@@ -83,8 +83,12 @@ class AfterRunHookError(CogneeSystemError):
     The runs are recorded as completed and their data is stored; the step runs
     again on the dataset's next run. ``failures`` holds ``(dataset_id,
     dataset_name, error)`` for every dataset whose step failed, and
-    ``__cause__`` is the first of those errors.
+    ``__cause__`` is the first of those errors. ``run_info`` is what the blocking
+    executor would have returned (``{dataset_id: PipelineRunInfo}``), so a caller
+    that treats the stored data as success can still read its runs.
     """
+
+    run_info: dict | None = None
 
     def __init__(self, failures: list[tuple[UUID, str, BaseException]]):
         from cognee.modules.operations import scrub_error_message

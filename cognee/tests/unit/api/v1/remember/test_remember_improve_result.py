@@ -409,3 +409,44 @@ def test_remote_payload_restores_improve_skipped():
     assert result.improve_skipped == "insufficient_credits"
     assert result.improve is None
     assert result.to_dict()["improve_skipped"] == "insufficient_credits"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_step_after_cognify_is_reported_and_improve_still_runs(monkeypatch):
+    """The data is stored and cognified, so the remember completes, carries its
+    run, and the automatic improve still runs."""
+    from cognee.modules.pipelines.exceptions import AfterRunHookError
+    from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
+
+    dataset_id = uuid4()
+    completed = PipelineRunCompleted(
+        pipeline_run_id=uuid4(), dataset_id=dataset_id, dataset_name="ds"
+    )
+
+    async def fake_add(*args, **kwargs):
+        return None
+
+    async def failing_step_cognify(*args, **kwargs):
+        failure = AfterRunHookError([(dataset_id, "ds", RuntimeError("compaction"))])
+        failure.run_info = {dataset_id: completed}
+        raise failure
+
+    improve_calls = []
+
+    async def fake_improve(**kwargs):
+        improve_calls.append(kwargs)
+        return _completed_improve()
+
+    monkeypatch.setattr("cognee.api.v1.add.add", fake_add)
+    monkeypatch.setattr("cognee.api.v1.cognify.cognify", failing_step_cognify)
+    monkeypatch.setattr(improve_pkg, "improve", fake_improve)
+
+    result = await remember_module.remember(
+        "note", dataset_id=dataset_id, user=SimpleNamespace(id=uuid4())
+    )
+
+    assert result.status == "completed"
+    assert result.pipeline_run_id == str(completed.pipeline_run_id)
+    assert "RuntimeError: compaction" in result.after_run_error
+    assert result.to_dict()["after_run_error"] == result.after_run_error
+    assert len(improve_calls) == 1

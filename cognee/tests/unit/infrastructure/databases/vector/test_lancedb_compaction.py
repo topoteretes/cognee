@@ -492,29 +492,38 @@ async def test_a_delete_before_the_rewrite_takes_the_lock_does_not_fail_it(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_a_failing_collection_raises(tmp_path, compaction_settings, monkeypatch):
+async def test_a_failing_collection_raises_after_the_others_are_compacted(
+    tmp_path, compaction_settings, monkeypatch
+):
     compaction_settings(retention_seconds=0)
     adapter, _ = _adapter(tmp_path)
     await _write_n_points(adapter, "Healthy_label", 2)
     await _write_n_points(adapter, "Broken_label", 2)
     original = adapter._compact_collection
+    compacted = []
 
     async def flaky(name, *args):
         if name == "Broken_label":
             raise RuntimeError("boom")
+        compacted.append(name)
         return await original(name, *args)
 
     monkeypatch.setattr(adapter, "_compact_collection", flaky)
 
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(RuntimeError, match="'Broken_label': RuntimeError\\('boom'\\)") as raised:
         await adapter.compact()
+
+    assert str(raised.value.__cause__) == "boom"
+    assert compacted == ["Healthy_label"]
+    assert adapter._compaction_dirty == {"Broken_label"}, "the failed table lost its place"
 
 
 @pytest.mark.asyncio
 async def test_an_incompatible_pylance_raises_and_writes_still_work(
     tmp_path, compaction_settings, monkeypatch
 ):
-    """lancedb and pylance on different Lance cores: compaction raises, writes are unaffected."""
+    """lancedb and pylance on different Lance cores: compaction raises once, then is
+    off for the adapter's lifetime; writes are unaffected."""
     from cognee_db_workers.lancedb_compaction import PylanceIncompatibleError
 
     adapter_module = importlib.import_module(
@@ -536,6 +545,9 @@ async def test_an_incompatible_pylance_raises_and_writes_still_work(
         await adapter.compact()
 
     assert len(attempts) == 1, "kept trying other tables after an incompatibility"
+    # Raised once: every later pass would fail the same way, so they skip.
+    assert await adapter.compact() == {"skipped": "pylance_incompatible"}
+    assert len(attempts) == 1
     await _write_n_points(adapter, "PylanceA_label", 1, start=2)  # writes still work
 
 

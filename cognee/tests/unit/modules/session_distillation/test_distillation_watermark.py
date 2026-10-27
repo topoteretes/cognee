@@ -803,3 +803,32 @@ async def test_capped_run_curates_the_most_relevant_and_seals_the_rest(monkeypat
     _forbid_llm(monkeypatch)
     second = await distill_module.distill_session("s-1", dataset=DATASET_A.name, user=USER)
     assert second.status == "no_new_entries"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_step_after_the_lessons_cognify_still_publishes(monkeypatch):
+    """The lessons landed, so the caller goes on to advance the watermark; raising
+    would repeat the curator and writer calls on every improve."""
+    from cognee.modules.pipelines.exceptions import AfterRunHookError
+
+    async def fake_add(*args, **kwargs):
+        return None
+
+    async def failing_step_cognify(*args, **kwargs):
+        raise AfterRunHookError([(DATASET_A.id, DATASET_A.name, RuntimeError("compaction"))])
+
+    monkeypatch.setattr("cognee.api.v1.add.add", fake_add)
+    monkeypatch.setattr("cognee.api.v1.cognify.cognify", failing_step_cognify)
+    monkeypatch.setattr(distill_module, "get_session_manager", lambda: None)
+
+    async def no_node_set(*args):
+        return []
+
+    monkeypatch.setattr(distill_module, "get_session_node_set", no_node_set)
+    scope = distill_module.SessionDistillationScope(session_id="s-1", user=USER, dataset=DATASET_A)
+
+    documents = await distill_module.publish_distilled_lessons(
+        scope, [WrittenLesson(accept=True, statement="Keep reports concise.")]
+    )
+
+    assert len(documents) == 1

@@ -10,6 +10,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
     TracePersistWindow,
 )
 from cognee.modules.improve.constants import AGENT_TRACE_FEEDBACKS_NODE_SET
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
@@ -98,6 +99,10 @@ async def cognify_agent_trace_feedback(
         # window would fail the same way, so improve stops the run.
         try:
             await cognee.cognify(datasets=[dataset_id], user=user)
+        except AfterRunHookError as error:
+            # The traces are cognified; only the step after the run failed, so
+            # the watermarks still move and the windows are not rebuilt.
+            logger.warning("Step after cognifying agent traces failed: %s", error)
         except Exception as error:
             raise_if_budget_exhausted(error)
             raise

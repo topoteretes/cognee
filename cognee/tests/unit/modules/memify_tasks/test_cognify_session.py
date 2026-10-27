@@ -407,3 +407,24 @@ async def test_cognify_session_preserves_last_entry_time_as_source_metadata(monk
     assert content.data == window.text
     assert content.external_metadata == {date_key: window.last_entry_time}
     assert content.literal_text is True
+
+
+@pytest.mark.asyncio
+async def test_cognify_session_failed_step_after_the_run_still_advances_the_watermark():
+    """The window is cognified; only the step after the run failed. Leaving the
+    watermark put would rebuild the window on every improve."""
+    from cognee.modules.pipelines.exceptions import AfterRunHookError
+
+    mock_sm = _mock_session_manager()
+    completed = _completed_run()
+    failure = AfterRunHookError([(completed.dataset_id, "ds", RuntimeError("compaction"))])
+    failure.run_info = {completed.dataset_id: completed}
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock),
+        patch("cognee.cognify", new_callable=AsyncMock, side_effect=failure),
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+    ):
+        await cognify_session([_window("Question: q?\n\nAnswer: a\n\n")], dataset_id="123")
+
+    mock_sm.update_session_context_entry.assert_called_once()

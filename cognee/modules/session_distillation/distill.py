@@ -50,6 +50,7 @@ from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.models import Dataset
 from cognee.modules.improve.config import get_improve_config
 from cognee.modules.improve.constants import SESSION_LEARNINGS_NODE_SET
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.truth_subspace.constants import truth_session_node_set
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -580,7 +581,12 @@ async def publish_distilled_lessons(
         [*DISTILLATE_NODE_SET, truth_session_node_set(scope.session_id)], session_node_set
     )
     await add(documents, dataset_id=scope.dataset.id, user=scope.user, node_set=node_set)
-    await cognify(datasets=[scope.dataset.id], user=scope.user)
+    try:
+        await cognify(datasets=[scope.dataset.id], user=scope.user)
+    except AfterRunHookError as error:
+        # The lessons landed; only the step after the run failed. Raising would
+        # keep the watermark put and repeat the curator and writer calls.
+        logger.warning("Step after cognifying distilled lessons failed: %s", error)
     return documents
 
 

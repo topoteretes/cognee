@@ -42,17 +42,24 @@ async def run_pipeline_blocking(pipeline: AsyncGenLike, **params) -> dict[str, A
         Dict[str, Any]:
             - If multiple datasets are processed, a mapping of dataset_id -> last run_info.
             - If no dataset_id is present in run_info, the run_info itself is returned.
+
+    Raises:
+        AfterRunHookError: carrying that same mapping as ``run_info``.
     """
     agen = pipeline(**params) if callable(pipeline) else pipeline
 
     total_run_info: dict[str, Any] = {}
 
-    async for run_info in agen:
-        dataset_id = getattr(run_info, "dataset_id", None)
-        if dataset_id:
-            total_run_info[dataset_id] = run_info
-        else:
-            total_run_info = run_info
+    try:
+        async for run_info in agen:
+            dataset_id = getattr(run_info, "dataset_id", None)
+            if dataset_id:
+                total_run_info[dataset_id] = run_info
+            else:
+                total_run_info = run_info
+    except AfterRunHookError as error:
+        error.run_info = total_run_info
+        raise
 
     return total_run_info
 

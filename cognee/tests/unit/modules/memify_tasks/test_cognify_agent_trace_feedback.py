@@ -298,3 +298,18 @@ async def test_session_node_set_is_appended_to_the_stage_node_set():
         await cognify_agent_trace_feedback(window, dataset_id="123")
 
     assert mock_add.await_args.kwargs["node_set"] == ["agent_trace_feedbacks", "project-a"]
+
+
+@pytest.mark.asyncio
+async def test_cognify_agent_trace_feedback_failed_step_after_the_run_is_not_raised():
+    """The traces are cognified; only the step after the run failed."""
+    from cognee.modules.pipelines.exceptions import AfterRunHookError
+
+    failure = AfterRunHookError([("123", "ds", RuntimeError("compaction"))])
+    with (
+        patch("cognee.add", new_callable=AsyncMock),
+        patch("cognee.cognify", new_callable=AsyncMock, side_effect=failure) as mock_cognify,
+    ):
+        await cognify_agent_trace_feedback("Agent trace step", dataset_id="123")
+
+    mock_cognify.assert_awaited_once()

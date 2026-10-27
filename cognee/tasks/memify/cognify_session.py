@@ -15,6 +15,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
 )
 from cognee.modules.improve.config import get_improve_config
 from cognee.modules.improve.constants import USER_SESSIONS_NODE_SET
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -102,9 +103,15 @@ async def cognify_session(
             # whole memify run — inspect the run info instead, keep this
             # window's watermark put (so it is re-extracted and retried on the
             # next improve()), and continue with the remaining windows.
-            cognify_result = await cognee.cognify(
-                datasets=[dataset_id], user=user, raise_on_error=False
-            )
+            try:
+                cognify_result = await cognee.cognify(
+                    datasets=[dataset_id], user=user, raise_on_error=False
+                )
+            except AfterRunHookError as error:
+                # The window is cognified; only the step after the run failed,
+                # so the watermark still moves and the window is not rebuilt.
+                logger.warning("Step after cognifying the session window failed: %s", error)
+                cognify_result = error.run_info
             errored_run = get_errored_run_info(cognify_result)
             if errored_run is not None:
                 logger.error(

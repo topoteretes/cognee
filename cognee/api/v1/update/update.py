@@ -21,6 +21,7 @@ from cognee.modules.cognify.config import (
     get_cognify_config,
     resolve_extractor,
 )
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -329,21 +330,28 @@ async def update(
         data_cache=data_cache,
     )
 
-    cognify_runs = await cognify(
-        datasets=[dataset_id],
-        user=user,
-        vector_db_config=vector_db_config,
-        graph_db_config=graph_db_config,
-        incremental_loading=incremental_loading,
-        data_cache=data_cache,
-        graph_model=graph_model,
-        custom_prompt=custom_prompt,
-        extractor=resolved_extractor,
-        chunk_size=fallback_chunk_size,
-        # An errored run is reported as a failed result, not raised: the
-        # caller gets the document id and the error to retry this one update.
-        raise_on_error=False,
-    )
+    after_run_error = None
+    try:
+        cognify_runs = await cognify(
+            datasets=[dataset_id],
+            user=user,
+            vector_db_config=vector_db_config,
+            graph_db_config=graph_db_config,
+            incremental_loading=incremental_loading,
+            data_cache=data_cache,
+            graph_model=graph_model,
+            custom_prompt=custom_prompt,
+            extractor=resolved_extractor,
+            chunk_size=fallback_chunk_size,
+            # An errored run is reported as a failed result, not raised: the
+            # caller gets the document id and the error to retry this one update.
+            raise_on_error=False,
+        )
+    except AfterRunHookError as error:
+        # The rebuild completed; only the step after it failed.
+        cognify_runs = error.run_info
+        after_run_error = str(error)
+        logger.warning("update: the step after the rebuild's cognify failed: %s", error)
 
     errored = get_errored_run_info(cognify_runs)
     run = errored or next(iter(cognify_runs.values()))
@@ -357,6 +365,7 @@ async def update(
         error=UpdateError(error_class=errored.error_class, message=errored.error_message)
         if errored
         else None,
+        after_run_error=after_run_error,
     ).model_dump()
 
 

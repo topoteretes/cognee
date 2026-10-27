@@ -39,6 +39,7 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.operations import record_operation
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
@@ -755,6 +756,11 @@ class RememberResult:
         improve_error: Why the automatic improve failed, when it did. The
             remember itself succeeded in that case: ``status`` stays
             ``"completed"`` / ``"session_stored"`` and only this field is set.
+        after_run_error: Why the step after the completed cognify run failed
+            (``AfterRunHookError``: the vector store compaction or the document
+            structure pass), when it did. The data is stored and cognified, so
+            ``status`` stays ``"completed"`` and the automatic improve still runs;
+            the step runs again on the dataset's next cognify.
         improve_skipped: Why the automatic improve was not started, when the
             host application's admission check declined it
             (``cognee.modules.improve.register_auto_improve_admission``): a
@@ -809,6 +815,8 @@ class RememberResult:
         # (A5). An improve failure never flips `status`; it lands here.
         self.improve: ImproveResult | None = None
         self.improve_error: str | None = None
+        # A failed step after the completed cognify; never flips `status` either.
+        self.after_run_error: str | None = None
         # The reason a host admission check gave for not starting it at all.
         self.improve_skipped: str | None = None
         self._task: asyncio.Task | None = None
@@ -844,6 +852,8 @@ class RememberResult:
             parts.append(f"improve={getattr(self.improve, 'status', None)!r}")
         if self.improve_error:
             parts.append(f"improve_error={self.improve_error!r}")
+        if self.after_run_error:
+            parts.append(f"after_run_error={self.after_run_error!r}")
         if self.improve_skipped:
             parts.append(f"improve_skipped={self.improve_skipped!r}")
         return f"RememberResult({', '.join(parts)})"
@@ -878,12 +888,15 @@ class RememberResult:
             d["improve"] = dump(mode="json") if callable(dump) else self.improve
         if self.improve_error:
             d["improve_error"] = self.improve_error
+        if self.after_run_error:
+            d["after_run_error"] = self.after_run_error
         if self.improve_skipped:
             d["improve_skipped"] = self.improve_skipped
         return d
 
     def _attach_improve_payload(self, payload: dict) -> None:
-        """Rebuild ``improve`` / ``improve_error`` / ``improve_skipped`` from a server's JSON."""
+        """Rebuild ``improve`` / ``improve_error`` / ``after_run_error`` / ``improve_skipped``
+        from a server's JSON."""
         if not isinstance(payload, dict):
             return
         improve_payload = payload.get("improve")
@@ -897,6 +910,8 @@ class RememberResult:
                 self.improve = improve_payload  # type: ignore[assignment]
         if payload.get("improve_error"):
             self.improve_error = str(payload["improve_error"])
+        if payload.get("after_run_error"):
+            self.after_run_error = str(payload["after_run_error"])
         if payload.get("improve_skipped"):
             self.improve_skipped = str(payload["improve_skipped"])
 
@@ -2147,23 +2162,30 @@ async def _remember_inner(
 
             datasets_arg = [dataset_name] if dataset_id is None else [dataset_id]
 
-            cognify_result = await cognify(
-                datasets=datasets_arg,
-                chunker=chunker,
-                chunk_size=chunk_size,
-                custom_prompt=custom_prompt,
-                run_in_background=False,
-                # Loud-by-default: a failed build raises CognifyFailedError
-                # (typed, classified, with a remedy) out of blocking remember()
-                # instead of returning a silently "errored" result nobody
-                # inspects. In background remember() a raise has nowhere to go
-                # and would skip _resolve(), losing pipeline_run_id/dataset_id/
-                # raw_result — so take the errored-run-info path there and let
-                # _resolve() record the failure on the result.
-                raise_on_error=raise_on_error and not run_in_background,
-                **shared_kwargs,
-                **cognify_kwargs,
-            )
+            try:
+                cognify_result = await cognify(
+                    datasets=datasets_arg,
+                    chunker=chunker,
+                    chunk_size=chunk_size,
+                    custom_prompt=custom_prompt,
+                    run_in_background=False,
+                    # Loud-by-default: a failed build raises CognifyFailedError
+                    # (typed, classified, with a remedy) out of blocking remember()
+                    # instead of returning a silently "errored" result nobody
+                    # inspects. In background remember() a raise has nowhere to go
+                    # and would skip _resolve(), losing pipeline_run_id/dataset_id/
+                    # raw_result — so take the errored-run-info path there and let
+                    # _resolve() record the failure on the result.
+                    raise_on_error=raise_on_error and not run_in_background,
+                    **shared_kwargs,
+                    **cognify_kwargs,
+                )
+            except AfterRunHookError as error:
+                # The data is stored and cognified; only the step after the run
+                # failed, so it is reported on the result, never as a failed remember.
+                cognify_result = error.run_info
+                result.after_run_error = str(error)
+                logger.warning("remember: the step after cognify failed (non-fatal): %s", error)
 
             result._resolve(cognify_result)
 
