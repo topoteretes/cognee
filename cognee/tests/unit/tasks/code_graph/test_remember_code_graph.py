@@ -554,3 +554,29 @@ async def test_code_sync_keeps_one_phase_so_repository_progress_survives(
         assert snapshot.counts == {"processed": 1, "failed": 1}
         await reporter.finish("partial", reason="processing_error")
     assert observations[-1].state == "partial"
+
+
+@pytest.mark.asyncio
+async def test_stored_repository_no_run_built_is_errored_not_processed(code_remember_env, tmp_path):
+    """A row whose directory is gone by the load gets no run, so no graph."""
+    code_remember_env["resolve"].return_value = tmp_path / "gone"
+
+    result = await remember(
+        "/local/repo", dataset_name="my_code", content_type="code", raise_on_error=False
+    )
+
+    code_remember_env["pipeline"].assert_not_awaited()
+    code_remember_env["mark_processed"].assert_not_awaited()
+    assert result.status == "errored"
+    assert result.items_processed == 0
+    assert result.items[0]["error"] == "code graph not built for 'gone'"
+
+
+@pytest.mark.asyncio
+async def test_stored_repository_no_run_built_raises_when_not_isolating(
+    code_remember_env, tmp_path
+):
+    code_remember_env["resolve"].return_value = tmp_path / "gone"
+
+    with pytest.raises(RuntimeError, match="code graph not built for 'gone'"):
+        await remember("/local/repo", dataset_name="my_code", content_type="code")

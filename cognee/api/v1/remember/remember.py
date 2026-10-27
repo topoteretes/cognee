@@ -1868,6 +1868,15 @@ async def _remember_inner(
                     else:
                         _apply_code_run_info(item[0], run.pipeline_result)
 
+                # A stored row no run built (its directory was gone by the
+                # time the graph was loaded) has no graph: never a success.
+                for item, _data, repo_path in pending:
+                    if item.get("status") != "errored":
+                        error = RuntimeError(f"code graph not built for '{repo_path.name}'")
+                        if not isolate_failures:
+                            raise error
+                        _fail(item, error)
+
             # The repositories are extracted together, so they finish together:
             # one report for the whole batch.
             failed = len([item for item in result.items if item.get("status") == "errored"])

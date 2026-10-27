@@ -703,9 +703,9 @@ async def test_route_loads_every_member_under_its_own_row_once_per_run(route_env
         env.golf_row,
         env.ui_row,
     ]
-    # Once loaded, the run keeps its verdict but not the snapshot.
+    # Once loaded, the run keeps its verdict (and never the snapshot).
     run = cluster_module._cluster_runs[str(env.dataset.id)]
-    assert (run.done, run.is_cluster, run.snapshot) == (True, True, None)
+    assert (run.done, run.is_cluster) == (True, True)
 
 
 @pytest.mark.asyncio
@@ -727,25 +727,22 @@ async def test_route_snapshots_again_for_a_new_pipeline_run(route_env):
 
 
 @pytest.mark.asyncio
-async def test_route_retries_a_failed_member_load_from_the_same_snapshot(route_env):
+async def test_route_does_not_load_again_once_a_member_load_failed_in_the_run(route_env):
+    """A failed member load is the run's verdict, like an enola failure: the
+    dataset's other rows in the run get the same error instead of reloading."""
     env = route_env
-    env.edges.side_effect = [RuntimeError("graph write failed"), None, None]
+    env.edges.side_effect = RuntimeError("graph write failed")
     ctx = PipelineContext(
         user=env.user, data_item=env.ui_row, dataset=env.dataset, pipeline_run_id=uuid4()
     )
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="graph write failed"):
         await load_dataset_cluster(ctx)
-    assert await load_dataset_cluster(ctx) is True
+    with pytest.raises(RuntimeError, match="graph write failed"):
+        await load_dataset_cluster(ctx)
 
-    # The snapshot was taken once; the second row walked the members again
-    # (the loaded one is then skipped by its stamp inside extract_code_graph).
     env.snapshot_mock.assert_awaited_once()
-    assert [call.kwargs["repo_scope"] for call in env.extract.await_args_list] == [
-        "golf",
-        "golf",
-        "ui",
-    ]
+    assert [call.kwargs["repo_scope"] for call in env.extract.await_args_list] == ["golf"]
 
 
 @pytest.mark.asyncio
