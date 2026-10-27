@@ -292,6 +292,7 @@ async def resolve_code_repository(
         data_id = await get_unique_data_id(f"code_repo:{identity or directory}", user, dataset_id)
 
     if data_id is not None and dataset_id is not None:
+        from cognee.infrastructure.locks import dataset_lock
         from cognee.modules.data.methods import reset_data_pipeline_status
 
         # The id is pinned, so add()'s incremental check would find the stored
@@ -302,7 +303,11 @@ async def resolve_code_repository(
         # an unchanged repo whose later run fails is still marked as built.
         # The clear is unconditional: an unchanged repo's manifest is stored
         # again on every add, which costs one small write, not a rebuild.
-        await reset_data_pipeline_status(data_id, dataset_id, pipeline_names=("add_pipeline",))
+        # The reset is a read-modify-write of the row's pipeline_status, so it takes the
+        # dataset lock (a no-op when the pipeline runner already holds it). The clone
+        # before it does not: a clone must not block the dataset's other runs.
+        async with dataset_lock(dataset_id):
+            await reset_data_pipeline_status(data_id, dataset_id, pipeline_names=("add_pipeline",))
 
     system_metadata = {
         "source": "code_repo",
@@ -364,8 +369,9 @@ async def resolve_code_repository_url(
         dataset_id=dataset_id,
         source_url=source_url,
         include_documents=include_documents,
-        # Keyed on the default branch's clone: branches of one URL share the row,
-        # since their code graphs share the repository's node ids.
+        # Keyed on the default branch's clone, as every URL row was before branches:
+        # existing rows keep their ids, and branches of one URL share the row, since
+        # their code graphs share the repository's node ids.
         identity=clone_dir(source_url),
     )
 

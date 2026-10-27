@@ -14,6 +14,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.api.v1.serve import state as serve_state
+from cognee.exceptions import CogneeValidationError
 from cognee.tasks.code_graph.config import validate_codegraph_config
 from cognee.tasks.ingestion.data_item import DataItem
 
@@ -64,13 +65,20 @@ def test_the_config_accepts_only_its_keys_and_real_values():
     assert validate_codegraph_config({"repo_credentials": "tok", "include_documents": None}) == {
         "repo_credentials": "tok"
     }
-    with pytest.raises(ValueError, match="Unknown codegraph_config keys: treat_as_repository"):
+    with pytest.raises(
+        CogneeValidationError, match="Unknown codegraph_config keys: treat_as_repository"
+    ):
         validate_codegraph_config({"treat_as_repository": True})
-    with pytest.raises(TypeError, match="must be a bool"):  # "false" is truthy
+    with pytest.raises(CogneeValidationError, match="must be a bool"):  # "false" is truthy
         validate_codegraph_config({"include_documents": "false"})
-    with pytest.raises(TypeError, match="non-empty str"):
-        validate_codegraph_config({"repo_credentials": ""})
-    with pytest.raises(TypeError, match="must be a dict"):
+    with pytest.raises(CogneeValidationError, match="must be a str, got bytes"):
+        validate_codegraph_config({"repo_credentials": b"tok"})
+    for token in ("", "  ", " tok ", "tok\n"):  # one error for a blank or padded token
+        with pytest.raises(CogneeValidationError, match="non-blank token"):
+            validate_codegraph_config({"repo_credentials": token})
+    with pytest.raises(CogneeValidationError, match="Unknown codegraph_config keys: 1"):
+        validate_codegraph_config({1: "x"})
+    with pytest.raises(CogneeValidationError, match="must be a dict"):
         validate_codegraph_config(["include_documents"])
 
 
@@ -119,17 +127,30 @@ async def test_options_with_nothing_to_apply_them_to_are_refused(executor, confi
     """Plain text resolves to no repository: the options would be silently ignored."""
     executor.resolver.side_effect = lambda data, **kwargs: ["a note"]
 
-    with pytest.raises(ValueError, match="codegraph_config applies to repositories"):
+    with pytest.raises(CogneeValidationError, match="codegraph_config applies to repositories"):
         await add_module.add("a note", codegraph_config=config)
 
     executor.run.assert_not_awaited()
 
 
 @pytest.mark.asyncio
+async def test_an_item_without_system_metadata_is_not_a_repository(executor):
+    """DataItem.system_metadata defaults to None: it must be skipped, not crash."""
+    executor.resolver.side_effect = lambda data, **kwargs: [
+        _manifest(),
+        DataItem(data="a note", label="note"),
+    ]
+
+    await add_module.add(_REPO, codegraph_config={"include_documents": False})
+
+    executor.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_a_token_for_a_local_directory_is_refused(executor):
     executor.resolver.side_effect = lambda data, **kwargs: [_manifest(url=False)]
 
-    with pytest.raises(ValueError, match="repository URLs, not to a local directory"):
+    with pytest.raises(CogneeValidationError, match="repository URLs, not to a local directory"):
         await add_module.add("/some/repo", codegraph_config={"repo_credentials": "tok"})
 
     executor.run.assert_not_awaited()
@@ -147,14 +168,16 @@ async def test_a_remote_instance_refuses_options_it_would_drop(monkeypatch, conf
     client = SimpleNamespace(add=AsyncMock())
     monkeypatch.setattr(serve_state, "get_remote_client", lambda: client)
 
-    with pytest.raises(ValueError, match="not supported while connected to a remote"):
+    with pytest.raises(CogneeValidationError, match="not supported while connected to a remote"):
         await add_module.add(_REPO, codegraph_config=config)
 
     client.add.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_the_repository_is_resolved_under_the_dataset_lock(executor):
+async def test_the_clone_is_not_held_up_by_the_dataset_lock(executor):
+    """add() resolves the repository without the dataset lock: only the stamp reset takes
+    it, so a clone never blocks the dataset's other runs."""
     from cognee.infrastructure.locks.dataset_lock import held_datasets
 
     held = []
@@ -167,4 +190,4 @@ async def test_the_repository_is_resolved_under_the_dataset_lock(executor):
 
     await add_module.add(_REPO, codegraph_config={"repo_credentials": "tok"})
 
-    assert held == [True]
+    assert held == [False]

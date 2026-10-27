@@ -91,7 +91,7 @@ async def list_installation_repositories(token: str) -> list[str]:
 async def _add_and_build(full_name: str, dataset_name: str, owner, token: str) -> None:
     """Add one repository, then build exactly the rows that add returned."""
     from cognee.api.v1.add import add
-    from cognee.api.v1.cognify.cognify import cognify, raise_if_cognify_errored
+    from cognee.api.v1.cognify.cognify import cognify
     from cognee.modules.pipelines.exceptions import PipelineRunFailedError
     from cognee.modules.pipelines.models import PipelineRunErrored
 
@@ -99,6 +99,8 @@ async def _add_and_build(full_name: str, dataset_name: str, owner, token: str) -
         clone_url(full_name),
         dataset_name=dataset_name,
         user=owner,
+        # A code-only add needs no provider: the sync makes no LLM or embedding calls.
+        skip_connection_test=True,
         codegraph_config={
             "repo_credentials": token,
             # The code graph is the point of the sync: indexing every repository's
@@ -116,13 +118,12 @@ async def _add_and_build(full_name: str, dataset_name: str, owner, token: str) -
             )
         )
     if not added.data_ids:
-        # Nothing was stored for this repository, so there is nothing to build: this
-        # repository fails, the others go on.
+        # cognify(data_ids=None) would build the whole dataset, and an empty list is
+        # refused there: this repository fails, the others go on.
         raise PipelineRunFailedError(message="GitHub repository add returned no data to build.")
-    result = await cognify(
-        datasets=[added.dataset_id], data_ids=added.data_ids, user=owner, raise_on_error=False
-    )
-    raise_if_cognify_errored(result)
+    # cognify() wraps a failure of the pipeline run in a cognee error (raise_on_error
+    # is on), so the loop in sync_repositories sees one repository's failure.
+    await cognify(datasets=[added.dataset_id], data_ids=added.data_ids, user=owner)
 
 
 async def sync_repositories(
@@ -135,8 +136,9 @@ async def sync_repositories(
     request path (the post-install hook and webhook handling both run
     detached), so there is nothing to hand off to. A repository that cannot be
     cloned or built (a cognee error, an I/O or network failure) is logged and the sync
-    moves on; a failed token mint (installation-wide) or a programming error aborts the
-    sync.
+    moves on. A failed token mint (installation-wide) aborts the sync, and so does an
+    error of another type from add() or from cognify() before its pipeline runs (for
+    example a migration or database error while resolving the rows).
 
     The token is renewed before a clone whenever it is close to expiring, so a very large
     installation never starts a transfer near the end of one token's hour.

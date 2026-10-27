@@ -50,6 +50,7 @@ async def _cognify(
     execute_run=None,
     extractor="gliner_demo",
     read_rows=None,
+    gliner_tasks=(),
     **cognify_kwargs,
 ):
     """Run cognify keyless (gliner_demo resolved, runtime missing) over ``items``."""
@@ -73,7 +74,7 @@ async def _cognify(
         ),
         patch(
             "cognee.tasks.graph.gliner_demo.tasks.get_gliner_demo_tasks",
-            AsyncMock(return_value=[]),
+            AsyncMock(return_value=list(gliner_tasks)),
         ),
         patch.object(migrations, "run_migrations_and_block", AsyncMock()),
         patch(
@@ -180,8 +181,7 @@ async def test_the_llm_extractor_never_reads_the_rows_to_look_for_a_runtime():
 
     await _cognify([_item()], extractor="llm", runtime=runtime, read_rows=read_rows)
 
-    # The locked run's own check still asks, and is a no-op for the LLM extractor.
-    assert all(call.args[0] == "llm" for call in runtime.await_args_list)
+    runtime.assert_not_awaited()
     assert read_rows.await_count == 0  # the preflight scan of the dataset's rows
 
 
@@ -214,3 +214,22 @@ async def test_a_code_only_run_without_the_runtime_builds_no_gliner_tasks():
 
     build.assert_not_awaited()
     runtime.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_document_row_that_appears_late_never_runs_an_empty_task_list():
+    """The tasks are built empty while the runtime is missing. A document row that shows
+    up before the locked run, once the runtime is importable, must get the real tasks:
+    an empty list would mark the row processed without extracting anything."""
+    task = object()
+    seen = []
+
+    async def execute(**kwargs):
+        await kwargs["before_run"]([_item()], DATASET)
+        seen.append(kwargs["tasks"](_item()))
+        return {}
+
+    # The preflight sees code only; the locked check passes, the runtime having appeared.
+    await _cognify([CODE_REPO], runtime=AsyncMock(), execute_run=execute, gliner_tasks=[task])
+
+    assert seen == [[task]]

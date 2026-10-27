@@ -492,7 +492,7 @@ async def _chunks_from_data_items(
     a (potentially multi-GB) manifest file. Code files run the deterministic
     code graph pipeline (no LLM calls), so they are counted, not chunked.
     """
-    from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
+    from cognee.modules.cognify.routing import CODE_ROUTES, CognifyRoute, cognify_route_for
 
     llm_items: list[Data] = []
     skipped_dlt_chunks = 0
@@ -512,7 +512,7 @@ async def _chunks_from_data_items(
                 )
                 row_count = 0
             skipped_dlt_chunks += row_count
-        elif route in (CognifyRoute.CODE, CognifyRoute.CODE_REPO):
+        elif route in CODE_ROUTES:
             skipped_code_items += 1
         else:
             llm_items.append(data_item)
