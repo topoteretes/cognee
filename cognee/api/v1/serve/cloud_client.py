@@ -576,6 +576,30 @@ class CloudClient:
                 matches.append(row)
         return matches
 
+    async def sparql(
+        self,
+        dataset_id: UUID,
+        query: str,
+        *,
+        base_iri: str | None = None,
+        limit: int = 1000,
+    ) -> dict:
+        """POST /api/v1/datasets/{dataset_id}/sparql — read-only SPARQL over the graph."""
+        session = await self._get_session()
+
+        payload: dict = {"query": query, "limit": limit}
+        if base_iri:
+            payload["baseIri"] = base_iri
+
+        async with session.post(
+            f"{self.service_url}/api/v1/datasets/{dataset_id}/sparql",
+            json=payload,
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote SPARQL query failed ({resp.status}): {body}")
+            return await resp.json()
+
     async def cognify(self, datasets: Any = None, **kwargs) -> dict:
         """POST /api/v1/cognify — build the knowledge graph."""
         session = await self._get_session()
