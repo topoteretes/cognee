@@ -42,6 +42,7 @@ from cognee.modules.operations import record_operation
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
+from cognee.modules.pipelines.utils import iter_ingestion_entries
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
 
@@ -954,7 +955,7 @@ class RememberResult:
             self.dataset_name = run_dataset_name
 
         if hasattr(run_info, "status"):
-            self.status = "errored" if "Errored" in run_info.status else "completed"
+            self.status = "errored" if run_info.status == "PipelineRunErrored" else "completed"
             if hasattr(run_info, "pipeline_run_id"):
                 self.pipeline_run_id = str(run_info.pipeline_run_id)
         else:
@@ -989,15 +990,11 @@ class RememberResult:
             ingestion_info = getattr(run_info, "data_ingestion_info", None)
             if ingestion_info and isinstance(ingestion_info, list):
                 processed = 0
-                for entry in ingestion_info:
-                    if not isinstance(entry, dict):
-                        continue
-                    status = getattr(entry.get("run_info"), "status", "")
-                    if "Errored" in status:
+                for status, entry_data_ids in iter_ingestion_entries(ingestion_info):
+                    if status == "PipelineRunErrored":
                         continue
                     processed += 1
-                    if entry.get("data_id") is not None:
-                        self.items.append({"id": str(entry["data_id"])})
+                    self.items.extend({"id": str(data_id)} for data_id in entry_data_ids)
                 self.items_processed = processed
 
     def _fail(self, exc: BaseException):
@@ -1648,6 +1645,7 @@ async def _remember_inner(
 
         from cognee import __version__ as cognee_version
         from cognee.infrastructure.locks.dataset_lock import dataset_lock
+        from cognee.modules.integrations.sync_progress import report_sync_progress
         from cognee.shared.utils import send_telemetry
         from cognee.tasks.code_graph.cluster import (
             pipeline_errored,
@@ -1716,7 +1714,7 @@ async def _remember_inner(
             if run_id is not None:
                 item["pipeline_run_id"] = str(run_id)
                 result.pipeline_run_id = str(run_id)
-            if "Errored" in getattr(run_info, "status", ""):
+            if getattr(run_info, "status", "") == "PipelineRunErrored":
                 item["status"] = "errored"
                 item["error"] = (
                     getattr(run_info, "error_message", None) or "code_graph_pipeline errored"
@@ -1764,6 +1762,11 @@ async def _remember_inner(
             _fail(item, exc)
 
         async def _run_repos(isolate_failures: bool) -> None:
+            # One phase for the whole batch: a per-repo phase change would reset
+            # the repository counter and its estimate.
+            await report_sync_progress(
+                phase="processing", completed=0, total=len(repo_specs), unit="repositories"
+            )
             # Clone first, outside the lock: a remote repository's clone is
             # the slow, network-bound part and reads no dataset state, so
             # nothing else on the dataset should wait for it.
@@ -1865,6 +1868,16 @@ async def _remember_inner(
                     else:
                         _apply_code_run_info(item[0], run.pipeline_result)
 
+            # The repositories are extracted together, so they finish together:
+            # one report for the whole batch.
+            failed = len([item for item in result.items if item.get("status") == "errored"])
+            await report_sync_progress(
+                phase="processing",
+                completed=len(repo_specs),
+                total=len(repo_specs),
+                unit="repositories",
+                counts={"processed": len(repo_specs) - failed, "failed": failed},
+            )
             result.items_processed = len(
                 [item for item in result.items if item.get("status") != "errored"]
             )

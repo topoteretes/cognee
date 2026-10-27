@@ -1,21 +1,32 @@
 "use client";
 
-import { Flex, Stack } from "@mantine/core";
 import ProfileWidget from "./elements/ProfileWidget";
 import SecurityWidget from "./elements/SecurityWidget";
 import { TrackPageView } from "@/modules/analytics";
+import isCloudEnvironment from "@/utils/isCloudEnvironment";
+import styles from "./SettingsPage.module.css";
 
-// Open-source override — the SaaS settings page adds cloud-only widgets;
-// local mode has profile and security only. (OrganizationWidget was removed
-// from the SaaS repo; do not re-add it here.)
 export default function SettingsPage() {
   return (
-    <Stack className="!gap-[0.625rem] h-full">
+    <div className={styles.page}>
       <TrackPageView page="Settings" />
-      <Flex gap={"0.625rem"} className="flex-col xl:flex-row">
-        <ProfileWidget />
+      <header className={styles.header}>
+        <h1>Settings</h1>
+        <p>Manage your account and session.</p>
+      </header>
+      <div className={styles.grid}>
+        {isCloudEnvironment() ? <ProfileWidget /> : (
+          <section className={styles.card} aria-labelledby="account-heading">
+            <h2 id="account-heading">Account</h2>
+            <p className={styles.subtitle}>Your local Cognee account</p>
+            <div className={styles.section}>
+              <span className={styles.badge}>Local workspace</span>
+              <p className={styles.subtitle}>You are signed in to your local Cognee instance. Profile editing is not available in this app.</p>
+            </div>
+          </section>
+        )}
         <SecurityWidget />
-      </Flex>
-    </Stack>
+      </div>
+    </div>
   );
 }

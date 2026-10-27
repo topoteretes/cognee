@@ -124,6 +124,34 @@ describe("toHttpError", () => {
     // original response body should still be readable
     await expect(res.text()).resolves.toBeDefined();
   });
+
+  // Live in production: `error` (and, symmetrically, `message`) can itself be
+  // a nested object rather than a string. The old code only unwrapped that
+  // shape for `detail`, so this fell through to `String(anObject)`, which
+  // silently produces the literal text "[object Object]" — the exact string a
+  // real deployment showed once something finally rendered this message
+  // on-screen (CLO-816), with zero information about what actually failed.
+  it("unwraps a nested message when error is an object, not a string", async () => {
+    const res = makeResponse(422, { error: { message: "Bad email" } });
+    await expect(toHttpError(res)).rejects.toMatchObject({ message: "Bad email" });
+  });
+
+  it("unwraps a nested message when message is an object, not a string", async () => {
+    const res = makeResponse(422, { message: { message: "Bad email" } });
+    await expect(toHttpError(res)).rejects.toMatchObject({ message: "Bad email" });
+  });
+
+  it("stringifies a nested object it cannot unwrap, instead of '[object Object]'", async () => {
+    const res = makeResponse(422, { error: { code: "invalid_email" } });
+    const err = await toHttpError(res).catch((e) => e);
+    expect(err.message).toBe(JSON.stringify({ code: "invalid_email" }));
+    expect(err.message).not.toBe("[object Object]");
+  });
+
+  it("still prefers detail over an object-shaped error", async () => {
+    const res = makeResponse(400, { detail: "d", error: { message: "e" } });
+    await expect(toHttpError(res)).rejects.toMatchObject({ message: "d" });
+  });
 });
 
 // ─── normalizeError ───────────────────────────────────────────────────────────

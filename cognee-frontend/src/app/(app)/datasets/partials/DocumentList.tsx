@@ -1,15 +1,19 @@
 "use client";
 
 import type { ReactElement } from "react";
-import FileIcon, { getExtMeta } from "@/ui/elements/FileIcon";
+import { connectorRepository } from "@/modules/datasets/describeTextBlob";
+import FileIcon, { getExtMeta, REPOSITORY_META } from "@/ui/elements/FileIcon";
 import { decodeFilename, formatDate, formatFileSize } from "@/utils/fileFormat";
+import { fmtCount } from "@/utils/formatCount";
 import { capRows, MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
 import ProcessingBadge from "./ProcessingBadge";
 
 export interface DocRow {
+  /** Stored processing outcome; undefined while it is not known. */
   completed?: boolean;
   id: string;
   name: string;
+  label?: string;
   extension?: string;
   /** Set by callers that map API rows to their own shape. */
   size?: number;
@@ -31,8 +35,9 @@ export default function DocumentList<T extends DocRow>({
   return (
     <>
       {visible.map((doc, i) => {
-        const displayName = decodeFilename(doc.name);
-        const meta = getExtMeta(displayName, doc.extension);
+        const repository = connectorRepository(doc);
+        const displayName = repository ?? decodeFilename(doc.name);
+        const meta = repository ? REPOSITORY_META : getExtMeta(displayName, doc.extension);
         return (
           <div key={doc.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: i < visible.length - 1 ? "1px solid rgba(255,255,255,0.07)" : "none" }}>
             <FileIcon {...meta} />
@@ -55,7 +60,7 @@ export default function DocumentList<T extends DocRow>({
       })}
       {hidden > 0 && (
         <div style={{ padding: "8px 16px", fontSize: 11, color: "rgba(237,236,234,0.35)", textAlign: "center" }}>
-          Showing {MAX_RENDERED_ROWS.toLocaleString()} of {docs.length.toLocaleString()} documents
+          Showing {fmtCount(MAX_RENDERED_ROWS)} of {fmtCount(docs.length)} documents
         </div>
       )}
     </>

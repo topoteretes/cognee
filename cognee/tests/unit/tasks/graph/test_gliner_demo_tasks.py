@@ -1204,11 +1204,13 @@ def _patch_recall(monkeypatch, available: bool):
     serve_state = importlib.import_module("cognee.api.v1.serve.state")
     search_methods = importlib.import_module("cognee.modules.search.methods.search")
     search_operations = importlib.import_module("cognee.modules.search.operations")
+    preflight = importlib.import_module("cognee.modules.preflight")
 
     captured = {}
 
     async def fake_authorized_search(**kwargs):
         captured["query_type"] = kwargs.get("query_type")
+        captured["only_context"] = kwargs.get("only_context")
         captured["search_llm_config"] = kwargs.get("llm_config")
         return []
 
@@ -1223,25 +1225,25 @@ def _patch_recall(monkeypatch, available: bool):
     monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
     monkeypatch.setattr(search_methods, "authorized_search", fake_authorized_search)
     monkeypatch.setattr(search_operations, "log_search_history", noop)
-    monkeypatch.setattr(recall_module, "llm_available", fake_llm_available)
+    monkeypatch.setattr(preflight, "llm_available", fake_llm_available)
     user = SimpleNamespace(id=uuid4(), tenant_id=None)
     return recall_module, captured, user
 
 
-# recall's CHUNKS default keys on LLM availability, never on the extractor that
+# recall's no-LLM default keys on LLM availability, never on the extractor that
 # built the graph: a gliner-built graph with a key present answers completions,
-# and an LLM-built graph without one degrades to CHUNKS instead of failing.
+# and an LLM-built graph without one returns the HYBRID prompt instead of failing.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "available, auto_route, expected",
+    "available, auto_route, only_context",
     [
-        (False, True, SearchType.CHUNKS),
-        (False, False, SearchType.CHUNKS),
-        (True, False, SearchType.HYBRID_COMPLETION),
+        (False, True, True),
+        (False, False, True),
+        (True, False, False),
     ],
 )
-async def test_recall_default_query_type_is_chunks_without_a_usable_llm(
-    monkeypatch, available, auto_route, expected
+async def test_recall_default_is_hybrid_only_context_without_a_usable_llm(
+    monkeypatch, available, auto_route, only_context
 ):
     from uuid import uuid4
 
@@ -1253,7 +1255,8 @@ async def test_recall_default_query_type_is_chunks_without_a_usable_llm(
         auto_route=auto_route,
         user=user,
     )
-    assert captured["query_type"] == expected
+    assert captured["query_type"] == SearchType.HYBRID_COMPLETION
+    assert captured["only_context"] is only_context
 
 
 @pytest.mark.asyncio
