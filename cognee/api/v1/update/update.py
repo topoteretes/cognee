@@ -349,6 +349,7 @@ async def update(
         chunk_size=fallback_chunk_size,
         # An errored run is reported as a failed result, not raised: the
         # caller gets the document id and the error to retry this one update.
+        # So is a failed step after the completed run (``after_run_error``).
         raise_on_error=False,
     )
 
@@ -364,6 +365,7 @@ async def update(
         error=UpdateError(error_class=errored.error_class, message=errored.error_message)
         if errored
         else None,
+        after_run_error=getattr(run, "after_run_error", None),
     ).model_dump()
 
 
