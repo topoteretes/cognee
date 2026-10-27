@@ -610,3 +610,19 @@ async def test_the_stamp_is_reset_under_the_dataset_lock_after_the_clone_lock_is
     assert seen["reset_stamp"] is False
     assert seen["resolve"] == {"clone_lock": True, "dataset_lock": False}
     assert seen["reset"] == {"clone_lock": False, "dataset_lock": True}
+
+
+@pytest.mark.parametrize("access_control, shared_graph", [("true", False), ("false", True)])
+def test_the_legacy_error_names_the_shared_graph_only_when_there_is_one(
+    monkeypatch, access_control, shared_graph
+):
+    """A new dataset is a fix only while graphs are isolated per dataset."""
+    from cognee.tasks.code_graph.code_repo import LegacyRepositoryError
+
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", access_control)
+
+    message = LegacyRepositoryError("a remote repository row").message
+
+    assert "Create a new dataset" in message
+    assert "(found: a remote repository row)" in message
+    assert ("forget the legacy repository first" in message) is shared_graph

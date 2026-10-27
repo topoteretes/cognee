@@ -250,13 +250,29 @@ def build_repo_manifest(directory: Path, covered: list[Path]) -> str:
 
 
 class LegacyRepositoryError(CodeRepositoryError):
-    """An existing remote graph must be preserved and rebuilt in a new dataset."""
+    """An existing remote graph must be preserved and rebuilt in a new dataset.
+
+    With ``ENABLE_BACKEND_ACCESS_CONTROL=false`` every dataset shares one graph, so a new
+    dataset meets the same legacy nodes: the legacy repository has to be forgotten, and
+    the message says so only then.
+    """
 
     def __init__(self, where: str):
+        from cognee.context_global_variables import backend_access_control_enabled
+
+        message = (
+            f"This repository was stored before repository identities changed (found: {where}). "
+            "Create a new dataset, call add(repo_url, dataset_name='new_code'), then "
+            "cognify(datasets=['new_code']). The existing data and graph are unchanged."
+        )
+        if not backend_access_control_enabled():
+            message += (
+                " The graph is shared by every dataset, so a new dataset meets the same legacy "
+                "nodes: forget the legacy repository first (forget(data_id=...) for its row, or "
+                "forget(dataset=...) for the dataset that holds it)."
+            )
         super().__init__(
-            message="This dataset contains legacy repository identities. Create a new dataset, "
-            "call add(repo_url, dataset_name='new_code'), then cognify(datasets=['new_code']). "
-            f"The existing data and graph are unchanged. (found: {where})",
+            message=message,
             name="LegacyRepositoryError",
             status_code=status.HTTP_409_CONFLICT,
         )

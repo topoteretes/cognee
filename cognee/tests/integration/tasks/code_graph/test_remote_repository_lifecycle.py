@@ -492,3 +492,34 @@ async def test_a_stale_manifest_is_never_stored_over_a_newer_one(code_environmen
     await build(fresh, env)
     nodes, _ = await graph(fresh, env)
     assert any("moved" in props["name"] for props in repo_nodes(nodes, remote.key).values())
+
+
+@pytest.mark.asyncio
+async def test_a_shared_graph_keeps_a_legacy_graph_visible_to_every_dataset(
+    code_environment, monkeypatch
+):
+    """With access control off all datasets share one graph, so the advice to build in a new
+    dataset cannot work and the error says to forget the legacy repository first."""
+    from cognee.tasks.code_graph.code_repo import LegacyRepositoryError
+    from cognee.tasks.code_graph.extract_code_graph import (
+        add_code_graph_data_points,
+        fact_node_id,
+    )
+    from cognee.tasks.code_graph.models import CodeRepository
+
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+    env = code_environment
+    remote = env.remote("acme/api")
+    added = await add(remote.url, env)
+    clone = Path((await manifest(added))["repo_path"])
+    old_name = "github.com-acme-api"
+    old_node = CodeRepository(
+        id=fact_node_id(old_name, "repository", old_name),
+        name=old_name,
+        path=str(clone.parent / old_name),
+    )
+    await add_code_graph_data_points([old_node], graph_only=True)
+
+    fresh = await add(remote.url, env, dataset="fresh")
+    with pytest.raises(LegacyRepositoryError, match="forget the legacy repository first"):
+        await build(fresh, env)
