@@ -84,6 +84,14 @@ class RecallPayloadDTO(InDTO):
         default=False,
         description="Include source/provenance references in completion results.",
     )
+    include_global_context_index: bool = Field(
+        default=False,
+        description=(
+            "Add the dataset's global context index (built by POST /api/v1/improve with "
+            "buildGlobalContextIndex) to the retrieval context. Read by GRAPH_COMPLETION "
+            "and HYBRID_COMPLETION (the auto-routing default); other search types ignore it."
+        ),
+    )
     session_id: str | None = Field(
         default=None,
         examples=[None],
@@ -246,6 +254,9 @@ def get_recall_router() -> APIRouter:
         - **verbose** (bool): Verbose output
         - **include_references** (bool): Include source/provenance references in
           completion results (default: true)
+        - **include_global_context_index** (bool): Add the dataset's global context
+          index to the retrieval context (GRAPH_COMPLETION and HYBRID_COMPLETION;
+          default: false)
         - **stream** (Optional[bool]): Stream the answer as server-sent events
           (`text/event-stream`). Defaults to content negotiation on `Accept`.
         - **session_id** (Optional[str]): Session whose cached QA and trace entries
@@ -318,6 +329,9 @@ def get_recall_router() -> APIRouter:
                 tool_connections=payload.tool_connections,
                 tools_trigger=payload.tools_trigger,
                 code_query=payload.code_query,
+                retriever_specific_config={"include_global_context_index": True}
+                if payload.include_global_context_index
+                else None,
             )
 
         streaming = wants_event_stream(request.headers.get("accept"), payload.stream)

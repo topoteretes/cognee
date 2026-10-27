@@ -121,6 +121,14 @@ class SearchPayloadDTO(InDTO):
         default=False,
         description="Attach source references to completion-type results.",
     )
+    include_global_context_index: bool = Field(
+        default=False,
+        description=(
+            "Add the dataset's global context index (built by POST /api/v1/improve with "
+            "buildGlobalContextIndex) to the retrieval context. Read by GRAPH_COMPLETION "
+            "and HYBRID_COMPLETION; other search types ignore it."
+        ),
+    )
     code_query: dict[str, Any] | None = Field(
         default=None,
         description=(
@@ -268,6 +276,7 @@ def get_search_router() -> APIRouter:
         - **tools** (Optional[List[str]]): Tool whitelist for AGENTIC_COMPLETION searches
         - **max_iter** (Optional[int]): Max agentic iterations, must be >= 1 (AGENTIC_COMPLETION only)
         - **include_references** (bool): Attach source references to completion-type results (default: true)
+        - **include_global_context_index** (bool): Add the dataset's global context index to the retrieval context (GRAPH_COMPLETION and HYBRID_COMPLETION; default: false)
         - **code_query** (Optional[dict]): Structured operation arguments for CODE search
 
         ## Response
@@ -305,6 +314,7 @@ def get_search_router() -> APIRouter:
                 "tools": payload.tools,
                 "max_iter": payload.max_iter,
                 "include_references": payload.include_references,
+                "include_global_context_index": payload.include_global_context_index,
                 "code_query": len(str(payload.code_query)) if payload.code_query else 0,
                 "cognee_version": cognee_version,
             },
@@ -332,6 +342,9 @@ def get_search_router() -> APIRouter:
                 max_iter=payload.max_iter,
                 include_references=payload.include_references,
                 code_query=payload.code_query,
+                retriever_specific_config={"include_global_context_index": True}
+                if payload.include_global_context_index
+                else None,
             )
 
             return jsonable_encoder(results)
