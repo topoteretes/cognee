@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 import diskcache as dc
+from diskcache.core import MODE_PICKLE
 from pydantic import ValidationError
 
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
@@ -19,6 +20,36 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("FSCacheAdapter")
 
 
+class _TextDisk(dc.Disk):
+    """diskcache serializer that never pickles and never unpickles.
+
+    Every key and value this adapter stores is a ``str``, which diskcache keeps as raw
+    text, so a pickled row can only have been written into the cache directory by
+    something else. Refusing such rows keeps a writable cache directory from becoming
+    code execution (diskcache's default Disk unpickles whatever mode a row declares).
+    """
+
+    def put(self, key):
+        if not isinstance(key, str):
+            raise TypeError(f"Filesystem cache keys must be str, got {type(key).__name__}")
+        return super().put(key)
+
+    def get(self, key, raw):
+        if not raw:
+            raise ValueError("Refusing a pickled key in the filesystem cache")
+        return super().get(key, raw)
+
+    def store(self, value, read, key=dc.core.UNKNOWN):
+        if not read and not isinstance(value, str):
+            raise TypeError(f"Filesystem cache values must be str, got {type(value).__name__}")
+        return super().store(value, read, key=key)
+
+    def fetch(self, mode, filename, value, read):
+        if mode == MODE_PICKLE:
+            raise ValueError("Refusing a pickled value in the filesystem cache")
+        return super().fetch(mode, filename, value, read)
+
+
 class FSCacheAdapter(CacheDBInterface):
     """Filesystem-backed cache adapter for session QA and agent-trace storage."""
 
@@ -30,7 +61,7 @@ class FSCacheAdapter(CacheDBInterface):
         data_root_directory = storage_config["data_root_directory"]
         self.cache_directory = os.path.join(data_root_directory, ".cognee_fs_cache", default_key)
         os.makedirs(self.cache_directory, exist_ok=True)
-        self.cache = dc.Cache(directory=self.cache_directory)
+        self.cache = dc.Cache(directory=self.cache_directory, disk=_TextDisk)
         self.session_ttl_seconds = session_ttl_seconds
         # Evict any entries whose TTL has already elapsed
         self.cache.expire()
