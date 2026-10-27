@@ -16,6 +16,7 @@ from rdflib.namespace import XSD
 from cognee.modules.graph.rdf import sparql as sparql_module
 from cognee.modules.graph.rdf.export import DEFAULT_BASE_IRI
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.tests.utils.recording_http_server import recording_http_server
 
 datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
 serve_state = importlib.import_module("cognee.api.v1.serve.state")
@@ -58,7 +59,7 @@ class FakeGraphEngine:
 
 @pytest.fixture
 def graph(monkeypatch):
-    """Scope the sparql module to a fake engine; records the dataset context it asked for."""
+    """Enable SPARQL and scope it to a fake engine; records the dataset context it asked for."""
     engine = FakeGraphEngine()
     contexts = []
 
@@ -74,6 +75,7 @@ def graph(monkeypatch):
     monkeypatch.setattr(sparql_module, "get_graph_engine", _get_graph_engine)
     monkeypatch.delenv("SPARQL_MAX_GRAPH_NODES", raising=False)
     monkeypatch.delenv("SPARQL_QUERY_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.setenv("ALLOW_SPARQL_QUERY", "true")
     engine.contexts = contexts
     return engine
 
@@ -237,6 +239,134 @@ def test_malformed_query_is_400(client):
 
     assert response.status_code == 400
     assert "Invalid SPARQL query" in response.json()["message"]
+    # Parsed before the graph is read.
+    assert client.graph.get_graph_data_calls == 0
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT * WHERE { SERVICE <http://169.254.169.254/latest/> { ?s ?p ?o } }",
+        "SELECT * WHERE { SERVICE SILENT <http://internal:8080/sparql> { ?s ?p ?o } }",
+        "SELECT * WHERE { ?svc rdfs:label ?n . SERVICE ?svc { ?s ?p ?o } }",
+        "SELECT * WHERE { { SELECT ?s WHERE { SERVICE <http://x/> { ?s ?p ?o } } } }",
+        "SELECT * WHERE { ?s rdfs:label ?n OPTIONAL { SERVICE <http://x/> { ?s ?p ?o } } }",
+        "SELECT * WHERE { { ?s ?p ?o } UNION { SERVICE <http://x/> { ?s ?p ?o } } }",
+        "ASK { SERVICE <http://x/> { ?s ?p ?o } }",
+        "CONSTRUCT { ?s ?p ?o } WHERE { SERVICE <http://x/> { ?s ?p ?o } }",
+        "PREFIX ex: <http://x/> SELECT * WHERE { service ex:endpoint { ?s ?p ?o } }",
+    ],
+)
+def test_service_queries_are_refused_with_400(client, query):
+    response = _sparql(client, query)
+
+    assert response.status_code == 400, response.text
+    assert "SPARQL SERVICE is not supported" in response.json()["message"]
+    # Refused before the dataset graph is opened at all.
+    assert client.graph.contexts == []
+    assert client.graph.get_graph_data_calls == 0
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT * FROM <file:///etc/passwd> WHERE { ?s ?p ?o }",
+        "SELECT * FROM <http://169.254.169.254/latest/> WHERE { ?s ?p ?o }",
+        "SELECT * FROM NAMED <http://x/g> WHERE { GRAPH ?g { ?s ?p ?o } }",
+        "ASK FROM <http://x/g> { ?s ?p ?o }",
+        "CONSTRUCT { ?s ?p ?o } FROM <http://x/g> WHERE { ?s ?p ?o }",
+        "DESCRIBE ?s FROM <http://x/g> WHERE { ?s ?p ?o }",
+    ],
+)
+def test_from_clauses_are_refused_with_400(client, query):
+    response = _sparql(client, query)
+
+    assert response.status_code == 400, response.text
+    assert "SPARQL FROM / FROM NAMED is not supported" in response.json()["message"]
+    assert client.graph.get_graph_data_calls == 0
+
+
+@pytest.fixture
+def internal_server():
+    """A local endpoint standing in for an internal service; records every request."""
+    with recording_http_server(
+        b'{"head": {"vars": []}, "results": {"bindings": []}}',
+        "application/sparql-results+json",
+    ) as server:
+        yield server
+
+
+def test_service_query_sends_no_request_to_the_named_endpoint(client, internal_server):
+    """Without the guard rdflib sends this request from the server (SSRF)."""
+    url, requests = internal_server
+
+    response = _sparql(client, f"SELECT * WHERE {{ SERVICE <{url}/internal> {{ ?s ?p ?o }} }}")
+
+    assert response.status_code == 400
+    assert requests == []
+
+
+def test_rdflib_would_call_the_service_endpoint_without_the_guard(internal_server):
+    """Pins why the guard exists: rdflib really does send the SERVICE request."""
+    from rdflib.plugins.sparql import prepareQuery
+
+    url, requests = internal_server
+    query = prepareQuery(f"SELECT * WHERE {{ SERVICE <{url}/internal> {{ ?s ?p ?o }} }}")
+
+    list(Graph().query(query))
+
+    assert len(requests) == 1
+    assert requests[0].startswith("/internal")
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT ?service WHERE { ?service rdfs:label ?name }",
+        'SELECT ?s WHERE { ?s rdfs:label ?n FILTER(CONTAINS(?n, "SERVICE")) }',
+        "SELECT ?s WHERE { ?s <http://example.org/vocab#service> ?o }",
+        "SELECT ?s WHERE { ?s ?p ?o } # SERVICE <http://x/> in a comment",
+        "PREFIX from: <http://example.org/> SELECT ?s WHERE { ?s from:named ?o }",
+    ],
+)
+def test_queries_that_only_spell_service_or_from_still_run(client, query):
+    response = _sparql(client, query)
+
+    assert response.status_code == 200, response.text
+
+
+# --- HTTP + SDK: opt-in -------------------------------------------------------
+
+
+def test_route_is_disabled_by_default_with_a_message_naming_the_setting(client, monkeypatch):
+    monkeypatch.delenv("ALLOW_SPARQL_QUERY")
+
+    response = _sparql(client, SELECT_LABELS)
+
+    assert response.status_code == 403, response.text
+    message = response.json()["message"]
+    assert "disabled by default" in message
+    assert "ALLOW_SPARQL_QUERY=true" in message
+    # Nothing is looked up or read while the feature is off.
+    assert client.authorized.calls == []
+    assert client.graph.contexts == []
+
+
+@pytest.mark.parametrize("value", ["false", "0", "no", "", "maybe"])
+def test_only_truthy_values_enable_sparql(monkeypatch, value):
+    monkeypatch.setenv("ALLOW_SPARQL_QUERY", value)
+
+    assert sparql_module.sparql_queries_allowed() is False
+    with pytest.raises(sparql_module.SparqlDisabledError, match="ALLOW_SPARQL_QUERY=true"):
+        sparql_module.assert_sparql_enabled()
+
+
+@pytest.mark.parametrize("value", ["true", "TRUE", " True ", "1", "yes"])
+def test_truthy_values_enable_sparql(monkeypatch, value):
+    monkeypatch.setenv("ALLOW_SPARQL_QUERY", value)
+
+    assert sparql_module.sparql_queries_allowed() is True
+    sparql_module.assert_sparql_enabled()
 
 
 def test_over_size_graph_is_413_and_points_at_the_export(client, monkeypatch):
@@ -366,6 +496,51 @@ async def test_sdk_sparql_refuses_an_inaccessible_dataset(monkeypatch, graph):
         await datasets_module.datasets.sparql(DATASET_ID, SELECT_LABELS, user=user)
 
     assert graph.contexts == []
+
+
+@pytest.mark.asyncio
+async def test_sdk_sparql_is_disabled_by_default(monkeypatch, graph):
+    monkeypatch.delenv("ALLOW_SPARQL_QUERY")
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+    authorize = AsyncMock()
+
+    with (
+        patch.object(datasets_module, "get_authorized_dataset", authorize),
+        pytest.raises(sparql_module.SparqlDisabledError, match="ALLOW_SPARQL_QUERY=true"),
+    ):
+        await datasets_module.datasets.sparql(DATASET_ID, SELECT_LABELS, user=SimpleNamespace())
+
+    authorize.assert_not_called()
+    assert graph.contexts == []
+
+
+@pytest.mark.asyncio
+async def test_sdk_sparql_refuses_service(monkeypatch, graph):
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+    dataset = SimpleNamespace(id=DATASET_ID, owner_id=OWNER_ID)
+
+    with (
+        patch.object(datasets_module, "get_authorized_dataset", AsyncMock(return_value=dataset)),
+        pytest.raises(sparql_module.SparqlExternalAccessNotAllowedError),
+    ):
+        await datasets_module.datasets.sparql(
+            DATASET_ID, "SELECT * WHERE { SERVICE <http://x/> { ?s ?p ?o } }", user=object()
+        )
+
+    assert graph.get_graph_data_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_sdk_sparql_under_serve_leaves_the_setting_to_the_server(monkeypatch):
+    """Under serve() the remote server's ALLOW_SPARQL_QUERY decides, not this process's."""
+    monkeypatch.delenv("ALLOW_SPARQL_QUERY", raising=False)
+    client = SimpleNamespace(sparql=AsyncMock(return_value={"boolean": True}))
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: client)
+
+    body = await datasets_module.datasets.sparql(DATASET_ID, "ASK { ?s ?p ?o }")
+
+    assert body == {"boolean": True}
+    client.sparql.assert_awaited_once()
 
 
 @pytest.mark.asyncio

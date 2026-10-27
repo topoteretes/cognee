@@ -4,11 +4,15 @@ The RDF view is not a live store: ``export_memory_graph_to_rdf`` reads the whole
 dataset graph (``get_graph_data``) and loads it into an in-memory rdflib store,
 then the query runs there. That keeps the feature engine-agnostic (Kuzu, Neo4j,
 ... all share one SPARQL surface) at the cost of materializing the graph per
-request. Three guards keep that cost bounded:
+request. The surface is opt-in: ``ALLOW_SPARQL_QUERY=true`` enables it, and the
+HTTP route and the SDK call refuse with ``SparqlDisabledError`` until then. Three
+guards keep the cost bounded:
 
 * the query is refused up front when it carries SPARQL Update keywords, so the
   view can never be mutated (and the error names the problem rather than
-  surfacing an rdflib parse error);
+  surfacing an rdflib parse error), or when it reads anything beyond the view:
+  ``SERVICE`` would make the server send an HTTP request to any endpoint, and
+  ``FROM`` / ``FROM NAMED`` name graphs to load from a URL or file;
 * the dataset's node count is checked *before* the export, and graphs above
   ``SPARQL_MAX_GRAPH_NODES`` are refused with a pointer at the RDF export, which
   streams the same triples without holding a query engine in memory;
@@ -29,8 +33,10 @@ import re
 from typing import Any
 from uuid import UUID
 
-from pyparsing import ParseException
+from pyparsing import ParseException, ParseResults
 from rdflib import BNode
+from rdflib.plugins.sparql.parser import parseQuery
+from rdflib.plugins.sparql.parserutils import CompValue
 from rdflib.query import Result
 
 from cognee.context_global_variables import set_database_global_context_variables
@@ -51,6 +57,13 @@ DEFAULT_QUERY_TIMEOUT_SECONDS = 30.0
 # ``INSERT DATA``. ``WITH`` and ``USING`` only exist in update grammar but are
 # harmless without a verb, so they are not listed.
 _UPDATE_KEYWORDS = ("INSERT", "DELETE", "LOAD", "CLEAR", "DROP", "CREATE", "ADD", "MOVE", "COPY")
+
+# Parse-tree nodes that reach beyond the dataset view: SERVICE sends an HTTP request
+# to the endpoint it names, FROM / FROM NAMED name graphs to load from a URL or file.
+_EXTERNAL_ACCESS_NODES = {
+    "ServiceGraphPattern": "SERVICE",
+    "DatasetClause": "FROM / FROM NAMED",
+}
 
 # A keyword counts only as a bare token: not the tail of a variable (``?delete``),
 # a prefixed name (``ex:create``, ``create:x``) or a longer word (``created``).
@@ -86,6 +99,23 @@ class SparqlUpdateNotAllowedError(SparqlQueryError):
     """The query carries SPARQL Update keywords; the RDF view is read-only."""
 
 
+class SparqlExternalAccessNotAllowedError(SparqlQueryError):
+    """The query reads beyond the dataset view (``SERVICE``, ``FROM``, ``FROM NAMED``)."""
+
+
+class SparqlDisabledError(SparqlQueryError):
+    """SPARQL is opt-in; ``ALLOW_SPARQL_QUERY`` is not enabled on this deployment."""
+
+    def __init__(self):
+        super().__init__(
+            "SPARQL queries are disabled by default. To enable them, set the environment "
+            "variable ALLOW_SPARQL_QUERY=true for the cognee server (or the process running "
+            "the SDK) and restart it. Each query loads the dataset's whole graph into "
+            "memory, so enable it only when the users of this deployment are trusted with "
+            "that load."
+        )
+
+
 class SparqlGraphTooLargeError(SparqlQueryError):
     """The dataset graph exceeds ``SPARQL_MAX_GRAPH_NODES``; use the RDF export."""
 
@@ -109,6 +139,17 @@ class SparqlQueryTimeoutError(SparqlQueryError):
             f"SPARQL query did not finish within {timeout_seconds:g}s "
             "(SPARQL_QUERY_TIMEOUT_SECONDS). Narrow the query or raise the timeout."
         )
+
+
+def sparql_queries_allowed() -> bool:
+    """SPARQL over dataset graphs is opt-in through ``ALLOW_SPARQL_QUERY=true``."""
+    return os.getenv("ALLOW_SPARQL_QUERY", "false").strip().lower() in ("true", "1", "yes")
+
+
+def assert_sparql_enabled() -> None:
+    """Raise ``SparqlDisabledError`` unless ``ALLOW_SPARQL_QUERY`` is enabled."""
+    if not sparql_queries_allowed():
+        raise SparqlDisabledError()
 
 
 def max_graph_nodes() -> int:
@@ -160,6 +201,45 @@ def assert_read_only(query: str) -> None:
             "Only read-only query forms (SELECT, ASK, CONSTRUCT, DESCRIBE) run against "
             "the dataset graph; write through cognee.add/cognify instead."
         )
+
+
+def _parse_tree_node_names(node: Any, names: set[str]) -> set[str]:
+    """Collect the name of every node in an rdflib SPARQL parse tree."""
+    if isinstance(node, CompValue):
+        names.add(node.name)
+        for value in node.values():
+            _parse_tree_node_names(value, names)
+    elif isinstance(node, (list, tuple, ParseResults)):
+        for item in node:
+            _parse_tree_node_names(item, names)
+    return names
+
+
+def assert_no_external_access(query: str) -> None:
+    """Refuse a query that reads beyond the dataset view.
+
+    Checks the parse tree, not the text, so ``SERVICE`` is found wherever it is
+    nested (subquery, ``OPTIONAL``, ``UNION``) and a literal or variable that merely
+    spells "service" passes. Raises ``SparqlSyntaxError`` when the query does not parse.
+    """
+    try:
+        parse_tree = parseQuery(query)
+    except ParseException as error:
+        raise SparqlSyntaxError(f"Invalid SPARQL query: {error}") from error
+
+    node_names = _parse_tree_node_names(parse_tree, set())
+    for node_name, clause in _EXTERNAL_ACCESS_NODES.items():
+        if node_name in node_names:
+            raise SparqlExternalAccessNotAllowedError(
+                f"SPARQL {clause} is not supported: the query runs over this dataset's "
+                "graph only and cannot read other graphs or endpoints."
+            )
+
+
+def validate_query(query: str) -> None:
+    """Every check that needs only the query text: read-only, then no external access."""
+    assert_read_only(query)
+    assert_no_external_access(query)
 
 
 def term_to_json(term: Any) -> str | None:
@@ -245,7 +325,8 @@ async def query_dataset_sparql(
 ) -> dict[str, Any]:
     """Run a read-only SPARQL query over one dataset's graph.
 
-    The caller must already have checked that the user may read ``dataset_id``
+    The caller must already have checked that SPARQL is enabled
+    (``assert_sparql_enabled``) and that the user may read ``dataset_id``
     (``get_authorized_existing_datasets``/``get_authorized_dataset``); this
     function only scopes the graph engine to that dataset the way search does,
     so under access control each tenant's graph stays isolated.
@@ -254,6 +335,8 @@ async def query_dataset_sparql(
         ValueError: ``limit`` is outside ``1..MAX_LIMIT``.
         SparqlUpdateNotAllowedError: the query carries Update keywords.
         SparqlSyntaxError: rdflib could not parse the query.
+        SparqlExternalAccessNotAllowedError: the query uses ``SERVICE``, ``FROM`` or
+            ``FROM NAMED``.
         SparqlGraphTooLargeError: the graph has more nodes than
             ``SPARQL_MAX_GRAPH_NODES``.
         SparqlQueryTimeoutError: export + query exceeded
@@ -261,7 +344,8 @@ async def query_dataset_sparql(
     """
     if not 1 <= limit <= MAX_LIMIT:
         raise ValueError(f"limit must be between 1 and {MAX_LIMIT}, got {limit}")
-    assert_read_only(query)
+    # Parsing is CPU-bound; it runs before the graph is read, so a refused query costs nothing.
+    await asyncio.to_thread(validate_query, query)
 
     base_iri = base_iri or DEFAULT_BASE_IRI
     max_nodes = max_graph_nodes()

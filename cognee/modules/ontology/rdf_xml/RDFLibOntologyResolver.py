@@ -19,6 +19,10 @@ from cognee.modules.ontology.ontology_env_config import (
     get_ontology_env_config,
     normalize_ontology_reasoning,
 )
+from cognee.modules.ontology.rdf_xml.parse_rdf_content import (
+    FALLBACK_FORMATS,
+    parse_rdf_content,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("OntologyAdapter")
@@ -35,8 +39,6 @@ CONTENT_TYPE_FORMATS = {
     "application/trig": "trig",
     "application/ld+json": "json-ld",
 }
-
-FALLBACK_FORMATS = ("xml", "turtle", "n3", "nt", "json-ld", "trig", "nquads")
 
 # Predicates the OWL-RL closure asserts reflexively for every term it touches.
 REFLEXIVE_CLOSURE_PREDICATES = (
@@ -252,34 +254,23 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                 f"Ontology file object returned unsupported content type: {type(content)}"
             )
 
-        candidate_formats = self._get_candidate_formats(file_obj)
-        parse_errors = []
+        try:
+            parsed_graph, rdf_format = parse_rdf_content(
+                content, self._get_candidate_formats(file_obj)
+            )
+        except ValueError as error:
+            raise ValueError(
+                f"Unable to parse ontology file object '{self._get_file_object_name(file_obj)}'. "
+                f"{error}"
+            ) from error
 
-        for rdf_format in candidate_formats:
-            parsed_graph = Graph()
-            try:
-                parsed_graph.parse(data=content, format=rdf_format)
-            except Exception as error:
-                logger.debug(
-                    "Skipping item after error in RDFLibOntologyResolver._parse_file_object",
-                    exc_info=True,
-                )
-                parse_errors.append(f"{rdf_format}: {error}")
-                continue
+        for prefix, namespace in parsed_graph.namespaces():
+            target_graph.bind(prefix, namespace, override=False)
 
-            for prefix, namespace in parsed_graph.namespaces():
-                target_graph.bind(prefix, namespace, override=False)
+        for triple in parsed_graph:
+            target_graph.add(triple)
 
-            for triple in parsed_graph:
-                target_graph.add(triple)
-
-            return rdf_format
-
-        raise ValueError(
-            f"Unable to parse ontology file object '{self._get_file_object_name(file_obj)}'. "
-            f"Tried formats: {', '.join(candidate_formats)}. "
-            f"Last error: {parse_errors[-1] if parse_errors else 'unknown error'}"
-        )
+        return rdf_format
 
     def build_lookup(self) -> None:
         try:

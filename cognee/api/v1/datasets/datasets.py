@@ -254,17 +254,24 @@ class datasets:
         ``SPARQL_MAX_GRAPH_NODES`` raise ``SparqlGraphTooLargeError`` and a
         query over ``SPARQL_QUERY_TIMEOUT_SECONDS`` raises
         ``SparqlQueryTimeoutError`` (all in ``cognee.modules.graph.rdf``).
+        ``SERVICE``, ``FROM`` and ``FROM NAMED`` raise
+        ``SparqlExternalAccessNotAllowedError``.
+
+        Disabled by default: set ``ALLOW_SPARQL_QUERY=true`` to enable it, or the
+        call raises ``SparqlDisabledError``.
 
         Routes to the remote instance when connected via ``serve()``, like
-        ``list_data``; there the server's limits apply and a refused query
-        surfaces as ``RuntimeError`` carrying the HTTP status.
+        ``list_data``; there the server's setting and limits apply and a refused
+        query surfaces as ``RuntimeError`` carrying the HTTP status.
         """
         from cognee.api.v1.serve.state import get_remote_client
-        from cognee.modules.graph.rdf.sparql import query_dataset_sparql
+        from cognee.modules.graph.rdf.sparql import assert_sparql_enabled, query_dataset_sparql
 
         client = get_remote_client()
         if client is not None:
             return await client.sparql(dataset_id, query, base_iri=base_iri, limit=limit)
+
+        assert_sparql_enabled()
 
         if not user:
             user = await get_default_user()
