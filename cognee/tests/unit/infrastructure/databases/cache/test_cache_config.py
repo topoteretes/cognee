@@ -77,7 +77,7 @@ def test_cache_config_custom_values():
 def test_cache_config_to_dict():
     """Test the to_dict method returns all configuration values."""
     config = CacheConfig(
-        cache_backend="fs",
+        cache_backend="redis",
         caching=True,
         shared_ladybug_lock=True,
         cache_host="test-host",
@@ -90,7 +90,7 @@ def test_cache_config_to_dict():
     config_dict = config.to_dict()
 
     assert config_dict == {
-        "cache_backend": "fs",
+        "cache_backend": "redis",
         "cache_db_url": None,
         "cache_purge_interval_seconds": 900,
         "caching": True,

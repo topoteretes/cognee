@@ -122,7 +122,7 @@ jobs:
         env:
           ENV: 'dev'
           CACHING: 'true'
-          CACHE_BACKEND: 'fs'
+          CACHE_BACKEND: 'sqlite'
           OPENAI_API_KEY: "mock-not-used"
           LLM_API_KEY: "mock-not-used"
           EMBEDDING_DIMENSIONS: 300

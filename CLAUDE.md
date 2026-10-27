@@ -451,7 +451,7 @@ add → cognify → search example live there too.
 
 #### Session Cache
 ```bash
-# Session/conversation cache backend: sqlite (default), turso, postgres, redis, fs, tapes
+# Session/conversation cache backend: sqlite (default), turso, postgres, redis, tapes
 CACHE_BACKEND=sqlite
 # Optional explicit SQLAlchemy URL for sqlite/turso/postgres cache backends (overrides defaults)
 CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db

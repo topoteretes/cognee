@@ -10,7 +10,7 @@ class CacheConfig(BaseSettings):
     Configuration for distributed cache systems (e.g., Redis), used for locking or coordination.
 
     Attributes:
-    - cache_backend: Session cache backend; one of "redis", "fs", "tapes", "sqlite", "turso",
+    - cache_backend: Session cache backend; one of "redis", "tapes", "sqlite", "turso",
       "postgres" (default "sqlite"). "sqlite", "turso" and "postgres" use the SQL cache adapter,
       differing only in default connection URL resolution and driver: "turso" is the same
       cache.db layout on the Turso rewrite engine (pyturso, ``pip install cognee"[turso]"``),
@@ -50,7 +50,7 @@ class CacheConfig(BaseSettings):
       its context updates reach this turn's answer -- at the cost of two calls in a row.
     """
 
-    cache_backend: Literal["redis", "fs", "tapes", "sqlite", "turso", "postgres"] = "sqlite"
+    cache_backend: Literal["redis", "tapes", "sqlite", "turso", "postgres"] = "sqlite"
     cache_db_url: str | None = None
     cache_purge_interval_seconds: int = 900
     caching: bool = True
