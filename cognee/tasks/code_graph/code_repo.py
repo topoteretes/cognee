@@ -328,7 +328,14 @@ async def resolve_code_repository(
     dataset_id=None,
     source_url: str | None = None,
     include_documents: bool = True,
+    reset_stamp: bool = True,
 ):
+    """Build the repo manifest and, with ``reset_stamp``, clear its stored add stamp.
+
+    A caller holding the clone lock passes ``reset_stamp=False`` and calls
+    ``reset_add_stamp`` once it has released it: the dataset lock must never be taken
+    inside the clone lock, because cognify takes them in the opposite order.
+    """
     async with repository_read(directory, remote=source_url is not None) as commit:
         item, documents, skipped = await _build_code_repository(
             directory, user, dataset_id, source_url, include_documents
@@ -338,7 +345,32 @@ async def resolve_code_repository(
             manifest.update(commit=commit, repo_key=repo_key(source_url), identity_version=2)
             item.data = json.dumps(manifest, indent=2)
             item.system_metadata["identity_version"] = 2
-        return item, documents, skipped
+    if reset_stamp:
+        await reset_add_stamp(item.data_id, dataset_id)
+    return item, documents, skipped
+
+
+async def reset_add_stamp(data_id, dataset_id) -> None:
+    """Clear the stored manifest row's add stamp, under the dataset lock.
+
+    The id is pinned, so add()'s incremental check would find the stored row already
+    added and skip it before ingestion compares content: a changed repo would keep its
+    old manifest and graph. Clearing only the add stamp lets the manifest through;
+    ingestion then clears the other stamps when the content changed, and keeps them when
+    it did not, so an unchanged repo whose later run fails is still marked as built. The
+    clear is unconditional: an unchanged repo's manifest is stored again on every add,
+    which costs one small write, not a rebuild.
+
+    The reset is a read-modify-write of the row's pipeline_status, so it takes the
+    dataset lock (a no-op when the pipeline runner already holds it).
+    """
+    if data_id is None or dataset_id is None:
+        return
+    from cognee.infrastructure.locks import dataset_lock
+    from cognee.modules.data.methods import reset_data_pipeline_status
+
+    async with dataset_lock(dataset_id):
+        await reset_data_pipeline_status(data_id, dataset_id, pipeline_names=("add_pipeline",))
 
 
 async def _build_code_repository(
@@ -354,8 +386,8 @@ async def _build_code_repository(
     to the stable identity (user, dataset, repo path) — mirroring DLT source
     manifests — so re-adding the same repo updates one record instead of
     accreting new ones; without a user context the id is left content-derived.
-    With a pinned id and a dataset, the stored row's add stamp is cleared so
-    the re-add reaches ingestion's content comparison (see the reset below).
+    With a pinned id and a dataset, the caller clears the stored row's add stamp so
+    the re-add reaches ingestion's content comparison (see ``reset_add_stamp``).
     ``source_url`` (credential-free) records where a cloned repository came
     from as ``system_metadata["repo_url"]``.
 
@@ -400,19 +432,6 @@ async def _build_code_repository(
             user,
             dataset_id,
         )
-
-    if data_id is not None and dataset_id is not None:
-        from cognee.modules.data.methods import reset_data_pipeline_status
-
-        # The id is pinned, so add()'s incremental check would find the stored
-        # row already added and skip it before ingestion compares content: a
-        # changed repo would keep its old manifest and graph. Clearing only the
-        # add stamp lets the manifest through; ingestion then clears the other
-        # stamps when the content changed, and keeps them when it did not, so
-        # an unchanged repo whose later run fails is still marked as built.
-        # The clear is unconditional: an unchanged repo's manifest is stored
-        # again on every add, which costs one small write, not a rebuild.
-        await reset_data_pipeline_status(data_id, dataset_id, pipeline_names=("add_pipeline",))
 
     system_metadata = {
         "source": "code_repo",
@@ -479,6 +498,7 @@ async def resolve_code_repository_url(
             dataset_id=dataset_id,
             source_url=source_url,
             include_documents=include_documents,
+            reset_stamp=False,
         )
         commit = json.loads(manifest_item.data)["commit"]
         stored_documents = []
@@ -497,7 +517,8 @@ async def resolve_code_repository_url(
                     },
                 )
             )
-        return manifest_item, stored_documents, skipped
+    await reset_add_stamp(manifest_item.data_id, dataset_id)
+    return manifest_item, stored_documents, skipped
 
 
 async def add_code_repository(

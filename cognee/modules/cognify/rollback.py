@@ -15,7 +15,7 @@ from cognee.modules.graph.legacy.has_edges_in_legacy_ledger import has_edges_in_
 from cognee.modules.graph.legacy.has_nodes_in_legacy_ledger import has_nodes_in_legacy_ledger
 from cognee.modules.graph.methods.delete_from_graph_and_vector import delete_from_graph_and_vector
 from cognee.modules.graph.models import Edge, Node
-from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
+from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed_in
 from cognee.modules.pipelines.utils import iter_ingestion_entries
 from cognee.shared.logging_utils import get_logger
 
@@ -95,16 +95,13 @@ async def _completed_data_ids(session, data_ids: set, dataset_id: Any) -> set:
     completed item: documents the run finished before it stopped."""
     if not data_ids:
         return set()
-    dataset_id_str = str(dataset_id)
     records = (
         (await session.execute(select(Data).where(Data.id.in_(list(data_ids))))).scalars().all()
     )
     return {
         record.id
         for record in records
-        if is_data_item_completed(
-            ((record.pipeline_status or {}).get("cognify_pipeline") or {}).get(dataset_id_str)
-        )
+        if is_data_item_completed_in(record.pipeline_status, "cognify_pipeline", dataset_id)
     }
 
 

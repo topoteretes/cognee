@@ -18,6 +18,7 @@ from uuid import uuid4
 import aiohttp
 import pytest
 
+from cognee.modules.pipelines.exceptions import CognifyFailedError
 from cognee.modules.pipelines.models import PipelineRunCompleted, PipelineRunErrored
 from cognee.tasks.code_graph.resolve_repo import CodeRepositoryError
 
@@ -114,6 +115,7 @@ async def test_default_sync_covers_every_installation_repo(mocks):
         assert call.kwargs == {
             "dataset_name": "github_acme_org",
             "user": mocks.owner,
+            "skip_connection_test": True,
             "codegraph_config": {"repo_credentials": "tok123", "include_documents": False},
         }
 
@@ -131,7 +133,6 @@ async def test_each_repository_is_built_in_its_own_scoped_run(mocks):
             "datasets": [run.dataset_id],
             "data_ids": run.data_ids,
             "user": mocks.owner,
-            "raise_on_error": False,
         }
 
 
@@ -196,19 +197,6 @@ async def test_sync_reports_live_work_without_inventing_file_progress(mocks):
     assert mocks.observations[-1].counts == {"processed": 1, "failed": 0}
 
 
-def _errored_run(error_class="RuntimeError", message="boom"):
-    dataset_id = uuid4()
-    return {
-        dataset_id: PipelineRunErrored(
-            pipeline_run_id=uuid4(),
-            dataset_id=dataset_id,
-            dataset_name="github_acme_org",
-            error_class=error_class,
-            error_message=message,
-        )
-    }
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "failing,state",
@@ -216,7 +204,9 @@ def _errored_run(error_class="RuntimeError", message="boom"):
 )
 async def test_handled_repo_failures_are_not_reported_successful(mocks, failing, state):
     mocks.cognify.side_effect = [
-        _errored_run(message="secret") if name in failing else {}
+        CognifyFailedError(error_class="RuntimeError", error_message="secret")
+        if name in failing
+        else {}
         for name in ("acme/api", "acme/web")
     ]
 
@@ -262,23 +252,34 @@ async def test_a_failed_add_keeps_its_cause_and_the_token_never_reaches_the_log(
 
 
 @pytest.mark.asyncio
-async def test_an_add_that_reports_no_rows_fails_that_repository_and_never_builds_the_dataset(
-    mocks, caplog
+@pytest.mark.parametrize("data_ids", [None, []], ids=["none", "empty"])
+async def test_an_add_without_rows_fails_that_repository_and_builds_nothing(
+    mocks, caplog, data_ids
 ):
-    """An empty id list would make the build fall back to the whole dataset."""
-    empty = PipelineRunCompleted(
-        pipeline_run_id=uuid4(),
-        dataset_id=uuid4(),
-        dataset_name="github_acme_org",
-        data_ingestion_info=[],
-    )
-    mocks.add.side_effect = [empty, _added()]
+    """cognify(data_ids=None) would build the whole dataset."""
+    mocks.add.side_effect = [SimpleNamespace(dataset_id=uuid4(), data_ids=data_ids), _added()]
 
     with caplog.at_level(logging.ERROR):
         await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert mocks.add.await_count == 2 and mocks.cognify.await_count == 1
     assert "failed for acme/api" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_failed_build_fails_that_repository_alone(mocks, caplog):
+    """cognify() wraps what a build raises, so the loop sees a cognee error."""
+    mocks.cognify.side_effect = [
+        CognifyFailedError(error_class="RuntimeError", error_message="graph write failed"),
+        {},
+    ]
+
+    with caplog.at_level(logging.ERROR):
+        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert mocks.add.await_count == 2 and mocks.cognify.await_count == 2
+    assert "failed for acme/api" in caplog.text
+    assert mocks.observations[-1].state == "partial"
 
 
 @pytest.mark.asyncio
@@ -299,13 +300,14 @@ async def test_an_io_or_network_failure_fails_that_repository_alone(mocks, caplo
 
 
 @pytest.mark.asyncio
-async def test_programming_errors_abort_the_sync(mocks):
-    mocks.cognify.side_effect = [TypeError("a bug"), {}]
+async def test_an_error_add_raises_outside_the_caught_types_aborts_the_sync(mocks):
+    mocks.add.side_effect = [TypeError("a bug"), _added()]
 
     with pytest.raises(TypeError):
         await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert mocks.add.await_count == 1
+    mocks.cognify.assert_not_awaited()
 
 
 @pytest.mark.asyncio

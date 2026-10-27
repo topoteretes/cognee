@@ -554,3 +554,59 @@ async def test_resolving_a_local_project_honours_include_documents(tmp_path, llm
     resolved = await resolve_data_directories([str(project)], include_documents=False)
 
     assert not [item for item in resolved if isinstance(item, str)]
+
+
+@pytest.mark.asyncio
+async def test_the_stamp_is_reset_under_the_dataset_lock_after_the_clone_lock_is_released(
+    tmp_path, monkeypatch
+):
+    """cognify takes the dataset lock and then the clone lock, so the dataset lock must
+    never be taken inside the clone lock. The clone and manifest run under the clone lock
+    without the dataset lock; the stamp reset, a read-modify-write of the row, runs under
+    the dataset lock once the clone lock is released."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from uuid import uuid4
+
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.infrastructure.locks import held_datasets
+
+    resolve = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
+    monkeypatch.setattr(resolve, "default_clones_dir", lambda: tmp_path)
+    dataset_id = uuid4()
+    seen = {}
+
+    def locks():
+        task = asyncio.current_task()
+        return {
+            "clone_lock": bool(resolve._HELD_CLONE_LOCKS.get(task)),
+            "dataset_lock": dataset_id in held_datasets.get(),
+        }
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+        return tmp_path / "clone"
+
+    async def fake_resolve_code_repository(directory, **kwargs):
+        seen["resolve"] = locks()
+        seen["reset_stamp"] = kwargs["reset_stamp"]
+        return SimpleNamespace(data='{"commit": "c1"}', data_id=uuid4()), [], 0
+
+    async def fake_reset(*_args, **_kwargs):
+        seen["reset"] = locks()
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+    monkeypatch.setattr(code_repo_module, "resolve_code_repository", fake_resolve_code_repository)
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.data.methods"),
+        "reset_data_pipeline_status",
+        fake_reset,
+    )
+
+    await code_repo_module.resolve_code_repository_url(
+        "https://github.com/org/repo", user=Mock(), dataset_id=dataset_id
+    )
+
+    assert seen["reset_stamp"] is False
+    assert seen["resolve"] == {"clone_lock": True, "dataset_lock": False}
+    assert seen["reset"] == {"clone_lock": False, "dataset_lock": True}
