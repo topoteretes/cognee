@@ -7,10 +7,11 @@ bucket per document (``create_document_bucket_id``, keyed by ``Data.id``).
 against what the build computed: it writes the rows whose text is new or
 changed and deletes the rest. It can only address rows whose document still
 has a ``Data`` row, so deletion removes rows itself, while their ids are still
-derivable: ``remove_document_routes`` when a document is deleted or its memory
-dropped, ``remove_dataset_routes`` when a dataset is deleted or its memory
-dropped, and ``prune_dataset_routes`` drops the whole collection, so a prune
-followed by an embedding model change starts from a clean table.
+derivable: ``remove_dataset_routes`` with the deleted documents, which also
+takes the root, since the root names every document and the index drops its
+own root at the same time; ``prune_dataset_routes`` drops the whole
+collection, so a prune followed by an embedding model change starts from a
+clean table.
 
 Nothing here runs with backend access control off. Every dataset then shares
 one store, so there is nothing to route between, and the rows would land in
@@ -109,26 +110,18 @@ async def sync_dataset_routes(dataset_id: str, desired: list[GlobalContextSummar
 
 
 async def remove_dataset_routes(dataset_id: UUID | str, document_ids: list[UUID | str]) -> None:
-    """Delete every routing row a dataset could have: the dataset or its memory is deleted."""
+    """Delete the dataset's root row and the bucket rows of the given documents.
+
+    Called with one document when it, or its memory, is deleted, and with all
+    of them when the dataset is. The root goes either way: its text names every
+    document, so the index drops it with any of them, and the next build
+    writes both anew.
+    """
     if not backend_access_control_enabled():
         return
     await get_dataset_route_engine().delete_data_points(
         DATASET_ROUTE_COLLECTION,
         [UUID(row_id) for row_id in dataset_route_ids(dataset_id, document_ids)],
-    )
-
-
-async def remove_document_routes(dataset_id: UUID | str, document_ids: list[UUID | str]) -> None:
-    """Delete the bucket rows of the given documents: they, or their memory, are deleted.
-
-    The dataset's root row stays; it names the remaining documents and is
-    rewritten by the next index build.
-    """
-    if not backend_access_control_enabled():
-        return
-    _root, *buckets = dataset_route_ids(dataset_id, document_ids)
-    await get_dataset_route_engine().delete_data_points(
-        DATASET_ROUTE_COLLECTION, [UUID(row_id) for row_id in buckets]
     )
 
 

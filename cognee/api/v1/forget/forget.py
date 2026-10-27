@@ -540,10 +540,14 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
 
         await delete_edge_evidence(dataset_id, data_id)
 
-        # 1d. The routing row that mirrored this item's index bucket.
-        from cognee.modules.search.dataset_routing import remove_document_routes
+        # 1d. The index: the item's bucket went with its memory above (it
+        # carries the item's source ref); the dataset's root names the item,
+        # so it goes here, with the routing rows that mirrored both.
+        from cognee.modules.search.dataset_routing import remove_dataset_routes
+        from cognee.tasks.memify.global_context_index import remove_dataset_root
 
-        await remove_document_routes(dataset_id, [data_id])
+        await remove_dataset_routes(dataset_id, [data_id])
+        await remove_dataset_root(dataset_id)
 
         # 2. Reset pipeline_status for this data record
         db_engine = get_relational_engine()

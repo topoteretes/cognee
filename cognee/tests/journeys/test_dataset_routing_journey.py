@@ -79,11 +79,13 @@ async def test_unscoped_recall_is_routed_to_the_dataset_holding_the_answer(
         return {str(row.id) for row in rows}
 
     # Forgetting one of B's documents removes its bucket row at once (its id can
-    # no longer be derived once the Data row is gone); B's root and the other
-    # buckets stay until the next index build rewrites the root.
+    # no longer be derived once the Data row is gone) and B's root row, whose
+    # text named the document; the other buckets stay. The next index build
+    # writes the root again.
     gone, *kept = documents[dataset_b]
     await cognee.forget(data_id=gone, dataset_id=dataset_b)
-    assert await stored(dataset_b, documents[dataset_b]) == set(dataset_route_ids(dataset_b, kept))
+    _root, *kept_buckets = dataset_route_ids(dataset_b, kept)
+    assert await stored(dataset_b, documents[dataset_b]) == set(kept_buckets)
 
     # Dropping A's memory alone (its files stay) removes every row of A.
     await cognee.forget(dataset_id=dataset_a, memory_only=True)

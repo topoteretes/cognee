@@ -510,6 +510,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                             self.vector = vector
 
                     async with self.engine.begin() as connection:
+                        # The dataset handlers install the extension in the databases
+                        # they create; the deployment's default database (dataset
+                        # routing) has no handler, so the collection installs it.
+                        # A no-op where it is installed.
+                        await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
                         if len(Base.metadata.tables.keys()) > 0:
                             await connection.run_sync(
                                 Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]

@@ -44,6 +44,7 @@ from .persist import (
     delete_context_index_nodes,
     persist_context_index_edges,
     persist_context_summaries,
+    stamp_bucket_owners,
 )
 
 _RankedEntities = list[tuple[str, float]]
@@ -81,6 +82,13 @@ async def build_document_index(
         if data.existing_summary_texts.get(node_id) != summary.text
     ]
     await persist_context_summaries(changed, ctx)
+    # Over the whole index, like the routing sync below: a bucket the last build
+    # left unstamped is stamped now.
+    await stamp_bucket_owners(
+        unified_engine.graph,
+        data.dataset_id,
+        [summary for summary in desired.values() if not summary.is_root],
+    )
     # The routing collection mirrors this index and reconciles against the full
     # desired set, not the diff, so a row it is missing is written too.
     await sync_dataset_routes(data.dataset_id, list(desired.values()))

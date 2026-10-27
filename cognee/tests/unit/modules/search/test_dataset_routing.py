@@ -306,20 +306,22 @@ async def test_removing_a_dataset_deletes_its_root_and_every_bucket(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_removing_documents_deletes_their_buckets_and_keeps_the_root(monkeypatch):
+async def test_removing_a_document_deletes_its_bucket_and_the_root_not_the_others(monkeypatch):
     """Deletion-time removal: the bucket id derives from the Data row, so it is
-    deleted while that row still exists; the root is rewritten by the next build."""
-    from cognee.modules.search.dataset_routing import remove_document_routes
+    deleted while that row still exists; the root names every document, so it
+    goes too, and the next build rewrites it. The other buckets stay."""
+    from cognee.modules.search.dataset_routing import remove_dataset_routes
 
     a, gone, kept = uuid4(), uuid4(), uuid4()
     engine = FakeEngine()
     _patch(monkeypatch, engine, {a: [gone, kept]})
 
-    await remove_document_routes(a, [gone])
+    await remove_dataset_routes(a, [gone])
 
     root, bucket = dataset_route_ids(a, [gone])
-    assert engine.deleted == [UUID(bucket)]
-    assert UUID(root) not in engine.deleted
+    assert set(engine.deleted) == {UUID(root), UUID(bucket)}
+    _root, kept_bucket = dataset_route_ids(a, [kept])
+    assert UUID(kept_bucket) not in engine.deleted
 
 
 @pytest.mark.asyncio
@@ -356,7 +358,6 @@ async def test_removal_is_a_no_op_without_backend_access_control(monkeypatch):
     from cognee.modules.search.dataset_routing import (
         prune_dataset_routes,
         remove_dataset_routes,
-        remove_document_routes,
     )
 
     a, doc = uuid4(), uuid4()
@@ -364,7 +365,6 @@ async def test_removal_is_a_no_op_without_backend_access_control(monkeypatch):
     _patch(monkeypatch, engine, {a: [doc]}, access_control=False)
 
     await remove_dataset_routes(a, [doc])
-    await remove_document_routes(a, [doc])
     await prune_dataset_routes()
 
     assert engine.deleted == [] and engine.dropped == []

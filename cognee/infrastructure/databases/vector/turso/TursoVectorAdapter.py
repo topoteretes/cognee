@@ -20,6 +20,7 @@ retried on ``Write-write conflict``.
 
 import asyncio
 import json
+import os
 import threading
 from typing import Any
 from uuid import UUID
@@ -143,6 +144,13 @@ class TursoVectorAdapter(VectorDBInterface):
             return self._connection
 
         import turso
+
+        # The dataset handler makes the directory of every per-dataset file; the
+        # deployment's default store (dataset routing) has no handler, so its
+        # directory is made here. Local files only, so a plain path.
+        directory = os.path.dirname(self.url)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
 
         config = self.turso_config
         # Driver autocommit in both modes: single statements commit on their own,

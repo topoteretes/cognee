@@ -5,14 +5,16 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from cognee.infrastructure.databases.provenance import make_source_ref_key
+from cognee.infrastructure.databases.provenance import make_source_ref_key, parse_source_ref_key
 from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
+from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization.models import GlobalContextSummary
 
 from .constants import GLOBAL_CONTEXT_SUMMARY_COLLECTION
+from .ids import create_root_summary_id
 
 
 async def safe_delete_context_vectors(vector_engine: Any, ids: list[str]) -> None:
@@ -38,6 +40,15 @@ async def delete_context_index_nodes(unified_engine: Any, bucket_ids: list[str])
 def ensure_global_context_storage_context(
     ctx: PipelineContext | None,
 ) -> PipelineContext | None:
+    """Give the index write a dataset-level data item, so its nodes and edges are stamped.
+
+    The index is built over the whole dataset, not from one data item, so the
+    memify pipeline hands it none. The sentinel id below makes every write
+    carry a source ref of this dataset: the root and the edges keep it, so a
+    dataset deletion on a shared graph removes them with the dataset's other
+    refs, and a bucket trades it for its document's own ref right after the
+    write (``stamp_bucket_owners``).
+    """
     if ctx is None or getattr(ctx.data_item, "id", None) is not None:
         return ctx
 
@@ -84,15 +95,76 @@ async def persist_context_summaries(
         )
 
 
+async def stamp_bucket_owners(
+    graph_engine: Any, dataset_id: str, buckets: list[GlobalContextSummary]
+) -> None:
+    """Give every document bucket its document's source ref, and only that one.
+
+    A bucket is what the index says about one document, so the document owns
+    it: ``forget()`` then removes the bucket through the provenance delete,
+    like every other node the document produced, and nothing has to know the
+    bucket's id at deletion time. The write folds the dataset-level ref in
+    (``ensure_global_context_storage_context``), so a bucket is never stored
+    unstamped; this pass replaces that ref with the document's. It runs over
+    the whole index, not only the buckets just written, so buckets written
+    before it existed, or by a build that crashed before reaching it, are
+    stamped by the next build. Graph-provenance graphs only: a ledger graph
+    keeps a document's bucket until the next build no longer computes it.
+    """
+    if not buckets or not await stores_provenance_in_graph(graph_engine):
+        return
+
+    dataset_uuid = UUID(dataset_id)
+    current = await graph_engine.get_node_delete_data([str(bucket.id) for bucket in buckets])
+    to_attach: dict[str, list[str]] = {}
+    to_remove: dict[tuple[str, ...], list[str]] = {}
+    for bucket in buckets:
+        owner = make_source_ref_key(dataset_uuid, UUID(bucket.document_id))
+        existing = current.get(str(bucket.id))
+        held = set(existing.source_ref_keys if existing else ())
+        if owner not in held:
+            to_attach.setdefault(owner, []).append(str(bucket.id))
+        stale = tuple(
+            sorted(ref for ref in held - {owner} if _is_document_ref_of(ref, dataset_uuid))
+        )
+        if stale:
+            to_remove.setdefault(stale, []).append(str(bucket.id))
+    # One call per distinct key set: every bucket has its own owner, so the
+    # attach is per bucket, but the refs to take back are shared and go in one.
+    for owner, node_ids in to_attach.items():
+        await graph_engine.attach_node_source_refs(node_ids, [owner])
+    for stale, node_ids in to_remove.items():
+        await graph_engine.remove_node_source_refs(node_ids, list(stale))
+
+
+def _is_document_ref_of(source_ref_key: str, dataset_id: UUID) -> bool:
+    """Whether a ref is a document-level ref of this dataset, the kind this pass owns."""
+    parsed = parse_source_ref_key(source_ref_key)
+    return parsed.dataset_id == dataset_id and parsed.chunk_id is None
+
+
+async def remove_dataset_root(dataset_id: UUID | str) -> None:
+    """Drop the dataset's root summary: a document it names was deleted.
+
+    The root is computed from every document, so a document's deletion leaves
+    it naming entities and a document the dataset no longer has. Ownership
+    cannot express that (shared output survives to its last owner), so the
+    root goes with the document, and the next index build writes a new one.
+    Runs in the dataset's database context, like the document delete it follows.
+    """
+    await delete_context_index_nodes(
+        await get_unified_engine(), [str(create_root_summary_id(str(dataset_id)))]
+    )
+
+
 def _context_index_source_ref(ctx: PipelineContext | None) -> tuple[str | None, str | None]:
     """Dataset-level source ref + run id for the global-context-index edges.
 
-    Reuses the same sentinel data id as the context summary nodes
-    (``ensure_global_context_storage_context``) so the ``summarized_in`` edges
-    carry the same provenance key as the summaries they connect — both are then
-    removed together when the dataset is deleted. These edges are dataset-scoped
-    (built over many summaries), so they are deliberately not tied to a single
-    ingested data item.
+    Reuses the same sentinel data id as the root (``ensure_global_context_storage_context``),
+    so the edges are removed with the dataset's other refs when the dataset is
+    deleted. They are not tied to a document: an edge goes with either of its
+    endpoints, and a bucket's edges therefore leave with the bucket when its
+    document is deleted.
     """
     ctx = ensure_global_context_storage_context(ctx)
     if ctx is None:
