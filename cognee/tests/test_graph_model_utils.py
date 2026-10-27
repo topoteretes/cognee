@@ -331,7 +331,7 @@ def test_from_identity_target_with_extra_required_field_raises():
         datapoint_model_to_basemodel(Person)
 
 
-def test_from_identity_schema_round_trip_drops_the_marker():
+def test_from_identity_schema_round_trip_keeps_the_reference():
     class Role(DataPoint):
         name: str
         metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
@@ -343,7 +343,10 @@ def test_from_identity_schema_round_trip_drops_the_marker():
 
     schema = graph_model_to_graph_schema(Person)
     regenerated = graph_schema_to_graph_model(schema)
-    assert _identity_field_types(regenerated) == {}
+    target = _identity_field_types(regenerated)["is_a"]
+    assert target.__name__ == "Role"
+    assert target._get_identity_fields() == ["name"]
+    assert regenerated._get_identity_fields() == ["name"]
 
 
 def _named_person():
@@ -475,15 +478,136 @@ def test_edge_endpoint_may_have_extra_required_fields():
     assert "friends_with" in simplified.model_fields
 
 
-def test_edge_schema_round_trip_drops_edge_fields():
+def test_edge_schema_round_trip_keeps_edge_fields():
     Person = _named_person()
 
     class PeopleGraph(DataPoint):
         people: list[Person]
         friends_with: list[Edge[Person, Person]]
+        family_links: list[Edge[Person, Person, Literal["married_to", "sibling_of"]]] = []
+        other_links: list[Edge[Person, Person, str]] = []
 
     regenerated = graph_schema_to_graph_model(graph_model_to_graph_schema(PeopleGraph))
-    assert _edge_field_types(regenerated) == {}
+    edges = _edge_field_types(regenerated)
+    assert {name: (s.__name__, t.__name__) for name, (s, t, _) in edges.items()} == {
+        "friends_with": ("Person", "Person"),
+        "family_links": ("Person", "Person"),
+        "other_links": ("Person", "Person"),
+    }
+    assert get_args(edges["family_links"][2]) == ("married_to", "sibling_of")
+    assert edges["other_links"][2] is str
+
+
+def test_schema_literal_field_stays_a_plain_string():
+    """A generated Enum would reach the graph store as a value it cannot encode."""
+
+    class Qualifier(DataPoint):
+        text: str
+        kind: Literal["condition", "scenario"]
+
+    class Graph(DataPoint):
+        qualifiers: list[Qualifier]
+
+    graph_schema_to_graph_model(graph_model_to_graph_schema(Graph))
+    from cognee.shared._generated_graph_models import Qualifier as Regenerated
+
+    qualifier = Regenerated(text="drought", kind="scenario")
+    assert type(qualifier.kind) is str
+
+
+class ResearchVariable(DataPoint):
+    name: str
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+
+class ResearchQualifier(DataPoint):
+    text: str
+    kind: Literal["condition", "scenario", "limitation", "uncertainty"]
+    metadata: dict = {"index_fields": ["text"]}
+
+
+class ResearchSource(DataPoint):
+    title: str
+    metadata: dict = {"index_fields": ["title"], "identity_fields": ["title"]}
+
+
+class ResearchClaim(DataPoint):
+    statement: str
+    value: str | None = None
+    about: Annotated[ResearchVariable, FromIdentity()]
+    qualified_by: list[ResearchQualifier] = []
+    supported_by: Annotated[ResearchSource, FromIdentity()] | None = None
+    metadata: dict = {"index_fields": ["statement"], "identity_fields": ["statement"]}
+
+
+class ResearchGraph(DataPoint):
+    claims: list[ResearchClaim]
+    causal_links: list[
+        Edge[ResearchClaim, ResearchClaim, Literal["causes", "requires", "prevents"]]
+    ] = []
+    other_links: list[Edge[ResearchVariable, ResearchVariable, str]] = []
+
+
+async def _graph_shape(model: type[DataPoint], answer: dict):
+    from cognee.modules.graph.utils import get_graph_from_model
+    from cognee.shared.llm_graph_model import content_graph_to_data_point
+
+    llm_model = datapoint_model_to_basemodel(model)
+    root = await content_graph_to_data_point(llm_model.model_validate(answer), model)
+    nodes, edges = await get_graph_from_model(
+        root, added_nodes={}, added_edges={}, visited_properties={}
+    )
+    identity_nodes = sorted(
+        (type(node).__name__, str(node.id))
+        for node in nodes
+        if isinstance(node, DataPoint) and type(node)._get_identity_fields()
+    )
+    return (
+        sorted(type(node).__name__ for node in nodes),
+        sorted(edge[2] for edge in edges),
+        identity_nodes,
+    )
+
+
+@pytest.mark.asyncio
+async def test_schema_round_trip_builds_the_same_graph():
+    """A model sent over the wire extracts exactly the graph the original extracts."""
+    regenerated = graph_schema_to_graph_model(graph_model_to_graph_schema(ResearchGraph))
+    answer = {
+        "claims": [
+            {
+                "statement": "wetlands cut phosphorus loading by 32%",
+                "value": "32%",
+                "about": "phosphorus loading",
+                "qualified_by": [{"text": "drought scenario", "kind": "scenario"}],
+                "supported_by": "Lindqvist 2024",
+            },
+            {
+                "statement": "wetland methane emissions increased",
+                "about": "methane emissions",
+                "qualified_by": [{"text": "drought scenario", "kind": "scenario"}],
+                "supported_by": "Lindqvist 2024",
+            },
+        ],
+        "causal_links": [
+            {
+                "source": "wetlands cut phosphorus loading by 32%",
+                "target": "wetland methane emissions increased",
+                "relationship_type": "causes",
+            }
+        ],
+        "other_links": [
+            {
+                "source": "phosphorus loading",
+                "target": "methane emissions",
+                "relationship_type": "trades off with",
+            }
+        ],
+    }
+
+    original_shape = await _graph_shape(ResearchGraph, answer)
+    assert await _graph_shape(regenerated, answer) == original_shape
+    assert {"about", "supported_by", "causes", "trades_off_with"} <= set(original_shape[1])
 
 
 class ModuleLevelPerson(DataPoint):

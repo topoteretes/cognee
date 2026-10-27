@@ -5,18 +5,40 @@ across the wire. The LLM boundary (what an LLM is asked to answer for a model,
 and how the answer becomes DataPoints again) lives in ``cognee.shared.llm_graph_model``.
 """
 
+import copy
 import re
 import sys
 import types
-from typing import cast
+from typing import Annotated, Any, Union, cast, get_args, get_origin
 
-from datamodel_code_generator import DataModelType, GenerateConfig, InputFileType, generate
+from datamodel_code_generator import (
+    DataModelType,
+    GenerateConfig,
+    InputFileType,
+    LiteralType,
+    generate,
+)
 from pydantic import BaseModel
 from pydantic._internal._core_utils import CoreSchemaOrField, is_core_schema
 from pydantic.json_schema import GenerateJsonSchema
 
+from cognee.infrastructure.engine import DataPoint, Edge, FromIdentity
 from cognee.shared.exceptions import ExternalSchemaReferenceError
-from cognee.shared.llm_graph_model import datapoint_model_to_basemodel
+from cognee.shared.llm_graph_model import (
+    _edge_field_types,
+    _identity_field_types,
+    _is_union,
+    _strip_annotated,
+    datapoint_model_to_basemodel,
+)
+
+# Graph semantics the LLM-facing schema cannot express, carried as JSON-schema keywords.
+# On a model's schema: the DataPoint ``metadata`` default (index and identity fields).
+METADATA_KEYWORD = "x-cognee-metadata"
+# On a property: the DataPoint class a FromIdentity reference names.
+REFERENCE_KEYWORD = "x-cognee-reference"
+# On a property: the endpoint classes of a list[Edge[...]] field.
+EDGE_KEYWORD = "x-cognee-edge"
 
 
 def _reject_external_refs(node) -> None:
@@ -56,6 +78,9 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
         # ensure proper integration with Cognee's graph engine
         base_class="cognee.infrastructure.engine.DataPoint",
         type_overrides={"DataPoint": "cognee.infrastructure.engine.DataPoint"},
+        # A generated Enum class would reach the graph store as a value no JSON
+        # encoder accepts; a Literal keeps the plain string the LLM answered.
+        enum_field_as_literal=LiteralType.All,
     )
     # Override title to ensure a valid and secure Python class name for the generated model
     # 'config' has 'output=None', 'generate' is supposed to return a string
@@ -86,22 +111,175 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
     # Then rebuild the graph model to ensure it properly inherits from the updated DataPoint class
     graph_model.model_rebuild(_types_namespace=namespace)
 
+    _restore_graph_semantics(pydantic_json_schema, namespace)
+
     # Return dynamically created Pydantic model class that can be used in cognee for graph creation and querying
     return graph_model
 
 
-def graph_model_to_graph_schema(graph_model: type[BaseModel]) -> dict:
-    class GenerateJsonSchemaWithoutDefaultTitles(GenerateJsonSchema):
-        def field_title_should_be_set(self, schema: CoreSchemaOrField) -> bool:
-            return_value = super().field_title_should_be_set(schema)
-            if return_value and is_core_schema(schema):
-                return False
-            return return_value
+def _restore_graph_semantics(schema: dict, namespace: dict) -> None:
+    """Put back what ``graph_model_to_graph_schema`` recorded as ``x-cognee-*`` keywords.
 
-    model_for_schema = datapoint_model_to_basemodel(graph_model)
-    return model_for_schema.model_json_schema(
-        schema_generator=GenerateJsonSchemaWithoutDefaultTitles
+    A schema without them (hand-written, or from the graph model editor) is left as
+    generated.
+    """
+    model_schemas = [(schema["title"], schema), *schema.get("$defs", {}).items()]
+    patched = []
+    for name, model_schema in model_schemas:
+        model = namespace.get(name)
+        if not (isinstance(model, type) and issubclass(model, DataPoint)):
+            continue
+        fields = {}
+        if METADATA_KEYWORD in model_schema:
+            fields["metadata"] = _with(
+                model.model_fields["metadata"], default=model_schema[METADATA_KEYWORD]
+            )
+        for field_name, field_schema in model_schema.get("properties", {}).items():
+            if REFERENCE_KEYWORD in field_schema:
+                target = namespace[field_schema[REFERENCE_KEYWORD]]
+                field_info = model.model_fields[field_name]
+                fields[field_name] = _with(
+                    field_info,
+                    annotation=_reference_annotation(
+                        field_info.annotation, Annotated[target, FromIdentity()]
+                    ),
+                )
+            if EDGE_KEYWORD in field_schema:
+                endpoints = field_schema[EDGE_KEYWORD]
+                field_info = model.model_fields[field_name]
+                fields[field_name] = _with(
+                    field_info,
+                    annotation=_edge_annotation(
+                        field_info.annotation,
+                        namespace[endpoints["source"]],
+                        namespace[endpoints["target"]],
+                    ),
+                )
+        if fields:
+            # Copies, never in place: an inherited FieldInfo (metadata) is DataPoint's own.
+            model.__pydantic_fields__.update(fields)
+            patched.append(model)
+
+    for model in patched:
+        model.model_rebuild(force=True, _types_namespace=namespace)
+
+
+def _with(field_info: Any, **changes: Any) -> Any:
+    changed = copy.copy(field_info)
+    for attribute, value in changes.items():
+        setattr(changed, attribute, value)
+    return changed
+
+
+def _reference_annotation(annotation: Any, reference: Any) -> Any:
+    """``annotation`` with the identity string it holds replaced by ``reference``."""
+    core, _ = _strip_annotated(annotation)
+    if core is str:
+        return reference
+    if get_origin(core) is list:
+        return list[_reference_annotation(get_args(core)[0], reference)]
+    if _is_union(get_origin(core)):
+        return Union[  # noqa: UP007 - built from a runtime tuple; no | spelling
+            tuple(
+                arg if arg is type(None) else _reference_annotation(arg, reference)
+                for arg in get_args(core)
+            )
+        ]
+    raise ValueError(f"{REFERENCE_KEYWORD} marks {annotation!r}, which holds no identity string")
+
+
+def _edge_annotation(annotation: Any, source_type: type, target_type: type) -> Any:
+    """``list[Edge[source, target, ...]]`` in place of the edge rows ``annotation`` holds."""
+    core, _ = _strip_annotated(annotation)
+    if _is_union(get_origin(core)):
+        return Union[  # noqa: UP007 - built from a runtime tuple; no | spelling
+            tuple(
+                arg if arg is type(None) else _edge_annotation(arg, source_type, target_type)
+                for arg in get_args(core)
+            )
+        ]
+    if get_origin(core) is not list:
+        raise ValueError(f"{EDGE_KEYWORD} marks {annotation!r}, which is not a list of edge rows")
+    row_model, _ = _strip_annotated(get_args(core)[0])
+    relationship = row_model.model_fields.get("relationship_type")
+    if relationship is None:
+        return list[Edge[source_type, target_type]]
+    return list[Edge[source_type, target_type, relationship.annotation]]
+
+
+class _GenerateJsonSchemaWithoutDefaultTitles(GenerateJsonSchema):
+    def field_title_should_be_set(self, schema: CoreSchemaOrField) -> bool:
+        return_value = super().field_title_should_be_set(schema)
+        if return_value and is_core_schema(schema):
+            return False
+        return return_value
+
+
+def _llm_json_schema(model: type[BaseModel]) -> dict:
+    return datapoint_model_to_basemodel(model).model_json_schema(
+        schema_generator=_GenerateJsonSchemaWithoutDefaultTitles
     )
+
+
+def graph_model_to_graph_schema(graph_model: type[BaseModel]) -> dict:
+    """The JSON schema of the model the LLM answers, plus the graph semantics it drops.
+
+    The LLM-facing schema narrows ``FromIdentity`` references to strings, replaces typed
+    ``Edge`` fields by flat rows and leaves out every DataPoint's ``metadata``. Each of
+    those is recorded as an ``x-cognee-*`` keyword next to what it describes, so
+    ``graph_schema_to_graph_model`` rebuilds the same model on the other side of the wire.
+    """
+    schema = _llm_json_schema(graph_model)
+    if isinstance(graph_model, type) and issubclass(graph_model, DataPoint):
+        _annotate_graph_semantics(schema, graph_model)
+    return schema
+
+
+def _annotate_graph_semantics(schema: dict, graph_model: type[DataPoint]) -> None:
+    definitions = schema.setdefault("$defs", {})
+    pending = [graph_model]
+    seen: set[type[DataPoint]] = set()
+    while pending:
+        model = pending.pop()
+        if model in seen:
+            continue
+        seen.add(model)
+
+        if model is graph_model:
+            model_schema = schema
+        elif model.__name__ in definitions:
+            model_schema = definitions[model.__name__]
+        else:
+            # Only reachable as a reference or an edge endpoint, so the LLM schema
+            # names it nowhere; the receiving side still needs the node class.
+            model_schema = _llm_json_schema(model)
+            definitions.update(model_schema.pop("$defs", {}))
+            definitions[model.__name__] = model_schema
+
+        model_schema[METADATA_KEYWORD] = model.model_fields["metadata"].default
+        properties = model_schema["properties"]
+        references = _identity_field_types(model)
+        edges = _edge_field_types(model)
+        for name, target_type in references.items():
+            properties[name][REFERENCE_KEYWORD] = target_type.__name__
+            pending.append(target_type)
+        for name, (source_type, target_type, _) in edges.items():
+            properties[name][EDGE_KEYWORD] = {
+                "source": source_type.__name__,
+                "target": target_type.__name__,
+            }
+            pending.extend((source_type, target_type))
+        for name, field_info in model.model_fields.items():
+            if name in DataPoint.model_fields or name in references or name in edges:
+                continue
+            pending.extend(_datapoint_classes_in(field_info.annotation))
+
+
+def _datapoint_classes_in(annotation: Any) -> list[type[DataPoint]]:
+    core, _ = _strip_annotated(annotation)
+    if isinstance(core, type) and issubclass(core, DataPoint):
+        return [core]
+    return [found for arg in get_args(core) for found in _datapoint_classes_in(arg)]
 
 
 if __name__ == "__main__":
