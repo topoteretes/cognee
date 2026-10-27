@@ -297,8 +297,12 @@ def get_remember_router() -> APIRouter:
                 "content_type='code' only: also embed the extracted code facts so "
                 "semantic/completion retrievers can see them (requires an embedding "
                 "provider). Default false — the code graph pipeline is deterministic "
-                "and makes no LLM or embedding calls, and SearchType.CODE uses graph "
-                "indexes only."
+                "and makes no LLM call, and SearchType.CODE uses graph indexes only. "
+                "Its one embedding step is the docstring tail (CODE_GRAPH_DOCS, on by "
+                "default), which embeds the repository's docstrings: on the local "
+                "fastembed model when no key is configured, unless a COGNEE_SKIP_* / "
+                "MOCK_EMBEDDING switch disables that fallback; CODE_GRAPH_DOCS=false "
+                "keeps the route graph-only."
             ),
         ),
         user: User = Depends(get_authenticated_user),
@@ -349,8 +353,10 @@ def get_remember_router() -> APIRouter:
           each repository is one data item, its id on the result item;
           omit for normal ingestion.
         - **index_vectors** (Optional[bool]): content_type="code" only — also embed the
-          extracted code facts for semantic retrievers (default false, no LLM/embedding
-          calls otherwise).
+          extracted code facts for semantic retrievers (default false; no LLM call either
+          way, and the only embedding otherwise is the docstring tail's — CODE_GRAPH_DOCS,
+          on by default, local fastembed when no key is configured unless a COGNEE_SKIP_* /
+          MOCK_EMBEDDING switch is set; CODE_GRAPH_DOCS=false keeps the route graph-only).
 
         Either datasetName or datasetId must be provided.
         - **import_mode** (Optional[str]): COGX archive imports only: 'preserve' (default),

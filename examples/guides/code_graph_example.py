@@ -1,24 +1,26 @@
 """Build a code knowledge graph with enola + cognee, then query it.
 
 What it shows:
-    - Running the enola-backed code graph pipeline (extract -> load nodes -> load edges)
+    - Running the enola-backed code graph pipeline (extract -> load nodes ->
+      load edges -> store docstrings)
     - Querying the resulting graph deterministically with SearchType.CODE
-    - Optionally (CODE_GRAPH_DOCS=1), storing the repository's docstrings as
-      knowledge-graph chunks linked to the code graph and finding one with
-      SearchType.CHUNKS
+    - Finding a docstring with SearchType.CHUNKS: the pipeline stores the
+      repository's docstrings as knowledge-graph chunks linked to the code
+      graph (on by default; CODE_GRAPH_DOCS=false switches it off)
 
 Requirements:
     - The enola binary included with cognee, or an explicit binary set through
       ENOLA_PATH
-    - For the optional docstring step only: an embedding provider (the chunks
-      are embedded; no LLM key is needed)
+    - For the docstring step: an embedding model. With no embedding provider
+      and no LLM key configured, the local fastembed model is used (downloaded
+      on first use), so the example stays keyless. No step needs an LLM key.
 
 SearchType.CODE does not require an LLM API key or embedding model.
 
 Prefer a one-liner? cognee.remember(repo_path_or_git_url, content_type="code")
 runs this same pipeline in a single call (it also accepts a list of
-repositories, and index_vectors=True to enable embeddings). This example
-assembles the pipeline explicitly so each step stays visible.
+repositories, and index_vectors=True to embed the code facts themselves too).
+This example assembles the pipeline explicitly so each step stays visible.
 
 For cross-repository paths, generate one Enola append/multi-repository snapshot
 and ingest it into one dataset. Repositories indexed in separate datasets are
@@ -26,6 +28,9 @@ searched independently and cannot have graph paths between them.
 
 Run it:
     CODE_GRAPH_REPO_PATH=/path/to/some/repo uv run python examples/guides/code_graph_example.py
+
+    The code graph alone, no docstrings and no embedding at all:
+    CODE_GRAPH_DOCS=false CODE_GRAPH_REPO_PATH=/path/to/some/repo uv run python examples/guides/code_graph_example.py
 """
 
 import asyncio
@@ -34,14 +39,17 @@ import os
 
 import cognee
 from cognee import SearchType
-from cognee.memify_pipelines.cognify_code_docs import cognify_code_docs_pipeline
-from cognee.modules.users.methods import get_default_user
+from cognee.modules.cognify.config import get_cognify_config
 from cognee.shared.logging_utils import ERROR, setup_logging
 from cognee.tasks.code_graph import get_code_graph_tasks
 
 
 async def main():
     repo_path = os.getenv("CODE_GRAPH_REPO_PATH", os.getcwd())
+    # The docstring step reads CODE_GRAPH_DOCS (on by default), the same
+    # setting cognify()'s code routes follow; get_code_graph_tasks(repo_path,
+    # code_docs=False) is the programmatic opt-out.
+    store_docstrings = get_cognify_config().code_graph_docs
 
     # Start clean so the example is reproducible.
     await cognee.prune.prune_data()
@@ -49,14 +57,17 @@ async def main():
 
     print(f"Extracting code graph from: {repo_path}")
     await cognee.run_custom_pipeline(
-        # Pass index_vectors=True only if these facts should also be available
-        # to semantic/LLM retrievers; SearchType.CODE does not need it.
+        # Pass index_vectors=True only if the code facts themselves should also
+        # be available to semantic/LLM retrievers; SearchType.CODE does not
+        # need it, and the docstring chunks are embedded either way.
         tasks=get_code_graph_tasks(repo_path),
         data=repo_path,
         dataset="code_graph_demo",
         pipeline_name="code_graph_pipeline",
-        # This pipeline is deterministic (no LLM/embedding calls), so skip the
-        # first-run LLM/embedding connection checks and stay truly keyless.
+        # No task in this list calls the LLM, so skip the first-run connection
+        # checks and stay keyless. The docstring step still embeds its chunks
+        # (fastembed when no provider is configured); a misconfigured embedding
+        # provider surfaces there rather than in the probe.
         skip_connection_test=True,
     )
 
@@ -107,18 +118,16 @@ async def main():
     )
     print(json.dumps(insights, indent=2, default=str))
 
-    # Docstrings as memory. The code docs memify pipeline reads the code graph
-    # above, stores each documented symbol's docstring as a DocumentChunk whose
-    # text starts with "file:line" and the signature, and links it to its
-    # CodeSymbol with a `describes` edge, so recall / CHUNKS / GRAPH_COMPLETION
-    # answer "what does X do" from the docstring and reach the code in one hop.
-    # Opt-in because storing the chunks embeds them, which needs an embedding
-    # provider. Embed-only: no LLM call; extract_entities=True would add
-    # cognify's LLM entity extraction and summaries over the chunks.
-    if os.getenv("CODE_GRAPH_DOCS"):
-        print("Storing the repository's docstrings in the knowledge graph")
-        await cognify_code_docs_pipeline(user=await get_default_user(), dataset="code_graph_demo")
-
+    # Docstrings as memory. The last task of the pipeline above stored each
+    # documented symbol's docstring (the whole comment enola wrote to its
+    # docs.jsonl) as a DocumentChunk whose text starts with "file:line" and the
+    # symbol's name, linked to its CodeSymbol with a `describes` edge, so
+    # recall / CHUNKS / GRAPH_COMPLETION answer "what does X do" from the
+    # docstring and reach the code in one hop. Embed-only: no LLM call.
+    # cognify_code_docs_pipeline(user, dataset=..., extract_entities=True) in
+    # cognee.memify_pipelines.cognify_code_docs additionally runs cognify's LLM
+    # entity extraction and summaries over the chunks (needs an LLM key).
+    if store_docstrings:
         print("Docstring chunks answering a question (SearchType.CHUNKS, embeddings only)")
         docstring_hits = await cognee.search(
             query_type=SearchType.CHUNKS,

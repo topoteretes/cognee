@@ -40,9 +40,11 @@ class CodeGraphEntity(DataPoint):
     name) — see fact_node_id — so several enola ids can land on one node; the
     first occurrence's id is kept. Historical snapshots carry none.
 
-    doc is the comment the author wrote on the symbol (enola's descriptive
-    ``doc`` prop: the first paragraph, cut near 300 bytes), set only when the
-    extractor read one; it is also the description.
+    doc is the first paragraph of the comment the author wrote on the symbol
+    or module (enola's descriptive ``doc`` prop, cut near 300 bytes; on
+    modules since enola 0.4.32), set only when the extractor read one; it is
+    also the description. The whole comment is in the snapshot's docs.jsonl,
+    which the code docs chain stores as chunks (cognee/tasks/code_docs).
     """
 
     name: str

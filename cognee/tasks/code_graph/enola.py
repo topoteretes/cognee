@@ -6,8 +6,10 @@ deterministically extracts an architectural graph from a codebase.
 artifacts (documented under docs/schema/ upstream, versioned by the receipt's
 ``format_version``) are `facts.jsonl` (one fact per line), `insights.json`
 (explainer findings with evidence), `flows.json` (the ways into the program,
-ranked by what each reaches) and `receipt.json` (provenance, counts and
-extraction quality). Everything else in the directory is internal.
+ranked by what each reaches), `docs.jsonl` (the whole comment of each
+documented symbol and module, enola >= 0.4.32) and `receipt.json`
+(provenance, counts and extraction quality). Everything else in the directory
+is internal.
 """
 
 import asyncio
@@ -15,8 +17,11 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
+import stat
 import sysconfig
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +62,15 @@ _RELATION_TARGET_KEYS = ("target", "name", "to", "target_name")
 # and terminal hints assume an interactive shell.
 _SUBPROCESS_ENV_OVERRIDES = {"ENOLA_NO_UPDATE_CHECK": "1", "ENOLA_NO_PROMPTS": "1"}
 
+# docs.jsonl (docs/schema/docs.md upstream): one line per fact that carries a
+# ``doc``, holding the whole comment its author wrote, joined to facts.jsonl by
+# ``id``. Written by the ``docs`` renderer, on by default since enola 0.4.32.
+DOCS_ARTIFACT = "docs.jsonl"
+_DOCS_RENDERER = "docs"
+_DOC_KINDS = frozenset({"symbol", "module"})
+# A fact id as it appears in a facts.jsonl line: 32 lowercase hex characters in quotes.
+_QUOTED_FACT_ID = re.compile(r'"([0-9a-f]{32})"')
+
 
 class EnolaNotInstalledError(CogneeConfigurationError):
     def __init__(
@@ -76,6 +90,25 @@ class EnolaSnapshotError(CogneeSystemError):
         status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
     ):
         super().__init__(message, name, status_code)
+
+
+class EnolaDocsUnavailable(Exception):
+    """A snapshot directory holds no docs.jsonl a reader may use; the message says why."""
+
+
+@dataclass(frozen=True)
+class EnolaDocs:
+    """A snapshot's docs.jsonl, as its receipt vouches for it.
+
+    ``snapshot_id`` is snapshot_identity() of the directory, the value
+    add_code_graph_edges stamps as ``last_snapshot_id`` on the repository nodes
+    of a snapshot it loads, so a reader can tell whether these docs belong to
+    the code graph it holds. ``lines`` are the well-formed lines, in file order
+    (none when nothing is documented).
+    """
+
+    snapshot_id: str | None
+    lines: tuple[dict, ...]
 
 
 def _environment_scripts_binary() -> str | None:
@@ -220,16 +253,7 @@ def parse_enola_snapshot(
     if corrupt_lines:
         logger.warning("Skipped %d corrupt line(s) in %s", corrupt_lines, facts_path)
 
-    receipt = None
-    receipt_path = snapshot_dir / "receipt.json"
-    if receipt_path.is_file():
-        try:
-            with open(receipt_path, "r", encoding="utf-8") as receipt_file:
-                loaded = json.load(receipt_file)
-            receipt = loaded if isinstance(loaded, dict) else None
-        except (json.JSONDecodeError, OSError):
-            logger.warning("Could not parse receipt.json in %s; ignoring it.", snapshot_dir)
-
+    receipt = _read_receipt(snapshot_dir)
     validate_receipt(receipt, snapshot_dir, fact_count=len(facts))
 
     repos = {fact["repo"] for fact in facts if isinstance(fact.get("repo"), str) and fact["repo"]}
@@ -246,6 +270,169 @@ def parse_enola_snapshot(
         facts_path,
     )
     return facts, receipt
+
+
+def _read_receipt(snapshot_dir: Path) -> dict | None:
+    """receipt.json of a snapshot directory, or None when it is missing or unparseable."""
+    receipt_path = snapshot_dir / "receipt.json"
+    if not receipt_path.is_file():
+        return None
+    try:
+        with open(receipt_path, "r", encoding="utf-8") as receipt_file:
+            loaded = json.load(receipt_file)
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        logger.warning("Could not parse receipt.json in %s; ignoring it.", snapshot_dir)
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def read_enola_docs(snapshot_dir: str | Path) -> EnolaDocs:
+    """A snapshot's docs.jsonl: the whole comment of every documented symbol and module.
+
+    facts.jsonl holds a fact's ``doc``, the first paragraph of its comment cut
+    at 300 bytes; docs.jsonl holds all of it (up to 8 KiB), one JSON line per
+    documented fact: ``id`` (the fact's id in facts.jsonl; overloads share
+    one), ``repo`` (absent on a fact without a repository label), ``kind``
+    (``symbol`` or ``module``), ``name``, ``file`` (for a module, its
+    directory), ``line`` (absent on a module) and ``doc``. In a multi-repo run
+    every repository's directory receives the same file, each line naming its
+    repository.
+
+    Only a file the receipt vouches for is read, by the rule flows.json follows
+    (_receipt_vouches_for): an enola run whose configuration leaves the docs
+    renderer out does not touch docs.jsonl, so a file from an earlier run may
+    sit next to facts it does not describe. An empty file the receipt vouches
+    for is valid: the snapshot documents nothing.
+
+    Raises EnolaDocsUnavailable, its message the reason, when the snapshot
+    directory is gone (a lost clone, a code file's staging directory removed
+    after its run), when docs.jsonl is missing from it (a snapshot from an
+    enola before 0.4.32, or a configuration without the docs renderer), or is
+    unreadable, not vouched for, or not UTF-8. A line that is not a
+    well-formed doc line (32-hex ``id``, ``kind`` symbol or module, non-empty
+    ``name``/``file``, non-blank ``doc``, integer ``line`` or none, string
+    ``repo`` or none) is skipped and counted in one warning; no line makes the
+    read fail.
+
+    Lines are split on ``\\n`` alone, the byte enola ends each line with: a doc
+    may hold U+0085, U+2028 or U+2029, which ``str.splitlines`` would also
+    break a line at.
+    """
+    snapshot_dir = Path(snapshot_dir)
+    # stat, not is_dir: since Python 3.14 is_dir answers False when the check itself fails.
+    try:
+        is_directory = stat.S_ISDIR(snapshot_dir.stat().st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        is_directory = False
+    except OSError as error:
+        raise EnolaDocsUnavailable(f"could not read '{snapshot_dir}': {error}") from None
+    if not is_directory:
+        raise EnolaDocsUnavailable(
+            f"the snapshot directory '{snapshot_dir}' does not exist (a lost clone, or a code "
+            "file's staging directory, removed after its run)"
+        )
+    docs_path = snapshot_dir / DOCS_ARTIFACT
+    try:
+        content = docs_path.read_bytes()
+    except FileNotFoundError:
+        raise EnolaDocsUnavailable(
+            f"no {DOCS_ARTIFACT} in '{snapshot_dir}' (a snapshot from enola before 0.4.32, "
+            "or a configuration without the docs renderer)"
+        ) from None
+    except OSError as error:
+        raise EnolaDocsUnavailable(f"could not read '{docs_path}': {error}") from None
+
+    receipt = _read_receipt(snapshot_dir)
+    if not _receipt_vouches_for(receipt, DOCS_ARTIFACT, _DOCS_RENDERER, content):
+        raise EnolaDocsUnavailable(
+            f"receipt.json in '{snapshot_dir}' does not list these {DOCS_ARTIFACT} bytes among "
+            "its run's outputs, so an earlier enola run wrote them"
+        )
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise EnolaDocsUnavailable(f"'{docs_path}' is not UTF-8") from None
+
+    lines = []
+    malformed = 0
+    for raw_line in text.split("\n"):
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        try:
+            line = json.loads(raw_line)
+        except (ValueError, RecursionError):
+            malformed += 1
+            continue
+        if _is_doc_line(line):
+            lines.append(line)
+        else:
+            malformed += 1
+    if malformed:
+        logger.warning("Skipped %d malformed line(s) in %s", malformed, docs_path)
+    return EnolaDocs(snapshot_id=snapshot_identity(snapshot_dir, receipt), lines=tuple(lines))
+
+
+def read_enola_fact_docs(
+    snapshot_dir: str | Path, fact_ids: set[str]
+) -> dict[tuple[str, int | None], str]:
+    """The ``doc`` prop of each fact with one of ``fact_ids`` in facts.jsonl, by (id, line).
+
+    Declarations that share a fact id -- overloads, a property getter and its
+    setter -- are separate facts at their own lines, each with its own ``doc``
+    (its first paragraph). docs.jsonl, though, takes their whole comments from
+    a table keyed without the line (enola 0.4.32), so every one of them can
+    carry the same text, one declaration's. This is what a reader checks such
+    lines against. A line is parsed only when one of the quoted 32-hex strings
+    in it is one of the ids (a set lookup, whatever their number), so a large
+    facts.jsonl costs one read; an unreadable or missing file gives nothing to
+    check against, and a malformed line is skipped.
+    """
+    found: dict[tuple[str, int | None], str] = {}
+    if not fact_ids:
+        return found
+    fact_ids = frozenset(fact_ids)
+    try:
+        with open(Path(snapshot_dir) / "facts.jsonl", "r", encoding="utf-8") as facts_file:
+            for raw_line in facts_file:
+                if fact_ids.isdisjoint(_QUOTED_FACT_ID.findall(raw_line)):
+                    continue
+                try:
+                    fact = json.loads(raw_line)
+                except (ValueError, RecursionError):
+                    continue
+                if not isinstance(fact, dict):
+                    continue
+                fact_id = fact.get("id")
+                if not isinstance(fact_id, str) or fact_id not in fact_ids:
+                    continue
+                props = fact.get("props")
+                doc = props.get("doc") if isinstance(props, dict) else None
+                line = fact.get("line")
+                if isinstance(doc, str) and doc and (line is None or type(line) is int):
+                    found.setdefault((fact["id"], line), doc)
+    except (OSError, UnicodeDecodeError):
+        return {}
+    return found
+
+
+def _is_doc_line(line: Any) -> bool:
+    """Whether a parsed docs.jsonl line has the documented shape (see read_enola_docs)."""
+    if not isinstance(line, dict) or not is_enola_id(line.get("id")):
+        return False
+    kind = line.get("kind")
+    if not isinstance(kind, str) or kind not in _DOC_KINDS:
+        return False
+    if not all(isinstance(line.get(key), str) and line[key] for key in ("name", "file")):
+        return False
+    doc = line.get("doc")
+    if not isinstance(doc, str) or not doc.strip():
+        return False
+    number = line.get("line")
+    if number is not None and (isinstance(number, bool) or not isinstance(number, int)):
+        return False
+    repo = line.get("repo")
+    return repo is None or isinstance(repo, str)
 
 
 def validate_receipt(
@@ -557,21 +744,28 @@ def _disambiguate_flow_names(facts: list[dict]) -> None:
 
 
 def _receipt_vouches_for_flows(receipt: dict | None, content: bytes) -> bool:
-    """Whether receipt.json says this run wrote flows.json, with these bytes.
+    """Whether receipt.json says this run wrote flows.json, with these bytes (_receipt_vouches_for)."""
+    return _receipt_vouches_for(receipt, "flows.json", "flows", content)
+
+
+def _receipt_vouches_for(
+    receipt: dict | None, artifact: str, renderer: str, content: bytes
+) -> bool:
+    """Whether receipt.json says this run wrote ``artifact``, with these bytes.
 
     enola hashes every artifact it writes into ``output_hashes``, so a file it
     did not write this run is missing there or hashes differently. A receipt
-    without output hashes vouches through its ``renderers``. Without a receipt
-    there is nothing to check against (historical writers wrote neither a
-    receipt nor flows.json); the file is read.
+    without output hashes vouches through its ``renderers`` (``renderer`` names
+    the one that writes the artifact). Without a receipt there is nothing to
+    check against (historical writers wrote no receipt); the file is read.
     """
     if not isinstance(receipt, dict):
         return True
     output_hashes = receipt.get("output_hashes")
     if isinstance(output_hashes, dict):
-        return output_hashes.get("flows.json") == ("sha256:" + hashlib.sha256(content).hexdigest())
+        return output_hashes.get(artifact) == ("sha256:" + hashlib.sha256(content).hexdigest())
     renderers = receipt.get("renderers")
-    return isinstance(renderers, list) and "flows" in renderers
+    return isinstance(renderers, list) and renderer in renderers
 
 
 def snapshot_identity(snapshot_dir: str | Path, receipt: dict | None) -> str | None:

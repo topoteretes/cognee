@@ -216,7 +216,7 @@ async def test_memify_seeds_a_graph_reading_extraction_instead_of_projecting(
     with pytest.warns(FutureWarning):
         await cognee.memify(
             extraction_tasks=["extract_code_docs"],
-            enrichment_tasks=["add_data_points", "add_code_doc_edges"],
+            enrichment_tasks=["store_code_docs", "add_code_doc_edges"],
         )
 
     legacy_env.get_fragment.assert_not_awaited()

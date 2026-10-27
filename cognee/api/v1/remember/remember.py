@@ -1726,9 +1726,14 @@ async def _remember_inner(
             # concurrent add()/cognify() of the dataset from overwriting them.
             # The lock is re-entrant, so add() and the pipeline run inside it.
             async with dataset_lock(dataset.id):
-                # The default (graph-only) pipeline performs no LLM or embedding
-                # calls, so it must not demand an API key on first run. With
-                # index_vectors=True embeddings are used, so the checks stay on.
+                # The default pipeline performs no LLM call, and its one embedding
+                # step (the docstring tail, CODE_GRAPH_DOCS) runs on the local
+                # fastembed model when no key is configured, so it must not demand
+                # an API key on first run. This per-call skip leaves that fallback
+                # on; the COGNEE_SKIP_* / MOCK_EMBEDDING env vars switch it off, and
+                # a tail that then finds no provider raises. With index_vectors=True the code
+                # facts are embedded with the configured provider, so the checks
+                # stay on.
                 skip_connection_test = not bool(index_vectors)
                 # One Data row per repository gives the caller a data_id for
                 # forget() and lists the repo on the dataset. Running the pipeline
