@@ -3,7 +3,9 @@
 A repository extracted on its own cannot see the others: a frontend's HTTP call
 names a path, and only a snapshot that also covers the backend can say which
 route serves it. enola links repositories when it is given a cluster config
-listing them, and writes the whole linked graph to every member's ``.enola``.
+listing them, and writes the whole linked graph into every member, under a
+directory of the dataset's own (``.enola-<dataset_id>``, see
+:func:`cluster_output_dir`) rather than the shared ``.enola``.
 
 A dataset is the cluster. When it holds more than one ``code_repo`` Data row,
 :func:`snapshot_dataset_code_repos` runs enola once over all of them and the
@@ -12,7 +14,7 @@ code graph tasks then load that snapshot one member at a time
 still removes exactly one repository. A dataset with a single repository
 keeps the per-repository run.
 
-The cluster has no state of its own on disk. Its members are the dataset's
+The cluster config has no file of its own. Its members are the dataset's
 ``code_repo`` rows, whose ``system_metadata.repo_path`` names the directory;
 the config enola needs is rendered from those rows at run time and piped to
 it (see :func:`cognee.tasks.code_graph.enola.run_enola_cluster`).
@@ -109,18 +111,31 @@ async def dataset_code_repo_rows(dataset_id: UUID) -> list:
     return [row for row in await get_dataset_data(dataset_id) if is_code_repo_sourced(row)]
 
 
-def _written_label(repo_path: Path, snapshot_id: str | None) -> str | None:
+def cluster_output_dir(dataset_id: UUID) -> str:
+    """Where, inside each member repository, a dataset's cluster snapshot is written.
+
+    A remote clone is shared by every dataset that adds its URL, and a cluster
+    snapshot holds the facts of all the dataset's repositories. One directory
+    per dataset keeps a cluster run from overwriting the snapshot another
+    dataset is reading. enola takes the name relative to each repository.
+    """
+    return f".enola-{dataset_id}"
+
+
+def _written_label(repo_path: Path, output_dir: str, snapshot_id: str | None) -> str | None:
     """The label enola gave a member in the snapshot just taken, or None.
 
     A cluster run writes ``snapshot.meta.json`` into every member's
-    ``.enola`` with the member's own ``repo_label`` — the exact name its
+    ``output_dir`` with the member's own ``repo_label`` — the exact name its
     facts carry. The file is enola's own bookkeeping rather than part of the
     documented snapshot contract, so it is only trusted when it describes
     this snapshot (same ``snapshot_id``) and the caller falls back to
     deriving the label when it is missing or stale.
     """
     try:
-        meta = json.loads((repo_path / ".enola" / "snapshot.meta.json").read_text(encoding="utf-8"))
+        meta = json.loads(
+            (repo_path / output_dir / "snapshot.meta.json").read_text(encoding="utf-8")
+        )
     except (OSError, json.JSONDecodeError):
         return None
     if not isinstance(meta, dict):
@@ -131,7 +146,7 @@ def _written_label(repo_path: Path, snapshot_id: str | None) -> str | None:
     return label if isinstance(label, str) and label else None
 
 
-def _label_candidates(repo_path: Path) -> list[str]:
+def _label_candidates(repo_path: Path, output_dir: str) -> list[str]:
     """The labels enola may have given a repository, most likely first.
 
     enola labels a repository by its own name from the git remote, and by its
@@ -140,7 +155,7 @@ def _label_candidates(repo_path: Path) -> list[str]:
     """
     candidates = []
     try:
-        receipt = json.loads((repo_path / ".enola" / "receipt.json").read_text(encoding="utf-8"))
+        receipt = json.loads((repo_path / output_dir / "receipt.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         receipt = None
     git = receipt.get("git") if isinstance(receipt, dict) else None
@@ -155,11 +170,12 @@ def _label_candidates(repo_path: Path) -> list[str]:
 def resolve_member_labels(
     repo_paths: list[Path],
     fact_labels: set[str],
+    output_dir: str,
     snapshot_id: str | None = None,
 ) -> list[str] | None:
     """The enola label of each member, or None when they cannot be told apart.
 
-    A member whose ``.enola`` carries the label enola wrote for this snapshot
+    A member whose ``output_dir`` carries the label enola wrote for this snapshot
     uses it as is. For the rest the label is derived: members are taken in
     cluster order, as enola takes them, a label another member holds is not
     available, a candidate the snapshot's facts actually carry wins, and a
@@ -167,7 +183,7 @@ def resolve_member_labels(
     loaded by label, so one left without a label of its own — or two members
     claiming the same written label — means no cluster.
     """
-    written = [_written_label(repo_path, snapshot_id) for repo_path in repo_paths]
+    written = [_written_label(repo_path, output_dir, snapshot_id) for repo_path in repo_paths]
     taken = [label for label in written if label is not None]
     if len(set(taken)) != len(taken):
         return None
@@ -177,7 +193,7 @@ def resolve_member_labels(
         if written_label is not None:
             labels.append(written_label)
             continue
-        free = [label for label in _label_candidates(repo_path) if label not in taken]
+        free = [label for label in _label_candidates(repo_path, output_dir) if label not in taken]
         if not free:
             return None
         label = next((label for label in free if label in fact_labels), free[0])
@@ -219,12 +235,13 @@ async def snapshot_dataset_code_repos(
 
     repo_paths = [repo_path for _data, repo_path in members]
     cluster_timeout = max(timeout, min(timeout * len(members), CLUSTER_ENOLA_TIMEOUT_CAP_SECONDS))
-    snapshot_dir = await run_enola_cluster(repo_paths, timeout=cluster_timeout)
+    output_dir = cluster_output_dir(dataset_id)
+    snapshot_dir = await run_enola_cluster(repo_paths, output_dir, timeout=cluster_timeout)
 
     facts, receipt = await asyncio.to_thread(parse_enola_snapshot, snapshot_dir)
     fact_labels = {fact["repo"] for fact in facts if isinstance(fact.get("repo"), str)}
     labels = resolve_member_labels(
-        repo_paths, fact_labels, snapshot_id=snapshot_identity(snapshot_dir, receipt)
+        repo_paths, fact_labels, output_dir, snapshot_id=snapshot_identity(snapshot_dir, receipt)
     )
     if labels is None:
         logger.warning(

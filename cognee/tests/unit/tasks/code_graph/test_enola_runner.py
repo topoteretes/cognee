@@ -154,16 +154,23 @@ async def test_run_enola_generate_returns_snapshot_dir(monkeypatch, tmp_path):
 
 # --- clusters: the config is rendered from the members and never persisted ---
 
+CLUSTER_OUTPUT_DIR = ".enola-7d4e1c2a-0000-4000-8000-000000000000"
 
-def test_render_cluster_config_lists_absolute_paths_and_disables_history(tmp_path):
+
+def test_render_cluster_config_sets_output_dir_lists_absolute_paths_and_disables_history(
+    tmp_path,
+):
     odd = tmp_path / "re: po"
 
-    config = enola_module.render_cluster_config([tmp_path / "golf", odd])
+    config = enola_module.render_cluster_config([tmp_path / "golf", odd], CLUSTER_OUTPUT_DIR)
 
     # Paths are JSON-quoted (so Windows backslashes are escaped, and a path
     # with YAML punctuation stays one scalar), absolute, in cluster order.
     golf = json.dumps(str(tmp_path / "golf"))
-    assert config == f"repos:\n  - {golf}\n  - {json.dumps(str(odd))}\nhistory:\n  enabled: false\n"
+    assert config == (
+        f'output:\n  dir: "{CLUSTER_OUTPUT_DIR}"\n'
+        f"repos:\n  - {golf}\n  - {json.dumps(str(odd))}\nhistory:\n  enabled: false\n"
+    )
 
 
 def _cluster_repos(tmp_path):
@@ -194,18 +201,21 @@ async def test_run_enola_cluster_pipes_the_config_and_writes_no_file(monkeypatch
     golf, ui = _cluster_repos(tmp_path)
 
     def write_snapshot():
-        (golf / ".enola").mkdir(exist_ok=True)
-        (golf / ".enola" / "facts.jsonl").write_text("")
+        (golf / CLUSTER_OUTPUT_DIR).mkdir(exist_ok=True)
+        (golf / CLUSTER_OUTPUT_DIR / "facts.jsonl").write_text("")
 
     calls = _capture_subprocess(monkeypatch, write_snapshot)
 
-    snapshot_dir = await enola_module.run_enola_cluster([golf, ui], timeout=5.0)
+    snapshot_dir = await enola_module.run_enola_cluster([golf, ui], CLUSTER_OUTPUT_DIR, timeout=5.0)
 
-    assert snapshot_dir == golf / ".enola"
+    assert snapshot_dir == golf / CLUSTER_OUTPUT_DIR
     (args, kwargs, process), *_ = calls
     assert args == (str(fake_binary), "--generate", "/dev/stdin")
     assert kwargs["stdin"] == asyncio.subprocess.PIPE
-    assert process.stdin_received == enola_module.render_cluster_config([golf, ui]).encode()
+    assert (
+        process.stdin_received
+        == enola_module.render_cluster_config([golf, ui], CLUSTER_OUTPUT_DIR).encode()
+    )
     # Neutral working directory, nothing written next to the repositories.
     assert kwargs["cwd"] not in {str(golf), str(ui)}
     assert not list(tmp_path.rglob("*.yaml"))
@@ -223,19 +233,19 @@ async def test_run_enola_cluster_on_windows_uses_a_temporary_file_it_removes(mon
     seen_configs = []
 
     def write_snapshot():
-        (golf / ".enola").mkdir(exist_ok=True)
-        (golf / ".enola" / "facts.jsonl").write_text("")
+        (golf / CLUSTER_OUTPUT_DIR).mkdir(exist_ok=True)
+        (golf / CLUSTER_OUTPUT_DIR / "facts.jsonl").write_text("")
         # The config exists while enola runs ...
         seen_configs.extend(path.read_text() for path in tmp_path.glob("cognee-enola-cluster-*"))
 
     calls = _capture_subprocess(monkeypatch, write_snapshot)
 
-    await enola_module.run_enola_cluster([golf, ui], timeout=5.0)
+    await enola_module.run_enola_cluster([golf, ui], CLUSTER_OUTPUT_DIR, timeout=5.0)
 
     (args, _kwargs, process), *_ = calls
     assert args[:2] == (str(fake_binary), "--generate")
     assert args[2].endswith(".yaml") and process.stdin_received is None
-    assert seen_configs == [enola_module.render_cluster_config([golf, ui])]
+    assert seen_configs == [enola_module.render_cluster_config([golf, ui], CLUSTER_OUTPUT_DIR)]
     # ... and is gone once it has exited.
     assert not list(tmp_path.glob("cognee-enola-cluster-*"))
 
@@ -248,6 +258,6 @@ async def test_run_enola_cluster_rejects_a_missing_repository_before_running(mon
     calls = _capture_subprocess(monkeypatch, lambda: None)
 
     with pytest.raises(enola_module.EnolaSnapshotError):
-        await enola_module.run_enola_cluster([golf, tmp_path / "gone"])
+        await enola_module.run_enola_cluster([golf, tmp_path / "gone"], CLUSTER_OUTPUT_DIR)
 
     assert calls == []

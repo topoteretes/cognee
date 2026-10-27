@@ -4,7 +4,7 @@ import importlib
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -13,6 +13,7 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.code_graph.cluster import (
     ClusterMember,
     DatasetCodeSnapshot,
+    cluster_output_dir,
     code_repo_path,
     load_dataset_cluster,
     mark_dataset_code_repos_for_rebuild,
@@ -40,6 +41,8 @@ pipeline_module = importlib.import_module("cognee.modules.run_custom_pipeline")
 code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
 
 SNAPSHOT_ID = "sha256:c1u5te4"
+DATASET_ID = UUID("7d4e1c2a-0000-4000-8000-000000000000")
+OUTPUT_DIR = cluster_output_dir(DATASET_ID)
 
 # A frontend function calls a backend route; the backend route has a handler.
 CLUSTER_FACTS = [
@@ -80,13 +83,13 @@ def _write_snapshot(
     label=None,
     label_snapshot_id=None,
 ):
-    """A member's ``.enola`` as a cluster run leaves it.
+    """A member's cluster output directory (``OUTPUT_DIR``) as a cluster run leaves it.
 
     ``label`` adds the ``snapshot.meta.json`` enola writes, carrying the
     member's own ``repo_label`` (for ``label_snapshot_id``, default this
     snapshot). Without it only the contract files are present.
     """
-    snapshot_dir = directory / ".enola"
+    snapshot_dir = directory / OUTPUT_DIR
     snapshot_dir.mkdir(parents=True, exist_ok=True)
     (snapshot_dir / "facts.jsonl").write_text("\n".join(json.dumps(fact) for fact in facts) + "\n")
     receipt = {"snapshot_id": snapshot_id}
@@ -134,13 +137,23 @@ def test_code_repo_path_reads_metadata_as_dict_or_json_string(tmp_path):
     assert code_repo_path(SimpleNamespace(system_metadata=None)) is None
 
 
+def test_each_dataset_has_its_own_cluster_output_dir():
+    """A clone is shared by datasets: their cluster snapshots must not overwrite each other."""
+    other = UUID("7d4e1c2a-0000-4000-8000-000000000001")
+
+    assert OUTPUT_DIR != cluster_output_dir(other)
+    assert ".enola" not in {OUTPUT_DIR, cluster_output_dir(other)}
+
+
 def test_member_label_is_the_one_enola_wrote_for_this_snapshot(tmp_path):
     """enola records each member's label; it wins over anything derivable."""
     first, second = _repos(tmp_path, "one", "two")
     _write_snapshot(first, remote="github.com/acme/golf", label="golf-api")
     _write_snapshot(second, label="ui")
 
-    labels = resolve_member_labels([first, second], {"golf-api", "ui"}, snapshot_id=SNAPSHOT_ID)
+    labels = resolve_member_labels(
+        [first, second], {"golf-api", "ui"}, OUTPUT_DIR, snapshot_id=SNAPSHOT_ID
+    )
 
     assert labels == ["golf-api", "ui"]
 
@@ -150,7 +163,9 @@ def test_members_with_the_same_written_label_are_not_a_cluster(tmp_path):
     _write_snapshot(first, label="web")
     _write_snapshot(second, label="web")
 
-    assert resolve_member_labels([first, second], {"web"}, snapshot_id=SNAPSHOT_ID) is None
+    assert (
+        resolve_member_labels([first, second], {"web"}, OUTPUT_DIR, snapshot_id=SNAPSHOT_ID) is None
+    )
 
 
 def test_stale_written_label_is_ignored_and_derived_instead(tmp_path):
@@ -159,7 +174,7 @@ def test_stale_written_label_is_ignored_and_derived_instead(tmp_path):
     _write_snapshot(golf, label="old-golf", label_snapshot_id="sha256:older")
     _write_snapshot(ui, label="ui")
 
-    labels = resolve_member_labels([golf, ui], {"golf", "ui"}, snapshot_id=SNAPSHOT_ID)
+    labels = resolve_member_labels([golf, ui], {"golf", "ui"}, OUTPUT_DIR, snapshot_id=SNAPSHOT_ID)
 
     assert labels == ["golf", "ui"]
 
@@ -170,7 +185,9 @@ def test_derived_label_avoids_one_another_member_was_written(tmp_path):
     _write_snapshot(first)
     _write_snapshot(second, label="web")
 
-    labels = resolve_member_labels([first, second], {"web", "web-b"}, snapshot_id=SNAPSHOT_ID)
+    labels = resolve_member_labels(
+        [first, second], {"web", "web-b"}, OUTPUT_DIR, snapshot_id=SNAPSHOT_ID
+    )
 
     assert labels is None  # "web" is taken and the directory name is the only candidate
 
@@ -181,7 +198,7 @@ def test_member_label_is_the_remote_name_else_the_directory_name(tmp_path):
     _write_snapshot(golf, remote="github.com/acme/golf")
     _write_snapshot(ui)
 
-    assert resolve_member_labels([golf, ui], {"golf", "ui"}) == ["golf", "ui"]
+    assert resolve_member_labels([golf, ui], {"golf", "ui"}, OUTPUT_DIR) == ["golf", "ui"]
 
 
 def test_member_label_follows_the_facts_when_enola_fell_back_to_the_directory(tmp_path):
@@ -190,7 +207,10 @@ def test_member_label_follows_the_facts_when_enola_fell_back_to_the_directory(tm
     _write_snapshot(first, remote="github.com/acme/web")
     _write_snapshot(second, remote="github.com/other/web")
 
-    assert resolve_member_labels([first, second], {"web", "web-b"}) == ["web", "web-b"]
+    assert resolve_member_labels([first, second], {"web", "web-b"}, OUTPUT_DIR) == [
+        "web",
+        "web-b",
+    ]
 
 
 def test_members_that_cannot_be_told_apart_are_not_a_cluster(tmp_path):
@@ -200,7 +220,7 @@ def test_members_that_cannot_be_told_apart_are_not_a_cluster(tmp_path):
     _write_snapshot(first, remote="github.com/acme/web")
     _write_snapshot(second, remote="github.com/other/web")
 
-    assert resolve_member_labels([first, second], {"web"}) is None
+    assert resolve_member_labels([first, second], {"web"}, OUTPUT_DIR) is None
 
 
 @pytest.mark.asyncio
@@ -224,12 +244,13 @@ async def test_cluster_snapshot_runs_enola_once_and_labels_each_member(monkeypat
     golf_row, ui_row = _row(golf), _row(ui)
 
     snapshot = await snapshot_dataset_code_repos(
-        uuid4(), [(golf_row, golf), (ui_row, ui)], timeout=10.0
+        DATASET_ID, [(golf_row, golf), (ui_row, ui)], timeout=10.0
     )
 
     # One enola run over both directories, no config written anywhere: the
-    # timeout covers the whole cluster, per repository.
-    run_cluster.assert_awaited_once_with([golf, ui], timeout=20.0)
+    # timeout covers the whole cluster, per repository, and the snapshot goes
+    # to the dataset's own directory, not the shared .enola.
+    run_cluster.assert_awaited_once_with([golf, ui], OUTPUT_DIR, timeout=20.0)
     assert not list(tmp_path.rglob("cluster.yaml"))
     assert snapshot.snapshot_dir == snapshot_dir
     assert [(member.data, member.label) for member in snapshot.members] == [

@@ -214,17 +214,19 @@ def _config_via_stdin() -> bool:
     return os.name != "nt"
 
 
-def render_cluster_config(repo_paths: list[Path]) -> str:
+def render_cluster_config(repo_paths: list[Path], output_dir: str) -> str:
     """The enola cluster config for these repositories, as YAML text.
 
     enola accepts a cluster only as a ``repos:`` config, whose entries must be
     plain path strings. Paths are written absolute, so the config means the
     same thing wherever enola resolves it from, and as JSON strings, which are
-    valid YAML scalars and quote any path safely. enola's per-repository
+    valid YAML scalars and quote any path safely. ``output_dir`` replaces
+    ``.enola`` as the snapshot directory; enola joins it to each repository
+    path and refuses an absolute one. enola's per-repository
     architecture history (revisions under ``~/.enola/graphs``) is switched
     off: cognee keeps its own record of the snapshot it loaded.
     """
-    lines = ["repos:"]
+    lines = ["output:", f"  dir: {json.dumps(output_dir)}", "repos:"]
     lines.extend(f"  - {json.dumps(str(path))}" for path in repo_paths)
     lines.extend(["history:", "  enabled: false"])
     return "\n".join(lines) + "\n"
@@ -232,12 +234,13 @@ def render_cluster_config(repo_paths: list[Path]) -> str:
 
 async def run_enola_cluster(
     repo_paths: list[Path],
+    output_dir: str,
     timeout: float = 600.0,
 ) -> Path:
     """Run `enola --generate` over a cluster of repositories; return one snapshot directory.
 
     enola links the repositories of a cluster config into one graph and
-    writes that whole graph to every member's `.enola`, so any member's
+    writes that whole graph to every member's ``output_dir``, so any member's
     directory is the cluster's snapshot. The first member's is returned.
 
     The config is built from the repositories' paths and handed to enola on
@@ -254,7 +257,7 @@ async def run_enola_cluster(
         if not repo_path.is_dir():
             raise EnolaSnapshotError(message=f"Repository path '{repo_path}' is not a directory.")
 
-    config_text = render_cluster_config(repo_paths)
+    config_text = render_cluster_config(repo_paths, output_dir)
     subject = f"the {len(repo_paths)}-repository cluster {[path.name for path in repo_paths]}"
     cwd = Path(tempfile.gettempdir())
 
@@ -279,7 +282,7 @@ async def run_enola_cluster(
             stdin_data=config_text.encode("utf-8"),
         )
 
-    snapshot_dir = repo_paths[0] / ".enola"
+    snapshot_dir = repo_paths[0] / output_dir
     if not (snapshot_dir / "facts.jsonl").is_file():
         raise EnolaSnapshotError(
             message=f"enola completed but no facts.jsonl was found in '{snapshot_dir}'."
