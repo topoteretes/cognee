@@ -1,7 +1,7 @@
 import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid5
+from uuid import NAMESPACE_OID, uuid5
 
 import pytest
 
@@ -196,3 +196,63 @@ async def test_from_extraction_summarizes_a_custom_graph_model(monkeypatch):
         "Maya reports to Priya.\n"
         "Priya works for Acme."
     )
+
+
+def _dataset_ctx(dataset_id):
+    return SimpleNamespace(dataset=SimpleNamespace(id=dataset_id))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("passed_prompt", [None, ""])
+async def test_missing_prompt_uses_the_dataset_prompt(monkeypatch, passed_prompt):
+    chunks = [_chunk("Acme agreed to buy Beta Corp.")]
+    extract = AsyncMock(return_value=chunks)
+    _patch(monkeypatch, extract)
+    stored = AsyncMock(return_value="Extract companies and deals.")
+    monkeypatch.setattr(task_module, "get_dataset_custom_prompt", stored)
+    dataset_id = uuid5(NAMESPACE_OID, "ds")
+
+    await task_module.extract_graph_and_summarize(
+        chunks,
+        KnowledgeGraph,
+        custom_prompt=passed_prompt,
+        ctx=_dataset_ctx(dataset_id),
+        summary_method="llm",
+    )
+
+    stored.assert_awaited_once_with(dataset_id)
+    assert extract.await_args.kwargs["custom_prompt"] == "Extract companies and deals."
+
+
+@pytest.mark.asyncio
+async def test_passed_prompt_wins_over_the_dataset_prompt(monkeypatch):
+    chunks = [_chunk("Acme agreed to buy Beta Corp.")]
+    extract = AsyncMock(return_value=chunks)
+    _patch(monkeypatch, extract)
+    stored = AsyncMock(return_value="Extract companies and deals.")
+    monkeypatch.setattr(task_module, "get_dataset_custom_prompt", stored)
+
+    await task_module.extract_graph_and_summarize(
+        chunks,
+        KnowledgeGraph,
+        custom_prompt="Extract people only.",
+        ctx=_dataset_ctx(uuid5(NAMESPACE_OID, "ds")),
+        summary_method="llm",
+    )
+
+    stored.assert_not_awaited()
+    assert extract.await_args.kwargs["custom_prompt"] == "Extract people only."
+
+
+@pytest.mark.asyncio
+async def test_no_dataset_in_context_keeps_the_built_in_prompt(monkeypatch):
+    chunks = [_chunk("Acme agreed to buy Beta Corp.")]
+    extract = AsyncMock(return_value=chunks)
+    _patch(monkeypatch, extract)
+    stored = AsyncMock(return_value="Extract companies and deals.")
+    monkeypatch.setattr(task_module, "get_dataset_custom_prompt", stored)
+
+    await task_module.extract_graph_and_summarize(chunks, KnowledgeGraph, summary_method="llm")
+
+    stored.assert_not_awaited()
+    assert extract.await_args.kwargs["custom_prompt"] is None
