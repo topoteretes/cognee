@@ -170,6 +170,13 @@ async def test_a_selected_lfs_pointer_is_skipped_and_never_runs_smudge(origin, c
     assert (target / "BRANCH.txt").exists()
     snapshot = json.loads((target / ".git" / "cognee-snapshot.json").read_text())
     assert snapshot["skipped"]["lfs_pointer"] == 1
+    # The selected file count is of the files that remain on disk.
+    on_disk = [
+        path
+        for path in target.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(target).parts
+    ]
+    assert snapshot["selected_files"] == len(on_disk)
     assert not list(clones.glob(".*.tmp-*"))
 
 
@@ -498,3 +505,45 @@ async def test_a_file_replaced_by_a_submodule_does_not_stay_in_the_work_tree(ori
     await resolve_module.resolve_repo_source(_URL, clones_dir=clones)
 
     assert not (target / "y.py").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize("step", ["remove_unselected_files", "remove_lfs_pointers"])
+async def test_a_cancelled_checkout_cleanup_finishes_before_the_lock_is_released(
+    origin, clones, monkeypatch, step
+):
+    """These steps delete files in a worker thread, and a cancelled to_thread await does not
+    stop it: the resolver must keep the clone lock until the thread is done, or the thread
+    would delete files from the clone the next run publishes."""
+    import asyncio
+    import threading
+
+    selection = importlib.import_module("cognee.tasks.code_graph.repo_selection")
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    original = getattr(selection, step)
+
+    def paused(*args):
+        entered.set()
+        try:
+            assert release.wait(10), "Test did not release the cleanup step"
+            return original(*args)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(selection, step, paused)
+    task = asyncio.create_task(resolve_module.resolve_repo_source(_URL, clones_dir=clones))
+    try:
+        assert await asyncio.to_thread(entered.wait, 10)
+        task.cancel()
+        await asyncio.sleep(0.05)
+        task.cancel()
+        await asyncio.sleep(0.05)
+        assert not task.done(), "Resolver abandoned a live filesystem writer"
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert finished.is_set()
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)

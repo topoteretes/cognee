@@ -541,3 +541,30 @@ def test_files_outside_the_selection_are_removed_from_the_work_tree(tmp_path):
         "sub/keep.py",
     ]
     assert not (tmp_path / "gone").exists()
+
+
+def test_a_selected_file_survives_a_difference_of_case_or_normalisation_in_its_name(tmp_path):
+    """On a case-insensitive filesystem git writes `Src/keep.py` and `src/a.py` into one
+    directory, so the name on disk can differ in case from the tree path; macOS also
+    stores names decomposed. Neither may make a selected file look unselected."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "keep.py").write_text("x = 1\n")
+    decomposed = "cafe\u0301.py"
+    (tmp_path / decomposed).write_text("y = 2\n")
+
+    assert remove_unselected_files(tmp_path, ["Src/keep.py", "caf\u00e9.py"]) == 0
+
+    assert (tmp_path / "src" / "keep.py").exists() and (tmp_path / decomposed).exists()
+
+
+def test_enolas_output_and_gits_directory_are_not_the_selections_to_remove(tmp_path):
+    (tmp_path / ".enola").mkdir()
+    (tmp_path / ".enola" / ".extractor_cache.json").write_text("{}")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("kept")
+    (tmp_path / "keep.py").write_text("x = 1\n")
+
+    assert remove_unselected_files(tmp_path, ["keep.py"]) == 0
+
+    assert (tmp_path / ".enola" / ".extractor_cache.json").exists()
+    assert (tmp_path / ".git" / "config").exists()

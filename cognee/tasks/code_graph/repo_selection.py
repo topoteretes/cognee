@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path, PurePosixPath
 
 from fastapi import status
@@ -169,22 +170,30 @@ def write_sparse_patterns(repo: Path, paths: list[str]) -> None:
     )
 
 
+def _folded(path: str) -> str:
+    """A path as a case-insensitive, normalisation-insensitive filesystem would compare it."""
+    return unicodedata.normalize("NFC", path).casefold()
+
+
 def remove_unselected_files(repo: Path, paths: list[str]) -> int:
     """Delete every file of the work tree that is not in the selection and return how many.
 
     The sparse patterns select exactly these paths, but git leaves a file in place when its
-    path stops being a file (a file replaced by a submodule keeps its old content).
+    path stops being a file (a file replaced by a submodule keeps its old content). Paths are
+    compared folded: on a case-insensitive filesystem git writes ``Src/a.py`` and ``src/b.py``
+    into one directory, and a selected file must not be deleted for the case of its name.
+    The root ``.git`` and Enola's ``.enola`` output are not the selection's to remove.
     """
-    selected = set(paths)
+    selected = {_folded(path) for path in paths}
     removed = 0
     directories_seen = []
     for directory, directories, files in os.walk(repo):
         if Path(directory) == repo:
-            directories[:] = [name for name in directories if name != ".git"]
+            directories[:] = [name for name in directories if name not in (".git", ".enola")]
         directories_seen.append(Path(directory))
         for name in files:
             full = Path(directory) / name
-            if full.relative_to(repo).as_posix() not in selected:
+            if _folded(full.relative_to(repo).as_posix()) not in selected:
                 full.unlink()
                 removed += 1
     for directory in reversed(directories_seen):

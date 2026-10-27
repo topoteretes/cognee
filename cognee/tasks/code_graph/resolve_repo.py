@@ -562,8 +562,9 @@ async def resolve_repo_source(
 
     Remote checkouts use blob filtering and exact sparse paths. Documents are
     included by default; code-only mode omits binary document assets while
-    retaining text and configuration needed by custom extractors. Selected Git
-    LFS files and servers that ignore filtering raise CodeRepositoryError.
+    retaining text and configuration needed by custom extractors. A selected Git LFS
+    pointer is removed and counted, and a server that ignores filtering raises
+    CodeRepositoryError.
     Operator disk guards use COGNEE_REPOS_MAX_BYTES and COGNEE_REPOS_MIN_FREE_BYTES;
     neither has a default limit. Polling requires filesystem quota headroom.
 
@@ -875,14 +876,17 @@ async def _checkout_snapshot(
             raise CodeRepositoryError(
                 message=f"Could not checkout repository: {scrub(stderr)[-500:]}"
             )
-    await asyncio.to_thread(remove_unselected_files, repo, paths)
-    skipped["lfs_pointer"] = await asyncio.to_thread(remove_lfs_pointers, repo, paths)
+    # Like every writer thread here: a cancelled to_thread await does not stop it.
+    await finish_cleanup(asyncio.to_thread(remove_unselected_files, repo, paths))
+    skipped["lfs_pointer"] = await finish_cleanup(
+        asyncio.to_thread(remove_lfs_pointers, repo, paths)
+    )
     snapshot = {
         "commit": commit,
         "selection_fingerprint": selection_fingerprint(paths, include_documents),
         "selection_version": 1,
         "include_documents": include_documents,
-        "selected_files": len(paths),
+        "selected_files": len(paths) - skipped["lfs_pointer"],
         "skipped": skipped,
     }
     await asyncio.to_thread(

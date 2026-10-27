@@ -21,7 +21,8 @@ The ordinary document ingestion rules still apply after checkout.
 Servers that ignore the filter fail rather than downloading a full clone.
 Git LFS smudging is disabled. A selected file that is an LFS pointer is not the
 file's content, so it is removed from the checkout and counted under
-`lfs_pointer` in the manifest's skip counts; the rest of the repository is ingested.
+`lfs_pointer` in the manifest's skip counts (the selected file count is of the files
+that remain); the rest of the repository is ingested.
 Paths containing newlines cannot be represented safely by sparse checkout and
 answer 400. After every checkout, files that are not part of the selection are
 removed from the work tree.
@@ -88,8 +89,8 @@ measured tree (managed clones and local ingestion storage), so the cost grows wi
 number of files and with the number of concurrent runs, and the scans share the default
 executor; the budget is global to its roots, so any run in flight when the total crosses
 the limit is stopped, not necessarily the one that grew; a directory that cannot be read
-is skipped; clones, `.tmp-*` leftovers of repositories that are not touched again and
-the rest of the ingestion storage count until they are removed by hand. Checking out a
+is skipped; clones, `.tmp-*` and `.old-*` leftovers of repositories that are not touched again
+and the rest of the ingestion storage count until they are removed by hand. Checking out a
 repository with several hundred thousand selected files is superlinear in git itself and
 can reach the 600 s git timeout.
 
