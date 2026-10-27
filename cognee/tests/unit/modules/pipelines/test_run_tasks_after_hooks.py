@@ -307,6 +307,28 @@ async def test_a_failed_hook_does_not_stop_the_next_datasets(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_the_blocking_executor_marks_each_run_whose_hook_failed():
+    """The raised error carries every dataset's run, and only the runs whose step
+    failed carry the reason, so a caller that does not raise can still tell them apart."""
+    datasets = [SimpleNamespace(id=uuid4(), name=name) for name in ("a", "b")]
+
+    async def pipeline():
+        for dataset in datasets:
+            yield PipelineRunCompleted(
+                pipeline_run_id=uuid4(), dataset_id=dataset.id, dataset_name=dataset.name
+            )
+        raise _hook_failure(datasets[0])
+
+    with pytest.raises(AfterRunHookError) as raised:
+        await pipeline_execution_mode.run_pipeline_blocking(pipeline)
+
+    runs = raised.value.run_info
+    assert runs[datasets[0].id].after_run_error == "RuntimeError: compaction exploded"
+    assert runs[datasets[1].id].after_run_error is None
+    assert "after_run_error" not in runs[datasets[1].id].model_dump()
+
+
+@pytest.mark.asyncio
 async def test_a_failed_hook_in_the_background_does_not_stop_the_next_datasets(monkeypatch):
     pushed = []
     monkeypatch.setattr(
@@ -357,6 +379,41 @@ async def test_cognify_raises_a_failed_hook_unwrapped():
         )
 
     assert raised.value is failure
+
+
+@pytest.mark.asyncio
+async def test_cognify_without_raise_on_error_returns_the_runs_of_a_failed_hook():
+    """raise_on_error=False reports a failed step on the runs, as it does an errored run."""
+    dataset = SimpleNamespace(id=uuid4(), name="ds")
+    completed = PipelineRunCompleted(
+        pipeline_run_id=uuid4(),
+        dataset_id=dataset.id,
+        dataset_name=dataset.name,
+        after_run_error="RuntimeError: compaction exploded",
+    )
+    failure = _hook_failure(dataset)
+    failure.run_info = {dataset.id: completed}
+
+    async def fake_executor(**kwargs):
+        raise failure
+
+    with (
+        patch.object(
+            cognify_module, "get_pipeline_executor", lambda run_in_background: fake_executor
+        ),
+        patch.object(cognify_module, "get_default_tasks", new=AsyncMock(return_value=[])),
+        patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value=[])),
+        patch.object(cognify_module, "get_code_file_tasks", new=MagicMock(return_value=[])),
+        patch.object(cognify_module, "get_code_repo_tasks", new=MagicMock(return_value=[])),
+    ):
+        result = await cognify_module.cognify(
+            datasets=["ds"],
+            chunk_size=1024,
+            config={"ontology_config": {"ontology_resolver": None}},
+            raise_on_error=False,
+        )
+
+    assert result == {dataset.id: completed}
 
 
 @pytest.mark.parametrize("name", ["compact_vector_store", "reconcile_document_structure"])

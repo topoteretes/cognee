@@ -301,15 +301,27 @@ async def test_session_node_set_is_appended_to_the_stage_node_set():
 
 
 @pytest.mark.asyncio
-async def test_cognify_agent_trace_feedback_failed_step_after_the_run_is_not_raised():
-    """The traces are cognified; only the step after the run failed."""
+async def test_a_failed_step_after_the_run_is_raised_after_the_watermarks_move():
+    """The traces are cognified; only the step after the run failed. The watermarks
+    still move, so the windows are not rebuilt, and then the error is raised."""
     from cognee.modules.pipelines.exceptions import AfterRunHookError
 
+    manager = _FakeSessionManager()
+    windows = [
+        _window(text=f"Session ID: {sid}\n\nstep", persisted_trace_count=count, session_id=sid)
+        for sid, count in (("a", 4), ("b", 7))
+    ]
     failure = AfterRunHookError([("123", "ds", RuntimeError("compaction"))])
     with (
         patch("cognee.add", new_callable=AsyncMock),
-        patch("cognee.cognify", new_callable=AsyncMock, side_effect=failure) as mock_cognify,
+        patch("cognee.cognify", new_callable=AsyncMock, side_effect=failure),
+        patch.object(
+            cognify_agent_trace_feedback_module, "get_session_manager", return_value=manager
+        ),
+        pytest.raises(AfterRunHookError) as raised,
     ):
-        await cognify_agent_trace_feedback("Agent trace step", dataset_id="123")
+        await cognify_agent_trace_feedback(windows, dataset_id="123")
 
-    mock_cognify.assert_awaited_once()
+    assert raised.value is failure
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "a") == 4
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "b") == 7

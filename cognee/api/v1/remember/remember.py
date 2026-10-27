@@ -758,9 +758,11 @@ class RememberResult:
             ``"completed"`` / ``"session_stored"`` and only this field is set.
         after_run_error: Why the step after the completed cognify run failed
             (``AfterRunHookError``: the vector store compaction or the document
-            structure pass), when it did. The data is stored and cognified, so
-            ``status`` stays ``"completed"`` and the automatic improve still runs;
-            the step runs again on the dataset's next cognify.
+            structure pass), when it did. The data is stored and cognified and the
+            automatic improve still runs. A blocking remember then raises the
+            error; with ``raise_on_error=False`` or in the background it is only
+            reported here and ``status`` stays ``"completed"``. The step runs
+            again on the dataset's next cognify.
         improve_skipped: Why the automatic improve was not started, when the
             host application's admission check declined it
             (``cognee.modules.improve.register_auto_improve_admission``): a
@@ -971,6 +973,7 @@ class RememberResult:
 
         if hasattr(run_info, "status"):
             self.status = "errored" if run_info.status == "PipelineRunErrored" else "completed"
+            self.after_run_error = getattr(run_info, "after_run_error", None)
             if hasattr(run_info, "pipeline_run_id"):
                 self.pipeline_run_id = str(run_info.pipeline_run_id)
         else:
@@ -2162,6 +2165,7 @@ async def _remember_inner(
 
             datasets_arg = [dataset_name] if dataset_id is None else [dataset_id]
 
+            after_run_hook_error: AfterRunHookError | None = None
             try:
                 cognify_result = await cognify(
                     datasets=datasets_arg,
@@ -2182,10 +2186,12 @@ async def _remember_inner(
                 )
             except AfterRunHookError as error:
                 # The data is stored and cognified; only the step after the run
-                # failed, so it is reported on the result, never as a failed remember.
+                # failed. The run is resolved and improve still runs, then the
+                # error is raised. _resolve reads the reason off the run
+                # (``after_run_error``), as it does when raise_on_error=False
+                # returned it instead of raising.
+                after_run_hook_error = error
                 cognify_result = error.run_info
-                result.after_run_error = str(error)
-                logger.warning("remember: the step after cognify failed (non-fatal): %s", error)
 
             result._resolve(cognify_result)
 
@@ -2212,6 +2218,9 @@ async def _remember_inner(
                             "remember: self-improvement reported errors (non-fatal): %s",
                             result.improve_error,
                         )
+
+            if after_run_hook_error is not None:
+                raise after_run_hook_error
 
         if session_ids:
             operation_context.set_session_id(session_ids[0] if len(session_ids) == 1 else None)

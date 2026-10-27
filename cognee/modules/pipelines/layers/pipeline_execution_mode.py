@@ -44,7 +44,8 @@ async def run_pipeline_blocking(pipeline: AsyncGenLike, **params) -> dict[str, A
             - If no dataset_id is present in run_info, the run_info itself is returned.
 
     Raises:
-        AfterRunHookError: carrying that same mapping as ``run_info``.
+        AfterRunHookError: carrying that same mapping as ``run_info``, each failed
+            dataset's completed run with its reason as ``after_run_error``.
     """
     agen = pipeline(**params) if callable(pipeline) else pipeline
 
@@ -58,6 +59,10 @@ async def run_pipeline_blocking(pipeline: AsyncGenLike, **params) -> dict[str, A
             else:
                 total_run_info = run_info
     except AfterRunHookError as error:
+        for dataset_id, reason in error.reasons.items():
+            run_info = total_run_info.get(dataset_id)
+            if isinstance(run_info, PipelineRunCompleted):
+                run_info.after_run_error = reason
         error.run_info = total_run_info
         raise
 

@@ -236,20 +236,16 @@ async def test_errored_rebuild_is_a_failed_result_not_an_exception():
 
 
 async def test_a_failed_step_after_the_rebuild_is_reported_not_raised():
-    from cognee.modules.pipelines.exceptions import AfterRunHookError
-
     data_id, dataset_id = uuid4(), uuid4()
     completed = _run(dataset_id)
+    completed.after_run_error = "RuntimeError: compaction"
     stack = _Stack(data_id, dataset_id, AsyncMock(), completed)
-    failure = AfterRunHookError([(dataset_id, "ds", RuntimeError("compaction"))])
-    failure.run_info = {dataset_id: completed}
-    stack.cognify.side_effect = failure
 
     result = await _update(stack, data_id, dataset_id, chunk_level_diff=False)
 
     assert result["status"] == "full_rebuild"
     assert result["pipeline_run_id"] == completed.pipeline_run_id
-    assert "RuntimeError: compaction" in result["after_run_error"]
+    assert result["after_run_error"] == "RuntimeError: compaction"
 
 
 def test_result_schema_round_trips_through_json():

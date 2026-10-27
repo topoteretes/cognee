@@ -410,21 +410,31 @@ async def test_cognify_session_preserves_last_entry_time_as_source_metadata(monk
 
 
 @pytest.mark.asyncio
-async def test_cognify_session_failed_step_after_the_run_still_advances_the_watermark():
-    """The window is cognified; only the step after the run failed. Leaving the
-    watermark put would rebuild the window on every improve."""
+async def test_cognify_session_failed_step_after_the_run_is_raised_after_every_window():
+    """The windows are cognified; only the step after a run failed. Every window
+    still runs and advances its watermark (leaving it put would rebuild the window
+    on every improve), then the error is raised."""
     from cognee.modules.pipelines.exceptions import AfterRunHookError
 
     mock_sm = _mock_session_manager()
-    completed = _completed_run()
-    failure = AfterRunHookError([(completed.dataset_id, "ds", RuntimeError("compaction"))])
-    failure.run_info = {completed.dataset_id: completed}
+    failed_step, clean = _completed_run(), _completed_run()
+    failed_step.after_run_error = "RuntimeError: compaction"
+    windows = [
+        _window("Question: q1?\n\nAnswer: a\n\n", persisted_qa_count=1),
+        _window("Question: q2?\n\nAnswer: b\n\n", persisted_qa_count=2),
+    ]
 
     with (
         patch("cognee.add", new_callable=AsyncMock),
-        patch("cognee.cognify", new_callable=AsyncMock, side_effect=failure),
+        patch(
+            "cognee.cognify",
+            new_callable=AsyncMock,
+            side_effect=[{failed_step.dataset_id: failed_step}, {clean.dataset_id: clean}],
+        ) as mock_cognify,
         patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+        pytest.raises(AfterRunHookError, match="'ds' \\(RuntimeError: compaction\\)"),
     ):
-        await cognify_session([_window("Question: q?\n\nAnswer: a\n\n")], dataset_id="123")
+        await cognify_session(windows, dataset_id="123")
 
-    mock_sm.update_session_context_entry.assert_called_once()
+    assert mock_cognify.await_count == 2
+    assert mock_sm.update_session_context_entry.call_count == 2
