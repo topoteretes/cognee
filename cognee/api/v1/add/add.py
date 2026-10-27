@@ -26,6 +26,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.code_repo import refuse_moved_repositories
 from cognee.tasks.code_graph.config import CodeGraphConfig, validate_codegraph_config
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
@@ -354,6 +355,8 @@ async def add(
             branch=branch,
             needs_llm=False,
         ),
+        # Under the dataset lock, right before the manifest is stored: see its docstring.
+        Task(refuse_moved_repositories, needs_llm=False),
         Task(
             ingest_data,
             dataset_name,

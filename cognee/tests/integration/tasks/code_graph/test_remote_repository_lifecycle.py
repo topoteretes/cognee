@@ -361,13 +361,20 @@ async def _make_row_legacy(added):
         await session.commit()
 
 
-@pytest.mark.asyncio
-async def test_sync_forgets_a_legacy_repository_row_and_builds_it_again(code_environment):
-    """GitHub sync cannot move to a new dataset, so it forgets the repository's legacy row
-    and builds it once more instead of failing every sync."""
-    from cognee.modules.integrations.github.sync import _forget_legacy_repository
-    from cognee.tasks.code_graph.code_repo import LegacyRepositoryError
+@pytest.fixture
+def sync_module(monkeypatch):
+    """The GitHub sync, cloning the hosted URLs the test remotes stand in for."""
+    module = importlib.import_module("cognee.modules.integrations.github.sync")
+    monkeypatch.setattr(module, "clone_url", lambda full_name: f"https://github.com/{full_name}")
+    return module
 
+
+@pytest.mark.asyncio
+async def test_sync_forgets_a_legacy_repository_row_and_builds_it_again(
+    code_environment, sync_module
+):
+    """GitHub sync cannot move to a new dataset, so its own retry forgets the repository's
+    legacy row and builds the repository once more instead of failing every sync."""
     env = code_environment
     remote = env.remote("acme/api")
     other = env.remote("acme/web")
@@ -375,14 +382,113 @@ async def test_sync_forgets_a_legacy_repository_row_and_builds_it_again(code_env
     kept = await add(other.url, env)
     await build(kept, env)
     await _make_row_legacy(added)
-    with pytest.raises(LegacyRepositoryError):
-        await add(remote.url, env)
 
-    await _forget_legacy_repository("acme/api", "code", env.user)
+    await sync_module._add_and_build("acme/api", "code", env.user, "token")
 
-    rebuilt = await add(remote.url, env)
-    await build(rebuilt, env)
-    nodes, _ = await graph(rebuilt, env)
+    nodes, _ = await graph(added, env)
     assert repo_nodes(nodes, remote.key)
     assert repo_nodes(nodes, other.key)  # another repository of the dataset is left alone
-    assert (await manifest(rebuilt))["identity_version"] == 2
+    rows = await get_dataset_data(added.dataset_id)
+    assert len(rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_sync_does_not_forget_anything_for_a_legacy_graph_no_row_owns(
+    code_environment, sync_module, monkeypatch
+):
+    """Forgetting rows cannot heal a legacy graph node that no row owns: the error is
+    raised as it is and the stored rows and graph are left as they were."""
+    from cognee.tasks.code_graph.code_repo import LegacyRepositoryError
+    from cognee.tasks.code_graph.extract_code_graph import (
+        add_code_graph_data_points,
+        fact_node_id,
+    )
+    from cognee.tasks.code_graph.models import CodeRepository
+
+    env = code_environment
+    remote = env.remote("acme/api")
+    added = await add(remote.url, env)
+    clone = Path((await manifest(added))["repo_path"])
+    old_name = "github.com-acme-api"
+    old_node = CodeRepository(
+        id=fact_node_id(old_name, "repository", old_name),
+        name=old_name,
+        path=str(clone.parent / old_name),
+    )
+    async with set_database_global_context_variables(added.dataset_id, env.user.id):
+        await add_code_graph_data_points([old_node], graph_only=True)
+    before = await graph(added, env)
+    attempts = []
+    real_once = sync_module._add_and_build_once
+
+    async def counted(*args):
+        attempts.append(args[0])
+        return await real_once(*args)
+
+    monkeypatch.setattr(sync_module, "_add_and_build_once", counted)
+
+    with pytest.raises(LegacyRepositoryError):
+        await sync_module._add_and_build("acme/api", "code", env.user, "token")
+
+    assert attempts == ["acme/api"]  # no second build: nothing was forgotten
+    assert await graph(added, env) == before
+    assert len(await get_dataset_data(added.dataset_id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_dataset_lock_is_never_taken_inside_the_clone_lock(code_environment, monkeypatch):
+    """cognify takes the dataset lock and then the clone lock, so an add that held the clone
+    lock while it waited for the dataset lock would deadlock against it."""
+    env = code_environment
+    remote = env.remote("acme/api")
+    added = await add(remote.url, env)
+    code_repo = importlib.import_module("cognee.tasks.code_graph.code_repo")
+    build_manifest = code_repo._build_code_repository
+    resolving = asyncio.Event()
+
+    async def slow_build(*args, **kwargs):
+        resolving.set()
+        await asyncio.sleep(3)  # the add holds the clone lock meanwhile
+        return await build_manifest(*args, **kwargs)
+
+    monkeypatch.setattr(code_repo, "_build_code_repository", slow_build)
+    pre_resolve = asyncio.create_task(add(remote.url, env))
+    await resolving.wait()
+
+    # cognify takes the dataset lock at once and waits for the clone lock behind the add.
+    await asyncio.wait_for(asyncio.gather(pre_resolve, build(added, env)), timeout=60)
+
+
+@pytest.mark.asyncio
+async def test_a_stale_manifest_is_never_stored_over_a_newer_one(code_environment):
+    """The repository is built at its first revision. Add A resolves it, the remote moves,
+    add B resolves the new revision, and both stamp resets run before A's ingest. Without a
+    check A's unchanged manifest was stored and stamped, B's was skipped as already added,
+    and the graph stayed on the old revision with no error."""
+    from cognee.infrastructure.locks import dataset_lock
+    from cognee.tasks.code_graph.code_repo import RepositoryChangedError
+
+    env = code_environment
+    remote = env.remote("acme/api")
+    built = await add(remote.url, env)
+    await build(built, env)
+    first_revision = (await manifest(built))["commit"]
+
+    stale_add = asyncio.create_task(add(remote.url, env))
+    async with dataset_lock(built.dataset_id):
+        # A resolved its manifest and waits for the lock to reset the stamp; the remote
+        # moves and B resolves the new revision behind it.
+        await asyncio.sleep(3)
+        moved_revision = remote.commit("moved")
+        fresh_add = asyncio.create_task(add(remote.url, env))
+        await asyncio.sleep(3)
+
+    with pytest.raises(RepositoryChangedError):
+        await stale_add
+    fresh = await fresh_add
+
+    assert fresh.data_ids == built.data_ids
+    assert (await manifest(fresh))["commit"] == moved_revision != first_revision
+    await build(fresh, env)
+    nodes, _ = await graph(fresh, env)
+    assert any("moved" in props["name"] for props in repo_nodes(nodes, remote.key).values())

@@ -319,8 +319,11 @@ async def test_git_never_prompts(monkeypatch):
             env={"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "a.b", "GIT_CONFIG_VALUE_0": "c"},
         )
     assert seen["GIT_SSH_COMMAND"] == "ssh -i ~/.ssh/deploy_key"
-    # The caller's config entries come first; the no-stored-credentials ones follow.
-    assert (seen["GIT_CONFIG_COUNT"], seen["GIT_CONFIG_KEY_0"]) == ("3", "a.b")
+    # The caller's config entries come first; the no-stored-credentials ones and the
+    # no-background-maintenance ones follow.
+    assert (seen["GIT_CONFIG_COUNT"], seen["GIT_CONFIG_KEY_0"]) == ("5", "a.b")
+    assert (seen["GIT_CONFIG_KEY_3"], seen["GIT_CONFIG_VALUE_3"]) == ("maintenance.auto", "false")
+    assert (seen["GIT_CONFIG_KEY_4"], seen["GIT_CONFIG_VALUE_4"]) == ("gc.auto", "0")
 
 
 def test_a_www_prefix_never_makes_a_second_identity():

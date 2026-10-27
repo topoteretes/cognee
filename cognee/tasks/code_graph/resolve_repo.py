@@ -296,6 +296,10 @@ def _noninteractive_env(ssh_command: str | None = None) -> dict:
 # and repository config, which git reads before the environment's entries.
 _NO_STORED_CREDENTIALS_CONFIG = (("credential.helper", ""), ("core.askPass", ""))
 
+# A fetch can leave a detached ``maintenance`` or ``gc`` process behind that outlives the
+# clone lock and holds git lock files of its own.
+_NO_BACKGROUND_MAINTENANCE_CONFIG = (("maintenance.auto", "false"), ("gc.auto", "0"))
+
 
 def _git_config_entries(env) -> list[tuple[str, str]]:
     """The ``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_KEY_<n>`` / ``GIT_CONFIG_VALUE_<n>`` entries of ``env``."""
@@ -315,7 +319,8 @@ def _is_git_config_entry(name: str) -> bool:
 
 def _git_env(env: dict | None = None) -> dict:
     """The environment git runs with: the process's, non-interactive, ``env`` on top,
-    and no stored credentials (see :data:`_NO_STORED_CREDENTIALS_CONFIG`).
+    no stored credentials (see :data:`_NO_STORED_CREDENTIALS_CONFIG`) and no background
+    maintenance (see :data:`_NO_BACKGROUND_MAINTENANCE_CONFIG`).
 
     Environment-level config entries are renumbered into one list: the process's own
     first, then ``env``'s (e.g. :func:`_credential_env`), then the hardening entries
@@ -328,6 +333,7 @@ def _git_env(env: dict | None = None) -> dict:
         _git_config_entries(os.environ)
         + _git_config_entries(extra)
         + list(_NO_STORED_CREDENTIALS_CONFIG)
+        + list(_NO_BACKGROUND_MAINTENANCE_CONFIG)
     )
     merged = {
         name: value
@@ -695,8 +701,9 @@ def _remove_stale_git_locks(clone: Path) -> None:
 
     git is killed outright on cancel and timeout (as is the whole process on an OOM kill),
     so it never removes its own ``index.lock`` or ``shallow.lock``, and every later
-    fetch or reset would fail on them. The clone lock is held, so no git process of ours
-    is running in this clone and every lock file here is stale.
+    fetch or reset would fail on them. The clone lock is held and git runs without
+    background maintenance, so no git process of ours is running in this clone and every
+    lock file here is stale. Git run by hand in a managed clone is not supported.
     """
     git_dir = clone / ".git"
     for lock in [*git_dir.glob("*.lock"), *(git_dir / "refs").rglob("*.lock")]:

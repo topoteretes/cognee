@@ -305,6 +305,8 @@ def test_git_runs_without_stored_credentials_or_askpass(monkeypatch):
         ("http.https://github.com/org/repo.git/.extraHeader", env["GIT_CONFIG_VALUE_2"]),
         ("credential.helper", ""),
         ("core.askPass", ""),
+        ("maintenance.auto", "false"),
+        ("gc.auto", "0"),
     ]
     assert env["GIT_CONFIG_VALUE_2"].startswith("Authorization: Basic ")
     assert (env["GIT_ASKPASS"], env["SSH_ASKPASS"], env["GIT_TERMINAL_PROMPT"]) == ("", "", "0")

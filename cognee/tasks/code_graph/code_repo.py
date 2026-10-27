@@ -21,8 +21,9 @@ tree:
 
 The repo item's raw data is a JSON manifest (repo path + covered files +
 combined content hash), so the stored record is small. Its id is pinned, so
-``resolve_code_repository`` clears the stored row's add stamp before the
-pipeline's incremental check sees it; re-adding a changed repo then resets
+``_reset_add_stamp`` clears the stored row's add stamp (under the dataset lock, after
+the clone lock is released for a remote repository) before the pipeline's
+incremental check sees it; re-adding a changed repo then resets
 pipeline status through the normal content-change detection. The clear is
 unconditional, so an unchanged repo's small manifest is stored again on every
 add; its cognify stamps are kept and nothing is rebuilt. The
@@ -273,6 +274,28 @@ class RepositoryChangedError(CodeRepositoryError):
         )
 
 
+async def refuse_moved_repositories(data):
+    """Raise RepositoryChangedError for a remote manifest whose checkout moved since it was built.
+
+    Runs as an ``add()`` pipeline task, under the dataset lock and right before ingestion.
+    Another add of this dataset resets the manifest row's stamp only under that lock, so
+    one that did so before this ingest has already refreshed the checkout. Storing this
+    older manifest then would mark the row as added and make that add skip its newer one,
+    leaving the graph on the old revision with no error. Raising instead lets the caller
+    add the repository again.
+    """
+    for item in data if isinstance(data, list) else [data]:
+        metadata = getattr(item, "system_metadata", None) or {}
+        if metadata.get("source") != "code_repo" or "repo_url" not in metadata:
+            continue
+        manifest = json.loads(item.data)
+        async with repository_read(
+            Path(manifest["repo_path"]), remote=True, expected_commit=manifest["commit"]
+        ):
+            pass
+    return data
+
+
 def manifest_repo_name(data_item) -> str | None:
     metadata = getattr(data_item, "system_metadata", None)
     if isinstance(metadata, str):
@@ -338,7 +361,7 @@ async def resolve_code_repository(
     """Build the repo manifest and, with ``reset_stamp``, clear its stored add stamp.
 
     A caller holding the clone lock passes ``reset_stamp=False`` and calls
-    ``reset_add_stamp`` once it has released it: the dataset lock must never be taken
+    ``_reset_add_stamp`` once it has released it: the dataset lock must never be taken
     inside the clone lock, because cognify takes them in the opposite order.
     """
     async with repository_read(directory, remote=source_url is not None) as commit:
@@ -351,11 +374,11 @@ async def resolve_code_repository(
             item.data = json.dumps(manifest, indent=2)
             item.system_metadata["identity_version"] = 2
     if reset_stamp:
-        await reset_add_stamp(item.data_id, dataset_id)
+        await _reset_add_stamp(item.data_id, dataset_id)
     return item, documents, skipped
 
 
-async def reset_add_stamp(data_id, dataset_id) -> None:
+async def _reset_add_stamp(data_id, dataset_id) -> None:
     """Clear the stored manifest row's add stamp, under the dataset lock.
 
     The id is pinned, so add()'s incremental check would find the stored row already
@@ -367,7 +390,8 @@ async def reset_add_stamp(data_id, dataset_id) -> None:
     which costs one small write, not a rebuild.
 
     The reset is a read-modify-write of the row's pipeline_status, so it takes the
-    dataset lock (a no-op when the pipeline runner already holds it).
+    dataset lock (a no-op when the pipeline runner already holds it). Without a user the
+    id is not pinned, and without a dataset there is no stored row: nothing to reset.
     """
     if data_id is None or dataset_id is None:
         return
@@ -392,7 +416,7 @@ async def _build_code_repository(
     manifests — so re-adding the same repo updates one record instead of
     accreting new ones; without a user context the id is left content-derived.
     With a pinned id and a dataset, the caller clears the stored row's add stamp so
-    the re-add reaches ingestion's content comparison (see ``reset_add_stamp``).
+    the re-add reaches ingestion's content comparison (see ``_reset_add_stamp``).
     ``source_url`` (credential-free) records where a cloned repository came
     from as ``system_metadata["repo_url"]``.
 
@@ -522,7 +546,7 @@ async def resolve_code_repository_url(
                     },
                 )
             )
-    await reset_add_stamp(manifest_item.data_id, dataset_id)
+    await _reset_add_stamp(manifest_item.data_id, dataset_id)
     return manifest_item, stored_documents, skipped
 
 
