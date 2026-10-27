@@ -17,6 +17,7 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
 from cognee.modules.pipelines.layers.setup_and_check_environment import (
     setup_and_check_environment,
 )
+from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.tasks.task import Task, pipeline_needs_llm
 from cognee.modules.users.models import User
@@ -127,16 +128,24 @@ async def run_pipeline(
             after_run_completed=after_run_completed,
             after_items_ran=after_items_ran,
         )
+        run_completed = False
         try:
             async with aclosing(source):
                 async for run_info in source:
+                    run_completed = isinstance(run_info, PipelineRunCompleted)
                     yield run_info
         except AfterRunHookError as error:
+            # Only this dataset's own step after its completed run; one a task
+            # raised (an improve bridge) failed the run and goes on as is.
+            if not run_completed:
+                raise
             # This dataset's run completed, so the next ones still run; every
             # failed step is raised together after them.
             hook_failures.extend(error.failures)
     if hook_failures:
-        raise AfterRunHookError(hook_failures) from hook_failures[0][2]
+        raise AfterRunHookError(hook_failures) from next(
+            (error for *_, error in hook_failures if isinstance(error, BaseException)), None
+        )
 
 
 async def run_pipeline_per_dataset(

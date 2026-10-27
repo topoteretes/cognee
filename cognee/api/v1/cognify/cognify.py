@@ -560,6 +560,8 @@ async def cognify(
             # failed. raise_on_error=False reports that on the runs, like an
             # errored run, instead of raising.
             if raise_on_error:
+                # A dataset whose run errored outranks one whose data is stored.
+                raise_if_cognify_errored(error.run_info)
                 raise
             logger.warning("cognify: the step after the run failed: %s", error)
             result = error.run_info
