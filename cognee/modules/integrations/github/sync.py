@@ -88,17 +88,82 @@ async def list_installation_repositories(token: str) -> list[str]:
     return full_names
 
 
+async def _forget_legacy_repository(full_name: str, dataset_name: str, owner) -> list:
+    """Forget this repository's rows written before repository identities changed.
+
+    Returns the forgotten ids, empty when the dataset holds none. The code graph is
+    derived from GitHub, so the add that follows rebuilds it. The graph a row owns goes
+    with it; with a graph shared between datasets that can include nodes another
+    dataset's legacy build shares.
+    """
+    from cognee.api.v1.forget import forget
+    from cognee.modules.data.methods import get_authorized_existing_datasets
+    from cognee.tasks.code_graph.code_repo import legacy_repository_row_ids
+
+    datasets = await get_authorized_existing_datasets([dataset_name], "write", owner, strict=True)
+    data_ids = await legacy_repository_row_ids(clone_url(full_name), datasets[0].id)
+    for data_id in data_ids:
+        receipt = await forget(data_id=data_id, dataset_id=datasets[0].id, user=owner)
+        logger.info(
+            "Forgot the legacy row %s of GitHub repository %s: %s", data_id, full_name, receipt
+        )
+    return data_ids
+
+
 async def _add_and_build(full_name: str, dataset_name: str, owner, token: str) -> None:
+    """Add and build one repository, once more when that can heal it.
+
+    A dataset an earlier release synced holds the repository under the old identity, and
+    the sync cannot move to another dataset, so its legacy rows are forgotten and the
+    repository is built again instead of failing every sync. A repository that moved
+    after this add resolved it, whether add() refuses its stale manifest or cognify finds
+    the checkout changed (an overlapping sync or an upstream change), is added and built
+    again too. Anything else, or a second failure, fails the repository.
+    """
+    from cognee.modules.pipelines.exceptions import CognifyFailedError
+    from cognee.tasks.code_graph.code_repo import LegacyRepositoryError, RepositoryChangedError
+
+    try:
+        await _add_and_build_once(full_name, dataset_name, owner, token)
+    except LegacyRepositoryError:
+        forgotten = await _forget_legacy_repository(full_name, dataset_name, owner)
+        if not forgotten:
+            raise
+        logger.warning(
+            "GitHub repository %s: forgot %d row(s) written before repository identities "
+            "changed and building it again.",
+            full_name,
+            len(forgotten),
+        )
+        await _add_and_build_once(full_name, dataset_name, owner, token)
+    except (RepositoryChangedError, CognifyFailedError) as error:
+        # With RAISE_INCREMENTAL_LOADING_ERRORS off the pipeline reports the error as
+        # an errored run, which cognify raises as CognifyFailedError.
+        if not isinstance(error, RepositoryChangedError) and (
+            error.error_class != "RepositoryChangedError"
+        ):
+            raise
+        logger.warning(
+            "GitHub repository %s changed while it was being built: adding and building it again.",
+            full_name,
+        )
+        await _add_and_build_once(full_name, dataset_name, owner, token)
+
+
+async def _add_and_build_once(full_name: str, dataset_name: str, owner, token: str) -> None:
     """Add one repository, then build exactly the rows that add returned."""
     from cognee.api.v1.add import add
-    from cognee.api.v1.cognify.cognify import cognify, raise_if_cognify_errored
+    from cognee.api.v1.cognify.cognify import cognify
     from cognee.modules.pipelines.exceptions import PipelineRunFailedError
     from cognee.modules.pipelines.models import PipelineRunErrored
+    from cognee.tasks.code_graph.code_repo import RepositoryChangedError
 
     added = await add(
         clone_url(full_name),
         dataset_name=dataset_name,
         user=owner,
+        # A code-only add needs no provider: the sync makes no LLM or embedding calls.
+        skip_connection_test=True,
         codegraph_config={
             "repo_credentials": token,
             # The code graph is the point of the sync: indexing every repository's
@@ -108,6 +173,10 @@ async def _add_and_build(full_name: str, dataset_name: str, owner, token: str) -
         },
     )
     if isinstance(added, PipelineRunErrored):
+        if added.error_class == "RepositoryChangedError":
+            # With RAISE_INCREMENTAL_LOADING_ERRORS off the pipeline reports the error as
+            # an errored run: raise it as add() otherwise does, for the retry.
+            raise RepositoryChangedError()
         # Git keeps the token out of every string it builds, so this is a second line of
         # defence: the error logs itself when built, so the token goes before that.
         raise PipelineRunFailedError(
@@ -116,13 +185,12 @@ async def _add_and_build(full_name: str, dataset_name: str, owner, token: str) -
             )
         )
     if not added.data_ids:
-        # Nothing was stored for this repository, so there is nothing to build: this
-        # repository fails, the others go on.
+        # cognify(data_ids=None) would build the whole dataset, and an empty list is
+        # refused there: this repository fails, the others go on.
         raise PipelineRunFailedError(message="GitHub repository add returned no data to build.")
-    result = await cognify(
-        datasets=[added.dataset_id], data_ids=added.data_ids, user=owner, raise_on_error=False
-    )
-    raise_if_cognify_errored(result)
+    # cognify() wraps a failure of the pipeline run in a cognee error (raise_on_error
+    # is on), so the loop in sync_repositories sees one repository's failure.
+    await cognify(datasets=[added.dataset_id], data_ids=added.data_ids, user=owner)
 
 
 async def sync_repositories(
@@ -135,8 +203,10 @@ async def sync_repositories(
     request path (the post-install hook and webhook handling both run
     detached), so there is nothing to hand off to. A repository that cannot be
     cloned or built (a cognee error, an I/O or network failure) is logged and the sync
-    moves on; a failed token mint (installation-wide) or a programming error aborts the
-    sync.
+    moves on. A failed token mint (installation-wide) aborts the sync, and so does an
+    error of another type from add() or from cognify() before its pipeline runs (for
+    example a migration or database error while resolving the rows), and so does an
+    error of its own from forgetting a legacy repository.
 
     The token is renewed before a clone whenever it is close to expiring, so a very large
     installation never starts a transfer near the end of one token's hour.

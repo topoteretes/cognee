@@ -14,12 +14,24 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from weakref import WeakSet
 
-from pydantic import Field, ValidationError
+from fastapi import status
+from pydantic import Field, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.exceptions import CogneeConfigurationError
 from cognee.tasks.code_graph.process import finish_cleanup
 from cognee.tasks.code_graph.resolve_repo import CodeRepositoryError
+
+_DISK_FULL_MESSAGES = (b"no space left on device", b"disk quota exceeded")
+
+
+def reports_disk_full(stderr: bytes) -> bool:
+    """Whether a child process's stderr says the filesystem is full, in any letter case.
+
+    git capitalises the message, enola (Go) prints it in lowercase.
+    """
+    lowered = stderr.lower()
+    return any(message in lowered for message in _DISK_FULL_MESSAGES)
 
 
 class RepositoryResourceError(CodeRepositoryError):
@@ -45,11 +57,18 @@ class RepositoryResourceError(CodeRepositoryError):
             measured = f"{used_bytes} bytes used; budget {limit_bytes} bytes"
         else:
             measured = f"{free_bytes} bytes free; at least {limit_bytes} bytes required"
+        if limit_bytes is None:
+            remedy = "Free disk space or use a worker with more space."
+        elif used_bytes is not None:
+            remedy = (
+                "Raise COGNEE_REPOS_MAX_BYTES or free space under the clones and data directories."
+            )
+        else:
+            remedy = "Free disk space, or lower COGNEE_REPOS_MIN_FREE_BYTES."
         super().__init__(
-            message=f"Repository processing stopped: {reason} ({measured}). "
-            "Use a worker with more space or ingest a prepared local checkout.",
+            message=f"Repository processing stopped: {reason} ({measured}). {remedy}",
             name="RepositoryResourceError",
-            status_code=507,
+            status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
         )
 
 
@@ -58,6 +77,12 @@ class RepositoryDiskConfig(BaseSettings):
 
     max_bytes: int | None = Field(default=None, gt=0)
     min_free_bytes: int | None = Field(default=None, gt=0)
+
+    @field_validator("max_bytes", "min_free_bytes", mode="before")
+    @classmethod
+    def _empty_is_unset(cls, value):
+        """A variable left empty, as .env.template shows it, means no limit."""
+        return None if isinstance(value, str) and not value.strip() else value
 
 
 def repository_disk_config() -> RepositoryDiskConfig:
@@ -86,13 +111,17 @@ def disk_usage_bytes(root: Path) -> int:
                 for entry in entries:
                     try:
                         info = entry.stat(follow_symlinks=False)
-                    except FileNotFoundError:
-                        continue  # Git renamed or removed a temporary pack during this scan.
+                    except (FileNotFoundError, PermissionError):
+                        # Git renamed or removed a temporary pack during this scan, or the
+                        # entry is not ours to stat (a volume's lost+found).
+                        continue
                     total += stat_disk_bytes(info)
                     if stat.S_ISDIR(info.st_mode):
                         pending.append(Path(entry.path))
-        except FileNotFoundError:
-            continue  # A completed/failed clone can disappear during the scan.
+        except (FileNotFoundError, PermissionError):
+            # A completed/failed clone can disappear during the scan, and a directory we
+            # may not read (a volume's lost+found) holds nothing of ours.
+            continue
     return total
 
 
@@ -270,6 +299,9 @@ async def _monitored_repository_disk_budget(clone_root: Path):
             uncancel = getattr(owner, "uncancel", None)
             if callable(uncancel):
                 uncancel()
+                if owner.cancelling():
+                    # The owner was cancelled from outside too: that cancellation wins.
+                    raise
             raise failure[0] from None
         raise
     finally:

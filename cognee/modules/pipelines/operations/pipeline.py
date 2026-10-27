@@ -78,6 +78,8 @@ async def run_pipeline(
     mapping one item to its task list (a task resolver — see ``run_tasks``);
     items resolved to different lists still share one run per dataset.
     ``extras`` carries caller-resolved context into each item's PipelineContext.
+    ``data=None`` runs the whole dataset; ``data=[]`` selects nothing: no task runs, but
+    the run is still recorded and its hooks fire.
     ``before_run`` is awaited with each dataset's selected rows and the dataset, under
     that dataset's lock, before its tasks run.
 

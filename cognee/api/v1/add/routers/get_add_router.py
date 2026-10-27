@@ -17,6 +17,7 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
+from cognee.tasks.code_graph.repo_resources import RepositoryResourceError
 from cognee.tasks.ingestion.data_item import (
     pair_labels_with_data,
     parse_external_metadata,
@@ -225,7 +226,7 @@ def get_add_router() -> APIRouter:
                 return JSONResponse(
                     status_code=(
                         status.HTTP_507_INSUFFICIENT_STORAGE
-                        if add_run is not None and add_run.error_class == "RepositoryResourceError"
+                        if add_run.error_class == RepositoryResourceError.__name__
                         else status.HTTP_500_INTERNAL_SERVER_ERROR
                     ),
                     content=ErrorResponse(

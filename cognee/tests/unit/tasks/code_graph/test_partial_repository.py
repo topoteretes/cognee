@@ -1,6 +1,7 @@
 """Partial clone selection against a real filtered Git upload-pack server."""
 
 import importlib
+import json
 import os
 import shutil
 import subprocess
@@ -151,7 +152,7 @@ async def test_sparse_checkout_preserves_literal_paths_and_extractor_inputs(orig
 
 
 @pytest.mark.asyncio
-async def test_selected_lfs_pointer_fails_and_never_runs_smudge(origin, clones, tmp_path):
+async def test_a_selected_lfs_pointer_is_skipped_and_never_runs_smudge(origin, clones, tmp_path):
     marker = tmp_path / "smudged"
     (origin.work / ".gitattributes").write_text("large.py filter=lfs\n")
     (origin.work / "large.py").write_text(
@@ -161,10 +162,21 @@ async def test_selected_lfs_pointer_fails_and_never_runs_smudge(origin, clones, 
     # Global config also reaches clone's checkout; source repo config alone would not.
     _git(origin.work, "config", "--global", "filter.lfs.smudge", f"touch '{marker}'")
     _git(origin.work, "config", "--global", "filter.lfs.required", "true")
-    with pytest.raises(resolve_module.CodeRepositoryError, match="Git LFS"):
-        await resolve_module.resolve_repo_source(_URL, clones_dir=clones)
+    target = await resolve_module.resolve_repo_source(_URL, clones_dir=clones)
     assert not marker.exists()
-    assert not resolve_module.clone_dir(_URL, clones_dir=clones).exists()
+    # The pointer is not content: it is removed from the checkout and counted, and the
+    # rest of the repository is ingested.
+    assert not (target / "large.py").exists()
+    assert (target / "BRANCH.txt").exists()
+    snapshot = json.loads((target / ".git" / "cognee-snapshot.json").read_text())
+    assert snapshot["skipped"]["lfs_pointer"] == 1
+    # The selected file count is of the files that remain on disk.
+    on_disk = [
+        path
+        for path in target.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(target).parts
+    ]
+    assert snapshot["selected_files"] == len(on_disk)
     assert not list(clones.glob(".*.tmp-*"))
 
 
@@ -303,6 +315,7 @@ async def test_cancelled_sparse_writer_finishes_before_clone_cleanup(
     import threading
 
     selection = importlib.import_module("cognee.tasks.code_graph.repo_selection")
+    read_repository_snapshot = selection.read_repository_snapshot
     target = resolve_module.clone_dir(_URL, clones_dir=clones)
     if refresh:
         await resolve_module.resolve_repo_source(_URL, clones_dir=clones)
@@ -331,7 +344,13 @@ async def test_cancelled_sparse_writer_finishes_before_clone_cleanup(
         with pytest.raises(asyncio.CancelledError):
             await task
         assert finished.is_set()
-        assert not target.exists()
+        if refresh:
+            # A cancelled refresh keeps the clone: its snapshot record is gone, so the next
+            # run replaces it instead of trusting a half-updated checkout.
+            assert target.exists()
+            assert read_repository_snapshot(target) is None
+        else:
+            assert not target.exists()
         assert not list(clones.glob(".*.tmp-*"))
     finally:
         release.set()
@@ -360,7 +379,7 @@ async def test_cancelled_full_cache_retirement_publishes_valid_replacement(
     original = resolve_module._remove_clone
 
     def paused_removal(path):
-        if path == target:
+        if ".old-" in path.name:  # the retired clone: the replacement is already published
             entered.set()
             assert release.wait(10), "Test did not release cache retirement"
         return original(path)
@@ -392,9 +411,139 @@ async def test_cancelled_full_cache_retirement_publishes_valid_replacement(
             await task
         await reader
         assert not list(clones.glob(".*.tmp-*"))
+        assert not list(clones.glob(".*.old-*"))
     finally:
         release.set()
         await asyncio.gather(
             task, *([reader] if reader is not None else []), return_exceptions=True
         )
     assert await resolve_module.resolve_repo_source(_URL, clones_dir=clones) == target
+
+
+@pytest.mark.asyncio
+async def test_a_failed_removal_of_the_retired_clone_never_fails_the_publish(
+    origin, clones, monkeypatch
+):
+    """The old clone is renamed aside before it is deleted: a deletion that fails (or a
+    process killed meanwhile) leaves a retired directory, never a half-deleted target."""
+    target = resolve_module.clone_dir(_URL, clones_dir=clones)
+    clones.mkdir()
+    _git(clones, "clone", "--depth", "1", origin.bare.resolve().as_uri(), str(target))
+    original = resolve_module._remove_clone
+
+    def failing_removal(path):
+        if ".old-" in path.name:
+            raise PermissionError("busy")
+        return original(path)
+
+    monkeypatch.setattr(resolve_module, "_remove_clone", failing_removal)
+
+    assert await resolve_module.resolve_repo_source(_URL, clones_dir=clones) == target
+
+    assert (target / ".git").is_dir() and (target / "BRANCH.txt").exists()
+    assert len(list(clones.glob(".*.old-*"))) == 1
+    monkeypatch.setattr(resolve_module, "_remove_clone", original)
+    assert await resolve_module.resolve_repo_source(_URL, clones_dir=clones) == target
+    assert not list(clones.glob(".*.old-*"))
+
+
+@pytest.mark.asyncio
+async def test_the_snapshot_record_is_invalidated_before_the_checkout_is_touched(
+    origin, clones, monkeypatch
+):
+    """A refresh that fails after it started to update the checkout must not leave the old
+    record behind, or an earlier manifest would be accepted for a half-updated clone."""
+    from cognee.tasks.code_graph.repo_selection import read_repository_snapshot
+
+    target = await resolve_module.resolve_repo_source(_URL, clones_dir=clones)
+    assert read_repository_snapshot(target) is not None
+    seen = []
+
+    async def failing_checkout(repo, *args, **kwargs):
+        seen.append(read_repository_snapshot(repo))
+        raise resolve_module.CodeRepositoryError(message="checkout failed")
+
+    monkeypatch.setattr(resolve_module, "_checkout_snapshot", failing_checkout)
+    with pytest.raises(resolve_module.CodeRepositoryError, match="checkout failed"):
+        await resolve_module.resolve_repo_source(_URL, clones_dir=clones)
+
+    assert seen == [None]
+    assert read_repository_snapshot(target) is None
+
+
+@pytest.mark.asyncio
+async def test_a_budget_error_during_a_refresh_frees_the_clone(origin, clones, monkeypatch):
+    from cognee.tasks.code_graph.repo_resources import RepositoryResourceError
+
+    target = await resolve_module.resolve_repo_source(_URL, clones_dir=clones)
+
+    async def out_of_space(*args, **kwargs):
+        raise RepositoryResourceError("repository storage budget exceeded", 1, used_bytes=2)
+
+    monkeypatch.setattr(resolve_module, "_checkout_snapshot", out_of_space)
+    with pytest.raises(RepositoryResourceError):
+        await resolve_module.resolve_repo_source(_URL, clones_dir=clones)
+
+    assert not target.exists()
+
+
+@pytest.mark.asyncio
+async def test_a_file_replaced_by_a_submodule_does_not_stay_in_the_work_tree(origin, clones):
+    """git leaves the old file in place when its path becomes a gitlink: the checkout must
+    contain exactly the selection, so Enola never reads a file the fingerprint omits."""
+    (origin.work / "y.py").write_text("old = True\n")
+    _git(origin.work, "add", "y.py")
+    origin.commit("main", "with-file")
+    target = await resolve_module.resolve_repo_source(_URL, clones_dir=clones)
+    assert (target / "y.py").read_text() == "old = True\n"
+
+    _git(origin.work, "rm", "-q", "-f", "y.py")
+    _git(origin.work, "update-index", "--add", "--cacheinfo", f"160000,{'a' * 40},y.py")
+    # Not origin.commit(): it stages the work tree again and would drop the gitlink.
+    _git(origin.work, "commit", "-q", "-m", "with-gitlink")
+    _git(origin.work, "push", "-q", "origin", "main")
+    await resolve_module.resolve_repo_source(_URL, clones_dir=clones)
+
+    assert not (target / "y.py").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize("step", ["remove_unselected_files", "remove_lfs_pointers"])
+async def test_a_cancelled_checkout_cleanup_finishes_before_the_lock_is_released(
+    origin, clones, monkeypatch, step
+):
+    """These steps delete files in a worker thread, and a cancelled to_thread await does not
+    stop it: the resolver must keep the clone lock until the thread is done, or the thread
+    would delete files from the clone the next run publishes."""
+    import asyncio
+    import threading
+
+    selection = importlib.import_module("cognee.tasks.code_graph.repo_selection")
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    original = getattr(selection, step)
+
+    def paused(*args):
+        entered.set()
+        try:
+            assert release.wait(10), "Test did not release the cleanup step"
+            return original(*args)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(selection, step, paused)
+    task = asyncio.create_task(resolve_module.resolve_repo_source(_URL, clones_dir=clones))
+    try:
+        assert await asyncio.to_thread(entered.wait, 10)
+        task.cancel()
+        await asyncio.sleep(0.05)
+        task.cancel()
+        await asyncio.sleep(0.05)
+        assert not task.done(), "Resolver abandoned a live filesystem writer"
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert finished.is_set()
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)

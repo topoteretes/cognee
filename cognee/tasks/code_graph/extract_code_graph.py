@@ -1,5 +1,6 @@
 """Map enola snapshot facts to cognee DataPoints and typed graph edges."""
 
+import asyncio
 import hashlib
 import json
 import posixpath
@@ -875,10 +876,12 @@ async def extract_code_graph(
             raise ValueError("extract_code_graph requires repo_path or snapshot_dir.")
         snapshot_dir = await run_enola_generate(repo_path, timeout=timeout)
 
-    facts, receipt = parse_enola_snapshot(snapshot_dir)
+    facts, receipt = await asyncio.to_thread(parse_enola_snapshot, snapshot_dir)
     if namespace:
         await reject_legacy_repository_graph(facts, namespace, repo_path)
-        facts = namespace_snapshot_repos(facts, namespace, repo_path)
+        # Parsing, qualifying and mapping a large snapshot take seconds each: they run in a
+        # worker thread so the event loop stays responsive meanwhile.
+        facts = await asyncio.to_thread(namespace_snapshot_repos, facts, namespace, repo_path)
 
     if receipt:
         logger.info(
@@ -913,8 +916,8 @@ async def extract_code_graph(
             )
             return []
 
-    data_points = map_facts_to_data_points(
-        facts, repo_path=repo_path, node_set=node_set, repo_name=repo_name
+    data_points = await asyncio.to_thread(
+        map_facts_to_data_points, facts, repo_path=repo_path, node_set=node_set, repo_name=repo_name
     )
     logger.info("Mapped %d enola fact(s) to %d data point(s).", len(facts), len(data_points))
     return data_points
@@ -1167,12 +1170,16 @@ async def add_code_graph_edges(
             raise ValueError("add_code_graph_edges requires repo_path or snapshot_dir.")
         snapshot_dir = Path(repo_path) / ".enola"
 
-    facts, receipt = parse_enola_snapshot(snapshot_dir)
+    facts, receipt = await asyncio.to_thread(parse_enola_snapshot, snapshot_dir)
     if namespace:
-        facts = namespace_snapshot_repos(facts, namespace, repo_path)
+        facts = await asyncio.to_thread(namespace_snapshot_repos, facts, namespace, repo_path)
     diagnostics = []
-    edges, skipped = build_code_graph_edges(
-        facts, repo_path=repo_path, repo_name=repo_name, diagnostics=diagnostics
+    edges, skipped = await asyncio.to_thread(
+        build_code_graph_edges,
+        facts,
+        repo_path=repo_path,
+        repo_name=repo_name,
+        diagnostics=diagnostics,
     )
     logger.info("Resolved %d code graph edge(s), skipped %d.", len(edges), skipped)
 

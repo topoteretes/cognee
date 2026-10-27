@@ -207,6 +207,55 @@ async def test_add_code_graph_edges_stamps_receipt_projection(tmp_path, monkeypa
     assert "repo_path" not in stamped[0].last_receipt
 
 
+@pytest.mark.asyncio
+async def test_a_large_snapshot_is_processed_off_the_event_loop(tmp_path, monkeypatch):
+    """Parsing, qualifying, mapping and linking a large snapshot take seconds each, so none
+    of them may block the event loop."""
+    import threading
+
+    extractor = importlib.import_module("cognee.tasks.code_graph.extract_code_graph")
+    _write_snapshot(tmp_path, TWO_FACTS)
+    engine = AsyncMock()
+    engine.get_graph_data.return_value = ([], [])
+    engine.get_node.return_value = None
+    monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
+    monkeypatch.setattr(
+        code_retriever_module, "invalidate_code_graph_snapshot_cache", lambda **kwargs: None
+    )
+    threads = {}
+
+    def record(name):
+        real = getattr(extractor, name)
+
+        def recording(*args, **kwargs):
+            threads.setdefault(name, []).append(threading.current_thread())
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(extractor, name, recording)
+
+    steps = (
+        "parse_enola_snapshot",
+        "namespace_snapshot_repos",
+        "map_facts_to_data_points",
+        "build_code_graph_edges",
+    )
+    for name in steps:
+        record(name)
+    namespace = "github.com/acme/shop"
+
+    await extractor.extract_code_graph(
+        repo_path="/repos/shop", snapshot_dir=tmp_path, namespace=namespace
+    )
+    await add_code_graph_edges(
+        ["sentinel"], repo_path="/repos/shop", snapshot_dir=tmp_path, namespace=namespace
+    )
+
+    assert set(threads) == set(steps)
+    assert all(
+        thread is not threading.main_thread() for calls in threads.values() for thread in calls
+    )
+
+
 # --- facts: ids, positions, new kinds ----------------------------------------
 
 

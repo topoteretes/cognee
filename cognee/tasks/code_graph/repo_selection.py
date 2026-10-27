@@ -4,7 +4,10 @@ import hashlib
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path, PurePosixPath
+
+from fastapi import status
 
 SNAPSHOT_FILE = "cognee-snapshot.json"
 
@@ -100,7 +103,7 @@ def select_tree(tree: str, include_documents: bool) -> tuple[list[str], dict[str
     from cognee.tasks.code_graph.resolve_repo import CodeRepositoryError
 
     documents = _document_extensions() if include_documents else frozenset()
-    ignored_dirs = SKIP_DIRS | {".git", ".enola"}
+    ignored_dirs = {name.lower() for name in SKIP_DIRS | {".git", ".enola"}}
     selected = []
     skipped = {"ignored_path": 0, "binary": 0, "symlink": 0, "submodule": 0}
     if tree and not tree.endswith("\0"):
@@ -130,7 +133,11 @@ def select_tree(tree: str, include_documents: bool) -> tuple[list[str], dict[str
         # Keep tracked dotfiles: enola needs ignore rules and hidden CI/config
         # inputs too. The document ingestion walker applies its own hidden-path
         # exclusions later. Git metadata and generated snapshots are never inputs.
-        elif any(part in ignored_dirs for part in path.split("/")):
+        # Directories match at any depth and in any letter case (the checkout can be on a
+        # case-insensitive filesystem); a file that merely has such a name is a file.
+        elif any(part.lower() in ignored_dirs for part in path.split("/")[:-1]) or (
+            path.rsplit("/", 1)[-1].lower() in (".git", ".enola")
+        ):
             skipped["ignored_path"] += 1
         else:
             extension = PurePosixPath(path).suffix.lstrip(".").lower()
@@ -151,7 +158,8 @@ def write_sparse_patterns(repo: Path, paths: list[str]) -> None:
     for path in paths:
         if "\n" in path or "\r" in path:
             raise CodeRepositoryError(
-                message="A selected repository path contains a newline; sparse checkout is unsafe."
+                message="A selected repository path contains a newline; sparse checkout is unsafe.",
+                status_code=status.HTTP_400_BAD_REQUEST,
             )
         escaped = re.sub(r"([\\*?\[\] ])", r"\\\1", path)
         patterns.append("/" + escaped)
@@ -162,11 +170,48 @@ def write_sparse_patterns(repo: Path, paths: list[str]) -> None:
     )
 
 
-def check_selected_content(repo: Path, paths: list[str]) -> None:
-    """LFS is never expanded implicitly or indexed as if its pointer were the content."""
+def _folded(path: str) -> str:
+    """A path as a case-insensitive, normalisation-insensitive filesystem would compare it."""
+    return unicodedata.normalize("NFC", path).casefold()
+
+
+def remove_unselected_files(repo: Path, paths: list[str]) -> int:
+    """Delete every file of the work tree that is not in the selection and return how many.
+
+    The sparse patterns select exactly these paths, but git leaves a file in place when its
+    path stops being a file (a file replaced by a submodule keeps its old content). Paths are
+    compared folded: on a case-insensitive filesystem git writes ``Src/a.py`` and ``src/b.py``
+    into one directory, and a selected file must not be deleted for the case of its name.
+    The root ``.git`` and Enola's ``.enola`` output are not the selection's to remove.
+    """
+    selected = {_folded(path) for path in paths}
+    removed = 0
+    directories_seen = []
+    for directory, directories, files in os.walk(repo):
+        if Path(directory) == repo:
+            directories[:] = [name for name in directories if name not in (".git", ".enola")]
+        directories_seen.append(Path(directory))
+        for name in files:
+            full = Path(directory) / name
+            if _folded(full.relative_to(repo).as_posix()) not in selected:
+                full.unlink()
+                removed += 1
+    for directory in reversed(directories_seen):
+        if directory != repo and not any(directory.iterdir()):
+            directory.rmdir()
+    return removed
+
+
+def remove_lfs_pointers(repo: Path, paths: list[str]) -> int:
+    """Delete the selected files that are Git LFS pointers and return how many.
+
+    LFS is never expanded implicitly and a pointer is not the file's content, so it must not
+    be indexed as if it were: a pointer is removed from the checkout and counted as skipped.
+    """
     from cognee.tasks.code_graph.resolve_repo import CodeRepositoryError
 
     prefix = b"version https://git-lfs.github.com/spec/v1"
+    removed = 0
     for path in paths:
         try:
             with (repo / path).open("rb") as file:
@@ -177,10 +222,9 @@ def check_selected_content(repo: Path, paths: list[str]) -> None:
                 "platform cannot represent, or a path that is too long)."
             ) from error
         if head == prefix:
-            raise CodeRepositoryError(
-                message="A selected file is stored in Git LFS. Materialize it in a local "
-                "checkout before ingestion; automatic LFS downloads are disabled."
-            )
+            (repo / path).unlink()
+            removed += 1
+    return removed
 
 
 def _snapshot_path(repo: Path, *, pending: bool = False) -> Path:

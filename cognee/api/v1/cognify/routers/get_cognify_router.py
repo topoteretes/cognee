@@ -36,6 +36,7 @@ from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
+from cognee.tasks.code_graph.repo_resources import RepositoryResourceError
 
 logger = get_logger("api.cognify")
 
@@ -280,7 +281,7 @@ def get_cognify_router() -> APIRouter:
                     status_code=(
                         status.HTTP_507_INSUFFICIENT_STORAGE
                         if first_err is not None
-                        and first_err.error_class == "RepositoryResourceError"
+                        and first_err.error_class == RepositoryResourceError.__name__
                         else status.HTTP_500_INTERNAL_SERVER_ERROR
                     ),
                     content=ErrorResponse(

@@ -37,14 +37,15 @@ async def _fake_dataset_data(dataset_id, data_ids=None, **_kwargs):
     return rows if data_ids is None else [row for row in rows if row.id in data_ids]
 
 
-async def _cognify(datasets=("repos",), authorized=None, **cognify_kwargs):
+async def _cognify(datasets=("repos",), authorized=None, execute_run=None, **cognify_kwargs):
     async def execute(**kwargs):
         if "before_run" in kwargs:
             await kwargs["before_run"](kwargs["data"], DATASET)
         return {DATASET.id: SimpleNamespace(status="done")}
 
-    pipeline = AsyncMock(side_effect=execute)
+    pipeline = AsyncMock(side_effect=execute_run or execute)
     runtime = AsyncMock()
+    environment = AsyncMock()
     if authorized is None:
         authorized = AsyncMock(return_value=[DATASET])
     dataset_data = AsyncMock(side_effect=_fake_dataset_data)
@@ -62,10 +63,11 @@ async def _cognify(datasets=("repos",), authorized=None, **cognify_kwargs):
         patch.object(cognify_module, "get_pipeline_executor", return_value=pipeline),
         patch(
             "cognee.modules.pipelines.layers.setup_and_check_environment.setup_and_check_environment",
-            AsyncMock(),
+            environment,
         ),
     ):
         result = await cognify_module.cognify(datasets=list(datasets), **cognify_kwargs)
+    pipeline.environment = environment
     return result, pipeline, runtime, dataset_data
 
 
@@ -132,8 +134,51 @@ async def test_data_ids_are_refused_while_connected_to_a_remote_instance():
     remote = SimpleNamespace(cognify=AsyncMock())
     with (
         patch.object(serve_state, "get_remote_client", return_value=remote),
-        pytest.raises(ValueError, match="remote Cognee instance"),
+        pytest.raises(CogneeValidationError, match="remote Cognee instance"),
     ):
         await cognify_module.cognify(datasets=["repos"], data_ids=[REPO_A.id])
 
     remote.cognify.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_raw_error_of_the_run_is_wrapped_unless_raw_errors_are_asked_for():
+    """GitHub sync relies on this: its per-repository catch sees a cognee error."""
+    from cognee.modules.pipelines.exceptions import CognifyFailedError
+
+    async def crash(**_kwargs):
+        raise RuntimeError("graph write failed")
+
+    with pytest.raises(CognifyFailedError, match="graph write failed"):
+        await _cognify(data_ids=[REPO_A.id], execute_run=crash)
+    with pytest.raises(RuntimeError, match="graph write failed"):
+        await _cognify(data_ids=[REPO_A.id], execute_run=crash, raise_on_error=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "ids, needs_probes",
+    [([REPO_A.id, REPO_B.id], False), ([REPO_A.id, DOCUMENT.id], True)],
+    ids=["code_only", "with_a_document"],
+)
+async def test_a_data_ids_run_probes_providers_only_when_its_rows_need_them(ids, needs_probes):
+    """GitHub sync builds code repositories only: with the LLM extractor configured it must
+    not probe the LLM or the embeddings, as the rows decide under the dataset lock."""
+    _result, pipeline, _runtime, _rows = await _cognify(data_ids=ids, extractor="llm")
+
+    assert pipeline.await_args.kwargs["skip_connection_test"] is True
+    pipeline.environment.assert_awaited_once()
+    kwargs = pipeline.environment.await_args.kwargs
+    assert kwargs["skip_connection_test"] is (not needs_probes)
+    assert kwargs["needs_llm"] is needs_probes
+
+
+@pytest.mark.asyncio
+async def test_a_run_without_data_ids_keeps_its_probes_before_the_lock():
+    _result, pipeline, _runtime, _rows = await _cognify(extractor="llm")
+
+    # The run's own hooks (the code mapping warning) are not the probe decision: probes stay
+    # in run_pipeline, before the lock, exactly as for every cognify without data_ids.
+    assert "skip_connection_test" not in pipeline.await_args.kwargs
+    assert pipeline.await_args.kwargs["needs_llm"] is True
+    pipeline.environment.assert_not_awaited()
