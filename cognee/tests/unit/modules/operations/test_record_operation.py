@@ -12,6 +12,7 @@ Runs against a real temporary SQLite database — no LLM, no network.
 
 import asyncio
 import importlib
+import sys
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -311,9 +312,11 @@ async def test_background_improve_cancelled_before_start_persists_one_failed_scr
     assert row.operation_name == "improve"
     assert row.outcome == "failed"
     assert row.error_class == "CancelledError"
-    assert row.error_message is not None
-    assert secret not in row.error_message
-    assert "[secret]" in row.error_message
+    assert secret not in (row.error_message or "")
+    if sys.version_info >= (3, 11):
+        # Python 3.10 does not hand a done callback the cancel message, so the
+        # row has no message to scrub there.
+        assert "[secret]" in row.error_message
     assert row.dataset_id == harness.dataset.id
     assert row.user_id == harness.user.id
     assert row.ended_at is not None
