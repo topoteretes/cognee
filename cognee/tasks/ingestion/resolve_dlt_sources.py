@@ -726,8 +726,14 @@ def _reserved_json_column(row: DltRowData, source_tag: str, column: str, raise_s
     return raw
 
 
-def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
+def _row_node_set(row: DltRowData, source_tag: str) -> list[str]:
     """The node sets a document row names in its ``cognee_node_set`` column.
+
+    A row states its full current node sets, so a row without the column, or
+    with an empty list, has none: ``[]``, never ``None``. Re-ingesting an
+    existing document treats ``None`` as "keep the stored node sets" (the
+    PATCH rule of update()), which would leave a page that lost all its labels
+    in the node sets it was removed from; ``[]`` clears them.
 
     The column must hold a JSON list of names. It comes back as that list (a
     json column) or as its JSON text (SQLite). Any other shape raises: the
@@ -746,7 +752,7 @@ def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
     """
     raw = _reserved_json_column(row, source_tag, NODE_SET_COLUMN, _raise_node_set_shape)
     if raw is None:
-        return None
+        return []
     if not isinstance(raw, list):
         _raise_node_set_shape(row, source_tag, f"a JSON {type(raw).__name__}")
     # No cap on the number or length of names, on purpose. A cap would cut a
@@ -767,7 +773,7 @@ def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
         except UnicodeEncodeError:
             _raise_node_set_shape(row, source_tag, "an entry that cannot be encoded as a name")
         unique.setdefault(key, name)
-    return list(unique.values()) or None
+    return list(unique.values())
 
 
 _STRUCTURE_ENTRY_KEYS = {"kind", "id", "name", "document"}
