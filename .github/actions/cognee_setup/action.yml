@@ -106,6 +106,7 @@ runs:
           uv run python -m cognee.tasks.graph.gliner_demo.install \
             && uv run python .github/scripts/fetch_keyless_models.py && exit 0
           echo "Fetching the keyless models failed (attempt $attempt of 5)"
-          [ "$attempt" -lt 5 ] && sleep $((attempt * 30))
+          # Random extra seconds, so jobs refused together do not retry together.
+          [ "$attempt" -lt 5 ] && sleep $((attempt * 30 + RANDOM % 30))
         done
         exit 1
