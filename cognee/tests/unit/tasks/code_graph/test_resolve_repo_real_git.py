@@ -353,6 +353,26 @@ async def test_default_branch_refresh_follows_remote_head_change(origin, clones)
 
 
 @pytest.mark.asyncio
+async def test_lock_files_of_a_killed_git_do_not_wedge_the_clone(origin, clones):
+    """Git is killed with SIGKILL on cancel, timeout and OOM, so it leaves index.lock and
+    shallow.lock behind; the next refresh must remove them instead of failing for good."""
+    target = await _resolve(clones)
+    leftovers = [
+        target / ".git" / "index.lock",
+        target / ".git" / "shallow.lock",
+        target / ".git" / "refs" / "heads" / "main.lock",
+    ]
+    for lock in leftovers:
+        lock.write_text("")
+    origin.commit("main", "main-2")
+
+    assert await _resolve(clones) == target
+
+    assert _content(target) == "main-2"
+    assert not any(lock.exists() for lock in leftovers)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("branch", [None, "main"])
 async def test_unreachable_origin_never_returns_stale_success(origin, clones, branch):
     target = await _resolve(clones, branch)

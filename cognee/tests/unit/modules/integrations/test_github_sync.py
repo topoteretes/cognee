@@ -389,3 +389,53 @@ async def test_the_token_never_reaches_the_log_of_a_failed_repository(mocks, cap
 
     assert "failed for acme/api" in caplog.text
     assert "tok123" not in caplog.text
+
+
+@pytest.fixture
+def legacy(monkeypatch, mocks):
+    """The legacy rows of a repository and the calls that forget them, with the real
+    add and cognify replaced as in every sync test."""
+    code_repo = importlib.import_module("cognee.tasks.code_graph.code_repo")
+    forget_module = importlib.import_module("cognee.api.v1.forget")
+    data_methods = importlib.import_module("cognee.modules.data.methods")
+    dataset = SimpleNamespace(id=uuid4())
+    legacy_ids = [uuid4(), uuid4()]
+    forget = AsyncMock()
+    monkeypatch.setattr(forget_module, "forget", forget)
+    monkeypatch.setattr(
+        data_methods, "get_authorized_existing_datasets", AsyncMock(return_value=[dataset])
+    )
+    monkeypatch.setattr(code_repo, "legacy_repository_row_ids", AsyncMock(return_value=legacy_ids))
+    return SimpleNamespace(
+        forget=forget, dataset=dataset, ids=legacy_ids, error=code_repo.LegacyRepositoryError
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_repository_is_forgotten_and_built_again_once(mocks, legacy):
+    mocks.add.side_effect = [legacy.error("a remote repository row"), _added(), _added()]
+
+    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert [call.kwargs["data_id"] for call in legacy.forget.await_args_list] == legacy.ids
+    assert all(
+        call.kwargs == {"data_id": data_id, "dataset_id": legacy.dataset.id, "user": mocks.owner}
+        for call, data_id in zip(legacy.forget.await_args_list, legacy.ids)
+    )
+    assert mocks.add.await_count == 3 and mocks.cognify.await_count == 2
+    assert mocks.observations[-1].state == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_a_repository_that_stays_legacy_fails_alone_after_one_rebuild(mocks, legacy):
+    mocks.add.side_effect = [
+        legacy.error("a remote repository row"),
+        legacy.error("a graph written before repository identities changed"),
+        _added(),
+    ]
+
+    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert legacy.forget.await_count == len(legacy.ids)  # forgotten once, never in a loop
+    assert mocks.add.await_count == 3 and mocks.cognify.await_count == 1
+    assert mocks.observations[-1].state == "partial"

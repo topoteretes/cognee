@@ -88,7 +88,42 @@ async def list_installation_repositories(token: str) -> list[str]:
     return full_names
 
 
+async def _forget_legacy_repository(full_name: str, dataset_name: str, owner) -> None:
+    """Forget this repository's rows written before repository identities changed.
+
+    The code graph is derived from GitHub, so it is rebuilt by the add that follows.
+    """
+    from cognee.api.v1.forget import forget
+    from cognee.modules.data.methods import get_authorized_existing_datasets
+    from cognee.tasks.code_graph.code_repo import legacy_repository_row_ids
+
+    (dataset,) = await get_authorized_existing_datasets([dataset_name], "write", owner)
+    for data_id in await legacy_repository_row_ids(clone_url(full_name), dataset.id):
+        await forget(data_id=data_id, dataset_id=dataset.id, user=owner)
+
+
 async def _add_and_build(full_name: str, dataset_name: str, owner, token: str) -> None:
+    """Add and build one repository, rebuilding it once when it holds a legacy graph.
+
+    A dataset an earlier release synced holds the repository under the old identity, and
+    the sync cannot move to another dataset, so the legacy data is forgotten and built
+    again instead of failing every sync.
+    """
+    from cognee.tasks.code_graph.code_repo import LegacyRepositoryError
+
+    try:
+        await _add_and_build_once(full_name, dataset_name, owner, token)
+    except LegacyRepositoryError:
+        logger.warning(
+            "GitHub repository %s holds a graph from before repository identities changed: "
+            "forgetting it and building it again.",
+            full_name,
+        )
+        await _forget_legacy_repository(full_name, dataset_name, owner)
+        await _add_and_build_once(full_name, dataset_name, owner, token)
+
+
+async def _add_and_build_once(full_name: str, dataset_name: str, owner, token: str) -> None:
     """Add one repository, then build exactly the rows that add returned."""
     from cognee.api.v1.add import add
     from cognee.api.v1.cognify.cognify import cognify

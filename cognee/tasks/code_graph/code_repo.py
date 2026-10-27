@@ -294,32 +294,37 @@ async def repository_read(directory: Path, *, remote: bool, expected_commit: str
         yield commit
 
 
-async def _reject_legacy_repo_row(source_url, dataset_id):
-    """Inspect remote provenance in this dataset, never a globally claimed name."""
+async def legacy_repository_row_ids(source_url, dataset_id) -> list:
+    """Ids of this dataset's rows for ``source_url`` written before repository identities
+    changed: a remote ``code_repo`` row without ``identity_version`` 2."""
     from sqlalchemy import select
 
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Data
 
     async with get_relational_engine().get_async_session() as session:
-        metadata_rows = (
-            (
-                await session.execute(
-                    select(Data.system_metadata).where(
-                        Data.dataset_id == dataset_id,
-                        Data.system_metadata["source"].as_string() == "code_repo",
-                    )
+        rows = (
+            await session.execute(
+                select(Data.id, Data.system_metadata).where(
+                    Data.dataset_id == dataset_id,
+                    Data.system_metadata["source"].as_string() == "code_repo",
                 )
             )
-            .scalars()
-            .all()
-        )
-    for metadata in metadata_rows:
+        ).all()
+    legacy = []
+    for data_id, metadata in rows:
         if isinstance(metadata, str):
             metadata = json.loads(metadata)
         url = metadata.get("repo_url")
         if url and repo_key(url) == repo_key(source_url) and metadata.get("identity_version") != 2:
-            raise LegacyRepositoryError("a remote repository row")
+            legacy.append(data_id)
+    return legacy
+
+
+async def _reject_legacy_repo_row(source_url, dataset_id):
+    """Inspect remote provenance in this dataset, never a globally claimed name."""
+    if await legacy_repository_row_ids(source_url, dataset_id):
+        raise LegacyRepositoryError("a remote repository row")
 
 
 async def resolve_code_repository(

@@ -337,3 +337,52 @@ async def test_a_remote_repository_stores_its_documents_with_the_commit(code_env
     documents = [row for row in rows if (row.system_metadata or {}).get("source") != "code_repo"]
     assert len(documents) == 1
     assert documents[0].external_metadata["repo_commit"] == revision
+
+
+async def _make_row_legacy(added):
+    from sqlalchemy import update
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Data
+
+    async with get_relational_engine().get_async_session() as session:
+        row = await session.get(Data, added.data_ids[0])
+        await session.execute(
+            update(Data)
+            .where(Data.id == added.data_ids[0])
+            .values(
+                system_metadata={
+                    key: value
+                    for key, value in row.system_metadata.items()
+                    if key != "identity_version"
+                }
+            )
+        )
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_sync_forgets_a_legacy_repository_row_and_builds_it_again(code_environment):
+    """GitHub sync cannot move to a new dataset, so it forgets the repository's legacy row
+    and builds it once more instead of failing every sync."""
+    from cognee.modules.integrations.github.sync import _forget_legacy_repository
+    from cognee.tasks.code_graph.code_repo import LegacyRepositoryError
+
+    env = code_environment
+    remote = env.remote("acme/api")
+    other = env.remote("acme/web")
+    added = await add(remote.url, env)
+    kept = await add(other.url, env)
+    await build(kept, env)
+    await _make_row_legacy(added)
+    with pytest.raises(LegacyRepositoryError):
+        await add(remote.url, env)
+
+    await _forget_legacy_repository("acme/api", "code", env.user)
+
+    rebuilt = await add(remote.url, env)
+    await build(rebuilt, env)
+    nodes, _ = await graph(rebuilt, env)
+    assert repo_nodes(nodes, remote.key)
+    assert repo_nodes(nodes, other.key)  # another repository of the dataset is left alone
+    assert (await manifest(rebuilt))["identity_version"] == 2

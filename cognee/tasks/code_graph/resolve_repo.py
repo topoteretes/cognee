@@ -629,6 +629,7 @@ async def resolve_repo_source(
         if (target / ".git").is_dir():
             await _verify_origin(target, clean_url)
             if await _has_commit(target):
+                await asyncio.to_thread(_remove_stale_git_locks, target)
                 ref = f"refs/heads/{branch}" if branch is not None else "HEAD"
                 code, stderr = await _run_git(
                     ["fetch", "--depth", "1", clean_url, ref], cwd=target, env=git_env
@@ -687,6 +688,19 @@ async def resolve_repo_source(
             if partial.exists():
                 await finish_cleanup(asyncio.to_thread(_remove_clone, partial))
         return target
+
+
+def _remove_stale_git_locks(clone: Path) -> None:
+    """Delete the lock files a killed git process left in ``clone``.
+
+    git is killed outright on cancel and timeout (as is the whole process on an OOM kill),
+    so it never removes its own ``index.lock`` or ``shallow.lock``, and every later
+    fetch or reset would fail on them. The clone lock is held, so no git process of ours
+    is running in this clone and every lock file here is stale.
+    """
+    git_dir = clone / ".git"
+    for lock in [*git_dir.glob("*.lock"), *(git_dir / "refs").rglob("*.lock")]:
+        lock.unlink(missing_ok=True)
 
 
 async def _verify_origin(clone: Path, expected: str) -> None:
