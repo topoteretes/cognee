@@ -308,7 +308,7 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **RAG_COMPLETION** - Traditional RAG with chunks
 - **CHUNKS** - Vector similarity search over chunks
 - **CHUNKS_LEXICAL** - Lexical (keyword) search over chunks
-- **SUMMARIES** - Search pre-computed document summaries
+- **SUMMARIES** - Search the pre-computed chunk summaries. With the default `SUMMARY_METHOD=from_extraction` a summary holds only the chunk's extracted entity names and relationships, so attribute facts (a number, a size, a specialty) stated only in prose are not in it, and a chunk with no relationships has none; a dataset where no chunk has one returns no hits. `SUMMARY_METHOD=llm` restores prose summaries
 - **CYPHER** - Direct Cypher query execution (disabled by default; `ALLOW_CYPHER_QUERY=true` enables it)
 - **NATURAL_LANGUAGE** - Natural language to structured query (LLM writes Cypher, then runs it; disabled by default behind the same `ALLOW_CYPHER_QUERY=true` flag)
 - **TEMPORAL** - Hybrid retrieval reranked by time: the `Timestamp` nodes overlapping the window the LLM extracts from the question ("what happened in 1969?") are looked up natively (`get_timestamps_in_range` on Ladybug, Neo4j, Postgres demo; a scan elsewhere), the chunks attached to them join the hybrid candidates (similarity alone misses most rows dated inside a window), and the anchored candidates move to the front, ranked by how tightly their matched timestamp fits the window (a chunk dated to the day before one that only names the year); nothing is dropped, and a question with no time or no overlap gets plain hybrid

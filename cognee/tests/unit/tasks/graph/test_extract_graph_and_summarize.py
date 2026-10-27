@@ -42,7 +42,16 @@ def _patch(monkeypatch, extract):
     monkeypatch.setattr(task_module, "extract_graph_from_data", extract)
     summarize = AsyncMock(return_value=["llm-summary"])
     monkeypatch.setattr(task_module, "summarize_text", summarize)
+    _patch_vector_engine(monkeypatch)
     return summarize
+
+
+def _patch_vector_engine(monkeypatch):
+    vector_engine = SimpleNamespace(create_vector_index=AsyncMock())
+    monkeypatch.setattr(
+        task_module, "get_vector_engine_async", AsyncMock(return_value=vector_engine)
+    )
+    return vector_engine
 
 
 @pytest.mark.asyncio
@@ -72,6 +81,23 @@ async def test_omitted_summary_method_reads_the_config(monkeypatch):
 
     summarize.assert_not_awaited()
     assert result == chunks
+
+
+@pytest.mark.asyncio
+async def test_from_extraction_creates_the_summary_collection_when_no_chunk_has_a_relation(
+    monkeypatch,
+):
+    """SUMMARIES must find an empty collection, not a missing one, on such a dataset."""
+    chunks = [_chunk("A cat on a sofa.")]
+    _patch(monkeypatch, AsyncMock(return_value=chunks))
+    vector_engine = _patch_vector_engine(monkeypatch)
+
+    result = await task_module.extract_graph_and_summarize(
+        chunks, KnowledgeGraph, summary_method="from_extraction"
+    )
+
+    assert result == chunks
+    vector_engine.create_vector_index.assert_awaited_once_with("TextSummary", "text")
 
 
 def _deal_graph():

@@ -30,7 +30,10 @@ stand-ins from `mock_ai.py`:
 
 No network, no secrets. This tier runs on every PR, including forks. Because
 it is deterministic, the correctness journey holds every path to **30/30** in
-this mode; a lost question is a regression and the scorecard names it.
+this mode, except `SUMMARIES` at **23/30** (the default summary is built from
+the extracted relationships, so the replayed summary is not used and the seven
+attribute questions miss); a lost question is a regression and the scorecard
+names it.
 
 `COGNEE_JOURNEY_MODE=llm` uses the real providers from the environment. The
 correctness journey switches to threshold assertions and additionally enforces

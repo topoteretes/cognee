@@ -18,7 +18,8 @@ deletion. After every single iteration the whole system is verified:
     gone from graph AND vector store;
   - the graph equals EXACTLY the structure the live chunk texts imply —
     entities, entity types, ``is_a``, ``contains``, ``precedes`` relationships,
-    one summary per chunk, ``made_from``, ``is_part_of`` — so nothing stale
+    one summary per chunk that states a relationship (the default
+    ``from_extraction`` summary), ``made_from``, ``is_part_of`` — so nothing stale
     survives (no ghost entities, no relationship without supporting text) and
     nothing live is missing (no fact deleted while a chunk still states it);
   - ownership is exact: every entity's chunk-scoped (v2) owners are the
@@ -338,9 +339,12 @@ def _expected_structure(chunks_by_doc: dict):
         nodes.add(f"doc:{doc_id}")
         for chunk_id, text in chunks:
             nodes.add(f"chunk:{chunk_id}")
-            nodes.add(f"summary:{chunk_id}")
             edges.add((f"chunk:{chunk_id}", "is_part_of", f"doc:{doc_id}"))
-            edges.add((f"summary:{chunk_id}", "made_from", f"chunk:{chunk_id}"))
+            # The default summary is built from the chunk's relationships, so a
+            # chunk that states none has no summary.
+            if _pairs(text):
+                nodes.add(f"summary:{chunk_id}")
+                edges.add((f"summary:{chunk_id}", "made_from", f"chunk:{chunk_id}"))
             for name in _nouns(text):
                 nodes.add(f"entity:{name}")
                 nodes.add(f"type:{_kind(name)}")

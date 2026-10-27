@@ -3,6 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.ontology.ontology_config import Config
@@ -36,8 +37,12 @@ async def extract_graph_and_summarize(
             chunk_attachment=chunk_attachment,
             **kwargs,
         )
-        # A chunk with no relations has no summary. It is returned as itself so
-        # add_data_points still stores it.
+        # A chunk with no relations has no summary. Create the summary collection
+        # anyway, so a dataset where no chunk has a relation answers SUMMARIES with
+        # no hits instead of NoDataError, which is reserved for a dataset with no data.
+        vector_engine = await get_vector_engine_async()
+        await vector_engine.create_vector_index(TextSummary.__name__, "text")
+        # A chunk with no summary is returned as itself so add_data_points still stores it.
         return [
             await build_summary_from_extraction(chunk, graph_model) or chunk
             for chunk in extracted_chunks
