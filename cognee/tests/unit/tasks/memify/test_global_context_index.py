@@ -41,6 +41,20 @@ def _default_ledger_graph(monkeypatch):
     monkeypatch.setattr(persist_module, "stores_provenance_in_graph", AsyncMock(return_value=False))
 
 
+@pytest.fixture(autouse=True)
+def routed(monkeypatch):
+    """Record what the run mirrors into the dataset routing collection (a real store otherwise)."""
+    calls = []
+
+    async def fake_sync_dataset_routes(dataset_id, desired):
+        calls.append((dataset_id, desired))
+
+    monkeypatch.setattr(
+        update_global_context_index_module, "sync_dataset_routes", fake_sync_dataset_routes
+    )
+    return calls
+
+
 def _summary_node(text: str = "summary", bucket_id: str | None = None) -> SummaryNode:
     return SummaryNode(
         id=str(uuid4()),
@@ -536,7 +550,9 @@ async def test_update_global_context_index_rejects_graph_without_dataset_before_
 
 
 @pytest.mark.asyncio
-async def test_update_global_context_index_first_build_creates_one_bucket_per_summary(monkeypatch):
+async def test_update_global_context_index_first_build_creates_one_bucket_per_summary(
+    monkeypatch, routed
+):
     summaries = [_summary_node("alpha"), _summary_node("beta"), _summary_node("gamma")]
     summary_input = GlobalContextIndexInput(text_summaries=summaries, buckets=[])
     dataset_id = uuid4()
@@ -598,6 +614,9 @@ async def test_update_global_context_index_first_build_creates_one_bucket_per_su
     }
     _assert_add_data_points_used_context(add_data_points_mock, ctx)
     unified_engine.graph.add_nodes.assert_not_awaited()
+    # The routing collection mirrors this method's root only: its bucket ids are
+    # clustering results, which the read path cannot derive.
+    assert routed == [(str(dataset_id), roots)]
 
 
 @pytest.mark.asyncio

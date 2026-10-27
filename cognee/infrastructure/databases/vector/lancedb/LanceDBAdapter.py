@@ -473,13 +473,11 @@ class LanceDBAdapter(VectorDBInterface):
         payload_schema = type(data_points[0])
         self._mark_written(collection_name)
 
+        # create_collection does its own double-checked locking on VECTOR_DB_LOCK;
+        # taking the lock here as well deadlocked the first write to a collection
+        # (the lock is not reentrant).
         if not await self.has_collection(collection_name):
-            async with self.VECTOR_DB_LOCK:
-                if not await self.has_collection(collection_name):
-                    await self.create_collection(
-                        collection_name,
-                        payload_schema,
-                    )
+            await self.create_collection(collection_name, payload_schema)
 
         collection = await self.get_collection(collection_name)
 

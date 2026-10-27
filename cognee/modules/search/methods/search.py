@@ -247,32 +247,93 @@ async def authorized_search(
         datasets=dataset_ids, permission_type="read", user=user
     )
 
-    # Searches all provided datasets and handles setting up of appropriate database context based on permissions
-    search_results = await search_in_datasets_context(
-        search_datasets=search_datasets,
-        query_type=query_type,
-        query_text=query_text,
-        user=user,
-        system_prompt_path=system_prompt_path,
-        system_prompt=system_prompt,
-        top_k=top_k,
-        node_type=node_type,
-        node_name=node_name,
-        node_name_filter_operator=node_name_filter_operator,
-        only_context=only_context,
-        session_id=session_id,
-        wide_search_top_k=wide_search_top_k,
-        triplet_distance_penalty=triplet_distance_penalty,
-        feedback_influence=feedback_influence,
-        retriever_specific_config=retriever_specific_config,
-        neighborhood_depth=neighborhood_depth,
-        neighborhood_seed_top_k=neighborhood_seed_top_k,
-        include_references=include_references,
-        llm_config=llm_config,
-        embedding_config=embedding_config,
-    )
+    async def _search(datasets: list[Dataset]) -> list[SearchResultPayload]:
+        # Searches all provided datasets and handles setting up of appropriate database context based on permissions
+        return await search_in_datasets_context(
+            search_datasets=datasets,
+            query_type=query_type,
+            query_text=query_text,
+            user=user,
+            system_prompt_path=system_prompt_path,
+            system_prompt=system_prompt,
+            top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
+            only_context=only_context,
+            session_id=session_id,
+            wide_search_top_k=wide_search_top_k,
+            triplet_distance_penalty=triplet_distance_penalty,
+            feedback_influence=feedback_influence,
+            retriever_specific_config=retriever_specific_config,
+            neighborhood_depth=neighborhood_depth,
+            neighborhood_seed_top_k=neighborhood_seed_top_k,
+            include_references=include_references,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
+        )
 
+    routed_datasets = await _route_datasets(query_text, dataset_ids, search_datasets)
+    if routed_datasets is None:
+        return await _search(search_datasets)
+
+    # Routed: the best-scoring datasets plus every unindexed one. Finding
+    # nothing there, or only datasets without searchable memory (an unscoped
+    # search raises that only when every dataset lacks it), widens the search
+    # back to every readable dataset.
+    try:
+        search_results = await _search(routed_datasets)
+    except NoDataError:
+        logger.info(
+            "Dataset routing picked datasets with no searchable memory; "
+            "searching every readable dataset."
+        )
+        return await _search(search_datasets)
+    if not any(payload.entries() for payload in search_results):
+        logger.info(
+            "Dataset routing searched %d of %d datasets and found nothing; "
+            "searching every readable dataset.",
+            len(routed_datasets),
+            len(search_datasets),
+        )
+        return await _search(search_datasets)
     return search_results
+
+
+async def _route_datasets(
+    query_text: str, dataset_ids: list[UUID] | None, search_datasets: list[Dataset]
+) -> list[Dataset] | None:
+    """The datasets an unscoped search covers after routing, or None to cover them all.
+
+    Routing applies only when the caller named no dataset, more than one is
+    readable, backend access control gives each its own store, and routing is
+    on. The decision keeps every dataset with no routing rows, so a dataset
+    never searched by the global context index is never dropped.
+    """
+    from cognee.modules.search.dataset_routing import get_dataset_routing_config, route_datasets
+
+    if (
+        dataset_ids is not None
+        or len(search_datasets) < 2
+        or not backend_access_control_enabled()
+        or not get_dataset_routing_config().enabled
+    ):
+        return None
+
+    decision = await route_datasets(
+        query_text,
+        [dataset.id for dataset in search_datasets],
+        get_dataset_routing_config().top_k,
+    )
+    if not decision.narrowed:
+        return None
+
+    by_id = {dataset.id: dataset for dataset in search_datasets}
+    routed = [by_id[dataset_id] for dataset_id in decision.dataset_ids]
+    logger.info(
+        "Dataset routing: searching %d of %d readable datasets", len(routed), len(search_datasets)
+    )
+    return routed
 
 
 async def search_in_datasets_context(

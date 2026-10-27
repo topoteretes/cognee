@@ -43,6 +43,13 @@ async def delete_dataset(dataset: Dataset):
         )
         await session.commit()
 
+    # No index build follows a dataset delete, so its routing rows go here,
+    # while the data ids they derive from are still known. Imported here: the
+    # routing package reads this package, which imports this module.
+    from cognee.modules.search.dataset_routing import remove_dataset_routes
+
+    await remove_dataset_routes(dataset.id, data_ids)
+
     # Files are refcounted by raw_data_location inside delete_data_entity, so
     # content shared with other datasets' rows keeps its file.
     for data_id in data_ids:

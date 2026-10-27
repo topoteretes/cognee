@@ -92,8 +92,8 @@ Runs the self-improvement loop over a dataset: nine stages in a fixed order,
 each of which first declines work it cannot do (no LLM calls) and then runs.
 Stages 1-7 (feedback weights, session Q&A / trace persistence, agent context,
 distillation, user preferences, truth subspace) need --session-ids. Conflict
-review, the truth subspace and the global context index are opt-in flags. The
-result prints one line per stage.
+review and the truth subspace are opt-in flags; the global context index runs
+by default (IMPROVE_GLOBAL_CONTEXT_INDEX). The result prints one line per stage.
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -130,7 +130,10 @@ result prints one line per stage.
         parser.add_argument(
             "--build-global-context-index",
             action="store_true",
-            help="Build the global context index (opt-in stage)",
+            help=(
+                "Build the global context index for this run even if "
+                "IMPROVE_GLOBAL_CONTEXT_INDEX is false (default: follow that setting)"
+            ),
         )
         parser.add_argument(
             "--build-truth-subspace",
@@ -165,7 +168,10 @@ result prints one line per stage.
             fmt.echo(f"Improving knowledge graph for dataset '{dataset}'...")
 
             feedback_alpha: float | None = getattr(args, "feedback_alpha", None)
-            build_global_context_index = bool(getattr(args, "build_global_context_index", False))
+            # The flag only forces the stage on; absent, improve() follows its config.
+            build_global_context_index = (
+                True if getattr(args, "build_global_context_index", False) else None
+            )
             build_truth_subspace = bool(getattr(args, "build_truth_subspace", False))
             review_conflicts = bool(getattr(args, "review_conflicts", False))
             if getattr(args, "node_name", None) is not None:

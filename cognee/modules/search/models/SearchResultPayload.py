@@ -8,6 +8,14 @@ from cognee.modules.search.models.EvidenceReference import EvidenceReference
 from cognee.modules.search.types.SearchType import SearchType
 
 
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
 class SearchResultPayload(BaseModel):
     """Result payload from retriever classes."""
 
@@ -46,6 +54,25 @@ class SearchResultPayload(BaseModel):
     # search's list still carries one entry per dataset, so a caller can tell
     # "nothing matched here" from "this dataset was not searched" -- and read why.
     error: str | None = None
+
+    def entries(self) -> list[Any]:
+        """What this dataset's search found, one element per result.
+
+        The prompt pair of an ``only_context`` search counts as one entry; otherwise
+        the completion, else the context, else the raw retriever output. An empty
+        list means retrieval found nothing: recall's ``on_empty`` tools fallback,
+        the session short-circuit and dataset routing's retry all read it that way.
+        """
+        if self.only_context and self.user_prompt:
+            return [self.user_prompt]
+        if self.only_context:
+            # Retrievers report a miss as None, "" or []; a bare "" is not a hit.
+            return [entry for entry in _as_list(self.context) if entry]
+        if self.completion is not None:
+            return _as_list(self.completion)
+        if self.context is not None:
+            return _as_list(self.context)
+        return _as_list(self.result_object)
 
     @field_serializer("result_object")
     def serialize_complex_types(self, v: Any):

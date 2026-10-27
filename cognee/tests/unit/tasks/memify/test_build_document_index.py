@@ -247,7 +247,7 @@ async def test_only_changed_nodes_are_written_and_everything_else_is_deleted(mon
             "bucket-of-a-deleted-document": "orphan",
         }
     )
-    deleted, persisted, edges = [], [], []
+    deleted, persisted, edges, routed = [], [], [], []
 
     async def fake_engine():
         return "engine"
@@ -261,16 +261,22 @@ async def test_only_changed_nodes_are_written_and_everything_else_is_deleted(mon
     async def fake_edges(edges_by_relationship, engine, ctx=None):
         edges.append(edges_by_relationship)
 
+    async def fake_sync_routes(dataset_id, desired):
+        routed.append((dataset_id, [summary.id for summary in desired]))
+
     monkeypatch.setattr(build_document_index_module, "get_unified_engine", fake_engine)
     monkeypatch.setattr(build_document_index_module, "delete_context_index_nodes", fake_delete)
     monkeypatch.setattr(build_document_index_module, "persist_context_summaries", fake_persist)
     monkeypatch.setattr(build_document_index_module, "persist_context_index_edges", fake_edges)
+    monkeypatch.setattr(build_document_index_module, "sync_dataset_routes", fake_sync_routes)
 
     changed = await build_document_index_module.build_document_index(content)
 
     assert [summary.id for summary in changed] == [beta.id]
     assert [summary.id for summary in persisted] == [beta.id]
     assert deleted == ["bucket-of-a-deleted-document"]
+    # The routing collection reconciles against the whole desired index, not the diff.
+    assert routed == [("ds", [alpha.id, beta.id, root.id])]
     # One write carrying both edge sets, for the changed bucket only; the
     # summarizes edge targets the document.
     assert edges == [

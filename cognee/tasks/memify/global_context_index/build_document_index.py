@@ -26,6 +26,7 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.graph.utils.entity_scoring import compute_idf_from_counts
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.tasks.task import task_summary
+from cognee.modules.search.dataset_routing import sync_dataset_routes
 from cognee.tasks.summarization.models import GlobalContextSummary
 
 from .constants import (
@@ -80,6 +81,9 @@ async def build_document_index(
         if data.existing_summary_texts.get(node_id) != summary.text
     ]
     await persist_context_summaries(changed, ctx)
+    # The routing collection mirrors this index and reconciles against the full
+    # desired set, not the diff, so a row it is missing is written too.
+    await sync_dataset_routes(data.dataset_id, list(desired.values()))
     await _persist_bucket_edges(
         [summary for summary in changed if not summary.is_root],
         data.dataset_id,

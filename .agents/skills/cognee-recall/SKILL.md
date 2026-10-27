@@ -17,9 +17,13 @@ for r in results:
     print(r.source, r.text)  # e.g. "graph", "Einstein was born in Ulm."
 ```
 
-Without `datasets` it searches every dataset the user can read. Pass
+Without `datasets` it covers every dataset the user can read, but dataset
+routing (on by default, `DATASET_ROUTING_ENABLED`) scores those datasets
+against the query on their global context index and searches only the best
+`DATASET_ROUTING_TOP_K` (default 1), plus any dataset that has no index yet;
+a routed search that finds nothing is widened to all of them. Pass
 `datasets=["research"]` (names) or `dataset_ids=[...]` (UUIDs, which win) to
-narrow it; that is also faster.
+pin the scope yourself; an explicit scope is never routed.
 
 ## Use it
 

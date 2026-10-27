@@ -1,0 +1,234 @@
+"""authorized_search: dataset routing narrows an unscoped search to the routed datasets."""
+
+import importlib
+import types
+from uuid import NAMESPACE_OID, uuid4, uuid5
+
+import pytest
+
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.search.dataset_routing import DatasetRoutingConfig, DatasetRoutingDecision
+from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
+from cognee.modules.search.types import SearchType
+
+
+def _dataset(name):
+    return types.SimpleNamespace(id=uuid5(NAMESPACE_OID, name), name=name, tenant_id=None)
+
+
+def _payload(dataset, hits=(), **fields):
+    return SearchResultPayload(
+        result_object=list(hits),
+        search_type=SearchType.CHUNKS,
+        question="q",
+        dataset_id=dataset.id,
+        dataset_name=dataset.name,
+        **fields,
+    )
+
+
+@pytest.fixture
+def lane(monkeypatch):
+    """Stub the permission lookup, the fan-out and the router; returns spies and knobs."""
+    search_mod = importlib.import_module("cognee.modules.search.methods.search")
+    routing_pkg = importlib.import_module("cognee.modules.search.dataset_routing")
+
+    state = types.SimpleNamespace(
+        readable=[_dataset("a"), _dataset("b")],
+        fan_out_calls=[],  # dataset lists handed to search_in_datasets_context, in order
+        route_calls=[],
+        decision=None,
+        responses=[[]],  # one per fan-out call, in order; the last one repeats
+        access_control=True,
+        config=DatasetRoutingConfig(_env_file=None),
+    )
+
+    async def fake_readable(datasets, permission_type, user):
+        assert permission_type == "read"
+        if datasets is None:
+            return state.readable
+        return [dataset for dataset in state.readable if dataset.id in datasets]
+
+    async def fake_fan_out(**kwargs):
+        state.fan_out_calls.append([dataset.id for dataset in kwargs["search_datasets"]])
+        response = state.responses[min(len(state.fan_out_calls), len(state.responses)) - 1]
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    async def fake_route(query_text, dataset_ids, top_k):
+        state.route_calls.append((query_text, list(dataset_ids), top_k))
+        return state.decision
+
+    monkeypatch.setattr(search_mod, "get_authorized_existing_datasets", fake_readable)
+    monkeypatch.setattr(search_mod, "search_in_datasets_context", fake_fan_out)
+    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: state.access_control)
+    monkeypatch.setattr(routing_pkg, "route_datasets", fake_route)
+    monkeypatch.setattr(routing_pkg, "get_dataset_routing_config", lambda: state.config)
+    state.search_mod = search_mod
+    return state
+
+
+async def _search(lane, **kwargs):
+    return await lane.search_mod.authorized_search(
+        query_type=SearchType.CHUNKS,
+        query_text="q",
+        user=types.SimpleNamespace(id=uuid4(), tenant_id=None),
+        **kwargs,
+    )
+
+
+def _narrowed(lane):
+    a, b = (dataset.id for dataset in lane.readable)
+    return DatasetRoutingDecision(candidates=(a, b), routed=(b,), unindexed=(), scores={b: 0.1})
+
+
+@pytest.mark.asyncio
+async def test_unscoped_search_covers_only_the_routed_dataset(lane):
+    lane.decision = _narrowed(lane)
+    a, b = lane.readable
+    lane.responses = [[_payload(b, ["hit"])]]
+
+    out = await _search(lane)
+
+    assert lane.route_calls == [("q", [a.id, b.id], 1)]
+    assert lane.fan_out_calls == [[b.id]]
+    assert [payload.dataset_id for payload in out] == [b.id]
+
+
+@pytest.mark.asyncio
+async def test_top_k_comes_from_config(lane):
+    lane.decision = _narrowed(lane)
+    lane.config = DatasetRoutingConfig(_env_file=None, top_k=2)
+
+    await _search(lane)
+
+    assert lane.route_calls[0][2] == 2
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_dataset_scope_is_never_routed(lane):
+    a, _ = lane.readable
+
+    await _search(lane, dataset_ids=[a.id])
+
+    assert lane.route_calls == []
+    assert lane.fan_out_calls == [[a.id]]
+
+
+@pytest.mark.asyncio
+async def test_routing_off_covers_every_readable_dataset(lane):
+    lane.config = DatasetRoutingConfig(_env_file=None, enabled=False)
+
+    await _search(lane)
+
+    assert lane.route_calls == []
+    assert lane.fan_out_calls == [[dataset.id for dataset in lane.readable]]
+
+
+@pytest.mark.asyncio
+async def test_no_routing_without_backend_access_control(lane):
+    lane.access_control = False
+
+    await _search(lane)
+
+    assert lane.route_calls == []
+    assert lane.fan_out_calls == [[dataset.id for dataset in lane.readable]]
+
+
+@pytest.mark.asyncio
+async def test_a_single_readable_dataset_is_not_scored(lane):
+    lane.readable = lane.readable[:1]
+
+    await _search(lane)
+
+    assert lane.route_calls == []
+    assert lane.fan_out_calls == [[lane.readable[0].id]]
+
+
+@pytest.mark.asyncio
+async def test_an_unnarrowed_decision_keeps_every_dataset(lane):
+    a, b = (dataset.id for dataset in lane.readable)
+    lane.decision = DatasetRoutingDecision(candidates=(a, b), routed=(), unindexed=(a, b))
+
+    await _search(lane)
+
+    assert lane.fan_out_calls == [[a, b]]
+
+
+@pytest.mark.asyncio
+async def test_routed_datasets_come_best_first_then_unindexed(lane):
+    lane.readable = [_dataset("a"), _dataset("b"), _dataset("c")]
+    a, b, c = (dataset.id for dataset in lane.readable)
+    lane.decision = DatasetRoutingDecision(
+        candidates=(a, b, c), routed=(c,), unindexed=(a,), scores={c: 0.1, b: 0.5}
+    )
+    lane.responses = [[_payload(lane.readable[2], ["hit"])]]
+
+    await _search(lane)
+
+    assert lane.fan_out_calls == [[c, a]]
+
+
+@pytest.mark.asyncio
+async def test_a_routed_search_that_finds_nothing_widens_to_every_dataset(lane):
+    lane.decision = _narrowed(lane)
+    a, b = lane.readable
+    lane.responses = [[_payload(b)], [_payload(a, ["found elsewhere"]), _payload(b)]]
+
+    out = await _search(lane)
+
+    assert lane.fan_out_calls == [[b.id], [a.id, b.id]]
+    assert [payload.dataset_id for payload in out] == [a.id, b.id]
+
+
+@pytest.mark.asyncio
+async def test_an_empty_only_context_answer_counts_as_nothing_found(lane):
+    lane.decision = _narrowed(lane)
+    a, b = lane.readable
+    lane.responses = [[_payload(b, only_context=True, context="")], [_payload(a, ["x"])]]
+
+    await _search(lane, only_context=True)
+
+    assert lane.fan_out_calls == [[b.id], [a.id, b.id]]
+
+
+@pytest.mark.asyncio
+async def test_routed_datasets_without_memory_widen_to_every_dataset(lane):
+    lane.decision = _narrowed(lane)
+    a, b = lane.readable
+    lane.responses = [NoDataError("nothing here"), [_payload(a, ["hit"])]]
+
+    out = await _search(lane)
+
+    assert lane.fan_out_calls == [[b.id], [a.id, b.id]]
+    assert [payload.dataset_id for payload in out] == [a.id]
+
+
+@pytest.mark.asyncio
+async def test_no_data_anywhere_still_raises(lane):
+    lane.decision = _narrowed(lane)
+    lane.responses = [NoDataError("nothing here")]
+
+    with pytest.raises(NoDataError):
+        await _search(lane)
+
+    assert len(lane.fan_out_calls) == 2
+
+
+def test_routing_is_on_by_default():
+    config = DatasetRoutingConfig(_env_file=None)
+    assert config.enabled is True
+    assert config.top_k == 1
+    with pytest.raises(ValueError):
+        DatasetRoutingConfig(_env_file=None, top_k=0)
+
+
+def test_payload_entries_follow_the_normalization_rule():
+    dataset = _dataset("a")
+    assert _payload(dataset).entries() == []
+    assert _payload(dataset, ["x"]).entries() == ["x"]
+    assert _payload(dataset, ["x"], completion="answer").entries() == ["answer"]
+    assert _payload(dataset, only_context=True, context="").entries() == []
+    assert _payload(dataset, only_context=True, context=["c"]).entries() == ["c"]
+    assert _payload(dataset, only_context=True, user_prompt="p", context=["c"]).entries() == ["p"]

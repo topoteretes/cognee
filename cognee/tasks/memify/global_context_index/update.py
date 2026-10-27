@@ -4,6 +4,7 @@ import math
 from dataclasses import dataclass
 from numbers import Real
 from typing import Any
+from uuid import UUID
 
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.graph.methods.get_global_context_graph_inputs import (
@@ -11,6 +12,7 @@ from cognee.modules.graph.methods.get_global_context_graph_inputs import (
 )
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.tasks.task import task_summary
+from cognee.modules.search.dataset_routing import sync_dataset_routes
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.summarization.models import GlobalContextSummary
 
@@ -289,6 +291,32 @@ async def update_global_context_index(
         min_overlap,
     )
     scope = await load_update_scope(data, bucketing_strategy, ctx)
+    context_datapoints = await _place_new_summaries(
+        scope,
+        rebuild,
+        max_bucket_size,
+        placement_distance_threshold,
+        bucketing_strategy,
+        min_overlap,
+        ctx,
+    )
+    # The routing collection can address this method's root only: its bucket ids
+    # are clustering results, not derivable from the dataset's documents.
+    root = _current_root(scope, context_datapoints)
+    if scope.dataset_id:
+        await sync_dataset_routes(scope.dataset_id, [root] if root else [])
+    return context_datapoints
+
+
+async def _place_new_summaries(
+    scope: UpdateScope,
+    rebuild: bool,
+    max_bucket_size: int,
+    placement_distance_threshold: float,
+    bucketing_strategy: BucketingStrategyName,
+    min_overlap: float,
+    ctx: PipelineContext | None,
+) -> list[GlobalContextSummary]:
     unified_engine, graph_bucketing_inputs = await prepare_existing_context_index(
         scope,
         rebuild,
@@ -321,4 +349,23 @@ async def update_global_context_index(
         min_overlap,
         graph_bucketing_inputs,
         ctx,
+    )
+
+
+def _current_root(
+    scope: UpdateScope, context_datapoints: list[GlobalContextSummary]
+) -> GlobalContextSummary | None:
+    """The dataset root as it stands after the run: rewritten this run, or as loaded."""
+    for datapoint in context_datapoints:
+        if datapoint.is_root:
+            return datapoint
+    existing = scope.context_input.root
+    if existing is None or not existing.text:
+        return None
+    return GlobalContextSummary(
+        id=UUID(str(existing.id)),
+        text=existing.text,
+        dataset_id=scope.dataset_id,
+        level=existing.level if existing.level is not None else 1,
+        is_root=True,
     )

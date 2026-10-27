@@ -160,7 +160,7 @@ async def improve(
     run_in_background: bool = False,
     node_name: list[str] | None = None,
     session_ids: list[str] | None = None,
-    build_global_context_index: bool = False,
+    build_global_context_index: bool | None = None,
     build_truth_subspace: bool = False,
     review_conflicts: bool = False,
     **kwargs: Unpack[ImproveKwargs],
@@ -216,7 +216,10 @@ async def improve(
             ``dataset_name`` — is not re-bridged into this call's dataset;
             those stages then report nothing new. (Distillation is
             per-dataset and unaffected.)
-        build_global_context_index: Opt in to ``global_context_index``.
+        build_global_context_index: Run ``global_context_index``. ``None`` (the
+            default) follows ``IMPROVE_GLOBAL_CONTEXT_INDEX`` (default true: the
+            index is LLM-free and dataset routing reads it); ``False``
+            skips the stage for this call.
         build_truth_subspace: Opt in to ``build_truth_subspace``.
         review_conflicts: Review dated source facts and update conflict descriptions.
             Also enabled by ``IMPROVE_REVIEW_CONFLICTS=true``.
@@ -514,7 +517,7 @@ async def _resolve_inputs(
     dataset: str | UUID,
     session_ids: list[str],
     run_in_background: bool,
-    build_global_context_index: bool,
+    build_global_context_index: bool | None,
     build_truth_subspace: bool,
     review_conflicts: bool,
     overrides: dict,
@@ -560,6 +563,9 @@ async def _resolve_inputs(
         feedback_alpha = config.feedback_alpha
     # Argument and IMPROVE_REVIEW_CONFLICTS are both opt-ins: either turns the stage on.
     review_conflicts = review_conflicts or config.review_conflicts
+    # The index is on by default (IMPROVE_GLOBAL_CONTEXT_INDEX); an explicit argument wins.
+    if build_global_context_index is None:
+        build_global_context_index = config.global_context_index
     if legacy_memify is not None:
         from cognee.api.v1.memify.memify import resolve_memify_tasks
 
