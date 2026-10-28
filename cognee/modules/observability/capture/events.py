@@ -60,7 +60,8 @@ class CaptureEvent:
     kind: str
     # Object reference (or snapshot per the snapshot rule).
     payload: Any
-    # "pydantic" | "json" | "text"
+    # "pydantic" | "json" | "text" | "manifest" (the RunScope itself: rendered
+    # by the flusher, once at serialization and again right before delivery).
     payload_kind: str
     # Explicit overrides — raw at emit, str()-coerced by the flusher.
     run_id: UUID | str | None

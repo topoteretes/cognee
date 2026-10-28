@@ -45,26 +45,6 @@ from .run_tasks_with_telemetry import (
 logger = get_logger("run_tasks(tasks: [Task], data)")
 
 
-async def _close_capture_run(eval_capture, capture_scope) -> None:
-    """Deliver the run's events, then its manifest — in that order (SDK-529).
-
-    The manifest carries the run's own capture accounting (``events_delivered``,
-    ``capture_complete``), so it is finished only after the drain that delivers
-    the run's events: a sink failure during that drain is then charged to the
-    run before its manifest is written, instead of after. The manifest is
-    drained inline too, but only when the first drain finished — under a wedged
-    sink, or with a concurrent run's events still arriving, it is left to the
-    flusher / the atexit hook rather than adding a second full budget to the
-    pipeline's tail. Both drains are bounded by DRAIN_TIMEOUT_S and swallow
-    their own exceptions.
-    """
-    complete = await eval_capture.drain()
-    if capture_scope is not None:
-        capture_scope.finish()
-        if complete:
-            await eval_capture.drain()
-
-
 async def run_tasks(
     tasks: list[Task] | Callable[[Any], list[Task]],
     dataset_id: UUID,
@@ -126,9 +106,13 @@ async def run_tasks(
         # capture package. Pipeline scopes are always sampled. The scope is
         # entered on the exit stack after the start-event handoff (like the
         # usage and parent-run scopes) and so exits only once the consumer
-        # finishes the generator — later than the drains below;
-        # _close_capture_run finishes the scope between them so the manifest is
-        # delivered before the terminal yield (exit then skips the duplicate).
+        # finishes the generator — later than the terminal yield; the run
+        # finishes the scope right after its terminal log instead, so the
+        # manifest is queued before that yield (exit then skips the duplicate).
+        # Nothing here drains: this generator runs under the dataset's lock
+        # (run_pipeline_per_dataset), and a drain would hold it for the drain
+        # budget. Delivery is the flusher's; the manifest is rendered when it
+        # is delivered, after the run's events, so its accounting is final.
         # The manifest mirrors the pipeline log's attribution (pipeline_name,
         # outcome, error_class), like an operation manifest mirrors its
         # pipeline_runs row.
@@ -394,16 +378,14 @@ async def run_tasks(
                         PIPELINE_RUN_COMPLETED, user, additional_properties=telemetry_properties
                     )
 
-                # A pipeline run is seconds-to-minutes and LLM-bound, so a drain
-                # is noise here: it returns within its timeout even under a
-                # wedged sink (leftovers stay with the flusher / the atexit
-                # hook) and swallows its own exceptions.
-                if eval_capture.is_active():
-                    if capture_scope is not None:
-                        capture_scope.note("outcome", OperationOutcome.SUCCEEDED.value)
-                        # None on success, kept for a stable manifest shape.
-                        capture_scope.note("error_class", None)
-                    await _close_capture_run(eval_capture, capture_scope)
+                # Eval capture: queue the manifest, no drain (see the scope's
+                # comment above). Cheap — one append — so the dataset lock is
+                # not held for any sink I/O.
+                if capture_scope is not None:
+                    capture_scope.note("outcome", OperationOutcome.SUCCEEDED.value)
+                    # None on success, kept for a stable manifest shape.
+                    capture_scope.note("error_class", None)
+                    capture_scope.finish()
 
                 yield PipelineRunCompleted(
                     pipeline_run_id=pipeline_run_id,
@@ -461,21 +443,17 @@ async def run_tasks(
                 )
 
                 ownership.closed = True
-                # Eval capture: mirror the error record on the manifest, then — on
-                # the same bound as the success path, within drain()'s timeout —
-                # deliver the run's events and its manifest. A consumer closing
-                # the generator (GeneratorExit) gets no await beyond cleanup: the
-                # manifest is finished and left to the flusher / the atexit hook.
-                if eval_capture.is_active() and capture_scope is not None:
+                # Eval capture: mirror the error record on the manifest and queue
+                # it, like the success path — no drain, no await. A consumer
+                # closing the generator (GeneratorExit) gets no await beyond
+                # cleanup either way.
+                if capture_scope is not None:
                     capture_scope.note("outcome", OperationOutcome.FAILED.value)
                     capture_scope.note("error_class", type(root_error).__name__)
+                    capture_scope.finish()
                 if isinstance(error, GeneratorExit):
-                    if capture_scope is not None:
-                        capture_scope.finish()
                     raise
                 items_failed = items_failed or isinstance(error, PipelineRunFailedError)
-                if eval_capture.is_active():
-                    await _close_capture_run(eval_capture, capture_scope)
 
                 yield PipelineRunErrored(
                     pipeline_run_id=pipeline_run_id,

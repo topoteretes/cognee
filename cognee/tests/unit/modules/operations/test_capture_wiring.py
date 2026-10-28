@@ -1,15 +1,18 @@
 """Eval-capture wirings (SDK-529): record_operation and run_tasks open a run
 scope only when capture is active, the manifest carries the (late-bound)
-dataset plus the operation's name/outcome/error class, only the pipeline
-runner drains — and that drain covers the run's own manifest — and the
-FastAPI lifespan shuts capture down on exit.
+dataset plus the operation's name/outcome/error class, neither wiring drains
+(the pipeline runner holds its dataset's lock; the manifest is rendered at
+delivery, so its accounting is exact anyway), and the FastAPI lifespan shuts
+capture down on exit.
 
 ``record_operation``'s row writer is stubbed; ``run_tasks`` is driven through
 ``runner_plumbing``; the real ``lifespan`` runs with its startup collaborators
 stubbed. No LLM, no network, no database.
 """
 
+import asyncio
 import importlib
+import time
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -230,6 +233,7 @@ async def test_run_tasks_stamps_the_pipelines_user_and_tenant_on_every_record(
         tasks=[], dataset_id=dataset.id, data=["a"], user=user, pipeline_name="cognify_pipeline"
     ):
         pass
+    await capture.drain()  # the runner queues; delivery is the flusher's (or a drain's)
 
     records = fake_capture_sink.records
     assert {record["kind"] for record in records} == {KIND_SUMMARY_GENERATED, KIND_RUN_MANIFEST}
@@ -238,11 +242,16 @@ async def test_run_tasks_stamps_the_pipelines_user_and_tenant_on_every_record(
 
 
 @pytest.mark.asyncio
-async def test_run_tasks_drains_its_events_then_its_manifest_after_the_terminal_log(
+async def test_run_tasks_queues_its_manifest_after_the_terminal_log_and_never_drains(
     monkeypatch, runner_plumbing, fake_capture_sink
 ):
+    """The runner executes under its dataset's lock, so it must not wait on
+    sink I/O there: it finishes the scope (one append) and leaves delivery to
+    the flusher. The manifest's accounting is exact all the same — it is
+    rendered when the flusher writes it, after the run's events."""
     dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
     logs = runner_plumbing(run_tasks_module, dataset)
+    capture.hook._configure(flush_interval_s=60.0)  # nothing is delivered on its own
 
     order = []
     logs.complete.side_effect = lambda *args, **kwargs: order.append("complete")
@@ -266,9 +275,8 @@ async def test_run_tasks_drains_its_events_then_its_manifest_after_the_terminal_
     events = await _drive(run_tasks_module, dataset)
     pipeline_run_id = events[0].pipeline_run_id
 
-    # Events first, then — once that drain completed — the manifest, so its
-    # accounting describes what actually reached the sink.
-    assert order == ["complete", "drain", "drain"]
+    # The terminal log, then the manifest queued — and no drain under the lock.
+    assert order == ["complete"]
     [scope] = seen_scopes
     assert scope.kind == "pipeline"
     assert scope.run_id == pipeline_run_id
@@ -277,7 +285,17 @@ async def test_run_tasks_drains_its_events_then_its_manifest_after_the_terminal_
     assert scope.finished is True
     assert capture.current_scope() is None
 
-    # The scope's exit — after the terminal yield — did not enqueue a duplicate.
+    # Queued behind the run's event, not delivered: the flusher's job. The
+    # scope's exit — after the terminal yield — did not enqueue a duplicate.
+    assert [event.kind for event in capture.hook._runtime.buffer] == [
+        KIND_SUMMARY_GENERATED,
+        KIND_RUN_MANIFEST,
+    ]
+    assert fake_capture_sink.records == []
+    assert scope.delivered == 0
+
+    await real_drain()
+
     assert not capture.hook._runtime.buffer
     [manifest] = _manifests(fake_capture_sink)
     assert manifest["run_id"] == str(pipeline_run_id)
@@ -292,12 +310,12 @@ async def test_run_tasks_drains_its_events_then_its_manifest_after_the_terminal_
     # The setup the run started under, extractor included.
     assert payload["setup"]["graph_extractor"] == "gliner_demo"
     assert payload["setup_fingerprint"].startswith("sha256:")
-    # Exact per-run accounting, taken after the run's events were delivered.
+    # Exact per-run accounting, rendered when the manifest was written — after
+    # the run's event, in the same flush.
     assert payload["events_emitted"] == 1
     assert payload["events_delivered"] == 1
     assert payload["events_dropped"] == 0
     assert payload["capture_complete"] is True
-    await real_drain()
     assert len(_manifests(fake_capture_sink)) == 1
 
 
@@ -326,8 +344,11 @@ async def test_run_tasks_reports_the_failure_on_the_error_path(
     with pytest.raises(RuntimeError, match="item exploded"):
         await _drive(run_tasks_module, dataset)
 
-    assert order == ["error", "drain", "drain"]
+    # The error log, then the manifest queued — no drain on this path either.
+    assert order == ["error"]
     logs.complete.assert_not_awaited()
+    assert [event.kind for event in capture.hook._runtime.buffer] == [KIND_RUN_MANIFEST]
+    await real_drain()
     # A failed run is identifiable from its manifest alone: an eval must be able
     # to exclude a cognify that died halfway without joining back to the logs.
     [manifest] = _manifests(fake_capture_sink)
@@ -340,47 +361,46 @@ async def test_run_tasks_reports_the_failure_on_the_error_path(
 
 
 @pytest.mark.asyncio
-async def test_run_tasks_leaves_the_manifest_to_the_flusher_when_its_drain_did_not_finish(
-    monkeypatch, runner_plumbing, fake_capture_sink
-):
-    """Under a wedged sink the first drain runs out of budget; a second full
-    budget for the manifest would double the pipeline's tail latency, so the
-    manifest is finished but left to the flusher / atexit hook instead."""
+async def test_run_tasks_returns_without_waiting_on_a_wedged_sink(monkeypatch, runner_plumbing):
+    """The runner holds its dataset's lock, so a sink that never answers must
+    not hold the run — and the lock — for a drain budget. No drain is
+    attempted at all: the manifest is queued and left to the flusher / the
+    atexit hook."""
     dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
     runner_plumbing(run_tasks_module, dataset)
 
-    drains = []
+    async def wedged(records):
+        await asyncio.Event().wait()
 
-    async def incomplete_drain(timeout=None):
-        drains.append(timeout)
-        return False
-
-    monkeypatch.setattr(capture, "drain", incomplete_drain)
+    capture.register_capture_sink(wedged)
+    capture.hook._configure(flush_interval_s=60.0, sink_timeout_s=0.1)
+    drain_spy = AsyncMock()
+    monkeypatch.setattr(capture, "drain", drain_spy)
     monkeypatch.setattr(
         run_tasks_module, "run_tasks_data_item", AsyncMock(return_value={"run_info": "ok"})
     )
 
+    started = time.monotonic()
     await _drive(run_tasks_module, dataset)
 
-    assert len(drains) == 1
+    assert time.monotonic() - started < 1.0
+    drain_spy.assert_not_awaited()
     # Finished (so exit will not emit a duplicate) and buffered, not delivered.
     assert [event.kind for event in capture.hook._runtime.buffer] == [KIND_RUN_MANIFEST]
-    assert _manifests(fake_capture_sink) == []
 
 
 @pytest.mark.asyncio
-async def test_run_tasks_manifest_is_in_the_sink_before_the_terminal_yield(
+async def test_run_tasks_manifest_is_queued_before_the_terminal_yield(
     monkeypatch, runner_plumbing, fake_capture_sink
 ):
-    """The pipeline's own drain delivers its manifest.
-
-    By the time the consumer receives the terminal event the sink already
-    holds the run's manifest — no consumer-side drain, no flusher tick and no
-    atexit hook involved — even though the scope itself only exits once the
-    generator is finalized.
+    """By the time the consumer receives the terminal event the manifest is
+    already queued behind the run's event — before the scope exits with the
+    generator — so the flusher's next pass, or a consumer's drain, delivers the
+    whole run with nothing else having to happen first.
     """
     dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
     runner_plumbing(run_tasks_module, dataset)
+    capture.hook._configure(flush_interval_s=60.0)
 
     async def fake_item(*args, **kwargs):
         capture.emit(KIND_SUMMARY_GENERATED, "from a task", payload_kind="text")
@@ -388,7 +408,7 @@ async def test_run_tasks_manifest_is_in_the_sink_before_the_terminal_yield(
 
     monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", fake_item)
 
-    manifests_at_yield = []
+    queued_at_yield = []
     async for event in run_tasks_module.run_tasks(
         tasks=[],
         dataset_id=dataset.id,
@@ -396,9 +416,17 @@ async def test_run_tasks_manifest_is_in_the_sink_before_the_terminal_yield(
         user=SimpleNamespace(id=uuid4(), tenant_id=None),
         pipeline_name="cognify_pipeline",
     ):
-        manifests_at_yield.append((type(event).__name__, len(_manifests(fake_capture_sink))))
+        queued = [buffered.kind for buffered in capture.hook._runtime.buffer]
+        queued_at_yield.append((type(event).__name__, queued))
 
-    assert manifests_at_yield == [("PipelineRunStarted", 0), ("PipelineRunCompleted", 1)]
+    assert queued_at_yield == [
+        ("PipelineRunStarted", []),
+        ("PipelineRunCompleted", [KIND_SUMMARY_GENERATED, KIND_RUN_MANIFEST]),
+    ]
+    assert _manifests(fake_capture_sink) == []
+
+    await capture.drain()
+
     assert not capture.hook._runtime.buffer
     [manifest] = _manifests(fake_capture_sink)
     assert manifest["payload"]["kind"] == "pipeline"

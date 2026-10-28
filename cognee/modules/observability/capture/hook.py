@@ -59,10 +59,15 @@ the interval tick even when nothing emits on-loop), and woken either by the
 ``batch_size`` (``call_soon_threadsafe`` — the only loop primitive safe from
 any thread/loop; a worker-thread emit targets a flusher whose loop is RUNNING,
 since a wake scheduled on a stopped loop would never fire). Serialization runs
-in a worker thread because it is pure CPU (~15 ms per 64-graph batch) and would
-otherwise freeze concurrent recall coroutines; inside atexit handlers the
-executor is gone and it runs inline. Each sink write is bounded by
-``sink_timeout_s`` so a wedged sink cannot pin the flusher forever.
+on a capture worker thread because it is pure CPU (~15 ms per 64-graph batch)
+and would otherwise freeze concurrent recall coroutines — the capture pool
+(``sinks._CapturePool``, two threads of its own, never the loop's default
+executor), which the sink writes use too; inside atexit handlers the pool is
+gone and it runs inline. The pool does not queue: with both workers busy —
+live work, or writes a timeout abandoned — a batch is refused
+(``CapturePoolSaturated``) and counted as dropped, so a wedged sink cannot
+line batches up behind it. Each sink write is bounded by ``sink_timeout_s``
+so a wedged sink cannot pin the flusher forever.
 
 Every timed wait on the flusher and drain paths goes through ``_wait_bounded``,
 never ``asyncio.wait_for``: on CPython < 3.12 ``wait_for`` swallows a
@@ -109,7 +114,13 @@ runtime's ``dropped`` (diagnostics) and on the run the event belongs to
 drops it, the emit path or the flusher — so a manifest's ``events_dropped``
 is that run's own count, not a delta of a shared counter that concurrent runs
 pollute. ``RunScope.delivered`` is credited on the sink's first
-acknowledgement of each event.
+acknowledgement of each event; a sink that acknowledges part of a group
+(``PartialDelivery``) has the rest charged to their runs, position by
+position. A run's manifest is queued at ``finish()`` and RENDERED when it is
+delivered — the flusher calls ``to_manifest()`` right before the sink write
+(``_refresh_manifests``), after every event of the run queued ahead of it was
+delivered or dropped — so its counts are final without anyone draining: the
+pipeline runner, which runs under the dataset lock, only finishes its scope.
 """
 
 from __future__ import annotations
@@ -132,12 +143,20 @@ from cognee.shared.logging_utils import get_logger
 from .config import CaptureConfig, get_capture_config
 from .events import (
     CAPTURE_SCHEMA_VERSION,
+    KIND_RUN_MANIFEST,
     KIND_SETUP_CHANGED,
     RETRIEVAL_KIND_PREFIX,
     CaptureEvent,
 )
 from .setup import setup_diff
-from .sinks import CaptureSink, FanOutSink, StorageSink, run_off_loop
+from .sinks import (
+    CaptureSink,
+    FanOutSink,
+    PartialDelivery,
+    StorageSink,
+    _reset_pool_for_tests,
+    run_off_loop,
+)
 
 if TYPE_CHECKING:
     from .manifest import RunScope
@@ -907,6 +926,10 @@ def _serialize_payload(event: CaptureEvent) -> Any:
         return event.payload.model_dump(mode="json")
     if payload_kind in ("json", "text"):
         return event.payload
+    if payload_kind == "manifest":
+        # The RunScope itself. Rendered here so the record is complete even if
+        # the delivery-time render (``_refresh_manifests``) cannot run.
+        return event.payload.to_manifest()
     raise ValueError(f"unknown payload_kind {payload_kind!r}")
 
 
@@ -970,6 +993,37 @@ def _account_delivered(events: Iterable[CaptureEvent | None]) -> None:
         scope = event.scope
         if scope is not None:
             scope.delivered += 1
+
+
+def _account_partial(slots: list[CaptureEvent | None], undelivered: Iterable[int]) -> int:
+    """Credit the delivered slots of a group and charge the rest; return how many were lost.
+
+    ``undelivered`` are positions in the group as the sink saw it (see
+    ``PartialDelivery``); one outside the group is ignored rather than trusted.
+    """
+    lost = {position for position in undelivered if 0 <= position < len(slots)}
+    _account_delivered(slot for position, slot in enumerate(slots) if position not in lost)
+    return _account_dropped(slots[position] for position in sorted(lost))
+
+
+def _refresh_manifests(group: list[dict], slots: list[CaptureEvent | None]) -> None:
+    """Render each manifest in ``group`` again, right before its sink write.
+
+    A manifest is queued at ``finish()`` with its run's events still ahead of
+    it in the buffer, and nobody drains for it (the pipeline runner holds the
+    dataset lock). Rendering the accounting at delivery — after the groups
+    ahead of it in this batch, and every earlier batch, were delivered or
+    dropped — is what keeps ``events_delivered`` and ``capture_complete``
+    exact without a drain. ``ended_at`` was fixed at ``finish()``; only the
+    counts move. A render that fails leaves the serialization-time payload.
+    """
+    for record, event in zip(group, slots):
+        if event is None or event.payload_kind != "manifest":
+            continue
+        try:
+            record["payload"] = _serialize_payload(event)
+        except Exception as exc:
+            logger.debug("capture manifest render failed (%s)", exc)
 
 
 def _requeue(runtime: CaptureRuntime, pending: list[CaptureEvent | None]) -> None:
@@ -1045,7 +1099,7 @@ async def _flush_one_batch(runtime: CaptureRuntime, deadline: float | None = Non
             for index, record in enumerate(records):
                 groups.setdefault((record["run_id"], record["kind"]), []).append(index)
 
-            for indexes in groups.values():
+            for (_run_id, kind), indexes in groups.items():
                 # Bounded: a wedged sink (S3 under partition) must not pin the
                 # flusher — nor a drain() past its own budget.
                 bound = runtime.sink_timeout_s
@@ -1056,10 +1110,22 @@ async def _flush_one_batch(runtime: CaptureRuntime, deadline: float | None = Non
                     bound = min(bound, remaining)
                 group = [records[index] for index in indexes]
                 slots = [pending[index] for index in indexes]
-                delivered = False
+                if kind == KIND_RUN_MANIFEST:
+                    # Final counts: the run's events ahead of it are accounted.
+                    _refresh_manifests(group, slots)
                 try:
                     await _wait_bounded(sink(group), bound)
-                    delivered = True
+                    _account_delivered(slots)
+                except PartialDelivery as exc:
+                    # The sink wrote what it could and named the rest.
+                    lost = _account_partial(slots, exc.undelivered)
+                    runtime.dropped += lost
+                    logger.debug(
+                        "capture sink left out %d of %d event(s), dropped (%s)",
+                        lost,
+                        len(indexes),
+                        exc,
+                    )
                 except asyncio.TimeoutError as exc:
                     if deadline is not None and time.monotonic() >= deadline:
                         break  # the caller's budget ran out, not the sink's: retry later
@@ -1074,8 +1140,6 @@ async def _flush_one_batch(runtime: CaptureRuntime, deadline: float | None = Non
                 except Exception as exc:
                     runtime.dropped += _account_dropped(slots)
                     logger.debug("capture sink failed, %d event(s) dropped (%s)", len(indexes), exc)
-                if delivered:
-                    _account_delivered(slots)
                 for index in indexes:
                     pending[index] = None
                 # Let other coroutines interleave between sink writes.
@@ -1139,8 +1203,12 @@ async def drain(timeout: float | None = None) -> bool:
     """Flush the events buffered so far, then wait for in-flight batches.
 
     ``timeout=None`` (the default) means the configured budget:
-    ``COGNEE_CAPTURE_DRAIN_TIMEOUT_S``, 5 s unless overridden — this is the
-    wait the pipeline wiring adds at every run completion while capture is on.
+    ``COGNEE_CAPTURE_DRAIN_TIMEOUT_S``, 5 s unless overridden. For
+    ``shutdown()``, the atexit hook and callers flushing before they exit —
+    not the pipeline runner, which runs under its dataset's lock and would
+    hold it for the budget: it finishes its scope and leaves delivery to the
+    flusher (the manifest is rendered at delivery, so its accounting is final
+    all the same).
 
     Never requires a flusher to exist, never raises (a cancellation of the
     caller propagates, as it must), and returns within about ``timeout`` — the
@@ -1153,9 +1221,7 @@ async def drain(timeout: float | None = None) -> bool:
 
     Returns True when nothing is left buffered or in flight on this process —
     every event was delivered or accounted as dropped — and False when the
-    budget ran out or a concurrent producer kept the buffer non-empty. The
-    pipeline wiring uses it to decide whether its manifest can be drained
-    inline too.
+    budget ran out or a concurrent producer kept the buffer non-empty.
     """
     runtime = _runtime
     if timeout is None:
@@ -1259,4 +1325,5 @@ def _reset_for_tests() -> None:
     for flusher in list(_runtime.flushers.values()):
         _cancel_flusher(flusher, wait=True)
     _runtime = CaptureRuntime()
+    _reset_pool_for_tests()
     get_capture_config.cache_clear()

@@ -72,6 +72,8 @@ class RunScope:
     parent: RunScope | None = None
     # Set by finish(): the manifest has been enqueued, exit must not emit again.
     finished: bool = False
+    # Fixed by finish(); the manifest is rendered later, at delivery.
+    ended_at: float | None = None
 
     def set_dataset(self, dataset_id: UUID | str | None) -> None:
         """Bind the dataset late. Because ``CaptureEvent.scope`` is resolved at
@@ -124,7 +126,7 @@ class RunScope:
         self.counters[counter] += n
 
     def to_manifest(self) -> dict[str, Any]:
-        ended_at = time.time()
+        ended_at = self.ended_at if self.ended_at is not None else time.time()
         dataset_id = self.resolved_dataset_id()
         parent = self.parent
         parent_run_id = None if parent is None or parent.run_id is None else str(parent.run_id)
@@ -149,14 +151,15 @@ class RunScope:
             "ended_at": ended_at,
             "duration_s": ended_at - self.started_at,
             "counters": dict(self.counters),
-            # Exact per-run accounting (see the class docstring). A consumer
-            # verifies completeness by comparing the records it finds under the
-            # run with events_emitted; capture_complete says whether capture
-            # itself lost anything by the time this manifest was written.
-            # Pipeline runs drain before finishing, so for them every emitted
-            # event is delivered or dropped here and events_delivered equals
-            # events_emitted when complete; an operation run (never drained)
-            # reports what the sink had acknowledged so far.
+            # Exact per-run accounting (see the class docstring). The flusher
+            # renders the manifest right before its sink write (see
+            # ``_refresh_manifests`` in hook.py), after every event of the run
+            # queued ahead of it was delivered or dropped — so no run drains for
+            # this: events_delivered equals events_emitted when nothing was
+            # lost, and capture_complete says whether capture lost anything by
+            # the time the manifest went out. A consumer verifies completeness
+            # by comparing the records it finds under the run with
+            # events_emitted.
             "events_emitted": self.emitted,
             "events_dropped": self.dropped,
             "events_delivered": self.delivered,
@@ -166,13 +169,17 @@ class RunScope:
     def finish(self) -> None:
         """Enqueue the manifest now; idempotent.
 
-        ``run_scope`` calls this on exit. A caller that drains BEFORE its scope
-        closes (run_tasks: the scope encloses the terminal ``yield``) calls it
-        right before the drain so the run's most important record is covered
-        by that drain rather than left to the interval tick or the atexit hook.
-        Manifests get headroom past the queue bound (up to ``2 * QUEUE_SIZE``
-        buffered events in total): an overflowing run must still report
-        ``events_dropped``, but the buffer stays finite under a wedged sink.
+        ``run_scope`` calls this on exit. ``run_tasks``, whose scope encloses
+        the terminal ``yield``, calls it right after the terminal log so the
+        manifest is queued before that yield rather than when the consumer
+        finally closes the generator. Nobody drains for it: the pipeline runner
+        runs under the dataset lock, and the manifest is rendered at delivery,
+        so the flusher's own pass covers the run's events and then this record
+        with their final accounting. ``ended_at`` is fixed here; the counts are
+        read when the manifest is rendered. Manifests get headroom past the
+        queue bound (up to ``2 * QUEUE_SIZE`` buffered events in total): an
+        overflowing run must still report ``events_dropped``, but the buffer
+        stays finite under a wedged sink.
 
         An unsampled run still gets its manifest. Sampling gates ``retrieval.*``
         payloads (see ``should_capture``), not the record that identifies the run:
@@ -185,11 +192,12 @@ class RunScope:
         if self.finished:
             return
         self.finished = True
+        self.ended_at = time.time()
         try:
             hook._emit_manifest(
                 KIND_RUN_MANIFEST,
-                self.to_manifest(),
-                payload_kind="json",
+                self,
+                payload_kind="manifest",
                 run_id=self.run_id,
                 dataset_id=self.resolved_dataset_id(),
             )

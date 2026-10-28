@@ -71,10 +71,10 @@ class CaptureConfig(BaseSettings):
     # Upper bound on one sink write; a wedged sink (S3 under partition) must not
     # pin the flusher and every later drain().
     cognee_capture_sink_timeout_s: float = 30.0
-    # Default budget for drain() when the caller passes no timeout — the wait the
-    # pipeline wiring adds at every run completion while capture is on. Lower it
-    # when that tail latency matters more than losing a slow sink's last batch
-    # to the atexit hook.
+    # Default budget for drain() when the caller passes no timeout: what
+    # shutdown() (the API lifespan) and an explicit drain() wait for the sink.
+    # Pipeline runs never drain — they run under the dataset lock — so this is
+    # not a per-run tail latency.
     cognee_capture_drain_timeout_s: float = 5.0
 
     model_config = SettingsConfigDict(extra="allow")

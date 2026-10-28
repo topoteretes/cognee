@@ -262,6 +262,60 @@ async def test_a_drained_run_reports_every_event_delivered(fake_capture_sink):
     assert manifest["payload"]["capture_complete"] is True
 
 
+@pytest.mark.asyncio
+async def test_the_manifest_is_rendered_at_delivery_so_no_run_has_to_drain(fake_capture_sink):
+    """run_tasks finishes its scope and never drains (it runs under the dataset
+    lock). The manifest is queued behind the run's events, and its counts are
+    read when the flusher writes it — after them — so it still reports every
+    event delivered. ``ended_at`` is the finish time, not the delivery time."""
+    hook._configure(flush_interval_s=60.0)
+    with capture.run_scope(uuid4(), kind="pipeline") as scope:
+        capture.emit(KIND_SUMMARY_GENERATED, "a", payload_kind="text")
+        capture.emit(KIND_SUMMARY_GENERATED, "b", payload_kind="text")
+        scope.finish()
+        assert (scope.emitted, scope.dropped, scope.delivered) == (2, 0, 0)
+        assert scope.ended_at is not None
+    assert len(hook._runtime.buffer) == 3  # two events and the manifest, nothing delivered
+    await asyncio.sleep(0.02)  # delivery later than finish, measurably
+
+    await capture.drain()
+
+    [manifest] = _manifests(fake_capture_sink)
+    payload = manifest["payload"]
+    assert payload["events_emitted"] == payload["events_delivered"] == 2
+    assert payload["events_dropped"] == 0
+    assert payload["capture_complete"] is True
+    assert payload["ended_at"] == scope.ended_at
+    assert payload["duration_s"] == scope.ended_at - scope.started_at
+
+
+@pytest.mark.asyncio
+async def test_a_loss_ahead_of_the_manifest_in_the_same_batch_shows_on_it(monkeypatch):
+    """One flush pops the run's event and its manifest together; the event's
+    group is written first and rejected. The manifest, rendered right before
+    its own write, already carries that drop."""
+    monkeypatch.setattr(hook, "logger", MagicMock())
+    calls = []
+
+    async def rejects_events(records):
+        calls.append(records)
+        if records[0]["kind"] != KIND_RUN_MANIFEST:
+            raise RuntimeError("boom")
+
+    capture.register_capture_sink(rejects_events)
+    hook._configure(flush_interval_s=60.0)
+
+    with capture.run_scope(uuid4(), kind="pipeline"):
+        capture.emit(KIND_SUMMARY_GENERATED, "lost", payload_kind="text")
+    await capture.drain()
+
+    assert len(calls) == 2  # the event's group, then the manifest's
+    [manifest] = [r for call in calls for r in call if r["kind"] == KIND_RUN_MANIFEST]
+    assert manifest["payload"]["events_dropped"] == 1
+    assert manifest["payload"]["events_delivered"] == 0
+    assert manifest["payload"]["capture_complete"] is False
+
+
 def test_manifests_are_bounded_past_queue_size(fake_capture_sink):
     # A sync caller with no loop anywhere: nothing can flush, so every completed
     # run's manifest stays buffered. Manifests bypass QUEUE_SIZE, but not 2x it.

@@ -25,7 +25,23 @@ contained here. A sink must let ``CancelledError`` propagate — the flusher
 cancels a write that outlives ``SINK_TIMEOUT_S`` or a ``drain()`` budget and
 waits ``_CANCEL_GRACE_S`` for that cancel to land before abandoning the write
 and re-buffering the batch.
-Sinks must not depend on the default executor or on threads: the atexit drain
+
+A sink that wrote SOME of the records it was handed — the proxy sink leaves
+out a record it cannot serialize or that is over the Firehose record limit,
+and a request that fails leaves the later ones unsent — raises
+``PartialDelivery`` AFTER writing what it could, naming the positions it did
+not deliver. The flusher credits the rest to their runs and charges those
+positions as dropped; a plain exception charges the whole batch.
+
+Off-loop work — serialization, gzip, every sink write — runs on the capture
+pool (``_CapturePool``: two worker threads of its own), never on the loop's
+default executor: capture must not queue behind, or take workers from, the
+``to_thread`` work of the pipeline it observes, and a wedged write abandoned
+by a timeout keeps only a capture worker busy. The pool is small on purpose and
+does not queue: with both workers busy a submission raises
+``CapturePoolSaturated`` and the flusher counts that batch as dropped, instead
+of lining batches up behind writes that may never return. Sinks must not
+depend on the default executor or on threads of their own: the atexit drain
 runs after ``threading._shutdown()``, when ``asyncio.to_thread`` raises and the
 write is lost; ``StorageSink`` goes through ``run_off_loop`` /
 ``run_coroutine_off_loop``, which fall back to an inline call there.
@@ -50,8 +66,11 @@ import io
 import itertools
 import json
 import os
+import threading
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
+from concurrent.futures import Future as ConcurrentFuture
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from cognee.shared.logging_utils import get_logger
@@ -67,28 +86,132 @@ CaptureSink = Callable[[list[dict]], Awaitable[None]]
 
 T = TypeVar("T")
 
+# Worker threads of the capture pool. Two: one flusher's serialization or write
+# at a time, plus one for a second loop's flusher (run_sync's thread, the
+# dataset-queue reaper) or for a write a timeout abandoned.
+CAPTURE_POOL_WORKERS = 2
+
+
+class CapturePoolSaturated(Exception):
+    """Both capture workers are busy: the submission was refused, not queued.
+
+    Deliberately not a ``RuntimeError``: ``run_off_loop`` falls back to an
+    inline call on that (the pool gone at interpreter exit), and a saturated
+    pool must drop the batch instead, so a wedged sink cannot move its wait
+    onto the event loop.
+    """
+
+
+class PartialDelivery(Exception):
+    """Raised by a sink that delivered some of its records and not others.
+
+    ``undelivered`` holds the positions, in the list the sink was handed, of the
+    records that did not reach the destination; the sink raises it AFTER
+    writing what it could. The flusher credits every other record to its run
+    and charges these as dropped, so ``events_delivered`` and
+    ``capture_complete`` describe what actually landed. A sink that delivered
+    nothing raises its own error, which charges the whole batch.
+    """
+
+    def __init__(self, undelivered: Iterable[int], reason: str | None = None) -> None:
+        self.undelivered: tuple[int, ...] = tuple(sorted(set(undelivered)))
+        super().__init__(reason or f"{len(self.undelivered)} record(s) not delivered")
+
+
+class _CapturePool:
+    """The capture-only thread pool; see the module docstring.
+
+    ``busy`` counts submissions not yet finished — including a worker still
+    running a function the awaiting side gave up on (a cancelled future never
+    interrupts a thread) — so saturation means "both workers are occupied",
+    whether by live work or by abandoned writes. The executor is created on
+    first use, so importing capture starts no threads.
+    """
+
+    def __init__(self, max_workers: int) -> None:
+        self.max_workers = max_workers
+        self._executor: ThreadPoolExecutor | None = None
+        self._busy = 0
+        self._lock = threading.Lock()
+
+    @property
+    def busy(self) -> int:
+        return self._busy
+
+    def submit(
+        self, loop: asyncio.AbstractEventLoop, func: Callable[..., T], /, *args: Any
+    ) -> asyncio.Future[T]:
+        """Schedule ``func`` on a capture worker; returns a future bound to ``loop``.
+
+        Raises ``CapturePoolSaturated`` when both workers are busy, and the
+        executor's ``RuntimeError`` once the interpreter is shutting down —
+        callers fall back to an inline call on that one only.
+        """
+        with self._lock:
+            if self._busy >= self.max_workers:
+                raise CapturePoolSaturated(
+                    f"{self._busy} capture worker(s) busy, submission refused"
+                )
+            executor = self._executor
+            if executor is None:
+                executor = self._executor = ThreadPoolExecutor(
+                    max_workers=self.max_workers, thread_name_prefix="cognee-capture"
+                )
+            self._busy += 1
+        try:
+            future = executor.submit(func, *args)
+        except BaseException:
+            with self._lock:
+                self._busy -= 1
+            raise
+        # Bound to this executor: after reset() a worker of the old executor
+        # finishing late must not decrement the new count.
+        future.add_done_callback(functools.partial(self._release, executor))
+        return asyncio.wrap_future(future, loop=loop)
+
+    def _release(self, executor: ThreadPoolExecutor, _future: ConcurrentFuture) -> None:
+        with self._lock:
+            if self._executor is executor:
+                self._busy -= 1
+
+    def reset(self) -> None:
+        """Forget the executor; its threads finish their current work on their own."""
+        with self._lock:
+            executor, self._executor, self._busy = self._executor, None, 0
+        if executor is not None:
+            executor.shutdown(wait=False)
+
+
+_pool = _CapturePool(CAPTURE_POOL_WORKERS)
+
+
+def _reset_pool_for_tests() -> None:
+    """A fresh pool per test, so a write one test abandoned cannot saturate the next."""
+    _pool.reset()
+
 
 async def run_off_loop(func: Callable[..., T], /, *args: Any) -> T:
-    """Run pure-CPU work in a worker thread, inline once the executor is gone.
+    """Run pure-CPU work on a capture worker, inline once the pool is gone.
 
-    Serialization and gzip run in the default executor (the body of
-    ``asyncio.to_thread``) so they never freeze concurrent coroutines. Inside
-    atexit handlers ``threading._shutdown()`` has already run and the executor
-    refuses new work with ``RuntimeError`` ("cannot schedule new futures after
-    interpreter shutdown") — raised at SUBMIT time, before ``func`` starts.
-    Falling back to an inline call there is what lets the atexit drain persist
-    the batch it popped instead of silently losing it. Shared by the flusher
-    and ``StorageSink``.
+    Serialization and gzip run on the capture pool so they never freeze
+    concurrent coroutines. Inside atexit handlers ``threading._shutdown()`` has
+    already run and the pool refuses new work with ``RuntimeError`` ("cannot
+    schedule new futures after interpreter shutdown") — raised at SUBMIT time,
+    before ``func`` starts. Falling back to an inline call there is what lets
+    the atexit drain persist the batch it popped instead of silently losing it.
+    Shared by the flusher and the sinks.
 
-    Only the submit-time failure triggers the fallback: an error raised by
+    Only that submit-time failure triggers the fallback: an error raised by
     ``func`` itself in the worker thread — a ``RecursionError`` (a
     ``RuntimeError`` subclass) on a pathologically deep payload, say —
-    propagates instead of being retried on the event loop.
+    propagates instead of being retried on the event loop, and so does
+    ``CapturePoolSaturated`` (not a ``RuntimeError``), which the flusher
+    accounts as a dropped batch.
     """
     loop = asyncio.get_running_loop()
     context = contextvars.copy_context()
     try:
-        future = loop.run_in_executor(None, functools.partial(context.run, func, *args))
+        future = _pool.submit(loop, context.run, func, *args)
     except RuntimeError:
         return func(*args)
     return await future
@@ -113,11 +236,11 @@ async def run_coroutine_off_loop(make_coroutine: Callable[[], Awaitable[T]]) -> 
     why blob names are collision-free and manifests are written atomically) and
     a stalled filesystem no longer freezes every coroutine on the flusher's loop.
     Same submit-time fallback as ``run_off_loop``: inside the atexit drain the
-    executor is gone, and the coroutine is awaited inline on the drain's own loop.
+    pool is gone, and the coroutine is awaited inline on the drain's own loop.
     """
     loop = asyncio.get_running_loop()
     try:
-        future = loop.run_in_executor(None, functools.partial(_run_to_completion, make_coroutine))
+        future = _pool.submit(loop, _run_to_completion, make_coroutine)
     except RuntimeError:
         return await make_coroutine()
     return await future
@@ -208,7 +331,10 @@ class FanOutSink:
     re-raised so the flusher accounts the batch as dropped. The at-least-once
     contract therefore holds per batch, not per sink — a batch one sink stored
     and another lost is counted lost on the run (``events_dropped``), which is
-    the honest reading of "did the warehouse get it".
+    the honest reading of "did the warehouse get it". A sink that delivered
+    part of the batch (``PartialDelivery``) contributes the positions it left
+    out: the batch's undelivered set is the union over sinks, and a sink that
+    failed outright still fails the whole batch.
     """
 
     def __init__(self, sinks: Sequence[CaptureSink]) -> None:
@@ -218,14 +344,20 @@ class FanOutSink:
 
     async def __call__(self, records: list[dict]) -> None:
         first_error: Exception | None = None
+        undelivered: set[int] = set()
         for sink in self.sinks:
             try:
                 await sink(records)
             except asyncio.CancelledError:
                 raise
+            except PartialDelivery as exc:
+                undelivered.update(exc.undelivered)
+                logger.debug("capture sink %r delivered part of a batch in fan-out (%s)", sink, exc)
             except Exception as exc:
                 if first_error is None:
                     first_error = exc
                 logger.debug("capture sink %r failed in fan-out (%s)", sink, exc)
         if first_error is not None:
             raise first_error
+        if undelivered:
+            raise PartialDelivery(undelivered)

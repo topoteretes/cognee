@@ -32,8 +32,9 @@ from cognee.modules.observability.capture import (
     StorageSink,
     get_capture_config,
     hook,
+    sinks,
 )
-from cognee.modules.observability.capture.sinks import run_off_loop
+from cognee.modules.observability.capture.sinks import PartialDelivery, run_off_loop
 from cognee.shared.data_models import KnowledgeGraph
 
 pytestmark = pytest.mark.usefixtures("capture_reset")
@@ -904,12 +905,107 @@ async def test_run_off_loop_does_not_retry_a_worker_failure_inline(monkeypatch):
     # around the whole call would re-run the failing work on the event loop.
     assert calls == 1
 
-    # The submit-time fallback (executor gone at interpreter exit) still works.
+    # The submit-time fallback (the pool gone at interpreter exit) still works.
     def refuse(*_args, **_kwargs):
         raise RuntimeError("cannot schedule new futures after interpreter shutdown")
 
-    monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", refuse)
+    monkeypatch.setattr(sinks._pool, "submit", refuse)
     assert await run_off_loop(lambda x: x * 2, 21) == 42
+
+
+@pytest.mark.asyncio
+async def test_off_loop_work_runs_on_the_capture_pool_not_the_default_executor(monkeypatch):
+    """Serialization and sink writes must not queue behind — or take workers
+    from — the ``to_thread`` work of the pipeline they observe."""
+
+    def default_executor_used(*_args, **_kwargs):
+        raise AssertionError("the loop's default executor was used")
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", default_executor_used)
+
+    worker = await run_off_loop(threading.current_thread)
+    assert worker is not threading.current_thread()
+    assert worker.name.startswith("cognee-capture")
+    await _wait_until(lambda: sinks._pool.busy == 0)
+
+    async def on_own_loop():
+        return threading.current_thread()
+
+    worker = await sinks.run_coroutine_off_loop(on_own_loop)
+    assert worker.name.startswith("cognee-capture")
+
+
+@pytest.mark.asyncio
+async def test_a_saturated_capture_pool_refuses_new_batches_which_count_as_dropped(
+    monkeypatch, fake_capture_sink
+):
+    """Two writes a timeout abandoned keep both capture workers busy. A batch
+    that arrives then is refused at submit and counted dropped — not queued
+    behind writes that may never return, which would turn every later flush
+    into a full timeout."""
+    fake_logger = MagicMock()
+    monkeypatch.setattr(hook, "logger", fake_logger)
+    hook._configure(flush_interval_s=60.0)
+    gate = threading.Event()
+    loop = asyncio.get_running_loop()
+    occupied = [sinks._pool.submit(loop, gate.wait) for _ in range(sinks.CAPTURE_POOL_WORKERS)]
+    try:
+        assert sinks._pool.busy == sinks.CAPTURE_POOL_WORKERS
+        with capture.run_scope(uuid4(), kind="pipeline") as scope:
+            capture.emit(KIND_SUMMARY_GENERATED, "refused", payload_kind="text")
+            started = time.monotonic()
+            await capture.drain(timeout=2.0)
+            assert time.monotonic() - started < 1.0  # refused, not waited for
+        assert (scope.emitted, scope.dropped, scope.delivered) == (1, 1, 0)
+        assert hook._runtime.dropped == 1
+        assert fake_capture_sink.records == []
+        fake_logger.debug.assert_any_call("capture flush failed, %d event(s) dropped (%s)", 1, ANY)
+    finally:
+        gate.set()
+        await asyncio.gather(*occupied)
+
+    # Capacity is back: the manifest queued at scope exit and a new event go through.
+    capture.emit(KIND_SUMMARY_GENERATED, "after", payload_kind="text")
+    assert await capture.drain()
+    kinds = [record["kind"] for record in fake_capture_sink.records]
+    assert sorted(kinds) == sorted([KIND_RUN_MANIFEST, KIND_SUMMARY_GENERATED])
+    assert sinks._pool.busy == 0
+
+
+@pytest.mark.asyncio
+async def test_a_partial_delivery_credits_what_landed_and_charges_the_rest(monkeypatch):
+    """A sink that wrote part of a group names the rest (PartialDelivery): those
+    slots are dropped on their run, the others delivered — never the whole
+    group credited because the write as a whole did not raise."""
+    fake_logger = MagicMock()
+    monkeypatch.setattr(hook, "logger", fake_logger)
+    calls: list[list[dict]] = []
+
+    async def leaves_one_out(records):
+        calls.append(records)
+        if records[0]["kind"] == KIND_SUMMARY_GENERATED:
+            # Position 7 does not exist in a group of three: ignored, not trusted.
+            raise PartialDelivery([1, 7])
+
+    capture.register_capture_sink(leaves_one_out)
+    hook._configure(flush_interval_s=60.0)
+
+    with capture.run_scope(uuid4(), kind="pipeline") as scope:
+        for text in ("a", "b", "c"):
+            capture.emit(KIND_SUMMARY_GENERATED, text, payload_kind="text")
+        await capture.drain()
+        assert (scope.emitted, scope.dropped, scope.delivered) == (3, 1, 2)
+    await capture.drain()
+
+    assert hook._runtime.dropped == 1
+    assert not hook._runtime.buffer and hook._in_flight_total() == 0
+    fake_logger.debug.assert_any_call(
+        "capture sink left out %d of %d event(s), dropped (%s)", 1, 3, ANY
+    )
+    [manifest] = [r for call in calls for r in call if r["kind"] == KIND_RUN_MANIFEST]
+    assert manifest["payload"]["events_delivered"] == 2
+    assert manifest["payload"]["events_dropped"] == 1
+    assert manifest["payload"]["capture_complete"] is False
 
 
 # ---------------------------------------------------------------------------

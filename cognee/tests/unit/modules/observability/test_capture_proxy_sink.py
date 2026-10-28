@@ -5,6 +5,8 @@ switches allow it. No network: the poster is a recorder."""
 
 import asyncio
 import json
+import os
+import stat
 import time
 from uuid import uuid4
 
@@ -34,6 +36,7 @@ from cognee.modules.observability.capture.proxy_sink import (
     prepare_record,
     proxy_sink_blocked,
 )
+from cognee.modules.observability.capture.sinks import PartialDelivery
 from cognee.tests.unit.modules.conftest import FakeCaptureSink
 
 pytestmark = pytest.mark.usefixtures("capture_reset")
@@ -231,6 +234,25 @@ def fixed_identity(monkeypatch):
     monkeypatch.setattr(proxy_sink_module, "telemetry_identity", lambda: dict(IDENTITY))
 
 
+TEST_ID_KEY = b"test-id-key"
+
+
+@pytest.fixture(autouse=True)
+def fixed_id_key(monkeypatch):
+    """One known pseudonym key, no key file read or written — and the kill
+    switches off, so a sink called directly is not blocked by the shell's ENV."""
+    monkeypatch.setenv(proxy_sink_module.ID_KEY_ENV, TEST_ID_KEY.decode())
+    monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
+    monkeypatch.delenv("ENV", raising=False)
+    proxy_sink_module._reset_id_key_for_tests()
+    yield
+    proxy_sink_module._reset_id_key_for_tests()
+
+
+def _pseudonym(value):
+    return proxy_sink_module.graph_id_pseudonym(value, TEST_ID_KEY)
+
+
 class RecordingPoster:
     """The transport, recording instead of posting; optionally failing or stalling."""
 
@@ -274,7 +296,7 @@ def _record(kind, payload, *, run_id=None, dataset_id=None, user_id=None, tenant
 def test_content_kinds_leave_as_counts_and_histograms_by_default():
     graph = prepare_record(_record(KIND_EXTRACTION_CHUNK_GRAPH, CHUNK_GRAPH), include_content=False)
     assert graph["payload"] == {
-        "chunk_id": "chunk-1",
+        "chunk_id": _pseudonym("chunk-1"),
         "chunk_index": 0,
         "chunk_size_chars": 42,
         "node_count": 3,
@@ -286,7 +308,7 @@ def test_content_kinds_leave_as_counts_and_histograms_by_default():
 
     fuzzy = prepare_record(_record(KIND_EXTRACTION_FUZZY_MATCH, FUZZY_MATCH), include_content=False)
     assert fuzzy["payload"] == {
-        "chunk_id": "chunk-1",
+        "chunk_id": _pseudonym("chunk-1"),
         "chunk_index": 0,
         "lookups": 3,
         "count": 1,
@@ -303,7 +325,7 @@ def test_dropped_duplicate_ids_and_relationship_labels_never_leave_by_default():
     dropped = prepare_record(
         _record(KIND_EXTRACTION_DROPPED_DUPLICATES, DROPPED_DUPLICATES), include_content=False
     )
-    assert dropped["payload"] == {"chunk_id": "chunk-1", "chunk_index": 0, "count": 2}
+    assert dropped["payload"] == {"chunk_id": _pseudonym("chunk-1"), "chunk_index": 0, "count": 2}
     assert dropped["content_included"] is False
 
     candidates = prepare_record(
@@ -314,20 +336,27 @@ def test_dropped_duplicate_ids_and_relationship_labels_never_leave_by_default():
         "pool_size": 3,
         "pool_truncated": False,
         "cut_size": 1,
-        "pool": RETRIEVAL_CANDIDATES["pool"],
-        "top_k": [{"source": "node-1", "target": "node-2", "score": 0.62}],
+        "pool": [
+            {**entry, "id": _pseudonym(entry["id"])} for entry in RETRIEVAL_CANDIDATES["pool"]
+        ],
+        "top_k": [{"source": _pseudonym("node-1"), "target": _pseudonym("node-2"), "score": 0.62}],
     }
     assert candidates["content_included"] is False
     assert "founded" not in json.dumps(candidates)
 
-    # The switch sends both verbatim and flagged, like the other content kinds.
+    # The switch sends both verbatim and flagged, like the other content kinds —
+    # verbatim but for the graph ids, which only ever leave as pseudonyms.
     for kind, payload in (
         (KIND_EXTRACTION_DROPPED_DUPLICATES, DROPPED_DUPLICATES),
         (KIND_RETRIEVAL_CANDIDATES, RETRIEVAL_CANDIDATES),
     ):
         full = prepare_record(_record(kind, payload), include_content=True)
-        assert full["payload"] == payload
+        assert full["payload"] == proxy_sink_module.pseudonymize_graph_ids(
+            kind, payload, TEST_ID_KEY
+        )
         assert full["content_included"] is True
+    assert full["payload"]["top_k"][0]["rel"] == "founded"
+    assert full["payload"]["top_k"][0]["source"] == _pseudonym("node-1")
 
 
 def test_every_kind_is_classified_and_no_extracted_string_leaves_with_content_off():
@@ -343,7 +372,10 @@ def test_every_kind_is_classified_and_no_extracted_string_leaves_with_content_of
         leaked = [sentinel for sentinel in EXTRACTED if sentinel in wire]
         assert not leaked, (kind, leaked)
         if kind not in CONTENT_KINDS:
-            assert out["payload"] == payload
+            # As it is, but for the graph ids, which leave as pseudonyms.
+            assert out["payload"] == proxy_sink_module.pseudonymize_graph_ids(
+                kind, payload, TEST_ID_KEY
+            )
 
 
 def test_a_graph_that_failed_to_dump_still_reduces_to_a_record():
@@ -359,14 +391,14 @@ def test_a_graph_that_failed_to_dump_still_reduces_to_a_record():
 
 def test_the_content_switch_sends_the_payload_verbatim_and_says_so():
     full = prepare_record(_record(KIND_EXTRACTION_CHUNK_GRAPH, CHUNK_GRAPH), include_content=True)
-    assert full["payload"] == CHUNK_GRAPH
+    assert full["payload"] == {**CHUNK_GRAPH, "chunk_id": _pseudonym("chunk-1")}
     assert full["content_included"] is True
 
     # A metadata kind is never flagged as content, whichever way the switch is set.
     delta = {"node_count": 3, "edge_count": 1, "node_types": {"Person": 2}, "node_ids": ["x"]}
     for include_content in (False, True):
         out = prepare_record(_record(KIND_STORAGE_DELTA, delta), include_content=include_content)
-        assert out["payload"] == delta
+        assert out["payload"] == {**delta, "node_ids": [_pseudonym("x")]}
         assert out["content_included"] is False
 
 
@@ -391,6 +423,92 @@ def test_ids_leave_as_they_are_and_the_input_record_is_untouched():
     assert out["payload"] == manifest
     assert "content_included" not in record
     assert json.dumps(record, sort_keys=True) == before
+
+
+def test_graph_ids_leave_as_pseudonyms_under_a_key_that_never_leaves():
+    """An entity id is uuid5(public namespace, "Entity:<name>"): anyone holding
+    a candidate name can compute it and confirm it appears in a record. What
+    leaves is a keyed hash instead — the same for the same id across records
+    (joins hold), different under another installation's key — and the key
+    itself is in no request."""
+    node_id, chunk_id = str(uuid4()), str(uuid4())
+    delta = {"node_count": 1, "node_types": {"Entity": 1}, "node_ids": [node_id, None]}
+    candidates = {
+        **RETRIEVAL_CANDIDATES,
+        "pool": [{"id": node_id, "collection": "Entity_name", "score": 0.1}],
+        "top_k": [{"source": node_id, "target": chunk_id, "rel": "mentions", "score": 0.5}],
+    }
+    summary = {"chunk_id": chunk_id, "summary_id": str(uuid4()), "model": "m", "summary_chars": 3}
+
+    out_delta = prepare_record(_record(KIND_STORAGE_DELTA, delta), include_content=False)
+    out_candidates = prepare_record(
+        _record(KIND_RETRIEVAL_CANDIDATES, candidates), include_content=False
+    )
+    out_summary = prepare_record(_record(KIND_SUMMARY_GENERATED, summary), include_content=False)
+
+    pseudonym = out_delta["payload"]["node_ids"][0]
+    assert pseudonym != node_id and len(pseudonym) == proxy_sink_module.PSEUDONYM_HEX_CHARS
+    assert out_delta["payload"]["node_ids"][1] is None
+    # The same node, the same pseudonym, whichever record it appears in.
+    assert out_candidates["payload"]["pool"][0]["id"] == pseudonym
+    assert out_candidates["payload"]["top_k"][0]["source"] == pseudonym
+    assert out_candidates["payload"]["top_k"][0]["target"] == out_summary["payload"]["chunk_id"]
+    assert out_summary["payload"]["summary_id"] != summary["summary_id"]
+    wire = json.dumps([out_delta, out_candidates, out_summary])
+    assert node_id not in wire and chunk_id not in wire and TEST_ID_KEY.decode() not in wire
+    # Content mode changes nothing about the ids.
+    with_content = prepare_record(
+        _record(KIND_RETRIEVAL_CANDIDATES, candidates), include_content=True
+    )
+    assert with_content["payload"]["pool"][0]["id"] == pseudonym
+    # Another installation's key is another pseudonym space.
+    other = prepare_record(
+        _record(KIND_STORAGE_DELTA, delta), include_content=False, id_key=b"other"
+    )
+    assert other["payload"]["node_ids"][0] not in (pseudonym, node_id)
+    # A UUID and its string form agree, so an emit point may pass either.
+    as_uuid = uuid4()
+    assert proxy_sink_module.graph_id_pseudonym(as_uuid, TEST_ID_KEY) == _pseudonym(str(as_uuid))
+
+
+def test_the_installation_key_is_created_once_owner_only_and_read_back(monkeypatch, tmp_path):
+    from cognee.shared import utils as shared_utils
+
+    monkeypatch.delenv(proxy_sink_module.ID_KEY_ENV, raising=False)
+    monkeypatch.setattr(shared_utils, "_PERSISTENT_ID_DIR", tmp_path / ".cognee")
+    proxy_sink_module._reset_id_key_for_tests()
+
+    first = proxy_sink_module.installation_id_key()
+    key_file = tmp_path / ".cognee" / proxy_sink_module.ID_KEY_FILE_NAME
+    assert key_file.read_text(encoding="utf-8").encode("utf-8") == first
+    assert len(first) == 64  # 32 random bytes, as hex
+    if os.name != "nt":
+        assert stat.S_IMODE(key_file.stat().st_mode) == 0o600
+
+    proxy_sink_module._reset_id_key_for_tests()  # a later process
+    assert proxy_sink_module.installation_id_key() == first
+
+    # The environment wins: one pseudonym space across machines. The file stays.
+    monkeypatch.setenv(proxy_sink_module.ID_KEY_ENV, "shared")
+    proxy_sink_module._reset_id_key_for_tests()
+    assert proxy_sink_module.installation_id_key() == b"shared"
+    assert key_file.read_text(encoding="utf-8").encode("utf-8") == first
+
+
+def test_an_unwritable_home_leaves_a_key_for_this_process_only(monkeypatch, tmp_path):
+    from cognee.shared import utils as shared_utils
+
+    monkeypatch.delenv(proxy_sink_module.ID_KEY_ENV, raising=False)
+    blocked = tmp_path / "blocked"
+    blocked.write_text("a file where the directory should be", encoding="utf-8")
+    monkeypatch.setattr(shared_utils, "_PERSISTENT_ID_DIR", blocked)
+    proxy_sink_module._reset_id_key_for_tests()
+
+    key = proxy_sink_module.installation_id_key()
+    assert len(key) == 32 and proxy_sink_module.installation_id_key() == key
+    out = prepare_record(_record(KIND_STORAGE_DELTA, {"node_ids": ["n"]}), include_content=False)
+    assert out["payload"]["node_ids"] == [proxy_sink_module.graph_id_pseudonym("n", key)]
+    assert "n" != out["payload"]["node_ids"][0]
 
 
 def test_model_settings_that_are_paths_leave_as_local_path():
@@ -427,7 +545,11 @@ def test_model_settings_that_are_paths_leave_as_local_path():
 
     summary = {"chunk_id": "c", "model": "C:\\models\\summarizer", "summary_chars": 12}
     out = prepare_record(_record(KIND_SUMMARY_GENERATED, summary), include_content=False)
-    assert out["payload"] == {"chunk_id": "c", "model": "local_path", "summary_chars": 12}
+    assert out["payload"] == {
+        "chunk_id": _pseudonym("c"),
+        "model": "local_path",
+        "summary_chars": 12,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -459,26 +581,80 @@ async def test_post_bodies_carry_the_identity_block_and_the_prepared_records():
     assert all("content_included" not in record for record in records)  # not mutated
 
 
-@pytest.mark.asyncio
-async def test_batches_split_by_bytes_and_oversize_records_are_skipped():
-    poster = RecordingPoster()
+def _two_records_per_request(poster, **overrides):
     small = _record(KIND_STORAGE_DELTA, {"node_count": 1})
     one_record_bytes = len(json.dumps(prepare_record(small, include_content=False)))
     frame = len(b'{"identity":' + json.dumps(IDENTITY).encode() + b',"records":[]}')
-    sink = ProxySink(
-        "https://proxy.test/capture",
-        poster=poster,
+    options = {
         # Room for two records per request, not three.
-        max_batch_bytes=frame + 2 * one_record_bytes + 1,
-        max_record_bytes=one_record_bytes + 50,
-    )
-    oversize = _record(KIND_STORAGE_DELTA, {"node_ids": ["x" * 400]})
+        "max_batch_bytes": frame + 2 * one_record_bytes + 1,
+        "max_record_bytes": one_record_bytes + 50,
+    }
+    options.update(overrides)
+    return ProxySink("https://proxy.test/capture", poster=poster, **options)
+
+
+@pytest.mark.asyncio
+async def test_batches_split_by_bytes_and_an_oversize_record_is_left_out_and_reported():
+    poster = RecordingPoster()
+    sink = _two_records_per_request(poster)
+    small = _record(KIND_STORAGE_DELTA, {"node_count": 1})
+    # Padded through a field that leaves as it is (node ids would shrink to pseudonyms).
+    oversize = _record(KIND_STORAGE_DELTA, {"node_count": 1, "node_types": {"x" * 400: 1}})
     records = [small, _record(KIND_STORAGE_DELTA, {"node_count": 2}), oversize, small, small]
 
-    await sink(records)
+    with pytest.raises(PartialDelivery) as info:
+        await sink(records)
 
+    assert info.value.undelivered == (2,)  # reported by position, after the POSTs
     assert [len(body["records"]) for _, body, _ in poster.calls] == [2, 2]
     assert oversize["event_id"] not in {record["event_id"] for record in poster.records}
+
+
+@pytest.mark.asyncio
+async def test_a_record_the_sink_leaves_out_is_charged_to_its_run_not_credited():
+    """Over the record cap, or not serializable: left out of the request and
+    dropped on the run — the POST succeeding must not credit it as delivered."""
+    poster = RecordingPoster()
+    capture.register_capture_sink(
+        ProxySink("https://proxy.test/capture", poster=poster, max_record_bytes=600)
+    )
+    hook._configure(flush_interval_s=60.0)
+    circular: dict = {}
+    circular["self"] = circular
+
+    with capture.run_scope(uuid4(), kind="pipeline") as scope:
+        capture.emit(KIND_STORAGE_DELTA, {"node_count": 1}, payload_kind="json")
+        # Padded through a field that leaves as it is (node ids would shrink to pseudonyms).
+        capture.emit(KIND_STORAGE_DELTA, {"node_types": {"x" * 2000: 1}}, payload_kind="json")
+        capture.emit(KIND_STORAGE_DELTA, circular, payload_kind="json")
+        await capture.drain()
+        assert (scope.emitted, scope.dropped, scope.delivered) == (3, 2, 1)
+
+    assert len(poster.calls) == 1
+    assert [record["payload"] for record in poster.records] == [{"node_count": 1}]
+
+
+@pytest.mark.asyncio
+async def test_a_post_that_fails_after_an_earlier_one_landed_charges_only_what_it_carried():
+    class FailsSecond(RecordingPoster):
+        def __call__(self, url, body, timeout_s):
+            super().__call__(url, body, timeout_s)
+            if len(self.calls) == 2:
+                raise RuntimeError("503 from the proxy")
+
+    poster = FailsSecond()
+    sink = _two_records_per_request(poster)
+    records = [_record(KIND_STORAGE_DELTA, {"node_count": 1}) for _ in range(5)]
+
+    with pytest.raises(PartialDelivery) as info:
+        await sink(records)
+
+    # The first request landed; the failed one and the one never sent did not.
+    assert info.value.undelivered == (2, 3, 4)
+    assert isinstance(info.value.__cause__, RuntimeError)
+    assert len(poster.calls) == 2
+    assert [r["event_id"] for r in poster.records[:2]] == [r["event_id"] for r in records[:2]]
 
 
 @pytest.mark.asyncio
@@ -495,6 +671,26 @@ async def test_a_failed_post_counts_the_batch_as_dropped_on_the_run():
     assert scope.emitted == 1
     assert scope.dropped == 1
     assert scope.delivered == 0
+
+
+@pytest.mark.asyncio
+async def test_the_kill_switch_is_honoured_on_every_send_not_only_at_selection(monkeypatch):
+    """TELEMETRY_DISABLED is the one switch that promises nothing leaves. A sink
+    selected while it was unset refuses the moment it is set, and the records
+    it refused are dropped on their run, not credited."""
+    poster = RecordingPoster()
+    capture.register_capture_sink(ProxySink("https://proxy.test/capture", poster=poster))
+    hook._configure(flush_interval_s=60.0)
+
+    with capture.run_scope(uuid4(), kind="pipeline") as scope:
+        capture.emit(KIND_SUMMARY_GENERATED, "before", payload_kind="text")
+        await capture.drain()
+        monkeypatch.setenv("TELEMETRY_DISABLED", "1")
+        capture.emit(KIND_SUMMARY_GENERATED, "after", payload_kind="text")
+        await capture.drain()
+
+    assert [record["payload"] for record in poster.records] == ["before"]
+    assert (scope.emitted, scope.dropped, scope.delivered) == (2, 1, 1)
 
 
 @pytest.mark.asyncio
@@ -616,3 +812,27 @@ async def test_fan_out_runs_every_sink_and_reraises_the_first_failure():
     assert last.records == records
     with pytest.raises(ValueError, match="at least one sink"):
         FanOutSink([])
+
+
+@pytest.mark.asyncio
+async def test_fan_out_unions_partial_deliveries_and_a_failure_still_fails_the_batch():
+    def leaves_out(*positions):
+        async def sink(records):
+            raise PartialDelivery(positions)
+
+        return sink
+
+    stored = FakeCaptureSink()
+    records = [_record(KIND_STORAGE_DELTA, {"node_count": n}) for n in range(3)]
+
+    with pytest.raises(PartialDelivery) as info:
+        await FanOutSink([leaves_out(0), stored, leaves_out(2)])(records)
+    # "Did the warehouse get it", per record: what any sink left out is lost.
+    assert info.value.undelivered == (0, 2)
+    assert stored.records == records
+
+    async def failing(records):
+        raise RuntimeError("proxy down")
+
+    with pytest.raises(RuntimeError, match="proxy down"):
+        await FanOutSink([leaves_out(0), failing])(records)

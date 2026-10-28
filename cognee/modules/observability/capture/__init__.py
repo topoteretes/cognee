@@ -70,11 +70,13 @@ above. ``proxy`` ships records through the analytics proxy product telemetry
 uses - a Firehose stream behind it, the MotherDuck warehouse once a day - and
 sends METADATA ONLY unless ``COGNEE_CAPTURE_PROXY_CONTENT`` is set: the content
 kinds leave as counts and type histograms, model settings that are paths as
-``local_path``, run and dataset ids as they are (ids, not content - the rule
-telemetry applies to datasets); every record carries the run's cognee
-``user_id`` and ``tenant_id`` like telemetry does. The
-proxy sink obeys ``TELEMETRY_DISABLED`` and ``ENV=test|dev``. ``both`` runs the
-two. See ``proxy_sink.py``.
+``local_path``, graph and chunk ids as keyed pseudonyms under a key that never
+leaves the machine (they are deterministic hashes of names and text), run and
+dataset ids as they are (random ids, not content - the rule telemetry applies
+to datasets); every record carries the run's cognee ``user_id`` and
+``tenant_id`` like telemetry does. The proxy sink obeys ``TELEMETRY_DISABLED``
+and ``ENV=test|dev``, checked on every send. ``both`` runs the two. See
+``proxy_sink.py``.
 """
 
 from .config import CaptureConfig, get_capture_config
