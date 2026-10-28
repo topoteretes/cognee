@@ -2,6 +2,7 @@
 
 import pytest
 
+from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.cache.config import CacheConfig, get_cache_config
 
 
@@ -150,6 +151,17 @@ def test_cache_config_session_search_mode_from_env(monkeypatch):
 def test_cache_config_rejects_invalid_session_search_mode():
     with pytest.raises(ValueError):
         CacheConfig(session_search_mode="fast")
+
+
+def test_cache_config_rejects_removed_fs_backend(monkeypatch):
+    """CACHE_BACKEND=fs names the removal and the fix, not a bare Literal mismatch."""
+    monkeypatch.setenv("CACHE_BACKEND", "fs")
+
+    with pytest.raises(CogneeConfigurationError) as raised:
+        CacheConfig(_env_file=None)
+
+    assert "CACHE_BACKEND=fs is no longer supported" in raised.value.message
+    assert "Unset CACHE_BACKEND" in raised.value.remediation
 
 
 def test_get_cache_config_singleton():

@@ -4,6 +4,8 @@ from typing import Literal
 import pydantic
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cognee.exceptions import CogneeConfigurationError
+
 
 class CacheConfig(BaseSettings):
     """
@@ -77,6 +79,25 @@ class CacheConfig(BaseSettings):
     tapes_request_timeout: float = 5.0
 
     model_config = SettingsConfigDict(extra="allow")
+
+    @pydantic.field_validator("cache_backend", mode="before")
+    @classmethod
+    def reject_removed_fs_backend(cls, value):
+        # Raised as-is (not a ValueError), so the user sees this instead of a Literal mismatch.
+        if isinstance(value, str) and value.strip().lower() == "fs":
+            raise CogneeConfigurationError(
+                "CACHE_BACKEND=fs is no longer supported: the filesystem session cache was "
+                "removed because its storage library (diskcache) has an unpatched "
+                "pickle-deserialization vulnerability (GHSA-w8v5-vhqr-4h9v). Sessions it "
+                "stored under <data_root>/.cognee_fs_cache are not read anymore.",
+                remediation=(
+                    "Unset CACHE_BACKEND to use the default sqlite cache (a cache.db next to "
+                    "the relational database), or set it to one of: sqlite, turso, postgres, "
+                    "redis, tapes. On an S3 system root, use CACHE_BACKEND=postgres or set "
+                    "CACHE_DB_URL."
+                ),
+            )
+        return value
 
     @pydantic.model_validator(mode="after")
     def sync_legacy_ladybug_lock(self):
