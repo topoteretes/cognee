@@ -33,6 +33,11 @@ class HttpClient(Protocol):
     HTTP error status: the caller decides what a 4xx means, because providers
     disagree on whether a rejected exchange is a 4xx or a 200 with an error
     field. Transport failures raise the client's own exception.
+
+    Neither method follows redirects: a redirect comes back as its own 3xx
+    status. The token POST carries the client secret and the refresh token, and
+    a followed 307/308 would send that body to whatever host the response names
+    and hand back that host's answer.
     """
 
     async def post_form(
@@ -73,7 +78,9 @@ class AiohttpClient:
     ) -> tuple[int, Any]:
         async with (
             aiohttp.ClientSession(timeout=self._timeout) as session,
-            session.post(url, data=dict(data), headers=_with_accept(headers)) as response,
+            session.post(
+                url, data=dict(data), headers=_with_accept(headers), allow_redirects=False
+            ) as response,
         ):
             return response.status, await _decode(response)
 
@@ -84,7 +91,7 @@ class AiohttpClient:
     ) -> tuple[int, Any]:
         async with (
             aiohttp.ClientSession(timeout=self._timeout) as session,
-            session.get(url, headers=_with_accept(headers)) as response,
+            session.get(url, headers=_with_accept(headers), allow_redirects=False) as response,
         ):
             return response.status, await _decode(response)
 

@@ -129,7 +129,9 @@ async def _request(
     attempt = 0
     while True:
         try:
-            async with session.request(method, url, **kwargs) as response:
+            # No redirects: requests carry the app's Basic credentials or a bearer
+            # token, which a followed redirect would hand to another host.
+            async with session.request(method, url, allow_redirects=False, **kwargs) as response:
                 status = response.status
                 if status == 429 and attempt < MAX_RATE_LIMIT_RETRIES:
                     delay = _retry_delay(response.headers.get("Retry-After"))
@@ -216,6 +218,7 @@ async def revoke_token(token: str, *, client_id: str, client_secret: str) -> Non
             REVOKE_URL,
             json={"token": token},
             headers=_app_headers(client_id, client_secret),
+            allow_redirects=False,
         ) as response,
     ):
         if response.status != 200:

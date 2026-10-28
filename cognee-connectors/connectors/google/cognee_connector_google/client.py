@@ -28,7 +28,8 @@ class GoogleAuthError(RuntimeError):
 async def _token_request(operation: str, payload: dict[str, str]) -> dict[str, Any]:
     async with (
         aiohttp.ClientSession(timeout=TIMEOUT) as session,
-        session.post(TOKEN_URL, data=payload) as response,
+        # No redirects: the body carries the client secret and the refresh token.
+        session.post(TOKEN_URL, data=payload, allow_redirects=False) as response,
     ):
         status = response.status
         try:
@@ -80,7 +81,7 @@ async def revoke_token(token: str) -> None:
     """Best-effort revoke of the grant represented by ``token``."""
     async with (
         aiohttp.ClientSession(timeout=TIMEOUT) as session,
-        session.post(REVOKE_URL, data={"token": token}) as response,
+        session.post(REVOKE_URL, data={"token": token}, allow_redirects=False) as response,
     ):
         if response.status != 200:
             logger.warning("Google token revoke returned HTTP %s", response.status)
@@ -95,7 +96,10 @@ async def _authorized_get(
     async with (
         aiohttp.ClientSession(timeout=TIMEOUT) as session,
         session.get(
-            url, params=params, headers={"Authorization": f"Bearer {access_token}"}
+            url,
+            params=params,
+            headers={"Authorization": f"Bearer {access_token}"},
+            allow_redirects=False,
         ) as response,
     ):
         if response.status != 200:

@@ -198,6 +198,16 @@ async def test_exchange_callback_rejects_an_error_status_with_a_clean_body():
 
 
 @pytest.mark.asyncio
+async def test_exchange_callback_rejects_a_redirect_with_a_clean_body():
+    """The client does not follow redirects, so a 3xx is a failed exchange even
+    when its body would pass as a token response."""
+    http = FakeHttpClient([(307, {"access_token": "tok"})])
+
+    with pytest.raises(RuntimeError, match="returned HTTP 307"):
+        await _connector(http=http).exchange_callback("code", {})
+
+
+@pytest.mark.asyncio
 async def test_exchange_callback_names_the_missing_secret():
     http = FakeHttpClient([(200, {"access_token": "tok"})])
 

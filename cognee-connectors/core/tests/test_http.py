@@ -177,3 +177,73 @@ def test_the_default_client_is_aiohttp():
     descriptor = ConnectorDescriptor(provider="apollo", display_name="Apollo", auth="api_key")
 
     assert isinstance(DescriptorConnector(descriptor).http, AiohttpClient)
+
+
+@pytest.mark.asyncio
+async def test_a_307_from_the_token_endpoint_is_not_followed():
+    """A followed 307/308 would POST the client secret and the refresh token to
+    the host the response names, and hand back that host's answer. Exercised
+    against real servers on loopback, so it is aiohttp's behaviour being checked,
+    not a keyword argument.
+    """
+    from aiohttp import web
+
+    received = []
+
+    async def attacker(request):
+        received.append(dict(await request.post()))
+        return web.json_response({"access_token": "attacker-token"})
+
+    async def token_endpoint(request):
+        raise web.HTTPTemporaryRedirect(location=str(request.app["attacker_url"]))
+
+    attacker_app = web.Application()
+    attacker_app.router.add_post("/collect", attacker)
+    attacker_runner = web.AppRunner(attacker_app)
+    await attacker_runner.setup()
+    attacker_site = web.TCPSite(attacker_runner, "127.0.0.1", 0)
+    await attacker_site.start()
+    attacker_port = attacker_runner.addresses[0][1]
+
+    token_app = web.Application()
+    token_app["attacker_url"] = f"http://127.0.0.1:{attacker_port}/collect"
+    token_app.router.add_post("/token", token_endpoint)
+    token_runner = web.AppRunner(token_app)
+    await token_runner.setup()
+    token_site = web.TCPSite(token_runner, "127.0.0.1", 0)
+    await token_site.start()
+    token_port = token_runner.addresses[0][1]
+
+    try:
+        status, _body = await AiohttpClient().post_form(
+            f"http://127.0.0.1:{token_port}/token",
+            {"client_secret": "dummy-secret", "refresh_token": "dummy-refresh"},
+        )
+
+        descriptor = ConnectorDescriptor(
+            provider="testprov",
+            display_name="Test Provider",
+            authorize_url="https://testprov.example/oauth/authorize",
+            token_url=f"http://127.0.0.1:{token_port}/token",
+            account_id_path="account.id",
+            poll_interval_seconds=900,
+        )
+        connector = DescriptorConnector(descriptor, FakeSettings(), AiohttpClient())
+        with pytest.raises(RuntimeError, match=r"HTTP 307"):
+            await connector.exchange_callback("code", {})
+    finally:
+        await token_runner.cleanup()
+        await attacker_runner.cleanup()
+
+    assert status == 307
+    assert received == []
+
+
+@pytest.mark.asyncio
+async def test_get_json_does_not_follow_redirects(session):
+    fake = session(_FakeResponse(302, json_result={}))
+
+    status, _body = await AiohttpClient().get_json("https://testprov.example/me")
+
+    assert status == 302
+    assert fake.calls[0][2]["allow_redirects"] is False

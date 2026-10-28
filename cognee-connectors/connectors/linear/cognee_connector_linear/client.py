@@ -95,6 +95,7 @@ async def graphql(
             GRAPHQL_URL,
             json=payload,
             headers={"Authorization": f"Bearer {access_token}"},
+            allow_redirects=False,  # never hand the bearer token to another host
         ) as response,
     ):
         if response.status == 401:

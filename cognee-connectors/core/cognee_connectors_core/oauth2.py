@@ -300,7 +300,10 @@ class DescriptorConnector(Connector):
 
         self.descriptor.check_exchange(body)
 
-        if status >= 400:
+        if not 200 <= status < 300:
+            # A 3xx too: the client does not follow redirects (see
+            # cognee_connectors_core.http), so a redirect is a failed exchange,
+            # never a token response to accept.
             raise RuntimeError(f"{self.provider} {what} returned HTTP {status}")
         return body
 
