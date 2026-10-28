@@ -254,6 +254,8 @@ class datasets:
         ``SPARQL_MAX_GRAPH_NODES`` raise ``SparqlGraphTooLargeError`` and a
         query over ``SPARQL_QUERY_TIMEOUT_SECONDS`` raises
         ``SparqlQueryTimeoutError`` (all in ``cognee.modules.graph.rdf``).
+        ``SERVICE``, ``FROM`` and ``FROM NAMED`` raise
+        ``SparqlExternalAccessNotAllowedError``.
 
         Routes to the remote instance when connected via ``serve()``, like
         ``list_data``; there the server's limits apply and a refused query
