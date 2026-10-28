@@ -85,9 +85,16 @@ def should_answer_turn(analysis: SessionTurnAnalysis, *, has_previous_qa: bool) 
     return bool(query_to_answer or not has_analysis_signal or not has_previous_qa)
 
 
-def acknowledgement_for_turn(response_to_user: str | None) -> str:
-    """Acknowledgement stored and returned when a turn does not generate an answer."""
-    return (response_to_user or "").strip() or DEFAULT_NO_ANSWER_ACK
+def acknowledgement_for_turn() -> str:
+    """Acknowledgement stored and returned when a turn does not generate an answer.
+
+    Deliberately fixed rather than the analysis model's ``response_to_user``: that text
+    is stored as the assistant's answer and recalled in later turns, so a model that
+    restates the user's claim ("Confirmed: ...") would turn it into an assistant-
+    asserted fact (#4296). The model still decides whether to answer; code owns the
+    words.
+    """
+    return DEFAULT_NO_ANSWER_ACK
 
 
 def coerce_qa_entry(entry: Any) -> dict:
@@ -491,7 +498,7 @@ async def prepare_session_turn(
 
     should_answer = should_answer_turn(analysis, has_previous_qa=bool(previous_qa_id))
     response_to_user = (
-        acknowledgement_for_turn(analysis.response_to_user)
+        acknowledgement_for_turn()
         if not should_answer
         else ((analysis.response_to_user or "").strip() or None)
     )
