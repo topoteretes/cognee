@@ -467,6 +467,11 @@ class _CodeGraphSnapshot:
         # fact operation sees them; flows, search, ask and capabilities read
         # them through the flow indexes built below.
         self.flows: dict[str, dict[str, Any]] = {}
+        # Symbol id to the hash of its stored source. The text lives in CodeSource nodes this
+        # snapshot never loads: an answer fetches the few it cites by id (see
+        # CodeCompletionRetriever), and the hash tells it whether that text is still the one
+        # this snapshot describes.
+        self.source_hashes: dict[str, str] = {}
         for item in raw_nodes or []:
             if not isinstance(item, (tuple, list)) or len(item) != 2:
                 continue
@@ -491,6 +496,9 @@ class _CodeGraphSnapshot:
                 continue
             if node_type not in CODE_NODE_TYPES:
                 continue
+            source_hash = properties.pop("source_sha256", None)
+            if source_hash:
+                self.source_hashes[node_id] = source_hash
             properties["id"] = node_id
             self.nodes[node_id] = properties
 
@@ -1405,8 +1413,12 @@ class CodeRetriever(BaseRetriever):
                 "SearchType.CODE does not support batched queries.", param="query_batch"
             )
         snapshot = await self._snapshot()
+        return await self.query_snapshot(snapshot, query or "")
+
+    async def query_snapshot(self, snapshot: _CodeGraphSnapshot, query: str) -> dict[str, Any]:
+        """Run against an already loaded snapshot so composed queries share one version."""
         handler = getattr(self, f"_{self.operation}")
-        result = handler(snapshot, query or "")
+        result = handler(snapshot, query)
         if inspect.isawaitable(result):
             result = await result
         if self.diagram_format is not None:

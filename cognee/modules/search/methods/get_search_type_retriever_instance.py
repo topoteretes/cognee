@@ -480,4 +480,21 @@ async def get_search_type_retriever_instance(
 
         retriever_instance = retriever_cls(**retriever_args)
 
+    if "code_context" in retriever_specific_config:
+        from cognee.modules.retrieval.code_completion_retriever import CodeCompletionRetriever
+
+        if type(retriever_instance) not in {
+            GraphCompletionRetriever,
+            HybridRetriever,
+            CompletionRetriever,
+        }:
+            raise QueryValidationError(
+                message="Code answers support GRAPH_COMPLETION, HYBRID_COMPLETION and RAG_COMPLETION."
+            )
+        retriever_instance = CodeCompletionRetriever(
+            retriever_instance,
+            retriever_specific_config["code_context"],
+            plan_question=not kwargs.get("only_context", False),
+            plan_cache=retriever_specific_config.get("code_plan_cache"),
+        )
     return retriever_instance

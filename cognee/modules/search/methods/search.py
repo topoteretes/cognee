@@ -665,6 +665,8 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 search_result_dict["evidence"] = [
                     reference.model_dump(mode="json") for reference in search_result.evidence
                 ]
+                if search_result.code_evidence is not None:
+                    search_result_dict["code_evidence"] = search_result.code_evidence
             else:
                 # Result attribute handles returning appropriate result based on set flags and outputs
                 search_result_dict["search_result"] = search_result.result
@@ -691,6 +693,8 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                         reference.model_dump(mode="json") for reference in search_result.evidence
                     ],
                 }
+                if search_result.code_evidence is not None:
+                    search_result_dict["code_evidence"] = search_result.code_evidence
                 return_value.append(search_result_dict)
             return return_value
         else:

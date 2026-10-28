@@ -39,6 +39,11 @@ class BaseRetriever(ABC):
     # flows) must leave this False.
     skip_completion_on_empty_context = False
 
+    # When True, a failure of any retrieval lane of a session turn fails the turn. By default
+    # the conversational lane is best-effort and a failed lane is dropped; a retriever whose
+    # answer must contain everything it was asked to retrieve (code evidence) opts in.
+    strict_retrieval = False
+
     @abstractmethod
     async def get_retrieved_objects(self, query: str | None, query_batch: str | None) -> Any:
         """

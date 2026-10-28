@@ -88,6 +88,32 @@ async def test_extract_skips_when_stored_snapshot_id_matches(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_a_fresh_extraction_is_not_skipped_by_an_unchanged_snapshot_id(tmp_path, monkeypatch):
+    """Enola's snapshot id need not change when a body does, so only an import may skip."""
+    extractor = importlib.import_module("cognee.tasks.code_graph.extract_code_graph")
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    _write_snapshot(snapshot, FACTS)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(extractor, "run_enola_generate", AsyncMock(return_value=snapshot))
+    engine = _mock_engine(monkeypatch)
+    engine.get_node.return_value = {
+        "last_snapshot_id": SNAPSHOT_ID,
+        "last_mapping_version": CODE_GRAPH_MAPPING_VERSION,
+    }
+
+    data_points = await extract_code_graph(repo_path=str(repo))
+
+    assert len(data_points) == 3  # repository + two symbols, not []
+
+
+def test_the_mapping_version_covers_the_captured_source():
+    # Version 5 added source_evidence: a graph on an older mapping must be mapped again.
+    assert CODE_GRAPH_MAPPING_VERSION >= 5
+
+
+@pytest.mark.asyncio
 async def test_extract_reads_marker_from_json_properties_blob(tmp_path, monkeypatch):
     _write_snapshot(tmp_path, FACTS)
     engine = _mock_engine(monkeypatch)
@@ -236,6 +262,7 @@ async def test_delta_write_skips_unchanged_facts(tmp_path, monkeypatch):
         "nodes_unchanged": 1,
         "samples_added": [],
         "samples_updated": ["app/api.handler"],
+        "sources_written": 0,
     }
     assert list(result) == list(data_points)
     engine.get_graph_data.assert_awaited_once()
@@ -326,3 +353,63 @@ async def test_partial_prewrite_state_is_reread_before_owned_edge_cleanup(tmp_pa
         for call in engine.delete_edge_triples.await_args_list
         for edge in call.args[0]
     )
+
+
+@pytest.mark.asyncio
+async def test_source_nodes_follow_their_symbol_through_the_delta_write(tmp_path, monkeypatch):
+    import time
+
+    from cognee.tasks.code_graph.extract_code_graph import map_facts_to_data_points
+    from cognee.tasks.code_graph.source_evidence import capture_sources
+
+    add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
+    add_data_points_mock = AsyncMock(side_effect=lambda points, **kwargs: points)
+    monkeypatch.setattr(add_data_points_module, "add_data_points", add_data_points_mock)
+    (tmp_path / "db.py").write_text("def build():\n    return 1\n")
+    facts = [{"kind": "symbol", "name": "db.build", "file": "db.py", "line": 1, "repo": REPO}]
+    points = map_facts_to_data_points(
+        facts,
+        repo_path=f"/repos/{REPO}",
+        source_files=capture_sources(facts, tmp_path, time.time_ns()),
+    )
+    symbol = next(p for p in points if p.__class__.__name__ == "CodeSymbol")
+    source = next(p for p in points if p.__class__.__name__ == "CodeSource")
+
+    _mock_engine(monkeypatch, [], [])
+    first = await add_code_graph_data_points(points)
+    assert first.node_delta["sources_written"] == 1 and first.node_delta["nodes_added"] == 1
+
+    _mock_engine(
+        monkeypatch,
+        [
+            (str(symbol.id), {"fact_hash": symbol.fact_hash}),
+            (str(source.id), {"fact_hash": source.fact_hash}),
+        ],
+        [],
+    )
+    again = await add_code_graph_data_points(points)
+    assert again.node_delta["sources_written"] == 0 and again.node_delta["nodes_unchanged"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_source_node_the_run_did_not_produce_is_swept(tmp_path, monkeypatch):
+    from cognee.tasks.code_graph.extract_code_graph import _sweep_stale_code_graph
+
+    kept, lost = "kept-source-id", "lost-source-id"
+    _write_snapshot(tmp_path, FACTS)
+    engine = _mock_engine(monkeypatch)
+    nodes = [
+        (kept, {"type": "CodeSource", "repo": REPO, "name": "a"}),
+        (lost, {"type": "CodeSource", "repo": REPO, "name": "b"}),
+    ]
+    await _sweep_stale_code_graph(
+        engine,
+        FACTS,
+        [],
+        f"/repos/{REPO}",
+        nodes,
+        set(),
+        current_source_ids={kept},
+    )
+    removed = {node_id for call in engine.delete_nodes.await_args_list for node_id in call.args[0]}
+    assert removed == {lost}

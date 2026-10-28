@@ -58,6 +58,7 @@ def _eligible_retriever_types() -> frozenset[type]:
     Opt-in is by exact type, never by subclass: a variant that overrides retrieval or
     runs its own LLM rounds cannot honour the one-blocking-completion contract.
     """
+    from cognee.modules.retrieval.code_completion_retriever import CodeCompletionRetriever
     from cognee.modules.retrieval.completion_retriever import CompletionRetriever
     from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
     from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
@@ -65,6 +66,7 @@ def _eligible_retriever_types() -> frozenset[type]:
     return frozenset(
         {
             CompletionRetriever,
+            CodeCompletionRetriever,
             GraphCompletionRetriever,
             HybridRetriever,
         }
@@ -221,10 +223,17 @@ async def _retrieve_merged_objects(
         conversational_result = None
 
     if isinstance(raw_result, Exception):
-        if not use_conversational_lane or isinstance(conversational_result, Exception):
+        if (
+            retriever.strict_retrieval
+            or not use_conversational_lane
+            or isinstance(conversational_result, Exception)
+        ):
             raise raw_result
         raw_result = None
     if isinstance(conversational_result, Exception):
+        if retriever.strict_retrieval:
+            # A strict retriever must not answer from half of what it was asked to retrieve.
+            raise conversational_result
         conversational_result = None
 
     retrieved_objects = retriever.merge_retrieved_objects(raw_result, conversational_result)

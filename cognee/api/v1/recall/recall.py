@@ -345,6 +345,31 @@ def _scope_should_forward_resolved(scope: str | list[str] | None) -> bool:
     return bool(scope and {"all", "graph_context"}.intersection(scope))
 
 
+# Combined graph and code scope answers with code evidence for these types. The types below
+# also generate or route to an answer, which would then carry no code evidence, so they are
+# refused; every other type is retrieval-only and still returns its own graph and code results.
+_CODE_ANSWER_TYPES = frozenset(
+    {SearchType.GRAPH_COMPLETION, SearchType.HYBRID_COMPLETION, SearchType.RAG_COMPLETION}
+)
+_ANSWER_TYPES_WITHOUT_CODE = frozenset(
+    {
+        SearchType.GRAPH_COMPLETION_COT,
+        SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
+        SearchType.GRAPH_COMPLETION_DECOMPOSITION,
+        SearchType.GRAPH_SUMMARY_COMPLETION,
+        SearchType.AGENTIC_COMPLETION,
+        SearchType.TEMPORAL,
+        SearchType.FEELING_LUCKY,
+        SearchType.BROAD,
+    }
+)
+
+
+def _answers_with_code(sources: list[str], search_type: SearchType) -> bool:
+    """Whether the answer of this search type carries code evidence under these sources."""
+    return "code" in sources and search_type in _CODE_ANSWER_TYPES
+
+
 @telemetry_on_error("cognee.recall ERRORED")
 async def recall(
     query_text: str,
@@ -428,8 +453,10 @@ async def recall(
             scope (same dict format and operations as ``search(code_query=...)``,
             e.g. ``{"operation": "impact_analysis", "seeds": ["UserService"]}`` or
             ``{"operation": "ask", "question": "where are tokens validated?"}``).
-            ``None`` runs the default ``explore`` operation with the query
-            text as seed. Only valid when ``scope`` includes ``"code"``
+            For code-only scope, ``None`` runs ``explore`` with the query as seed.
+            Combined graph/code scope on GRAPH/HYBRID/RAG completion instead passes
+            code and source evidence to the answer (see ``docs/code-answers.md``).
+            Only valid when ``scope`` includes ``"code"``
             (which is never implied by ``"auto"`` or ``"all"``); results are
             tagged ``source="code"``. A seed the code graph cannot resolve, a
             dataset without a code graph, or flows on a graph without them
@@ -511,6 +538,8 @@ async def recall(
             ),
             name="InvalidCodeQueryError",
         )
+    if "graph" in sources and "code" in sources:
+        sources = [source for source in sources if source != "code"] + ["code"]
     # "on_empty" means: go back to the source database only when cognee lacks
     # context — so tools must observe every other source's results first.
     if tools_trigger == "on_empty" and "tools" in sources:
@@ -583,6 +612,7 @@ async def recall(
 
         async with record_operation("recall", user=user, session_id=session_id):
             merged: list[RecallResponse] = []
+            code_in_answer = False
 
             async def _run_session() -> list[RecallResponse]:
                 if not session_id:
@@ -621,7 +651,7 @@ async def recall(
                 )
 
             async def _run_graph() -> list[RecallResponse]:
-                nonlocal user, dataset_ids
+                nonlocal user, dataset_ids, code_in_answer
 
                 from cognee.modules.recall.methods.normalize_search_payload import (
                     normalize_search_payload,
@@ -674,7 +704,16 @@ async def recall(
                     routed_rule = decision.rule
                 else:
                     decision = fallback_decision
+                if (
+                    routed_rule is not None
+                    and "code" in sources
+                    and decision.search_type in _ANSWER_TYPES_WITHOUT_CODE
+                ):
+                    # The caller pinned nothing: a routed type that cannot carry the code
+                    # evidence they asked for becomes the default answer type.
+                    decision, routed_rule = fallback_decision, None
                 local_query_type = decision.search_type
+                code_in_answer = _answers_with_code(sources, local_query_type)
                 # The caller's only_context stays what it was for the warm-up guard and
                 # the skill gate below; the router's forced one applies to the search.
                 search_only_context = only_context or decision.only_context
@@ -716,6 +755,7 @@ async def recall(
                     recall_config is not None
                     and recall_config.recall_warmup_shortcircuit
                     and not only_context
+                    and not code_in_answer
                 )
                 probe_dataset_ids = search_dataset_ids
                 if guard_active and dataset_ids:
@@ -800,6 +840,16 @@ async def recall(
                         ]
 
                 async def _search(search_type: SearchType):
+                    nonlocal code_in_answer
+                    code_in_answer = _answers_with_code(sources, search_type)
+                    if "code" in sources and search_type in _ANSWER_TYPES_WITHOUT_CODE:
+                        raise CogneeValidationError(
+                            message=(
+                                "Combined graph/code answers support GRAPH_COMPLETION, "
+                                "HYBRID_COMPLETION and RAG_COMPLETION. Choose one of these "
+                                "to include code evidence in the answer."
+                            )
+                        )
                     return await authorized_search(
                         query_text=query_text,
                         query_type=search_type,
@@ -815,7 +865,16 @@ async def recall(
                         wide_search_top_k=wide_search_top_k,
                         triplet_distance_penalty=triplet_distance_penalty,
                         feedback_influence=feedback_influence,
-                        retriever_specific_config=retriever_specific_config,
+                        retriever_specific_config=(
+                            {
+                                **(retriever_specific_config or {}),
+                                "code_context": code_query,
+                                # One plan per question for every dataset of this search.
+                                "code_plan_cache": {},
+                            }
+                            if code_in_answer
+                            else retriever_specific_config
+                        ),
                         neighborhood_depth=neighborhood_depth,
                         neighborhood_seed_top_k=neighborhood_seed_top_k,
                         include_references=include_references,
@@ -875,6 +934,17 @@ async def recall(
                     tagged.extend(
                         [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]
                     )
+                    if r.code_evidence is not None:
+                        code_payload = SearchResultPayload(
+                            search_type=SearchType.CODE,
+                            completion=r.code_evidence["operations"],
+                            dataset_id=r.dataset_id,
+                            dataset_name=r.dataset_name,
+                        )
+                        tagged.extend(
+                            ResponseCodeEntry(**item.model_dump(), source="code")
+                            for item in normalize_search_payload(code_payload)
+                        )
                 return tagged
 
             async def _run_tools() -> list[RecallResponse]:
@@ -940,6 +1010,8 @@ async def recall(
 
             async def _run_code() -> list[RecallResponse]:
                 nonlocal user
+                if code_in_answer:
+                    return []  # The completion already carries its code evidence.
 
                 from cognee.modules.recall.methods.normalize_search_payload import (
                     normalize_search_payload,

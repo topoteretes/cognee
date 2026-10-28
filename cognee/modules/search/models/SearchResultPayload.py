@@ -23,6 +23,7 @@ class SearchResultPayload(BaseModel):
     # as-is instead of being coerced into an empty bare BaseModel.
     completion: str | list[str] | list[dict] | dict | BaseModel | list[BaseModel] | None = None
     evidence: list[EvidenceReference] = Field(default_factory=list)
+    code_evidence: dict | None = None
 
     # TODO: Add return_type info
     search_type: SearchType

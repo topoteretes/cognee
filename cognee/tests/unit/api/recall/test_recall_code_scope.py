@@ -170,14 +170,17 @@ async def test_graph_and_code_lanes_both_contribute(captured_search, graph_lane_
         SearchResultPayload(
             dataset_id=uuid4(),
             completion="the graph answer",
+            code_evidence={
+                "sources": [{"name": "UserService"}],
+                "operations": [{"operation": "ask", "seeds": [{"name": "UserService"}]}],
+            },
             search_type=SearchType.GRAPH_COMPLETION,
         )
     ]
-    code_result = [code_payload({"nodes": [{"name": "UserService"}]})]
 
     async def routed(**kwargs):
         captured_search["calls"].append(kwargs)
-        return code_result if kwargs["query_type"] is SearchType.CODE else graph_result
+        return graph_result
 
     monkeypatch.setattr(search_mod, "authorized_search", routed)
 
@@ -191,8 +194,81 @@ async def test_graph_and_code_lanes_both_contribute(captured_search, graph_lane_
     )
 
     lanes = {call["query_type"] for call in captured_search["calls"]}
-    assert lanes == {SearchType.GRAPH_COMPLETION, SearchType.CODE}
+    assert lanes == {SearchType.GRAPH_COMPLETION}
+    config = captured_search["calls"][0]["retriever_specific_config"]
+    assert config == {"code_context": None, "code_plan_cache": {}}
     assert {entry.source for entry in results} == {"graph", "code"}
+    assert results[0].metadata["code_evidence"]["sources"][0]["name"] == "UserService"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "search_type",
+    [
+        SearchType.TEMPORAL,
+        SearchType.FEELING_LUCKY,
+        SearchType.BROAD,
+        SearchType.AGENTIC_COMPLETION,
+        SearchType.GRAPH_COMPLETION_COT,
+        SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
+        SearchType.GRAPH_COMPLETION_DECOMPOSITION,
+        SearchType.GRAPH_SUMMARY_COMPLETION,
+    ],
+)
+async def test_an_answer_type_that_cannot_carry_code_evidence_is_refused(
+    captured_search, graph_lane_stubs, search_type
+):
+    with pytest.raises(CogneeValidationError, match="Combined graph/code answers"):
+        await recall(
+            "what calls UserService?",
+            query_type=search_type,
+            auto_route=False,
+            scope=["graph", "code"],
+            dataset_ids=[uuid4()],
+            user=SimpleNamespace(id=uuid4()),
+        )
+    assert not captured_search["calls"]
+
+
+@pytest.mark.asyncio
+async def test_a_routed_temporal_type_answers_with_code_instead_of_failing(
+    captured_search, graph_lane_stubs, monkeypatch
+):
+    captured_search["results"]["value"] = []
+    await recall(
+        "What did the sync code change in 2019?",
+        scope=["graph", "code"],
+        dataset_ids=[uuid4()],
+        user=SimpleNamespace(id=uuid4()),
+    )
+    types = {call["query_type"] for call in captured_search["calls"]}
+    assert SearchType.TEMPORAL not in types
+    assert types & {SearchType.HYBRID_COMPLETION, SearchType.GRAPH_COMPLETION}
+
+
+@pytest.mark.asyncio
+async def test_a_retrieval_only_type_still_returns_graph_and_code_results(
+    captured_search, graph_lane_stubs
+):
+    captured_search["results"]["value"] = [
+        SearchResultPayload(dataset_id=uuid4(), completion=["chunk"], search_type=SearchType.CHUNKS)
+    ]
+    await recall(
+        "UserService",
+        query_type=SearchType.CHUNKS,
+        auto_route=False,
+        scope=["graph", "code"],
+        dataset_ids=[uuid4()],
+        user=SimpleNamespace(id=uuid4()),
+    )
+    assert {call["query_type"] for call in captured_search["calls"]} == {
+        SearchType.CHUNKS,
+        SearchType.CODE,
+    }
+    assert all(
+        "code_context" not in (call["retriever_specific_config"] or {})
+        for call in captured_search["calls"]
+    )
 
 
 def test_code_is_a_valid_scope_but_never_implied():

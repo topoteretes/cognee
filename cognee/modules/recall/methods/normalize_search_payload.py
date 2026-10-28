@@ -126,6 +126,8 @@ def _build_item(
         text = _text_from_dict(raw) if raw else str(entry)
 
     metadata = _provenance_metadata(raw)
+    if payload.code_evidence is not None:
+        metadata["code_evidence"] = payload.code_evidence
     if payload.evidence:
         metadata["evidence"] = [reference.model_dump(mode="json") for reference in payload.evidence]
 

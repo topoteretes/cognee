@@ -76,6 +76,10 @@ class CodeSymbol(CodeGraphEntity):
     """
 
     symbol_kind: str | None = None
+    # Hash of the symbol's own source lines, read from the checkout while the facts were
+    # extracted; the lines are the CodeSource node at ``source_node_id(id)``. Absent for
+    # imported snapshots, virtual files and files that are not UTF-8.
+    source_sha256: str | None = None
 
 
 class ApiEndpoint(CodeGraphEntity):
@@ -156,3 +160,25 @@ class CodeAssociation(CodeGraphEntity):
 
 class CodeLintFinding(CodeGraphEntity):
     """A finding an external linter reported through enola's provider seam (kind: lint)."""
+
+
+class CodeSource(DataPoint):
+    """The source lines of one CodeSymbol, kept off the symbol node.
+
+    A CODE query loads every symbol and none of them needs its text, which is as large as
+    the repository, so the text lives in a node of a type those queries never load. An answer
+    reads the few it cites by id. ``text_sha256`` is the symbol's ``source_sha256`` of the
+    index this node was written by.
+    """
+
+    name: str
+    repo: str | None = None
+    remote_repository: str | None = None
+    symbol_id: str
+    text: str
+    line: int
+    end_line: int
+    text_sha256: str
+    fact_hash: str | None = None
+    part_of: CodeRepository | None = None
+    metadata: dict = {"index_fields": []}

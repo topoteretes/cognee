@@ -82,6 +82,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`multimedia_audio_image_processing_example.py`](guides/multimedia_audio_image_processing_example.py) | Audio + image ingestion (bundled assets) |
 | [`image_ocr_extraction.py`](guides/image_ocr_extraction.py) | Vision transcription + OCR text for an image |
 | [`code_graph_example.py`](guides/code_graph_example.py) | Code-graph pipeline + `SearchType.CODE`, module/component/hook architecture |
+| [`code_answers.py`](guides/code_answers.py) | Answer code questions with indexed source, graph evidence and coverage through `recall()` |
 | [`remote_code_repository.py`](guides/remote_code_repository.py) | Safe remote repository ingestion through `add` → scoped `cognify` |
 | [`code_reference_task.py`](guides/code_reference_task.py) | Link ingested document/issue chunks to exact code symbols with evidence and source ownership |
 | [`gmail.py`](guides/gmail.py) | Ingest Gmail with the bundled SDK connector, incremental sync and delete propagation (needs `cognee[gmail]`) |
