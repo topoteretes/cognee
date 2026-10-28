@@ -730,17 +730,6 @@ class LanceDBAdapter(VectorDBInterface):
                 )
         return self._compaction_unsupported
 
-    def _turn_off_compaction(self, exc: Exception) -> None:
-        # Called from the handlers that caught ``exc``; its message names the
-        # underlying error, which is all a version mismatch needs.
-        self._compaction_unsupported = "pylance_incompatible"
-        logger.warning(
-            "LanceDB compaction turned off: pylance cannot open the tables lancedb "
-            "wrote (%s). Install the pylance release line matching lancedb's "
-            "bundled Lance core.",
-            exc,
-        )
-
     async def compact(self, collection_name: str | None = None) -> dict:
         """Fold the fragments cognee's upserts leave behind and prune old versions.
 
@@ -778,8 +767,10 @@ class LanceDBAdapter(VectorDBInterface):
         is network transfer and cleanup is thousands of object deletes, and
         turned off for the adapter's lifetime when the installed pylance is not
         on the Lance core lancedb bundles, or cannot open the tables lancedb
-        wrote. Fail-open per collection: a failure is logged and reported in
-        the returned stats, never raised.
+        wrote (that pass raises ``PylanceIncompatibleError``, later ones skip).
+        A failure on one collection does not stop the pass: the rest are
+        compacted, the failed one stays first in line for the next pass, and
+        one error naming every failed collection is raised at the end.
         """
         options = self._compaction_options()
         reason = self._compaction_skip_reason()
@@ -799,6 +790,7 @@ class LanceDBAdapter(VectorDBInterface):
             version_budget = int(options["max_versions"])  # 0 = unlimited
             tasks_left, versions_left = task_budget, version_budget
             results: dict = {}
+            failures: list[tuple[str, Exception]] = []
             for name in names:
                 tasks_spent = task_budget > 0 and tasks_left <= 0
                 versions_spent = version_budget > 0 and versions_left <= 0
@@ -816,24 +808,28 @@ class LanceDBAdapter(VectorDBInterface):
                     self._compaction_dirty.discard(name)
                 try:
                     stats = await self._compact_collection(name, options, max_tasks, max_versions)
-                except PylanceIncompatibleError as exc:
-                    self._turn_off_compaction(exc)
-                    results[name] = {"error": str(exc)[:200]}
-                    break
-                except Exception as exc:
-                    logger.warning(
-                        "Compaction skipped for collection '%s': %s",
-                        name,
-                        exc,
-                        exc_info=True,
-                    )
-                    results[name] = {"error": str(exc)[:200]}
+                except PylanceIncompatibleError:
+                    # Not specific to this table: every later pass would fail the
+                    # same way, so raise it once and stop compacting.
+                    self._compaction_unsupported = "pylance_incompatible"
+                    raise
+                except Exception as error:
+                    # The others still drain; this table stays first in line. The
+                    # error raised after the pass chains only the first failure.
+                    logger.warning("Compaction failed for collection '%s'", name, exc_info=True)
+                    self._compaction_dirty.add(name)
+                    failures.append((name, error))
                     continue
                 results[name] = stats
                 if task_budget > 0:
                     tasks_left -= int(stats.get("executed_tasks", 0) or 0)
                 if version_budget > 0:
                     versions_left -= int(stats.get("old_versions_removed", 0) or 0)
+            if failures:
+                described = "; ".join(f"'{name}': {error!r}" for name, error in failures)
+                raise RuntimeError(
+                    f"LanceDB compaction failed for {len(failures)} collection(s): {described}"
+                ) from failures[0][1]
             return results
 
     async def _compact_collection(

@@ -1,7 +1,7 @@
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field, computed_field
 
 from cognee.modules.data.models.Data import Data
 from cognee.modules.pipelines.utils import iter_ingestion_entries
@@ -81,6 +81,11 @@ class PipelineRunYield(PipelineRunInfo):
 class PipelineRunCompleted(PipelineRunInfo):
     status: str = "PipelineRunCompleted"
 
+    # Set when the step after the completed run failed (``AfterRunHookError``:
+    # the document structure pass or the vector store compaction); the run's data
+    # is stored. PII-scrubbed. Left out of the serialized run when unset.
+    after_run_error: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
 
 class PipelineRunAlreadyCompleted(PipelineRunInfo):
     status: str = "PipelineRunAlreadyCompleted"
@@ -120,3 +125,18 @@ def get_errored_run_info(result) -> PipelineRunErrored | None:
             if isinstance(run_info, PipelineRunErrored):
                 return run_info
     return None
+
+
+def get_after_run_failures(result) -> list[tuple[UUID, str, str]]:
+    """``(dataset_id, dataset_name, after_run_error)`` of each completed run in a
+    cognify()/run_pipeline result whose step after the run failed.
+
+    What ``cognify(raise_on_error=False)`` returns instead of raising
+    ``AfterRunHookError``; read like ``get_errored_run_info``.
+    """
+    runs = result.values() if isinstance(result, dict) else [result]
+    return [
+        (run.dataset_id, run.dataset_name, run.after_run_error)
+        for run in runs
+        if isinstance(run, PipelineRunCompleted) and run.after_run_error
+    ]

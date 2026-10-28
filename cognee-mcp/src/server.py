@@ -838,6 +838,13 @@ async def forget(
             elif clean_history and not dataset and not parsed_dataset_id:
                 # No target: the guards above let this through only for a history-only call.
                 text = f"Search history deleted (status={status})."
+            elif parsed_data_id and status == "not_found":
+                # The receipt says nothing existed for the id: a wrong id or an
+                # already-deleted item. Never word that as a deletion.
+                text = (
+                    f"Data item '{data_id}' was not found in dataset '{dataset or dataset_id}' "
+                    "(wrong id, or already deleted); nothing was deleted (status=not_found)."
+                )
             elif parsed_data_id:
                 text = f"Data item '{data_id}' deleted (status={status})."
             else:
