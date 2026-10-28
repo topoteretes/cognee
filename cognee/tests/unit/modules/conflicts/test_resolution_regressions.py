@@ -1,8 +1,8 @@
 """Reproductions of the review findings on the conflict resolution API (SDK-1328).
 
-Each test encodes one scenario from the review. A test marked ``xfail(strict=True)``
-fails on the branch today and starts failing the suite the moment its finding is
-fixed, which is the signal to drop the marker.
+Each test encodes one scenario from the review and fails on the branch today, with
+no expected-failure marker, so the failures are visible in CI. A test turns green
+once its finding is fixed.
 """
 
 from contextlib import asynccontextmanager
@@ -61,9 +61,6 @@ def _use_real_invalidation(monkeypatch, manager, sessions):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True, reason="a user resolution marks facts the user never saw as superseded (SDK-1328)"
-)
 async def test_review_does_not_reject_new_evidence_the_user_never_saw(lane):  # noqa: F811
     """The user picked Alice over Bob. A later review reports the same conflict with a new
     fact, Carol, the user never saw: preserving the choice must not mark Carol superseded.
@@ -96,10 +93,6 @@ async def test_review_does_not_reject_new_evidence_the_user_never_saw(lane):  # 
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True,
-    reason="session invalidation keys on the subject entity and chunk ids, not the competing facts (SDK-1328)",
-)
 async def test_resolving_a_conflict_keeps_cached_answers_about_other_attributes(
     lane,  # noqa: F811
     monkeypatch,
@@ -129,10 +122,6 @@ async def test_resolving_a_conflict_keeps_cached_answers_about_other_attributes(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("engine_given", [True, False])
-@pytest.mark.xfail(
-    strict=True,
-    reason="attach_chunk_conflicts fails chunk searches when the graph cannot be read (SDK-1328)",
-)
 async def test_chunk_search_survives_an_unreadable_graph(monkeypatch, engine_given):
     """A deployment whose graph engine cannot be read (vector-only, adapter without
     get_filtered_graph_data) still returns its chunk hits, as get_chunk_conflicts does.
@@ -152,10 +141,6 @@ async def test_chunk_search_survives_an_unreadable_graph(monkeypatch, engine_giv
 # Finding 6: resolved_context.py `accepted_facts_context` cutoff ---------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="accepted_facts_context drops decisions past global_context_index_top_k (SDK-1328)",
-)
 def test_every_relevant_user_decision_reaches_the_prelude():
     """Six decisions about retrieved nodes with global_context_index_top_k=5: a decision
     the user made about the retrieved subject is never dropped by a cutoff.
@@ -173,10 +158,6 @@ def test_every_relevant_user_decision_reaches_the_prelude():
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True,
-    reason="strict invalidation treats an already-removed entry as a failure (SDK-1328)",
-)
 async def test_strict_invalidation_tolerates_an_entry_that_is_already_gone(monkeypatch):
     """A contaminated answer removed by a concurrent cleanup makes delete_qa return False;
     strict cleanup must treat that as done, not as a failure of the resolution.
@@ -199,9 +180,6 @@ async def test_strict_invalidation_tolerates_an_entry_that_is_already_gone(monke
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True, reason="list_conflicts/resolve_conflict ignore cognee.serve() (SDK-1328)"
-)
 async def test_sdk_conflict_calls_follow_serve_to_the_remote_instance(monkeypatch):
     """After cognee.serve(url), list_conflicts and resolve_conflict go to the remote
     instance like every other SDK entry point, instead of the empty local stores.
@@ -226,9 +204,6 @@ async def test_sdk_conflict_calls_follow_serve_to_the_remote_instance(monkeypatc
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True, reason="a user decision is rendered by two mechanisms in graph context (SDK-1328)"
-)
 async def test_a_user_decision_is_stated_once_in_graph_context():
     """The surviving Alice edge carries the user's mark and the rejected Bob edge is
     replaced by the resolution: the decision text must be stated once, not twice.
