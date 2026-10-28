@@ -2,6 +2,8 @@
 
 import json
 
+from cognee.context_global_variables import current_dataset_id
+
 CONFLICT_ABOUT = "conflict_about"
 CONFLICT_VALUE = "conflict_value"
 CONFLICT_CITES = "conflict_cites"
@@ -53,3 +55,28 @@ def status_label(properties: dict) -> str:
     if status == "current":
         return f"[as of {date}]"
     return f"[{status}; as of {date}]"
+
+
+def user_selected_facts(properties: dict) -> list[str]:
+    """The accepted facts attached to a user-resolved claim, including a rejected one."""
+    return sorted(
+        {
+            mark["selected_fact"]
+            for mark in read_conflict_marks(properties)
+            if _is_user_resolution_in_scope(mark) and mark.get("selected_fact")
+        }
+    )
+
+
+def is_rejected_fact(properties: dict) -> bool:
+    return any(
+        _is_user_resolution_in_scope(mark) and mark.get("status") == "superseded"
+        for mark in read_conflict_marks(properties)
+    )
+
+
+def _is_user_resolution_in_scope(mark: dict) -> bool:
+    dataset_id = current_dataset_id.get()
+    return mark.get("resolution_source") == "user" and (
+        dataset_id is None or str(mark.get("dataset_id")) == str(dataset_id)
+    )

@@ -2,15 +2,17 @@
 
 Two jobs, in that order. ``attach_chunk_conflicts`` annotates the hits a
 retriever just selected; the renderers below turn annotated hits into the
-passage and conflict sections of a retrieval context. Both are additive: a
-failure leaves the hits exactly as they were retrieved rather than failing the
-search, which is why the graph read is guarded here rather than at each caller.
+passage and conflict sections of a retrieval context. Review explanations are
+best-effort. User decisions are mandatory: if they cannot be read, retrieval
+must not silently return a rejected assertion.
 """
 
 from dataclasses import dataclass, field
 
+from cognee.context_global_variables import current_dataset_id
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.utils.fact_conflicts import CONFLICT_CITES, effective_date_display
+from cognee.modules.retrieval.utils.resolved_context import read_user_resolutions
 from cognee.modules.retrieval.utils.results import payload, result_id
 from cognee.shared.logging_utils import get_logger
 
@@ -35,6 +37,7 @@ class ChunkConflicts:
     document: str | None = None
     effective_date: str | None = None
     conflicts: dict[str, str] = field(default_factory=dict)
+    resolutions: dict[str, str] = field(default_factory=dict)
 
 
 def _unwrap_hit(item):
@@ -63,6 +66,10 @@ def _conflicts_by_chunk(nodes, edges, *, requested_ids: set[str]) -> dict[str, C
     )
     by_chunk: dict[str, ChunkConflicts] = {}
     for chunk_id, conflict_id, edge_properties in citations:
+        properties = conflict_properties.get(conflict_id, {})
+        dataset_id = current_dataset_id.get()
+        if dataset_id is not None and properties.get("dataset_id") not in (None, str(dataset_id)):
+            continue
         text = conflict_properties.get(conflict_id, {}).get("text") or edge_properties.get(
             "edge_text"
         )
@@ -73,6 +80,12 @@ def _conflicts_by_chunk(nodes, edges, *, requested_ids: set[str]) -> dict[str, C
             ChunkConflicts(edge_properties.get("document"), edge_properties.get("effective_date")),
         )
         chunk.conflicts[conflict_id] = text
+        if (
+            properties.get("resolution_source") == "user"
+            and properties.get("selected_fact")
+            and (dataset_id is None or str(properties.get("dataset_id")) == str(dataset_id))
+        ):
+            chunk.resolutions[conflict_id] = properties["selected_fact"]
     return by_chunk
 
 
@@ -120,24 +133,33 @@ def _payloads_by_chunk_id(hits, *, summaries: bool) -> dict[str, list[dict]]:
 async def attach_chunk_conflicts(hits, *, graph_engine=None, summaries: bool = False) -> None:
     """Annotate the selected hits in place with the conflicts citing them.
 
-    Total by design, so a caller never needs its own guard: resolving the graph
-    engine can fail on its own, which ``get_chunk_conflicts`` never sees.
-    Callers that already hold an engine pass it.
+    Read durable decisions independently of citation links, which may still be
+    pending after an interrupted write. Callers holding an engine pass it.
     """
     payloads_by_chunk_id = _payloads_by_chunk_id(hits, summaries=summaries)
     if not payloads_by_chunk_id:
         return
-    try:
-        engine = graph_engine or await get_graph_engine()
-        conflicts_by_chunk_id = await get_chunk_conflicts(engine, list(payloads_by_chunk_id))
-    except Exception:
-        logger.warning("Could not read chunk conflicts", exc_info=True)
-        return
+    engine = graph_engine or await get_graph_engine()
+    resolutions = await read_user_resolutions(engine)
+    conflicts_by_chunk_id = await get_chunk_conflicts(engine, list(payloads_by_chunk_id))
+    for resolution in resolutions:
+        for chunk_id in set(resolution["sources"]) & payloads_by_chunk_id.keys():
+            chunk = conflicts_by_chunk_id.setdefault(chunk_id, ChunkConflicts())
+            chunk.resolutions[resolution["id"]] = resolution["selected_fact"]
+            chunk.conflicts[resolution["id"]] = (
+                resolution.get("text") or resolution["selected_fact"]
+            )
     for chunk_id, chunk_conflicts in conflicts_by_chunk_id.items():
         explanations = [chunk_conflicts.conflicts[key] for key in sorted(chunk_conflicts.conflicts)]
         header = passage_header(chunk_conflicts.document, chunk_conflicts.effective_date)
         for hit_payload in payloads_by_chunk_id[chunk_id]:
             hit_payload["conflicts"] = list(explanations)
+            if chunk_conflicts.resolutions:
+                # A passage may contain both competing assertions. Return the accepted
+                # facts instead of exposing the rejected assertion as current evidence.
+                # Only this search result changes; original documents remain untouched.
+                hit_payload["text"] = "\n".join(sorted(set(chunk_conflicts.resolutions.values())))
+                hit_payload["resolved_facts"] = dict(chunk_conflicts.resolutions)
             hit_payload[PASSAGE_HEADER_KEY] = header
 
 

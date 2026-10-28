@@ -13,9 +13,9 @@ exist (COG-5835). This module removes the contaminated session state:
   (turn -> feedback entry -> context lesson -> later turns that consumed the
   lesson) to a fixpoint.
 
-Both are best-effort by contract: they must never fail the delete that
-triggered them, so callers wrap them in non-fatal try/except and all cache
-lookups fail open.
+Deletion callers use best-effort cleanup: it must never fail the delete that
+triggered it. Conflict resolution opts into strict cleanup so reported cache
+deletion failures leave its decision pending for retry.
 
 Known limits (documented, deliberate): agent-trace entries carry context text
 without element ids and are not matched; the tapes cache backend is
@@ -80,6 +80,8 @@ async def invalidate_sessions_for_deleted_data(
     deleted_node_ids: set[str],
     deleted_edge_ids: set[str],
     user_id: UUID | None = None,
+    *,
+    strict: bool = False,
 ) -> dict:
     """Remove session entries contaminated by a deleted data item.
 
@@ -95,6 +97,8 @@ async def invalidate_sessions_for_deleted_data(
     default session, which carries no dataset attribution. Element-id matching
     keeps the wider scan precise (COG-6292). ``user_id`` is accepted for
     callers and does not filter the unattributed query.
+    ``strict=True`` is used by conflict resolution: a failed cleanup must keep
+    that decision pending, so a retry can finish invalidating obsolete answers.
     """
     totals = {"sessions_considered": 0, "qa_entries_deleted": 0, "context_entries_deleted": 0}
     if not deleted_node_ids and not deleted_edge_ids:
@@ -119,10 +123,13 @@ async def invalidate_sessions_for_deleted_data(
                 session_id=session_id,
                 deleted_node_ids=deleted_node_ids,
                 deleted_edge_ids=deleted_edge_ids,
+                strict=strict,
             )
             totals["qa_entries_deleted"] += counts[0]
             totals["context_entries_deleted"] += counts[1]
         except Exception as error:
+            if strict:
+                raise
             logger.warning(
                 "Session invalidation: targeted cleanup failed for session %s, user %s "
                 "(non-fatal): %s",
@@ -150,6 +157,7 @@ async def _invalidate_session_entries(
     session_id: str,
     deleted_node_ids: set[str],
     deleted_edge_ids: set[str],
+    strict: bool = False,
 ) -> tuple[int, int]:
     """Targeted cleanup of one session. Returns (qa_deleted, context_deleted)."""
     entries = await session_manager.get_session(user_id=user_id, session_id=session_id)
@@ -206,6 +214,8 @@ async def _invalidate_session_entries(
     for qa_id in contaminated_qa_ids:
         if await session_manager.delete_qa(user_id=user_id, qa_id=qa_id, session_id=session_id):
             qa_deleted += 1
+        elif strict:
+            raise RuntimeError("Could not invalidate a cached answer for the resolved conflict")
 
     context_deleted = 0
     for entry_id in contaminated_feedback_ids | contaminated_context_ids:
@@ -213,6 +223,8 @@ async def _invalidate_session_entries(
             user_id=user_id, entry_id=entry_id, session_id=session_id
         ):
             context_deleted += 1
+        elif strict:
+            raise RuntimeError("Could not invalidate a cached lesson for the resolved conflict")
 
     # Clamp the persist watermark to the surviving entry count. A watermark
     # above the count reads as "session was rebuilt" and makes the next

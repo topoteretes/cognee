@@ -22,6 +22,7 @@ from cognee.modules.graph.utils.fact_conflicts import (
     CONFLICT_CITES,
     CONFLICT_VALUE,
     STATUS_PRECEDENCE,
+    read_conflict_marks,
 )
 from cognee.tasks.storage import add_data_points
 
@@ -44,6 +45,60 @@ class ConflictChange:
     @property
     def fact_statuses(self) -> dict[str, str]:
         return self.accepted.fact_statuses if self.accepted else {}
+
+
+def _preserve_user_resolutions(to_write: ConflictsToWrite) -> None:
+    """An automatic review may refresh evidence, but cannot overturn a user's choice.
+
+    Mutate the batch so its finalization receives the same protected nodes. Drops of
+    deleted subjects still go through; LLM drops of a live user's decision do not.
+    """
+    accepted = {str(item.conflict.id): item for item in to_write.accepted_conflicts}
+    for conflict_id, stored in to_write.scope.conflicts.items():
+        if stored.get("resolution_source") != "user":
+            continue
+        incoming = accepted.get(conflict_id)
+        dropping = conflict_id in to_write.dropped_conflict_ids
+        if incoming and incoming.conflict.resolution_source == "user":
+            continue  # An explicit API resolution, including a revision of a prior choice.
+        if not incoming and not dropping:
+            continue
+        if dropping and stored["about_id"] not in to_write.scope.entities:
+            continue  # The subject itself was deleted.
+        statuses = {
+            fact_id: ("current" if fact_id == stored.get("selected_fact_id") else "superseded")
+            for fact_id, fact in to_write.scope.facts.items()
+            if any(
+                str(mark.get("conflict_id")) == conflict_id
+                for mark in read_conflict_marks(fact["properties"])
+            )
+            or (incoming and fact_id in incoming.fact_statuses)
+        }
+        replacement = _rebuild_stored_conflict(
+            stored,
+            rejected_fact_ids=sorted(
+                fid for fid in statuses if fid != stored.get("selected_fact_id")
+            ),
+            rejected_fact_texts=sorted(
+                set(stored.get("rejected_fact_texts", []))
+                | {
+                    to_write.scope.facts[fid]["properties"].get("edge_text", "")
+                    for fid in statuses
+                    if fid != stored.get("selected_fact_id")
+                }
+                - {""}
+            ),
+            sources=sorted(
+                set(stored.get("sources", [])) | set(incoming.conflict.sources if incoming else [])
+            ),
+            values=sorted(
+                set(stored.get("values", [])) | set(incoming.conflict.values if incoming else [])
+            ),
+        )
+        accepted[conflict_id] = AcceptedConflict(replacement, statuses)
+        if dropping:
+            to_write.dropped_conflict_ids.remove(conflict_id)
+    to_write.accepted_conflicts[:] = list(accepted.values())
 
 
 def _collect_conflict_changes(to_write: ConflictsToWrite) -> list[ConflictChange]:
@@ -113,7 +168,14 @@ def _restate_marks(
             continue
         marks = [mark for mark in marks if str(mark["conflict_id"]) != change.conflict_id]
         if status:
-            marks.append({"conflict_id": change.conflict_id, "status": status})
+            mark = {"conflict_id": change.conflict_id, "status": status}
+            if change.accepted.conflict.resolution_source == "user":
+                mark.update(
+                    resolution_source="user",
+                    dataset_id=change.accepted.conflict.dataset_id,
+                    selected_fact=change.accepted.conflict.selected_fact,
+                )
+            marks.append(mark)
     return marks
 
 
@@ -296,6 +358,7 @@ def _update_scope_conflicts(changes: list[ConflictChange], scope: ReviewScope) -
 
 
 async def _write_conflict_changes(unified, to_write: ConflictsToWrite, ctx) -> None:
+    _preserve_user_resolutions(to_write)
     changes = _collect_conflict_changes(to_write)
     conflict_ctx = _build_conflict_storage_context(ctx, to_write.scope.dataset_id)
 

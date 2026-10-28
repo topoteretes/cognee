@@ -46,6 +46,7 @@ from cognee.modules.retrieval.utils.global_context import (
     load_root_text,
     search_top_global_context_summaries,
 )
+from cognee.modules.retrieval.utils.results import payload, result_id
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.modules.user_preferences import load_preference_text, load_preference_weights
 from cognee.shared.logging_utils import get_logger
@@ -198,6 +199,9 @@ class HybridRetriever(BaseRetriever):
         await attach_chunk_conflicts(
             chunk_objects.get("chunks", []), graph_engine=self._unified_engine.graph
         )
+        for chunk in chunk_objects.get("chunks", []):
+            if payload(chunk).get("resolved_facts"):
+                chunk_objects["chunk_summaries"].pop(result_id(chunk), None)
         return HybridCandidates(
             chunks=chunk_objects["chunks"],
             chunk_summaries=chunk_objects["chunk_summaries"],
@@ -243,6 +247,15 @@ class HybridRetriever(BaseRetriever):
             self.node_name,
             self.node_name_filter_operator,
         )
+        from cognee.modules.retrieval.utils.resolved_context import (
+            apply_entity_resolutions,
+            apply_fact_hit_resolutions,
+            read_user_resolutions,
+        )
+
+        resolutions = await read_user_resolutions(self._unified_engine.graph)
+        edge_hits = apply_fact_hit_resolutions(edge_hits, resolutions)
+        apply_entity_resolutions(entities, resolutions)
         return entities, FactCandidates(
             edge_hits=edge_hits,
             reachable_edge_type_ids=reachable_ids,
@@ -272,6 +285,14 @@ class HybridRetriever(BaseRetriever):
         if self._unified_engine is None:
             self._unified_engine = await get_unified_engine()
 
+        from cognee.modules.retrieval.utils.resolved_context import (
+            accepted_facts_context,
+            read_user_resolutions,
+        )
+
+        resolutions = await read_user_resolutions(self._unified_engine.graph)
+        if resolutions:
+            return accepted_facts_context(resolutions)
         root_text, top_summaries = await asyncio.gather(
             load_root_text(),
             search_top_global_context_summaries(

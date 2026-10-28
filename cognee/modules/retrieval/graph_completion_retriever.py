@@ -176,7 +176,15 @@ class GraphCompletionRetriever(BaseRetriever):
             logger.warning("Empty context was provided to the completion")
             return []
 
-        return triplets
+        from cognee.modules.retrieval.utils.resolved_context import (
+            apply_graph_resolutions,
+            read_user_resolutions,
+        )
+
+        resolutions = await read_user_resolutions(self._unified_engine.graph)
+        if query_batch:
+            return [apply_graph_resolutions(batch, resolutions) for batch in triplets]
+        return apply_graph_resolutions(triplets, resolutions)
 
     async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
         """
@@ -285,8 +293,21 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         if len(queries) == 1:
             triplets = await self.get_triplets(query=queries[0])
-            return [triplets]
-        return await self.get_triplets(query_batch=queries)
+            batches = [triplets]
+        else:
+            batches = await self.get_triplets(query_batch=queries)
+        if not any(batches):
+            return batches
+        # CoT and context-extension retrieval use this entry point for both the
+        # initial query and follow-up questions, bypassing get_retrieved_objects.
+        from cognee.modules.retrieval.utils.resolved_context import (
+            apply_graph_resolutions,
+            read_user_resolutions,
+        )
+
+        self._unified_engine = self._unified_engine or await get_unified_engine()
+        resolutions = await read_user_resolutions(self._unified_engine.graph)
+        return [apply_graph_resolutions(batch, resolutions) for batch in batches]
 
     async def get_context_from_objects(
         self,
@@ -346,6 +367,14 @@ class GraphCompletionRetriever(BaseRetriever):
             return ""
         if self._unified_engine is None:
             self._unified_engine = await get_unified_engine()
+        from cognee.modules.retrieval.utils.resolved_context import (
+            accepted_facts_context,
+            read_user_resolutions,
+        )
+
+        resolutions = await read_user_resolutions(self._unified_engine.graph)
+        if resolutions:
+            return accepted_facts_context(resolutions)
         root_text = await load_root_text()
         top_summaries = await search_top_global_context_summaries(
             query, self.global_context_index_top_k, self._unified_engine.vector

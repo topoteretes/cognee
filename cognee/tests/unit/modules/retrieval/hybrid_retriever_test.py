@@ -26,6 +26,8 @@ def _unified(vector=None, graph=None):
     unified.vector = vector or MagicMock()
     unified.vector.embedding_engine.embed_text = AsyncMock(return_value=[QUERY_VECTOR])
     unified.graph = graph or MagicMock()
+    if graph is None:
+        unified.graph.get_filtered_graph_data = AsyncMock(return_value=([], []))
     unified.graph.is_empty = AsyncMock(return_value=False)
     return unified
 
@@ -1167,8 +1169,47 @@ def _edge_hit(text):
 
 def _graph(nodes=None, edges=None):
     graph = MagicMock()
+    graph.get_filtered_graph_data = AsyncMock(return_value=([], []))
     graph.get_neighborhood = AsyncMock(return_value=(nodes or [], edges or []))
     return graph
+
+
+@pytest.mark.asyncio
+async def test_user_resolution_overrides_rejected_passage_and_standalone_fact():
+    old, selected = "Company has CEO Bob", "Company has CEO Alice"
+    vector = MagicMock()
+    vector.has_collection = AsyncMock(return_value=False)
+    vector.search = _vector_search(
+        chunks=[_result("chunk-1", {"id": "chunk-1", "text": old})],
+        edge_types=[_edge_hit(old)],
+    )
+    graph = _graph()
+    graph.get_filtered_graph_data.return_value = (
+        [
+            (
+                "conflict",
+                {
+                    "resolution_source": "user",
+                    "selected_fact": selected,
+                    "sources": ["chunk-1"],
+                    "rejected_fact_texts": [old],
+                },
+            )
+        ],
+        [],
+    )
+    retriever = HybridRetriever(text_summaries_top_k=0, facts_top_k=1)
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=_unified(vector=vector, graph=graph),
+    ):
+        objects = await retriever.get_retrieved_objects(query="Who is CEO?")
+        context = await retriever.get_context_from_objects(
+            query="Who is CEO?", retrieved_objects=objects
+        )
+    assert selected in context
+    assert old not in context
 
 
 @pytest.mark.asyncio
@@ -1336,6 +1377,7 @@ async def test_graph_neighborhood_error_keeps_chunks_entities_and_facts():
     )
     graph = MagicMock()
     graph.get_neighborhood = AsyncMock(side_effect=RuntimeError("graph unavailable"))
+    graph.get_filtered_graph_data = AsyncMock(return_value=([], []))
     retriever = HybridRetriever(text_summaries_top_k=0, facts_top_k=1)
 
     with patch(

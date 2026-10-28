@@ -265,3 +265,7 @@ Then: make sure it runs with `uv run python <path>` after `uv sync` and a config
 and add a row to the matching table in this README.
 
 See [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the broader contribution flow.
+
+### Resolve a fact conflict
+
+[resolve_conflicts.py](guides/resolve_conflicts.py) lists competing facts and records a user choice that future retrieval honors. See [the API guide](../docs/resolve-conflicts.md).

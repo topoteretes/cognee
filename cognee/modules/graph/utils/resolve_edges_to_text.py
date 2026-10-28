@@ -2,7 +2,12 @@ import string
 from collections import Counter
 
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.modules.graph.utils.fact_conflicts import fact_status, status_label
+from cognee.modules.graph.utils.fact_conflicts import (
+    fact_status,
+    is_rejected_fact,
+    status_label,
+    user_selected_facts,
+)
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
 from cognee.shared.logging_utils import get_logger
 
@@ -71,6 +76,10 @@ async def resolve_edges_to_text(retrieved_edges: list[Edge]) -> str:
     if not retrieved_edges:
         return ""
 
+    accepted = sorted(
+        {text for edge in retrieved_edges for text in user_selected_facts(edge.attributes)}
+    )
+    retrieved_edges = [edge for edge in retrieved_edges if not is_rejected_fact(edge.attributes)]
     nodes = _extract_nodes_from_edges(retrieved_edges)
 
     node_section = "\n".join(
@@ -116,4 +125,9 @@ async def resolve_edges_to_text(retrieved_edges: list[Edge]) -> str:
         },
     )
 
-    return f"Nodes:\n{node_section}\n\nConnections:\n{connection_section}"
+    rendered = (
+        f"Nodes:\n{node_section}\n\nConnections:\n{connection_section}" if retrieved_edges else ""
+    )
+    if accepted:
+        rendered += "\n\n## Accepted facts (user resolved)\n" + "\n".join(accepted)
+    return rendered.strip()
