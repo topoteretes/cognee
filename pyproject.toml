@@ -87,18 +87,15 @@ dependencies = [
     # LLM key and no EMBEDDING_* settings are configured, so a bare install can ingest.
     # 0.9.1 is the first release that admits Pillow 13 (3.11+; Pillow 13 dropped 3.10).
     "fastembed>=0.9.1,<0.10",
-    # onnxruntime 1.23.2 is the last release with cp310 wheels, so 3.10 stays there.
-    # It is also the last release with wheels for macOS 13 (Darwin 22) and for Intel
-    # Macs: from 1.24.1 the only macOS wheel is macosx_14_0_arm64 and there is no
-    # sdist, so those machines stay on 1.23.2 too (same split as ladybug below) on
-    # 3.11-3.13. 3.14 cannot be held back: onnxruntime has no cp314 wheel below
-    # 1.24.1, and every fastembed since 0.8 needs >=1.24.2 on 3.14 anyway, so
-    # loosening the fastembed pin would not help; those Macs get no usable wheel on
-    # 3.14, as on dev before this change. Everywhere else 3.11+ is open upwards: the
-    # patched unstructured (docs extra) needs >=1.25.
-    "onnxruntime<=1.23.2 ; python_version < '3.11'",
-    "onnxruntime<=1.23.2 ; python_version >= '3.11' and python_version < '3.14' and sys_platform == 'darwin' and ('Darwin Kernel Version 22.' in platform_version or platform_machine == 'x86_64')",
-    "onnxruntime>=1.24.1 ; python_version >= '3.14' or (python_version >= '3.11' and (sys_platform != 'darwin' or ('Darwin Kernel Version 22.' not in platform_version and platform_machine != 'x86_64')))",
+    # onnxruntime 1.23.2 is the last release with cp310 wheels (1.24-1.30 still claim
+    # >=3.10 in metadata, so the resolver needs telling), and the last with wheels for
+    # macOS 13 (Darwin 22) or Intel Macs: from 1.24.1 the only macOS wheel is
+    # macosx_14_0_arm64, with no sdist. Same split as ladybug below. 3.14 cannot be
+    # held back (no cp314 wheel below 1.24.1), so those Macs get no usable wheel
+    # there, as on dev before this change. Everywhere else the resolver takes the
+    # newest release; fastembed and unstructured carry their own onnxruntime floors.
+    "onnxruntime<=1.23.2 ; python_version < '3.11' or (python_version < '3.14' and sys_platform == 'darwin' and ('Darwin Kernel Version 22.' in platform_version or platform_machine == 'x86_64'))",
+    "onnxruntime>=1.17",
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
     "pylance>=12.0.0,<12.1.0",  # same Lance release line as lancedb, see above
@@ -193,12 +190,12 @@ docs = [
     # GHSA-vfmq-68hx-4jfw is fixed in lxml 6.1.0 (see the scraping extra).
     "lxml>=6.1.0,<7",
     # GHSA-4mvj-m6j5-pmf7 (critical) and GHSA-v5mq-3xhg-98m9 are fixed in 0.24.1.
-    # 0.24.1's pdf extra needs unstructured-inference>=1.6.12 -> onnxruntime>=1.25.0,
-    # which has no cp310 wheel and no wheel for macOS 13 or Intel Macs, so Python 3.10
-    # and those machines keep the older line (see onnxruntime above) and stay exposed
-    # to the advisories 0.24.1 fixes.
-    "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.24.1,<1 ; python_version >= '3.14' or (python_version >= '3.11' and (sys_platform != 'darwin' or ('Darwin Kernel Version 22.' not in platform_version and platform_machine != 'x86_64')))",
-    "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<1 ; python_version < '3.11' or (python_version < '3.14' and sys_platform == 'darwin' and ('Darwin Kernel Version 22.' in platform_version or platform_machine == 'x86_64'))",
+    # The resolver takes 0.24.1+ wherever it can install (GHSA-4mvj-m6j5-pmf7, critical).
+    # Its pdf extra needs unstructured-inference>=1.6.12 -> onnxruntime>=1.25, and
+    # 0.24+ itself is 3.11-3.13 only, so Python 3.10, 3.14, macOS 13 and Intel Macs
+    # fall back to the 0.18 line (see onnxruntime above) and stay exposed to those
+    # advisories.
+    "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<1",
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
 # enola-cli is a core dependency. The empty extra keeps `cognee[codegraph]` installable.
