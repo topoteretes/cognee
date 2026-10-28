@@ -14,8 +14,9 @@ from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import XSD
 
 from cognee.modules.graph.rdf import sparql as sparql_module
-from cognee.modules.graph.rdf.export import DEFAULT_BASE_IRI
+from cognee.modules.graph.rdf.export import DEFAULT_BASE_IRI, query_memory_graph_sparql
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.tests.utils.recording_http_server import recording_http_server
 
 datasets_module = importlib.import_module("cognee.api.v1.datasets.datasets")
 serve_state = importlib.import_module("cognee.api.v1.serve.state")
@@ -38,6 +39,14 @@ EDGES = [
 SELECT_LABELS = "SELECT ?s ?name WHERE { ?s rdfs:label ?name } ORDER BY ?name"
 
 
+def _long_query(patterns: int) -> str:
+    return (
+        "SELECT * WHERE { "
+        + " ".join(f"?s <http://x/p{i}> ?o{i} ." for i in range(patterns))
+        + " }"
+    )
+
+
 class FakeGraphEngine:
     def __init__(self, nodes=NODES, edges=EDGES, *, num_nodes=None, data_delay=0.0):
         self._nodes = nodes
@@ -58,7 +67,7 @@ class FakeGraphEngine:
 
 @pytest.fixture
 def graph(monkeypatch):
-    """Scope the sparql module to a fake engine; records the dataset context it asked for."""
+    """Enable SPARQL and scope it to a fake engine; records the dataset context it asked for."""
     engine = FakeGraphEngine()
     contexts = []
 
@@ -188,6 +197,28 @@ def test_base_iri_is_applied_to_minted_iris(client):
     assert response.json()["rows"][0][0] == "https://example.org/mem/node/person-1"
 
 
+@pytest.mark.parametrize("base_iri", [None, "https://example.org/mem/"])
+def test_view_prefixes_work_without_a_prefix_declaration(client, base_iri):
+    """``cognee:`` / ``cprop:`` are bound by the view and follow the request's base IRI."""
+    query = (
+        "SELECT ?o WHERE { ?s cprop:knows ?o . ?s rdfs:label ?n "
+        "FILTER(STRSTARTS(STR(?s), STR(cognee:))) }"
+    )
+    extra = {"base_iri": base_iri} if base_iri else {}
+
+    response = _sparql(client, query, **extra)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["rows"] == [[f"{base_iri or DEFAULT_BASE_IRI}node/person-2"]]
+
+
+def test_undeclared_prefix_is_400(client):
+    response = _sparql(client, "SELECT ?o WHERE { ?s nope:x ?o }")
+
+    assert response.status_code == 400, response.text
+    assert "Unknown namespace prefix" in response.json()["message"]
+
+
 # --- HTTP: guards -------------------------------------------------------------
 
 
@@ -237,6 +268,137 @@ def test_malformed_query_is_400(client):
 
     assert response.status_code == 400
     assert "Invalid SPARQL query" in response.json()["message"]
+    # Parsed before the graph is read.
+    assert client.graph.get_graph_data_calls == 0
+
+
+def test_query_too_long_to_parse_is_400_not_500(client):
+    """rdflib's parser exhausts the recursion limit at about 90 triple patterns."""
+    response = _sparql(client, _long_query(200))
+
+    assert response.status_code == 400, response.text
+    assert "too long or too deeply nested" in response.json()["message"]
+    assert client.graph.get_graph_data_calls == 0
+
+
+def test_a_long_query_below_the_parser_limit_still_runs(client):
+    response = _sparql(client, _long_query(60))
+
+    assert response.status_code == 200, response.text
+
+
+def test_query_is_parsed_once(client, monkeypatch):
+    """The checked parse tree is what runs; ``Graph.query`` does not parse the text again."""
+    from rdflib.plugins.sparql import processor
+
+    calls = []
+
+    def _counting(parse):
+        def _wrapped(*args, **kwargs):
+            calls.append(args[0])
+            return parse(*args, **kwargs)
+
+        return _wrapped
+
+    monkeypatch.setattr(sparql_module, "parseQuery", _counting(sparql_module.parseQuery))
+    monkeypatch.setattr(processor, "parseQuery", _counting(processor.parseQuery))
+
+    response = _sparql(client, SELECT_LABELS)
+
+    assert response.status_code == 200, response.text
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT * WHERE { SERVICE <http://169.254.169.254/latest/> { ?s ?p ?o } }",
+        "SELECT * WHERE { SERVICE SILENT <http://internal:8080/sparql> { ?s ?p ?o } }",
+        "SELECT * WHERE { ?svc rdfs:label ?n . SERVICE ?svc { ?s ?p ?o } }",
+        "SELECT * WHERE { { SELECT ?s WHERE { SERVICE <http://x/> { ?s ?p ?o } } } }",
+        "SELECT * WHERE { ?s rdfs:label ?n OPTIONAL { SERVICE <http://x/> { ?s ?p ?o } } }",
+        "SELECT * WHERE { { ?s ?p ?o } UNION { SERVICE <http://x/> { ?s ?p ?o } } }",
+        "ASK { SERVICE <http://x/> { ?s ?p ?o } }",
+        "CONSTRUCT { ?s ?p ?o } WHERE { SERVICE <http://x/> { ?s ?p ?o } }",
+        "PREFIX ex: <http://x/> SELECT * WHERE { service ex:endpoint { ?s ?p ?o } }",
+    ],
+)
+def test_service_queries_are_refused_with_400(client, query):
+    response = _sparql(client, query)
+
+    assert response.status_code == 400, response.text
+    assert "SPARQL SERVICE is not supported" in response.json()["message"]
+    # Refused before the dataset graph is opened at all.
+    assert client.graph.contexts == []
+    assert client.graph.get_graph_data_calls == 0
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT * FROM <file:///etc/passwd> WHERE { ?s ?p ?o }",
+        "SELECT * FROM <http://169.254.169.254/latest/> WHERE { ?s ?p ?o }",
+        "SELECT * FROM NAMED <http://x/g> WHERE { GRAPH ?g { ?s ?p ?o } }",
+        "ASK FROM <http://x/g> { ?s ?p ?o }",
+        "CONSTRUCT { ?s ?p ?o } FROM <http://x/g> WHERE { ?s ?p ?o }",
+        "DESCRIBE ?s FROM <http://x/g> WHERE { ?s ?p ?o }",
+    ],
+)
+def test_from_clauses_are_refused_with_400(client, query):
+    response = _sparql(client, query)
+
+    assert response.status_code == 400, response.text
+    assert "SPARQL FROM / FROM NAMED is not supported" in response.json()["message"]
+    assert client.graph.get_graph_data_calls == 0
+
+
+@pytest.fixture
+def internal_server():
+    """A local endpoint standing in for an internal service; records every request."""
+    with recording_http_server(
+        b'{"head": {"vars": []}, "results": {"bindings": []}}',
+        "application/sparql-results+json",
+    ) as server:
+        yield server
+
+
+def test_service_query_sends_no_request_to_the_named_endpoint(client, internal_server):
+    """Without the guard rdflib sends this request from the server (SSRF)."""
+    url, requests = internal_server
+
+    response = _sparql(client, f"SELECT * WHERE {{ SERVICE <{url}/internal> {{ ?s ?p ?o }} }}")
+
+    assert response.status_code == 400
+    assert requests == []
+
+
+def test_rdflib_would_call_the_service_endpoint_without_the_guard(internal_server):
+    """Pins why the guard exists: rdflib really does send the SERVICE request."""
+    from rdflib.plugins.sparql import prepareQuery
+
+    url, requests = internal_server
+    query = prepareQuery(f"SELECT * WHERE {{ SERVICE <{url}/internal> {{ ?s ?p ?o }} }}")
+
+    list(Graph().query(query))
+
+    assert len(requests) == 1
+    assert requests[0].startswith("/internal")
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT ?service WHERE { ?service rdfs:label ?name }",
+        'SELECT ?s WHERE { ?s rdfs:label ?n FILTER(CONTAINS(?n, "SERVICE")) }',
+        "SELECT ?s WHERE { ?s <http://example.org/vocab#service> ?o }",
+        "SELECT ?s WHERE { ?s ?p ?o } # SERVICE <http://x/> in a comment",
+        "PREFIX from: <http://example.org/> SELECT ?s WHERE { ?s from:named ?o }",
+    ],
+)
+def test_queries_that_only_spell_service_or_from_still_run(client, query):
+    response = _sparql(client, query)
+
+    assert response.status_code == 200, response.text
 
 
 def test_over_size_graph_is_413_and_points_at_the_export(client, monkeypatch):
@@ -263,6 +425,24 @@ def test_slow_query_is_504(client, monkeypatch):
     assert "0.05s" in response.json()["message"]
 
 
+def test_parsing_counts_toward_the_timeout(client, monkeypatch):
+    """A query that is slow to parse answers 504 too, not only a slow export or evaluation."""
+    import time
+
+    parse = sparql_module.prepare_query
+
+    def _slow_parse(query):
+        time.sleep(0.5)
+        return parse(query)
+
+    monkeypatch.setenv("SPARQL_QUERY_TIMEOUT_SECONDS", "0.05")
+    monkeypatch.setattr(sparql_module, "prepare_query", _slow_parse)
+
+    response = _sparql(client, SELECT_LABELS)
+
+    assert response.status_code == 504, response.text
+
+
 def test_unauthorized_dataset_is_404_like_the_other_dataset_routes(client):
     client.authorized.datasets = []
 
@@ -271,6 +451,48 @@ def test_unauthorized_dataset_is_404_like_the_other_dataset_routes(client):
     assert response.status_code == 404
     assert response.json() == {"message": f"Dataset ({DATASET_ID}) not found."}
     assert client.graph.contexts == []
+
+
+# --- query_memory_graph_sparql (Python-only helper) --------------------------
+
+
+@pytest.mark.asyncio
+async def test_query_memory_graph_sparql_runs_a_read_only_query():
+    rows = await query_memory_graph_sparql(SELECT_LABELS, graph_engine=FakeGraphEngine())
+
+    assert [str(row[1]) for row in rows] == ["Ada", "Grace", "Person"]
+
+
+@pytest.mark.asyncio
+async def test_query_memory_graph_sparql_knows_the_view_prefixes():
+    rows = await query_memory_graph_sparql(
+        "SELECT ?o WHERE { ?s cprop:knows ?o }", graph_engine=FakeGraphEngine()
+    )
+
+    assert [str(row[0]) for row in rows] == [f"{DEFAULT_BASE_IRI}node/person-2"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query, error",
+    [
+        (
+            "SELECT * WHERE {{ SERVICE <{url}/internal> {{ ?s ?p ?o }} }}",
+            "SparqlExternalAccessNotAllowedError",
+        ),
+        ("SELECT * FROM <{url}/graph> WHERE {{ ?s ?p ?o }}", "SparqlExternalAccessNotAllowedError"),
+        ("LOAD <{url}/graph>", "SparqlUpdateNotAllowedError"),
+    ],
+)
+async def test_query_memory_graph_sparql_refuses_external_access(internal_server, query, error):
+    url, requests = internal_server
+    engine = FakeGraphEngine()
+
+    with pytest.raises(getattr(sparql_module, error)):
+        await query_memory_graph_sparql(query.format(url=url), graph_engine=engine)
+
+    assert requests == []
+    assert engine.get_graph_data_calls == 0
 
 
 # --- pure helpers -------------------------------------------------------------
@@ -366,6 +588,36 @@ async def test_sdk_sparql_refuses_an_inaccessible_dataset(monkeypatch, graph):
         await datasets_module.datasets.sparql(DATASET_ID, SELECT_LABELS, user=user)
 
     assert graph.contexts == []
+
+
+@pytest.mark.asyncio
+async def test_sdk_sparql_refuses_service(monkeypatch, graph):
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+    dataset = SimpleNamespace(id=DATASET_ID, owner_id=OWNER_ID)
+
+    with (
+        patch.object(datasets_module, "get_authorized_dataset", AsyncMock(return_value=dataset)),
+        pytest.raises(sparql_module.SparqlExternalAccessNotAllowedError),
+    ):
+        await datasets_module.datasets.sparql(
+            DATASET_ID, "SELECT * WHERE { SERVICE <http://x/> { ?s ?p ?o } }", user=object()
+        )
+
+    assert graph.get_graph_data_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_sdk_sparql_reports_a_query_too_long_to_parse_as_a_syntax_error(monkeypatch, graph):
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+    dataset = SimpleNamespace(id=DATASET_ID, owner_id=OWNER_ID)
+
+    with (
+        patch.object(datasets_module, "get_authorized_dataset", AsyncMock(return_value=dataset)),
+        pytest.raises(sparql_module.SparqlSyntaxError, match="too long or too deeply nested"),
+    ):
+        await datasets_module.datasets.sparql(DATASET_ID, _long_query(200), user=object())
+
+    assert graph.get_graph_data_calls == 0
 
 
 @pytest.mark.asyncio
