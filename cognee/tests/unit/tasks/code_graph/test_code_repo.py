@@ -347,7 +347,13 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
     cloned_specs = []
 
     async def fake_resolve_repo_source(
-        spec, clones_dir=None, credentials=None, branch=None, include_documents=True
+        spec,
+        clones_dir=None,
+        credentials=None,
+        branch=None,
+        include_documents=True,
+        include_paths=None,
+        exclude_paths=None,
     ):
         cloned_specs.append((spec, branch))
         _commit_fixture(clone)
@@ -403,7 +409,13 @@ async def test_repository_url_credentials_are_redacted_from_the_manifest(
     cloned_specs = []
 
     async def fake_resolve_repo_source(
-        spec, clones_dir=None, credentials=None, branch=None, include_documents=True
+        spec,
+        clones_dir=None,
+        credentials=None,
+        branch=None,
+        include_documents=True,
+        include_paths=None,
+        exclude_paths=None,
     ):
         cloned_specs.append(spec)
         _commit_fixture(clone)
@@ -431,7 +443,13 @@ async def test_a_repository_url_keeps_one_data_row_whatever_the_branch(tmp_path,
     from cognee.tasks.code_graph.resolve_repo import repo_identity
 
     async def fake_resolve_repo_source(
-        spec, clones_dir=None, credentials=None, branch=None, include_documents=True
+        spec,
+        clones_dir=None,
+        credentials=None,
+        branch=None,
+        include_documents=True,
+        include_paths=None,
+        exclude_paths=None,
     ):
         directory = tmp_path / (branch or "default")
         directory.mkdir()
@@ -503,7 +521,13 @@ async def test_a_repository_url_clones_with_the_credentials_and_leaves_out_docum
     seen = {}
 
     async def fake_resolve_repo_source(
-        spec, clones_dir=None, credentials=None, branch=None, include_documents=True
+        spec,
+        clones_dir=None,
+        credentials=None,
+        branch=None,
+        include_documents=True,
+        include_paths=None,
+        exclude_paths=None,
     ):
         seen.update(spec=spec, credentials=credentials, branch=branch)
         _commit_fixture(clone)
@@ -539,7 +563,13 @@ async def test_resolving_a_repository_url_passes_the_options_to_the_clone(
     seen = []
 
     async def fake_resolve_repo_source(
-        spec, clones_dir=None, credentials=None, branch=None, include_documents=True
+        spec,
+        clones_dir=None,
+        credentials=None,
+        branch=None,
+        include_documents=True,
+        include_paths=None,
+        exclude_paths=None,
     ):
         seen.append(credentials)
         _commit_fixture(clone)

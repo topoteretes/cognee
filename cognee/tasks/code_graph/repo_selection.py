@@ -1,5 +1,7 @@
 """Select exact paths from a commit tree without downloading its blobs."""
 
+import fnmatch
+import functools
 import hashlib
 import json
 import os
@@ -88,13 +90,128 @@ _BINARY_EXTENSIONS = frozenset(
 _OBJECT_ID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 
 
-def select_tree(tree: str, include_documents: bool) -> tuple[list[str], dict[str, int]]:
-    """Read the complete NUL-delimited ls-tree output; malformed records fail closed.
+def validate_path_patterns(
+    patterns: list[str] | None, name: str, *, optional: bool = False
+) -> None:
+    """Validate POSIX globs: ** spans components; *, ? and [] match within one.
 
-    Unknown extensions are retained: custom enola extractors and manifests may
-    need them. There is no file-size cutoff. Symlinks and submodules are explicitly
-    excluded, and code-only still retains text (including enola's markdown inputs).
+    ``optional`` accepts None, which means no filter (include_paths) rather than an empty list.
     """
+    from cognee.exceptions import CogneeValidationError
+
+    if patterns is None and optional:
+        return
+    if not isinstance(patterns, list) or any(not isinstance(p, str) for p in patterns):
+        raise CogneeValidationError(f"{name} must be a list of path patterns.")
+    for pattern in patterns:
+        parts = pattern.split("/")
+        if (
+            not pattern
+            or "\\" in pattern
+            or any(ord(char) < 32 or ord(char) == 127 for char in pattern)
+            or any(part in ("", ".", "..") for part in parts)
+            or re.match(r"^[A-Za-z]:", pattern)
+            or any("**" in part and part != "**" for part in parts)
+        ):
+            raise CogneeValidationError(
+                f"Invalid {name} pattern {pattern!r}: use relative POSIX globs."
+            )
+
+
+def path_matches(path: str, pattern: str) -> bool:
+    """Match a full relative path, case-sensitively, with ** matching zero or more folders."""
+    parts, patterns = path.split("/"), pattern.split("/")
+    if "**" not in patterns:
+        return len(parts) == len(patterns) and all(
+            fnmatch.fnmatchcase(part, rule) for part, rule in zip(parts, patterns)
+        )
+
+    @functools.cache
+    def match(position: int, rule: int) -> bool:
+        if rule == len(patterns):
+            return position == len(parts)
+        if patterns[rule] == "**":
+            return match(position, rule + 1) or (
+                position < len(parts) and match(position + 1, rule)
+            )
+        return (
+            position < len(parts)
+            and fnmatch.fnmatchcase(parts[position], patterns[rule])
+            and match(position + 1, rule + 1)
+        )
+
+    return match(0, 0)
+
+
+def select_tree(
+    tree: str,
+    include_documents: bool,
+    include_paths: list[str] | None = None,
+    exclude_paths: list[str] | None = None,
+) -> tuple[list[str], dict[str, int]]:
+    """Select paths using the same complete-tree rules as preview_tree, counting what is skipped."""
+    selected = []
+    counts = dict.fromkeys(_skip_reasons(include_paths, exclude_paths), 0)
+    for path, reason in _classify_tree(tree, include_documents, include_paths, exclude_paths):
+        if reason is None:
+            selected.append(path)
+        else:
+            counts[reason] += 1
+    return selected, counts
+
+
+def preview_tree(
+    tree: str,
+    include_documents: bool = True,
+    include_paths: list[str] | None = None,
+    exclude_paths: list[str] | None = None,
+) -> dict:
+    """Preview a complete NUL-delimited tree listing without fetching blobs.
+
+    Returns selected paths and skipped paths grouped by reason. Exclusions win.
+    Unknown extensions remain eligible for custom extractors. Symlinks and
+    submodules never qualify. LFS pointers cannot be detected without blobs.
+    """
+    selected = []
+    skipped = {reason: [] for reason in _skip_reasons(include_paths, exclude_paths)}
+    for path, reason in _classify_tree(tree, include_documents, include_paths, exclude_paths):
+        (selected if reason is None else skipped[reason]).append(path)
+    return {"selected": selected, "skipped": skipped}
+
+
+def _skip_reasons(include_paths: list[str] | None, exclude_paths: list[str] | None) -> list[str]:
+    reasons = ["ignored_path", "binary", "symlink", "submodule"]
+    if include_paths is not None or exclude_paths:
+        reasons += ["not_included", "excluded"]
+    return reasons
+
+
+def _classify_tree(
+    tree: str,
+    include_documents: bool,
+    include_paths: list[str] | None,
+    exclude_paths: list[str] | None,
+):
+    """Yield ``(path, reason)`` for every tree entry; the reason is None when it is selected.
+
+    Invalid patterns and an incomplete listing raise here, at the call, not at the first item.
+    """
+    validate_path_patterns(include_paths, "include_paths", optional=True)
+    exclude_paths = [] if exclude_paths is None else exclude_paths
+    validate_path_patterns(exclude_paths, "exclude_paths")
+    if tree and not tree.endswith("\0"):
+        from cognee.tasks.code_graph.resolve_repo import CodeRepositoryError
+
+        raise CodeRepositoryError(message="The repository tree listing is incomplete.")
+    return _walk_tree(tree, include_documents, include_paths, exclude_paths)
+
+
+def _walk_tree(
+    tree: str,
+    include_documents: bool,
+    include_paths: list[str] | None,
+    exclude_paths: list[str],
+):
     from cognee.tasks.code_graph.code_repo import (
         REPO_SKIPPED_MEDIA_EXTENSIONS,
         SKIP_DIRS,
@@ -104,10 +221,6 @@ def select_tree(tree: str, include_documents: bool) -> tuple[list[str], dict[str
 
     documents = _document_extensions() if include_documents else frozenset()
     ignored_dirs = {name.lower() for name in SKIP_DIRS | {".git", ".enola"}}
-    selected = []
-    skipped = {"ignored_path": 0, "binary": 0, "symlink": 0, "submodule": 0}
-    if tree and not tree.endswith("\0"):
-        raise CodeRepositoryError(message="The repository tree listing is incomplete.")
     seen = set()
     for record in tree.split("\0")[:-1]:
         header, separator, path = record.partition("\t")
@@ -125,29 +238,34 @@ def select_tree(tree: str, include_documents: bool) -> tuple[list[str], dict[str
         seen.add(path)
         mode, kind, _oid = fields
         if mode == "160000" and kind == "commit":
-            skipped["submodule"] += 1
+            yield path, "submodule"
         elif mode == "120000" and kind == "blob":
-            skipped["symlink"] += 1
+            yield path, "symlink"
         elif mode not in ("100644", "100755") or kind != "blob":
             raise CodeRepositoryError(message="The repository tree contains an unsupported entry.")
         # Keep tracked dotfiles: enola needs ignore rules and hidden CI/config
         # inputs too. The document ingestion walker applies its own hidden-path
-        # exclusions later. Git metadata and generated snapshots are never inputs.
+        # exclusions later. Version-control metadata and generated snapshots are never inputs.
         # Directories match at any depth and in any letter case (the checkout can be on a
         # case-insensitive filesystem); a file that merely has such a name is a file.
         elif any(part.lower() in ignored_dirs for part in path.split("/")[:-1]) or (
             path.rsplit("/", 1)[-1].lower() in (".git", ".enola")
         ):
-            skipped["ignored_path"] += 1
+            yield path, "ignored_path"
         else:
             extension = PurePosixPath(path).suffix.lstrip(".").lower()
             if extension in REPO_SKIPPED_MEDIA_EXTENSIONS or (
                 extension in _BINARY_EXTENSIONS and extension not in documents
             ):
-                skipped["binary"] += 1
+                yield path, "binary"
+            elif any(path_matches(path, pattern) for pattern in exclude_paths):
+                yield path, "excluded"
+            elif include_paths is not None and not any(
+                path_matches(path, pattern) for pattern in include_paths
+            ):
+                yield path, "not_included"
             else:
-                selected.append(path)
-    return selected, skipped
+                yield path, None
 
 
 def write_sparse_patterns(repo: Path, paths: list[str]) -> None:

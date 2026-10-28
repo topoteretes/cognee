@@ -194,10 +194,12 @@ async def upsert_credential(
     engine = get_relational_engine()
     async with engine.get_async_session() as db:
         result = await db.execute(
-            select(IntegrationCredential).where(
+            select(IntegrationCredential)
+            .where(
                 IntegrationCredential.provider == provider,
                 IntegrationCredential.provider_account_id == provider_account_id,
             )
+            .with_for_update()
         )
         credential = result.scalar_one_or_none()
 
@@ -229,10 +231,8 @@ async def upsert_credential(
         credential.auth_type = auth_type
         credential.scopes = scopes
         if not isinstance(provider_metadata, _Unset):
-            # Best-effort under concurrency: this read-modify-write and
-            # update_provider_metadata's both run unlocked in separate
-            # transactions, so a reconnect racing a settings write can still
-            # lose one of them. Both windows are a single statement wide.
+            # Merged under the row lock on Postgres. SQLite has no row locks, so there a
+            # reconnect racing a settings write can still lose one of them.
             credential.provider_metadata = {
                 **(credential.provider_metadata or {}),
                 **(provider_metadata or {}),
@@ -398,10 +398,12 @@ async def update_provider_metadata(
     engine = get_relational_engine()
     async with engine.get_async_session() as db:
         result = await db.execute(
-            select(IntegrationCredential).where(
+            select(IntegrationCredential)
+            .where(
                 IntegrationCredential.provider == provider,
                 IntegrationCredential.provider_account_id == provider_account_id,
             )
+            .with_for_update()
         )
         credential = result.scalar_one_or_none()
         if credential is None:

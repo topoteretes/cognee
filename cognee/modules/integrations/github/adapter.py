@@ -150,7 +150,7 @@ class GithubIntegration(OAuthIntegration):
         this hook, firing after the upsert, is what actually performs the
         initial sync.
         """
-        await sync_repositories(credential)
+        await sync_repositories(credential, trigger="initial")
 
     async def sync_now(self, credential: IntegrationCredential) -> None:
         await sync_repositories(credential)

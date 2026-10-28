@@ -99,6 +99,8 @@ async def test_options_resolve_the_repository_ahead_of_the_run(executor):
         "credentials": "tok",
         "include_documents": False,
         "branch": "dev",
+        "include_paths": None,
+        "exclude_paths": None,
     }
     # The pipeline then runs on the resolved items, not on the original spec.
     assert [item.label for item in executor.run.await_args.kwargs["data"]] == ["code_repo:repo"]
@@ -191,3 +193,39 @@ async def test_the_clone_is_not_held_up_by_the_dataset_lock(executor):
     await add_module.add(_REPO, codegraph_config={"repo_credentials": "tok"})
 
     assert held == [False]
+
+
+@pytest.mark.asyncio
+async def test_path_filters_reach_resolver_with_explicit_empty_selection(executor):
+    await add_module.add(
+        _REPO,
+        branch="dev",
+        codegraph_config={
+            "include_documents": False,
+            "include_paths": [],
+            "exclude_paths": ["tests/**"],
+        },
+    )
+    assert executor.resolver.await_args.kwargs["include_paths"] == []
+    assert executor.resolver.await_args.kwargs["exclude_paths"] == ["tests/**"]
+    assert executor.resolver.await_args.kwargs["branch"] == "dev"
+
+
+def test_path_filters_require_explicit_code_only_ingestion():
+    with pytest.raises(CogneeValidationError, match="require include_documents=False"):
+        validate_codegraph_config({"include_paths": ["docs/**"]})
+    assert validate_codegraph_config({"include_documents": False, "include_paths": []}) == {
+        "include_documents": False,
+        "include_paths": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_remote_instance_refuses_path_filters_before_sending(monkeypatch):
+    client = SimpleNamespace(add=AsyncMock())
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: client)
+    with pytest.raises(CogneeValidationError, match="path filters are not supported"):
+        await add_module.add(
+            _REPO, codegraph_config={"include_documents": False, "include_paths": []}
+        )
+    client.add.assert_not_awaited()

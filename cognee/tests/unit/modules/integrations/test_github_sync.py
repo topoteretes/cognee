@@ -73,6 +73,10 @@ def test_clone_url_carries_no_credentials():
 def mocks(monkeypatch):
     from cognee.modules.integrations.sync_progress import SyncProgressReporter
 
+    credentials = importlib.import_module("cognee.modules.integrations.credentials")
+    monkeypatch.setattr(
+        credentials, "require_active_credential", AsyncMock(side_effect=lambda row: row)
+    )
     observations = []
 
     original_report = SyncProgressReporter.report
@@ -86,7 +90,6 @@ def mocks(monkeypatch):
     owner = SimpleNamespace(id=_USER_ID)
     mocked = SimpleNamespace(
         mint=AsyncMock(return_value=("tok123", None)),
-        list_repos=AsyncMock(return_value=["acme/api", "acme/web"]),
         add=AsyncMock(side_effect=lambda *args, **kwargs: _added()),
         cognify=AsyncMock(return_value={}),
         get_user=AsyncMock(return_value=owner),
@@ -94,7 +97,6 @@ def mocks(monkeypatch):
         observations=observations,
     )
     monkeypatch.setattr(sync_module, "mint_installation_token", mocked.mint)
-    monkeypatch.setattr(sync_module, "list_installation_repositories", mocked.list_repos)
     # Patched at their home modules: _add_and_build imports both lazily.
     monkeypatch.setattr(_add_module, "add", mocked.add)
     monkeypatch.setattr(_cognify_module, "cognify", mocked.cognify)
@@ -103,29 +105,11 @@ def mocks(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_default_sync_covers_every_installation_repo(mocks):
-    await sync_module.sync_repositories(_credential())
-
-    mocks.list_repos.assert_awaited_once_with("tok123")
-    assert [call.args[0] for call in mocks.add.await_args_list] == [
-        "https://github.com/acme/api.git",
-        "https://github.com/acme/web.git",
-    ]
-    for call in mocks.add.await_args_list:
-        assert call.kwargs == {
-            "dataset_name": "github_acme_org",
-            "user": mocks.owner,
-            "skip_connection_test": True,
-            "codegraph_config": {"repo_credentials": "tok123", "include_documents": False},
-        }
-
-
-@pytest.mark.asyncio
 async def test_each_repository_is_built_in_its_own_scoped_run(mocks):
     added = [_added(), _added([uuid4(), uuid4()])]
     mocks.add.side_effect = added
 
-    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+    await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert mocks.cognify.await_count == 2
     for run, call in zip(added, mocks.cognify.await_args_list):
@@ -138,9 +122,9 @@ async def test_each_repository_is_built_in_its_own_scoped_run(mocks):
 
 @pytest.mark.asyncio
 async def test_a_token_without_an_expiry_is_minted_before_each_clone(mocks):
-    mocks.mint.side_effect = [("listing", None), ("first", None), ("second", None)]
+    mocks.mint.side_effect = [("initial", None), ("first", None), ("second", None)]
 
-    await sync_module.sync_repositories(_credential())
+    await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert [
         call.kwargs["codegraph_config"]["repo_credentials"] for call in mocks.add.await_args_list
@@ -148,19 +132,8 @@ async def test_a_token_without_an_expiry_is_minted_before_each_clone(mocks):
 
 
 @pytest.mark.asyncio
-async def test_explicit_repo_list_skips_the_listing_call(mocks):
-    await sync_module.sync_repositories(_credential(), ["acme/api"])
-
-    mocks.list_repos.assert_not_awaited()
-    mocks.add.assert_awaited_once()
-    assert mocks.add.await_args.args == ("https://github.com/acme/api.git",)
-
-
-@pytest.mark.asyncio
-async def test_empty_installation_syncs_nothing(mocks):
-    mocks.list_repos.return_value = []
-
-    await sync_module.sync_repositories(_credential())
+async def test_an_empty_selection_syncs_nothing(mocks):
+    assert await sync_module._sync_repositories(_credential(), []) == "nothing_selected"
 
     mocks.add.assert_not_awaited()
     mocks.cognify.assert_not_awaited()
@@ -168,7 +141,7 @@ async def test_empty_installation_syncs_nothing(mocks):
 
 @pytest.mark.asyncio
 async def test_account_login_falls_back_to_the_installation_id(mocks):
-    await sync_module.sync_repositories(_credential(provider_metadata=None), ["acme/api"])
+    await sync_module._sync_repositories(_credential(provider_metadata=None), ["acme/api"])
 
     assert mocks.add.await_args.kwargs["dataset_name"] == "github_42"
 
@@ -184,7 +157,7 @@ async def test_sync_reports_live_work_without_inventing_file_progress(mocks):
         return _added()
 
     mocks.add.side_effect = add
-    task = asyncio.create_task(sync_module.sync_repositories(_credential(), ["acme/api"]))
+    task = asyncio.create_task(sync_module._sync_repositories(_credential(), ["acme/api"]))
     await entered.wait()
     progress = mocks.observations[-1]
     assert progress.state == "running"
@@ -210,7 +183,7 @@ async def test_handled_repo_failures_are_not_reported_successful(mocks, failing,
         for name in ("acme/api", "acme/web")
     ]
 
-    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+    await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     progress = mocks.observations[-1]
     assert progress.state == state
@@ -224,7 +197,7 @@ async def test_a_repository_that_cannot_be_cloned_fails_alone(mocks, caplog):
     mocks.add.side_effect = [CodeRepositoryError(message="Failed to clone"), _added()]
 
     with caplog.at_level(logging.ERROR):
-        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+        await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert mocks.add.await_count == 2 and mocks.cognify.await_count == 1
     assert "failed for acme/api" in caplog.text
@@ -245,7 +218,7 @@ async def test_a_failed_add_keeps_its_cause_and_the_token_never_reaches_the_log(
     ]
 
     with caplog.at_level(logging.ERROR):
-        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+        await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert "CodeRepositoryError: Failed to clone" in caplog.text
     assert "tok123" not in caplog.text
@@ -260,7 +233,7 @@ async def test_an_add_without_rows_fails_that_repository_and_builds_nothing(
     mocks.add.side_effect = [SimpleNamespace(dataset_id=uuid4(), data_ids=data_ids), _added()]
 
     with caplog.at_level(logging.ERROR):
-        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+        await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert mocks.add.await_count == 2 and mocks.cognify.await_count == 1
     assert "failed for acme/api" in caplog.text
@@ -275,7 +248,7 @@ async def test_a_failed_build_fails_that_repository_alone(mocks, caplog):
     ]
 
     with caplog.at_level(logging.ERROR):
-        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+        await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert mocks.add.await_count == 2 and mocks.cognify.await_count == 2
     assert "failed for acme/api" in caplog.text
@@ -292,7 +265,7 @@ async def test_an_io_or_network_failure_fails_that_repository_alone(mocks, caplo
     mocks.add.side_effect = [error, _added()]
 
     with caplog.at_level(logging.ERROR):
-        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+        await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert mocks.add.await_count == 2 and mocks.cognify.await_count == 1
     assert "failed for acme/api" in caplog.text
@@ -304,7 +277,7 @@ async def test_an_error_add_raises_outside_the_caught_types_aborts_the_sync(mock
     mocks.add.side_effect = [TypeError("a bug"), _added()]
 
     with pytest.raises(TypeError):
-        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+        await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert mocks.add.await_count == 1
     mocks.cognify.assert_not_awaited()
@@ -315,7 +288,7 @@ async def test_a_failed_token_mint_aborts_the_sync(mocks):
     mocks.mint.side_effect = [("listing", None), RuntimeError("mint failed")]
 
     with pytest.raises(RuntimeError, match="mint failed"):
-        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+        await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     mocks.add.assert_not_awaited()
 
@@ -324,7 +297,7 @@ async def test_a_failed_token_mint_aborts_the_sync(mocks):
 async def test_cancelled_repo_sync_preserves_cancellation(mocks):
     mocks.add.side_effect = asyncio.CancelledError
     with pytest.raises(asyncio.CancelledError):
-        await sync_module.sync_repositories(_credential(), ["acme/api"])
+        await sync_module._sync_repositories(_credential(), ["acme/api"])
     assert mocks.observations[-1].state == "cancelled"
 
 
@@ -344,7 +317,8 @@ async def test_repository_discovery_reports_each_page_without_claiming_a_total(m
     monkeypatch.setattr(sync_module.aiohttp, "ClientSession", lambda **kwargs: session)
     report = AsyncMock()
     monkeypatch.setattr(sync_module, "report_sync_progress", report)
-    assert await sync_module.list_installation_repositories("secret") == ["acme/api", "acme/web"]
+    records = await sync_module.list_installation_repository_records("secret")
+    assert [record["full_name"] for record in records] == ["acme/api", "acme/web"]
     assert [call.kwargs["completed"] for call in report.await_args_list] == [1, 2]
     assert all("total" not in call.kwargs for call in report.await_args_list)
     assert all("secret" not in str(call.kwargs) for call in report.await_args_list)
@@ -356,7 +330,7 @@ async def test_a_token_far_from_expiry_is_reused_for_every_clone(mocks):
 
     mocks.mint.return_value = ("tok123", datetime.now(timezone.utc) + timedelta(minutes=50))
 
-    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web", "acme/docs"])
+    await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web", "acme/docs"])
 
     mocks.mint.assert_awaited_once()  # the listing token served all three clones
     assert {
@@ -372,7 +346,7 @@ async def test_a_token_close_to_expiry_is_renewed_before_the_clone(mocks):
     later = datetime.now(timezone.utc) + timedelta(minutes=55)
     mocks.mint.side_effect = [("old", soon), ("new", later)]
 
-    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+    await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert mocks.mint.await_count == 2
     assert [
@@ -385,7 +359,7 @@ async def test_the_token_never_reaches_the_log_of_a_failed_repository(mocks, cap
     mocks.add.side_effect = [OSError("write failed, token tok123 rejected"), _added()]
 
     with caplog.at_level(logging.ERROR):
-        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+        await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert "failed for acme/api" in caplog.text
     assert "tok123" not in caplog.text
@@ -422,7 +396,7 @@ async def test_a_legacy_repository_is_forgotten_and_built_again_once(mocks, lega
     mocks.add.side_effect = [legacy.legacy_error("a remote repository row"), _added(), _added()]
 
     with caplog.at_level(logging.INFO):
-        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+        await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert [call.kwargs for call in legacy.forget.await_args_list] == [
         {"data_id": data_id, "dataset_id": legacy.dataset.id, "user": mocks.owner}
@@ -438,7 +412,7 @@ async def test_a_legacy_repository_is_forgotten_and_built_again_once(mocks, lega
 async def test_the_legacy_rows_are_looked_up_in_the_dataset_the_owner_can_write(mocks, legacy):
     mocks.add.side_effect = [legacy.legacy_error("a remote repository row"), _added()]
 
-    await sync_module.sync_repositories(_credential(), ["acme/api"])
+    await sync_module._sync_repositories(_credential(), ["acme/api"])
 
     legacy.datasets.assert_awaited_once_with(["github_acme_org"], "write", mocks.owner, strict=True)
     legacy.row_ids.assert_awaited_once_with("https://github.com/acme/api.git", legacy.dataset.id)
@@ -453,7 +427,7 @@ async def test_a_legacy_error_without_a_legacy_row_is_not_retried(mocks, legacy,
     mocks.cognify.side_effect = [legacy.legacy_error("a graph written before"), {}]
 
     with caplog.at_level(logging.WARNING):
-        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+        await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     legacy.forget.assert_not_awaited()
     assert mocks.add.await_count == 2 and mocks.cognify.await_count == 2  # web is built
@@ -469,7 +443,7 @@ async def test_a_repository_that_stays_legacy_fails_alone_after_one_rebuild(mock
         _added(),
     ]
 
-    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+    await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert legacy.forget.await_count == len(legacy.ids)  # forgotten once, never in a loop
     assert mocks.add.await_count == 3 and mocks.cognify.await_count == 1
@@ -483,7 +457,7 @@ async def test_a_dataset_that_cannot_be_resolved_fails_that_repository_alone(moc
     legacy.datasets.side_effect = DatasetNotFoundError(message="gone")
     mocks.add.side_effect = [legacy.legacy_error("a remote repository row"), _added()]
 
-    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+    await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     legacy.forget.assert_not_awaited()
     assert mocks.add.await_count == 2 and mocks.cognify.await_count == 1
@@ -497,7 +471,7 @@ async def test_a_failing_forget_aborts_the_sync(mocks, legacy):
     mocks.add.side_effect = [legacy.legacy_error("a remote repository row"), _added()]
 
     with pytest.raises(RuntimeError, match="database is gone"):
-        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+        await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert mocks.add.await_count == 1
 
@@ -519,7 +493,7 @@ async def test_a_repository_that_moved_after_add_is_added_and_built_again(
     mocks.cognify.side_effect = [changed, {}, {}]
 
     with caplog.at_level(logging.WARNING):
-        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+        await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert mocks.add.await_count == 3 and mocks.cognify.await_count == 3
     assert "changed while it was being built" in caplog.text
@@ -534,7 +508,7 @@ async def test_a_failure_of_another_kind_is_not_retried(mocks, legacy):
         {},
     ]
 
-    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+    await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert mocks.add.await_count == 2 and mocks.cognify.await_count == 2
     assert mocks.observations[-1].state == "partial"
@@ -544,7 +518,7 @@ async def test_a_failure_of_another_kind_is_not_retried(mocks, legacy):
 async def test_a_repository_that_keeps_moving_fails_after_one_more_build(mocks, legacy):
     mocks.cognify.side_effect = [legacy.changed_error(), legacy.changed_error(), {}]
 
-    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+    await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert mocks.add.await_count == 3 and mocks.cognify.await_count == 3  # web is built
     assert mocks.observations[-1].state == "partial"
@@ -563,8 +537,74 @@ async def test_an_add_reported_as_moved_is_added_and_built_again(mocks, legacy, 
     mocks.add.side_effect = [moved, _added(), _added()]
 
     with caplog.at_level(logging.WARNING):
-        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+        await sync_module._sync_repositories(_credential(), ["acme/api", "acme/web"])
 
     assert mocks.add.await_count == 3 and mocks.cognify.await_count == 2
     assert "changed while it was being built" in caplog.text
     assert mocks.observations[-1].state == "succeeded"
+
+
+@pytest.fixture
+def ledger(monkeypatch):
+    retire_module = importlib.import_module("cognee.modules.integrations.github.retire")
+    record = AsyncMock()
+    retire = AsyncMock()
+    monkeypatch.setattr(retire_module, "record_indexed_repository", record)
+    monkeypatch.setattr(retire_module, "retire_unselected_repositories", retire)
+    return SimpleNamespace(record=record, retire=retire)
+
+
+@pytest.mark.asyncio
+async def test_a_stored_repository_is_recorded_before_its_build_even_when_the_build_fails(
+    mocks, ledger
+):
+    mocks.cognify.side_effect = [
+        CognifyFailedError(error_class="RuntimeError", error_message="boom"),
+        {},
+    ]
+    credential = _credential()
+
+    outcome = await sync_module._sync_repositories(
+        credential,
+        ["acme/api", "acme/web"],
+        repository_ids={"acme/api": "1", "acme/web": "2"},
+    )
+
+    assert outcome == "partial"
+    # Content that exists is tracked, so a failing repository can still be dropped from a
+    # selection later.
+    assert [call.args for call in ledger.record.await_args_list] == [
+        (credential, "1", "acme/api"),
+        (credential, "2", "acme/web"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_repository_whose_add_fails_is_not_recorded(mocks, ledger):
+    mocks.add.side_effect = [CodeRepositoryError(message="no clone"), _added()]
+
+    await sync_module._sync_repositories(
+        _credential(),
+        ["acme/api", "acme/web"],
+        repository_ids={"acme/api": "1", "acme/web": "2"},
+    )
+
+    assert [call.args[1:] for call in ledger.record.await_args_list] == [("2", "acme/web")]
+
+
+@pytest.mark.asyncio
+async def test_the_ledger_retires_unselected_repositories_before_building(mocks, ledger):
+    calls = []
+    ledger.retire.side_effect = lambda *args: calls.append("retire")
+    mocks.add.side_effect = lambda *args, **kwargs: calls.append("add") or _added()
+    credential = _credential()
+
+    await sync_module._sync_repositories(
+        credential,
+        ["acme/api"],
+        repository_ids={"acme/api": "1"},
+        retire_selection={"1"},
+    )
+
+    assert calls == ["retire", "add"]
+    ledger.retire.assert_awaited_once_with(credential, {"1"}, "github_acme_org", mocks.owner)

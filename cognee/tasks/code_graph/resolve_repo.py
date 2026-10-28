@@ -557,11 +557,15 @@ async def resolve_repo_source(
     credentials: str | None = None,
     branch: str | None = None,
     include_documents: bool = True,
+    include_paths: list[str] | None = None,
+    exclude_paths: list[str] | None = None,
 ) -> Path:
     """Return a local directory for the repo spec, shallow-cloning remote URLs.
 
-    Remote checkouts use blob filtering and exact sparse paths. Documents are
-    included by default; code-only mode omits binary document assets while
+    Remote checkouts use blob filtering and exact sparse paths.
+    ``include_paths`` and ``exclude_paths`` apply POSIX globs before blobs are
+    fetched; exclusions win and an empty include list selects nothing.
+    Documents are included by default; code-only mode omits binary document assets while
     retaining text and configuration needed by custom extractors. A selected Git LFS
     pointer is removed and counted, and a server that ignores filtering raises
     CodeRepositoryError.
@@ -586,15 +590,28 @@ async def resolve_repo_source(
     works but is the legacy path.
     """
     from cognee.tasks.code_graph.repo_resources import repository_disk_budget
+    from cognee.tasks.code_graph.repo_selection import validate_path_patterns
 
+    validate_path_patterns(include_paths, "include_paths", optional=True)
+    validate_path_patterns([] if exclude_paths is None else exclude_paths, "exclude_paths")
+    if not is_remote_repo(spec) and (include_paths is not None or exclude_paths):
+        raise CodeRepositoryError(
+            message="Repository path filters require a remote repository URL."
+        )
     if not is_remote_repo(spec):
-        return await _resolve_repo_source(spec, clones_dir, credentials, branch, include_documents)
+        return await _resolve_repo_source(
+            spec, clones_dir, credentials, branch, include_documents, include_paths, exclude_paths
+        )
     base = Path(clones_dir) if clones_dir is not None else default_clones_dir()
     async with repository_disk_budget(base):
-        return await _resolve_repo_source(spec, clones_dir, credentials, branch, include_documents)
+        return await _resolve_repo_source(
+            spec, clones_dir, credentials, branch, include_documents, include_paths, exclude_paths
+        )
 
 
-async def _resolve_repo_source(spec, clones_dir, credentials, branch, include_documents):
+async def _resolve_repo_source(
+    spec, clones_dir, credentials, branch, include_documents, include_paths, exclude_paths
+):
     from cognee.tasks.code_graph.repo_resources import RepositoryResourceError
 
     if not is_remote_repo(spec):
@@ -747,7 +764,13 @@ async def _resolve_repo_source(spec, clones_dir, credentials, branch, include_do
                     # refresh must never be accepted by an earlier manifest.
                     (target / ".git" / "cognee-snapshot.json").unlink(missing_ok=True)
                     await _checkout_snapshot(
-                        target, "FETCH_HEAD", include_documents, git_env, scrub
+                        target,
+                        "FETCH_HEAD",
+                        include_documents,
+                        git_env,
+                        scrub,
+                        include_paths,
+                        exclude_paths,
                     )
                     return target
                 except RepositoryResourceError:
@@ -791,7 +814,9 @@ async def _resolve_repo_source(spec, clones_dir, credentials, branch, include_do
             if code != 0:
                 raise CodeRepositoryError(message=f"Failed to clone '{clean_url}': {scrub(stderr)}")
             await _verify_origin(partial, clean_url)
-            await _checkout_snapshot(partial, "HEAD", include_documents, git_env, scrub)
+            await _checkout_snapshot(
+                partial, "HEAD", include_documents, git_env, scrub, include_paths, exclude_paths
+            )
             if not await _has_commit(partial):
                 raise CodeRepositoryError(
                     message="The cloned repository has no checked-out commit."
@@ -831,7 +856,13 @@ async def _verify_origin(clone: Path, expected: str) -> None:
 
 
 async def _checkout_snapshot(
-    repo: Path, ref: str, include_documents: bool, env: dict, scrub
+    repo: Path,
+    ref: str,
+    include_documents: bool,
+    env: dict,
+    scrub,
+    include_paths: list[str] | None = None,
+    exclude_paths: list[str] | None = None,
 ) -> None:
     from cognee.tasks.code_graph.repo_resources import (
         check_repository_disk,
@@ -860,7 +891,7 @@ async def _checkout_snapshot(
     )
     if code:
         raise CodeRepositoryError(message=f"Could not list repository tree: {scrub(stderr)[-500:]}")
-    paths, skipped = select_tree(tree, include_documents)
+    paths, skipped = select_tree(tree, include_documents, include_paths, exclude_paths)
     # A cancelled to_thread await does not stop its writer. Keep the lock until
     # it finishes so it cannot recreate a directory after clone cleanup.
     await finish_cleanup(asyncio.to_thread(write_sparse_patterns, repo, paths))

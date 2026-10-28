@@ -15,8 +15,8 @@ Deliberately narrow event coverage for the first cut:
 * ``installation_repositories`` added -> index the new repos. Removed repos
   are logged only — deleting indexed data on a webhook would be a silent,
   destructive surprise; ``forget()`` stays a human decision.
-* ``push`` to the default branch -> re-index that repo (the clone is a
-  shallow copy of the default branch, so other refs change nothing we hold).
+* ``push`` -> re-index when the saved policy enables pushes and selects the
+  pushed branch. Branch policy is resolved after loading the connection.
 """
 
 import json
@@ -28,6 +28,7 @@ from cognee.modules.integrations.credentials import (
     revoke_credential_by_account,
 )
 from cognee.modules.integrations.github.sync import sync_repositories
+from cognee.modules.integrations.github.sync_settings import read_sync_settings, selects_push
 
 logger = logging.getLogger(__name__)
 
@@ -77,16 +78,21 @@ async def handle_github_event(raw_body: bytes, headers: dict[str, str]) -> None:
                 removed,
             )
         if added:
-            await sync_repositories(credential, added)
+            await sync_repositories(credential, added, trigger="push")
         return
 
     if event == "push":
         repository = payload.get("repository") or {}
         full_name = repository.get("full_name")
-        default_branch = repository.get("default_branch")
-        if not full_name or payload.get("ref") != f"refs/heads/{default_branch}":
+        ref = payload.get("ref", "")
+        if not full_name or not ref.startswith("refs/heads/"):
             return
-        await sync_repositories(credential, [full_name])
+        branch = ref.removeprefix("refs/heads/")
+        if not selects_push(read_sync_settings(credential), repository, branch):
+            # Most pushes land on branches nobody syncs: decide before any token or listing.
+            logger.debug("GitHub push to %s:%s is not selected; ignoring", full_name, branch)
+            return
+        await sync_repositories(credential, [full_name], trigger="push", pushed_branch=branch)
         return
 
     logger.debug("GitHub %s delivery for installation %s ignored", event, installation_id)
