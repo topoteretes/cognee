@@ -153,6 +153,13 @@ async def add(
                  repository, and the repository is then
                  cloned before add() returns, also with ``run_in_background=True``.
                  Neither is supported while connected to a remote instance.
+                 Path selection in ``codegraph_config`` uses repository-relative POSIX globs:
+                 ``*`` and ``?`` match within a component, ``[]`` is a character class, and
+                 ``**`` matches zero or more components. ``include_paths=None`` selects all
+                 eligible paths; ``[]`` selects none. ``exclude_paths`` wins. Filters require
+                 a remote repository URL and ``include_documents=False``. Rebuilding the code
+                 graph removes previously indexed code facts outside the new selection.
+
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
@@ -261,6 +268,12 @@ async def add(
 
     client = get_remote_client()
     if client is not None:
+        if codegraph_config.get("include_paths") is not None or codegraph_config.get(
+            "exclude_paths"
+        ):
+            raise CogneeValidationError(
+                "Repository path filters are not supported while connected to a remote Cognee instance."
+            )
         if codegraph_config.get("repo_credentials"):
             # client.add() has no credentials field; the remote would try an
             # unauthenticated clone, so an explicit token has to raise.
@@ -374,7 +387,12 @@ async def add(
     # codegraph_config option runs the same resolver here first, with the options; the
     # runner and the task above then see already-resolved items and pass them through.
     include_documents = codegraph_config.get("include_documents", True)
-    if codegraph_config.get("repo_credentials") or not include_documents:
+    if (
+        codegraph_config.get("repo_credentials")
+        or not include_documents
+        or codegraph_config.get("include_paths") is not None
+        or codegraph_config.get("exclude_paths")
+    ):
         data = await resolve_data_directories(
             data,
             include_subdirectories=True,
@@ -383,6 +401,8 @@ async def add(
             credentials=codegraph_config.get("repo_credentials"),
             include_documents=include_documents,
             branch=branch,
+            include_paths=codegraph_config.get("include_paths"),
+            exclude_paths=codegraph_config.get("exclude_paths"),
         )
         repositories = [
             item

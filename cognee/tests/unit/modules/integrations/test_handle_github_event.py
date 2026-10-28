@@ -16,7 +16,9 @@ import pytest
 handle_module = importlib.import_module("cognee.modules.integrations.github.handle_github_event")
 handle_github_event = handle_module.handle_github_event
 
-_ACTIVE_CREDENTIAL = SimpleNamespace(status="active", provider_account_id="42")
+_ACTIVE_CREDENTIAL = SimpleNamespace(
+    status="active", provider_account_id="42", provider_metadata=None
+)
 
 
 @pytest.fixture
@@ -54,27 +56,72 @@ async def test_push_to_default_branch_resyncs_that_repo(mocks):
             {
                 "ref": "refs/heads/main",
                 "installation": {"id": 42},
-                "repository": {"full_name": "acme/api", "default_branch": "main"},
+                "repository": {"id": 7, "full_name": "acme/api", "default_branch": "main"},
             }
         ),
         {"x-github-event": "push"},
     )
 
-    mocks.sync.assert_awaited_once_with(_ACTIVE_CREDENTIAL, ["acme/api"])
+    mocks.sync.assert_awaited_once_with(
+        _ACTIVE_CREDENTIAL, ["acme/api"], trigger="push", pushed_branch="main"
+    )
+
+
+def _push(branch, repository_id=7, default_branch="main"):
+    return _body(
+        {
+            "ref": f"refs/heads/{branch}",
+            "installation": {"id": 42},
+            "repository": {
+                "id": repository_id,
+                "full_name": "acme/api",
+                "default_branch": default_branch,
+            },
+        }
+    )
+
+
+def _policy(**repositories):
+    return SimpleNamespace(
+        status="active",
+        provider_account_id="42",
+        provider_metadata={"github_sync_settings": {"repositories": repositories}},
+    )
 
 
 @pytest.mark.asyncio
-async def test_push_to_another_branch_is_ignored(mocks):
-    await handle_github_event(
-        _body(
-            {
-                "ref": "refs/heads/feature-x",
-                "installation": {"id": 42},
-                "repository": {"full_name": "acme/api", "default_branch": "main"},
-            }
-        ),
-        {"x-github-event": "push"},
+async def test_push_branch_is_forwarded_for_per_connection_policy(mocks):
+    credential = _policy(**{"7": {"branch": "feature-x"}})
+    mocks.get_credential.return_value = credential
+
+    await handle_github_event(_push("feature-x"), {"x-github-event": "push"})
+
+    mocks.sync.assert_awaited_once_with(
+        credential, ["acme/api"], trigger="push", pushed_branch="feature-x"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_push_to_an_unsynced_branch_is_dropped_before_any_sync(mocks):
+    await handle_github_event(_push("feature-x"), {"x-github-event": "push"})
+
+    mocks.sync.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_push_to_the_default_branch_is_dropped_when_the_policy_names_another(mocks):
+    mocks.get_credential.return_value = _policy(**{"7": {"branch": "release"}})
+
+    await handle_github_event(_push("main"), {"x-github-event": "push"})
+
+    mocks.sync.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_push_to_a_repository_outside_the_selection_is_dropped(mocks):
+    mocks.get_credential.return_value = _policy(**{"8": {}})
+
+    await handle_github_event(_push("main"), {"x-github-event": "push"})
 
     mocks.sync.assert_not_awaited()
 
@@ -95,7 +142,7 @@ async def test_added_repositories_are_synced_removed_only_logged(mocks):
 
     # Removed repos never trigger deletion — indexed data outlives the
     # webhook; forget() stays a human decision.
-    mocks.sync.assert_awaited_once_with(_ACTIVE_CREDENTIAL, ["acme/new"])
+    mocks.sync.assert_awaited_once_with(_ACTIVE_CREDENTIAL, ["acme/new"], trigger="push")
 
 
 @pytest.mark.asyncio

@@ -547,3 +547,77 @@ async def test_a_cancelled_checkout_cleanup_finishes_before_the_lock_is_released
     finally:
         release.set()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_path_filter_change_same_commit_refreshes_sparse_snapshot(origin, clones):
+    from cognee.tasks.code_graph.repo_selection import read_repository_snapshot
+
+    (origin.work / "one.py").write_text("one = 1\n")
+    (origin.work / "two.py").write_text("two = 2\n")
+    origin.commit("main", "selected paths")
+    target = await resolve_module.resolve_repo_source(
+        _URL, clones_dir=clones, include_paths=["one.py"]
+    )
+    first = read_repository_snapshot(target)
+    assert (target / "one.py").is_file()
+    assert not (target / "two.py").exists()
+    second_blob = git_output(origin.work, "rev-parse", "HEAD:two.py")
+    assert second_blob not in local_objects(target)
+
+    await resolve_module.resolve_repo_source(_URL, clones_dir=clones, include_paths=["two.py"])
+    second = read_repository_snapshot(target)
+    assert not (target / "one.py").exists()
+    assert (target / "two.py").is_file()
+    assert first["commit"] == second["commit"]
+    assert first["selection_fingerprint"] != second["selection_fingerprint"]
+
+    await resolve_module.resolve_repo_source(_URL, clones_dir=clones, include_paths=[])
+    assert not (target / "two.py").exists()
+    assert read_repository_snapshot(target)["selected_files"] == 0
+
+
+@pytest.mark.asyncio
+async def test_empty_path_selection_sweeps_previously_extracted_graph(origin, clones, monkeypatch):
+    """Real Git + Enola: an empty selection is a changed graph, not an incremental skip."""
+    from cognee.tasks.code_graph.enola import EnolaNotInstalledError, find_enola_binary
+    from cognee.tasks.code_graph.extract_code_graph import add_code_graph_edges, extract_code_graph
+
+    try:
+        find_enola_binary()
+    except EnolaNotInstalledError:
+        pytest.skip("enola is required")
+    graph_module = importlib.import_module("cognee.infrastructure.databases.graph.get_graph_engine")
+    engine = AsyncMock()
+    engine.get_node.return_value = None
+    engine.get_graph_data.return_value = ([], [])
+    monkeypatch.setattr(graph_module, "get_graph_engine", AsyncMock(return_value=engine))
+    monkeypatch.setattr(
+        importlib.import_module("cognee.infrastructure.databases.graph"),
+        "get_graph_engine",
+        AsyncMock(return_value=engine),
+    )
+    (origin.work / "one.py").write_text("def hello():\n    return 1\n")
+    origin.commit("main", "code to remove")
+    repo = await resolve_module.resolve_repo_source(
+        _URL, clones_dir=clones, include_paths=["one.py"]
+    )
+    namespace = "github.com/org/partial"
+    initial = await extract_code_graph(repo_path=repo, repo_name=namespace, namespace=namespace)
+    old_ids = {str(point.id) for point in initial if point.__class__.__name__ != "CodeRepository"}
+    assert old_ids
+    engine.get_graph_data.return_value = (
+        [
+            (str(point.id), {**point.model_dump(), "type": point.__class__.__name__})
+            for point in initial
+        ],
+        [],
+    )
+    await resolve_module.resolve_repo_source(_URL, clones_dir=clones, include_paths=[])
+    emptied = await extract_code_graph(repo_path=repo, repo_name=namespace, namespace=namespace)
+    assert emptied  # [] is the incremental no-op signal; empty content must not produce it.
+    await add_code_graph_edges(emptied, repo_path=repo, repo_name=namespace, namespace=namespace)
+    removed_ids = {
+        node_id for call in engine.delete_nodes.await_args_list for node_id in call.args[0]
+    }
+    assert old_ids <= removed_ids

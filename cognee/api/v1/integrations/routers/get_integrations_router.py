@@ -38,7 +38,6 @@ generic ``{provider}`` routes so ``plugins`` is never captured as a
 provider name.
 """
 
-import asyncio
 import hmac
 import logging
 import secrets
@@ -53,8 +52,9 @@ from pydantic import Field
 from sqlalchemy.exc import IntegrityError
 
 from cognee.api.DTO import InDTO, OutDTO
+from cognee.api.v1.integrations.background import spawn_background
+from cognee.api.v1.integrations.routers.get_github_sync_router import get_github_sync_router
 from cognee.api.v1.integrations.routers.get_sync_progress_router import get_sync_progress_router
-from cognee.infrastructure.background_tasks import register_background_task
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.list_agents import list_agents
 from cognee.modules.agents.registry import (
@@ -111,25 +111,7 @@ from cognee.modules.users.models import User
 
 logger = logging.getLogger(__name__)
 
-# Detached post-install / webhook work (initial syncs, event handling) runs
-# off the request path; strong references keep the tasks alive until done —
-# same pattern as remember()'s _BACKGROUND_REMEMBER_TASKS.
-_BACKGROUND_INTEGRATION_TASKS: set = set()
-
-
-def _spawn_background(coro, *, description: str) -> None:
-    """Run ``coro`` detached, logging (never raising) on failure."""
-
-    async def _guarded():
-        try:
-            await coro
-        except Exception:  # detached work must log, not crash the loop
-            logger.exception("%s failed", description)
-
-    task = register_background_task(asyncio.create_task(_guarded()))
-    _BACKGROUND_INTEGRATION_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_INTEGRATION_TASKS.discard)
-
+_spawn_background = spawn_background
 
 # Plugin keys with a native AgentConnectionType; anything else registers as
 # a generic "sdk" connection in the agent-connection registry.
@@ -468,6 +450,7 @@ def _frontend_redirect(integration: OAuthIntegration, outcome: str) -> RedirectR
 def get_integrations_router():
     integrations_router = APIRouter(lifespan=linear_resume_lifespan)
     integrations_router.include_router(get_sync_progress_router())
+    integrations_router.include_router(get_github_sync_router())
 
     # ------------------------------------------------------------------ #
     # Aggregate status (fixed /status path — before the {provider} routes)

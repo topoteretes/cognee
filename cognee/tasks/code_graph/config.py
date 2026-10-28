@@ -21,6 +21,9 @@ class CodeGraphConfig(TypedDict, total=False):
     # installation token). It reaches git only through environment config,
     # never the URL, so nothing stored or logged carries it.
     repo_credentials: str
+    # POSIX repository-relative globs. None selects all; [] selects nothing.
+    include_paths: list[str] | None
+    exclude_paths: list[str]
 
 
 CODEGRAPH_CONFIG_KEYS = frozenset(CodeGraphConfig.__annotations__)
@@ -49,6 +52,17 @@ def validate_codegraph_config(codegraph_config: CodeGraphConfig | None) -> CodeG
         raise CogneeValidationError(
             "codegraph_config['include_documents'] must be a bool, "
             f"got {type(config['include_documents']).__name__}."
+        )
+    from cognee.tasks.code_graph.repo_selection import validate_path_patterns
+
+    validate_path_patterns(config.get("include_paths"), "include_paths", optional=True)
+    validate_path_patterns(config.get("exclude_paths", []), "exclude_paths")
+    if (config.get("include_paths") is not None or config.get("exclude_paths")) and config.get(
+        "include_documents", True
+    ):
+        raise CogneeValidationError(
+            "Repository path filters require include_documents=False: document ownership "
+            "does not yet support removing previously indexed repository documents."
         )
     credentials = config.get("repo_credentials")
     if credentials is not None:

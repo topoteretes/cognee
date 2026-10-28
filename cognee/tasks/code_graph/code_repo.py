@@ -536,6 +536,8 @@ async def resolve_code_repository_url(
     credentials: str | None = None,
     include_documents: bool = True,
     branch: str | None = None,
+    include_paths: list[str] | None = None,
+    exclude_paths: list[str] | None = None,
 ):
     """Clone a hosted repository URL and build its repo-level DataItem.
 
@@ -550,6 +552,13 @@ async def resolve_code_repository_url(
     that branch instead of the remote's default; a dataset still holds one data
     row per URL, so adding it on another branch replaces that row's code graph.
     """
+    if (include_paths is not None or exclude_paths) and include_documents:
+        from cognee.exceptions import CogneeValidationError
+
+        raise CogneeValidationError(
+            "Repository path filters require include_documents=False: document ownership "
+            "does not yet support removing previously indexed repository documents."
+        )
     clone_url = code_repo_clone_url(spec)
     if clone_url is None:
         raise ValueError(
@@ -573,7 +582,12 @@ async def resolve_code_repository_url(
         _clone_lock(clone_dir(clone_url, branch)),
     ):
         repo_path = await resolve_repo_source(
-            clone_url, credentials=credentials, branch=branch, include_documents=include_documents
+            clone_url,
+            credentials=credentials,
+            branch=branch,
+            include_documents=include_documents,
+            include_paths=include_paths,
+            exclude_paths=exclude_paths,
         )
         source_url = redact_repo_spec(clone_url)
         manifest_item, documents, skipped = await resolve_code_repository(

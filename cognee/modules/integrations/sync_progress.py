@@ -16,7 +16,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from pydantic.alias_generators import to_camel
-from sqlalchemy import func, select, update
+from sqlalchemy import Select, func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.integrations.credentials import CredentialInactiveError
@@ -393,7 +394,7 @@ def _stored_snapshot(row: PipelineRun) -> SyncProgress:
     return progress
 
 
-async def get_sync_progress(credential: IntegrationCredential) -> SyncProgressResult:
+async def _sync_runs_query(db: AsyncSession, credential: IntegrationCredential) -> Select:
     """Read only runs belonging to this currently active credential and both owners.
 
     Same-owner reconnects reuse the credential row: they retain its history. A change
@@ -408,23 +409,44 @@ async def get_sync_progress(credential: IntegrationCredential) -> SyncProgressRe
         current.workspace_id == credential.workspace_id,
         current.status == "active",
     )
-    async with get_relational_engine().get_async_session() as db:
-        exists = await db.scalar(select(current.id).where(*guard))
-        if exists is None:
-            raise CredentialInactiveError("The connection is no longer active for this owner")
-        query = (
-            select(PipelineRun)
-            .join(current, current.id == credential.id)
-            .where(
-                *guard,
-                PipelineRun.operation_name == OPERATION_NAME,
-                PipelineRun.user_id == credential.user_id,
-                PipelineRun.tenant_id == credential.workspace_id,
-                PipelineRun.run_info["sync_progress"]["credential_id"].as_string()
-                == str(credential.id),
-            )
-            .order_by(PipelineRun.created_at.desc(), PipelineRun.id.desc())
+    exists = await db.scalar(select(current.id).where(*guard))
+    if exists is None:
+        raise CredentialInactiveError("The connection is no longer active for this owner")
+    return (
+        select(PipelineRun)
+        .join(current, current.id == credential.id)
+        .where(
+            *guard,
+            PipelineRun.operation_name == OPERATION_NAME,
+            PipelineRun.user_id == credential.user_id,
+            PipelineRun.tenant_id == credential.workspace_id,
+            PipelineRun.run_info["sync_progress"]["credential_id"].as_string()
+            == str(credential.id),
         )
+        .order_by(PipelineRun.created_at.desc(), PipelineRun.id.desc())
+    )
+
+
+async def get_sync_history(
+    credential: IntegrationCredential, *, limit: int | None = None, offset: int = 0
+) -> list[SyncProgress]:
+    """Return the stored invocations for the current owners, newest first.
+
+    Every invocation unless the caller pages with ``limit`` and ``offset``.
+    """
+    async with get_relational_engine().get_async_session() as db:
+        query = await _sync_runs_query(db, credential)
+        query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+        rows = (await db.execute(query)).scalars().all()
+        return [_stored_snapshot(row) for row in rows]
+
+
+async def get_sync_progress(credential: IntegrationCredential) -> SyncProgressResult:
+    """Read latest progress and locally active runs for the current owners."""
+    async with get_relational_engine().get_async_session() as db:
+        query = await _sync_runs_query(db, credential)
         latest = (await db.execute(query.limit(1))).scalar_one_or_none()
         unresolved = query.where(PipelineRun.ended_at.is_(None))
         local_ids = tuple(_active)
