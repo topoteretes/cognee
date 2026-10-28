@@ -19,3 +19,9 @@ def is_data_item_completed(status_value: Any) -> bool:
     if isinstance(status_value, dict):
         status_value = status_value.get("status")
     return status_value == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+
+
+def is_data_item_completed_in(pipeline_status: Any, pipeline_name: str, dataset_id: Any) -> bool:
+    """Whether a row's ``pipeline_status`` records ``pipeline_name`` completed for the dataset."""
+    status_for_pipeline = (pipeline_status or {}).get(pipeline_name) or {}
+    return is_data_item_completed(status_for_pipeline.get(str(dataset_id)))

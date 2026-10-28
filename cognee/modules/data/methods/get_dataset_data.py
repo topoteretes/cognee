@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from typing import Literal
 from uuid import UUID
 
@@ -13,8 +14,9 @@ async def get_dataset_data(
     offset: int = 0,
     *,
     order_by: Literal["size", "created_at"] = "size",
+    data_ids: Collection[UUID] | None = None,
 ) -> list[Data]:
-    """Return a dataset's data rows.
+    """Return a dataset's data rows (only those among ``data_ids`` when given).
 
     `limit` defaults to None -- every row -- because most callers here are
     internal pipeline code that genuinely needs the whole set (cognify,
@@ -31,7 +33,10 @@ async def get_dataset_data(
         ordering = Data.data_size.desc()
     else:
         raise ValueError(f"Unsupported dataset data ordering: {order_by}")
-    query = select(Data).filter(Data.dataset_id == dataset_id).order_by(ordering, Data.id)
+    query = select(Data).filter(Data.dataset_id == dataset_id)
+    if data_ids is not None:
+        query = query.filter(Data.id.in_(list(data_ids)))
+    query = query.order_by(ordering, Data.id)
 
     if offset:
         query = query.offset(offset)

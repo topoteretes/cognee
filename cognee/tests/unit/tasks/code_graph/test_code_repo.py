@@ -429,3 +429,111 @@ async def test_resolve_code_repository_url_rejects_non_repository_specs():
 
     with pytest.raises(ValueError, match="not a repository URL"):
         await resolve_code_repository_url("https://github.com/org/repo/blob/main/README.md")
+
+
+@pytest.mark.asyncio
+async def test_a_repository_url_clones_with_the_credentials_and_leaves_out_documents(
+    tmp_path, monkeypatch
+):
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+
+    clone = _make_repo(tmp_path)
+    seen = {}
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+        seen.update(spec=spec, credentials=credentials, branch=branch)
+        return clone
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+    manifest, documents, _skipped = await code_repo_module.resolve_code_repository_url(
+        "https://github.com/org/repo.git",
+        credentials="tok",
+        include_documents=False,
+        branch="dev",
+    )
+
+    assert seen == {
+        "spec": "https://github.com/org/repo.git",
+        "credentials": "tok",
+        "branch": "dev",
+    }
+    assert documents == []
+    assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo.git"
+    assert "tok" not in str(manifest.system_metadata)
+
+
+@pytest.mark.asyncio
+async def test_resolving_a_repository_url_passes_the_options_to_the_clone(
+    tmp_path, monkeypatch, llm_key_set
+):
+    """The token reaches the clone, and include_documents=False leaves the docs out."""
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
+
+    clone = _make_repo(tmp_path)
+    seen = []
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+        seen.append(credentials)
+        return clone
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+
+    resolved = await resolve_data_directories(
+        ["https://github.com/org/repo"], credentials="tok", include_documents=False
+    )
+
+    assert seen == ["tok"]
+    assert not [item for item in resolved if isinstance(item, str)]
+
+
+@pytest.mark.asyncio
+async def test_resolving_a_local_project_honours_include_documents(tmp_path, llm_key_set):
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
+
+    project = _make_repo(tmp_path)
+
+    resolved = await resolve_data_directories([str(project)], include_documents=False)
+
+    assert not [item for item in resolved if isinstance(item, str)]
+
+
+@pytest.mark.asyncio
+async def test_a_repository_url_is_cloned_outside_the_dataset_lock_and_stamped_under_it(
+    tmp_path, monkeypatch
+):
+    """The clone must not block the dataset's other runs; the stamp reset is a
+    read-modify-write of the row, which only the dataset lock protects."""
+    from unittest.mock import AsyncMock, Mock
+    from uuid import uuid4
+
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.infrastructure.locks import held_datasets
+
+    dataset_id = uuid4()
+    held = {}
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+        held["clone"] = dataset_id in held_datasets.get()
+        return _make_repo(tmp_path)
+
+    async def fake_reset(*_args, **_kwargs):
+        held["reset"] = dataset_id in held_datasets.get()
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.data.methods"),
+        "reset_data_pipeline_status",
+        fake_reset,
+    )
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.data.methods.get_unique_data_id"),
+        "get_unique_data_id",
+        AsyncMock(return_value=uuid4()),
+    )
+
+    await code_repo_module.resolve_code_repository_url(
+        "https://github.com/org/repo", user=Mock(), dataset_id=dataset_id
+    )
+
+    assert held == {"clone": False, "reset": True}

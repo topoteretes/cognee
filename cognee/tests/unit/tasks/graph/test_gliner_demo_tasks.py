@@ -862,6 +862,7 @@ async def _cognify_standard_tasks(**kwargs):
         patch.object(cognify_module, "get_pipeline_executor", return_value=execute_pipeline),
         # These tests select task lists; runtime installation has its own suite.
         patch.object(cognify_module, "ensure_extractor_runtime", AsyncMock()),
+        patch("cognee.tasks.graph.gliner_demo.install.gliner_runtime_installed", return_value=True),
     ):
         await cognify_module.cognify(chunk_size=512, **kwargs)
 

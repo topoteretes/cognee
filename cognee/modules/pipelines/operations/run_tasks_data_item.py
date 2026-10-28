@@ -22,7 +22,7 @@ from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.DataItemStatus import (
     DataItemStatus,
-    is_data_item_completed,
+    is_data_item_completed_in,
 )
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunAlreadyCompleted,
@@ -205,19 +205,19 @@ async def run_tasks_data_item_incremental(
             ).scalar_one_or_none()
 
     # Check pipeline status, if Data already processed for pipeline before skip current processing
-    if data_point:
-        status_for_pipeline = (data_point.pipeline_status or {}).get(pipeline_name) or {}
-        if is_data_item_completed(status_for_pipeline.get(str(dataset.id))):
-            yield {
-                "run_info": PipelineRunAlreadyCompleted(
-                    pipeline_run_id=pipeline_run_id,
-                    dataset_id=dataset.id,
-                    dataset_name=dataset.name,
-                ),
-                "data_id": data_id,
-                **_source_fields(data_point, data_item),
-            }
-            return
+    if data_point and is_data_item_completed_in(
+        data_point.pipeline_status, pipeline_name, dataset.id
+    ):
+        yield {
+            "run_info": PipelineRunAlreadyCompleted(
+                pipeline_run_id=pipeline_run_id,
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
+            ),
+            "data_id": data_id,
+            **_source_fields(data_point, data_item),
+        }
+        return
 
     try:
         # Process data based on data_item and list of tasks. aclosing closes

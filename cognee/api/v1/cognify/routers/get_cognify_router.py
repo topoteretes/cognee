@@ -59,6 +59,10 @@ class CognifyPayloadDTO(InDTO):
             "Takes precedence over the datasets name list when both are provided."
         ),
     )
+    data_ids: list[UUID] | None = Field(
+        default=None,
+        description="Build only these data items in exactly one dataset. An empty selection, or an id that is not a data item of that dataset, is rejected with HTTP 422.",
+    )
     run_in_background: bool | None = Field(
         default=False,
         description=(
@@ -250,6 +254,7 @@ def get_cognify_router() -> APIRouter:
                 chunk_size=payload.chunk_size,
                 chunks_per_batch=payload.chunks_per_batch,
                 data_per_batch=payload.data_per_batch,
+                data_ids=payload.data_ids,
                 # HTTP contract: clients poll run status from the returned run
                 # info (and /datasets/status); an errored run is a valid
                 # response body here, not an exception.
