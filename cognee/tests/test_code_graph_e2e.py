@@ -123,7 +123,8 @@ FORBIDDEN_NODE_TYPES = {
     "CodePart",
 }
 
-ALLOWED_NODE_TYPES = set(CODE_NODE_TYPES) | {"CodeRepository"}
+# CodeSource holds a symbol's own lines; CODE queries never load it, so it is not a CODE node type.
+ALLOWED_NODE_TYPES = set(CODE_NODE_TYPES) | {"CodeRepository", "CodeSource"}
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -194,6 +195,16 @@ def _assert_typed_code_graph(nodes: dict, edges: list, repo_name: str) -> None:
     assert receipt.get("enola_version") == ENOLA_PINNED_VERSION, (
         f"Graph was built by enola {receipt.get('enola_version')!r}, pinned {ENOLA_PINNED_VERSION!r}"
     )
+
+    # Every symbol that carries a source hash has its source node, with the same hash.
+    sources = _by_type(nodes, "CodeSource")
+    for symbol_id, props in _by_type(nodes, "CodeSymbol").items():
+        if props.get("source_sha256"):
+            assert any(
+                source.get("symbol_id") == str(symbol_id)
+                and source.get("text_sha256") == props["source_sha256"]
+                for source in sources.values()
+            ), f"CodeSymbol {props.get('name')!r} has a source hash but no matching CodeSource"
 
     # 3. Known modules, symbols (with symbol_kind), files, dependencies.
     modules = {p.get("name") for p in _by_type(nodes, "CodeModule").values()}

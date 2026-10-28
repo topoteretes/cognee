@@ -115,6 +115,45 @@ def _keepalives(text: str) -> int:
     return text.count(": keepalive")
 
 
+def test_code_evidence_is_identical_in_json_and_final_sse(client, monkeypatch):
+    from cognee.modules.recall.types.RecallResponse import ResponseCodeEntry
+
+    evidence = {
+        "sources": [
+            {"file": "sync.py", "line": 10, "source": {"file_sha256": "h1", "text": "return True"}}
+        ]
+    }
+    payload = [
+        PAYLOAD[0].model_copy(update={"metadata": {"code_evidence": evidence}}),
+        ResponseCodeEntry(
+            kind=SearchResultKind.CODE,
+            search_type=SearchType.CODE,
+            text="code evidence",
+            raw={"operation": "ask"},
+            source="code",
+        ),
+    ]
+
+    async def answer(**kwargs):
+        async with answer_scope(stage="generating"):
+            sink = get_active_token_sink()
+            if sink:
+                sink.put_delta("Answer")
+        return payload
+
+    monkeypatch.setattr(recall_pkg, "recall", answer)
+    request = {"query": "Does pause block manual sync?", "scope": ["graph", "code"]}
+    with _flag():
+        plain = client.post("/recall", json=request)
+        streamed = client.post("/recall", json={**request, "stream": True})
+    assert plain.status_code == streamed.status_code == 200
+    final = next(json.loads(data) for event, data in _frames(streamed.text) if event == "final")
+    assert final["results"] == plain.json()
+    # Equal bodies would also be equal if both dropped the evidence.
+    assert plain.json()[0]["metadata"]["code_evidence"] == evidence
+    assert plain.json()[1]["source"] == "code"
+
+
 # --------------------------- negotiation ---------------------------
 
 

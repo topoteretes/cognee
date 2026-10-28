@@ -129,6 +129,9 @@ async def get_retriever_output(
         context=context,
         completion=completion,
         evidence=evidence,
+        code_evidence=(
+            retrieved_objects.get("code_evidence") if isinstance(retrieved_objects, dict) else None
+        ),
         search_type=effective_query_type,
         only_context=only_context,
         user_prompt=prompts[0] if prompts else None,

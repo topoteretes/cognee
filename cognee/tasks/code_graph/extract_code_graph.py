@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import time
 from collections import Counter
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -37,10 +38,16 @@ from cognee.tasks.code_graph.models import (
     CodeModule,
     CodeRepository,
     CodeService,
+    CodeSource,
     CodeSymbol,
     CodeTestReference,
     ExternalDependency,
     StorageResource,
+)
+from cognee.tasks.code_graph.source_evidence import (
+    capture_sources,
+    source_for_fact,
+    source_node_id,
 )
 from cognee.tasks.code_graph.symbol_migration import (
     CODE_EDGE_OWNER,
@@ -101,7 +108,8 @@ _SWEEP_CHUNK_SIZE = 2000
 # 1: doc fields, CodeFlow nodes and declaration-view resolution (SDK-1119).
 # 4: source-file symbol identity, authoritative target_id resolution, internal import
 #    resolution, edge ownership and mapping diagnostics.
-CODE_GRAPH_MAPPING_VERSION = 4
+# 5: the source lines of each code symbol, captured at extraction, in CodeSource nodes.
+CODE_GRAPH_MAPPING_VERSION = 5
 
 
 def _is_mappable_fact(kind: Any, name: Any) -> bool:
@@ -248,6 +256,7 @@ def map_facts_to_data_points(
     repo_path: str | Path | None = None,
     node_set: list[str] | None = None,
     repo_name: str | None = None,
+    source_files: dict | None = None,
 ) -> list[DataPoint]:
     """Map parsed enola facts to DataPoints, prepending one CodeRepository per repo.
 
@@ -286,6 +295,7 @@ def map_facts_to_data_points(
     _get_repository(fallback_repo)
 
     entities: list[DataPoint] = []
+    sources: list[DataPoint] = []
     skipped_facts = 0
     duplicate_facts = 0
     unmapped_kinds: Counter = Counter()
@@ -349,6 +359,9 @@ def map_facts_to_data_points(
             fields["remote_repository"] = repo_name
         if model is CodeSymbol:
             fields["symbol_kind"] = props.get("symbol_kind")
+            source = source_for_fact(fact, source_files) if source_files is not None else None
+            if source is not None:
+                fields["source_sha256"] = source["text_sha256"]
         if doc is not None:
             # Only a documented fact gains the key, so an undocumented fact's
             # fact_hash stays byte-identical to before docs were read.
@@ -369,6 +382,22 @@ def map_facts_to_data_points(
         except ValidationError:
             skipped_facts += 1
             logger.warning("Skipping fact with invalid field types: %s", fact)
+            continue
+        if model is CodeSymbol and source is not None:
+            sources.append(
+                CodeSource(
+                    id=source_node_id(node_id),
+                    name=name,
+                    repo=repo,
+                    remote_repository=repo_name,
+                    symbol_id=str(node_id),
+                    part_of=_get_repository(repo),
+                    fact_hash=_fact_content_hash(
+                        {**source, "repo": repo, "remote_repository": repo_name}
+                    ),
+                    **{key: source[key] for key in ("text", "line", "end_line", "text_sha256")},
+                )
+            )
 
     if skipped_facts:
         logger.warning("Skipped %d fact(s) that could not be mapped to DataPoints.", skipped_facts)
@@ -381,7 +410,7 @@ def map_facts_to_data_points(
     if duplicate_facts:
         logger.info("Collapsed %d duplicate fact(s) into existing node ids.", duplicate_facts)
 
-    return list(repositories.values()) + entities
+    return list(repositories.values()) + entities + sources
 
 
 def _fact_content_hash(fields: dict[str, Any]) -> str:
@@ -862,8 +891,9 @@ async def extract_code_graph(
     relations are persisted separately by add_code_graph_edges, which re-reads
     the same snapshot after the nodes exist in the graph. ``node_set`` tags
     every returned node (see ``map_facts_to_data_points``). An unchanged
-    snapshot is skipped only for an untagged repo: a tagged one always reloads,
-    so a tag change (or a run that crashed mid-retag) is never skipped.
+    imported snapshot is skipped only for an untagged repo. Fresh extraction
+    compares source hashes even when the extracted facts have not changed.
+    Tagged imports always reload so a tag change is never skipped.
     ``repo_name`` supplies a name for unnamed facts; add_code_graph_edges must
     get the same value.
     """
@@ -872,6 +902,8 @@ async def extract_code_graph(
     if repo_path is None and isinstance(data, (str, Path)):
         repo_path = data
 
+    generated_here = snapshot_dir is None
+    extraction_started_ns = time.time_ns()
     if snapshot_dir is None:
         if repo_path is None:
             raise ValueError("extract_code_graph requires repo_path or snapshot_dir.")
@@ -907,6 +939,9 @@ async def extract_code_graph(
         if (
             stored_id == snapshot_id
             and stored_version == CODE_GRAPH_MAPPING_VERSION
+            # Enola's fact identity need not change when a literal/body changes.
+            # Fresh extraction must compare source hashes too, via delta writes.
+            and not generated_here
             and not node_set
             and not stored_tagged
         ):
@@ -917,8 +952,18 @@ async def extract_code_graph(
             )
             return []
 
+    source_files = None
+    if generated_here:
+        source_files = await asyncio.to_thread(
+            capture_sources, facts, Path(repo_path), extraction_started_ns
+        )
     data_points = await asyncio.to_thread(
-        map_facts_to_data_points, facts, repo_path=repo_path, node_set=node_set, repo_name=repo_name
+        map_facts_to_data_points,
+        facts,
+        repo_path=repo_path,
+        node_set=node_set,
+        repo_name=repo_name,
+        source_files=source_files,
     )
     logger.info("Mapped %d enola fact(s) to %d data point(s).", len(facts), len(data_points))
     return data_points
@@ -1088,6 +1133,7 @@ async def add_code_graph_data_points(
     added: list[str] = []
     updated: list[str] = []
     unchanged = 0
+    sources_written = 0
     for point in data_points:
         if isinstance(point, CodeRepository):
             # Repository nodes are always rewritten (they carry the snapshot
@@ -1096,6 +1142,12 @@ async def add_code_graph_data_points(
             continue
         point_id = str(getattr(point, "id", point))
         fact_hash = getattr(point, "fact_hash", None)
+        if isinstance(point, CodeSource):
+            # Source nodes follow their symbol: written when new or changed, counted apart.
+            if existing_hashes.get(point_id) != fact_hash:
+                to_write.append(point)
+                sources_written += 1
+            continue
         if point_id not in existing_hashes:
             to_write.append(point)
             added.append(str(getattr(point, "name", point_id)))
@@ -1135,6 +1187,7 @@ async def add_code_graph_data_points(
         "nodes_unchanged": unchanged,
         "samples_added": _delta_samples(added),
         "samples_updated": _delta_samples(updated),
+        "sources_written": sources_written,
     }
     return state
 
@@ -1265,6 +1318,7 @@ async def add_code_graph_edges(
             existing_edge_keys,
             repo_name=repo_name,
             owned_edge_keys=owned_edge_keys,
+            current_source_ids={str(p.id) for p in data_points if isinstance(p, CodeSource)},
         )
 
         # Retag: strip node_set names this repo carried before but not anymore.
@@ -1325,7 +1379,10 @@ async def add_code_graph_edges(
 
 def _code_graph_node_types() -> set:
     """Every graph node type this pipeline produces, CodeRepository included."""
-    return {model.__name__ for model in KIND_TO_MODEL.values()} | {CodeRepository.__name__}
+    return {model.__name__ for model in KIND_TO_MODEL.values()} | {
+        CodeRepository.__name__,
+        CodeSource.__name__,
+    }
 
 
 def _is_repo_code_node(properties: Any, snapshot_repos: set, code_types: set) -> bool:
@@ -1353,6 +1410,7 @@ async def _sweep_stale_code_graph(
     existing_edge_keys: set,
     repo_name: str | None = None,
     owned_edge_keys: set | None = None,
+    current_source_ids: set | None = None,
 ) -> tuple[int, int, list[str]]:
     """Remove code graph nodes/edges no longer derivable from the snapshot.
 
@@ -1375,7 +1433,9 @@ async def _sweep_stale_code_graph(
     stale_node_names = []
     for node_id, properties in existing_nodes:
         node_id = str(node_id)
-        if node_id in current_ids:
+        # A source node is current only when this run wrote or kept it: an imported
+        # snapshot, or a symbol that lost its source, leaves none behind.
+        if node_id in current_ids or node_id in (current_source_ids or ()):
             continue
         owns_remote_node = (
             repo_name is not None
