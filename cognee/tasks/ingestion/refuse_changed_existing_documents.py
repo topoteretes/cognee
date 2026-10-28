@@ -73,8 +73,10 @@ async def _origins(data: Any) -> tuple[dict[str, str], dict[tuple[str, str], str
             with open(path, "rb") as file:
                 metadata = await get_file_metadata(file, name=path.name)
             by_location[path.as_uri()] = metadata["content_hash"]
-        stream = getattr(item, "file", None)
-        filename = getattr(item, "filename", None)
+        stream = getattr(item, "file", item if hasattr(item, "read") else None)
+        filename = getattr(item, "filename", None) or (
+            item.name if isinstance(getattr(item, "name", None), str) else None
+        )
         if stream is not None and filename:
             # An upload is stored under its user-visible filename: the stem is
             # the row's name (ingestion derives it the same way), the extension

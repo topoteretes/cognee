@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 from dataclasses import dataclass
 from typing import BinaryIO
@@ -67,40 +68,57 @@ async def save_data_to_file_detailed(
 
     data_root_directory = storage_config["data_root_directory"]
 
-    classified_data = classify(data, filename)
-    is_text = isinstance(classified_data, TextData)
+    initial_pos = None
+    if hasattr(data, "tell") and hasattr(data, "seek"):
+        with contextlib.suppress(OSError, ValueError, AttributeError):
+            initial_pos = data.tell()
 
-    file_metadata = await classified_data.aget_metadata()
+    try:
+        classified_data = classify(data, filename)
+        is_text = isinstance(classified_data, TextData)
 
-    async with classified_data.get_data() as payload:
-        if "name" not in file_metadata or file_metadata["name"] is None:
-            data_contents = payload.encode("utf-8")
-            hash_contents = hashlib.md5(data_contents).hexdigest()
-            file_metadata["name"] = "text_" + hash_contents + ".txt"
+        file_metadata = await classified_data.aget_metadata()
 
-        file_name = file_metadata["name"]
+        async with classified_data.get_data() as payload:
+            if "name" not in file_metadata or file_metadata["name"] is None:
+                content_hash = file_metadata.get("content_hash")
+                if not content_hash:
+                    data_contents = payload.encode("utf-8") if isinstance(payload, str) else payload
+                    content_hash = hashlib.md5(data_contents).hexdigest()
+                    file_metadata["content_hash"] = content_hash
+                extension = file_metadata.get("extension") or ("txt" if is_text else "bin")
+                if is_text or extension == "txt":
+                    file_metadata["name"] = f"text_{content_hash}.txt"
+                else:
+                    file_metadata["name"] = f"file_{content_hash}.{extension}"
 
-        if file_extension is not None:
-            extension = file_extension.lstrip(".")
-            file_name_without_ext = file_name.rsplit(".", 1)[0]
-            file_name = f"{file_name_without_ext}.{extension}"
+            file_name = file_metadata["name"]
 
-        storage = get_file_storage(data_root_directory)
+            if file_extension is not None:
+                extension = file_extension.lstrip(".")
+                file_name_without_ext = file_name.rsplit(".", 1)[0]
+                file_name = f"{file_name_without_ext}.{extension}"
 
-        full_file_path = await storage.store(
-            _storage_key(file_name, file_metadata.get("content_hash"), is_text),
-            payload,
-            overwrite=True,
-        )
+            storage = get_file_storage(data_root_directory)
 
-    # Point the metadata at where the payload actually landed, and carry the
-    # document name derived from the caller's filename rather than from the
-    # (now content-addressed) key — ``Data.name`` must stay the name a user
-    # recognizes.
-    file_metadata["file_path"] = full_file_path
-    file_metadata["name"] = _derive_basename(file_name)
+            full_file_path = await storage.store(
+                _storage_key(file_name, file_metadata.get("content_hash"), is_text),
+                payload,
+                overwrite=True,
+            )
 
-    return StoredFile(file_path=full_file_path, metadata=file_metadata)
+        # Point the metadata at where the payload actually landed, and carry the
+        # document name derived from the caller's filename rather than from the
+        # (now content-addressed) key — ``Data.name`` must stay the name a user
+        # recognizes.
+        file_metadata["file_path"] = full_file_path
+        file_metadata["name"] = _derive_basename(file_name)
+
+        return StoredFile(file_path=full_file_path, metadata=file_metadata)
+    finally:
+        if initial_pos is not None and hasattr(data, "seek"):
+            with contextlib.suppress(OSError, ValueError, AttributeError):
+                data.seek(initial_pos)
 
 
 async def save_data_to_file(

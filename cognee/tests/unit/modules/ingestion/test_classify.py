@@ -19,8 +19,11 @@ derived in ``get_file_metadata`` (see ``test_get_file_metadata``).
 import io
 from unittest.mock import MagicMock
 
+import pytest
+
 from cognee.modules.ingestion.classify import classify
 from cognee.modules.ingestion.data_types import BinaryData
+from cognee.modules.ingestion.exceptions import IngestionError
 
 
 def _fake_binary_stream(name: str) -> MagicMock:
@@ -44,3 +47,22 @@ def test_posix_path_name_is_reduced_to_basename():
 def test_explicit_filename_takes_precedence_over_stream_name():
     result = classify(_fake_binary_stream(r"C:\Users\foo\ignored.pdf"), filename="explicit.pdf")
     assert result.name == "explicit.pdf"
+
+
+def test_bytesio_without_filename_classifies_as_binary_data():
+    bio = io.BytesIO(b"binary payload")
+    result = classify(bio)
+    assert isinstance(result, BinaryData)
+    assert result.name is None
+
+
+def test_bytesio_with_filename_classifies_as_binary_data():
+    bio = io.BytesIO(b"binary payload")
+    result = classify(bio, filename="custom.txt")
+    assert isinstance(result, BinaryData)
+    assert result.name == "custom.txt"
+
+
+def test_unsupported_data_type_raises_ingestion_error():
+    with pytest.raises(IngestionError):
+        classify(12345)

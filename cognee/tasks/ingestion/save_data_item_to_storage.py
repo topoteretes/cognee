@@ -1,3 +1,4 @@
+import io
 import os
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -72,6 +73,15 @@ async def save_data_item_to_storage_detailed(
     # data is a file object coming from upload.
     if hasattr(data_item, "file"):
         return await save_data_to_file_detailed(data_item.file, filename=data_item.filename)
+
+    if isinstance(data_item, (bytes, bytearray)):
+        return await save_data_to_file_detailed(io.BytesIO(data_item))
+
+    if hasattr(data_item, "read"):
+        filename = getattr(data_item, "filename", None) or (
+            data_item.name if isinstance(getattr(data_item, "name", None), str) else None
+        )
+        return await save_data_to_file_detailed(data_item, filename=filename)
 
     if isinstance(data_item, str):
         parsed_url = urlparse(data_item)
