@@ -89,7 +89,7 @@ function SourceCard({
       </Tooltip>
       <div
         className="truncate text-[11px] text-[#7E8CA6]"
-        title="entities = concepts extracted from this source; items = source documents/records ingested"
+        title="Counts in the loaded view: entities are extracted concepts; items are loaded source documents/records."
       >
         {entities
           ? `${entities} entities · ${docs} item${docs === 1 ? "" : "s"}`

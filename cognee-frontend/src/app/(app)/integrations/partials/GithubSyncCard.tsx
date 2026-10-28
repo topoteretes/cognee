@@ -39,6 +39,12 @@ export default function GithubSyncCard(): ReactElement {
   const [intervalText, setIntervalText] = useState("60");
   const [pathText, setPathText] = useState<Record<string, string>>({});
   const mounted = useRef(false);
+  // Orders every write of `state`: a status read that started before a save must not land after it.
+  const stateWrites = useRef(0);
+  const publish = useCallback((next: GithubSyncState | null) => {
+    stateWrites.current += 1;
+    setState(next);
+  }, []);
   const removedConfig = useRef<Record<string, GithubRepositorySettings>>({});
 
   // One place that makes saved settings the draft, so the form never shows stale input.
@@ -50,9 +56,10 @@ export default function GithubSyncCard(): ReactElement {
   }, []);
 
   const refresh = useCallback(async () => {
+    const write = ++stateWrites.current;
     try {
       const result = await githubSyncApi.state();
-      if (mounted.current) { setState(result); setStatusError(null); }
+      if (mounted.current && write === stateWrites.current) { setState(result); setStatusError(null); }
       return result;
     } catch (err) {
       if (mounted.current) setStatusError(githubSyncError(err));
@@ -101,7 +108,10 @@ export default function GithubSyncCard(): ReactElement {
     if (!mounted.current || win.closed) { win.close(); if (mounted.current) setConnecting(false); return; }
     win.location.href = url;
     const startedAt = Date.now();
+    let done = false;
+    let reading = false;
     const finish = (message: string | null) => {
+      done = true;
       if (poll.current) clearInterval(poll.current);
       poll.current = null;
       win.close();
@@ -112,18 +122,23 @@ export default function GithubSyncCard(): ReactElement {
     // The install is done once the server holds a connection, whether or not the
     // popup could report back (GitHub may sever window.opener).
     poll.current = setInterval(async () => {
+      if (reading) return; // A slow read must not stack a second one behind it.
+      reading = true;
       const taken = takeOAuthOutcome("github");
       const outcome = typeof taken === "string" ? taken : taken?.outcome ?? null;
       let current: GithubSyncState | null;
       try {
         current = await githubSyncApi.state();
       } catch (err) {
-        finish(githubSyncError(err));
+        if (!done) finish(githubSyncError(err));
         return;
+      } finally {
+        reading = false;
       }
+      if (done) return;
       if (current) {
         finish(null);
-        if (mounted.current) { setState(current); adopt(current.settings); }
+        if (mounted.current) { publish(current); adopt(current.settings); }
       } else if (isFailureOutcome(outcome)) {
         finish(describeOAuthFailure(outcome, "GitHub"));
       } else if (outcome === "connected") {
@@ -214,7 +229,7 @@ export default function GithubSyncCard(): ReactElement {
     setPendingSync(null);
     if (!draft) return "";
     const saved = await githubSyncApi.save(draft, syncNow, acknowledged);
-    setState(saved);
+    publish(saved);
     adopt(saved.settings);
     return saved.syncRequested ? "Saved. Sync started in the background." : "Saved.";
   });
@@ -252,7 +267,7 @@ export default function GithubSyncCard(): ReactElement {
               <button className={GHOST} disabled={busy || dirty} onClick={() => void act(async () => {
                 if (!settings) return "";
                 const saved = await githubSyncApi.save({ ...settings, enabled: !settings.enabled }, false, false);
-                setState(saved);
+                publish(saved);
                 adopt(saved.settings);
                 return saved.settings.enabled ? "Sync resumed." : "Sync paused.";
               })}>{settings?.enabled ? "Pause" : "Resume"}</button>

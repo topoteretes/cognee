@@ -117,6 +117,26 @@ test("pause and sync now wait for unsaved edits and an empty interval explains i
   expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
 });
 
+describe("a status read that is overtaken", () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  test("a late refresh does not overwrite a newer save", async () => {
+    api.save.mockImplementation(async (settings) => ({ settings, syncRequested: false }));
+    render(<GithubSyncCard />);
+    fireEvent.click(await screen.findByRole("button", { name: "Manage GitHub" }));
+    let late: (value: typeof pushState) => void = () => undefined;
+    api.state.mockReturnValue(new Promise((done) => { late = done; }));
+    await act(async () => { await jest.advanceTimersByTimeAsync(10100); }); // the dialog's refresh starts
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    expect(await screen.findByText("Sync is paused")).toBeInTheDocument();
+    await act(async () => { late(pushState); }); // it answers with the state from before the pause
+    expect(screen.getByText("Sync is paused")).toBeInTheDocument();
+    expect(screen.queryByText(/Save your changes before pausing/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
+  });
+});
+
 describe("installing the GitHub app", () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
@@ -157,5 +177,16 @@ describe("installing the GitHub app", () => {
     const calls = api.state.mock.calls.length;
     await act(async () => { await jest.advanceTimersByTimeAsync(10000); });
     expect(api.state.mock.calls.length).toBe(calls);
+  });
+
+  test("a slow status read is not stacked with another while the install waits", async () => {
+    await install();
+    let slow: (value: typeof pushState | null) => void = () => undefined;
+    api.state.mockReset();
+    api.state.mockReturnValue(new Promise((done) => { slow = done; }));
+    await act(async () => { await jest.advanceTimersByTimeAsync(6000); });
+    expect(api.state).toHaveBeenCalledTimes(1);
+    await act(async () => { slow(pushState); });
+    expect(await screen.findByText("Sync is running")).toBeInTheDocument();
   });
 });

@@ -38,12 +38,15 @@ export type CodeQuery =
 export interface CodeFact {
   id: string;
   kind: string;
+  type?: string;
   name?: string | null;
   file?: string;
   line?: number;
+  end_line?: number;
   repo?: string;
   path?: string;
   description?: string;
+  doc?: string;
   symbol_kind?: string;
   properties?: Record<string, unknown>;
   /** Outgoing edges: what this node calls, imports, declares as a method, ... */
@@ -74,6 +77,29 @@ export interface CodeArchitectureResult {
 
 export type CodeSearchResult = CodeFactsResult | CodeArchitectureResult;
 
+export interface CodeNeighbor {
+  relation: string;
+  direction: "in" | "out";
+  node: CodeFact & { type: string };
+}
+
+export interface CodeNeighborsResult {
+  operation: "neighbors";
+  anchor: CodeFact & { type: string };
+  neighbors: CodeNeighbor[];
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+}
+
+interface CodeNeighborsQuery {
+  operation: "neighbors";
+  id: string;
+  direction: "both";
+  offset: number;
+}
+
 export interface CodeSearchRequest {
   /** What the user typed. Sent for the pod's own logs; neither operation reads it. */
   query: string;
@@ -93,18 +119,18 @@ function isCodeSearchResult(value: unknown): value is CodeSearchResult {
  * Read defensively rather than cast: the route is typed `list[SearchResult] |
  * list`, so a list of payloads or a bare one are both within its contract.
  */
-function unwrapCodeResults(data: unknown): CodeSearchResult[] {
+function unwrapCodeResults<T>(data: unknown, isResult: (value: unknown) => value is T): T[] {
   const entries = Array.isArray(data) ? data : [data];
-  const results: CodeSearchResult[] = [];
+  const results: T[] = [];
   for (const entry of entries) {
-    if (isCodeSearchResult(entry)) {
+    if (isResult(entry)) {
       results.push(entry);
       continue;
     }
     if (typeof entry !== "object" || entry === null) continue;
     const payload = (entry as { search_result?: unknown }).search_result;
     for (const candidate of Array.isArray(payload) ? payload : [payload]) {
-      if (isCodeSearchResult(candidate)) results.push(candidate);
+      if (isResult(candidate)) results.push(candidate);
     }
   }
   return results;
@@ -129,6 +155,14 @@ export default async function searchCode(
   instance: CogneeInstance,
   request: CodeSearchRequest,
 ): Promise<CodeSearchResult[]> {
+  return unwrapCodeResults(await runCodeQuery(instance, request), isCodeSearchResult);
+}
+
+async function runCodeQuery(
+  instance: CogneeInstance,
+  request: Omit<CodeSearchRequest, "codeQuery"> & { codeQuery: CodeQuery | CodeNeighborsQuery },
+  signal?: AbortSignal,
+): Promise<unknown> {
   const response = await instance.fetch("/v1/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -139,6 +173,54 @@ export default async function searchCode(
       datasetIds: request.datasetIds,
     }),
     timeoutMs: CODE_SEARCH_TIMEOUT_MS,
+    ...(signal ? { signal } : {}),
   });
-  return unwrapCodeResults(await response.json());
+  return response.json();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isDetailedFact(value: unknown): value is CodeFact & { type: string } {
+  if (!isRecord(value) || typeof value.id !== "string" || !value.id ||
+      typeof value.kind !== "string" || typeof value.type !== "string") return false;
+  const strings = ["name", "file", "path", "repo", "description", "doc", "symbol_kind"];
+  if (strings.some((key) => value[key] != null && typeof value[key] !== "string")) return false;
+  return ["line", "end_line"].every((key) => value[key] == null ||
+    Number.isInteger(value[key]));
+}
+
+function isNeighborsResult(value: unknown): value is CodeNeighborsResult {
+  return isRecord(value) && value.operation === "neighbors" && isDetailedFact(value.anchor) &&
+    Array.isArray(value.neighbors) && value.neighbors.every((entry) =>
+      isRecord(entry) && typeof entry.relation === "string" &&
+      (entry.direction === "in" || entry.direction === "out") && isDetailedFact(entry.node)) &&
+    ["total", "offset", "limit"].every((key) => Number.isInteger(value[key]) && Number(value[key]) >= 0) &&
+    typeof value.has_more === "boolean";
+}
+
+/** Reads one page using the server's existing page size, including the anchor's details. */
+export async function getCodeNeighbors(
+  instance: CogneeInstance,
+  datasetId: string,
+  nodeId: string,
+  offset: number,
+  signal?: AbortSignal,
+): Promise<CodeNeighborsResult> {
+  const data = await runCodeQuery(instance, {
+    query: "",
+    codeQuery: { operation: "neighbors", id: nodeId, direction: "both", offset },
+    datasetIds: [datasetId],
+  }, signal);
+  const results = unwrapCodeResults(data, isNeighborsResult);
+  if (results.length !== 1) throw new Error("The server did not return readable code details.");
+  const result = results[0];
+  if (result.anchor.id !== nodeId || result.offset !== offset ||
+      result.offset + result.neighbors.length > result.total ||
+      result.has_more !== (result.offset + result.neighbors.length < result.total) ||
+      (result.has_more && !result.neighbors.length)) {
+    throw new Error("The server returned inconsistent code relationships.");
+  }
+  return result;
 }
