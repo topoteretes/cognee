@@ -27,13 +27,15 @@ from cognee.context_global_variables import (
     vector_db_config,
 )
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.locks import acquire_improve_lock_many, release_improve_lock_many
+from cognee.infrastructure.locks.session_lock import improve_lock_keys
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_embeddings import SESSION_QA_VECTOR_COLLECTION
 from cognee.memory.entries import QAEntry
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.session_lifecycle.delete_session import delete_session
-from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.methods import create_user, get_default_user
 
 delete_module = importlib.import_module("cognee.modules.session_lifecycle.delete_session")
 
@@ -134,10 +136,10 @@ async def test_without_the_dataset_context_the_vectors_survive(isolated_dataset,
     user, dataset = isolated_dataset
     await _answer_turn(user.id, dataset.id, "s2")
 
-    async def no_dataset(*, user_id, session_id):
-        return None
+    async def no_datasets(user_id, session_id):
+        return []
 
-    monkeypatch.setattr(delete_module, "get_session_dataset_id", no_dataset)
+    monkeypatch.setattr(delete_module, "_session_vector_datasets", no_datasets)
     # Cache content went, so it reports True; the vectors in the dataset store did not.
     assert await _as_fresh_request(lambda: delete_session(user.id, "s2")) is True
 
@@ -165,3 +167,58 @@ async def test_delete_session_strips_vectors_a_typed_entry_left_in_the_global_st
     assert await _as_fresh_request(_session_vector_rows) == 0
     async with set_database_global_context_variables(dataset.id, user.id):
         assert await _session_vector_rows() == 0
+
+
+async def _dataset_vector_rows(user_id: UUID, dataset_id: UUID) -> int:
+    async def count():
+        async with set_database_global_context_variables(dataset_id, user_id):
+            return await _session_vector_rows()
+
+    return await _as_fresh_request(count)
+
+
+@pytest.mark.asyncio
+async def test_delete_session_strips_vectors_from_every_dataset_it_answered_in(
+    isolated_dataset,
+):
+    """A recall over several datasets answers, and indexes, once per dataset;
+    the session record names only the first."""
+    user, dataset = isolated_dataset
+    other = await create_authorized_dataset("other", user)
+    await _answer_turn(user.id, dataset.id, "s4")
+    await _answer_turn(user.id, other.id, "s4")
+    assert await _dataset_vector_rows(user.id, other.id) == 1
+
+    assert await _as_fresh_request(lambda: delete_session(user.id, "s4")) is True
+
+    assert await _dataset_vector_rows(user.id, dataset.id) == 0
+    assert await _dataset_vector_rows(user.id, other.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_session_id_naming_another_users_dataset_does_not_reach_it(isolated_dataset):
+    user, dataset = isolated_dataset
+    stranger = await create_user("stranger@example.com", "password")
+    foreign = await create_authorized_dataset("foreign", stranger)
+
+    targets = await delete_module._session_vector_datasets(user.id, f"x_{foreign.id}")
+
+    assert foreign.id not in targets
+    assert dataset.id in targets
+
+
+@pytest.mark.asyncio
+async def test_delete_session_waits_for_an_improve_holding_the_session(isolated_dataset):
+    """An improve bridging the session would write its watermarks back after
+    the delete; the delete waits for its claim instead."""
+    user, dataset = isolated_dataset
+    await _answer_turn(user.id, dataset.id, "s5")
+    keys = improve_lock_keys(["s5"], user.id)
+    await acquire_improve_lock_many(keys)
+    try:
+        delete = asyncio.create_task(delete_session(user.id, "s5"))
+        await asyncio.sleep(0.5)
+        assert not delete.done()
+    finally:
+        await release_improve_lock_many(keys)
+    assert await asyncio.wait_for(delete, 30) is True

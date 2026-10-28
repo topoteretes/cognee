@@ -561,33 +561,6 @@ async def list_sessions_for_dataset(dataset_id: UUIDType) -> list[tuple[UUIDType
     return [(row.user_id, row.session_id) for row in rows]
 
 
-async def get_session_dataset_id(*, user_id: UUIDType, session_id: str) -> UUIDType | None:
-    """The dataset a session is attributed to, or None when nothing says.
-
-    The inverse of ``list_sessions_for_dataset`` and read the same way: the
-    ``dataset_id`` backfilled on the session row, else the dataset id a
-    per-dataset default session carries as its ``session_id`` suffix
-    (``{default_session_id}_{dataset_id}``). Attribution is best-effort by
-    design, so a session written by a path that knew no dataset answers None.
-    """
-    engine = get_relational_engine()
-    async with engine.get_async_session() as session:
-        dataset_id = (
-            await session.execute(
-                select(SessionRecord.dataset_id).where(
-                    SessionRecord.user_id == user_id, SessionRecord.session_id == session_id
-                )
-            )
-        ).scalar_one_or_none()
-    if dataset_id is not None:
-        return dataset_id
-    _, _, suffix = session_id.rpartition("_")
-    try:
-        return UUIDType(suffix)
-    except ValueError:
-        return None
-
-
 async def list_unattributed_sessions() -> list[tuple[UUIDType, str]]:
     """Return (user_id, session_id) pairs for sessions with no dataset attribution.
 

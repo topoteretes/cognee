@@ -61,12 +61,9 @@ async def stores(request):
         with (
             patch.object(delete_module, "get_session_manager", return_value=manager),
             patch.object(delete_module, "get_relational_engine", return_value=relational),
-            # The session-to-dataset lookup reads the same relational DB from the
-            # metrics module, which has its own engine import.
-            patch(
-                "cognee.modules.session_lifecycle.metrics.get_relational_engine",
-                return_value=relational,
-            ),
+            # No datasets here: the per-dataset vector stores are covered by
+            # test_session_delete_dataset_context.py over real stores.
+            patch.object(delete_module, "_session_vector_datasets", new=AsyncMock(return_value=[])),
             patch(
                 "cognee.infrastructure.session.session_manager.delete_session_qa_vectors",
                 new=vectors,
