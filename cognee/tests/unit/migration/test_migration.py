@@ -8,6 +8,8 @@ import json
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
+import pytest
+
 from cognee.modules.migration import loader
 from cognee.modules.migration.cogx import (
     COGX_VERSION,
@@ -673,6 +675,37 @@ class TestFormatEmitters:
         assert "MERGE (a)-[r:`lives_in`]->(b)" in script
         # Non-scalar property serialized as JSON string, not raw repr.
         assert '"[\\"city\\", \\"capital\\"]"' in script
+
+    @pytest.mark.parametrize("on_edge", [False, True], ids=["node", "edge"])
+    def test_cypher_preserves_distinct_property_names(self, tmp_path, on_edge):
+        properties = {
+            "first-name": "hyphenated",
+            "first name": "spaced",
+            "firstname": "plain",
+            "a`b": "backtick",
+            "ab": "letters",
+            "!!!": "punctuation",
+            "prop": "literal",
+            "123": "numeric",
+        }
+        nodes = [("n1", {}), ("n2", {})] if on_edge else [("n1", properties)]
+        edges = [("n1", "n2", "knows", properties)] if on_edge else []
+        destination = tmp_path / "graph.cypher"
+
+        write_cypher(nodes, edges, destination)
+
+        script = destination.read_text(encoding="utf-8")
+        for fragment in (
+            '`first-name`: "hyphenated"',
+            '`first name`: "spaced"',
+            '`firstname`: "plain"',
+            '`a``b`: "backtick"',
+            '`ab`: "letters"',
+            '`!!!`: "punctuation"',
+            '`prop`: "literal"',
+            '`123`: "numeric"',
+        ):
+            assert fragment in script
 
 
 class TestImportModeValidation:
