@@ -6,6 +6,7 @@ from .export import (
     query_memory_graph_sparql,
 )
 from .sparql import (
+    SparqlExternalAccessNotAllowedError,
     SparqlGraphTooLargeError,
     SparqlQueryError,
     SparqlQueryTimeoutError,
@@ -16,6 +17,7 @@ from .sparql import (
 
 __all__ = [
     "DEFAULT_BASE_IRI",
+    "SparqlExternalAccessNotAllowedError",
     "SparqlGraphTooLargeError",
     "SparqlQueryError",
     "SparqlQueryTimeoutError",
