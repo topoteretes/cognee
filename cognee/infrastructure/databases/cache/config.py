@@ -87,9 +87,8 @@ class CacheConfig(BaseSettings):
         if isinstance(value, str) and value.strip().lower() == "fs":
             raise CogneeConfigurationError(
                 "CACHE_BACKEND=fs is no longer supported: the filesystem session cache was "
-                "removed because its storage library (diskcache) has an unpatched "
-                "pickle-deserialization vulnerability (GHSA-w8v5-vhqr-4h9v). Sessions it "
-                "stored under <data_root>/.cognee_fs_cache are not read anymore.",
+                "removed. Sessions it stored under <data_root>/.cognee_fs_cache are not "
+                "read anymore.",
                 remediation=(
                     "Unset CACHE_BACKEND to use the default sqlite cache (a cache.db next to "
                     "the relational database), or set it to one of: sqlite, turso, postgres, "
