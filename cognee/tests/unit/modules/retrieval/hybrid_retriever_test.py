@@ -77,7 +77,7 @@ async def test_passage_section_formatting():
 
 
 @pytest.mark.asyncio
-async def test_reviewed_hybrid_retrieval_attaches_sources_and_deduplicates_conflicts():
+async def test_hybrid_retrieval_attaches_sources_and_deduplicates_conflicts():
     conflict = "Bob succeeded Alice as Acme CEO."
     chunk = _result(
         "chunk", {"id": "chunk", "text": "Bob became CEO.", "external_metadata": {"team": "A"}}
@@ -96,7 +96,6 @@ async def test_reviewed_hybrid_retrieval_attaches_sources_and_deduplicates_confl
                 {
                     "name": "Acme",
                     "description": "Bob leads Acme.",
-                    "conflicts_reviewed_at": "2026-01-10",
                 },
             ),
             ("company", {"name": "company"}),
@@ -125,7 +124,8 @@ async def test_reviewed_hybrid_retrieval_attaches_sources_and_deduplicates_confl
     context = await retriever.get_context_from_objects(query="q", retrieved_objects=retrieved)
     assert chunk.payload["conflicts"] == [conflict]
     assert "source: Report (2026-01-10)\nteam: A\nBob became CEO." in context
-    assert "### Acme (company)\nBob leads Acme." in context
+    assert "### Acme (company)\n" in context
+    assert "Bob leads Acme." not in context
     assert context.count(conflict) == 1
     assert "## Fact conflicts" in context
     assert "## Related facts" not in context
@@ -1350,7 +1350,6 @@ async def test_graph_neighborhood_error_keeps_chunks_entities_and_facts():
         {
             "id": "entity-1",
             "name": "Alice",
-            "description": None,
             "type": None,
             "edges": [],
         }

@@ -201,7 +201,7 @@ async def improve(
             index is LLM-free and dataset routing reads it); ``False``
             skips the stage for this call.
         build_truth_subspace: Opt in to ``build_truth_subspace``.
-        review_conflicts: Review dated source facts and update conflict descriptions.
+        review_conflicts: Review dated source facts and store their conflicts.
             Also enabled by ``IMPROVE_REVIEW_CONFLICTS=true``.
         **kwargs: Additional options — see ``ImproveKwargs``.
 
