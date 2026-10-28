@@ -49,4 +49,6 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          # The test puts the system root on S3, where the default sqlite cache.db cannot live.
+          CACHE_DB_URL: sqlite+aiosqlite:///${{ runner.temp }}/cognee_cache.db
         run: uv run python ./cognee/tests/test_s3_file_storage.py

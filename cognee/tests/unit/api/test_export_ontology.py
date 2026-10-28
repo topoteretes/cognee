@@ -7,6 +7,8 @@ Covers:
 - Export endpoint: unsupported format -> 400 listing the options
 - Export endpoint: unknown key -> 404, another user's key -> 404 (no existence leak)
 - Export endpoint: stored file that is not RDF -> 422
+- Export endpoint: JSON-LD referencing an external @context / @import -> 422, no request sent
+- Export endpoint: an ontology the chosen writer cannot express -> 422 naming the format, not 404
 """
 
 import json
@@ -21,10 +23,13 @@ from rdflib import Graph
 from cognee.api.client import app
 from cognee.api.v1.ontologies.ontologies import (
     EXPORT_FORMATS,
+    OntologyNotFoundError,
     OntologyParseError,
+    OntologySerializationError,
     OntologyService,
 )
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.tests.utils.recording_http_server import recording_http_server
 
 OWL_FIXTURE = b"""<?xml version="1.0"?>
 <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
@@ -281,5 +286,153 @@ def test_export_ontology_endpoint_unparseable_file_returns_422(client):
 
         assert response.status_code == 422
         assert response.json() == {"error": "Stored ontology file could not be parsed as RDF."}
+    finally:
+        client.delete(f"/api/v1/ontologies/{key}")
+
+
+# ---------------------------------------------------------------------------
+# JSON-LD contexts: never fetched (SSRF / local file read)
+# ---------------------------------------------------------------------------
+
+REMOTE_CONTEXT = b'{"@context": {"label": "http://www.w3.org/2000/01/rdf-schema#label"}}'
+
+
+def _jsonld(document: dict) -> bytes:
+    return json.dumps(document).encode()
+
+
+def _remote_context_documents(url: str) -> list[bytes]:
+    node = {"@id": "http://example.org/a", "label": "A"}
+    return [
+        _jsonld({"@context": f"{url}/context.jsonld", **node}),
+        _jsonld({"@context": [f"{url}/context.jsonld", {"ex": "http://example.org/"}], **node}),
+        _jsonld({"@graph": [{"@context": f"{url}/context.jsonld", **node}]}),
+        # A scoped context inside a term definition.
+        _jsonld(
+            {
+                "@context": {"knows": {"@id": "http://x/knows", "@context": f"{url}/scoped"}},
+                **node,
+            }
+        ),
+        _jsonld({"@context": {"@version": 1.1, "@import": f"{url}/imported"}, **node}),
+    ]
+
+
+def test_export_refuses_jsonld_that_references_an_external_context(client):
+    """Each document would make the server fetch the URL it names while parsing."""
+    with recording_http_server(REMOTE_CONTEXT, "application/ld+json") as (url, requests):
+        for index, document in enumerate(_remote_context_documents(url)):
+            key = f"test_export_remote_ctx_{index}_{uuid.uuid4().hex[:8]}"
+            _upload(client, key, content=document)
+            try:
+                response = client.get(f"/api/v1/ontologies/{key}/export")
+
+                assert response.status_code == 422, (index, response.text)
+            finally:
+                client.delete(f"/api/v1/ontologies/{key}")
+
+    assert requests == []
+
+
+def test_export_refuses_jsonld_that_references_a_local_file(client, tmp_path):
+    """A path or file: URI as @context would read a file from the server's disk."""
+    context_file = tmp_path / "context.jsonld"
+    context_file.write_bytes(REMOTE_CONTEXT)
+    node = {"@id": "http://example.org/a", "label": "A"}
+
+    for index, reference in enumerate([context_file.as_uri(), str(context_file)]):
+        key = f"test_export_file_ctx_{index}_{uuid.uuid4().hex[:8]}"
+        _upload(client, key, content=_jsonld({"@context": reference, **node}))
+        try:
+            response = client.get(f"/api/v1/ontologies/{key}/export")
+
+            assert response.status_code == 422, (reference, response.text)
+        finally:
+            client.delete(f"/api/v1/ontologies/{key}")
+
+
+def test_export_still_reads_jsonld_with_an_inline_context(client):
+    key = f"test_export_inline_ctx_{uuid.uuid4().hex[:8]}"
+    document = _jsonld(
+        {
+            "@context": {"label": "http://www.w3.org/2000/01/rdf-schema#label"},
+            "@id": "http://example.org/a",
+            "label": "A",
+        }
+    )
+    _upload(client, key, content=document)
+    try:
+        response = client.get(f"/api/v1/ontologies/{key}/export")
+
+        assert response.status_code == 200, response.text
+        assert len(Graph().parse(data=response.content, format="turtle")) == 1
+    finally:
+        client.delete(f"/api/v1/ontologies/{key}")
+
+
+def test_export_does_not_resolve_xml_external_entities(client):
+    """RDF/XML is parsed with external entities off; pins that against a parser change."""
+    with recording_http_server(b"<x/>", "application/xml") as (url, requests):
+        document = f"""<?xml version="1.0"?>
+<!DOCTYPE rdf:RDF [<!ENTITY ext SYSTEM "{url}/entity">]>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+  <rdf:Description rdf:about="http://example.org/a"><rdfs:label>&ext;</rdfs:label></rdf:Description>
+</rdf:RDF>""".encode()
+        key = f"test_export_xxe_{uuid.uuid4().hex[:8]}"
+        _upload(client, key, content=document)
+        try:
+            client.get(f"/api/v1/ontologies/{key}/export")
+        finally:
+            client.delete(f"/api/v1/ontologies/{key}")
+
+    assert requests == []
+
+
+# ---------------------------------------------------------------------------
+# Serialization failures are not "not found"
+# ---------------------------------------------------------------------------
+
+# rdflib's RDF/XML writer cannot shorten a predicate IRI ending in digits to a QName.
+DIGIT_PREDICATE_FIXTURE = (
+    b"<http://example.org/a> <http://example.org/123> <http://example.org/b> ."
+)
+
+
+def test_export_ontology_raises_serialization_error_for_inexpressible_format(
+    ontology_service, tmp_path
+):
+    user = SimpleNamespace(id="user-1")
+    _store(ontology_service, tmp_path, "user-1", "digits", DIGIT_PREDICATE_FIXTURE)
+
+    with pytest.raises(OntologySerializationError, match="cannot be serialized as xml"):
+        ontology_service.export_ontology("digits", user, export_format="xml")
+    assert ontology_service.export_ontology("digits", user, export_format="turtle")
+
+
+def test_load_ontology_graph_raises_not_found_for_unknown_and_invalid_keys(
+    ontology_service, tmp_path
+):
+    user = SimpleNamespace(id="user-1")
+
+    with pytest.raises(OntologyNotFoundError):
+        ontology_service.load_ontology_graph("missing", user)
+    with pytest.raises(OntologyNotFoundError):
+        ontology_service.load_ontology_graph("../escape", user)
+
+
+def test_export_ontology_endpoint_inexpressible_format_is_422_not_404(client):
+    key = f"test_export_digits_{uuid.uuid4().hex[:8]}"
+    _upload(client, key, content=DIGIT_PREDICATE_FIXTURE)
+    try:
+        as_xml = client.get(f"/api/v1/ontologies/{key}/export", params={"format": "xml"})
+        as_turtle = client.get(f"/api/v1/ontologies/{key}/export", params={"format": "turtle"})
+
+        assert as_xml.status_code == 422, as_xml.text
+        assert as_xml.json() == {
+            "error": "This ontology cannot be exported as xml. "
+            "Try format=turtle, which can represent any RDF graph."
+        }
+        assert as_turtle.status_code == 200
     finally:
         client.delete(f"/api/v1/ontologies/{key}")

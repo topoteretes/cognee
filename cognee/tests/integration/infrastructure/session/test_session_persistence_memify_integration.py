@@ -138,7 +138,7 @@ async def session_persistence_env(event_loop):
             # Skipping the provider probe only applies to a configured LLM: with no
             # key it would also switch off the keyless defaults (fork PRs).
             {
-                "CACHE_BACKEND": "fs",
+                "CACHE_BACKEND": "sqlite",
                 **({"COGNEE_SKIP_CONNECTION_TEST": "true"} if llm_available() else {}),
             },
             clear=False,
@@ -183,30 +183,14 @@ async def session_persistence_env(event_loop):
             _reset_cache_backend_caches()
 
 
-@pytest.fixture(params=["fs", "redis", "sqlite"])
+@pytest.fixture(params=["redis", "sqlite"])
 def session_manager_with_qa(request):
     """
-    SessionManager backed by FsCache, in-memory Redis, or SQL (aiosqlite).
+    SessionManager backed by in-memory Redis or SQL (aiosqlite).
     Tests run once per backend.
     """
     backend = request.param
-    if backend == "fs":
-        with (
-            tempfile.TemporaryDirectory() as tmpdir,
-            patch(
-                "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-                return_value={"data_root_directory": tmpdir},
-            ),
-        ):
-            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                FSCacheAdapter,
-            )
-
-            adapter = FSCacheAdapter()
-            sm = SessionManager(cache_engine=adapter)
-            yield sm, adapter
-            adapter.cache.close()
-    elif backend == "redis":
+    if backend == "redis":
         store = _InMemoryRedisList()
         patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
         with (
@@ -582,18 +566,10 @@ async def test_persist_sessions_watermark_ingests_everything_exactly_once(
     user = await get_default_user()
     user_id = str(user.id)
 
-    with (
-        tempfile.TemporaryDirectory() as tmpdir,
-        patch(
-            "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-            return_value={"data_root_directory": tmpdir},
-        ),
-    ):
-        from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-            FSCacheAdapter,
-        )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 
-        adapter = FSCacheAdapter()
+        adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmpdir}/cache.db")
         session_manager = SessionManager(cache_engine=adapter)
 
         await session_manager.add_qa(

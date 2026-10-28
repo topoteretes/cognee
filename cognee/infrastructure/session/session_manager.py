@@ -83,7 +83,7 @@ class SessionManager:
         Initialize SessionManager with a cache engine.
 
         Args:
-            cache_engine: CacheDBInterface implementation (RedisAdapter or FsCacheAdapter).
+            cache_engine: CacheDBInterface implementation (RedisAdapter or SqlCacheAdapter).
                          Can be None if caching is disabled.
             default_session_id: Session ID to use when session_id is None. Defaults to
                                "default_session".
