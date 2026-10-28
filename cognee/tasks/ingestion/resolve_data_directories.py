@@ -130,15 +130,16 @@ async def resolve_data_directories(
                 continue
 
             local_path = _resolve_existing_local_path(item)
+            is_directory = bool(local_path and local_path.is_dir())
 
-            if local_path and local_path.is_dir() and (include_paths is not None or exclude_paths):
+            if is_directory and (include_paths is not None or exclude_paths):
                 from cognee.exceptions import CogneeValidationError
 
                 raise CogneeValidationError(
                     "Repository path filters require a remote repository URL."
                 )
 
-            if local_path and local_path.is_dir():  # If it's a directory
+            if is_directory:  # If it's a directory
                 if include_subdirectories:
                     # A code project resolves to one repo item + its documents
                     # instead of a flat file list. Deferred import: code_repo
