@@ -28,7 +28,7 @@ export function drawDocumentBadges(
     // L2+ while a lens was active drew every OTHER source's document
     // badges too, reading as unrelated data suddenly appearing on zoom
     // (COG-6233).
-    if (!inLens(e, state.focusSets)) return;
+    if (!inLens(e, state.focusSets, state.focusTypes, state.entityType)) return;
     const phase = hashPhase(doc.id);
     const dx = e.x + 26 + (phase / 6.28) * 20;
     const dy = e.y + 18 + (((phase * 3) % 6.28) / 6.28) * 16;
@@ -44,7 +44,7 @@ export function drawDocumentBadges(
     // tethered to. They usually agree, but a document belongs to whatever
     // ingested it; the entity extracted from it is what's being described.
     const sets = setsOf(doc);
-    ctx.fillStyle = (sets.length && state.setColor[sets[0]]) || "#7E8CA6";
+    ctx.fillStyle = state.encoding.documentFill(sets);
     ctx.globalAlpha = 0.75;
     ctx.beginPath();
     ctx.roundRect(dx - 5, dy - 6, 10, 12, 2);
@@ -77,6 +77,8 @@ export function drawPlumbingLayer(
   entityById: Record<string, BusinessEntity>,
   transformK: number,
   focusSets: Set<string> | null,
+  focusTypes: Set<string> | null,
+  entityType: Record<string, string>,
 ): void {
   let cx = 0, cy = 0, count = 0, maxR = 0;
   Object.values(entityById).forEach((e) => {
@@ -92,12 +94,21 @@ export function drawPlumbingLayer(
 
   ctx.globalAlpha = 0.55;
   plumbingNodes.forEach((n) => {
-    // Same reasoning as drawDocumentBadges above — an unfiltered plumbing
-    // layer surfaced every OTHER source's leftover chunks/records while a
-    // focus lens was active (COG-6233).
-    if (!inLens(n, focusSets)) return;
-    const phase = hashPhase(n.id);
     const anchor = entityById[plumbingEntityId[n.id]];
+    // Same reasoning as drawDocumentBadges above for the source lens — an
+    // unfiltered plumbing layer surfaced every OTHER source's leftover
+    // chunks/records while a focus lens was active (COG-6233). The type
+    // lens can't reuse inLens directly, though: buildTypeLayer only buckets
+    // entities, so a plumbing node has no entityType entry of its own —
+    // checking it directly would fall through inLens's "other" default and
+    // hide the whole layer under any active type filter. Gate on the
+    // ANCHOR entity's type instead; an unlinked leftover (no anchor) isn't
+    // "of" any entity type, so it stays exempt from the type lens rather
+    // than being hidden by a check that can't apply to it.
+    const passesSets = !focusSets || setsOf(n).some((s) => focusSets.has(s));
+    const passesTypes = !focusTypes || !anchor || focusTypes.has(entityType[anchor.id] || "other");
+    if (!passesSets || !passesTypes) return;
+    const phase = hashPhase(n.id);
     let px: number, py: number;
     if (anchor && anchor.x != null && anchor.y != null) {
       const orbit = PLUMBING_ORBIT_MIN + (anchor._r ?? 5) + ((phase * 5) % 1) * PLUMBING_ORBIT_SPREAD;
