@@ -53,13 +53,23 @@ def _isolated_session_capture_state(tmp_path, monkeypatch):
         handle.cancel()
     monkeypatch.setattr(server, "_conversations", {})
     monkeypatch.setattr(server, "_idle_timers", {})
-    monkeypatch.setattr(server, "_running_improves", set())
+    monkeypatch.setattr(server, "_running_improves", {})
     monkeypatch.setattr(server, "_improve_locks", {})
+    monkeypatch.setattr(server, "_failed_retries", {})
     monkeypatch.setattr(server, "_capture_failures", 0)
-    monkeypatch.setattr(server, "_state_failures", 0)
+    monkeypatch.setattr(server, "_state_failures", {"read": 0, "write": 0})
     yield
     for handle in server._idle_timers.values():
         handle.cancel()
+    # A timer that fired in the test's last loop iteration may have left a task
+    # behind; it belongs to that test's loop and must not reach the next test.
+    for task in list(server._background_tasks):
+        try:
+            task.cancel()
+        except RuntimeError:
+            pass
+    server._background_tasks.clear()
+    server._background_task_datasets.clear()
 
 
 _called: set[str] = set()

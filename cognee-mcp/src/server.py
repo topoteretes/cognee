@@ -1136,9 +1136,17 @@ def _is_session_capture_enabled() -> bool:
 
 
 _DEFAULT_SESSION_IDLE_SECONDS = 1800.0
-# How long an improve that lost cognee's dataset lock to another improve waits
-# before it tries again.
+# How long an improve that lost cognee's dataset lock to another improve, or
+# found a sibling server process improving the conversation, waits before it
+# tries again.
 _LOCK_HELD_RETRY_SECONDS = 60.0
+# How many times a failing improve is retried by timer, one idle gap apart,
+# before the conversation is left to the next conversation boundary or server
+# start.
+_MAX_FAILED_RETRIES = 3
+# A server process's claim on a conversation it is improving counts as
+# abandoned after this long (the process died mid-improve).
+_IMPROVE_CLAIM_SECONDS = 3600.0
 
 
 def _session_idle_seconds() -> float:
@@ -1169,8 +1177,8 @@ def _auto_improve_enabled() -> bool:
     IMPROVE_AUTO_ENABLED is cognee's switch for every automatic improve, and
     false turns this one off too: turns are still captured, and the first
     server start after the switch is back on improves them. Read from the
-    environment (cognee loads its .env into it) with cognee's spelling of
-    false, so the two never disagree.
+    environment (cognee loads its .env into it) with the documented spellings
+    of false; a value cognee's own parser would reject counts as on here.
     """
     raw = os.getenv("IMPROVE_AUTO_ENABLED", "true").strip().lower()
     return raw not in ("false", "f", "no", "n", "off", "0")
@@ -1196,25 +1204,31 @@ _now = time.time
 #    "pending": [{"session_id", "dataset_name", "last_activity"}, ...]}
 # ``pending`` holds every other conversation that still has undistilled turns:
 # ended ones whose improve has not succeeded yet, and HTTP sessions inside
-# their idle gap or waiting for a retry. The file is the shared record of all
-# server processes of the client and is re-read before every change; this copy
-# only stands in while the disk is unavailable. A change lost between two
-# processes costs a retry, never a turn: the turns live in cognee's session
-# cache and improve is watermark-gated.
+# their idle gap or waiting for a retry. A record being improved carries
+# "improving": {"pid", "since"}, the claim sibling server processes defer to.
+# The file is the shared record of all server processes of the client: every
+# change re-reads it and writes only when nobody else wrote in between; this
+# copy only stands in while the disk is unavailable. A change that still loses
+# a race costs a retry, never a turn: the turns live in cognee's session cache
+# and improve is watermark-gated.
 _conversations: dict[str, dict] = {}
-# Consecutive state-file failures; the first one logs a warning, the rest debug.
-_state_failures = 0
+# Consecutive state-file failures per action; the first logs a warning, the rest debug.
+_state_failures = {"read": 0, "write": 0}
 # session_id -> the sleeping timer that improves it once its delay has passed.
 _idle_timers: dict[str, asyncio.TimerHandle] = {}
-# Conversations whose improve is running or queued right now.
-_running_improves: set[str] = set()
+# session_id -> improves of it running or queued in this process.
+_running_improves: dict[str, int] = {}
 # dataset_name -> lock: improves of one dataset run one at a time here, so two
 # conversations of one client never race for cognee's dataset lock.
 _improve_locks: dict[str, asyncio.Lock] = {}
+# session_id -> timer retries of a failing improve in this process.
+_failed_retries: dict[str, int] = {}
 # Undistilled conversations a client may keep waiting for a successful improve.
 _MAX_PENDING_CONVERSATIONS = 100
 # Consecutive capture failures; the first one logs a warning, the rest debug.
 _capture_failures = 0
+# Marks a write that replaces the file whatever it holds now.
+_UNCHECKED = object()
 
 
 def _conversation_path(client: str) -> Path:
@@ -1222,22 +1236,31 @@ def _conversation_path(client: str) -> Path:
 
 
 def _note_state_failure(action: str, client: str, error: Exception) -> None:
-    global _state_failures
-    _state_failures += 1
-    log = logger.warning if _state_failures == 1 else logger.debug
+    _state_failures[action] += 1
+    log = logger.warning if _state_failures[action] == 1 else logger.debug
     log(
         "Cannot %s the MCP conversation state of %s (%d in a row): %s; until the "
         "state is readable and writable again, conversations are tracked in memory "
         "only and do not survive a server restart",
         action,
         client,
-        _state_failures,
+        _state_failures[action],
         error,
     )
 
 
+def _note_state_ok(action: str, client: str) -> None:
+    if _state_failures[action]:
+        logger.info(
+            "The MCP conversation state of %s is %s again",
+            client,
+            {"read": "readable", "write": "writable"}[action],
+        )
+        _state_failures[action] = 0
+
+
 def _valid_conversation(entry) -> bool:
-    """The shape this server writes; anything else counts as an unreadable file."""
+    """The shape this server writes; anything else counts as a malformed file."""
 
     def number(value) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool)
@@ -1249,7 +1272,9 @@ def _valid_conversation(entry) -> bool:
         return False
     if not optional_str(entry.get("session_id")) or not optional_str(entry.get("dataset_name")):
         return False
-    if not number(entry.get("last_activity", 0)):
+    if not number(entry.get("last_activity", 0)) or not isinstance(
+        entry.get("distilled", True), bool
+    ):
         return False
     pending = entry.get("pending", [])
     return isinstance(pending, list) and all(
@@ -1261,51 +1286,135 @@ def _valid_conversation(entry) -> bool:
     )
 
 
-def _read_conversation(client: str) -> dict | None:
-    """The client's conversation file, or this process's last copy when the disk fails.
+def _read_conversation_raw(client: str) -> tuple[dict | None, bytes | None]:
+    """The client's file as (entry, bytes), or this process's last copy when the disk fails.
 
-    None when the client has no file yet, or a malformed one (the next write
-    replaces it).
+    (None, None) when the client has no file yet. A malformed file yields the
+    last copy and is replaced by the next write.
     """
+    path = _conversation_path(client)
     try:
-        entry = json.loads(_conversation_path(client).read_text())
+        raw = path.read_bytes()
     except FileNotFoundError:
-        return _conversations.get(client)
-    except (OSError, ValueError) as error:
+        return _conversations.get(client), None
+    except OSError as error:
         _note_state_failure("read", client, error)
-        return _conversations.get(client)
+        return _conversations.get(client), None
+    try:
+        entry = json.loads(raw)
+    except ValueError as error:
+        _note_state_failure("read", client, error)
+        return _conversations.get(client), raw
     if not _valid_conversation(entry):
-        _note_state_failure("read", client, ValueError("unexpected shape"))
-        return _conversations.get(client)
+        logger.warning(
+            "Ignoring the malformed MCP conversation state of %s at %s; the next write replaces it",
+            client,
+            path,
+        )
+        return _conversations.get(client), raw
+    _note_state_ok("read", client)
     _conversations[client] = entry
-    return entry
+    return entry, raw
 
 
-def _write_conversation(client: str, entry: dict) -> None:
-    """Replace the client's file atomically; this process's copy is updated either way."""
-    global _state_failures
+def _read_conversation(client: str) -> dict | None:
+    return _read_conversation_raw(client)[0]
+
+
+def _write_conversation(client: str, entry: dict, *, expected=_UNCHECKED) -> bool:
+    """Replace the client's file atomically; this process's copy is updated either way.
+
+    ``expected`` is what the caller read before changing the entry (None for no
+    file): when the file no longer matches, nothing is written and False says
+    so, so the caller can redo its change on what a sibling process wrote.
+    """
     _conversations[client] = entry
     path = _conversation_path(client)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        if expected is not _UNCHECKED:
+            try:
+                current = path.read_bytes()
+            except FileNotFoundError:
+                current = None
+            if current != expected:
+                return False
         tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-        tmp.write_text(json.dumps(entry))
+        tmp.write_bytes(json.dumps(entry).encode())
         os.replace(tmp, path)
     except OSError as error:
         _note_state_failure("write", client, error)
-        return
-    if _state_failures:
-        logger.info("The MCP conversation state of %s is readable and writable again", client)
-        _state_failures = 0
+        return True
+    _note_state_ok("write", client)
+    return True
+
+
+def _update_conversation(client: str, change) -> dict | None:
+    """Apply ``change`` to the client's file as a read-modify-write.
+
+    ``change(entry)`` returns the new entry, or None to leave the file as it
+    is. When a sibling process wrote between the read and the write, the
+    change is redone on the new content; the last attempt writes regardless.
+    Returns the entry on disk afterwards.
+    """
+    for attempt in range(3):
+        entry, raw = _read_conversation_raw(client)
+        new = change(entry)
+        if new is None:
+            return entry
+        if _write_conversation(client, new, expected=raw if attempt < 2 else _UNCHECKED):
+            return new
+    return new
+
+
+def _record_for(entry: dict | None, session_id: str) -> dict | None:
+    """The record of ``session_id`` in ``entry``: the current conversation or a pending one."""
+    if not entry:
+        return None
+    if entry.get("session_id") == session_id:
+        return entry
+    for past in entry.get("pending") or []:
+        if past.get("session_id") == session_id:
+            return past
+    return None
+
+
+def _with_claim(entry: dict, session_id: str, claim: dict | None) -> dict:
+    """``entry`` with the improve claim of ``session_id`` set, or removed when None."""
+
+    def updated(record: dict) -> dict:
+        record = {key: value for key, value in record.items() if key != "improving"}
+        if claim is not None:
+            record["improving"] = claim
+        return record
+
+    entry = dict(entry)
+    if entry.get("session_id") == session_id:
+        entry = updated(entry)
+    entry["pending"] = [
+        updated(past) if past.get("session_id") == session_id else past
+        for past in entry.get("pending") or []
+    ]
+    return entry
 
 
 def _upsert_pending(
-    pending: list[dict], session_id: str, dataset_name: str, last_activity: float
+    pending: list[dict],
+    session_id: str,
+    dataset_name: str,
+    last_activity: float,
+    *,
+    improving: dict | None = None,
 ) -> list[dict]:
     kept = [past for past in pending if past.get("session_id") != session_id]
-    kept.append(
-        {"session_id": session_id, "dataset_name": dataset_name, "last_activity": last_activity}
-    )
+    record = {
+        "session_id": session_id,
+        "dataset_name": dataset_name,
+        "last_activity": last_activity,
+    }
+    if improving is not None:
+        record["improving"] = improving
+    kept.append(record)
     return kept
 
 
@@ -1313,11 +1422,12 @@ def _cap_pending(client: str, pending: list[dict]) -> list[dict]:
     if len(pending) <= _MAX_PENDING_CONVERSATIONS:
         return pending
     dropped = pending[: len(pending) - _MAX_PENDING_CONVERSATIONS]
-    logger.warning(
-        "Giving up on %d undistilled MCP conversation(s) of %s; only the newest %d are kept: %s",
-        len(dropped),
-        client,
+    logger.info(
+        "Only the newest %d undistilled MCP conversation(s) of %s are remembered across a "
+        "server restart; dropping %d from the file: %s",
         _MAX_PENDING_CONVERSATIONS,
+        client,
+        len(dropped),
         [past["session_id"] for past in dropped],
     )
     return pending[-_MAX_PENDING_CONVERSATIONS:]
@@ -1336,27 +1446,38 @@ def _conversation_session_id(client: str, *, touch: bool) -> str | None:
     entry = _read_conversation(client)
     idle = _session_idle_seconds()
     now = _now()
+
+    def fresh(entry: dict) -> bool:
+        return idle <= 0 or now - float(entry.get("last_activity", 0)) <= idle
+
     current = entry.get("session_id") if entry else None
-    if current:
-        fresh = idle <= 0 or now - float(entry.get("last_activity", 0)) <= idle
-        if fresh or not touch:
-            return current
+    if current and (fresh(entry) or not touch):
+        return current
     if not touch:
         return None
 
-    pending = list(entry.get("pending") or []) if entry else []
-    if current and not entry.get("distilled", True) and entry.get("dataset_name"):
-        pending = _upsert_pending(
-            pending, current, entry["dataset_name"], float(entry.get("last_activity", 0))
-        )
-    entry = {
-        "session_id": f"{client}_{uuid.uuid4().hex}",
-        "dataset_name": None,
-        "last_activity": now,
-        "distilled": True,
-        "pending": _cap_pending(client, pending),
-    }
-    _write_conversation(client, entry)
+    def rotate(entry: dict | None) -> dict | None:
+        current = entry.get("session_id") if entry else None
+        if current and fresh(entry):
+            return None  # a sibling server process started a new conversation already
+        pending = list(entry.get("pending") or []) if entry else []
+        if current and not entry.get("distilled", True) and entry.get("dataset_name"):
+            pending = _upsert_pending(
+                pending,
+                current,
+                entry["dataset_name"],
+                float(entry.get("last_activity", 0)),
+                improving=entry.get("improving"),
+            )
+        return {
+            "session_id": f"{client}_{uuid.uuid4().hex}",
+            "dataset_name": None,
+            "last_activity": now,
+            "distilled": True,
+            "pending": _cap_pending(client, pending),
+        }
+
+    entry = _update_conversation(client, rotate)
     # A conversation boundary is also when every pending conversation of the
     # client gets another try.
     _schedule_undistilled(client, entry)
@@ -1407,6 +1528,29 @@ def _derived_session_id(*, touch: bool = False) -> str | None:
     return found[1] if found else None
 
 
+def _defer_improve(client: str, session_id: str) -> float:
+    """Seconds a due improve of ``session_id`` should wait, as the shared file sees it.
+
+    Positive when a sibling server process filed a newer turn (the rest of the
+    idle gap) or is improving the conversation right now (a short while; by
+    then it is gone from the file or free again); 0 when the improve may run.
+    """
+    record = _record_for(_read_conversation(client), session_id)
+    if record is None:
+        return 0.0
+    now = _now()
+    remaining = _session_idle_seconds() - (now - float(record.get("last_activity", 0)))
+    if remaining > 0.001:
+        return remaining
+    claim = record.get("improving") or {}
+    if (
+        claim.get("pid") not in (None, os.getpid())
+        and now - float(claim.get("since", 0)) < _IMPROVE_CLAIM_SECONDS
+    ):
+        return _LOCK_HELD_RETRY_SECONDS
+    return 0.0
+
+
 def _schedule_session_improve(
     client: str, session_id: str, dataset_name: str, *, delay: float
 ) -> None:
@@ -1414,10 +1558,11 @@ def _schedule_session_improve(
 
     A newer turn restarts the clock. Only the sleeping timer is replaced; an
     improve already running is left alone, and the next timer catches up with
-    whatever it missed through the improve watermark. Nothing is scheduled
-    when COGNEE_MCP_SESSION_IDLE_SECONDS is 0 or IMPROVE_AUTO_ENABLED is
-    false: the conversation stays undistilled on disk for a later server
-    start.
+    whatever it missed through the improve watermark. When the timer fires it
+    checks the shared file first: a newer turn or a running improve filed by a
+    sibling server process puts it back to sleep. Nothing is scheduled when
+    COGNEE_MCP_SESSION_IDLE_SECONDS is 0 or IMPROVE_AUTO_ENABLED is false: the
+    conversation stays undistilled on disk for a later server start.
     """
     if _session_idle_seconds() <= 0:
         return
@@ -1435,18 +1580,24 @@ def _schedule_session_improve(
 
     def fire() -> None:
         _idle_timers.pop(session_id, None)
+        wait = _defer_improve(client, session_id)
+        if wait > 0:
+            _schedule_session_improve(client, session_id, dataset_name, delay=wait)
+            return
         _track_background(_improve_session(client, session_id, dataset_name))
 
     _idle_timers[session_id] = loop.call_later(max(0.0, delay), fire)
 
 
-def _schedule_undistilled(client: str, entry: dict) -> None:
+def _schedule_undistilled(client: str, entry: dict | None) -> None:
     """Arm an improve for every conversation of ``client`` that still holds undistilled turns.
 
     Each runs once the rest of its idle gap has passed (right away for one that
-    ended long ago); a conversation whose improve is already running is left to
-    it.
+    ended long ago); a conversation whose improve is already running in this
+    process is left to it.
     """
+    if not entry:
+        return
     idle = _session_idle_seconds()
     now = _now()
     candidates = list(entry.get("pending") or [])
@@ -1472,43 +1623,111 @@ def _improve_outcome(result) -> str:
 
     ``bridged``: persist_session_qa completed, or had nothing new; the turns are
     in the graph. ``lock_held``: another improve of the dataset held cognee's
-    lock and nothing ran, worth a retry soon. ``failed``: the stage errored or
-    was cut off, worth a retry later. ``skipped``: the stage declined for good
-    (disabled by config, unsupported backend), so a retry would change nothing.
-    A payload without stage details (an older server) counts by its status.
+    lock and nothing ran, worth a retry soon. ``failed``: anything else, the
+    stage errored, was cut off, declined, or the run is not finished; the
+    conversation stays undistilled rather than being given up on. A payload
+    without stage details (an older server) counts by its status.
     """
     if not isinstance(result, dict):
         return "bridged"
+    if result.get("status") == "running" or result.get("finished") is False:
+        return "failed"
     stages = [stage for stage in result.get("stages") or [] if isinstance(stage, dict)]
     for stage in stages:
         if stage.get("stage") != "persist_session_qa":
             continue
-        status, reason = stage.get("status"), stage.get("reason")
-        if status in ("completed", "already_completed"):
+        if stage.get("status") in ("completed", "already_completed"):
             return "bridged"
-        if status == "skipped" and reason == "lock_held":
+        if stage.get("status") == "skipped" and stage.get("reason") == "lock_held":
             return "lock_held"
-        if status == "errored" or reason in ("budget_exhausted", "aborted_by_fatal_stage"):
-            return "failed"
-        return "skipped"
+        return "failed"
     if stages and all(
         stage.get("status") == "skipped" and stage.get("reason") == "lock_held" for stage in stages
     ):
         return "lock_held"
-    return "skipped" if result.get("status") == "skipped" else "bridged"
+    return "failed" if result.get("status") == "skipped" else "bridged"
+
+
+def _claim_improve(client: str, session_id: str) -> bool:
+    """Record in the shared file that this process improves ``session_id`` now.
+
+    False when a sibling server process holds a live claim on it. A session the
+    file does not know (an HTTP session past the pending cap) is improved
+    without a claim.
+    """
+    now = _now()
+    pid = os.getpid()
+    taken = []
+
+    def change(entry: dict | None) -> dict | None:
+        record = _record_for(entry, session_id)
+        if record is None:
+            return None
+        claim = record.get("improving") or {}
+        if (
+            claim.get("pid") not in (None, pid)
+            and now - float(claim.get("since", 0)) < _IMPROVE_CLAIM_SECONDS
+        ):
+            taken.append(claim)
+            return None
+        return _with_claim(entry, session_id, {"pid": pid, "since": now})
+
+    _update_conversation(client, change)
+    return not taken
+
+
+def _release_improve_claim(client: str, session_id: str) -> None:
+    def change(entry: dict | None) -> dict | None:
+        record = _record_for(entry, session_id)
+        if record is None or (record.get("improving") or {}).get("pid") != os.getpid():
+            return None
+        return _with_claim(entry, session_id, None)
+
+    _update_conversation(client, change)
+
+
+def _retry_failed(client: str, session_id: str, dataset_name: str) -> None:
+    """A failed improve is retried by timer a few times, one idle gap apart.
+
+    After that the conversation waits for the next conversation boundary or
+    server start, which try every pending conversation again.
+    """
+    _release_improve_claim(client, session_id)
+    attempts = _failed_retries.get(session_id, 0) + 1
+    _failed_retries[session_id] = attempts
+    if session_id in _idle_timers:
+        return
+    if attempts > _MAX_FAILED_RETRIES:
+        logger.warning(
+            "Not retrying MCP conversation %s by timer after %d failed attempts; the next "
+            "conversation boundary or server start tries again",
+            session_id,
+            attempts,
+        )
+        return
+    _schedule_session_improve(client, session_id, dataset_name, delay=_session_idle_seconds())
 
 
 async def _improve_session(client: str, session_id: str, dataset_name: str) -> None:
     """Bridge one captured conversation into the permanent graph.
 
-    Improves of one dataset run one at a time, so sibling conversations never
-    race for cognee's dataset lock. The result decides what happens next:
-    bridged turns leave the client's books; a lost lock (another improve of the
-    dataset, such as the one a remember runs) is retried in a minute; a failure
-    leaves the conversation undistilled for the next conversation boundary or
+    The conversation is claimed in the shared file first, so sibling server
+    processes defer to this one; improves of one dataset run one at a time in
+    this process, so sibling conversations never race for cognee's dataset
+    lock. The result decides what happens next: bridged turns leave the
+    client's books; a lost lock (another improve of the dataset, such as the
+    one a remember runs) is retried in a minute; a failure is retried a few
+    times one idle gap apart, then left to the next conversation boundary or
     server start.
     """
-    _running_improves.add(session_id)
+    if not _claim_improve(client, session_id):
+        logger.debug("A sibling server process is improving MCP conversation %s", session_id)
+        if session_id not in _idle_timers:
+            _schedule_session_improve(
+                client, session_id, dataset_name, delay=_LOCK_HELD_RETRY_SECONDS
+            )
+        return
+    _running_improves[session_id] = _running_improves.get(session_id, 0) + 1
     try:
         async with _improve_locks.setdefault(dataset_name, asyncio.Lock()):
             started = _now()
@@ -1520,13 +1739,19 @@ async def _improve_session(client: str, session_id: str, dataset_name: str) -> N
                 logger.warning(
                     "Improve of MCP conversation %s failed: %s", session_id, error, exc_info=True
                 )
+                _retry_failed(client, session_id, dataset_name)
                 return
     finally:
-        _running_improves.discard(session_id)
+        left = _running_improves.get(session_id, 0) - 1
+        if left > 0:
+            _running_improves[session_id] = left
+        else:
+            _running_improves.pop(session_id, None)
 
     outcome = _improve_outcome(result)
     summary = format_improve_result(result, dataset_name).splitlines()[0]
     if outcome == "lock_held":
+        _release_improve_claim(client, session_id)
         if session_id not in _idle_timers:
             _schedule_session_improve(
                 client, session_id, dataset_name, delay=_LOCK_HELD_RETRY_SECONDS
@@ -1540,17 +1765,15 @@ async def _improve_session(client: str, session_id: str, dataset_name: str) -> N
         return
     if outcome == "failed":
         logger.warning("Improve of MCP conversation %s did not persist it: %s", session_id, summary)
+        _retry_failed(client, session_id, dataset_name)
         return
+    _failed_retries.pop(session_id, None)
     if session_id not in _idle_timers:
-        # No newer turn arrived while this ran (a newer turn's own timer covers it).
         _mark_distilled(client, session_id, before=started)
-    if outcome == "skipped":
-        logger.warning(
-            "MCP conversation %s cannot be improved under the current settings: %s",
-            session_id,
-            summary,
-        )
-    elif isinstance(result, dict) and result.get("status") == "errored":
+    else:
+        # A newer turn arrived while this ran; its own timer covers it.
+        _release_improve_claim(client, session_id)
+    if isinstance(result, dict) and result.get("status") == "errored":
         logger.warning("Improved MCP conversation %s with errors: %s", session_id, summary)
     else:
         logger.info("Improved MCP conversation %s: %s", session_id, summary)
@@ -1564,22 +1787,34 @@ def _mark_turn_captured(client: str, session_id: str, dataset_name: str) -> None
     already ended) goes on the pending list, so a server start finds it.
     """
     now = _now()
-    entry = dict(
-        _read_conversation(client)
-        or {
-            "session_id": None,
-            "dataset_name": None,
-            "last_activity": 0.0,
-            "distilled": True,
-            "pending": [],
-        }
-    )
-    if entry.get("session_id") == session_id:
-        entry.update({"dataset_name": dataset_name, "last_activity": now, "distilled": False})
-    else:
-        pending = _upsert_pending(list(entry.get("pending") or []), session_id, dataset_name, now)
+
+    def change(entry: dict | None) -> dict:
+        entry = dict(
+            entry
+            or {
+                "session_id": None,
+                "dataset_name": None,
+                "last_activity": 0.0,
+                "distilled": True,
+                "pending": [],
+            }
+        )
+        if entry.get("session_id") == session_id:
+            entry.update({"dataset_name": dataset_name, "last_activity": now, "distilled": False})
+            return entry
+        pending = list(entry.get("pending") or [])
+        record = _record_for({"pending": pending}, session_id)
+        pending = _upsert_pending(
+            pending,
+            session_id,
+            dataset_name,
+            now,
+            improving=record.get("improving") if record else None,
+        )
         entry["pending"] = _cap_pending(client, pending)
-    _write_conversation(client, entry)
+        return entry
+
+    _update_conversation(client, change)
     _schedule_session_improve(client, session_id, dataset_name, delay=_session_idle_seconds())
 
 
@@ -1587,31 +1822,27 @@ def _mark_distilled(client: str, session_id: str, *, before: float) -> None:
     """An improve bridged ``session_id`` as of ``before``: it leaves the client's books.
 
     A turn that landed after the improve started keeps it undistilled; that
-    turn's own improve covers it.
+    turn's own improve covers it. This process's claim is dropped either way.
     """
-    entry = _read_conversation(client)
-    if entry is None:
-        return
-    entry = dict(entry)
-    changed = False
-    if (
-        entry.get("session_id") == session_id
-        and not entry.get("distilled", True)
-        and float(entry.get("last_activity", 0)) <= before
-    ):
-        entry["distilled"] = True
-        changed = True
-    pending = entry.get("pending") or []
-    kept = [
-        past
-        for past in pending
-        if past.get("session_id") != session_id or float(past.get("last_activity", 0)) > before
-    ]
-    if len(kept) != len(pending):
-        entry["pending"] = kept
-        changed = True
-    if changed:
-        _write_conversation(client, entry)
+
+    def change(entry: dict | None) -> dict | None:
+        if entry is None:
+            return None
+        new = _with_claim(entry, session_id, None)
+        if (
+            new.get("session_id") == session_id
+            and not new.get("distilled", True)
+            and float(new.get("last_activity", 0)) <= before
+        ):
+            new["distilled"] = True
+        new["pending"] = [
+            past
+            for past in new["pending"]
+            if past.get("session_id") != session_id or float(past.get("last_activity", 0)) > before
+        ]
+        return new if new != entry else None
+
+    _update_conversation(client, change)
 
 
 def _resume_conversations() -> None:
@@ -1621,9 +1852,15 @@ def _resume_conversations() -> None:
     before the gap, or its improve failed) is improved now, one still inside
     its gap waits out the rest of it. A file this server cannot make sense of
     is skipped with a warning; booting matters more than one conversation.
-    Runs inside the event loop, once the client is ready.
+    Runs inside the event loop, once the client is ready. Under
+    LLM_PROVIDER=mcp-sampling nothing is scheduled here: the host's model is
+    only reachable from inside a request, so the first conversation boundary
+    after the start catches up instead.
     """
     if not _is_session_capture_enabled() or _session_idle_seconds() <= 0:
+        return
+    if os.getenv("LLM_PROVIDER", "").strip().lower() == "mcp-sampling":
+        logger.info("LLM_PROVIDER=mcp-sampling: undistilled MCP conversations wait for a request")
         return
     try:
         paths = sorted(_conversation_state_dir().glob("*.json"))
@@ -1631,9 +1868,7 @@ def _resume_conversations() -> None:
         return
     for path in paths:
         try:
-            entry = _read_conversation(path.stem)
-            if entry:
-                _schedule_undistilled(path.stem, entry)
+            _schedule_undistilled(path.stem, _read_conversation(path.stem))
         except Exception:
             logger.warning("Skipping the MCP conversation state at %s", path, exc_info=True)
 

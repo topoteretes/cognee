@@ -10,6 +10,7 @@ model-visible cost: no extra tool, and the write never blocks the search.
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -101,6 +102,14 @@ async def _drain():
 async def _let_timers_fire(seconds=0.05):
     """Give call_later timers, and the tasks they spawn, a chance to run."""
     await asyncio.sleep(seconds)
+    await _drain()
+
+
+async def _wait_until(condition, timeout=5.0):
+    """Let timers and tasks run until ``condition()`` holds (or the timeout passes)."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not condition() and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.02)
     await _drain()
 
 
@@ -503,20 +512,29 @@ async def test_an_ended_conversation_stays_pending_until_an_improve_succeeds(
 
 
 @pytest.mark.asyncio
-async def test_improve_failure_leaves_the_conversation_for_the_next_attempt(
+async def test_failed_improve_is_retried_by_timer_then_left_to_boundaries(
     monkeypatch, in_request, idle
 ):
+    """An HTTP session has no conversation boundary, so a failing improve is retried by
+    timer, one idle gap apart, a bounded number of times; after that the conversation
+    stays pending for the next server start (or boundary, on stdio)."""
     idle(0.05)
     fake = _fake_client(improve=AsyncMock(side_effect=RuntimeError("llm down")))
     monkeypatch.setattr(server, "cognee_client", fake)
-    in_request()
+    monkeypatch.setattr(server, "_agent_scoped_default_dataset", lambda: "chatgpt_memory")
+    monkeypatch.setattr(server, "logger", MagicMock())  # four rendered tracebacks are slow
+    in_request(session=_Session("ChatGPT"), headers={"mcp-session-id": "abc"})
 
     await server.recall("q")
     await _drain()
-    await _let_timers_fire(0.3)
+    attempts = 1 + server._MAX_FAILED_RETRIES
+    await _wait_until(lambda: fake.improve.await_count >= attempts and not server._idle_timers)
 
-    fake.improve.assert_awaited_once()
-    assert _state()["distilled"] is False
+    assert fake.improve.await_count == attempts
+    assert not server._idle_timers
+    (record,) = _state("chatgpt")["pending"]
+    assert record["session_id"] == "chatgpt_abc"
+    assert "improving" not in record  # the claim of a failed run is released
 
 
 @pytest.mark.asyncio
@@ -783,11 +801,12 @@ def test_improve_outcome_reads_the_persist_stage():
         )
         == "bridged"
     )
+    # Anything that did not persist the turns leaves the conversation undistilled.
     assert (
         server._improve_outcome(
             {"stages": [{"stage": "persist_session_qa", "status": "skipped", "reason": "x"}]}
         )
-        == "skipped"
+        == "failed"
     )
     assert (
         server._improve_outcome(
@@ -798,9 +817,12 @@ def test_improve_outcome_reads_the_persist_stage():
         )
         == "failed"
     )
+    assert (
+        server._improve_outcome({"status": "running", "finished": False, "stages": []}) == "failed"
+    )
     # Payloads without stage detail (an older server) count by status.
     assert server._improve_outcome({"status": "completed", "stages": []}) == "bridged"
-    assert server._improve_outcome({"status": "skipped", "stages": []}) == "skipped"
+    assert server._improve_outcome({"status": "skipped", "stages": []}) == "failed"
     assert server._improve_outcome({"status": "completed", "result": "legacy"}) == "bridged"
     assert server._improve_outcome("not a dict") == "bridged"
 
@@ -813,7 +835,7 @@ async def test_lock_held_result_keeps_the_conversation_and_retries_soon(
     (the remember tool's own improve, say). Nothing was persisted, so the conversation
     stays undistilled and is tried again once the lock is likely free."""
     idle(0.05)
-    monkeypatch.setattr(server, "_LOCK_HELD_RETRY_SECONDS", 0.1)
+    monkeypatch.setattr(server, "_LOCK_HELD_RETRY_SECONDS", 10.0)
     fake = _fake_client()
     monkeypatch.setattr(server, "cognee_client", fake)
     monkeypatch.setattr(server, "_agent_scoped_default_dataset", lambda: "ds")
@@ -823,15 +845,17 @@ async def test_lock_held_result_keeps_the_conversation_and_retries_soon(
     await _drain()
     session_id = fake.remember_qa.call_args.kwargs["session_id"]
     fake.improve.return_value = _lock_held_result(session_id)
-    await _let_timers_fire(0.08)
+    await _let_timers_fire(0.3)
 
     fake.improve.assert_awaited_once()
     assert _state()["distilled"] is False
     retry = server._idle_timers[session_id]
-    assert 0 < retry.when() - asyncio.get_running_loop().time() <= 0.1
+    assert 0 < retry.when() - asyncio.get_running_loop().time() <= 10
 
+    # The retry comes due (triggered here instead of waiting the 10 s out).
     fake.improve.return_value = _persisted_result()
-    await _let_timers_fire(0.15)
+    server._schedule_session_improve("claude_desktop", session_id, "ds", delay=0)
+    await _let_timers_fire()
 
     assert fake.improve.await_count == 2
     assert _state()["distilled"] is True
@@ -892,11 +916,11 @@ async def test_errored_run_that_persisted_the_qa_counts_as_bridged(monkeypatch, 
 
 @pytest.mark.asyncio
 async def test_run_that_did_not_persist_the_qa_leaves_the_conversation_for_later(
-    monkeypatch, in_request, idle
+    monkeypatch, in_request, clock, idle
 ):
-    """The persist stage was cut off (an LLM budget error before it, say). No timer
-    races the same problem; the next conversation boundary or server start retries."""
-    idle(0.05)
+    """The persist stage was cut off (an LLM budget error before it, say). The
+    conversation stays undistilled and is retried one idle gap later."""
+    idle(100)
     fake = _fake_client(
         improve=AsyncMock(
             return_value={
@@ -917,27 +941,30 @@ async def test_run_that_did_not_persist_the_qa_leaves_the_conversation_for_later
 
     await server.recall("q")
     await _drain()
-    await _let_timers_fire(0.3)
+    session_id = fake.remember_qa.call_args.kwargs["session_id"]
+    clock(101)  # the gap is over
+    server._schedule_session_improve("claude_desktop", session_id, "ds", delay=0)
+    await _let_timers_fire()
 
     fake.improve.assert_awaited_once()
     assert _state()["distilled"] is False
-    assert not server._idle_timers
+    retry = server._idle_timers[session_id]
+    assert 95 < retry.when() - asyncio.get_running_loop().time() <= 100
 
 
 @pytest.mark.asyncio
-async def test_persist_stage_disabled_by_config_is_not_retried(monkeypatch, in_request, idle):
-    """When the operator disabled persist_session_qa, another run would change nothing."""
-    idle(0.05)
+async def test_persist_stage_skipped_for_an_unknown_reason_stays_pending(
+    monkeypatch, in_request, clock, idle
+):
+    """cognee cannot skip persist_session_qa for any reason but a lost lock today; should a
+    future gate decline it, the turns are kept rather than silently given up on."""
+    idle(100)
     fake = _fake_client(
         improve=AsyncMock(
             return_value={
                 "status": "skipped",
                 "stages": [
-                    {
-                        "stage": "persist_session_qa",
-                        "status": "skipped",
-                        "reason": "disabled_by_config",
-                    }
+                    {"stage": "persist_session_qa", "status": "skipped", "reason": "some_new_gate"}
                 ],
             }
         )
@@ -947,10 +974,14 @@ async def test_persist_stage_disabled_by_config_is_not_retried(monkeypatch, in_r
 
     await server.recall("q")
     await _drain()
-    await _let_timers_fire(0.3)
+    session_id = fake.remember_qa.call_args.kwargs["session_id"]
+    clock(101)  # the gap is over
+    server._schedule_session_improve("claude_desktop", session_id, "ds", delay=0)
+    await _let_timers_fire()
 
-    assert _state()["distilled"] is True
-    assert not server._idle_timers
+    fake.improve.assert_awaited_once()
+    assert _state()["distilled"] is False
+    assert session_id in server._idle_timers  # the retry, one gap later
 
 
 @pytest.mark.asyncio
@@ -1156,6 +1187,16 @@ async def test_malformed_state_files_neither_abort_startup_nor_capture(
             }
         )
     )
+    _state_file("vim").write_text(
+        json.dumps(
+            {
+                "session_id": "vim_v",
+                "dataset_name": "ds",
+                "last_activity": T0 - 5000,
+                "distilled": "false",
+            }
+        )
+    )
 
     server._resume_conversations()
     await _let_timers_fire()
@@ -1190,5 +1231,195 @@ def test_state_file_failures_quiet_down_and_report_recovery(monkeypatch, tmp_pat
     monkeypatch.setenv("COGNEE_MCP_STATE_DIR", str(tmp_path / "ok"))
     server._write_conversation("claude_desktop", entry)
 
-    assert log.info.call_count == 1 and server._state_failures == 0
+    assert log.info.call_count == 1 and server._state_failures["write"] == 0
     assert _state() == entry
+
+
+# --- sibling server processes share the file -------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_timer_defers_to_a_newer_turn_recorded_by_a_sibling_process(
+    monkeypatch, in_request, clock, idle
+):
+    """Claude Code starts one server per session, all sharing the client's file. A timer
+    that fires here after a sibling filed a newer turn waits out the rest of that gap
+    instead of improving a conversation that is still going."""
+    idle(100)
+    fake = _fake_client()
+    monkeypatch.setattr(server, "cognee_client", fake)
+    in_request()
+    session_id = server._derived_session_id(touch=True)
+    server._mark_turn_captured("claude_desktop", session_id, "ds")
+    clock(90)
+    sibling = _state()
+    sibling["last_activity"] = server._now()
+    _state_file().write_text(json.dumps(sibling))
+    clock(10)  # our own timer is due now
+
+    server._schedule_session_improve("claude_desktop", session_id, "ds", delay=0)
+    await _let_timers_fire()
+
+    fake.improve.assert_not_awaited()
+    remaining = server._idle_timers[session_id].when() - asyncio.get_running_loop().time()
+    assert 85 < remaining <= 90
+
+
+@pytest.mark.asyncio
+async def test_a_sibling_processs_running_improve_is_not_run_twice(
+    monkeypatch, in_request, clock, idle
+):
+    """The file records which process is improving a conversation; a timer here defers
+    to a live claim, and runs once the claim is stale (that process died mid-improve)."""
+    idle(100)
+    fake = _fake_client()
+    monkeypatch.setattr(server, "cognee_client", fake)
+    in_request()
+    session_id = server._derived_session_id(touch=True)
+    server._mark_turn_captured("claude_desktop", session_id, "ds")
+    clock(101)
+    state = _state()
+    state["improving"] = {"pid": os.getpid() + 1, "since": server._now()}
+    _state_file().write_text(json.dumps(state))
+
+    server._schedule_session_improve("claude_desktop", session_id, "ds", delay=0)
+    await _let_timers_fire()
+
+    fake.improve.assert_not_awaited()
+    retry = server._idle_timers[session_id].when() - asyncio.get_running_loop().time()
+    assert 55 < retry <= 60
+
+    clock(server._IMPROVE_CLAIM_SECONDS)  # the claim is stale: that process is gone
+    server._schedule_session_improve("claude_desktop", session_id, "ds", delay=0)
+    await _let_timers_fire()
+
+    fake.improve.assert_awaited_once()
+    assert _state()["distilled"] is True
+    assert "improving" not in _state()
+
+
+@pytest.mark.asyncio
+async def test_a_running_improve_is_claimed_in_the_file_and_released_after(
+    monkeypatch, in_request, idle
+):
+    idle(0.05)
+    release = asyncio.Event()
+
+    async def slow_improve(**kwargs):
+        await release.wait()
+        return _persisted_result()
+
+    fake = _fake_client(improve=AsyncMock(side_effect=slow_improve))
+    monkeypatch.setattr(server, "cognee_client", fake)
+    in_request()
+
+    await server.recall("q")
+    await _drain()
+    await asyncio.sleep(0.1)  # the gap passes; the improve is waiting on `release`
+
+    assert fake.improve.await_count == 1
+    assert _state()["improving"]["pid"] == os.getpid()
+
+    release.set()
+    await _let_timers_fire(0.1)
+
+    assert _state()["distilled"] is True
+    assert "improving" not in _state()
+
+
+@pytest.mark.asyncio
+async def test_mark_distilled_keeps_a_turn_a_sibling_filed_during_the_improve(
+    monkeypatch, in_request, clock, idle
+):
+    idle(100)
+    release = asyncio.Event()
+
+    async def slow_improve(**kwargs):
+        await release.wait()
+        return _persisted_result()
+
+    fake = _fake_client(improve=AsyncMock(side_effect=slow_improve))
+    monkeypatch.setattr(server, "cognee_client", fake)
+    in_request()
+    first = server._derived_session_id(touch=True)
+    server._mark_turn_captured("claude_desktop", first, "ds")
+    clock(101)
+    server._derived_session_id(touch=True)  # ends `first`; its improve starts now
+    await asyncio.sleep(0.05)
+    assert fake.improve.await_count == 1
+
+    # A sibling server process files a late turn into `first` while the improve runs.
+    clock(1)
+    state = _state()
+    for past in state["pending"]:
+        if past["session_id"] == first:
+            past["last_activity"] = server._now()
+    _state_file().write_text(json.dumps(state))
+    release.set()
+    await _let_timers_fire()
+
+    (record,) = _state()["pending"]
+    assert record["session_id"] == first
+    assert "improving" not in record
+
+
+@pytest.mark.asyncio
+async def test_http_turns_share_one_pending_record(monkeypatch, in_request, clock):
+    fake = _fake_client()
+    monkeypatch.setattr(server, "cognee_client", fake)
+    monkeypatch.setattr(server, "_agent_scoped_default_dataset", lambda: "chatgpt_memory")
+    in_request(session=_Session("ChatGPT"), headers={"mcp-session-id": "abc"})
+
+    await server.recall("first")
+    await _drain()
+    clock(10)
+    await server.recall("second")
+    await _drain()
+
+    assert _state("chatgpt")["pending"] == [
+        {"session_id": "chatgpt_abc", "dataset_name": "chatgpt_memory", "last_activity": T0 + 10}
+    ]
+
+
+def test_only_the_newest_100_pending_conversations_are_remembered(clock):
+    for i in range(server._MAX_PENDING_CONVERSATIONS + 1):
+        server._mark_turn_captured("chatgpt", f"chatgpt_{i}", "ds")
+
+    pending = _state("chatgpt")["pending"]
+    assert len(pending) == server._MAX_PENDING_CONVERSATIONS
+    assert pending[0]["session_id"] == "chatgpt_1"
+    assert pending[-1]["session_id"] == f"chatgpt_{server._MAX_PENDING_CONVERSATIONS}"
+
+
+@pytest.mark.asyncio
+async def test_server_start_under_mcp_sampling_waits_for_a_request(
+    monkeypatch, in_request, clock, idle
+):
+    """The host's model is only reachable from inside a request, so nothing is improved
+    at server start; the first conversation boundary after the start catches up."""
+    idle(100)
+    monkeypatch.setenv("LLM_PROVIDER", "mcp-sampling")
+    fake = _fake_client()
+    monkeypatch.setattr(server, "cognee_client", fake)
+    _state_file().parent.mkdir(parents=True)
+    _state_file().write_text(
+        json.dumps(
+            {
+                "session_id": "claude_desktop_old",
+                "dataset_name": "ds",
+                "last_activity": T0 - 1000,
+                "distilled": False,
+            }
+        )
+    )
+
+    server._resume_conversations()
+    await _let_timers_fire()
+    assert not server._idle_timers
+    fake.improve.assert_not_awaited()
+
+    in_request()
+    server._derived_session_id(touch=True)  # the first turn after the start is a boundary
+    await _let_timers_fire()
+
+    fake.improve.assert_awaited_once_with(dataset_name="ds", session_ids=["claude_desktop_old"])
