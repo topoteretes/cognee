@@ -35,7 +35,7 @@ def count_tokens(text: str, llm_model: str) -> int:
     """Local token count for the chunk content and the corpus (no API call)."""
     if infer_provider(llm_model) == "anthropic":
         return int(litellm.token_counter(model=llm_model, text=text))
-    return len(_openai_encoding(llm_model).encode(text))
+    return len(_openai_encoding(llm_model).encode(text, disallowed_special=()))
 
 
 def run_measurements(chunks: list[str], llm_models: list[str]) -> list[ChunkMeasurement]:
