@@ -2,8 +2,9 @@
 
 The bucket row's id derives from the ``Data`` row, so once that row is gone
 nothing can address the routing row again: it has to go before the relational
-delete, on the one path every document deletion shares. The dataset's root row
-goes with it (its text names the document).
+delete, on the one path every document deletion shares. The index nodes the
+rows mirror, the document's bucket and the dataset's root (its text names the
+document), go the same way.
 """
 
 import importlib
@@ -32,11 +33,11 @@ async def test_delete_data_removes_the_routing_row_before_the_relational_row(mon
             steps.append(("relational", deleted_dataset_id, [deleted_id]))
             return "receipt"
 
-    async def remove_dataset_root(rooted_dataset_id):
-        steps.append(("root", rooted_dataset_id))
+    async def remove_document_index(indexed_dataset_id, indexed_data_id):
+        steps.append(("index", indexed_dataset_id, indexed_data_id))
 
     monkeypatch.setattr(routing, "remove_dataset_routes", remove_dataset_routes)
-    monkeypatch.setattr(index, "remove_dataset_root", remove_dataset_root)
+    monkeypatch.setattr(index, "remove_document_index", remove_document_index)
     monkeypatch.setattr(delete_data_module, "get_relational_engine", FakeRelationalEngine)
 
     result = await delete_data(types.SimpleNamespace(id=data_id, __tablename__="data"), dataset_id)
@@ -44,6 +45,6 @@ async def test_delete_data_removes_the_routing_row_before_the_relational_row(mon
     assert result == "receipt"
     assert steps == [
         ("routing", dataset_id, [data_id]),
-        ("root", dataset_id),
+        ("index", dataset_id, data_id),
         ("relational", dataset_id, [data_id]),
     ]

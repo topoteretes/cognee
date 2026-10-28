@@ -115,16 +115,16 @@ def routing_removals(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def root_drops(monkeypatch):
-    """Record the index roots the memory-only helpers drop (the real function
-    opens the dataset's engines)."""
+def index_removals(monkeypatch):
+    """Record the documents the memory-only helpers remove from the index (the
+    real function opens the dataset's engines)."""
     index = importlib.import_module("cognee.tasks.memify.global_context_index")
     calls = []
 
-    async def remove_dataset_root(dataset_id):
-        calls.append(dataset_id)
+    async def remove_document_index(dataset_id, data_id):
+        calls.append((dataset_id, data_id))
 
-    monkeypatch.setattr(index, "remove_dataset_root", remove_dataset_root)
+    monkeypatch.setattr(index, "remove_document_index", remove_document_index)
     return calls
 
 
@@ -253,7 +253,7 @@ async def test_forget_dataset_memory_skips_records_without_pipeline_status(monke
 
 @pytest.mark.asyncio
 async def test_forget_data_memory_clears_graph_and_resets_pipeline(
-    monkeypatch, routing_removals, root_drops
+    monkeypatch, routing_removals, index_removals
 ):
     """memory_only=True with dataset+data_id clears graph/vector for the item."""
     other_dataset_id = str(uuid4())
@@ -307,10 +307,10 @@ async def test_forget_data_memory_clears_graph_and_resets_pipeline(
     # add pipeline status should remain untouched
     assert str(DATASET_ID) in data_record.pipeline_status["add_pipeline"]
     assert session.committed
-    # The item's routing bucket goes with its memory, and so does the dataset's
-    # root, in the graph and in the routing collection: its text named the item.
+    # The item's bucket and the dataset's root, whose text named the item, go
+    # with its memory, in the graph and in the routing collection.
     assert routing_removals == [(DATASET_ID, [DATA_ID_A])]
-    assert root_drops == [DATASET_ID]
+    assert index_removals == [(DATASET_ID, DATA_ID_A)]
 
 
 @pytest.mark.asyncio

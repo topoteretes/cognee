@@ -28,7 +28,12 @@ route_module = import_module("cognee.modules.search.dataset_routing.route")
 
 
 class FakeEngine:
-    """Records every call; ``scores`` maps row id -> cosine distance for score_by_ids."""
+    """Records every call; ``scores`` maps row id -> cosine distance for score_by_ids.
+
+    It has no ``search``: the routing rows of every tenant share one collection,
+    so the read path must address rows by id, and a free search over the
+    collection fails here.
+    """
 
     def __init__(self, scores=None, existing=None, score_error=None, stored_width=None):
         self.scores = scores or {}
@@ -401,3 +406,21 @@ def test_route_engine_embeds_with_the_deployment_settings_not_a_per_call_overrid
         embedding_config.reset(embedding_token)
 
     assert seen == [(None, None)]
+
+
+def test_route_engine_runs_in_process(monkeypatch):
+    """The store belongs to no dataset, so the dataset queue never pins its engine
+    and the idle reaper would close a subprocess engine under a routing call."""
+    from cognee.modules.search.dataset_routing import get_dataset_route_engine
+
+    handle_module = import_module("cognee.infrastructure.databases.vector.get_vector_engine")
+    seen = []
+
+    def fake_create_vector_engine(**config):
+        seen.append(config)
+        return types.SimpleNamespace(name="routing-engine")
+
+    monkeypatch.setattr(handle_module, "create_vector_engine", fake_create_vector_engine)
+
+    assert get_dataset_route_engine().name == "routing-engine"
+    assert seen[0]["vector_db_subprocess_enabled"] is False

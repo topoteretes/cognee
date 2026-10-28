@@ -9,10 +9,6 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.infrastructure.databases.provenance import (
-    make_chunk_source_ref_key,
-    make_source_ref_key,
-)
 from cognee.tasks.memify.global_context_index.build_document_index import build_context_summaries
 from cognee.tasks.memify.global_context_index.constants import ROOT_MAX_DOCUMENTS
 from cognee.tasks.memify.global_context_index.models import DatasetContent, DatasetEntity
@@ -254,7 +250,7 @@ async def test_only_changed_nodes_are_written_and_everything_else_is_deleted(mon
             "bucket-of-a-deleted-document": "orphan",
         }
     )
-    deleted, persisted, edges, routed, stamped = [], [], [], [], []
+    deleted, persisted, edges, routed = [], [], [], []
 
     async def fake_engine():
         return SimpleNamespace(graph="graph")
@@ -271,10 +267,6 @@ async def test_only_changed_nodes_are_written_and_everything_else_is_deleted(mon
     async def fake_sync_routes(dataset_id, desired):
         routed.append((dataset_id, [summary.id for summary in desired]))
 
-    async def fake_stamp(graph_engine, dataset_id, buckets):
-        stamped.append((graph_engine, dataset_id, [bucket.id for bucket in buckets]))
-
-    monkeypatch.setattr(build_document_index_module, "stamp_bucket_owners", fake_stamp)
     monkeypatch.setattr(build_document_index_module, "get_unified_engine", fake_engine)
     monkeypatch.setattr(build_document_index_module, "delete_context_index_nodes", fake_delete)
     monkeypatch.setattr(build_document_index_module, "persist_context_summaries", fake_persist)
@@ -288,8 +280,6 @@ async def test_only_changed_nodes_are_written_and_everything_else_is_deleted(mon
     assert deleted == ["bucket-of-a-deleted-document"]
     # The routing collection reconciles against the whole desired index, not the diff.
     assert routed == [("ds", [alpha.id, beta.id, root.id])]
-    # So does the ownership stamp, over every bucket and never the root.
-    assert stamped == [("graph", "ds", [alpha.id, beta.id])]
     # One write carrying both edge sets, for the changed bucket only; the
     # summarizes edge targets the document.
     assert edges == [
@@ -300,128 +290,23 @@ async def test_only_changed_nodes_are_written_and_everything_else_is_deleted(mon
     ]
 
 
-# --- ownership ---------------------------------------------------------------
-
-
-class FakeProvenanceGraph:
-    """A graph-provenance graph: the refs each node holds, and the calls made."""
-
-    def __init__(self, refs_by_node):
-        self.refs = {node_id: list(refs) for node_id, refs in refs_by_node.items()}
-        self.calls = []
-
-    async def get_node_delete_data(self, node_ids):
-        return {
-            node_id: SimpleNamespace(source_ref_keys=list(self.refs[node_id]))
-            for node_id in node_ids
-            if node_id in self.refs
-        }
-
-    async def attach_node_source_refs(self, node_ids, source_ref_keys, pipeline_run_id=None):
-        self.calls.append(("attach", list(node_ids), list(source_ref_keys)))
-        for node_id in node_ids:
-            self.refs.setdefault(node_id, []).extend(source_ref_keys)
-
-    async def remove_node_source_refs(self, node_ids, source_ref_keys):
-        self.calls.append(("remove", list(node_ids), list(source_ref_keys)))
-        for node_id in node_ids:
-            self.refs[node_id] = [ref for ref in self.refs[node_id] if ref not in source_ref_keys]
-
-
-def _provenance(monkeypatch, stored: bool):
-    async def stores_provenance_in_graph(_graph_engine):
-        return stored
-
-    monkeypatch.setattr(persist_module, "stores_provenance_in_graph", stores_provenance_in_graph)
+# --- deletion ----------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_each_bucket_ends_up_owned_by_its_document_alone(monkeypatch):
-    """The write folds the dataset-level ref in; the stamp swaps it for the document's,
-    so forget() removes the bucket with the document. Refs the pass does not own
-    (another dataset's, a chunk's) are left alone."""
-    _provenance(monkeypatch, stored=True)
-    dataset_id, doc_a, doc_b, other_dataset = uuid4(), uuid4(), uuid4(), uuid4()
-    content = make_content(
-        dataset_id=str(dataset_id),
-        documents={str(doc_a): "a.md", str(doc_b): "b.md"},
-        document_by_chunk={"c1": str(doc_a), "c2": str(doc_b)},
-        entities={"e1": ("One", "Thing", {"c1"}), "e2": ("Two", "Thing", {"c2"})},
-    )
-    bucket_a, bucket_b, _root = build_context_summaries(content)
-    dataset_level = make_source_ref_key(dataset_id, uuid4())  # the write's sentinel ref
-    foreign = make_source_ref_key(other_dataset, doc_a)
-    chunk_level = make_chunk_source_ref_key(dataset_id, doc_a, uuid4())
-    graph = FakeProvenanceGraph(
-        {
-            str(bucket_a.id): [dataset_level, foreign, chunk_level],
-            str(bucket_b.id): [make_source_ref_key(dataset_id, doc_b)],  # already right
-        }
-    )
-
-    await persist_module.stamp_bucket_owners(graph, str(dataset_id), [bucket_a, bucket_b])
-
-    assert graph.refs[str(bucket_a.id)] == [
-        foreign,
-        chunk_level,
-        make_source_ref_key(dataset_id, doc_a),
-    ]
-    assert graph.refs[str(bucket_b.id)] == [make_source_ref_key(dataset_id, doc_b)]
-    assert graph.calls == [
-        ("attach", [str(bucket_a.id)], [make_source_ref_key(dataset_id, doc_a)]),
-        ("remove", [str(bucket_a.id)], [dataset_level]),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_buckets_sharing_a_stale_ref_give_it_back_in_one_call(monkeypatch):
-    _provenance(monkeypatch, stored=True)
-    dataset_id, doc_a, doc_b = uuid4(), uuid4(), uuid4()
-    content = make_content(
-        dataset_id=str(dataset_id),
-        documents={str(doc_a): "a.md", str(doc_b): "b.md"},
-        document_by_chunk={"c1": str(doc_a), "c2": str(doc_b)},
-        entities={"e1": ("One", "Thing", {"c1"}), "e2": ("Two", "Thing", {"c2"})},
-    )
-    bucket_a, bucket_b, _root = build_context_summaries(content)
-    dataset_level = make_source_ref_key(dataset_id, uuid4())
-    graph = FakeProvenanceGraph(
-        {str(bucket_a.id): [dataset_level], str(bucket_b.id): [dataset_level]}
-    )
-
-    await persist_module.stamp_bucket_owners(graph, str(dataset_id), [bucket_a, bucket_b])
-
-    assert [call for call in graph.calls if call[0] == "remove"] == [
-        ("remove", [str(bucket_a.id), str(bucket_b.id)], [dataset_level])
-    ]
-
-
-@pytest.mark.asyncio
-async def test_a_ledger_graph_is_not_stamped(monkeypatch):
-    _provenance(monkeypatch, stored=False)
-    dataset_id, doc = uuid4(), uuid4()
-    content = make_content(
-        dataset_id=str(dataset_id),
-        documents={str(doc): "a.md"},
-        document_by_chunk={"c1": str(doc)},
-        entities={"e1": ("One", "Thing", {"c1"})},
-    )
-    bucket, _root = build_context_summaries(content)
-    graph = FakeProvenanceGraph({str(bucket.id): []})
-
-    await persist_module.stamp_bucket_owners(graph, str(dataset_id), [bucket])
-
-    assert graph.calls == []
-
-
-@pytest.mark.asyncio
-async def test_removing_the_root_deletes_its_node_and_its_vector_row(monkeypatch):
+async def test_removing_a_document_deletes_its_bucket_and_the_root_by_id(monkeypatch):
+    """Explicit ids, so it works on a ledger graph as on a graph-provenance one:
+    the bucket id derives from the Data row like the routing row's, and the root
+    names every document."""
     from cognee.tasks.memify.global_context_index.constants import (
         GLOBAL_CONTEXT_SUMMARY_COLLECTION,
     )
-    from cognee.tasks.memify.global_context_index.ids import create_root_summary_id
+    from cognee.tasks.memify.global_context_index.ids import (
+        create_document_bucket_id,
+        create_root_summary_id,
+    )
 
-    dataset_id = uuid4()
+    dataset_id, data_id = uuid4(), uuid4()
     calls = []
 
     class Graph:
@@ -437,10 +322,11 @@ async def test_removing_the_root_deletes_its_node_and_its_vector_row(monkeypatch
 
     monkeypatch.setattr(persist_module, "get_unified_engine", fake_engine)
 
-    await persist_module.remove_dataset_root(dataset_id)
+    await persist_module.remove_document_index(dataset_id, data_id)
 
+    bucket = create_document_bucket_id(str(dataset_id), str(data_id))
     root = create_root_summary_id(str(dataset_id))
     assert calls == [
-        ("graph", [str(root)]),
-        ("vector", GLOBAL_CONTEXT_SUMMARY_COLLECTION, [root]),
+        ("graph", [str(bucket), str(root)]),
+        ("vector", GLOBAL_CONTEXT_SUMMARY_COLLECTION, [bucket, root]),
     ]
