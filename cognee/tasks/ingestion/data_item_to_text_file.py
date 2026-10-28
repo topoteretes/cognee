@@ -6,6 +6,8 @@ from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cognee.infrastructure.files.storage import get_storage_config
+from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.loaders import get_loader_engine
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
@@ -43,6 +45,23 @@ async def pull_from_s3(file_path, destination_file) -> None:
         # writes wait on the disk. Inline, it parked the event loop for the whole
         # download, so the pipeline's per-item concurrency could not overlap.
         await run_async(_copy_stream, file, destination_file)
+
+
+def _is_in_data_storage(local_path: str) -> bool:
+    """Whether ``local_path`` is a file inside cognee's own data storage.
+
+    ACCEPT_LOCAL_FILE_PATH guards paths that callers pass in, and
+    save_data_item_to_storage enforces it before an item gets here. Uploads, raw
+    text and fetched pages are written to data storage by cognee itself, so the
+    setting must not stop them from being read back. Symlinks are resolved, so a
+    link inside storage that points elsewhere does not count.
+    """
+    data_root = str(get_storage_config()["data_root_directory"])
+    if data_root.startswith("s3://"):
+        return False  # stored objects are then s3:// paths, read by the branch above
+    root = os.path.realpath(os.path.expanduser(get_data_file_path(data_root)))
+    resolved = os.path.realpath(local_path)
+    return resolved == root or resolved.startswith(root.rstrip(os.sep) + os.sep)
 
 
 async def data_item_to_text_file(
@@ -90,7 +109,9 @@ async def data_item_to_text_file(
 
         # data is local file path
         elif parsed_url.scheme == "file":
-            if settings.accept_local_file_path:
+            if settings.accept_local_file_path or _is_in_data_storage(
+                get_data_file_path(data_item_path)
+            ):
                 loader = get_loader_engine()
                 return await loader.load_file(
                     data_item_path, preferred_loaders, **loader_kwargs
@@ -103,7 +124,7 @@ async def data_item_to_text_file(
             os.name == "nt" and len(data_item_path) > 1 and data_item_path[1] == ":"
         ):
             # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
-            if settings.accept_local_file_path:
+            if settings.accept_local_file_path or _is_in_data_storage(data_item_path):
                 loader = get_loader_engine()
                 return await loader.load_file(
                     data_item_path, preferred_loaders, **loader_kwargs

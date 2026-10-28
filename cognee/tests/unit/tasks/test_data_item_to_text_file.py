@@ -23,6 +23,8 @@ from unittest.mock import patch
 import pytest
 
 import cognee.tasks.ingestion.data_item_to_text_file as ditf
+from cognee.base_config import get_base_config
+from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
 
 
@@ -87,3 +89,84 @@ async def test_s3_temp_file_reopened_by_name_and_cleaned_up():
 
     # And it must still be cleaned up afterwards (no temp-file leak).
     assert not os.path.exists(captured["name"])
+
+
+class _RecordingLoaderEngine:
+    """Records which paths got past the local-file check; loading itself is not under test."""
+
+    def __init__(self):
+        self.loaded = []
+
+    async def load_file(self, file_path, preferred_loaders=None, **kwargs):
+        self.loaded.append(file_path)
+        return "STORAGE_PATH"
+
+    def get_loader(self, file_path, preferred_loaders=None):
+        return _FakeLoader()
+
+
+@pytest.fixture
+def local_paths_disabled(monkeypatch, tmp_path):
+    """ACCEPT_LOCAL_FILE_PATH=false, with cognee's data storage under tmp_path/data."""
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    monkeypatch.setattr(ditf.settings, "accept_local_file_path", False)
+    monkeypatch.setattr(get_base_config(), "data_root_directory", str(data_root))
+    return data_root
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("as_uri", [False, True], ids=["path", "file_uri"])
+async def test_stored_file_is_read_when_local_paths_are_disabled(local_paths_disabled, as_uri):
+    """A file cognee wrote to its own storage is not a caller-supplied path.
+
+    Uploads and raw text reach this function as files inside data storage, so
+    refusing those made every ingestion fail with local paths disabled.
+    """
+    stored = local_paths_disabled / "text_abc.txt"
+    stored.write_bytes(b"stored text")
+    path = stored.as_uri() if as_uri else str(stored)
+    engine = _RecordingLoaderEngine()
+
+    with patch.object(ditf, "get_loader_engine", return_value=engine):
+        storage_path, _ = await data_item_to_text_file(path)
+
+    assert storage_path == "STORAGE_PATH"
+    assert engine.loaded == [path]
+
+
+@pytest.mark.asyncio
+async def test_file_outside_storage_is_refused_when_local_paths_are_disabled(
+    local_paths_disabled, tmp_path
+):
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"not stored by cognee")
+    engine = _RecordingLoaderEngine()
+
+    with patch.object(ditf, "get_loader_engine", return_value=engine):
+        for path in (str(outside), outside.as_uri()):
+            with pytest.raises(IngestionError, match="Local files are not accepted"):
+                await data_item_to_text_file(path)
+
+    assert engine.loaded == []
+
+
+@pytest.mark.asyncio
+async def test_link_in_storage_to_outside_file_is_refused(local_paths_disabled, tmp_path):
+    """Storage membership is decided on the resolved path, not the link's location."""
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"not stored by cognee")
+    link = local_paths_disabled / "link.txt"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks are not available here")
+    engine = _RecordingLoaderEngine()
+
+    with (
+        patch.object(ditf, "get_loader_engine", return_value=engine),
+        pytest.raises(IngestionError, match="Local files are not accepted"),
+    ):
+        await data_item_to_text_file(str(link))
+
+    assert engine.loaded == []
