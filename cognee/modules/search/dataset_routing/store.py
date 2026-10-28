@@ -17,12 +17,11 @@ matches those settings (``EMBEDDING_MODEL`` changed without a prune) routing
 steps aside with a warning and the search covers every readable dataset, as it
 did before routing. Datasets built with different models are SDK-1316.
 
-The engine runs in-process, not in a worker subprocess. The dataset queue's
-idle reaper force-closes any unpinned subprocess engine, and an engine is
-pinned only while its dataset holds a queue slot; this store belongs to no
-dataset, so a reaper sweep could close it under a routing call. The reaper
-skips in-process engines, and one table of short rows for the whole
-deployment needs none of the isolation a worker gives a dataset's store.
+The engine is the default store's own cache entry, the one prune uses too.
+It belongs to no dataset, so no dataset-queue slot would pin it against the
+idle reaper, which force-closes unpinned subprocess engines and would close
+it under a routing call; the queue's pin predicate therefore pins the default
+store itself under access control (``DatasetQueuePinPredicate``).
 """
 
 from __future__ import annotations
@@ -88,12 +87,9 @@ def get_dataset_route_engine() -> _VectorEngineHandle:
     A re-resolving handle, like ``get_vector_engine_async`` returns: the routing
     writes hold it across several awaits while dataset pipelines open and evict
     engines from the shared cache, and a bare adapter reference would then be
-    closed under them. In-process, so the idle reaper never closes it mid-call
-    (see the module docstring).
+    closed under them.
     """
-    return _DatasetRouteEngineHandle(
-        {**get_vectordb_config().to_dict(), "vector_db_subprocess_enabled": False}
-    )
+    return _DatasetRouteEngineHandle(get_vectordb_config().to_dict())
 
 
 async def routing_width_matches(engine) -> bool:

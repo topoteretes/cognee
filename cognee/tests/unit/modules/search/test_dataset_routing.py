@@ -450,21 +450,3 @@ def test_route_engine_embeds_with_the_deployment_settings_not_a_per_call_overrid
         embedding_config.reset(embedding_token)
 
     assert seen == [(None, None)]
-
-
-def test_route_engine_runs_in_process(monkeypatch):
-    """The store belongs to no dataset, so the dataset queue never pins its engine
-    and the idle reaper would close a subprocess engine under a routing call."""
-    from cognee.modules.search.dataset_routing import get_dataset_route_engine
-
-    handle_module = import_module("cognee.infrastructure.databases.vector.get_vector_engine")
-    seen = []
-
-    def fake_create_vector_engine(**config):
-        seen.append(config)
-        return types.SimpleNamespace(name="routing-engine")
-
-    monkeypatch.setattr(handle_module, "create_vector_engine", fake_create_vector_engine)
-
-    assert get_dataset_route_engine().name == "routing-engine"
-    assert seen[0]["vector_db_subprocess_enabled"] is False
