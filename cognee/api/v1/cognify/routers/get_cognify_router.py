@@ -36,6 +36,7 @@ from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
+from cognee.tasks.code_graph.repo_resources import RepositoryResourceError
 
 logger = get_logger("api.cognify")
 
@@ -135,6 +136,7 @@ def get_cognify_router() -> APIRouter:
             409: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
             500: {"model": ErrorResponse},
+            507: {"model": ErrorResponse},
         },
     )
     @log_usage(function_name="POST /v1/cognify", log_type="api_endpoint")
@@ -276,7 +278,12 @@ def get_cognify_router() -> APIRouter:
                     detail = payload or str(first_err)
 
                 return JSONResponse(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    status_code=(
+                        status.HTTP_507_INSUFFICIENT_STORAGE
+                        if first_err is not None
+                        and first_err.error_class == RepositoryResourceError.__name__
+                        else status.HTTP_500_INTERNAL_SERVER_ERROR
+                    ),
                     content=ErrorResponse(
                         error="Pipeline run errored",
                         detail=detail,

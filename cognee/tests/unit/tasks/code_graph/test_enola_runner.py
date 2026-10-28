@@ -147,3 +147,29 @@ async def test_run_enola_generate_returns_snapshot_dir(monkeypatch, tmp_path):
 
     assert snapshot_dir == repo_path / ".enola"
     assert (snapshot_dir / "facts.jsonl").is_file()
+
+
+@pytest.mark.asyncio
+async def test_managed_extraction_preserves_preexisting_scratch_directory(monkeypatch, tmp_path):
+    fake_binary = _make_fake_binary(tmp_path)
+    monkeypatch.setenv("ENOLA_PATH", str(fake_binary))
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "cognee-snapshot.json").write_text("{}")
+    valuable = repo / ".enola-scratch" / "valuable.py"
+    valuable.parent.mkdir()
+    valuable.write_text("original content")
+    scratch = []
+
+    async def fake_spawn(*args, **kwargs):
+        scratch.append(kwargs["env"]["TMPDIR"])
+        snapshot = repo / ".enola"
+        snapshot.mkdir()
+        (snapshot / "facts.jsonl").write_text("{}\n")
+        return _FakeProcess(0)
+
+    monkeypatch.setattr(enola_module.asyncio, "create_subprocess_exec", fake_spawn)
+    await enola_module.run_enola_generate(repo)
+    assert valuable.read_text() == "original content"
+    assert scratch and scratch[0] != str(valuable.parent)
+    assert not list((repo / ".git").glob("cognee-enola-*"))

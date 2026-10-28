@@ -4,6 +4,9 @@ Run: uv run python examples/guides/remote_code_repository.py \
     https://github.com/owner/repo --dataset new_code
 For a private repository set CODE_REPO_TOKEN. Existing legacy graphs need a new
 dataset; this example never deletes data. Requires Git and the bundled Enola.
+Remote clones use blob filtering and sparse checkout. Operators can set optional
+COGNEE_REPOS_MAX_BYTES / COGNEE_REPOS_MIN_FREE_BYTES disk guards. See
+ docs/remote-repository-ingestion.md for storage scope and quota headroom.
 """
 
 import argparse

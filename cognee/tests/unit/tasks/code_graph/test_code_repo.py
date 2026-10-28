@@ -346,7 +346,9 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
     _make_repo(clone)
     cloned_specs = []
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+    async def fake_resolve_repo_source(
+        spec, clones_dir=None, credentials=None, branch=None, include_documents=True
+    ):
         cloned_specs.append((spec, branch))
         _commit_fixture(clone)
         return clone
@@ -400,7 +402,9 @@ async def test_repository_url_credentials_are_redacted_from_the_manifest(
     clone = _make_repo(tmp_path)
     cloned_specs = []
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+    async def fake_resolve_repo_source(
+        spec, clones_dir=None, credentials=None, branch=None, include_documents=True
+    ):
         cloned_specs.append(spec)
         _commit_fixture(clone)
         return clone
@@ -426,7 +430,9 @@ async def test_a_repository_url_keeps_one_data_row_whatever_the_branch(tmp_path,
     import cognee.tasks.code_graph.code_repo as code_repo_module
     from cognee.tasks.code_graph.resolve_repo import repo_identity
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+    async def fake_resolve_repo_source(
+        spec, clones_dir=None, credentials=None, branch=None, include_documents=True
+    ):
         directory = tmp_path / (branch or "default")
         directory.mkdir()
         _make_repo(directory)
@@ -496,7 +502,9 @@ async def test_a_repository_url_clones_with_the_credentials_and_leaves_out_docum
     clone = _make_repo(tmp_path)
     seen = {}
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+    async def fake_resolve_repo_source(
+        spec, clones_dir=None, credentials=None, branch=None, include_documents=True
+    ):
         seen.update(spec=spec, credentials=credentials, branch=branch)
         _commit_fixture(clone)
         return clone
@@ -530,7 +538,9 @@ async def test_resolving_a_repository_url_passes_the_options_to_the_clone(
     clone = _make_repo(tmp_path)
     seen = []
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+    async def fake_resolve_repo_source(
+        spec, clones_dir=None, credentials=None, branch=None, include_documents=True
+    ):
         seen.append(credentials)
         _commit_fixture(clone)
         return clone
@@ -584,7 +594,7 @@ async def test_the_stamp_is_reset_under_the_dataset_lock_after_the_clone_lock_is
             "dataset_lock": dataset_id in held_datasets.get(),
         }
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+    async def fake_resolve_repo_source(spec, **kwargs):
         return tmp_path / "clone"
 
     async def fake_resolve_code_repository(directory, **kwargs):
@@ -626,3 +636,56 @@ def test_the_legacy_error_names_the_shared_graph_only_when_there_is_one(
     assert "Create a new dataset" in message
     assert "(found: a remote repository row)" in message
     assert ("forget the legacy repository first" in message) is shared_graph
+
+
+@pytest.mark.asyncio
+async def test_every_document_copy_is_admitted_against_the_budget(tmp_path, monkeypatch):
+    """The document copies of a remote repository are checked one by one before they are
+    written: the budget is only effective if this call site asks it."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+    from uuid import uuid4
+
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+
+    resolve = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
+    resources = importlib.import_module("cognee.tasks.code_graph.repo_resources")
+    monkeypatch.setattr(resolve, "default_clones_dir", lambda: tmp_path)
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    documents = [clone / "a.md", clone / "b.md"]
+    for document in documents:
+        document.write_text("# doc\n")
+    admitted = []
+
+    class RecordingBudget:
+        def __init__(self, clone_root):
+            pass
+
+        def admit(self, size):
+            admitted.append(size)
+
+    async def fake_resolve_repo_source(spec, **kwargs):
+        return clone
+
+    async def fake_resolve_code_repository(directory, **kwargs):
+        return SimpleNamespace(data='{"commit": "c1"}', data_id=uuid4()), documents, 0
+
+    async def fake_store(source, filename, file_extension):
+        return SimpleNamespace(file_path=filename)
+
+    monkeypatch.setattr(resources, "DocumentCopyBudget", RecordingBudget)
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+    monkeypatch.setattr(code_repo_module, "resolve_code_repository", fake_resolve_code_repository)
+    monkeypatch.setattr(code_repo_module, "_reset_add_stamp", AsyncMock())
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.ingestion"),
+        "save_data_to_file_detailed",
+        fake_store,
+    )
+
+    await code_repo_module.resolve_code_repository_url(
+        "https://github.com/org/repo", user=Mock(), dataset_id=uuid4()
+    )
+
+    assert len(admitted) == 2 and all(size > 0 for size in admitted)
