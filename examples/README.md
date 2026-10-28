@@ -38,7 +38,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`recall_core.py`](guides/recall_core.py) | `recall` semantics and parameters |
 | [`improve_quickstart.py`](guides/improve_quickstart.py) | Graph enrichment before/after `improve()` |
 | [`agent_memory_quickstart.py`](guides/agent_memory_quickstart.py) | Wrap an LLM agent with `@cognee.agent_memory` |
-| [`no_llm_remember_recall.py`](guides/no_llm_remember_recall.py) | `remember → recall` with no LLM key at all: GLiNER graph + `CHUNKS` recall (needs `cognee[gliner]`) |
+| [`no_llm_remember_recall.py`](guides/no_llm_remember_recall.py) | `remember → recall` with no LLM key at all: GLiNER graph + `HYBRID_COMPLETION` recall with `only_context=True` (needs `cognee[gliner]`) |
 
 ### Sessions & self-improvement
 | Script | Demonstrates |

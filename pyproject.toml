@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "openai>=1.80.1",
     "python-dotenv>=1.0.1,<2.0.0",
-    "pydantic>=2.10.5",
+    "pydantic>=2.13",
     # GHSA-4xgf-cpjx-pc3j: 2.12.0–2.14.1 vulnerable, fixed in 2.14.2. Exclude the
     # vulnerable range rather than capping, so the patched 2.14.2+ is adopted once
     # it clears the `exclude-newer` window (it was <2 days old at time of writing).
@@ -252,6 +252,11 @@ tracing = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.20.0,<2",
     "opentelemetry-exporter-otlp-proto-http>=1.20.0,<2",
 ]
+
+# OWL-RL reasoning over the loaded ontology (ONTOLOGY_REASONING=owl_rl). owlrl 7.6+
+# requires rdflib>=7.6, which the core rdflib pin above does not admit, so keep the
+# window on the last series that works with rdflib 7.1.x.
+ontology = ["owlrl>=7.1.4,<7.2"]
 
 # Slim docling profile: converts office/HTML/email/markdown/LaTeX documents
 # without torch or the ML layout models (~280MB installed vs multiple GB).

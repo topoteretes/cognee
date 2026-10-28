@@ -9,6 +9,7 @@ from cognee.infrastructure.locks import get_dataset_lock, held_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.methods.get_selected_dataset_data import get_selected_dataset_data
 from cognee.modules.data.models import Data, Dataset
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.layers import validate_pipeline_tasks
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
@@ -16,6 +17,7 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
 from cognee.modules.pipelines.layers.setup_and_check_environment import (
     setup_and_check_environment,
 )
+from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.tasks.task import Task, pipeline_needs_llm
 from cognee.modules.users.models import User
@@ -87,7 +89,9 @@ async def run_pipeline(
 
     ``after_run_completed`` is awaited after each dataset's run completes, and
     ``after_items_ran`` also when items in the run failed, both inside that dataset's
-    database context (see ``run_tasks``)."""
+    database context (see ``run_tasks``). When either fails on a completed run, the
+    remaining datasets still run and one ``AfterRunHookError`` naming every failed
+    dataset is raised after them."""
     if tasks is None:
         raise ValueError(
             "run_pipeline requires tasks: a task list or a per-item task resolver callable"
@@ -106,6 +110,7 @@ async def run_pipeline(
 
     # TODO: If multiple datasets are provided, we currently run them sequentially to avoid overwhelming the system with too many concurrent pipeline runs.
     #       In the future, we could consider adding concurrency here with proper resource management and limits.
+    hook_failures = []
     for dataset in authorized_datasets:
         source = run_pipeline_per_dataset(
             dataset=dataset,
@@ -123,9 +128,24 @@ async def run_pipeline(
             after_run_completed=after_run_completed,
             after_items_ran=after_items_ran,
         )
-        async with aclosing(source):
-            async for run_info in source:
-                yield run_info
+        run_completed = False
+        try:
+            async with aclosing(source):
+                async for run_info in source:
+                    run_completed = isinstance(run_info, PipelineRunCompleted)
+                    yield run_info
+        except AfterRunHookError as error:
+            # Only this dataset's own step after its completed run; one a task
+            # raised (an improve bridge) failed the run and goes on as is.
+            if not run_completed:
+                raise
+            # This dataset's run completed, so the next ones still run; every
+            # failed step is raised together after them.
+            hook_failures.extend(error.failures)
+    if hook_failures:
+        raise AfterRunHookError(hook_failures) from next(
+            (error for *_, error in hook_failures if isinstance(error, BaseException)), None
+        )
 
 
 async def run_pipeline_per_dataset(

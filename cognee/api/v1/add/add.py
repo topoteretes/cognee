@@ -154,6 +154,13 @@ async def add(
             - Pipeline run ID for tracking
             - Dataset ID where data was stored
             - Processing status and any errors
+            - ``data_ids``: the id of every data item this call stored (or found
+              already present with identical content) — use these for later
+              ``update()`` / ``datasets.delete_data()`` calls instead of
+              re-deriving ids from content. They do not line up with the inputs:
+              a directory yields one id per file, and duplicates and items that
+              failed are left out. ``None`` with ``run_in_background=True``,
+              since the items are not stored yet when ``add()`` returns
             - Execution timestamps and metadata
 
     Next Steps:

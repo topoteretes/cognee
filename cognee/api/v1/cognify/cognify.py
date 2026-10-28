@@ -38,6 +38,7 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
 )
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.modules.pipelines.tasks.task import Task, pipeline_needs_llm
 from cognee.modules.users.models import User
@@ -292,6 +293,9 @@ async def cognify(
                 * Extracted entity and relationship counts
                 * Processing duration and resource usage
                 * Error details if any failures occurred
+                * ``after_run_error`` on a completed run whose step after the run
+                  (document structure pass, vector store compaction) failed; with
+                  ``raise_on_error=True`` (default) that raises ``AfterRunHookError``
             - **Background mode**: Dictionary mapping dataset_id -> the cognify run's
               started info
                 * Use pipeline_run_id to monitor status; while the indexing run works,
@@ -614,6 +618,16 @@ async def cognify(
                 # bloated store drains over several cognify runs.
                 after_run_completed=compact_vector_store,
             )
+        except AfterRunHookError as error:
+            # Every run completed and its data is stored; only the step after it
+            # failed. raise_on_error=False reports that on the runs, like an
+            # errored run, instead of raising.
+            if raise_on_error:
+                # A dataset whose run errored outranks one whose data is stored.
+                raise_if_cognify_errored(error.run_info)
+                raise
+            logger.warning("cognify: the step after the run failed: %s", error)
+            result = error.run_info
         except Exception as error:
             # Run-level failures (e.g. an AuthenticationError escaping a task)
             # re-raise straight out of the pipeline generator, bypassing the

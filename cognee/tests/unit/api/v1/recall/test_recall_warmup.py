@@ -661,8 +661,8 @@ async def test_a_graph_search_on_indexed_chunks_becomes_a_chunk_completion(
     monkeypatch.setattr(
         router,
         "route_query",
-        lambda query: types.SimpleNamespace(
-            search_type=SearchType.GRAPH_COMPLETION, rule="relational"
+        lambda query, constraints=None: types.SimpleNamespace(
+            search_type=SearchType.GRAPH_COMPLETION, rule="relational", only_context=False
         ),
     )
 
@@ -674,6 +674,41 @@ async def test_a_graph_search_on_indexed_chunks_becomes_a_chunk_completion(
     assert marker.status == "memory_extracting"
     assert "chunk-level search" in marker.text
     assert "Memory is extracting." in marker.text
+
+
+@pytest.mark.asyncio
+async def test_without_an_llm_the_chunk_completion_returns_its_context(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+    stubbed_graph_lane,
+):
+    """The chunk-level fallback is a completion type: with no LLM it runs with
+    only_context=True, as the router runs every completion type then."""
+    _use_config(monkeypatch, recall_config_mod)
+    _stub_probe(monkeypatch, graph_warmup_mod, _partial_probe(graph_warmup_mod, "extracting"))
+    graph_warmup_mod.clear_warmup_cache()
+    router = importlib.import_module("cognee.api.v1.recall.query_router")
+    monkeypatch.setattr(
+        router.RoutingConstraints,
+        "from_config",
+        classmethod(lambda cls, llm_config=None: cls(llm_available=False)),
+    )
+    monkeypatch.setattr(
+        router,
+        "route_query",
+        lambda query, constraints=None: types.SimpleNamespace(
+            search_type=SearchType.GRAPH_COMPLETION, rule="relational", only_context=False
+        ),
+    )
+
+    await api_recall_mod.recall(query_text="q", dataset_ids=[uuid4()], user=_make_user())
+
+    assert stubbed_graph_lane[0]["query_type"] == SearchType.RAG_COMPLETION
+    assert stubbed_graph_lane[0]["only_context"] is True
 
 
 @pytest.mark.asyncio
