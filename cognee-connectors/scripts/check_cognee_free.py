@@ -20,10 +20,14 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import logging
 import pkgutil
 import sys
-import traceback
 from types import ModuleType
+
+# Failures are reported through logger.exception, which prints the traceback with them
+# (configured to plain stdout lines in main()).
+logger = logging.getLogger(__name__)
 
 DEFAULT_ALLOWED = ("cognee_host",)
 
@@ -37,12 +41,11 @@ def _import(name: str) -> ModuleType | None:
     """Import ``name``; on failure print why and return ``None``."""
     try:
         return importlib.import_module(name)
-    except BaseException as error:  # noqa: BLE001 - every failure is reported, not hidden
+    except BaseException as error:  # every failure is reported, not hidden
         if _is_cognee_import_error(error):
-            print(f"FAIL: {name} pulled cognee in: {error}")
+            logger.exception("FAIL: %s pulled cognee in", name)
         else:
-            print(f"FAIL: {name} did not import ({type(error).__name__}: {error})")
-        print("".join(traceback.format_exception(error)).rstrip())
+            logger.exception("FAIL: %s did not import", name)
         return None
 
 
@@ -67,6 +70,7 @@ def walk(package: ModuleType, allowed: set[str], imported: list[str]) -> str | N
 
 
 def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(stream=sys.stdout, format="%(message)s", level=logging.INFO)
     parser = argparse.ArgumentParser(
         description="Import a package and all of its modules with cognee made unimportable."
     )

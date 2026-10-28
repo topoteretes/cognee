@@ -23,14 +23,20 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import logging
 import sys
 from importlib.metadata import PackageNotFoundError, distribution
+
+# A failed load is reported through logger.exception, which prints its traceback too
+# (configured to plain stdout lines in main()).
+logger = logging.getLogger(__name__)
 
 GROUPS = ("cognee.connectors", "cognee.sources", "cognee.integrations")
 HOST_GROUP = "cognee.integrations"
 
 
 def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(stream=sys.stdout, format="%(message)s", level=logging.INFO)
     parser = argparse.ArgumentParser(
         description="Load the cognee entry points of an installed distribution."
     )
@@ -71,11 +77,8 @@ def main(argv: list[str] | None = None) -> int:
         for entry_point in entry_points:
             try:
                 target = entry_point.load()
-            except BaseException as error:  # noqa: BLE001 - every failure is reported, not hidden
-                print(
-                    f"FAIL: {group}: {entry_point.name} = {entry_point.value} "
-                    f"({type(error).__name__}: {error})"
-                )
+            except BaseException:  # every failure is reported, not hidden
+                logger.exception("FAIL: %s: %s = %s", group, entry_point.name, entry_point.value)
                 failures += 1
                 continue
             print(f"{group}: {entry_point.name} = {entry_point.value} -> {target!r}")
