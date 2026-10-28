@@ -12,7 +12,7 @@ and the reduction of a webhook delivery to a dispatch.
 
 import hashlib
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 
@@ -252,7 +252,7 @@ async def test_exchange_callback_verifies_user_access_before_trusting_the_id(app
     )
     # The credential comes from the app-authenticated lookup, never from the
     # unauthenticated callback query string.
-    app_calls["lookup"].assert_awaited_once_with(12345)
+    app_calls["lookup"].assert_awaited_once_with(12345, settings=ANY)
 
 
 @pytest.mark.asyncio
@@ -344,7 +344,7 @@ def test_parse_installation_tolerates_a_missing_account():
 async def test_sync_scope_covers_every_installation_repo_by_default(app_calls):
     scope = await _connector().sync_scope(_credential(), {})
 
-    app_calls["mint"].assert_awaited_once_with(12345)
+    app_calls["mint"].assert_awaited_once_with(12345, settings=ANY)
     app_calls["list_records"].assert_awaited_once_with("tok123")
     # One dataset per installation, keyed on the installation id.
     assert scope.dataset_name == "github_12345"
@@ -401,7 +401,7 @@ async def test_clone_urls_carry_no_credentials(app_calls):
 async def test_list_resources_lists_the_installations_repositories(app_calls):
     resources = await _connector().list_resources(_credential(), {})
 
-    app_calls["mint"].assert_awaited_once_with(12345)
+    app_calls["mint"].assert_awaited_once_with(12345, settings=ANY)
     app_calls["list_records"].assert_awaited_once_with("tok123")
     assert resources == [
         ConnectorResource(
@@ -575,7 +575,7 @@ async def test_installation_unsuspend_resyncs_every_repository(app_calls):
     body = _body({"action": "unsuspend", "installation": {"id": 42}})
     dispatch = await _connector().handle_webhook(body, {"x-github-event": "installation"})
 
-    app_calls["mint"].assert_awaited_once_with(42)
+    app_calls["mint"].assert_awaited_once_with(42, settings=ANY)
     app_calls["list_records"].assert_awaited_once_with("tok123")
     assert dispatch.provider_account_id == "42"
     assert dispatch.resources == ["acme/api", "acme/web"]

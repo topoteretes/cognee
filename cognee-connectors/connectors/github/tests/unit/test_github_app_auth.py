@@ -73,3 +73,63 @@ def test_non_rsa_key_is_rejected(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="RSA"):
         build_app_jwt()
+
+
+class _FakeResponse:
+    status = 201
+
+    async def json(self):
+        return {"token": "installation-token", "expires_at": "2026-10-28T10:00:00Z"}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+
+class _FakeSession:
+    def __init__(self, calls):
+        self._calls = calls
+
+    def post(self, url, **kwargs):
+        self._calls.append((url, kwargs))
+        return _FakeResponse()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_a_connector_with_its_own_settings_authenticates_as_its_own_app(monkeypatch):
+    """The app id and key come from the connector's settings, not the process-wide
+    ones: empty globals must not fail the mint, and other globals must not be the
+    app it signs as."""
+    from cognee_connector_github import app_auth
+    from cognee_connector_github.connector import GithubConnector
+    from cognee_connector_github.settings import GithubSettings
+    from cognee_connectors_core.testing import FakeCredential
+
+    monkeypatch.setattr("cognee_connector_github.settings.github_settings.app_id", "")
+    monkeypatch.setattr("cognee_connector_github.settings.github_settings.app_private_key", "")
+    calls = []
+    monkeypatch.setattr(app_auth.aiohttp, "ClientSession", lambda **_kwargs: _FakeSession(calls))
+    monkeypatch.setattr(app_auth, "list_installation_repository_records", _async_return([]))
+    connector = GithubConnector(settings=GithubSettings(app_id="271828", app_private_key=_PEM))
+
+    await connector.list_resources(FakeCredential(provider="github", provider_account_id="42"), {})
+
+    url, kwargs = calls[0]
+    assert url.endswith("/app/installations/42/access_tokens")
+    jwt = kwargs["headers"]["Authorization"].removeprefix("Bearer ")
+    assert json.loads(_b64url_decode(jwt.split(".")[1]))["iss"] == "271828"
+
+
+def _async_return(value):
+    async def returns(*_args, **_kwargs):
+        return value
+
+    return returns

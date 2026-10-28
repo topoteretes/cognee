@@ -29,7 +29,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
-from cognee_connector_github.settings import private_key_pem, require
+from cognee_connector_github.settings import GithubSettings, private_key_pem, require
 
 API_BASE_URL = "https://api.github.com"
 
@@ -45,23 +45,27 @@ def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
-def build_app_jwt(*, now: int | None = None) -> str:
+def build_app_jwt(*, now: int | None = None, settings: GithubSettings | None = None) -> str:
     """Sign a short-lived RS256 JWT identifying the app itself.
 
-    ``now`` is injectable for tests; production callers omit it.
+    ``now`` is injectable for tests; production callers omit it. ``settings``
+    names the app (its id and private key) and defaults to the process-wide
+    settings; a connector built with its own settings passes them.
     """
     issued_at = int(now if now is not None else time.time())
     header = {"alg": "RS256", "typ": "JWT"}
     payload = {
         "iat": issued_at - _JWT_BACKDATE_SECONDS,
         "exp": issued_at + _JWT_LIFETIME_SECONDS,
-        "iss": require("app_id"),
+        "iss": require("app_id", settings),
     }
     signing_input = (
         f"{_b64url(json.dumps(header, separators=(',', ':')).encode())}"
         f".{_b64url(json.dumps(payload, separators=(',', ':')).encode())}"
     )
-    private_key = serialization.load_pem_private_key(private_key_pem().encode(), password=None)
+    private_key = serialization.load_pem_private_key(
+        private_key_pem(settings).encode(), password=None
+    )
     if not isinstance(private_key, RSAPrivateKey):
         raise RuntimeError("GITHUB_APP_PRIVATE_KEY is not an RSA private key")
     signature = private_key.sign(signing_input.encode(), padding.PKCS1v15(), hashes.SHA256())
@@ -76,7 +80,9 @@ def _api_headers(bearer: str) -> dict[str, str]:
     }
 
 
-async def get_installation(installation_id: int) -> dict[str, Any]:
+async def get_installation(
+    installation_id: int, *, settings: GithubSettings | None = None
+) -> dict[str, Any]:
     """Fetch one installation of *this* app, authenticated as the app.
 
     The authoritative source for install metadata (org login, repository
@@ -91,7 +97,7 @@ async def get_installation(installation_id: int) -> dict[str, Any]:
         aiohttp.ClientSession(timeout=_TIMEOUT) as session,
         session.get(
             f"{API_BASE_URL}/app/installations/{installation_id}",
-            headers=_api_headers(build_app_jwt()),
+            headers=_api_headers(build_app_jwt(settings=settings)),
         ) as response,
     ):
         if response.status != 200:
@@ -101,7 +107,9 @@ async def get_installation(installation_id: int) -> dict[str, Any]:
         return await response.json()
 
 
-async def mint_installation_token(installation_id: int) -> tuple[str, datetime | None]:
+async def mint_installation_token(
+    installation_id: int, *, settings: GithubSettings | None = None
+) -> tuple[str, datetime | None]:
     """Mint a fresh installation access token (valid ~1 hour).
 
     Returns ``(token, expires_at)``. Callers use the token immediately and
@@ -111,7 +119,7 @@ async def mint_installation_token(installation_id: int) -> tuple[str, datetime |
         aiohttp.ClientSession(timeout=_TIMEOUT) as session,
         session.post(
             f"{API_BASE_URL}/app/installations/{installation_id}/access_tokens",
-            headers=_api_headers(build_app_jwt()),
+            headers=_api_headers(build_app_jwt(settings=settings)),
         ) as response,
     ):
         if response.status != 201:

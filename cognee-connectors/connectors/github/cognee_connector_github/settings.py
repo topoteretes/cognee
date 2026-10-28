@@ -50,19 +50,20 @@ class GithubSettings(ConnectorSettings):
 github_settings = GithubSettings()
 
 
-def require(field_name: str) -> str:
+def require(field_name: str, settings: GithubSettings | None = None) -> str:
     """Return a settings value, refusing to proceed when it is unset.
 
     A missing GitHub secret must never degrade into a signature check
     against an empty key or a JWT signed with an empty PEM — both would fail
     in confusing, downstream ways instead of naming the actual problem.
+    ``settings`` defaults to the process-wide :data:`github_settings`.
     """
-    return _require(github_settings, field_name)
+    return _require(github_settings if settings is None else settings, field_name)
 
 
-def private_key_pem() -> str:
+def private_key_pem(settings: GithubSettings | None = None) -> str:
     """The app private key with env-file "\\n" escapes restored to newlines."""
-    return require("app_private_key").replace("\\n", "\n")
+    return require("app_private_key", settings).replace("\\n", "\n")
 
 
 __all__ = ["GithubSettings", "github_settings", "private_key_pem", "require"]

@@ -161,7 +161,7 @@ class GithubConnector(Connector):
 
         # The authoritative record, fetched as the app — nothing from the
         # unauthenticated query string beyond the (now verified) id is used.
-        return await app_auth.get_installation(int(installation_id))
+        return await app_auth.get_installation(int(installation_id), settings=self.settings)
 
     async def _exchange_user_token(self, code: str) -> dict[str, Any]:
         """Exchange the OAuth code for a *user* token.
@@ -246,7 +246,9 @@ class GithubConnector(Connector):
             )
 
         installation_id = int(credential.provider_account_id)
-        token, expires_at = await app_auth.mint_installation_token(installation_id)
+        token, expires_at = await app_auth.mint_installation_token(
+            installation_id, settings=self.settings
+        )
 
         if resources is None:
             records = await app_auth.list_installation_repository_records(token)
@@ -289,7 +291,9 @@ class GithubConnector(Connector):
         stamps into ``item_resource_ids``.
         """
         installation_id = int(credential.provider_account_id)
-        token, _expires_at = await app_auth.mint_installation_token(installation_id)
+        token, _expires_at = await app_auth.mint_installation_token(
+            installation_id, settings=self.settings
+        )
         repositories = await app_auth.list_installation_repository_records(token)
 
         return [
@@ -392,7 +396,9 @@ class GithubConnector(Connector):
             # ``resources`` cannot mean "everything" (only sync_scope's
             # ``None`` can), so the installation is enumerated here and every
             # repository named explicitly.
-            token, _expires_at = await app_auth.mint_installation_token(int(installation_id))
+            token, _expires_at = await app_auth.mint_installation_token(
+                int(installation_id), settings=self.settings
+            )
             records = await app_auth.list_installation_repository_records(token)
             return WebhookDispatch(
                 provider_account_id=installation_id,
