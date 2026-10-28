@@ -130,6 +130,7 @@ connection. Use `?account_id=INSTALLATION_ID` when several are connected.
 | --- | --- |
 | `GET /github/sync/settings` | Saved settings, next eligibility, last sync and status |
 | `PUT /github/sync/settings` | Body: `settings`, `acknowledge_removal`, optional `sync_now` |
+| `GET /github/sync/repositories` | Repositories the installation can read: `id`, `full_name`, `default_branch` |
 | `POST /github/sync/preview` | Body: `repository_id` and proposed repository `settings` |
 | `POST /github/sync/due` | Start this user's due schedules in the background |
 | `POST /github/sync` | Existing manual sync endpoint |

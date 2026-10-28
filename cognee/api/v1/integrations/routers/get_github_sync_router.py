@@ -11,7 +11,7 @@ from cognee.modules.integrations.credentials import (
     CredentialInactiveError,
     get_active_credential_for_user,
 )
-from cognee.modules.integrations.github.preview import preview_repository
+from cognee.modules.integrations.github.preview import list_repositories, preview_repository
 from cognee.modules.integrations.github.sync import sync_repositories
 from cognee.modules.integrations.github.sync_settings import (
     NEXT_SYNC_KEY,
@@ -55,6 +55,12 @@ class GithubPreviewResponse(OutDTO):
     tree_sha: str | None = None
     selected: list[str]
     skipped: dict[str, list[str]]
+
+
+class GithubRepositoryResponse(OutDTO):
+    id: str
+    full_name: str
+    default_branch: str | None = None
 
 
 class GithubDueResponse(OutDTO):
@@ -120,6 +126,25 @@ def get_github_sync_router() -> APIRouter:
                 description="GitHub sync after settings change",
             )
         return {**_settings_response(updated), "sync_requested": reconcile}
+
+    @router.get("/repositories", response_model=list[GithubRepositoryResponse])
+    async def repositories(
+        account_id: str | None = None, user: User = Depends(get_authenticated_user)
+    ):
+        """Repositories the installation can read, for choosing what to sync."""
+        credential = await _connection(user, account_id)
+        try:
+            return await list_repositories(credential)
+        except CredentialInactiveError:
+            raise HTTPException(
+                status_code=404, detail="Active GitHub connection not found"
+            ) from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        except RuntimeError:
+            raise HTTPException(
+                status_code=502, detail="GitHub repository listing failed"
+            ) from None
 
     @router.post("/preview", response_model=GithubPreviewResponse)
     async def preview(

@@ -103,3 +103,34 @@ async def test_preview_reads_branch_and_does_not_expose_token(monkeypatch):
     assert result["tree_sha"] == "b" * 40
     assert "secret" not in str(result)
     assert active.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_list_repositories_gives_string_ids_and_keeps_an_empty_repo(monkeypatch):
+    credential = SimpleNamespace(provider="github", provider_account_id="42")
+    monkeypatch.setattr(preview, "require_active_credential", AsyncMock(return_value=credential))
+    monkeypatch.setattr(
+        preview, "mint_installation_token", AsyncMock(return_value=("secret", None))
+    )
+    monkeypatch.setattr(
+        preview,
+        "list_installation_repository_records",
+        AsyncMock(
+            return_value=[
+                {"id": 1, "full_name": "org/a", "default_branch": "main", "private": True},
+                {"id": 2, "full_name": "org/empty", "default_branch": None},
+            ]
+        ),
+    )
+    assert await preview.list_repositories(credential) == [
+        {"id": "1", "full_name": "org/a", "default_branch": "main"},
+        {"id": "2", "full_name": "org/empty", "default_branch": None},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_repositories_refuses_another_provider(monkeypatch):
+    credential = SimpleNamespace(provider="linear", provider_account_id="42")
+    monkeypatch.setattr(preview, "require_active_credential", AsyncMock(return_value=credential))
+    with pytest.raises(ValueError, match="GitHub connection"):
+        await preview.list_repositories(credential)

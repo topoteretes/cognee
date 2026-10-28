@@ -25,11 +25,13 @@ def api(monkeypatch):
         return_value={"repository_id": "1", "branch": "main", "selected": [], "skipped": {}}
     )
     due = AsyncMock(return_value={})
+    listing = AsyncMock(return_value=[{"id": "7", "full_name": "o/r", "default_branch": "main"}])
     spawned = []
     monkeypatch.setattr(routes, "get_active_credential_for_user", find)
     monkeypatch.setattr(routes, "save_sync_settings", save)
     monkeypatch.setattr(routes, "preview_repository", preview)
     monkeypatch.setattr(routes, "run_due_github_syncs", due)
+    monkeypatch.setattr(routes, "list_repositories", listing)
     monkeypatch.setattr(
         routes, "spawn_background", lambda coro, **kwargs: (spawned.append(kwargs), coro.close())
     )
@@ -44,6 +46,7 @@ def api(monkeypatch):
         save=save,
         preview=preview,
         due=due,
+        listing=listing,
         spawned=spawned,
         app=app,
     )
@@ -203,3 +206,21 @@ def test_auth_required(api):
     api.app.dependency_overrides[get_authenticated_user] = unauthorized
     assert api.client.get("/integrations/github/sync/settings").status_code == 401
     api.find.assert_not_awaited()
+
+
+def test_repositories_lists_the_owned_installation(api):
+    response = api.client.get("/integrations/github/sync/repositories?account_id=42")
+    assert response.status_code == 200
+    assert response.json() == [{"id": "7", "fullName": "o/r", "defaultBranch": "main"}]
+    api.find.assert_awaited_once_with(api.user.id, "github", "42")
+    api.listing.assert_awaited_once_with(api.credential)
+
+
+def test_repositories_without_a_connection_is_404(api):
+    api.find.return_value = None
+    assert api.client.get("/integrations/github/sync/repositories").status_code == 404
+
+
+def test_repositories_maps_a_bad_request_to_422_like_preview(api):
+    api.listing.side_effect = ValueError("A GitHub connection is required")
+    assert api.client.get("/integrations/github/sync/repositories").status_code == 422
