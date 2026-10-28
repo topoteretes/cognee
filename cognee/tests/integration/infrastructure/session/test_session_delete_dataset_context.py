@@ -29,6 +29,7 @@ from cognee.context_global_variables import (
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_embeddings import SESSION_QA_VECTOR_COLLECTION
+from cognee.memory.entries import QAEntry
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.session_lifecycle.delete_session import delete_session
@@ -142,3 +143,25 @@ async def test_without_the_dataset_context_the_vectors_survive(isolated_dataset,
 
     async with set_database_global_context_variables(dataset.id, user.id):
         assert await _session_vector_rows() == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_session_strips_vectors_a_typed_entry_left_in_the_global_store(
+    isolated_dataset,
+):
+    """A typed remember() entry binds the session to its dataset but indexes the
+    Q&A in the global store, so the delete must clean that store too."""
+    user, dataset = isolated_dataset
+    entry = QAEntry(question="What is the door code?", answer="8919-6729")
+    await _as_fresh_request(
+        lambda: cognee.remember(
+            entry, session_id="s3", dataset_id=dataset.id, user=user, self_improvement=False
+        )
+    )
+    assert await _as_fresh_request(_session_vector_rows) == 1
+
+    assert await _as_fresh_request(lambda: delete_session(user.id, "s3")) is True
+
+    assert await _as_fresh_request(_session_vector_rows) == 0
+    async with set_database_global_context_variables(dataset.id, user.id):
+        assert await _session_vector_rows() == 0

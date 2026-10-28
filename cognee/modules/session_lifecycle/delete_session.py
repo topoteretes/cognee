@@ -18,6 +18,12 @@ inside that dataset's database context, found through the session record's
 ``dataset_id``, the way the search turn that wrote the vectors ran. A session
 with no recorded dataset, or whose dataset is already gone (``forget`` of the
 dataset invalidates its sessions itself), is cleaned in the ambient context.
+
+A session with a recorded dataset can still have Q&A vectors in the ambient
+store: a typed ``remember()`` entry binds the session to its dataset but
+indexes the Q&A outside the dataset's context, and sessions written before
+that was fixed keep their vectors there. So for such a session the vectors
+are cleaned in both stores; a store holding none is a no-op.
 """
 
 from contextlib import nullcontext
@@ -30,6 +36,7 @@ from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.locks import session_turn_lock
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.session_embeddings import delete_session_qa_vectors
 from cognee.modules.data.models import Dataset
 from cognee.shared.logging_utils import get_logger
 
@@ -97,6 +104,10 @@ async def delete_session(user_id: UUID, session_id: str) -> bool:
         else nullcontext()
     )
     async with session_turn_lock(str(user_id), session_id):
+        if dataset_id is not None:
+            # Before entering the dataset context: its vector config outlives
+            # the block, so afterwards the ambient store is out of reach.
+            await delete_session_qa_vectors(user_id=str(user_id), session_id=session_id)
         async with database_context:
             cache_deleted = await session_manager.delete_session(
                 user_id=str(user_id), session_id=session_id
