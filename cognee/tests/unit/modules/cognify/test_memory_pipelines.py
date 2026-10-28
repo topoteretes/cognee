@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.infrastructure.locks import get_dataset_lock, held_datasets
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
@@ -52,6 +53,9 @@ def _events(pipeline_name, outcome, dataset_id, items):
         )
     elif outcome == "raises":
         raise RuntimeError(f"{pipeline_name} setup failed")
+    elif outcome == "hook_fails":
+        yield PipelineRunCompleted(**common, data_ingestion_info=[])
+        raise AfterRunHookError([(dataset_id, "ds", RuntimeError("compaction failed"))])
 
 
 @pytest.fixture
@@ -224,13 +228,29 @@ async def test_every_dataset_runs_both_runs_before_the_next(monkeypatch, dataset
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("indexing_outcome", ["errored", "raises"])
-async def test_a_failed_indexing_run_never_blocks_extraction(
-    monkeypatch, datasets, pushed, caplog, indexing_outcome
+async def test_a_failed_after_run_hook_lets_the_other_datasets_run(monkeypatch, datasets, pushed):
+    """As run_pipeline does: the hook failures are raised together after every dataset."""
+    other = uuid4()
+    datasets.append(SimpleNamespace(id=other))
+    calls = _install_fake_run_pipeline(
+        monkeypatch, {INDEXING_PIPELINE_NAME: "completed", COGNIFY_PIPELINE_NAME: "hook_fails"}
+    )
+
+    with pytest.raises(AfterRunHookError) as raised:
+        await _collect(indexing_tasks="INDEX", **COGNIFY_PARAMS)
+
+    assert [call["datasets"][0] for call in calls] == [DATASET_ID, DATASET_ID, other, other]
+    assert [failure[0] for failure in raised.value.failures] == [DATASET_ID, other]
+    assert not (await get_dataset_lock(DATASET_ID)).locked()
+
+
+@pytest.mark.asyncio
+async def test_an_errored_indexing_run_never_blocks_extraction(
+    monkeypatch, datasets, pushed, caplog
 ):
+    """Items failed: the cognify run stores their chunks itself in its final write."""
     _install_fake_run_pipeline(
-        monkeypatch,
-        {INDEXING_PIPELINE_NAME: indexing_outcome, COGNIFY_PIPELINE_NAME: "completed"},
+        monkeypatch, {INDEXING_PIPELINE_NAME: "errored", COGNIFY_PIPELINE_NAME: "completed"}
     )
 
     with caplog.at_level("WARNING", logger="cognify"):
@@ -239,11 +259,45 @@ async def test_a_failed_indexing_run_never_blocks_extraction(
     assert isinstance(events[-1], PipelineRunCompleted)
     assert not any(isinstance(event, PipelineRunErrored) for event in events)
     messages = [record.message for record in caplog.records]
-    if indexing_outcome == "raises":
-        assert any("indexing_pipeline raised RuntimeError" in message for message in messages)
-    else:
-        assert any("Indexing dataset 'ds' failed (RuntimeError: boom)" in m for m in messages)
+    assert any("Indexing dataset 'ds' failed (RuntimeError: boom)" in m for m in messages)
     assert not (await get_dataset_lock(DATASET_ID)).locked()
+
+
+@pytest.mark.asyncio
+async def test_a_raising_indexing_run_fails_the_cognify_run_with_its_cause(
+    monkeypatch, datasets, pushed, caplog
+):
+    """A run-level failure is not item-specific: extraction would fail the same way
+    after re-reading the dataset, so it never starts and the caller gets the cause."""
+    _install_fake_run_pipeline(
+        monkeypatch, {INDEXING_PIPELINE_NAME: "raises", COGNIFY_PIPELINE_NAME: "completed"}
+    )
+    closed = []
+    original_close = memory_pipelines.close_run_with_cause
+
+    async def record_close(run, cause):
+        closed.append(cause)
+        await original_close(run, cause)
+
+    monkeypatch.setattr(memory_pipelines, "close_run_with_cause", record_close)
+    events = []
+
+    with (
+        caplog.at_level("ERROR", logger="cognify"),
+        pytest.raises(RuntimeError, match="indexing_pipeline setup failed"),
+    ):
+        async for event in memory_pipelines.run_memory_pipelines(
+            indexing_tasks="INDEX", **COGNIFY_PARAMS
+        ):
+            events.append(event)
+
+    # The cognify run opened, then was closed with the indexing cause; none of
+    # its work ran.
+    assert [type(event) for event in events] == [PipelineRunStarted]
+    assert [str(cause) for cause in closed] == ["indexing_pipeline setup failed"]
+    assert any("failing the extraction run" in record.message for record in caplog.records)
+    assert not (await get_dataset_lock(DATASET_ID)).locked()
+    assert DATASET_ID not in held_datasets.get()
 
 
 @pytest.mark.asyncio

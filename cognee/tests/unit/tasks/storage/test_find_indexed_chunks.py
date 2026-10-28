@@ -60,11 +60,15 @@ async def test_records_the_chunks_the_store_holds_and_their_documents():
 
 
 @pytest.mark.asyncio
-async def test_a_store_that_cannot_answer_records_nothing():
+async def test_a_store_that_cannot_answer_fails_before_extraction():
+    """Extraction's final write goes to the same store; failing here spends no tokens."""
     chunks = _chunks(2)
-    engine = SimpleNamespace(retrieve=AsyncMock(side_effect=RuntimeError("table missing")))
+    engine = SimpleNamespace(retrieve=AsyncMock(side_effect=RuntimeError("store unreachable")))
     ctx = PipelineContext()
-    with patch.object(module, "get_vector_engine_async", AsyncMock(return_value=engine)):
+    with (
+        patch.object(module, "get_vector_engine_async", AsyncMock(return_value=engine)),
+        pytest.raises(RuntimeError, match="store unreachable"),
+    ):
         await find_indexed_chunks(chunks, ctx=ctx)
     assert SEARCH_INDEXED_IDS not in ctx.extras
 
@@ -227,11 +231,12 @@ async def test_a_retry_retires_the_old_cut_even_when_a_chunk_id_is_reused():
 
 
 @pytest.mark.asyncio
-async def test_a_failed_check_never_fails_the_run():
+async def test_a_failed_check_fails_the_run():
+    """Continuing would leave the old cut next to the new one, so chunk searches
+    would return the passage twice, once without entities."""
     chunks = _cut(_chunks(1), tokens=256)
     ctx = _item_ctx(uuid4(), stamped=["indexing_pipeline"])
     graph = SimpleNamespace(get_connections=AsyncMock(side_effect=RuntimeError("graph down")))
 
-    deleted = await _run(chunks, ctx, graph)
-
-    deleted.assert_not_awaited()
+    with pytest.raises(RuntimeError, match="graph down"):
+        await _run(chunks, ctx, graph)

@@ -15,7 +15,7 @@ from cognee.modules.graph.legacy.has_edges_in_legacy_ledger import has_edges_in_
 from cognee.modules.graph.legacy.has_nodes_in_legacy_ledger import has_nodes_in_legacy_ledger
 from cognee.modules.graph.methods.delete_from_graph_and_vector import delete_from_graph_and_vector
 from cognee.modules.graph.models import Edge, Node
-from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
+from cognee.modules.pipelines.models.DataItemStatus import is_item_stamped
 from cognee.modules.pipelines.utils import iter_ingestion_entries
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME
@@ -100,17 +100,10 @@ async def _completed_data_ids(
     records a completed item: documents the run finished before it stopped."""
     if not data_ids:
         return set()
-    dataset_id_str = str(dataset_id)
     records = (
         (await session.execute(select(Data).where(Data.id.in_(list(data_ids))))).scalars().all()
     )
-    return {
-        record.id
-        for record in records
-        if is_data_item_completed(
-            ((record.pipeline_status or {}).get(pipeline_name) or {}).get(dataset_id_str)
-        )
-    }
+    return {record.id for record in records if is_item_stamped(record, pipeline_name, dataset_id)}
 
 
 async def cognify_rollback_handler(

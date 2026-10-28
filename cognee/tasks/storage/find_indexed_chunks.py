@@ -12,8 +12,7 @@ stamp: a stamp says "the item was indexed with some chunking", while the skip
 must hold for exactly these chunk ids. After a chunk-size change, a rollback of
 the index run, or ``forget(memory_only=True)`` the stamp and the store disagree,
 and the store is right. One id lookup per few hundred chunks; a store that
-cannot answer counts as holding nothing, because embedding a chunk twice costs
-tokens while skipping one that is not there would leave it unsearchable.
+cannot answer fails the run before extraction spends any tokens.
 
 A chunk-size change can leave an earlier indexing run's chunks alongside the
 new cut after extraction failed. Those earlier chunks are deleted before the
@@ -29,7 +28,7 @@ from cognee.modules.graph.methods.delete_chunks_incremental import (
     delete_chunks_incremental,
     edge_endpoints,
 )
-from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
+from cognee.modules.pipelines.models.DataItemStatus import is_item_stamped
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME
@@ -46,34 +45,18 @@ async def _ids_in_store(vector_engine, collection_name: str, ids: list[str]) -> 
     found: set[str] = set()
     for start in range(0, len(ids), LOOKUP_BATCH_SIZE):
         batch = ids[start : start + LOOKUP_BATCH_SIZE]
-        try:
-            rows = await vector_engine.retrieve(collection_name, batch)
-        except Exception as error:
-            # The adapters answer a missing collection (first run of a fresh
-            # store) with no rows, so this is a store that cannot answer at
-            # all. Embedding a chunk twice costs tokens; skipping one that is
-            # not there would leave it unsearchable, so the final write embeds
-            # this batch.
-            logger.warning(
-                "Could not read %s for already indexed chunks (%s: %s); "
-                "the final write embeds this batch.",
-                collection_name,
-                type(error).__name__,
-                error,
-                exc_info=True,
-            )
-            return found
+        # The adapters answer a missing collection (first run of a fresh store)
+        # with no rows. Any other failure is the store being unreachable or
+        # rejecting the query, and it propagates: extraction's final write goes
+        # to the same store, so continuing would only pay the LLM for every
+        # chunk before failing on it.
+        rows = await vector_engine.retrieve(collection_name, batch)
         found.update(str(row.id) for row in rows)
     return found
 
 
 # ctx.extras key: the item's document was checked for chunks cut differently.
 STALE_CHUNKS_CHECKED = "stale_chunks_checked"
-
-
-def _stamped(data_item, pipeline_name: str, dataset_id) -> bool:
-    status = (getattr(data_item, "pipeline_status", None) or {}).get(pipeline_name) or {}
-    return is_data_item_completed(status.get(str(dataset_id)))
 
 
 def _cut_differently(node: dict, chunk: DocumentChunk) -> bool:
@@ -100,8 +83,9 @@ async def retire_chunks_cut_differently(data_chunks: list[DocumentChunk], ctx) -
     whose extraction never completed: its stored chunks came from that run
     alone, and the extraction they waited for is this one. Chunk-scoped
     deletion needs ownership kept in the graph; elsewhere nothing is deleted.
-    Best effort: a failure is logged and never fails the run, since the cost
-    is a duplicate passage, not lost data.
+    A failure fails the run: continuing would leave the old cut next to the
+    new one, so chunk searches return the passage twice, once without
+    entities. Extraction's own write would fail on the same graph store.
     """
     data_item = getattr(ctx, "data_item", None)
     dataset = getattr(ctx, "dataset", None)
@@ -112,47 +96,36 @@ async def retire_chunks_cut_differently(data_chunks: list[DocumentChunk], ctx) -
     if str(document.id) in checked:
         return []
     checked.add(str(document.id))
-    if not _stamped(data_item, INDEXING_PIPELINE_NAME, dataset.id) or _stamped(
+    if not is_item_stamped(data_item, INDEXING_PIPELINE_NAME, dataset.id) or is_item_stamped(
         data_item, COGNIFY_PIPELINE_NAME, dataset.id
     ):
         return []
-    try:
-        graph_engine = await get_graph_engine()
-        if not await stores_provenance_in_graph(graph_engine):
-            return []
-        chunk_ids = []
-        for source, edge, target in await graph_engine.get_connections(str(document.id)):
-            if "is_part_of" not in str(edge.get("relationship_name", "")):
-                continue
-            source_id, target_id = edge_endpoints(source, edge, target)
-            if target_id == str(document.id) and source_id != str(document.id):
-                chunk_ids.append(source_id)
-        nodes = await graph_engine.get_nodes(chunk_ids) if chunk_ids else []
-        stale = [
-            str(node["id"])
-            for node in nodes
-            if node.get("type") == type(data_chunks[0]).__name__
-            and _cut_differently(node, data_chunks[0])
-        ]
-        if stale:
-            await delete_chunks_incremental(stale, dataset.id, data_item.id)
-            logger.info(
-                "Deleted %d chunk(s) of %r that an earlier indexing run cut with other "
-                "chunking settings; the document is indexed anew.",
-                len(stale),
-                getattr(document, "name", str(document.id)),
-            )
-        return stale
-    except Exception as error:
-        logger.warning(
-            "Could not check %r for chunks cut with other settings (%s: %s); "
-            "any such chunks stay searchable next to the new ones.",
-            getattr(document, "name", str(document.id)),
-            type(error).__name__,
-            error,
-            exc_info=True,
-        )
+    graph_engine = await get_graph_engine()
+    if not await stores_provenance_in_graph(graph_engine):
         return []
+    chunk_ids = []
+    for source, edge, target in await graph_engine.get_connections(str(document.id)):
+        if "is_part_of" not in str(edge.get("relationship_name", "")):
+            continue
+        source_id, target_id = edge_endpoints(source, edge, target)
+        if target_id == str(document.id) and source_id != str(document.id):
+            chunk_ids.append(source_id)
+    nodes = await graph_engine.get_nodes(chunk_ids) if chunk_ids else []
+    stale = [
+        str(node["id"])
+        for node in nodes
+        if node.get("type") == type(data_chunks[0]).__name__
+        and _cut_differently(node, data_chunks[0])
+    ]
+    if stale:
+        await delete_chunks_incremental(stale, dataset.id, data_item.id)
+        logger.info(
+            "Deleted %d chunk(s) of %r that an earlier indexing run cut with other "
+            "chunking settings; the document is indexed anew.",
+            len(stale),
+            getattr(document, "name", str(document.id)),
+        )
+    return stale
 
 
 @task_summary("Checked {n} chunk(s) for an existing index")

@@ -475,8 +475,10 @@ class LanceDBAdapter(VectorDBInterface):
         # same index) makes the directory visible before the first manifest
         # is committed, so open_table can still answer "not found" for a
         # moment. Retry instead of waiting on VECTOR_DB_LOCK: callers such as
-        # prune() and create_data_points already hold it, and asyncio.Lock is
-        # not re-entrant. A table that is really gone stops the retries.
+        # prune() and create_data_points already hold it, and the lock is not
+        # re-entrant. A table that is really gone stops the retries; one whose
+        # manifest never appears (a creator that crashed mid-create) is
+        # reported as missing once they run out.
         for delay in _OPEN_TABLE_RETRY_DELAYS:
             try:
                 return await connection.open_table(collection_name)
@@ -489,7 +491,7 @@ class LanceDBAdapter(VectorDBInterface):
                 raise CollectionNotFoundError(
                     f"Collection '{collection_name}' not found!"
                 ) from missing
-        return await connection.open_table(collection_name)
+        raise CollectionNotFoundError(f"Collection '{collection_name}' not found!") from missing
 
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""

@@ -269,16 +269,16 @@ async def _datasets_with_indexed_items(dataset_ids: list[UUID]) -> set[UUID]:
     # Deferred like the data package's own readers of this stamp: the pipeline
     # layer imports the data package at module scope.
     from cognee.modules.data.models import Data
-    from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
+    from cognee.modules.pipelines.models.DataItemStatus import is_item_stamped
 
     query = select(Data.dataset_id, Data.pipeline_status).filter(Data.dataset_id.in_(dataset_ids))
     found: set[UUID] = set()
     async with get_relational_engine().get_async_session() as session:
-        for dataset_id, pipeline_status in (await session.execute(query)).all():
+        for row in (await session.execute(query)).all():
+            dataset_id = row.dataset_id
             if dataset_id in found:
                 continue
-            stamps = (pipeline_status or {}).get(INDEXING_PIPELINE_NAME) or {}
-            if is_data_item_completed(stamps.get(str(dataset_id))):
+            if is_item_stamped(row, INDEXING_PIPELINE_NAME, dataset_id):
                 found.add(dataset_id)
     return found
 

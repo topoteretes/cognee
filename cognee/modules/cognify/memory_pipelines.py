@@ -25,8 +25,12 @@ nothing in the pipeline package knows about the chain.
 
 The indexing run rolls back per item: an item that failed loses its chunks,
 the items that completed keep theirs, and the cognify run stores the failed
-item's chunks itself in its final write. A failed indexing run never decides
-whether extraction runs, and a failed extraction leaves the indexed chunks
+item's chunks itself in its final write. That holds while the indexing run
+records failed items and carries on (``RAISE_INCREMENTAL_LOADING_ERRORS=false``).
+A failure it raises (its setup, the vector store, or by default any failed
+item, the policy the cognify run applies to its own items) fails the cognify
+run at once with that cause: extraction would hit it again after re-reading
+and re-chunking the dataset. A failed extraction leaves the indexed chunks
 searchable (rollback selects artifacts by run id).
 
 Each milestone is logged, so the memory's state can be read from the log
@@ -42,13 +46,14 @@ from uuid import UUID
 
 from cognee.infrastructure.locks import get_dataset_lock, held_datasets
 from cognee.modules.cognify.rollback import cognify_rollback_handler
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
 from cognee.modules.pipelines.layers.setup_and_check_environment import (
     setup_and_check_environment,
 )
-from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
+from cognee.modules.pipelines.models.DataItemStatus import is_item_stamped
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunAlreadyCompleted,
     PipelineRunCompleted,
@@ -58,6 +63,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunStarted,
 )
 from cognee.modules.pipelines.operations.pipeline import drive_marking_held, run_pipeline
+from cognee.modules.pipelines.operations.run_tasks import close_run_with_cause
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME
@@ -104,11 +110,6 @@ def _failure(run_info: PipelineRunErrored) -> str:
     return cause
 
 
-def _is_stamped(item: Any, pipeline_name: str, dataset_id: UUID) -> bool:
-    status = (getattr(item, "pipeline_status", None) or {}).get(pipeline_name) or {}
-    return is_data_item_completed(status.get(str(dataset_id)))
-
-
 def indexing_items(
     indexing_tasks: list | Callable[[Any], list],
     items: list,
@@ -133,8 +134,8 @@ def indexing_items(
         if not tasks:
             continue
         if incremental and (
-            _is_stamped(item, COGNIFY_PIPELINE_NAME, dataset_id)
-            or _is_stamped(item, INDEXING_PIPELINE_NAME, dataset_id)
+            is_item_stamped(item, COGNIFY_PIPELINE_NAME, dataset_id)
+            or is_item_stamped(item, INDEXING_PIPELINE_NAME, dataset_id)
         ):
             continue
         selected.append(item)
@@ -162,10 +163,12 @@ async def _run_indexing(
     """Run the indexing pipeline to its end; True when it completed.
 
     Its events are logged, not yielded: the cognify run is the one callers
-    follow. A failure is logged and swallowed, since extraction runs either
-    way and its final write stores whatever the indexing run did not.
+    follow. A run that records failed items without raising returns False,
+    and extraction's final write stores whatever it did not. A failure the
+    run raises propagates.
     """
     completed = False
+    errored = None
     indexing_run = run_pipeline(
         tasks=indexing_tasks,
         pipeline_name=INDEXING_PIPELINE_NAME,
@@ -173,48 +176,41 @@ async def _run_indexing(
         rollback_handler=_indexing_rollback_handler,
         **run_params,
     )
-    try:
-        async with aclosing(indexing_run):
-            async for run_info in indexing_run:
-                if isinstance(run_info, PipelineRunStarted):
-                    logger.info(
-                        "Indexing dataset %r (%s, run %s): chunking and embedding %d item(s) "
-                        "so chunk searches answer before entity extraction.",
-                        run_info.dataset_name,
-                        INDEXING_PIPELINE_NAME,
-                        run_info.pipeline_run_id,
-                        len(run_info.payload or []),
-                    )
-                elif isinstance(run_info, PipelineRunCompleted):
-                    completed = True
-                    processed, skipped = _item_counts(run_info)
-                    logger.info(
-                        "Dataset %r is indexed: %d item(s) chunked and embedded, %d already "
-                        "were. Chunk searches (CHUNKS, CHUNKS_LEXICAL, RAG_COMPLETION, "
-                        "HYBRID_COMPLETION) answer now; entity extraction is next, and "
-                        "graph-based answers improve once it completes.",
-                        run_info.dataset_name,
-                        processed,
-                        skipped,
-                    )
-                elif isinstance(run_info, PipelineRunErrored):
-                    logger.warning(
-                        "Indexing dataset %r failed (%s). The items that completed stay "
-                        "searchable; entity extraction runs anyway and stores the other "
-                        "items' chunks itself.",
-                        run_info.dataset_name,
-                        _failure(run_info),
-                    )
-    except Exception as error:
-        # A run-level failure (setup, authorization, an exception escaping a
-        # task). Extraction gets its own attempt and fails the same way if the
-        # cause persists; that failure is the one callers see.
-        logger.warning(
-            "%s raised %s: %s. Continuing with entity extraction.",
-            INDEXING_PIPELINE_NAME,
-            type(error).__name__,
-            error,
-            exc_info=True,
+    async with aclosing(indexing_run):
+        async for run_info in indexing_run:
+            if isinstance(run_info, PipelineRunStarted):
+                logger.info(
+                    "Indexing dataset %r (%s, run %s): chunking and embedding %d item(s) "
+                    "so chunk searches answer before entity extraction.",
+                    run_info.dataset_name,
+                    INDEXING_PIPELINE_NAME,
+                    run_info.pipeline_run_id,
+                    len(run_info.payload or []),
+                )
+            elif isinstance(run_info, PipelineRunCompleted):
+                completed = True
+                processed, skipped = _item_counts(run_info)
+                logger.info(
+                    "Dataset %r is indexed: %d item(s) chunked and embedded, %d already "
+                    "were. Chunk searches (CHUNKS, CHUNKS_LEXICAL, RAG_COMPLETION, "
+                    "HYBRID_COMPLETION) answer now; entity extraction is next, and "
+                    "graph-based answers improve once it completes.",
+                    run_info.dataset_name,
+                    processed,
+                    skipped,
+                )
+            elif isinstance(run_info, PipelineRunErrored):
+                errored = run_info
+                logger.warning(
+                    "Indexing dataset %r failed (%s). The items that completed stay searchable.",
+                    run_info.dataset_name,
+                    _failure(run_info),
+                )
+    if errored is not None:
+        logger.info(
+            "Entity extraction for dataset %r runs anyway and stores the failed items' "
+            "chunks itself.",
+            errored.dataset_name,
         )
     return completed
 
@@ -284,7 +280,25 @@ async def _dataset_chain(
         indexed = False
         if selected:
             _push_stage_progress(started, 0, len(selected))
-            indexed = await _run_indexing(indexing_tasks, {**run_params, "data": selected})
+            try:
+                indexed = await _run_indexing(indexing_tasks, {**run_params, "data": selected})
+            except Exception as error:
+                # Extraction would hit the same failure after re-reading the
+                # whole dataset (a failed item raises only when the cognify
+                # run would raise on it too). The cognify run records this
+                # cause before any of its work starts, and the caller gets it
+                # at once.
+                logger.error(
+                    "%s for dataset %r failed (%s: %s); failing the extraction run %s "
+                    "with it instead of starting it.",
+                    INDEXING_PIPELINE_NAME,
+                    started.dataset_name,
+                    type(error).__name__,
+                    error,
+                    started.pipeline_run_id,
+                )
+                await close_run_with_cause(cognify_run, error)
+                raise
             _push_stage_progress(started, len(selected), len(selected))
         else:
             logger.info(
@@ -345,19 +359,34 @@ async def run_memory_pipelines(
         cognify_params.get("datasets"), cognify_params.get("user")
     )
 
+    # As in run_pipeline: a failed after-run hook of a completed run lets the
+    # remaining datasets run, and one AfterRunHookError names them all.
+    hook_failures = []
     for dataset in datasets:
         chain = _dataset_chain(
             indexing_tasks, cognify_params, {"datasets": [dataset.id], "user": user}
         )
-        if dataset.id in held_datasets.get():
-            # An ancestor operation already owns this dataset's lock.
-            async with aclosing(chain):
-                async for run_info in chain:
+        run_completed = False
+        try:
+            if dataset.id in held_datasets.get():
+                # An ancestor operation already owns this dataset's lock.
+                async with aclosing(chain):
+                    async for run_info in chain:
+                        run_completed = isinstance(run_info, PipelineRunCompleted)
+                        yield run_info
+                continue
+            async with (
+                await get_dataset_lock(dataset.id),
+                aclosing(drive_marking_held(dataset.id, chain)) as source,
+            ):
+                async for run_info in source:
+                    run_completed = isinstance(run_info, PipelineRunCompleted)
                     yield run_info
-            continue
-        async with (
-            await get_dataset_lock(dataset.id),
-            aclosing(drive_marking_held(dataset.id, chain)) as source,
-        ):
-            async for run_info in source:
-                yield run_info
+        except AfterRunHookError as error:
+            if not run_completed:
+                raise
+            hook_failures.extend(error.failures)
+    if hook_failures:
+        raise AfterRunHookError(hook_failures) from next(
+            (error for *_, error in hook_failures if isinstance(error, BaseException)), None
+        )

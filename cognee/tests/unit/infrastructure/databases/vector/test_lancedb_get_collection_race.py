@@ -56,9 +56,22 @@ async def test_a_caller_holding_the_lock_does_not_deadlock():
     adapter = _adapter(connection)
 
     async with adapter.VECTOR_DB_LOCK:
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(CollectionNotFoundError):
             await asyncio.wait_for(adapter.get_collection("Stray"), timeout=5)
-    assert connection.open_table.await_count == 4
+    assert connection.open_table.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_a_table_that_never_gets_a_manifest_is_reported_missing():
+    """A creator that crashed mid-create leaves a directory with no manifest; callers
+    catch CollectionNotFoundError, not lance's own error."""
+    connection = SimpleNamespace(
+        table_names=AsyncMock(return_value=["Orphan"]),
+        open_table=AsyncMock(side_effect=ValueError("Table 'Orphan' was not found")),
+    )
+    adapter = _adapter(connection)
+
+    assert await adapter.retrieve("Orphan", ["id-1"]) == []
 
 
 @pytest.mark.asyncio

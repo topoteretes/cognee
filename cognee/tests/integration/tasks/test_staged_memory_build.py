@@ -344,9 +344,7 @@ async def test_a_background_build_hands_back_the_cognify_run(staged_env):
 
 
 @pytest.mark.asyncio
-async def test_a_partly_failed_indexing_run_keeps_its_completed_documents(
-    staged_env, monkeypatch
-):
+async def test_a_partly_failed_indexing_run_keeps_its_completed_documents(staged_env, monkeypatch):
     """One document fails indexing, the other is kept (per-item rollback); then
     extraction fails. The kept chunks must still count as searchable, recall must
     answer from them, and once the build succeeds the kept document must be a
@@ -373,6 +371,9 @@ async def test_a_partly_failed_indexing_run_keeps_its_completed_documents(
         raise RuntimeError("injected extraction outage")
 
     original_extract = cognify_module.extract_graph_and_summarize
+    # Failed items are recorded and the run carries on, so extraction runs; by
+    # default the failed item would raise and fail cognify at once.
+    monkeypatch.setenv("RAISE_INCREMENTAL_LOADING_ERRORS", "false")
     monkeypatch.setattr(cognify_module, "index_chunks_for_search", failing_index)
     monkeypatch.setattr(cognify_module, "extract_graph_and_summarize", failing_extract)
     with pytest.raises(Exception, match="injected extraction outage"):
@@ -394,12 +395,96 @@ async def test_a_partly_failed_indexing_run_keeps_its_completed_documents(
 
     monkeypatch.setattr(cognify_module, "index_chunks_for_search", original_index)
     monkeypatch.setattr(cognify_module, "extract_graph_and_summarize", original_extract)
+    monkeypatch.delenv("RAISE_INCREMENTAL_LOADING_ERRORS")
     await cognee.cognify(datasets=[dataset])
     status = (await cognee.datasets.get_memory_status([dataset_id]))[str(dataset_id)]
     assert status.state == "ready", status
 
-    kept = next(
-        item for item in await get_dataset_data(dataset_id) if "FAILINDEX" not in item.name
-    )
+    kept = next(item for item in await get_dataset_data(dataset_id) if "FAILINDEX" not in item.name)
     result = await cognee.update(data_id=kept.id, data=kept_text, dataset_id=dataset_id)
     assert result["status"] == "unchanged", result
+
+
+async def _indexing_run_count(dataset_id):
+    from sqlalchemy import func, select
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.pipelines.models import PipelineRun
+
+    async with get_relational_engine().get_async_session() as session:
+        return await session.scalar(
+            select(func.count(func.distinct(PipelineRun.pipeline_run_id))).where(
+                PipelineRun.dataset_id == dataset_id,
+                PipelineRun.pipeline_name == "indexing_pipeline",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_memory_only_forget_of_one_document_indexes_it_early_again(staged_env):
+    """The forget drops the document's chunks, so its indexing stamp goes too: the
+    next cognify indexes it before extraction instead of skipping it."""
+    import cognee
+
+    dataset = "staged_forget_memory_only"
+    await cognee.add("The night train to Vienna stops at every frozen lake.", dataset_name=dataset)
+    await cognee.cognify(datasets=[dataset])
+    dataset_id = next(d.id for d in await cognee.datasets.list_datasets() if d.name == dataset)
+    (data,) = await cognee.datasets.list_data(dataset_id)
+    assert await _indexing_run_count(dataset_id) == 1
+
+    await cognee.forget(data_id=data.id, dataset_id=dataset_id, memory_only=True)
+
+    (data,) = await cognee.datasets.list_data(dataset_id)
+    stamped = {name for name, by_dataset in data.pipeline_status.items() if by_dataset}
+    assert "indexing_pipeline" not in stamped and "cognify_pipeline" not in stamped
+
+    await cognee.cognify(datasets=[dataset])
+
+    assert await _indexing_run_count(dataset_id) == 2
+    status = (await cognee.datasets.get_memory_status([dataset_id]))[str(dataset_id)]
+    assert (status.state, status.search_level) == ("ready", "graph")
+
+
+@pytest.mark.asyncio
+async def test_a_run_level_indexing_failure_fails_cognify_at_once(staged_env, monkeypatch):
+    """Not item-specific, so extraction would fail the same way after re-reading the
+    dataset: it never starts, and the cognify run records the indexing cause."""
+    import cognee
+
+    memory_pipelines = importlib.import_module("cognee.modules.cognify.memory_pipelines")
+    cognify_module = importlib.import_module("cognee.api.v1.cognify.cognify")
+    dataset = "staged_indexing_outage"
+    await cognee.add("The orchard keeper counts the pears every September.", dataset_name=dataset)
+
+    original_run_pipeline = memory_pipelines.run_pipeline
+
+    def run_pipeline(**kwargs):
+        if kwargs["pipeline_name"] != "indexing_pipeline":
+            return original_run_pipeline(**kwargs)
+
+        async def unreachable():
+            raise ConnectionError("injected vector store outage")
+            yield
+
+        return unreachable()
+
+    extracted = []
+
+    async def tracking_extract(*args, **kwargs):
+        extracted.append(True)
+        raise AssertionError("extraction must not start")
+
+    monkeypatch.setattr(memory_pipelines, "run_pipeline", run_pipeline)
+    monkeypatch.setattr(cognify_module, "extract_graph_and_summarize", tracking_extract)
+
+    # raise_on_error=False keeps the raw cause; the default wraps it.
+    with pytest.raises(ConnectionError, match="injected vector store outage"):
+        await cognee.cognify(datasets=[dataset], raise_on_error=False)
+
+    assert not extracted
+    dataset_id = next(d.id for d in await cognee.datasets.list_datasets() if d.name == dataset)
+    status = (await cognee.datasets.get_memory_status([dataset_id]))[str(dataset_id)]
+    assert status.state == "extraction_failed"
+    assert status.error_class == "ConnectionError"
+    assert "injected vector store outage" in (status.error_message or "")
