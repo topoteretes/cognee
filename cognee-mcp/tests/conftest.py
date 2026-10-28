@@ -23,11 +23,35 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 MCP_ROOT = Path(__file__).resolve().parents[1]  # cognee-mcp/
 if str(MCP_ROOT) not in sys.path:
     sys.path.insert(0, str(MCP_ROOT))
 
 _STRICT_ENV = "COGNEE_MCP_STRICT_TOOL_COVERAGE"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_session_capture_state(tmp_path, monkeypatch):
+    """Keep session-capture state out of ~/.cognee and out of the next test.
+
+    Any recall through the in-memory MCP client records a turn and would write
+    the conversation file for the client under the real home directory.
+    """
+    from src import server
+
+    monkeypatch.setenv("COGNEE_MCP_STATE_DIR", str(tmp_path / "mcp_state"))
+    for handle in server._idle_timers.values():
+        handle.cancel()
+    monkeypatch.setattr(server, "_conversations", {})
+    monkeypatch.setattr(server, "_idle_timers", {})
+    monkeypatch.setattr(server, "_capture_failures", 0)
+    monkeypatch.setattr(server, "_conversation_state_broken", False)
+    yield
+    for handle in server._idle_timers.values():
+        handle.cancel()
+
 
 _called: set[str] = set()
 _uninstrumented: set[str] = set()

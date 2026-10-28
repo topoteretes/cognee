@@ -615,6 +615,34 @@ COGNEE_MCP_AGENT_SCOPED=false
 
 When disabled, no per-client datasets are autocreated.
 
+### Session capture (conversation turns over MCP)
+
+MCP gives the server no view of the conversation: unlike the Claude Code and Codex plugins, which capture every prompt and answer through host hooks, a client such as Claude Desktop, Cursor or the ChatGPT app only ever reaches cognee through tool calls. So the server records the one call that already happens on every turn: each `recall` stores its `query`, as a question, in the session cache of the client's default dataset (`<client>_memory`, see Agent Scoping), as a turn of the current conversation. Once the conversation has been silent for 30 minutes the server runs `improve` for it in the background, which distills what was asked about into the permanent graph. The user does nothing beyond talking.
+
+A conversation is identified per client and prefixed with the client name, so `session_records` can be counted per client:
+
+| Transport | Session id | Boundary |
+|---|---|---|
+| Streamable HTTP (hosted server, ChatGPT app) | `<client>_<mcp-session-id>` | the transport's own session |
+| stdio (Claude Desktop, Cursor), SSE | `<client>_<uuid>` | 30 minutes of silence; remembered across server restarts |
+
+What this does and does not capture:
+
+- **Captured:** the `query` the model sends to `recall`, on every turn where it calls `recall`. That is the model's search query, not the user's words, and a turn with several `recall` calls stores several entries. Stored cache-only, in the background, so recall latency is unchanged and nothing is cognified per turn.
+- **Not captured:** the assistant's answers, turns on which the model does not call `recall`, `recall` calls that pass their own `session_id` (that caller owns the session's turns), and structured `code_query` calls. MCP has no hook for the first two; full-fidelity capture needs a host with hooks (the Claude Code / Codex plugins).
+- **Not changed:** an explicit `remember` without `session_id` still writes permanent memory, and the search itself does not get the derived session injected (pass `session_id` for session-first search as before).
+- **Distillation:** the automatic `improve` runs after the idle gap with the LLM configured for the server. Without one it behaves like any keyless cognify: the session is persisted with the local GLiNER model (installed on first use) and the LLM-only stages skip. On stdio and SSE the current conversation is written to `~/.cognee/mcp/conversations/<client>.json` (`COGNEE_MCP_STATE_DIR` moves it), so a server that is quit mid-conversation continues it when restarted inside the gap and distills it when restarted after the gap; a conversation whose improve failed is retried at the next conversation boundary and at the next server start. A hosted HTTP server that restarts loses only its pending timers; those conversations are distilled by the next `improve` that names them.
+
+The model can skip the write for one call with `recall(query=..., store=False)`, e.g. when the user asks not to remember something. Operator settings, in `.env`:
+
+```bash
+# Turn capture off for the whole server: nothing is stored, nothing is improved.
+COGNEE_MCP_SESSION_CAPTURE=false
+# Silence that ends a conversation and triggers its improve (default 1800).
+# 0 keeps one conversation per server process and never runs improve by itself.
+COGNEE_MCP_SESSION_IDLE_SECONDS=1800
+```
+
 ### Per-dataset isolation (`ENABLE_BACKEND_ACCESS_CONTROL`)
 
 Agent scoping decides which dataset *name* a tool defaults to. Whether two datasets are actually isolated at the storage layer is governed by cognee's `ENABLE_BACKEND_ACCESS_CONTROL` flag:
