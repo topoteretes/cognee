@@ -84,7 +84,10 @@ def test_imported_snapshot_has_no_source_nodes(tmp_path):
 
 def test_changed_source_during_extraction_is_rejected(tmp_path):
     started = time.time_ns()
-    (tmp_path / "sync.py").write_text("changed during indexing")
+    path = tmp_path / "sync.py"
+    path.write_text("changed during indexing")
+    # A file system stamps with a coarse clock that can lag the call above.
+    os.utime(path, ns=(started + 1, started + 1))
     with pytest.raises(CogneeValidationError, match="changed during extraction") as error:
         capture_sources([{"file": "sync.py"}], tmp_path, started)
     assert error.value.remediation
