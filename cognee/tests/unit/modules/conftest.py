@@ -6,10 +6,16 @@ context, and captured run-lifecycle log calls.
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 from uuid import uuid4
 
 import pytest
+
+from cognee.modules.pipelines.operations.log_pipeline_run_complete import (
+    log_pipeline_run_complete,
+)
+from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
+from cognee.modules.pipelines.operations.log_pipeline_run_start import log_pipeline_run_start
 
 
 @pytest.fixture
@@ -36,10 +42,13 @@ def runner_plumbing(monkeypatch):
         db_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
         monkeypatch.setattr(module, "set_database_global_context_variables", db_ctx)
 
+        # Autospecced, so a call with a stale argument fails here instead of passing silently.
         logs = SimpleNamespace(
-            start=AsyncMock(return_value=SimpleNamespace(pipeline_run_id=uuid4())),
-            complete=AsyncMock(),
-            error=AsyncMock(),
+            start=create_autospec(
+                log_pipeline_run_start, return_value=SimpleNamespace(pipeline_run_id=uuid4())
+            ),
+            complete=create_autospec(log_pipeline_run_complete),
+            error=create_autospec(log_pipeline_run_error),
         )
         monkeypatch.setattr(module, "log_pipeline_run_start", logs.start)
         monkeypatch.setattr(module, "log_pipeline_run_complete", logs.complete)

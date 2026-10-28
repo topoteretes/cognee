@@ -39,9 +39,11 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.operations import record_operation
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
+from cognee.modules.pipelines.utils import iter_ingestion_entries
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
 
@@ -361,26 +363,6 @@ def _entry_with_node_set(entry: "MemoryEntry", node_set) -> "MemoryEntry":
             f"node_set={requested}; pass one of them"
         )
     return entry
-
-
-async def _rearm_session_improve_debounce(session_id: str, user) -> None:
-    """Refund the debounce window a lock-held bridge spent without persisting."""
-    from cognee.api.v1.remember.auto_improve_debounce import (
-        debounce_active,
-        rearm_auto_improve_debounce,
-    )
-
-    if not debounce_active():
-        return
-    user_id = str(user.id) if user is not None and hasattr(user, "id") else None
-    if not user_id:
-        return
-
-    from cognee.infrastructure.session.get_session_manager import get_session_manager
-
-    sm = get_session_manager()
-    if sm.is_available:
-        await rearm_auto_improve_debounce(sm, user_id, session_id)
 
 
 async def _session_improve_due(session_id: str, user) -> bool:
@@ -754,6 +736,13 @@ class RememberResult:
         improve_error: Why the automatic improve failed, when it did. The
             remember itself succeeded in that case: ``status`` stays
             ``"completed"`` / ``"session_stored"`` and only this field is set.
+        after_run_error: Why the step after the completed cognify run failed
+            (``AfterRunHookError``: the vector store compaction or the document
+            structure pass), when it did. The data is stored and cognified and the
+            automatic improve still runs. A blocking remember then raises the
+            error; with ``raise_on_error=False`` or in the background it is only
+            reported here and ``status`` stays ``"completed"``. The step runs
+            again on the dataset's next cognify.
         improve_skipped: Why the automatic improve was not started, when the
             host application's admission check declined it
             (``cognee.modules.improve.register_auto_improve_admission``): a
@@ -808,6 +797,8 @@ class RememberResult:
         # (A5). An improve failure never flips `status`; it lands here.
         self.improve: ImproveResult | None = None
         self.improve_error: str | None = None
+        # A failed step after the completed cognify; never flips `status` either.
+        self.after_run_error: str | None = None
         # The reason a host admission check gave for not starting it at all.
         self.improve_skipped: str | None = None
         self._task: asyncio.Task | None = None
@@ -843,6 +834,8 @@ class RememberResult:
             parts.append(f"improve={getattr(self.improve, 'status', None)!r}")
         if self.improve_error:
             parts.append(f"improve_error={self.improve_error!r}")
+        if self.after_run_error:
+            parts.append(f"after_run_error={self.after_run_error!r}")
         if self.improve_skipped:
             parts.append(f"improve_skipped={self.improve_skipped!r}")
         return f"RememberResult({', '.join(parts)})"
@@ -877,12 +870,15 @@ class RememberResult:
             d["improve"] = dump(mode="json") if callable(dump) else self.improve
         if self.improve_error:
             d["improve_error"] = self.improve_error
+        if self.after_run_error:
+            d["after_run_error"] = self.after_run_error
         if self.improve_skipped:
             d["improve_skipped"] = self.improve_skipped
         return d
 
     def _attach_improve_payload(self, payload: dict) -> None:
-        """Rebuild ``improve`` / ``improve_error`` / ``improve_skipped`` from a server's JSON."""
+        """Rebuild ``improve`` / ``improve_error`` / ``after_run_error`` / ``improve_skipped``
+        from a server's JSON."""
         if not isinstance(payload, dict):
             return
         improve_payload = payload.get("improve")
@@ -896,6 +892,8 @@ class RememberResult:
                 self.improve = improve_payload  # type: ignore[assignment]
         if payload.get("improve_error"):
             self.improve_error = str(payload["improve_error"])
+        if payload.get("after_run_error"):
+            self.after_run_error = str(payload["after_run_error"])
         if payload.get("improve_skipped"):
             self.improve_skipped = str(payload["improve_skipped"])
 
@@ -954,7 +952,8 @@ class RememberResult:
             self.dataset_name = run_dataset_name
 
         if hasattr(run_info, "status"):
-            self.status = "errored" if "Errored" in run_info.status else "completed"
+            self.status = "errored" if run_info.status == "PipelineRunErrored" else "completed"
+            self.after_run_error = getattr(run_info, "after_run_error", None)
             if hasattr(run_info, "pipeline_run_id"):
                 self.pipeline_run_id = str(run_info.pipeline_run_id)
         else:
@@ -989,15 +988,11 @@ class RememberResult:
             ingestion_info = getattr(run_info, "data_ingestion_info", None)
             if ingestion_info and isinstance(ingestion_info, list):
                 processed = 0
-                for entry in ingestion_info:
-                    if not isinstance(entry, dict):
-                        continue
-                    status = getattr(entry.get("run_info"), "status", "")
-                    if "Errored" in status:
+                for status, entry_data_ids in iter_ingestion_entries(ingestion_info):
+                    if status == "PipelineRunErrored":
                         continue
                     processed += 1
-                    if entry.get("data_id") is not None:
-                        self.items.append({"id": str(entry["data_id"])})
+                    self.items.extend({"id": str(data_id)} for data_id in entry_data_ids)
                 self.items_processed = processed
 
     def _fail(self, exc: BaseException):
@@ -1649,6 +1644,7 @@ async def _remember_inner(
         from cognee import __version__ as cognee_version
         from cognee.infrastructure.locks.dataset_lock import dataset_lock
         from cognee.modules.data.methods import mark_data_processed
+        from cognee.modules.integrations.sync_progress import report_sync_progress
         from cognee.modules.run_custom_pipeline import run_custom_pipeline
         from cognee.shared.utils import send_telemetry
         from cognee.tasks.code_graph import get_code_graph_tasks
@@ -1714,7 +1710,7 @@ async def _remember_inner(
             if run_id is not None:
                 item["pipeline_run_id"] = str(run_id)
                 result.pipeline_run_id = str(run_id)
-            if "Errored" in getattr(run_info, "status", ""):
+            if getattr(run_info, "status", "") == "PipelineRunErrored":
                 item["status"] = "errored"
                 item["error"] = (
                     getattr(run_info, "error_message", None) or "code_graph_pipeline errored"
@@ -1768,6 +1764,12 @@ async def _remember_inner(
                     )
 
         async def _run_repos(isolate_failures: bool) -> None:
+            processed = failed = 0
+            # One phase for the whole batch: a per-repo phase change would reset
+            # the repository counter and its estimate.
+            await report_sync_progress(
+                phase="processing", completed=0, total=len(repo_specs), unit="repositories"
+            )
             for position, spec in enumerate(repo_specs, start=1):
                 # redact: connector-supplied URLs may carry a token in the
                 # userinfo, which must not surface in results or logs. The
@@ -1790,6 +1792,17 @@ async def _remember_inner(
                     )
                     item["status"] = "errored"
                     item["error"] = str(exc)
+                if item.get("status") == "errored":
+                    failed += 1
+                else:
+                    processed += 1
+                await report_sync_progress(
+                    phase="processing",
+                    completed=position,
+                    total=len(repo_specs),
+                    unit="repositories",
+                    counts={"processed": processed, "failed": failed},
+                )
             result.items_processed = len(
                 [item for item in result.items if item.get("status") != "errored"]
             )
@@ -2076,26 +2089,6 @@ async def _remember_inner(
                                 "remember: session improve reported errors (non-fatal): %s",
                                 result.improve_error,
                             )
-                        elif result.improve.lock_held and result.improve.rerun_requested:
-                            # The holder of this session runs one more pass
-                            # before releasing, so this entry is bridged by it;
-                            # the debounce window stands.
-                            logger.info(
-                                "remember: session '%s' bridge deferred to the in-flight "
-                                "improve, which runs one more pass",
-                                session_id,
-                            )
-                        elif result.improve.lock_held:
-                            # Nothing was persisted — never log this as bridged.
-                            # Refund the debounce window so the next remember()
-                            # retries instead of waiting out a window this
-                            # bridge never used.
-                            await _rearm_session_improve_debounce(session_id, user)
-                            logger.info(
-                                "remember: session '%s' bridge skipped, another improve "
-                                "holds the lock; the next remember() retries",
-                                session_id,
-                            )
                         else:
                             logger.info(
                                 "remember: session '%s' bridged to permanent graph", session_id
@@ -2132,23 +2125,33 @@ async def _remember_inner(
 
             datasets_arg = [dataset_name] if dataset_id is None else [dataset_id]
 
-            cognify_result = await cognify(
-                datasets=datasets_arg,
-                chunker=chunker,
-                chunk_size=chunk_size,
-                custom_prompt=custom_prompt,
-                run_in_background=False,
-                # Loud-by-default: a failed build raises CognifyFailedError
-                # (typed, classified, with a remedy) out of blocking remember()
-                # instead of returning a silently "errored" result nobody
-                # inspects. In background remember() a raise has nowhere to go
-                # and would skip _resolve(), losing pipeline_run_id/dataset_id/
-                # raw_result — so take the errored-run-info path there and let
-                # _resolve() record the failure on the result.
-                raise_on_error=raise_on_error and not run_in_background,
-                **shared_kwargs,
-                **cognify_kwargs,
-            )
+            after_run_hook_error: AfterRunHookError | None = None
+            try:
+                cognify_result = await cognify(
+                    datasets=datasets_arg,
+                    chunker=chunker,
+                    chunk_size=chunk_size,
+                    custom_prompt=custom_prompt,
+                    run_in_background=False,
+                    # Loud-by-default: a failed build raises CognifyFailedError
+                    # (typed, classified, with a remedy) out of blocking remember()
+                    # instead of returning a silently "errored" result nobody
+                    # inspects. In background remember() a raise has nowhere to go
+                    # and would skip _resolve(), losing pipeline_run_id/dataset_id/
+                    # raw_result — so take the errored-run-info path there and let
+                    # _resolve() record the failure on the result.
+                    raise_on_error=raise_on_error and not run_in_background,
+                    **shared_kwargs,
+                    **cognify_kwargs,
+                )
+            except AfterRunHookError as error:
+                # The data is stored and cognified; only the step after the run
+                # failed. The run is resolved and improve still runs, then the
+                # error is raised. _resolve reads the reason off the run
+                # (``after_run_error``), as it does when raise_on_error=False
+                # returned it instead of raising.
+                after_run_hook_error = error
+                cognify_result = error.run_info
 
             result._resolve(cognify_result)
 
@@ -2175,6 +2178,9 @@ async def _remember_inner(
                             "remember: self-improvement reported errors (non-fatal): %s",
                             result.improve_error,
                         )
+
+            if after_run_hook_error is not None:
+                raise after_run_hook_error
 
         if session_ids:
             operation_context.set_session_id(session_ids[0] if len(session_ids) == 1 else None)

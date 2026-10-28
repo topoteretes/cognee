@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from cognee.infrastructure.databases.postgres.admin import create_pg_database_if_not_exists
 from cognee.infrastructure.databases.relational.config import get_relational_config
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.data.models import Data
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.dlt_row_data import DltRowData, DltRows
@@ -36,7 +37,8 @@ logger = get_logger("ingest_dlt_source")
 
 # Serializes dlt staging runs: one shared pipeline name means one shared dlt
 # working directory, which concurrent runs corrupt (see the lock's use below).
-_staging_lock = asyncio.Lock()
+# Loop-agnostic: module-level, so it outlives any single event loop.
+_staging_lock = LoopAgnosticLock()
 
 # Strict identifier pattern — only allow alphanumerics, underscores, dots, and hyphens
 _SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")

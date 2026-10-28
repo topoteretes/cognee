@@ -5,6 +5,7 @@ from typing import Any
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
 )
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
 from cognee.modules.users.methods.get_default_user import get_default_user
@@ -41,17 +42,29 @@ async def run_pipeline_blocking(pipeline: AsyncGenLike, **params) -> dict[str, A
         Dict[str, Any]:
             - If multiple datasets are processed, a mapping of dataset_id -> last run_info.
             - If no dataset_id is present in run_info, the run_info itself is returned.
+
+    Raises:
+        AfterRunHookError: carrying that same mapping as ``run_info``, each failed
+            dataset's completed run with its reason as ``after_run_error``.
     """
     agen = pipeline(**params) if callable(pipeline) else pipeline
 
     total_run_info: dict[str, Any] = {}
 
-    async for run_info in agen:
-        dataset_id = getattr(run_info, "dataset_id", None)
-        if dataset_id:
-            total_run_info[dataset_id] = run_info
-        else:
-            total_run_info = run_info
+    try:
+        async for run_info in agen:
+            dataset_id = getattr(run_info, "dataset_id", None)
+            if dataset_id:
+                total_run_info[dataset_id] = run_info
+            else:
+                total_run_info = run_info
+    except AfterRunHookError as error:
+        for dataset_id, reason in error.reasons.items():
+            run_info = total_run_info.get(dataset_id)
+            if isinstance(run_info, PipelineRunCompleted):
+                run_info.after_run_error = reason
+        error.run_info = total_run_info
+        raise
 
     return total_run_info
 
@@ -105,8 +118,13 @@ async def run_pipeline_as_background_process(
     async def handle_rest_of_the_run(pipeline_list):
         try:
             for pipeline_run in pipeline_list:
-                async for pipeline_run_info in pipeline_run:
-                    push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
+                try:
+                    async for pipeline_run_info in pipeline_run:
+                        push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
+                except AfterRunHookError:
+                    # The run completed, so the next datasets still run. Nothing
+                    # awaits this task, so the log is where the failure surfaces.
+                    logger.exception("The step after a completed background pipeline run failed")
         finally:
             await close_runs(pipeline_list)
 

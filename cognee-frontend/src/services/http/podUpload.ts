@@ -1,4 +1,5 @@
 import { HttpError, type ApiErrorBody } from "./errors";
+import { POD_ORIGIN_CLOUD, POD_ORIGIN_HEADER } from "./podOrigin";
 import type { UploadRequestOpts } from "@/modules/instances/types";
 
 // Retry budget for a batch rejected because other work is mid-flight. The pod
@@ -57,6 +58,7 @@ export default function podUpload(
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url, true);
     xhr.setRequestHeader("X-Api-Key", apiKey);
+    xhr.setRequestHeader(POD_ORIGIN_HEADER, POD_ORIGIN_CLOUD);
     xhr.responseType = "text";
     if (timeoutMs) xhr.timeout = timeoutMs;
 
