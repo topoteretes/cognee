@@ -319,6 +319,11 @@ class TestRoutingConstraints:
         assert route_query("show me the coding rules", no_llm) == RouteDecision(
             search_type=SearchType.CODING_RULES, rule="coding_rules_intent"
         )
+        assert route_query("What calls parse_config?", no_llm) == RouteDecision(
+            search_type=SearchType.CODE,
+            rule="code_question",
+            retriever_config={"operation": "ask", "question": "parse_config"},
+        )
 
     @pytest.mark.parametrize("search_type", sorted(COMPLETION_ONLY_TYPES, key=lambda s: s.value))
     def test_no_llm_runs_completion_only_types_as_only_context(self, search_type):
@@ -334,6 +339,16 @@ class TestRoutingConstraints:
         decision = route_query("What happened in 1898?", RoutingConstraints(llm_available=False))
         assert decision == RouteDecision(
             search_type=ROUTER_FALLBACK_TYPE, rule="time_scoped_question", only_context=True
+        )
+
+    def test_no_llm_sends_a_count_pick_to_the_fallback(self):
+        """BROAD writes its answer with an LLM, so with no LLM a count resolves to the
+        fallback too."""
+        decision = route_query(
+            "How many tickets are open?", RoutingConstraints(llm_available=False)
+        )
+        assert decision == RouteDecision(
+            search_type=ROUTER_FALLBACK_TYPE, rule="count_question", only_context=True
         )
 
     @pytest.mark.parametrize("search_type", sorted(CYPHER_TYPES, key=lambda s: s.value))
