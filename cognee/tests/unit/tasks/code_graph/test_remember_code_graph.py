@@ -402,3 +402,50 @@ async def test_code_route_never_resolves_the_graph_extractor(code_remember_env, 
 
     assert result.status == "completed"
     code_remember_env["pipeline"].assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_code_sync_keeps_one_phase_so_repository_progress_survives(
+    code_remember_env, monkeypatch
+):
+    from cognee.modules.integrations.sync_progress import (
+        SyncProgressReporter,
+        get_current_sync_progress,
+        track_sync,
+    )
+
+    observations = []
+
+    async def capture(reporter, snapshot=None):
+        observations.append(reporter.snapshot() if snapshot is None else snapshot)
+
+    async def clone(*args, **kwargs):
+        snapshot = get_current_sync_progress().snapshot()
+        assert snapshot.phase == "processing"
+        assert snapshot.total == 2  # Repositories, not an invented clone byte or file total.
+        return code_remember_env["repo_dir"]
+
+    async def index(**kwargs):
+        assert get_current_sync_progress().snapshot().phase == "processing"
+        if code_remember_env["pipeline"].await_count == 1:
+            raise RuntimeError("repo failed")
+
+    monkeypatch.setattr(SyncProgressReporter, "_publish", capture)
+    code_remember_env["resolve"].side_effect = clone
+    code_remember_env["pipeline"].side_effect = index
+    credential = SimpleNamespace(
+        provider="github", id=uuid4(), user_id=uuid4(), workspace_id=None, provider_account_id="42"
+    )
+    async with track_sync("github", credential) as reporter:
+        result = await remember(
+            ["https://github.com/org/a", "https://github.com/org/b"],
+            content_type="code",
+            raise_on_error=False,
+        )
+        assert result.status == "errored"
+        snapshot = reporter.snapshot()
+        assert snapshot.completed == snapshot.total == 2
+        assert snapshot.unit == "repositories"
+        assert snapshot.counts == {"processed": 1, "failed": 1}
+        await reporter.finish("partial", reason="processing_error")
+    assert observations[-1].state == "partial"

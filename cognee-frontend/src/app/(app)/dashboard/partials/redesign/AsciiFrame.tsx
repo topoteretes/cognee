@@ -58,8 +58,19 @@ export function AsciiFrame({ label, meta, children, minHeight, style }: AsciiFra
 
       {/* Flex column so a panel body can fill the frame with `flex: 1`. A
           percentage height cannot: the section is sized by `minHeight`, so its
-          height is indefinite and `height: 100%` collapses to `auto`. */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: label === null ? "16px 16px 16px" : "4px 16px 16px", color: T.text, minWidth: 0 }}>{children}</div>
+          height is indefinite and `height: 100%` collapses to `auto`.
+
+          `minHeight: 0` is what makes that promise hold for a body that
+          SCROLLS. As a flex item this div defaults to `min-height: auto`, so it
+          refuses to shrink below its content: a body taller than the frame grew
+          the div instead, the section's `overflow: hidden` clipped the excess,
+          and the body's own scrollbar never appeared because it had been given
+          all the height it asked for. Measured on the activity table, whose
+          frame is height-constrained by its caller: the div stood at 1686px
+          inside a 647px section and the table's scroll box did not scroll at
+          all. It only matters for a caller that constrains the frame's height,
+          which is why nothing else here changes. */}
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: label === null ? "16px 16px 16px" : "4px 16px 16px", color: T.text, minWidth: 0 }}>{children}</div>
     </section>
   );
 }

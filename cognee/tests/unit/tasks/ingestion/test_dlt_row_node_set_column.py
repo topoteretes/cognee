@@ -7,69 +7,12 @@ existed.
 """
 
 import hashlib
-import importlib
 import json
-from types import SimpleNamespace
 
 import pytest
 
-from cognee.tasks.ingestion.dlt_utils import (
-    DOCUMENT_SOURCE_ATTR,
-    NODE_SET_COLUMN,
-    PIPELINE_SCOPE_ATTR,
-)
+from cognee.tasks.ingestion.dlt_utils import NODE_SET_COLUMN
 from cognee.tasks.ingestion.resolve_dlt_sources import _build_document_data_item
-
-ingest = importlib.import_module("cognee.tasks.ingestion.ingest_dlt_source")
-
-
-@pytest.fixture
-def staging(tmp_path, monkeypatch):
-    """The real dlt pipeline on a throwaway SQLite staging database."""
-    dlt = pytest.importorskip("dlt")
-    config = SimpleNamespace(
-        db_provider="sqlite",
-        db_path=str(tmp_path),
-        db_host="",
-        db_port=0,
-        db_username="",
-        db_password="",
-    )
-    monkeypatch.setattr(ingest, "get_relational_config", lambda: config)
-    monkeypatch.setattr(
-        ingest,
-        "get_dlt_destination",
-        lambda dlt_db_name: dlt.destinations.sqlalchemy(
-            credentials={"database": str(tmp_path / dlt_db_name), "drivername": "sqlite"},
-        ),
-    )
-    pipeline_factory = dlt.pipeline
-    monkeypatch.setattr(
-        dlt,
-        "pipeline",
-        lambda **kw: pipeline_factory(pipelines_dir=str(tmp_path / "pipelines"), **kw),
-    )
-
-    def source(name, rows, tag="notion"):
-        @dlt.resource(name=name, primary_key="id")
-        def documents():
-            yield from rows
-
-        resource = documents()
-        setattr(resource, DOCUMENT_SOURCE_ATTR, tag)
-        setattr(resource, PIPELINE_SCOPE_ATTR, name)
-        return resource
-
-    async def run(name, rows, tag="notion"):
-        return await ingest.ingest_dlt_source(
-            source(name, rows, tag),
-            "brain",
-            primary_key="id",
-            write_disposition="merge",
-            max_rows_per_table=0,
-        )
-
-    return run
 
 
 @pytest.mark.asyncio
@@ -99,7 +42,19 @@ async def test_rows_that_never_set_the_column_keep_their_pre_contract_hash(stagi
         json.dumps(drive_row, sort_keys=True, default=str).encode()
     ).hexdigest()
     assert rows[0].content_hash == legacy_hash
-    assert _build_document_data_item(rows[0], None, "google_drive").node_set is None
+    # A row states its full node sets, so no column means none: [] clears what a
+    # re-sync of an existing document had stored, where None would keep it.
+    assert _build_document_data_item(rows[0], None, "google_drive").node_set == []
+
+
+@pytest.mark.asyncio
+async def test_an_empty_list_means_no_node_sets_not_unknown(staging):
+    """A page whose labels were all removed must clear them on re-sync, not keep them."""
+    rows = await staging(
+        "notion_pages", [{"id": "p1", "title": "T", "content": "C", NODE_SET_COLUMN: []}]
+    )
+
+    assert _build_document_data_item(rows[0], None, "notion").node_set == []
 
 
 @pytest.mark.asyncio

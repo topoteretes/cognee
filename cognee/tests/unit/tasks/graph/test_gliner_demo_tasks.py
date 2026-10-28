@@ -773,20 +773,17 @@ async def test_get_gliner_demo_tasks_shape():
 
 
 @pytest.mark.asyncio
-async def test_get_gliner_demo_tasks_appends_optional_graph_tasks_in_order():
+async def test_get_gliner_demo_tasks_appends_provenance_after_storage():
     with patch.object(tasks_module, "require_gliner2"):
         tasks = await get_gliner_demo_tasks(
             ["person"],
             track_provenance=True,
-            check_contradictions=True,
-            functional_relationships={"ceo_of"},
             chunk_size=512,
         )
 
-    assert [task.executable.__name__ for task in tasks][-3:] == [
+    assert [task.executable.__name__ for task in tasks][-2:] == [
+        "add_data_points",
         "record_provenance",
-        "detect_contradictions",
-        "resolve_temporal_contradictions",
     ]
 
 
@@ -861,6 +858,7 @@ async def _cognify_standard_tasks(**kwargs):
 
     with (
         patch.object(migrations, "run_migrations_and_block", AsyncMock()),
+        patch.object(cognify_module, "ensure_extractor_runtime", AsyncMock()),
         patch.object(cognify_module, "get_pipeline_executor", return_value=execute_pipeline),
         # These tests select task lists; runtime installation has its own suite.
         patch.object(cognify_module, "ensure_extractor_runtime", AsyncMock()),
@@ -943,7 +941,7 @@ async def test_gliner_extractor_rejects_unknown_kwargs_instead_of_swallowing():
 
 # The branches that cannot honour the extractor must raise before doing any
 # work — never silently run something other than what the caller selected.
-# All three checks sit at the top of cognify(), before any DB or span setup.
+# Both checks sit at the top of cognify(), before any DB or span setup.
 
 
 @pytest.mark.asyncio
@@ -1093,13 +1091,8 @@ def test_resolve_extractor_never_installs_the_gliner_runtime():
 def test_default_pipeline_needs_llm_formula():
     from cognee.modules.cognify.config import default_pipeline_needs_llm
 
-    assert default_pipeline_needs_llm("llm", _config_with_extractor("llm")) is True
-    assert default_pipeline_needs_llm("gliner_demo", _config_with_extractor("gliner_demo")) is False
-    # The opt-in contradiction pass is an LLM task appended to the gliner list too.
-    contradiction_config = _config_with_extractor("gliner_demo").model_copy(
-        update={"contradiction_detection": True}
-    )
-    assert default_pipeline_needs_llm("gliner_demo", contradiction_config) is True
+    assert default_pipeline_needs_llm("llm") is True
+    assert default_pipeline_needs_llm("gliner_demo") is False
 
 
 @pytest.mark.asyncio
@@ -1116,15 +1109,9 @@ async def test_default_task_list_llm_need_is_derived_from_the_tasks():
         llm_tasks = await cognify_module.get_default_tasks(
             graph_model=KnowledgeGraph, chunk_size=512
         )
-        gliner_with_contradictions = await get_gliner_demo_tasks(
-            chunk_size=512, check_contradictions=True
-        )
 
     assert pipeline_needs_llm(gliner_tasks) is False
     assert pipeline_needs_llm(llm_tasks) is True
-    # detect_contradictions defaults to needs_llm=True, so the union flags the
-    # gliner list without any formula involved.
-    assert pipeline_needs_llm(gliner_with_contradictions) is True
 
 
 def test_needs_llm_survives_with_config():
@@ -1217,11 +1204,13 @@ def _patch_recall(monkeypatch, available: bool):
     serve_state = importlib.import_module("cognee.api.v1.serve.state")
     search_methods = importlib.import_module("cognee.modules.search.methods.search")
     search_operations = importlib.import_module("cognee.modules.search.operations")
+    preflight = importlib.import_module("cognee.modules.preflight")
 
     captured = {}
 
     async def fake_authorized_search(**kwargs):
         captured["query_type"] = kwargs.get("query_type")
+        captured["only_context"] = kwargs.get("only_context")
         captured["search_llm_config"] = kwargs.get("llm_config")
         return []
 
@@ -1236,25 +1225,25 @@ def _patch_recall(monkeypatch, available: bool):
     monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
     monkeypatch.setattr(search_methods, "authorized_search", fake_authorized_search)
     monkeypatch.setattr(search_operations, "log_search_history", noop)
-    monkeypatch.setattr(recall_module, "llm_available", fake_llm_available)
+    monkeypatch.setattr(preflight, "llm_available", fake_llm_available)
     user = SimpleNamespace(id=uuid4(), tenant_id=None)
     return recall_module, captured, user
 
 
-# recall's CHUNKS default keys on LLM availability, never on the extractor that
+# recall's no-LLM default keys on LLM availability, never on the extractor that
 # built the graph: a gliner-built graph with a key present answers completions,
-# and an LLM-built graph without one degrades to CHUNKS instead of failing.
+# and an LLM-built graph without one returns the HYBRID prompt instead of failing.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "available, auto_route, expected",
+    "available, auto_route, only_context",
     [
-        (False, True, SearchType.CHUNKS),
-        (False, False, SearchType.CHUNKS),
-        (True, False, SearchType.HYBRID_COMPLETION),
+        (False, True, True),
+        (False, False, True),
+        (True, False, False),
     ],
 )
-async def test_recall_default_query_type_is_chunks_without_a_usable_llm(
-    monkeypatch, available, auto_route, expected
+async def test_recall_default_is_hybrid_only_context_without_a_usable_llm(
+    monkeypatch, available, auto_route, only_context
 ):
     from uuid import uuid4
 
@@ -1266,7 +1255,8 @@ async def test_recall_default_query_type_is_chunks_without_a_usable_llm(
         auto_route=auto_route,
         user=user,
     )
-    assert captured["query_type"] == expected
+    assert captured["query_type"] == SearchType.HYBRID_COMPLETION
+    assert captured["only_context"] is only_context
 
 
 @pytest.mark.asyncio

@@ -8,7 +8,7 @@ from cognee.infrastructure.databases.utils.engine_cache_ops import EngineCacheOp
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
-from .embeddings import get_embedding_engine
+from .embeddings import EmbeddingGateway, get_embedding_engine
 from .supported_databases import supported_databases
 
 logger = get_logger("VectorEngine")
@@ -164,7 +164,7 @@ def _create_vector_engine(
 
         An instance of the corresponding database adapter class for the specified provider.
     """
-    embedding_engine = get_embedding_engine()
+    embedding_engine = EmbeddingGateway(get_embedding_engine())
 
     if vector_db_provider in supported_databases:
         adapter = supported_databases[vector_db_provider]

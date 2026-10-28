@@ -6,6 +6,15 @@ import { FONT, T } from "./mono";
 export type DashRange = "24h" | "7d" | "30d";
 export const RANGES: DashRange[] = ["24h", "7d", "30d"];
 
+/**
+ * The widest window the toggle offers.
+ *
+ * Anything on the Overview that must NOT be re-scoped by the toggle fetches at
+ * this and slices locally. Derived from RANGES rather than written out, so
+ * adding a wider option widens the fetch instead of silently leaving those
+ * consumers on a narrower window than the user can select.
+ */
+
 interface RangeToggleProps {
   value: DashRange;
   onChange: (r: DashRange) => void;

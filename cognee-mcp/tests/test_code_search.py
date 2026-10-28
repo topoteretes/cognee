@@ -40,6 +40,7 @@ async def test_code_search_forwards_a_code_scoped_structured_query(monkeypatch):
             "kinds": ["module", "symbol"],
             "limit": 100,
         },
+        "include_references": False,
     }
 
 
@@ -61,6 +62,13 @@ async def test_code_search_schema_is_available_in_default_mode():
         "insights",
         "architecture",
         "delta",
+        "capabilities",
+        "search",
+        "neighbors",
+        "subgraph",
+        "flows",
+        "hubs",
+        "ask",
     }
 
 

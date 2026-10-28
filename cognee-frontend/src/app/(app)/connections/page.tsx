@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
-import { listSessions, type SessionRow } from "@/modules/sessions/getSessions";
+import { listSessions, sumTokens, type SessionRow } from "@/modules/sessions/getSessions";
 import { trackEvent, TrackPageView } from "@/modules/analytics";
 
 interface Agent {
@@ -689,7 +689,10 @@ function AgentMetrics({ sessions }: { sessions: SessionRow[] }) {
   const completed = sessions.filter((s) => s.effective_status === "completed").length;
   const failed = sessions.filter((s) => s.effective_status === "failed").length;
   const successRate = total > 0 ? ((completed / (completed + failed || 1)) * 100) : 100;
-  const totalTokens = sessions.reduce((acc, s) => acc + s.tokens_in + s.tokens_out, 0);
+  // Unmeasured sessions contribute nothing rather than being counted as zero,
+  // which is the same rule the row model applies: the token columns are
+  // nullable because the pod does not always populate them.
+  const totalTokens = sessions.reduce((acc, s) => acc + (sumTokens(s.tokens_in, s.tokens_out) ?? 0), 0);
   const totalErrors = sessions.reduce((acc, s) => acc + s.error_count, 0);
 
   function fmt(n: number): string {
@@ -761,7 +764,7 @@ function AgentSessionHistory({ sessions }: { sessions: SessionRow[] }) {
         {visible.map((s, i) => {
           const status = s.effective_status || s.status || "unknown";
           const dot = statusColor[status] || "#A1A1AA";
-          const tokens = s.tokens_in + s.tokens_out;
+          const tokens = sumTokens(s.tokens_in, s.tokens_out);
           return (
             <Link
               key={`${s.session_id}-${s.user_id}`}
@@ -778,7 +781,9 @@ function AgentSessionHistory({ sessions }: { sessions: SessionRow[] }) {
               </span>
               <span style={{ width: 100, fontSize: 13, color: "#3F3F46", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.last_model ?? "—"}</span>
               <span style={{ width: 80, fontSize: 13, color: "#18181B", flexShrink: 0, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                {tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens)}
+                {/* A dash, not a 0: the pod does not always record these, and
+                    "no tokens" and "no data" are different rows. */}
+                {tokens === null ? "—" : tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens)}
               </span>
               <span style={{ width: 80, fontSize: 12, color: "#A1A1AA", flexShrink: 0, textAlign: "right" }}>
                 {s.last_activity_at ? timeAgo(s.last_activity_at) : "—"}

@@ -17,7 +17,7 @@ COMMAND_DESCRIPTIONS = {
     "agents": "Manage agents (create, list, get, delete, register, unregister, connections)",
     "sessions": "View conversation sessions and Q&A history",
     "feedback": "Add or remove feedback on session Q&A entries",
-    "memify": "Run the memory enrichment pipeline on a dataset",
+    "memify": "Deprecated: run the memory enrichment pipeline (use improve)",
     "remember": "Ingest data and build the knowledge graph in a single call",
     "recall": "Search the knowledge graph for relevant information",
     "improve": "Enrich an existing knowledge graph with additional context and rules",
@@ -46,6 +46,7 @@ SEARCH_TYPE_CHOICES = [
     "CODE",
     "CYPHER",
     "GRAPH_REPORT",
+    "BROAD",
     "SKILLS",
     "TEMPORAL",
 ]
