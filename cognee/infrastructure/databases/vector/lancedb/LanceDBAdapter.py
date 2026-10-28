@@ -443,21 +443,33 @@ class LanceDBAdapter(VectorDBInterface):
                 widths.append(list_size)
         return choose_stored_vector_size(widths, self.name)
 
-    async def create_collection(self, collection_name: str, payload_schema: BaseModel):
-        """Create the LanceDB table for `collection_name` if it does not already exist."""
-        vector_size = self.embedding_engine.get_vector_size()
+    async def _create_collection_unlocked(
+        self, collection_name: str, payload_schema: BaseModel
+    ):
+        """Create the LanceDB table. Caller must already hold ``VECTOR_DB_LOCK``.
 
+        ``asyncio.Lock`` is not re-entrant, so paths that already hold the lock
+        (notably ``create_data_points``) must call this instead of
+        ``create_collection`` to avoid a same-loop deadlock.
+        """
+        vector_size = self.embedding_engine.get_vector_size()
         payload_schema = self.get_data_point_schema(payload_schema)
         LanceDataPoint = self._make_lance_datapoint_cls(payload_schema, vector_size)
+        connection = await self.get_connection()
+        return await connection.create_table(
+            name=collection_name,
+            schema=self._schema_for_create_table(LanceDataPoint),
+            exist_ok=True,
+        )
 
+    async def create_collection(self, collection_name: str, payload_schema: BaseModel):
+        """Create the LanceDB table for `collection_name` if it does not already exist."""
         if not await self.has_collection(collection_name):
             async with self.VECTOR_DB_LOCK:
                 if not await self.has_collection(collection_name):
-                    connection = await self.get_connection()
-                    return await connection.create_table(
-                        name=collection_name,
-                        schema=self._schema_for_create_table(LanceDataPoint),
-                        exist_ok=True,
+                    return await self._create_collection_unlocked(
+                        collection_name,
+                        payload_schema,
                     )
 
     async def get_collection(self, collection_name: str):
@@ -476,7 +488,9 @@ class LanceDBAdapter(VectorDBInterface):
         if not await self.has_collection(collection_name):
             async with self.VECTOR_DB_LOCK:
                 if not await self.has_collection(collection_name):
-                    await self.create_collection(
+                    # Must not call create_collection() here: it takes
+                    # VECTOR_DB_LOCK again and would deadlock (#5987).
+                    await self._create_collection_unlocked(
                         collection_name,
                         payload_schema,
                     )
