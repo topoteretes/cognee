@@ -154,8 +154,6 @@ async def cognify(
     extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
     ontology_file_path: str | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
-    gliner_processes: int | None = None,
-    gliner_threads: int | None = None,
     **kwargs,
 ):
     """
@@ -262,15 +260,6 @@ async def cognify(
                  with no relations gets no summary. The explicit argument wins over
                  the SUMMARY_METHOD setting ("llm" by default). Raises while
                  connected to a remote instance.
-        gliner_processes: Processes that share GLiNER extraction for this call;
-                 None uses GLINER_INFERENCE_PROCESSES (default 1). Each extra
-                 process loads its own model (~3 GB), and a script that uses
-                 more than one needs an ``if __name__ == "__main__":`` guard.
-                 Only valid with the GLiNER extractor.
-        gliner_threads: Concurrent model batches per process for this call;
-                 None uses GLINER_INFERENCE_THREADS (default 0, sized to the
-                 machine and split across the processes). The extracted graph is
-                 identical at every setting. Only valid with the GLiNER extractor.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -369,13 +358,6 @@ async def cognify(
         raise ValueError(
             "dry_run estimates the LLM extraction pipeline only; it has no cost model "
             "for the gliner_demo extractor."
-        )
-    if resolved_extractor != GLINER_DEMO_EXTRACTOR and (
-        gliner_processes is not None or gliner_threads is not None
-    ):
-        raise ValueError(
-            "gliner_processes and gliner_threads only apply to the GLiNER extractor; "
-            f"this call resolved to extractor={resolved_extractor!r}."
         )
 
     if chunk_attachment is not None:
@@ -494,8 +476,6 @@ async def cognify(
                 config=config,
                 chunk_attachment=chunk_attachment,
                 track_provenance=cognify_config.provenance_tracking,
-                inference_processes=gliner_processes,
-                inference_threads=gliner_threads,
             )
         else:
             tasks = await get_default_tasks(

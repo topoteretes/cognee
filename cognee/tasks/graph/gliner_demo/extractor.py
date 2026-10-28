@@ -23,17 +23,16 @@ lock removed, calls overlapping on the model, produced a graph identical to the
 sequential one.
 
 Extraction can also be spread over several processes (GLINER_INFERENCE_PROCESSES,
-or ``gliner_processes`` on cognify/remember; default 1). The calling process
+default 1). The calling process
 keeps every Nth batch and spawned workers run the rest, each with its own model
 and thread pool. Workers are shut down after WORKER_IDLE_SECONDS without work,
 so a one-off ingest does not pin a model copy per worker for the life of the
 process. On one machine threads already use the CPU, so processes mostly cost
 memory; they are the building block for spreading work across machines.
 
-There is one thread pool per process and one worker pool, each grown to the
-largest size any call asked for. A call's own limit is enforced by how many
-batches it keeps in flight, so calls with different settings share the pools
-instead of stacking pools on top of each other.
+There is one thread pool per process and one worker pool per model, sized once
+from the configuration and never replaced while in use, so every call shares
+them and the machine-sized bound holds across the whole process.
 
 Concurrency never changes the output. The long-text path is reproduced step for
 step (the same windows, the same batches of windows in the same order, the same
@@ -55,15 +54,17 @@ import multiprocessing
 import os
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import (
     FIRST_COMPLETED,
     Executor,
+    Future,
     ProcessPoolExecutor,
     ThreadPoolExecutor,
     wait,
 )
 from concurrent.futures.process import BrokenProcessPool
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -128,15 +129,11 @@ _pool_lock = threading.Lock()
 # it every pipeline's batch would be in flight at once, each holding its own
 # activations.
 _inference_lock = threading.Lock()
-# (requested processes, requested threads) -> (processes, threads per process)
-_resolved_concurrency: dict[tuple, tuple[int, int]] = {}
+# (processes, threads per process) the pools are sized to; see _pool_sizes.
+_sizes: tuple[int, int] | None = None
 _thread_pool_instance: ThreadPoolExecutor | None = None
-_thread_pool_size = 0
-_process_pool_instance: ProcessPoolExecutor | None = None
-_process_pool_model: str | None = None
-_process_pool_workers = 0
-_process_pool_users = 0
-_process_pool_last_used = 0.0
+# model name -> its worker processes
+_worker_pools: dict[str, _WorkerPool] = {}
 _reaper: threading.Timer | None = None
 # Worker processes are dropped after this long without work; the next call
 # that needs them starts fresh ones (about 10 s each, for the model load).
@@ -327,120 +324,102 @@ def auto_inference_threads(processes: int = 1) -> int:
     return max(1, total // processes)
 
 
-def inference_processes(requested: int | None = None) -> int:
-    """Processes sharing extraction: ``requested``, else GLINER_INFERENCE_PROCESSES."""
-    processes = get_cognify_config().gliner_inference_processes if requested is None else requested
-    if processes < 1:
-        raise ValueError(f"GLiNER inference processes must be >= 1, got {processes}")
-    return processes
+def inference_processes() -> int:
+    """Processes sharing extraction (GLINER_INFERENCE_PROCESSES)."""
+    return get_cognify_config().gliner_inference_processes
 
 
-def inference_threads(processes: int = 1, requested: int | None = None) -> int:
-    """Threads per process: ``requested``, else GLINER_INFERENCE_THREADS; 0 means auto."""
-    configured = get_cognify_config().gliner_inference_threads if requested is None else requested
-    if configured < 0:
-        raise ValueError(f"GLiNER inference threads must be >= 0, got {configured}")
+def inference_threads(processes: int = 1) -> int:
+    """Threads per process (GLINER_INFERENCE_THREADS), auto-sized when 0."""
+    configured = get_cognify_config().gliner_inference_threads
     return configured or auto_inference_threads(processes)
 
 
-def _concurrency(processes: int | None = None, threads: int | None = None) -> tuple[int, int]:
-    """Resolve (processes, threads per process) once per call shape.
+def _pool_sizes() -> tuple[int, int]:
+    """(processes, threads per process) that this process's pools are sized to.
 
-    Auto-sizing reads free memory, which drops once the pools fill it, so the
-    first answer is kept for the life of the process.
+    Resolved once, from the configuration: auto-sizing reads free memory, which
+    drops once the pools fill it, so the first answer is kept for the life of
+    the process. Worker processes are handed theirs by ``_worker_init``.
     """
-    key = (processes, threads)
+    global _sizes
     with _pool_lock:
-        if key not in _resolved_concurrency:
-            resolved_processes = inference_processes(processes)
-            resolved_threads = inference_threads(resolved_processes, threads)
-            _resolved_concurrency[key] = (resolved_processes, resolved_threads)
-            logger.info(
-                "GLiNER inference: %d process(es) x %d concurrent model batch(es)",
-                resolved_processes,
-                resolved_threads,
-            )
-        return _resolved_concurrency[key]
+        if _sizes is None:
+            processes = inference_processes()
+            _sizes = (processes, inference_threads(processes))
+            logger.info("GLiNER inference: %d process(es) x %d concurrent model batch(es)", *_sizes)
+        return _sizes
 
 
-def _thread_pool(threads: int) -> ThreadPoolExecutor:
-    """The one process-wide pool, grown to the largest size any call asked for.
+def _thread_pool() -> ThreadPoolExecutor | None:
+    """The process-wide pool for model batches, or None for one configured thread.
 
-    Growing replaces the pool; batches already running finish on the old one.
-    The pool bounds how many batches the whole process runs at once, and each
-    call bounds its own share by how many it keeps in flight (``_run_batches``).
+    Created once at the configured size and never replaced while the process
+    runs, so a call can hold on to it; it bounds how many batches the whole
+    process runs at once.
     """
-    global _thread_pool_instance, _thread_pool_size
+    global _thread_pool_instance
+    threads = _pool_sizes()[1]
+    if threads <= 1:
+        return None
     with _pool_lock:
-        if _thread_pool_instance is None or _thread_pool_size < threads:
-            if _thread_pool_instance is not None:
-                _thread_pool_instance.shutdown(wait=False)
+        if _thread_pool_instance is None:
             _thread_pool_instance = ThreadPoolExecutor(threads, thread_name_prefix="gliner")
-            _thread_pool_size = threads
         return _thread_pool_instance
 
 
-def _inference_pool(
-    processes: int | None = None, threads: int | None = None
-) -> ThreadPoolExecutor | None:
-    """This process's thread pool for the given call shape, or None for one thread.
+@dataclass
+class _WorkerPool:
+    """One model's worker processes, and the calls currently using them."""
 
-    The size assumes ``DEFAULT_BATCH_SIZE`` windows per batch (see
-    ``auto_inference_threads``); a call's own batch size does not resize it.
-    """
-    resolved_threads = _concurrency(processes, threads)[1]
-    return _thread_pool(resolved_threads) if resolved_threads > 1 else None
+    model_name: str
+    executor: ProcessPoolExecutor
+    users: int = 0
+    last_used: float = 0.0
 
 
-def _process_pool(model_name: str, workers: int) -> ProcessPoolExecutor:
-    """The one worker pool, grown to the most workers any call asked for.
+def _acquire_worker_pool(model_name: str) -> _WorkerPool:
+    """Borrow the model's worker pool: GLINER_INFERENCE_PROCESSES - 1 processes.
 
-    Spawned rather than forked: forking a process that already runs torch
+    Created once per model at the configured size and never replaced while in
+    use. Spawned rather than forked: forking a process that already runs torch
     threads is unsafe. Spawned workers import the calling script, which is why
     a script that uses processes needs an ``if __name__ == "__main__":`` guard.
-    Every caller must hand the pool back through ``_release_process_pool``.
+    Every caller must hand the pool back through ``_release_worker_pool``.
     """
-    global _process_pool_instance, _process_pool_model, _process_pool_workers
-    global _process_pool_users
+    processes, threads = _pool_sizes()
     with _pool_lock:
-        replace = (
-            _process_pool_instance is None
-            or _process_pool_model != model_name
-            or _process_pool_workers < workers
-        )
-        if replace:
-            _drop_process_pool_locked(wait=False)
-            _process_pool_instance = ProcessPoolExecutor(
-                workers,
+        pool = _worker_pools.get(model_name)
+        if pool is None:
+            executor = ProcessPoolExecutor(
+                processes - 1,
                 mp_context=multiprocessing.get_context("spawn"),
                 initializer=_worker_init,
-                initargs=(model_name,),
+                initargs=(model_name, threads),
             )
-            _process_pool_model, _process_pool_workers = model_name, workers
-        _process_pool_users += 1
-        return _process_pool_instance
+            pool = _worker_pools[model_name] = _WorkerPool(model_name, executor)
+        pool.users += 1
+        return pool
 
 
-def _release_process_pool(broken: bool = False) -> None:
-    """Hand the worker pool back; drop it if broken, else start the idle clock."""
-    global _process_pool_users, _process_pool_last_used
+def _release_worker_pool(pool: _WorkerPool, broken: bool = False) -> None:
+    """Hand a borrowed pool back; drop it if broken, else start the idle clock."""
     with _pool_lock:
-        _process_pool_users -= 1
-        _process_pool_last_used = time.monotonic()
+        pool.users -= 1
+        pool.last_used = time.monotonic()
         if broken:
             # A worker died (killed for memory, crashed). A broken pool stays
-            # broken, so drop it: the next call starts fresh workers.
-            _drop_process_pool_locked(wait=False)
-        elif _process_pool_users == 0:
+            # broken, so drop it: the next call starts fresh workers. Only this
+            # pool: a fresh one another call already started is left alone.
+            _drop_worker_pool_locked(pool)
+        elif pool.users == 0:
             _arm_reaper_locked()
 
 
-def _drop_process_pool_locked(wait: bool) -> None:
-    global _process_pool_instance, _process_pool_model, _process_pool_workers
-    pool, _process_pool_instance = _process_pool_instance, None
-    _process_pool_model, _process_pool_workers = None, 0
-    if pool is not None:
-        pool.shutdown(wait=wait, cancel_futures=not wait)
+def _drop_worker_pool_locked(pool: _WorkerPool, wait: bool = False) -> None:
+    if _worker_pools.get(pool.model_name) is pool:
+        del _worker_pools[pool.model_name]
+    pool.executor.shutdown(wait=wait, cancel_futures=not wait)
 
 
 def _arm_reaper_locked() -> None:
@@ -452,32 +431,32 @@ def _arm_reaper_locked() -> None:
 
 
 def _reap_idle_workers() -> None:
-    """Timer callback: drop the worker pool once it has sat idle long enough."""
+    """Timer callback: drop worker pools that have sat idle long enough."""
     global _reaper
     with _pool_lock:
         _reaper = None
-        if _process_pool_instance is None:
-            return
-        idle = time.monotonic() - _process_pool_last_used
-        if _process_pool_users == 0 and idle >= WORKER_IDLE_SECONDS:
-            logger.info("GLiNER inference: worker processes idle, shutting them down")
-            _drop_process_pool_locked(wait=False)
-        else:
+        now = time.monotonic()
+        for pool in list(_worker_pools.values()):
+            if pool.users == 0 and now - pool.last_used >= WORKER_IDLE_SECONDS:
+                logger.info("GLiNER inference: worker processes idle, shutting them down")
+                _drop_worker_pool_locked(pool)
+        if _worker_pools:
             _arm_reaper_locked()
 
 
 def reset_inference_pool() -> None:
     """Shut every pool down so the next call sizes new ones (tests, config changes)."""
-    global _thread_pool_instance, _thread_pool_size, _reaper
+    global _thread_pool_instance, _reaper, _sizes
     with _pool_lock:
         if _reaper is not None:
             _reaper.cancel()
             _reaper = None
         if _thread_pool_instance is not None:
             _thread_pool_instance.shutdown(wait=True)
-        _thread_pool_instance, _thread_pool_size = None, 0
-        _drop_process_pool_locked(wait=True)
-        _resolved_concurrency.clear()
+        _thread_pool_instance = None
+        for pool in list(_worker_pools.values()):
+            _drop_worker_pool_locked(pool, wait=True)
+        _sizes = None
 
 
 def _run_batches(
@@ -492,11 +471,12 @@ def _run_batches(
 ) -> list[list[dict[str, Any]]]:
     """Run model batches with at most ``threads`` in flight; one result list per batch.
 
-    One thread means the historic behaviour: the batches run in turn on the
-    calling thread, each taking turns with other callers' batches on the
-    inference lock. More means the shared pool, with this call submitting only
+    With no pool (one configured thread) the batches run in turn on the calling
+    thread, taking turns with other callers' batches on the inference lock.
+    Otherwise every call goes through the shared pool, submitting only
     ``threads`` batches at a time, so a call with a small limit never occupies
-    pool threads it is not allowed to use.
+    pool threads it is not allowed to use and every batch counts against the
+    pool's bound.
     """
 
     def run_batch(batch: list[str]) -> list[dict[str, Any]]:
@@ -513,14 +493,14 @@ def _run_batches(
             overlap_policy=OVERLAP_POLICY,
         )
 
-    if threads <= 1:
+    pool = _thread_pool()
+    if pool is None:
         results = []
         for batch in batches:
             with _inference_lock:
                 results.append(run_batch(batch))
         return results
 
-    pool = _thread_pool(threads)
     results: list = [None] * len(batches)
     queue = iter(enumerate(batches))
     pending: dict = {}
@@ -542,8 +522,10 @@ def _run_batches(
     return results
 
 
-def _worker_init(model_name: str) -> None:
-    """Worker process start-up: load the model once."""
+def _worker_init(model_name: str, threads: int) -> None:
+    """Worker process start-up: load the model once, take the parent's thread count."""
+    global _sizes
+    _sizes = (1, threads)
     _worker["extractor"] = load_extractor(model_name)
 
 
@@ -554,6 +536,15 @@ def _worker_run_share(
     extractor = _worker["extractor"]
     built = build_gliner_schema(extractor, schema)
     return _run_batches(extractor, built, batches, threads, **options)
+
+
+def _abandon_shares(futures: Iterable[Future]) -> None:
+    """After a failed call: cancel its queued shares and wait out the running ones,
+    so the caller releases the workers only once none of its work is left on them."""
+    futures = list(futures)
+    for future in futures:
+        future.cancel()
+    wait(futures)
 
 
 def _extract_long_concurrently(
@@ -609,9 +600,13 @@ def _extract_long_concurrently(
             if index > 0 and share
         }
     per_batch: list = [None] * len(batches)
-    per_batch[0::processes] = _run_batches(extractor, built, shares[0], threads, **options)
-    for index, future in remote.items():
-        per_batch[index::processes] = future.result()
+    try:
+        per_batch[0::processes] = _run_batches(extractor, built, shares[0], threads, **options)
+        for index, future in remote.items():
+            per_batch[index::processes] = future.result()
+    except BaseException:
+        _abandon_shares(remote.values())
+        raise
     window_results = [result for batch in per_batch for result in batch]
 
     merged, offset = [], 0
@@ -652,15 +647,12 @@ def extract_batch(
     batch_size: int = DEFAULT_BATCH_SIZE,
     window_words: int = DEFAULT_WINDOW_WORDS,
     window_overlap_words: int = DEFAULT_WINDOW_OVERLAP_WORDS,
-    processes: int | None = None,
-    threads: int | None = None,
     model_name: str = DEFAULT_MODEL,
 ) -> list[Mapping[str, Any]]:
     """Run one batched entity+relation extraction; one result dict per text.
 
-    ``processes`` and ``threads`` override GLINER_INFERENCE_PROCESSES and
-    GLINER_INFERENCE_THREADS for this call; ``model_name`` is what worker
-    processes load.
+    Spread over GLINER_INFERENCE_PROCESSES processes and GLINER_INFERENCE_THREADS
+    threads each; ``model_name`` is what worker processes load.
     """
     if not texts:
         return []
@@ -668,7 +660,7 @@ def extract_batch(
         return [{} for _ in texts]
 
     built = build_gliner_schema(extractor, schema)
-    processes, threads = _concurrency(processes, threads)
+    processes, threads = _pool_sizes()
     if processes == 1 and threads <= 1:
         with _inference_lock:
             return extractor.batch_extract_long(
@@ -683,7 +675,7 @@ def extract_batch(
                 overlap_policy=OVERLAP_POLICY,
             )
 
-    process_pool = _process_pool(model_name, processes - 1) if processes > 1 else None
+    worker_pool = _acquire_worker_pool(model_name) if processes > 1 else None
     broken = False
     try:
         return _extract_long_concurrently(
@@ -693,7 +685,7 @@ def extract_batch(
             threads=threads,
             processes=processes,
             schema=schema,
-            process_pool=process_pool,
+            process_pool=worker_pool.executor if worker_pool is not None else None,
             threshold=threshold,
             batch_size=batch_size,
             window_words=window_words,
@@ -703,8 +695,8 @@ def extract_batch(
         broken = True
         raise
     finally:
-        if process_pool is not None:
-            _release_process_pool(broken)
+        if worker_pool is not None:
+            _release_worker_pool(worker_pool, broken)
 
 
 def extract_once(
@@ -713,14 +705,8 @@ def extract_once(
     schema: GlinerSchema,
     *,
     threshold: float = DEFAULT_THRESHOLD,
-    processes: int | None = None,
-    threads: int | None = None,
 ) -> Mapping[str, Any]:
-    """Run one unchunked entity+relation extraction.
-
-    Runs on this process's thread pool for the same ``processes`` / ``threads``
-    as the extraction, so a call's schema probes stay inside its concurrency.
-    """
+    """Run one unchunked entity+relation extraction."""
     if not text or schema.is_empty:
         return {}
 
@@ -736,9 +722,9 @@ def extract_once(
             overlap_policy=OVERLAP_POLICY,
         )
 
-    # Inside the same concurrency as the extraction, so a call's schema probes
-    # count against the limit it asked for.
-    pool = _inference_pool(processes, threads)
+    # Through the same pool as batch extraction, so a schema probe counts
+    # against the same concurrency (and memory) bound.
+    pool = _thread_pool()
     if pool is not None:
         return pool.submit(run).result()
     with _inference_lock:

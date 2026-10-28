@@ -22,6 +22,18 @@ real_inference_threads = extractor_module.inference_threads
 GIB = 1024**3
 
 
+@pytest.fixture
+def pool_size(monkeypatch):
+    """``pool_size(n)``: size this process's thread pool to n, as the configuration would."""
+
+    def configure(threads: int) -> None:
+        monkeypatch.setattr(extractor_module, "inference_threads", lambda *_args: threads)
+        extractor_module.reset_inference_pool()
+
+    yield configure
+    extractor_module.reset_inference_pool()
+
+
 def names_text(seed: int, words: int) -> str:
     vocabulary = ["Pierre", "Natasha", "Moscow", "walked", "with", "the", "Prince", "and", "army"]
     return " ".join(vocabulary[(seed * 7 + i * 3) % len(vocabulary)] for i in range(words))
@@ -86,7 +98,8 @@ def sequential_reference(model):
     )
 
 
-def test_concurrent_path_matches_the_runtimes_sequential_long_text_path():
+def test_concurrent_path_matches_the_runtimes_sequential_long_text_path(pool_size):
+    pool_size(4)
     reference = sequential_reference(window_model())
     model = window_model()
     concurrent = extractor_module._extract_long_concurrently(
@@ -96,9 +109,10 @@ def test_concurrent_path_matches_the_runtimes_sequential_long_text_path():
     assert len(model.threads) > 1, "batches did not run on more than one thread"
 
 
-def test_every_batch_keeps_its_single_threaded_members():
+def test_every_batch_keeps_its_single_threaded_members(pool_size):
     """Same windows, grouped the same way: the property that keeps scores bit-identical."""
     model = window_model()  # skips first when gliner2 is not installed
+    pool_size(3)
     from gliner2.inference.chunking import split_text_into_chunks
 
     windows = [
@@ -234,7 +248,7 @@ class OverlapCountingModel:
 def test_one_thread_keeps_the_runtimes_long_text_call():
     """The single-threaded path is the unchanged public call, batches run in turn."""
     extractor_module.reset_inference_pool()
-    assert extractor_module._inference_pool() is None
+    assert extractor_module._thread_pool() is None
 
 
 def test_one_thread_runs_one_model_call_at_a_time(monkeypatch):
@@ -248,12 +262,11 @@ def test_one_thread_runs_one_model_call_at_a_time(monkeypatch):
     assert model.peak == 1
 
 
-def test_several_threads_share_one_pool(monkeypatch):
-    monkeypatch.setattr(extractor_module, "inference_threads", lambda *_args, **_kwargs: 3)
-    extractor_module.reset_inference_pool()
-    first = extractor_module._inference_pool()
-    assert first is not None and extractor_module._thread_pool_size == 3
-    assert extractor_module._inference_pool() is first, "one pool per process"
+def test_several_threads_share_one_pool(pool_size):
+    pool_size(3)
+    first = extractor_module._thread_pool()
+    assert first is not None and first._max_workers == 3
+    assert extractor_module._thread_pool() is first, "one pool per process, never replaced"
 
 
 def test_no_cgroup_files_means_no_container_limits(cgroup):
@@ -396,9 +409,10 @@ def test_a_container_quota_and_limit_both_bound_the_pool(machine, cgroup):
     assert extractor_module.auto_inference_threads() == 2
 
 
-def test_a_failing_batch_raises_and_the_pool_keeps_working():
+def test_a_failing_batch_raises_and_the_pool_keeps_working(pool_size):
     """An error in one batch reaches the caller, and the shared pool stays usable."""
     model = window_model()
+    pool_size(3)
     real_batch_extract = model.batch_extract
 
     def failing(texts, schemas, **options):
@@ -416,8 +430,9 @@ def test_a_failing_batch_raises_and_the_pool_keeps_working():
     assert recovered == sequential_reference(window_model())
 
 
-def test_concurrent_callers_share_the_pool_without_mixing_results():
+def test_concurrent_callers_share_the_pool_without_mixing_results(pool_size):
     """Two documents extracted at once through one pool each get their own result."""
+    pool_size(4)
     other_texts = [names_text(seed, 300) for seed in (7, 8, 9)]
     expected_a = sequential_reference(window_model())
     expected_b = window_model().batch_extract_long(
@@ -520,45 +535,28 @@ def test_auto_sizing_divides_the_machine_across_processes(
     assert extractor_module.auto_inference_threads(processes=processes) == expected
 
 
-def test_process_count_defaults_to_one_and_a_request_wins(monkeypatch):
-    monkeypatch.setattr(
-        extractor_module,
-        "get_cognify_config",
-        lambda: SimpleNamespace(gliner_inference_processes=1, gliner_inference_threads=0),
-    )
-    assert extractor_module.inference_processes() == 1
-    assert extractor_module.inference_processes(3) == 3
-    with pytest.raises(ValueError, match="processes must be >= 1"):
-        extractor_module.inference_processes(0)
+def test_process_count_defaults_to_one_and_must_be_at_least_one():
+    from cognee.modules.cognify.config import CognifyConfig
+
+    assert CognifyConfig().gliner_inference_processes == 1
+    with pytest.raises(ValueError, match="gliner_inference_processes"):
+        CognifyConfig(gliner_inference_processes=0)
 
 
-def test_requested_threads_win_over_the_configured_value(monkeypatch):
-    monkeypatch.setattr(
-        extractor_module,
-        "get_cognify_config",
-        lambda: SimpleNamespace(gliner_inference_threads=5),
-    )
-    assert real_inference_threads(requested=2) == 2
-    assert real_inference_threads() == 5
-
-
-def test_concurrency_is_resolved_once_per_call_shape(monkeypatch):
+def test_pool_sizes_are_resolved_once(monkeypatch):
     """Auto-sizing reads free memory, which the pools then use: the first answer sticks."""
     calls = []
 
-    def counting_threads(processes, requested):
-        calls.append((processes, requested))
+    def counting_threads(processes):
+        calls.append(processes)
         return 2
 
     monkeypatch.setattr(extractor_module, "inference_threads", counting_threads)
-    monkeypatch.setattr(
-        extractor_module, "inference_processes", lambda requested=None: requested or 1
-    )
+    monkeypatch.setattr(extractor_module, "inference_processes", lambda: 3)
     extractor_module.reset_inference_pool()
-    assert extractor_module._concurrency() == (1, 2)
-    assert extractor_module._concurrency() == (1, 2)
-    assert extractor_module._concurrency(2, 3) == (2, 2)
-    assert calls == [(1, None), (2, 3)]
+    assert extractor_module._pool_sizes() == (3, 2)
+    assert extractor_module._pool_sizes() == (3, 2)
+    assert calls == [3]
     extractor_module.reset_inference_pool()
 
 
@@ -569,13 +567,12 @@ def test_a_broken_worker_pool_is_dropped_so_the_next_call_starts_fresh(monkeypat
     from cognee.tasks.graph.gliner_demo.schema import GlinerSchema
 
     extractor_module.reset_inference_pool()
-    monkeypatch.setattr(extractor_module, "_concurrency", lambda *_args: (2, 1))
+    monkeypatch.setattr(extractor_module, "_pool_sizes", lambda: (2, 1))
     monkeypatch.setattr(extractor_module, "build_gliner_schema", lambda *_args: object())
     shut_down = []
-    sentinel = SimpleNamespace(shutdown=lambda **kwargs: shut_down.append(kwargs))
-    monkeypatch.setattr(extractor_module, "_process_pool_instance", sentinel)
-    monkeypatch.setattr(extractor_module, "_process_pool_model", "model")
-    monkeypatch.setattr(extractor_module, "_process_pool_workers", 1)
+    executor = SimpleNamespace(shutdown=lambda **kwargs: shut_down.append(kwargs))
+    pool = extractor_module._WorkerPool("model", executor)
+    monkeypatch.setitem(extractor_module._worker_pools, "model", pool)
 
     def broken(*_args, **_kwargs):
         raise BrokenProcessPool("a worker died")
@@ -585,29 +582,15 @@ def test_a_broken_worker_pool_is_dropped_so_the_next_call_starts_fresh(monkeypat
         extractor_module.extract_batch(
             object(), ["text"], GlinerSchema({"name": ""}, {}, source="caller"), model_name="model"
         )
-    assert extractor_module._process_pool_instance is None
+    assert "model" not in extractor_module._worker_pools
     assert shut_down == [{"wait": False, "cancel_futures": True}]
-    assert extractor_module._process_pool_users == 0
+    assert pool.users == 0
 
 
-def test_calls_with_different_thread_limits_share_one_pool(monkeypatch):
-    """The fix for stacked pools: 5 then 2 must leave one pool of 5, not 7 threads."""
-    extractor_module.reset_inference_pool()
-    monkeypatch.setattr(
-        extractor_module, "inference_threads", lambda _b, _p, requested=None: requested or 5
-    )
-    model = window_model()
-    extractor_module._extract_long_concurrently(model, TEXTS, object(), threads=5, **OPTIONS)
-    extractor_module._extract_long_concurrently(model, TEXTS, object(), threads=2, **OPTIONS)
-    assert extractor_module._thread_pool_size == 5
-    gliner_threads = [t for t in threading.enumerate() if t.name.startswith("gliner")]
-    assert 0 < len(gliner_threads) <= 5
-    extractor_module.reset_inference_pool()
-
-
-def test_a_call_never_has_more_batches_in_flight_than_its_own_limit():
+def test_a_call_never_has_more_batches_in_flight_than_its_own_limit(pool_size):
     """A call limited to 2 on a pool of 5 keeps at most 2 batches running at once."""
     model = window_model()
+    pool_size(5)
     in_flight, peak, lock = [0], [0], threading.Lock()
     real = model.batch_extract
 
@@ -622,21 +605,9 @@ def test_a_call_never_has_more_batches_in_flight_than_its_own_limit():
                 in_flight[0] -= 1
 
     model.batch_extract = counting
-    extractor_module._thread_pool(5)
     extractor_module._extract_long_concurrently(model, TEXTS, object(), threads=2, **OPTIONS)
-    assert extractor_module._thread_pool_size == 5
+    assert extractor_module._thread_pool()._max_workers == 5
     assert peak[0] == 2
-
-
-def test_the_pool_grows_to_the_largest_request_and_is_replaced_not_stacked():
-    extractor_module.reset_inference_pool()
-    small = extractor_module._thread_pool(2)
-    same = extractor_module._thread_pool(2)
-    large = extractor_module._thread_pool(4)
-    assert same is small and large is not small
-    assert extractor_module._thread_pool_size == 4
-    assert extractor_module._thread_pool(3) is large, "a smaller request reuses the larger pool"
-    extractor_module.reset_inference_pool()
 
 
 def test_one_thread_runs_the_batches_in_turn_on_the_calling_thread():
@@ -657,13 +628,14 @@ def test_idle_worker_processes_are_reaped(monkeypatch):
     monkeypatch.setattr(
         extractor_module.ProcessPoolExecutor, "__new__", lambda cls, *a, **k: fake_pool
     )
-    pool = extractor_module._process_pool("model", 1)
-    assert pool is fake_pool and extractor_module._process_pool_users == 1
-    extractor_module._release_process_pool()
+    monkeypatch.setattr(extractor_module, "_pool_sizes", lambda: (2, 1))
+    pool = extractor_module._acquire_worker_pool("model")
+    assert pool.executor is fake_pool and pool.users == 1
+    extractor_module._release_worker_pool(pool)
     deadline = time.time() + 2
-    while extractor_module._process_pool_instance is not None and time.time() < deadline:
+    while "model" in extractor_module._worker_pools and time.time() < deadline:
         time.sleep(0.02)
-    assert extractor_module._process_pool_instance is None, "idle workers were not dropped"
+    assert "model" not in extractor_module._worker_pools, "idle workers were not dropped"
     assert shut_down == [{"wait": False, "cancel_futures": True}]
 
 
@@ -674,12 +646,13 @@ def test_workers_in_use_are_not_reaped(monkeypatch):
     monkeypatch.setattr(
         extractor_module.ProcessPoolExecutor, "__new__", lambda cls, *a, **k: fake_pool
     )
-    extractor_module._process_pool("model", 1)
-    extractor_module._process_pool("model", 1)  # a second caller
-    extractor_module._release_process_pool()  # the first is done, the second still runs
+    monkeypatch.setattr(extractor_module, "_pool_sizes", lambda: (2, 1))
+    pool = extractor_module._acquire_worker_pool("model")
+    assert extractor_module._acquire_worker_pool("model") is pool  # a second caller
+    extractor_module._release_worker_pool(pool)  # the first is done, the second still runs
     time.sleep(0.2)
-    assert extractor_module._process_pool_instance is fake_pool
-    extractor_module._release_process_pool()
+    assert extractor_module._worker_pools["model"] is pool
+    extractor_module._release_worker_pool(pool)
     extractor_module.reset_inference_pool()
 
 
@@ -688,3 +661,52 @@ def test_more_processes_than_the_machine_fits_is_warned_about(machine, caplog):
     with caplog.at_level("WARNING"):
         assert extractor_module.auto_inference_threads(processes=8) == 1
     assert "8 processes asked for" in caplog.text
+
+
+def test_a_late_broken_release_leaves_a_fresh_pool_alone(monkeypatch):
+    """Two calls fail on one broken pool and a third starts a fresh one in between:
+    the second failure's release drops only the broken pool, not the fresh one."""
+    extractor_module.reset_inference_pool()
+    monkeypatch.setattr(extractor_module, "_pool_sizes", lambda: (2, 1))
+    monkeypatch.setattr(
+        extractor_module.ProcessPoolExecutor,
+        "__new__",
+        lambda cls, *a, **k: SimpleNamespace(shutdown=lambda **kwargs: None),
+    )
+    broken = extractor_module._acquire_worker_pool("model")
+    assert extractor_module._acquire_worker_pool("model") is broken
+    extractor_module._release_worker_pool(broken, broken=True)
+    fresh = extractor_module._acquire_worker_pool("model")
+    extractor_module._release_worker_pool(broken, broken=True)
+    assert fresh is not broken
+    assert extractor_module._worker_pools["model"] is fresh
+    extractor_module._release_worker_pool(fresh)
+    extractor_module.reset_inference_pool()
+
+
+def test_a_failed_call_cancels_its_queued_shares_and_waits_for_running_ones():
+    started, finish = threading.Event(), threading.Event()
+
+    def running():
+        started.set()
+        finish.wait()
+        return "done"
+
+    with ThreadPoolExecutor(1) as workers:
+        first = workers.submit(running)
+        queued = workers.submit(lambda: "never")
+        started.wait()
+        threading.Timer(0.05, finish.set).start()
+        extractor_module._abandon_shares([first, queued])
+        assert queued.cancelled()
+        assert first.done() and first.result() == "done"
+
+
+def test_a_worker_takes_its_thread_count_from_the_parent(monkeypatch):
+    monkeypatch.setattr(extractor_module, "load_extractor", lambda _name: "model")
+    monkeypatch.setattr(extractor_module, "inference_threads", lambda *_: pytest.fail())
+    monkeypatch.setattr(extractor_module, "_worker", {})
+    extractor_module.reset_inference_pool()
+    extractor_module._worker_init("model", 3)
+    assert extractor_module._pool_sizes() == (1, 3)
+    extractor_module.reset_inference_pool()

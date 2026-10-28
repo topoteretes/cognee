@@ -279,8 +279,6 @@ def schema_from_label_bank(
     sketch: str,
     *,
     threshold: float,
-    processes: int | None = None,
-    threads: int | None = None,
 ) -> GlinerSchema:
     """Probe one document sketch and keep only bank labels that fired.
 
@@ -294,16 +292,7 @@ def schema_from_label_bank(
         return EMPTY_SCHEMA
 
     probe_schema = GlinerSchema(dict(LABEL_BANK), dict(RELATION_BANK), source="label_bank")
-    results = [
-        extract_once(
-            extractor,
-            sketch,
-            probe_schema,
-            threshold=threshold,
-            processes=processes,
-            threads=threads,
-        )
-    ]
+    results = [extract_once(extractor, sketch, probe_schema, threshold=threshold)]
 
     entity_hits = {
         n: c for n, c in _count_hits(results, "entities").items() if c and n in LABEL_BANK
