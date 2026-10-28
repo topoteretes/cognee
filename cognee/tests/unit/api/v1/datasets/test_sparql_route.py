@@ -75,7 +75,6 @@ def graph(monkeypatch):
     monkeypatch.setattr(sparql_module, "get_graph_engine", _get_graph_engine)
     monkeypatch.delenv("SPARQL_MAX_GRAPH_NODES", raising=False)
     monkeypatch.delenv("SPARQL_QUERY_TIMEOUT_SECONDS", raising=False)
-    monkeypatch.setenv("ALLOW_SPARQL_QUERY", "true")
     engine.contexts = contexts
     return engine
 
@@ -335,40 +334,6 @@ def test_queries_that_only_spell_service_or_from_still_run(client, query):
     assert response.status_code == 200, response.text
 
 
-# --- HTTP + SDK: opt-in -------------------------------------------------------
-
-
-def test_route_is_disabled_by_default_with_a_message_naming_the_setting(client, monkeypatch):
-    monkeypatch.delenv("ALLOW_SPARQL_QUERY")
-
-    response = _sparql(client, SELECT_LABELS)
-
-    assert response.status_code == 403, response.text
-    message = response.json()["message"]
-    assert "disabled by default" in message
-    assert "ALLOW_SPARQL_QUERY=true" in message
-    # Nothing is looked up or read while the feature is off.
-    assert client.authorized.calls == []
-    assert client.graph.contexts == []
-
-
-@pytest.mark.parametrize("value", ["false", "0", "no", "", "maybe"])
-def test_only_truthy_values_enable_sparql(monkeypatch, value):
-    monkeypatch.setenv("ALLOW_SPARQL_QUERY", value)
-
-    assert sparql_module.sparql_queries_allowed() is False
-    with pytest.raises(sparql_module.SparqlDisabledError, match="ALLOW_SPARQL_QUERY=true"):
-        sparql_module.assert_sparql_enabled()
-
-
-@pytest.mark.parametrize("value", ["true", "TRUE", " True ", "1", "yes"])
-def test_truthy_values_enable_sparql(monkeypatch, value):
-    monkeypatch.setenv("ALLOW_SPARQL_QUERY", value)
-
-    assert sparql_module.sparql_queries_allowed() is True
-    sparql_module.assert_sparql_enabled()
-
-
 def test_over_size_graph_is_413_and_points_at_the_export(client, monkeypatch):
     monkeypatch.setenv("SPARQL_MAX_GRAPH_NODES", "2")
 
@@ -499,22 +464,6 @@ async def test_sdk_sparql_refuses_an_inaccessible_dataset(monkeypatch, graph):
 
 
 @pytest.mark.asyncio
-async def test_sdk_sparql_is_disabled_by_default(monkeypatch, graph):
-    monkeypatch.delenv("ALLOW_SPARQL_QUERY")
-    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
-    authorize = AsyncMock()
-
-    with (
-        patch.object(datasets_module, "get_authorized_dataset", authorize),
-        pytest.raises(sparql_module.SparqlDisabledError, match="ALLOW_SPARQL_QUERY=true"),
-    ):
-        await datasets_module.datasets.sparql(DATASET_ID, SELECT_LABELS, user=SimpleNamespace())
-
-    authorize.assert_not_called()
-    assert graph.contexts == []
-
-
-@pytest.mark.asyncio
 async def test_sdk_sparql_refuses_service(monkeypatch, graph):
     monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
     dataset = SimpleNamespace(id=DATASET_ID, owner_id=OWNER_ID)
@@ -528,19 +477,6 @@ async def test_sdk_sparql_refuses_service(monkeypatch, graph):
         )
 
     assert graph.get_graph_data_calls == 0
-
-
-@pytest.mark.asyncio
-async def test_sdk_sparql_under_serve_leaves_the_setting_to_the_server(monkeypatch):
-    """Under serve() the remote server's ALLOW_SPARQL_QUERY decides, not this process's."""
-    monkeypatch.delenv("ALLOW_SPARQL_QUERY", raising=False)
-    client = SimpleNamespace(sparql=AsyncMock(return_value={"boolean": True}))
-    monkeypatch.setattr(serve_state, "get_remote_client", lambda: client)
-
-    body = await datasets_module.datasets.sparql(DATASET_ID, "ASK { ?s ?p ?o }")
-
-    assert body == {"boolean": True}
-    client.sparql.assert_awaited_once()
 
 
 @pytest.mark.asyncio

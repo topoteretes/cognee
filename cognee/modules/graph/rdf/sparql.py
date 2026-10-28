@@ -4,9 +4,7 @@ The RDF view is not a live store: ``export_memory_graph_to_rdf`` reads the whole
 dataset graph (``get_graph_data``) and loads it into an in-memory rdflib store,
 then the query runs there. That keeps the feature engine-agnostic (Kuzu, Neo4j,
 ... all share one SPARQL surface) at the cost of materializing the graph per
-request. The surface is opt-in: ``ALLOW_SPARQL_QUERY=true`` enables it, and the
-HTTP route and the SDK call refuse with ``SparqlDisabledError`` until then. Three
-guards keep the cost bounded:
+request. Three guards keep that cost bounded:
 
 * the query is refused up front when it carries SPARQL Update keywords, so the
   view can never be mutated (and the error names the problem rather than
@@ -103,19 +101,6 @@ class SparqlExternalAccessNotAllowedError(SparqlQueryError):
     """The query reads beyond the dataset view (``SERVICE``, ``FROM``, ``FROM NAMED``)."""
 
 
-class SparqlDisabledError(SparqlQueryError):
-    """SPARQL is opt-in; ``ALLOW_SPARQL_QUERY`` is not enabled on this deployment."""
-
-    def __init__(self):
-        super().__init__(
-            "SPARQL queries are disabled by default. To enable them, set the environment "
-            "variable ALLOW_SPARQL_QUERY=true for the cognee server (or the process running "
-            "the SDK) and restart it. Each query loads the dataset's whole graph into "
-            "memory, so enable it only when the users of this deployment are trusted with "
-            "that load."
-        )
-
-
 class SparqlGraphTooLargeError(SparqlQueryError):
     """The dataset graph exceeds ``SPARQL_MAX_GRAPH_NODES``; use the RDF export."""
 
@@ -139,17 +124,6 @@ class SparqlQueryTimeoutError(SparqlQueryError):
             f"SPARQL query did not finish within {timeout_seconds:g}s "
             "(SPARQL_QUERY_TIMEOUT_SECONDS). Narrow the query or raise the timeout."
         )
-
-
-def sparql_queries_allowed() -> bool:
-    """SPARQL over dataset graphs is opt-in through ``ALLOW_SPARQL_QUERY=true``."""
-    return os.getenv("ALLOW_SPARQL_QUERY", "false").strip().lower() in ("true", "1", "yes")
-
-
-def assert_sparql_enabled() -> None:
-    """Raise ``SparqlDisabledError`` unless ``ALLOW_SPARQL_QUERY`` is enabled."""
-    if not sparql_queries_allowed():
-        raise SparqlDisabledError()
 
 
 def max_graph_nodes() -> int:
@@ -325,8 +299,7 @@ async def query_dataset_sparql(
 ) -> dict[str, Any]:
     """Run a read-only SPARQL query over one dataset's graph.
 
-    The caller must already have checked that SPARQL is enabled
-    (``assert_sparql_enabled``) and that the user may read ``dataset_id``
+    The caller must already have checked that the user may read ``dataset_id``
     (``get_authorized_existing_datasets``/``get_authorized_dataset``); this
     function only scopes the graph engine to that dataset the way search does,
     so under access control each tenant's graph stays isolated.

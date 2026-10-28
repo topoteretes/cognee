@@ -31,11 +31,9 @@ from cognee.modules.graph.rdf.sparql import (
     MAX_LIMIT as SPARQL_MAX_LIMIT,
 )
 from cognee.modules.graph.rdf.sparql import (
-    SparqlDisabledError,
     SparqlGraphTooLargeError,
     SparqlQueryError,
     SparqlQueryTimeoutError,
-    assert_sparql_enabled,
     query_dataset_sparql,
 )
 from cognee.modules.pipelines.models import PipelineRunStatus
@@ -471,7 +469,6 @@ def get_datasets_router() -> APIRouter:
         response_model_exclude_none=True,
         responses={
             400: {"model": ErrorResponseDTO},
-            403: {"model": ErrorResponseDTO},
             404: {"model": ErrorResponseDTO},
             413: {"model": ErrorResponseDTO},
             504: {"model": ErrorResponseDTO},
@@ -487,9 +484,6 @@ def get_datasets_router() -> APIRouter:
     ):
         """
         Run a read-only SPARQL query over a dataset's knowledge graph.
-
-        Disabled by default: set the environment variable `ALLOW_SPARQL_QUERY=true`
-        on the server to enable it.
 
         The dataset graph is read in full and loaded into an in-memory RDF store
         for the duration of the request (the same view `cognee.modules.graph.rdf`
@@ -525,7 +519,6 @@ def get_datasets_router() -> APIRouter:
         ## Error Codes
         - **400 Bad Request**: SPARQL Update keywords, `SERVICE` / `FROM` / `FROM NAMED`,
           or the query does not parse
-        - **403 Forbidden**: SPARQL is not enabled (`ALLOW_SPARQL_QUERY`)
         - **404 Not Found**: Dataset doesn't exist or user doesn't have access
         - **413 Content Too Large**: Dataset graph exceeds the node ceiling
         - **504 Gateway Timeout**: Query exceeded the wall-clock budget
@@ -539,14 +532,6 @@ def get_datasets_router() -> APIRouter:
                 "cognee_version": cognee_version,
             },
         )
-
-        try:
-            assert_sparql_enabled()
-        except SparqlDisabledError as error:
-            return JSONResponse(
-                status_code=status.HTTP_403_FORBIDDEN,
-                content=ErrorResponseDTO(message=str(error)).model_dump(),
-            )
 
         datasets_found = await get_authorized_existing_datasets([dataset_id], "read", user)
 
