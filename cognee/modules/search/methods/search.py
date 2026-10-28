@@ -247,10 +247,11 @@ async def authorized_search(
         datasets=dataset_ids, permission_type="read", user=user
     )
 
-    async def _search(datasets: list[Dataset]) -> list[SearchResultPayload]:
+    async def _search(datasets: list[Dataset], widening: bool = False) -> list[SearchResultPayload]:
         # Searches all provided datasets and handles setting up of appropriate database context based on permissions
         return await search_in_datasets_context(
             search_datasets=datasets,
+            widening=widening,
             query_type=query_type,
             query_text=query_text,
             user=user,
@@ -279,11 +280,15 @@ async def authorized_search(
 
     # Routed: the best-scoring datasets plus every unindexed one. Retrieving
     # nothing there (judged on the retrieval context, since a completion is
-    # written even over an empty one), only datasets without searchable
+    # written even over an empty one) widens the search to the datasets
+    # routing skipped, searched as the rest of this one search, so the routed
+    # datasets are not searched twice (a retriever that calls an LLM while
+    # retrieving would repeat those calls) and the merged list reads as one
+    # fan-out over every readable dataset. Only datasets without searchable
     # memory (an unscoped search raises that only when every dataset lacks
     # it), or a CODE seed the routed dataset alone cannot resolve (the fan-out
-    # softens a seed miss per dataset only when it searches several), widens
-    # the search back to every readable dataset.
+    # softens a seed miss per dataset only when it searches several), fail
+    # before any retrieval, so there the whole set is searched as one.
     from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
 
     try:
@@ -296,13 +301,18 @@ async def authorized_search(
         )
         return await _search(search_datasets)
     if all(payload.retrieved_nothing() for payload in search_results):
+        routed_ids = {dataset.id for dataset in routed_datasets}
+        remaining = [dataset for dataset in search_datasets if dataset.id not in routed_ids]
         logger.info(
             "Dataset routing searched %d of %d datasets and retrieved nothing; "
-            "searching every readable dataset.",
+            "searching the remaining %d.",
             len(routed_datasets),
             len(search_datasets),
+            len(remaining),
         )
-        return await _search(search_datasets)
+        search_results += await _search(remaining, widening=True)
+        order = {dataset.id: position for position, dataset in enumerate(search_datasets)}
+        search_results.sort(key=lambda payload: order[payload.dataset_id])
     return search_results
 
 
@@ -332,12 +342,22 @@ async def _route_datasets(
         get_dataset_routing_config().top_k,
     )
     if not decision.narrowed:
+        logger.info(
+            "Dataset routing: no dataset was given; searching all %d readable datasets "
+            "(%d without a routing index yet).",
+            len(search_datasets),
+            len(decision.unindexed),
+        )
         return None
 
     by_id = {dataset.id: dataset for dataset in search_datasets}
     routed = [by_id[dataset_id] for dataset_id in decision.dataset_ids]
     logger.info(
-        "Dataset routing: searching %d of %d readable datasets", len(routed), len(search_datasets)
+        "Dataset routing: no dataset was given; searching %s, the best match of the %d "
+        "readable datasets for this query%s. Pass datasets=[...] to search a specific one.",
+        ", ".join(f"'{by_id[dataset_id].name}'" for dataset_id in decision.routed),
+        len(search_datasets),
+        f", plus {len(decision.unindexed)} without a routing index" if decision.unindexed else "",
     )
     return routed
 
@@ -364,10 +384,17 @@ async def search_in_datasets_context(
     include_references: bool = False,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
+    widening: bool = False,
 ) -> list[tuple[Any, str | list[Edge], list[Dataset]]]:
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
     Not to be used outside of active access control mode.
+
+    ``widening``: these datasets complete a routed search whose first pass
+    retrieved nothing, so they are searched as part of that larger set: a
+    CODE seed miss is reported per dataset and a dataset without searchable
+    memory never fails the search, exactly as when every dataset is searched
+    at once.
     """
 
     async def _search_in_dataset_context(
@@ -496,7 +523,9 @@ async def search_in_datasets_context(
 
     # Search every dataset async based on query and appropriate database configuration
     tasks = []
-    soften_code_seed_misses = query_type is SearchType.CODE and len(search_datasets) > 1
+    soften_code_seed_misses = query_type is SearchType.CODE and (
+        widening or len(search_datasets) > 1
+    )
     if backend_access_control_enabled():
         for dataset in search_datasets:
             tasks.append(
@@ -576,6 +605,7 @@ async def search_in_datasets_context(
         query_type=query_type,
         query_text=query_text,
         only_context=only_context,
+        widening=widening,
     )
 
 
@@ -622,6 +652,7 @@ def _collect_dataset_results(
     query_type: SearchType,
     query_text: str,
     only_context: bool,
+    widening: bool = False,
 ) -> list[SearchResultPayload]:
     """Turn the fan-out's per-dataset outcomes into one entry per dataset, or one error.
 
@@ -631,15 +662,16 @@ def _collect_dataset_results(
     a dataset that could not be searched comes back with empty results and its reason
     on ``error``, so the caller is told what happened without losing the siblings'
     answers (``datasets=None`` means "every dataset the user can read", so a single
-    freshly created dataset must not take down unscoped search). Any other exception
-    propagates unchanged and fails the whole search.
+    freshly created dataset must not take down unscoped search). A ``widening`` pass
+    is the rest of a search whose routed datasets had memory, so it never raises for
+    lack of it. Any other exception propagates unchanged and fails the whole search.
     """
     for outcome in outcomes:
         if isinstance(outcome, BaseException) and not isinstance(outcome, DatasetNoDataError):
             raise outcome
 
     no_data = [outcome for outcome in outcomes if isinstance(outcome, DatasetNoDataError)]
-    if no_data and len(no_data) == len(outcomes):
+    if no_data and len(no_data) == len(outcomes) and not widening:
         if len(no_data) == 1:
             only = no_data[0]
             raise NoDataError(

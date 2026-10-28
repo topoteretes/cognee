@@ -222,7 +222,31 @@ async def test_an_embedding_failure_warns_and_leaves_every_dataset_searched(monk
 
     assert decision.unindexed == (a, b) and decision.narrowed is False
     assert engine.scored_ids == []
-    assert "could not be embedded" in caplog.text
+    assert "could not be scored" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_routing_store_warns_and_leaves_every_dataset_searched(
+    monkeypatch, caplog
+):
+    """Before routing no search touched the default store; a store that cannot be
+    read (a database that does not exist on the vector host, a file another
+    process holds) must not start failing every unscoped search."""
+    a, b = uuid4(), uuid4()
+    engine = FakeEngine()
+
+    async def unreachable(collection_name):
+        raise ConnectionError("database does not exist")
+
+    engine.has_collection = unreachable
+    _patch(monkeypatch, engine, {a: [], b: []})
+
+    with caplog.at_level("WARNING", logger="dataset_routing"):
+        decision = await route_datasets("q", [a, b], top_k=1)
+
+    assert decision.unindexed == (a, b) and decision.narrowed is False
+    assert engine.embedded == []
+    assert "could not be scored" in caplog.text
 
 
 @pytest.mark.asyncio

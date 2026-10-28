@@ -363,7 +363,7 @@ async def test_removing_a_document_deletes_its_bucket_and_the_root_by_id(monkeyp
 
     monkeypatch.setattr(persist_module, "get_unified_engine", fake_engine)
 
-    await persist_module.remove_document_index(dataset_id, data_id)
+    await persist_module.remove_document_index(dataset_id, [data_id])
 
     bucket = create_document_bucket_id(str(dataset_id), str(data_id))
     root = create_root_summary_id(str(dataset_id))

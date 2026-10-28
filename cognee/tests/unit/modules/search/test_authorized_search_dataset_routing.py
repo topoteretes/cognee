@@ -38,6 +38,7 @@ def lane(monkeypatch):
     state = types.SimpleNamespace(
         readable=[_dataset("a"), _dataset("b")],
         fan_out_calls=[],  # dataset lists handed to search_in_datasets_context, in order
+        widening_flags=[],  # the ``widening`` flag of each fan-out call, in order
         route_calls=[],
         decision=None,
         responses=[[]],  # one per fan-out call, in order; the last one repeats
@@ -53,6 +54,7 @@ def lane(monkeypatch):
 
     async def fake_fan_out(**kwargs):
         state.fan_out_calls.append([dataset.id for dataset in kwargs["search_datasets"]])
+        state.widening_flags.append(kwargs.get("widening", False))
         response = state.responses[min(len(state.fan_out_calls), len(state.responses)) - 1]
         if isinstance(response, Exception):
             raise response
@@ -173,15 +175,58 @@ async def test_routed_datasets_come_best_first_then_unindexed(lane):
 
 
 @pytest.mark.asyncio
-async def test_a_routed_search_that_finds_nothing_widens_to_every_dataset(lane):
+async def test_a_routed_search_that_finds_nothing_widens_to_the_remaining_datasets(lane):
+    """The routed dataset is not searched twice: the datasets routing skipped are
+    searched as the rest of the same search and the results merge in readable order."""
     lane.decision = _narrowed(lane)
     a, b = lane.readable
-    lane.responses = [[_payload(b)], [_payload(a, ["found elsewhere"]), _payload(b)]]
+    lane.responses = [[_payload(b)], [_payload(a, ["found elsewhere"])]]
 
     out = await _search(lane)
 
-    assert lane.fan_out_calls == [[b.id], [a.id, b.id]]
+    assert lane.fan_out_calls == [[b.id], [a.id]]
+    assert lane.widening_flags == [False, True]
     assert [payload.dataset_id for payload in out] == [a.id, b.id]
+
+
+@pytest.mark.asyncio
+async def test_the_widened_results_keep_readable_order(lane):
+    lane.readable = [_dataset("a"), _dataset("b"), _dataset("c")]
+    a, b, c = lane.readable
+    lane.decision = DatasetRoutingDecision(
+        candidates=(a.id, b.id, c.id), routed=(b.id,), unindexed=(), scores={b.id: 0.1}
+    )
+    lane.responses = [[_payload(b)], [_payload(a), _payload(c, ["hit"])]]
+
+    out = await _search(lane)
+
+    assert lane.fan_out_calls == [[b.id], [a.id, c.id]]
+    assert [payload.dataset_id for payload in out] == [a.id, b.id, c.id]
+
+
+def test_a_widening_pass_never_raises_for_datasets_without_memory(lane):
+    """The routed datasets had memory and retrieved nothing; the remaining ones
+    lacking it is reported per dataset, as a full fan-out would, not as a 404."""
+    a, b = lane.readable
+    outcomes = [
+        lane.search_mod.DatasetNoDataError(a, NoDataError("empty"), graph_is_empty=True),
+        lane.search_mod.DatasetNoDataError(b, NoDataError("empty"), graph_is_empty=True),
+    ]
+
+    with pytest.raises(NoDataError):
+        lane.search_mod._collect_dataset_results(
+            list(outcomes), query_type=SearchType.CHUNKS, query_text="q", only_context=False
+        )
+    out = lane.search_mod._collect_dataset_results(
+        list(outcomes),
+        query_type=SearchType.CHUNKS,
+        query_text="q",
+        only_context=False,
+        widening=True,
+    )
+
+    assert [payload.dataset_id for payload in out] == [a.id, b.id]
+    assert all(payload.error for payload in out)
 
 
 @pytest.mark.asyncio
@@ -192,7 +237,7 @@ async def test_an_empty_only_context_answer_counts_as_nothing_found(lane):
 
     await _search(lane, only_context=True)
 
-    assert lane.fan_out_calls == [[b.id], [a.id, b.id]]
+    assert lane.fan_out_calls == [[b.id], [a.id]]
 
 
 @pytest.mark.asyncio
@@ -208,8 +253,8 @@ async def test_a_completion_over_an_empty_context_counts_as_nothing_found(lane):
 
     out = await _search(lane)
 
-    assert lane.fan_out_calls == [[b.id], [a.id, b.id]]
-    assert [payload.dataset_id for payload in out] == [a.id]
+    assert lane.fan_out_calls == [[b.id], [a.id]]
+    assert [payload.dataset_id for payload in out] == [a.id, b.id]
 
 
 @pytest.mark.asyncio
@@ -237,11 +282,13 @@ async def test_a_dataset_that_could_not_be_searched_counts_as_nothing_found(lane
 
     await _search(lane)
 
-    assert lane.fan_out_calls == [[b.id], [a.id, b.id]]
+    assert lane.fan_out_calls == [[b.id], [a.id]]
 
 
 @pytest.mark.asyncio
 async def test_routed_datasets_without_memory_widen_to_every_dataset(lane):
+    """Every routed dataset failed before retrieving, so nothing is kept and the
+    whole set is searched as one (the fan-out's 404 rule needs the full set)."""
     lane.decision = _narrowed(lane)
     a, b = lane.readable
     lane.responses = [NoDataError("nothing here"), [_payload(a, ["hit"])]]
@@ -262,8 +309,8 @@ async def test_an_empty_row_result_without_a_context_counts_as_nothing_found(lan
 
     out = await _search(lane)
 
-    assert lane.fan_out_calls == [[b.id], [a.id, b.id]]
-    assert [payload.dataset_id for payload in out] == [a.id]
+    assert lane.fan_out_calls == [[b.id], [a.id]]
+    assert [payload.dataset_id for payload in out] == [a.id, b.id]
 
 
 @pytest.mark.asyncio

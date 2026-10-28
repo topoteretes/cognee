@@ -121,8 +121,8 @@ def index_removals(monkeypatch):
     index = importlib.import_module("cognee.tasks.memify.global_context_index")
     calls = []
 
-    async def remove_document_index(dataset_id, data_id):
-        calls.append((dataset_id, data_id))
+    async def remove_document_index(dataset_id, data_ids):
+        calls.append((dataset_id, list(data_ids)))
 
     monkeypatch.setattr(index, "remove_document_index", remove_document_index)
     return calls
@@ -310,7 +310,7 @@ async def test_forget_data_memory_clears_graph_and_resets_pipeline(
     # The item's bucket and the dataset's root, whose text named the item, go
     # with its memory, in the graph and in the routing collection.
     assert routing_removals == [(DATASET_ID, [DATA_ID_A])]
-    assert index_removals == [(DATASET_ID, DATA_ID_A)]
+    assert index_removals == [(DATASET_ID, [DATA_ID_A])]
 
 
 @pytest.mark.asyncio

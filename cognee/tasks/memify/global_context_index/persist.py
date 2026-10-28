@@ -95,27 +95,27 @@ async def persist_context_summaries(
         )
 
 
-async def remove_document_index(dataset_id: UUID | str, data_id: UUID | str) -> None:
-    """Drop a deleted document's bucket and the dataset's root, by their derived ids.
+async def remove_document_index(dataset_id: UUID | str, data_ids: list[UUID | str]) -> None:
+    """Drop the deleted documents' buckets and the dataset's root, by their derived ids.
 
     Explicit, not by provenance: the index nodes carry the dataset-level
     sentinel ref of the build (``ensure_global_context_storage_context``), and
-    on a ledger graph they carry no ref at all, so the document's own delete
-    never reaches them. The ids derive from the dataset and the ``Data`` row,
+    on a ledger graph they carry no ref at all, so a document's own delete
+    never reaches them. The ids derive from the dataset and the ``Data`` rows,
     like the routing rows', so this works on every graph the same way. The root
     goes too: it is computed from every document, so it would keep naming
-    entities and a document the dataset no longer has, and ownership cannot
+    entities and documents the dataset no longer has, and ownership cannot
     express that (shared output survives to its last owner). The next index
-    build writes both anew. Runs in the dataset's database context, like the
-    document delete it follows.
+    build writes everything anew. Takes a list so a sweep that deletes many
+    documents removes them in one graph call and one vector delete, with the
+    root once. Runs in the dataset's database context, like the document
+    delete it follows.
     """
     dataset_key = str(dataset_id)
     await delete_context_index_nodes(
         await get_unified_engine(),
-        [
-            str(create_document_bucket_id(dataset_key, str(data_id))),
-            str(create_root_summary_id(dataset_key)),
-        ],
+        [str(create_document_bucket_id(dataset_key, str(data_id))) for data_id in data_ids]
+        + [str(create_root_summary_id(dataset_key))],
     )
 
 

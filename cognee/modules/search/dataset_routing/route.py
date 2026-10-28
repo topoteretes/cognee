@@ -54,13 +54,29 @@ async def route_datasets(
     deployment with no routing collection at all, before the query is
     embedded: a search type that needs no embedding (CODE, lexical, Cypher)
     must not start needing one for a routing step that cannot narrow anything.
-    An embedding failure is a warning and leaves every dataset unindexed too,
-    for the same reason: routing is a narrowing, never the search itself.
+    Any failure on the way to a score, a routing store that cannot be reached,
+    a relational read that fails, a query that cannot be embedded, is a
+    warning and leaves every dataset unindexed too, for the same reason:
+    routing is a narrowing, never the search itself, and before it existed
+    no search depended on the default store.
     """
     if top_k < 1:
         raise ValueError("Dataset routing needs top_k >= 1.")
     candidates = tuple(dataset_ids)
+    try:
+        return await _score_candidates(query_text, candidates, top_k)
+    except Exception:
+        logger.warning(
+            "Dataset routing is off for this search: the query could not be scored against "
+            "the routing collection. Searching every readable dataset.",
+            exc_info=True,
+        )
+        return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
 
+
+async def _score_candidates(
+    query_text: str, candidates: tuple[UUID, ...], top_k: int
+) -> DatasetRoutingDecision:
     engine = get_dataset_route_engine()
     if not await engine.has_collection(DATASET_ROUTE_COLLECTION):
         return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
@@ -73,15 +89,7 @@ async def route_datasets(
         for row_id in dataset_route_ids(dataset_id, documents.get(dataset_id, [])):
             dataset_by_row[row_id] = dataset_id
 
-    try:
-        query_vector = (await engine.embedding_engine.embed_text([query_text]))[0]
-    except Exception:
-        logger.warning(
-            "Dataset routing is off for this search: the query could not be embedded. "
-            "Searching every readable dataset.",
-            exc_info=True,
-        )
-        return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
+    query_vector = (await engine.embedding_engine.embed_text([query_text]))[0]
     try:
         scored = await engine.score_by_ids(
             DATASET_ROUTE_COLLECTION, list(dataset_by_row), query_vector
