@@ -2,14 +2,19 @@
 
 Sync Drive through the SDK source's incremental, deletion-aware path.
 
-Core owns OAuth, resource selection and dataset ownership. The bundled
-connector owns listing, document extraction, cursors and delete tombstones.
+Core owns OAuth, resource selection and dataset ownership. This package's
+``google_drive_source`` owns listing, document extraction, cursors and delete
+tombstones.
 """
 
 from cognee.modules.integrations import ingestion
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 
 from cognee_connector_google_drive import client
+from cognee_connector_google_drive.source import (
+    build_drive_service_from_access_token,
+    google_drive_source,
+)
 
 GOOGLE_DRIVE_DATASET_PREFIX = "google_drive"
 SYNC_STATUS_OK = "ok"
@@ -57,9 +62,12 @@ async def _sync_source(
     ):
         raise ValueError("Drive selection must be a list of folder IDs or null")
 
-    source_factory = ingestion.source_factory("google_drive")
+    # This package's source and service, not ``ingestion.source_factory("google_drive")``:
+    # on cognee 1.6.x that name resolves to cognee's own bundled copy, whose DriveAuthError
+    # is not the class _classify_error checks.
+    source_factory = google_drive_source
     access_token = await access_token_for(credential)
-    service = ingestion.build_service("google_drive", access_token)
+    service = build_drive_service_from_access_token(access_token)
     shared_drive_ids: set[str] = set()
     page_token = None
     while True:
@@ -78,7 +86,7 @@ async def _sync_source(
             "folder_id": folder_id,
             "resource_name": resource_name,
             "service": service,
-            "service_factory": lambda: ingestion.build_service("google_drive", access_token),
+            "service_factory": lambda: build_drive_service_from_access_token(access_token),
             "check_active": check_active,
         }
         if folder_id in shared_drive_ids:

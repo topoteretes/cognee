@@ -63,8 +63,10 @@ def sync_mocks():
                 AsyncMock(side_effect=lambda credential: credential),
             ),
             patch.object(sync_module.ingestion, "retire_resources", AsyncMock()),
-            patch.object(sync_module.ingestion, "source_factory", return_value=mocks.source),
-            patch.object(sync_module.ingestion, "build_service", return_value="service"),
+            patch.object(sync_module, "google_drive_source", mocks.source),
+            patch.object(
+                sync_module, "build_drive_service_from_access_token", return_value="service"
+            ),
             patch.object(sync_module.client, "list_drives", mocks.drives),
             patch(
                 "cognee_connector_google_drive.cognee_host.adapter.access_token_for", mocks.token
@@ -126,7 +128,7 @@ async def test_unscoped_sync_includes_shared_drives_across_pages(sync_mocks):
 
 @pytest.mark.asyncio
 async def test_empty_selection_does_not_require_a_connector_or_token(sync_mocks):
-    with patch.object(sync_module.ingestion, "source_factory", side_effect=ImportError):
+    with patch.object(sync_module, "google_drive_source", side_effect=ImportError):
         await sync_drive(make_credential(selected_folder_ids=[]))
     sync_mocks.token.assert_not_awaited()
     sync_mocks.remember.assert_not_awaited()
@@ -147,12 +149,17 @@ async def test_malformed_selection_does_not_widen_to_all_drive(selection, sync_m
 
 @pytest.mark.asyncio
 async def test_missing_connector_is_degraded_and_never_uses_rest_ingestion(sync_mocks):
+    # The source is this package's own import, so what can still be missing at sync
+    # time is the Google client library the service is built with.
     with (
-        patch.object(sync_module.ingestion, "source_factory", side_effect=RuntimeError("install")),
+        patch.object(
+            sync_module,
+            "build_drive_service_from_access_token",
+            side_effect=RuntimeError("install"),
+        ),
         pytest.raises(RuntimeError, match="install"),
     ):
         await sync_drive(make_credential())
-    sync_mocks.token.assert_not_awaited()
     sync_mocks.remember.assert_not_awaited()
     assert sync_mocks.record.await_args.kwargs["counts"]["failed"] == 1
 
@@ -245,3 +252,18 @@ def test_the_whole_cause_chain_is_followed_and_a_cycle_ends():
     first, second = RuntimeError("a"), RuntimeError("b")
     first.__cause__, second.__cause__ = second, first
     assert sync_module._classify_error(first) == "failed_ingestion"
+
+
+def test_the_host_sync_runs_this_packages_source():
+    """Not cognee's bundled copy, which ``ingestion.source_factory`` names on cognee
+    1.6.x: a released fix must reach server syncs, and only this package's
+    DriveAuthError is the class ``_classify_error`` recognises."""
+    from cognee_connector_google_drive.source import (
+        build_drive_service_from_access_token,
+        google_drive_source,
+    )
+
+    assert sync_module.google_drive_source is google_drive_source
+    assert (
+        sync_module.build_drive_service_from_access_token is build_drive_service_from_access_token
+    )

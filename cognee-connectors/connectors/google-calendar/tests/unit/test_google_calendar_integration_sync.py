@@ -36,8 +36,10 @@ def sync_mocks():
                 AsyncMock(side_effect=lambda credential: credential),
             ),
             patch.object(sync_module.ingestion, "retire_resources", mocks.retire),
-            patch.object(sync_module.ingestion, "source_factory", return_value=mocks.source),
-            patch.object(sync_module.ingestion, "build_service", return_value="service"),
+            patch.object(sync_module, "google_calendar_source", mocks.source),
+            patch.object(
+                sync_module, "build_calendar_service_from_access_token", return_value="service"
+            ),
             patch(
                 "cognee_connector_google_calendar.cognee_host.adapter.access_token_for",
                 mocks.token,
@@ -126,7 +128,7 @@ async def test_disconnect_while_fetching_the_token_stops_before_ingestion(sync_m
 @pytest.mark.asyncio
 @pytest.mark.parametrize("metadata", [{}, {"selected_calendar_ids": []}])
 async def test_calendar_is_opt_in_even_without_connector_dependencies(metadata, sync_mocks):
-    with patch.object(sync_module.ingestion, "source_factory", side_effect=ImportError):
+    with patch.object(sync_module, "google_calendar_source", side_effect=ImportError):
         await sync_module.sync_google_calendar(credential(**metadata))
     # Every previously synced table goes: an empty selection means "sync nothing".
     sync_mocks.retire.assert_awaited_once_with(
@@ -250,3 +252,17 @@ def test_dataset_name_tells_apart_accounts_whose_slugs_collide():
     second = _dataset_name("a_b@example.com", "two")
     assert first != second
     assert first.startswith("google_calendar_a_b_example_com_")
+
+
+def test_the_host_sync_runs_this_packages_source():
+    """Not cognee's bundled copy, which ``ingestion.source_factory`` names on cognee 1.6.x."""
+    from cognee_connector_google_calendar.source import (
+        build_calendar_service_from_access_token,
+        google_calendar_source,
+    )
+
+    assert sync_module.google_calendar_source is google_calendar_source
+    assert (
+        sync_module.build_calendar_service_from_access_token
+        is build_calendar_service_from_access_token
+    )

@@ -6,6 +6,12 @@ Sync Google Calendar through the SDK connector's sync-token and tombstone path.
 from cognee.modules.integrations import ingestion
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 
+from cognee_connector_google.cognee_host.selected_sync import sync_selected_resources
+from cognee_connector_google_calendar.source import (
+    build_calendar_service_from_access_token,
+    google_calendar_source,
+)
+
 GOOGLE_CALENDAR_DATASET_PREFIX = "google_calendar"
 
 
@@ -42,10 +48,14 @@ async def _sync_source(
     # One source for all selected calendars: the connector keeps a sync token per
     # calendar in this resource's state and forgets the events of a calendar that
     # was deselected, so a changed selection needs no per-calendar resource here.
-    return await ingestion.sync_selected_resources(
+    # This package's source, not cognee's registry: on cognee 1.6.x that names
+    # cognee's own bundled copy of it (cognee_connector_google.cognee_host.selected_sync).
+    return await sync_selected_resources(
         "google_calendar",
         credential,
         counts,
+        make_source=google_calendar_source,
+        build_service=build_calendar_service_from_access_token,
         selection=calendars,
         selection_kwarg="calendar_ids",
         dataset_name=_dataset_name(credential),

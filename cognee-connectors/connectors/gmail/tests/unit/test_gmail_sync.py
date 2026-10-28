@@ -30,8 +30,10 @@ def sync_mocks():
                 AsyncMock(side_effect=lambda credential: credential),
             ),
             patch.object(sync_module.ingestion, "retire_resources", AsyncMock()),
-            patch.object(sync_module.ingestion, "source_factory", return_value=mocks.source),
-            patch.object(sync_module.ingestion, "build_service", return_value="service"),
+            patch.object(sync_module, "gmail_source", mocks.source),
+            patch.object(
+                sync_module, "build_gmail_service_from_access_token", return_value="service"
+            ),
             patch("cognee_connector_gmail.cognee_host.adapter.access_token_for", mocks.token),
             patch.object(
                 import_module("cognee.api.v1.remember.remember"), "remember", mocks.remember
@@ -79,7 +81,7 @@ async def test_sdk_source_receives_the_exact_scope(labels, sync_mocks):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("metadata", [{}, {"selected_label_ids": []}])
 async def test_mailbox_is_opt_in_even_without_connector_dependencies(metadata, sync_mocks):
-    with patch.object(sync_module.ingestion, "source_factory", side_effect=ImportError):
+    with patch.object(sync_module, "gmail_source", side_effect=ImportError):
         await sync_module.sync_gmail(credential(**metadata))
     sync_mocks.token.assert_not_awaited()
     sync_mocks.remember.assert_not_awaited()
@@ -182,3 +184,13 @@ async def test_stale_tables_are_retired_only_after_a_clean_run(
     if retained:
         retained = {sync_module.ingestion.resource_name("gmail", account)}
     retire.assert_awaited_once_with("gmail", account, sync_module._dataset_name(account), retained)
+
+
+def test_the_host_sync_runs_this_packages_source():
+    """Not cognee's bundled copy, which ``ingestion.source_factory`` names on cognee 1.6.x."""
+    from cognee_connector_gmail.source import build_gmail_service_from_access_token, gmail_source
+
+    assert sync_module.gmail_source is gmail_source
+    assert (
+        sync_module.build_gmail_service_from_access_token is build_gmail_service_from_access_token
+    )
