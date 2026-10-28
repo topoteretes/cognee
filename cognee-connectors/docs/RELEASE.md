@@ -15,7 +15,8 @@ every package whose current version is not on PyPI yet.
 
 - **With cognee.** Every stable cognee release (`release.yml` on `main`, not a
   `.devN` canary or an `rc`) ends with the job `release-connectors`, which
-  dispatches `release_connectors.yml` with `connector=all` on the same branch.
+  dispatches `release_connectors.yml` with `connector=all` on the release tag
+  `v<version>`, so the connectors release from the same commit as cognee.
   Packages whose version did not change are skipped, so the run publishes exactly
   the connector bumps merged since the last one. Turn it off for one cognee
   release with the `release_connectors` input. A connector failure shows up in
@@ -24,6 +25,11 @@ every package whose current version is not on PyPI yet.
   `all`, whenever a connector fix should not wait for the next cognee release.
 
 ## What a run does
+
+Every job of a run builds the same commit: the one the run was dispatched on,
+which the plan job records by SHA. A branch that moves while a tier publishes,
+or while a job waits for an environment approval, does not change what the later
+tiers release.
 
 1. **plan** reads every package and its version from the workspace
    (`scripts/packages.py`) and asks PyPI for `<distribution>/<version>`. A version

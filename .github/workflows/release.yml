@@ -538,12 +538,15 @@ jobs:
       - name: Dispatch release_connectors.yml
         env:
           GH_TOKEN: ${{ github.token }}
+          # On the tag this release just pushed, not on the branch: the connectors
+          # then release from the same commit as cognee, whatever merged since.
+          TAG: ${{ needs.release-github.outputs.tag }}
         run: |
           gh workflow run release_connectors.yml \
             --repo "${GITHUB_REPOSITORY}" \
-            --ref "${GITHUB_REF_NAME}" \
+            --ref "${TAG}" \
             -f connector=all
-          echo "Dispatched release_connectors.yml (connector=all) on ${GITHUB_REF_NAME}:"
+          echo "Dispatched release_connectors.yml (connector=all) on ${TAG}:"
           echo "https://github.com/${GITHUB_REPOSITORY}/actions/workflows/release_connectors.yml"
 
   trigger-docs-test-suite:

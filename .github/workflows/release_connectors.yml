@@ -14,6 +14,11 @@ name: release_connectors.yml
 # no connector reaches PyPI while the core version it needs is missing. Within
 # the last tier one connector failing does not stop the others.
 #
+# Every job releases the commit the plan job read, by SHA, never the branch
+# head at the time it starts: the branch may advance while core publishes or
+# while a job waits on an environment approval, and a later tier must not pick
+# up versions the plan never saw (or a connector that needs an unpublished core).
+#
 # Per package the job builds, attests, publishes, and only then pushes the tag
 # `<distribution>-v<version>` (no GitHub Release, as for cognee-mcp). A version
 # that is already on PyPI is refused when asked for explicitly and skipped under
@@ -65,6 +70,7 @@ jobs:
     name: Plan the connector release from ${{ github.ref_name }}
     runs-on: ubuntu-latest
     outputs:
+      sha: ${{ steps.plan.outputs.sha }}
       core: ${{ steps.plan.outputs.core }}
       base: ${{ steps.plan.outputs.base }}
       connectors: ${{ steps.plan.outputs.connectors }}
@@ -72,10 +78,11 @@ jobs:
       run:
         working-directory: cognee-connectors
     steps:
-      - name: Check out ${{ github.ref_name }}
+      - name: Check out ${{ github.ref_name }} at ${{ github.sha }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ github.ref_name }}
+          # The commit the run was dispatched on, not the branch head now.
+          ref: ${{ github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
@@ -95,6 +102,8 @@ jobs:
             echo "::error::${CONNECTOR} is not a package of the cognee-connectors workspace."
             exit 1
           fi
+
+          echo "sha=$(git rev-parse HEAD)" | tee -a "$GITHUB_OUTPUT"
 
           : > selected.txt
           while IFS=$'\t' read -r NAME VERSION; do
@@ -148,10 +157,11 @@ jobs:
       run:
         working-directory: cognee-connectors
     steps: &release-steps
-      - name: Check out ${{ github.ref_name }}
+      - name: Check out the planned commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ github.ref_name }}
+          # The SHA the plan job read, so every tier releases the same commit.
+          ref: ${{ needs.plan.outputs.sha }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
@@ -213,13 +223,15 @@ jobs:
 
       - name: Create and push git tag
         # After the upload on purpose: a failed publish leaves no tag behind, so
-        # the next run can retry the same version.
+        # the next run can retry the same version. The tag names the planned
+        # commit, which is what was built.
         env:
           TAG: ${{ steps.meta.outputs.tag }}
+          SHA: ${{ needs.plan.outputs.sha }}
         run: |
           git config user.name "Cognee Team"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag "${TAG}"
+          git tag "${TAG}" "${SHA}"
           git push origin "${TAG}"
 
   release-base:
