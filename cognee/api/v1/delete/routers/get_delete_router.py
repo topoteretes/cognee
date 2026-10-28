@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from cognee import __version__ as cognee_version
+from cognee.api.v1.datasets.dto import DeleteDataReceiptDTO
 from cognee.exceptions import CogneeApiError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
@@ -17,7 +18,9 @@ logger = get_logger()
 def get_delete_router() -> APIRouter:
     router = APIRouter()
 
-    @router.delete("", response_model=None, deprecated=True)
+    # Same response model as DELETE /v1/datasets/{dataset_id}/data/{data_id}, so
+    # the receipt has one wire shape (camelCase) on both routes.
+    @router.delete("", response_model=DeleteDataReceiptDTO, deprecated=True)
     @deprecated(
         reason="DELETE /v1/delete is deprecated. Use DELETE /v1/datasets/{dataset_id}/data/{data_id} instead.",
         version="0.3.9",
@@ -39,7 +42,9 @@ def get_delete_router() -> APIRouter:
             delete_dataset_if_empty: If True, deletes the dataset if it is left empty after data deletion
 
         Returns:
-            JSON response indicating success or failure
+            The deletion receipt (``DeleteDataReceiptDTO``, camelCase on the wire —
+            the same body as ``DELETE /v1/datasets/{dataset_id}/data/{data_id}``), or
+            an error body.
 
         """
         send_telemetry(

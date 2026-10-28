@@ -87,6 +87,3 @@ decision; the SDK does not infer them from silence.
 This feature does not set a GitHub repository-size limit, allocate larger workers,
 or resolve a pod eviction loop. Those need an explicit execution budget and host
 policy. It makes the resulting progress and decisions observable consistently.
-
-For a read-only client, see
-[`integration_sync_progress.py`](../examples/guides/integration_sync_progress.py).

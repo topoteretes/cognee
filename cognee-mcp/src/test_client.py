@@ -11,6 +11,8 @@ from uuid import uuid4
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from cognee.modules.preflight import llm_available
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -290,7 +292,17 @@ class CogneeTestClient:
         await self.test_tool_discovery()
         await self.test_hidden_tool_is_still_callable()
         await self.test_memory_tools()
-        await self.test_forget_one_memory(search_type=None)
+        # Default recall cites the forget ids in an LLM-written answer; without
+        # an LLM it returns the prompt instead, which cites nothing.
+        if llm_available():
+            await self.test_forget_one_memory(search_type=None)
+        elif os.getenv("CI_HAS_SECRETS") == "true":
+            self.test_results["forget_one_memory_default"] = {
+                "status": "FAIL",
+                "error": "no LLM available although CI has secrets",
+            }
+        else:
+            print("\nSkipping forget of a single recalled memory (default recall): no LLM")
         await self.test_forget_one_memory(search_type="CHUNKS")
         self.print_test_summary()
 
