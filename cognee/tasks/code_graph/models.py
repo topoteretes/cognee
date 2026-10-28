@@ -38,9 +38,9 @@ class CodeGraphEntity(DataPoint):
     the facts whose content actually changed (delta writes).
 
     enola_id is the writer's own fact identity (32 hex chars over repo, kind,
-    name and file; enola >= 0.4.10). Cognee's node identity stays (repo, kind,
-    name) — see fact_node_id — so several enola ids can land on one node; the
-    first occurrence's id is kept. Historical snapshots carry none.
+    name and file; enola >= 0.4.10). Cognee scopes symbol identities to their
+    source file, preserving same-named declarations in different files.
+    Other kinds retain (repo, kind, name). Historical snapshots carry no id.
 
     doc is the comment the author wrote on the symbol (enola's descriptive
     ``doc`` prop: the first paragraph, cut near 300 bytes), set only when the

@@ -124,7 +124,7 @@ class SearchPayloadDTO(InDTO):
     code_query: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "Structured arguments for search_type=CODE. Set operation to query_facts, "
+            "Structured arguments for search_type=CODE. Set operation to coverage, references, query_facts, "
             "explore, traverse, find_path, impact_analysis, insights, architecture, "
             "delta, capabilities, search, neighbors, subgraph, flows, hubs, or ask "
             "(ask answers a natural-language question with seeds, flows, a one-hop "

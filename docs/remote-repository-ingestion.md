@@ -98,3 +98,8 @@ A large repository with mostly excluded assets can need far less local disk.
 If the selected content, Git objects and processing output exceed capacity, use
 a worker with more disk. This does not provide a 50 GiB ingestion guarantee on
 a 4 GiB volume. Cloud worker sizing, token budgets and billing remain separate.
+
+## Code graph mapping and migration
+
+Code graph identity, migration, coverage and source references apply to both
+local and remote repositories. See [Code graph ingestion](code-graph-ingestion.md).

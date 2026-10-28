@@ -414,7 +414,15 @@ async def _run(config, query=""):
 
 
 def _node_id(kind, name):
-    return str(fact_node_id(REPO, kind, name))
+    file = next(
+        (
+            fact.get("file", "")
+            for fact in _snapshot_facts()
+            if fact["kind"] == kind and fact["name"] == name
+        ),
+        "",
+    )
+    return str(fact_node_id(REPO, kind, name, file))
 
 
 def _flow(name):

@@ -71,6 +71,8 @@ SAMPLE_ARGUMENTS = {
     "data_id": "sample-data-id",
     "dataset_id": "sample-dataset-id",
     "detail": "sample detail",
+    # SymbolMigrationError: the references that cannot choose among a legacy symbol's successors.
+    "issues": [{"source_id": "sample-source", "relationship": "describes"}],
     "dimension": 1,
     # AfterRunHookError: (dataset_id, dataset_name, error) per dataset whose step failed.
     "failures": [("sample-dataset-id", "sample_dataset", RuntimeError("sample reason"))],

@@ -377,7 +377,7 @@ def test_target_id_resolves_what_a_bare_name_cannot():
     assert [(edge[0], edge[1], edge[2]) for edge in edges] == [
         (
             fact_node_id("repo-c", "symbol", "main"),
-            fact_node_id("repo-b", "symbol", "helper"),
+            fact_node_id("repo-b", "symbol", "helper", "b.py"),
             "calls",
         )
     ]
@@ -389,7 +389,7 @@ def test_target_id_resolves_what_a_bare_name_cannot():
     assert skipped == 1
 
 
-def test_unknown_target_id_falls_back_to_name_resolution():
+def test_unknown_target_id_does_not_bind_by_name_resolution():
     facts = [
         {"kind": "symbol", "name": "helper", "repo": REPO, "id": ID_A},
         {
@@ -403,8 +403,8 @@ def test_unknown_target_id_falls_back_to_name_resolution():
 
     edges, skipped = build_code_graph_edges(facts)
 
-    assert skipped == 0
-    assert edges[0][1] == fact_node_id(REPO, "symbol", "helper")
+    assert skipped == 1
+    assert edges == []
 
 
 def test_target_id_pointing_at_an_unmapped_kind_is_skipped_not_bound():
@@ -422,12 +422,9 @@ def test_target_id_pointing_at_an_unmapped_kind_is_skipped_not_bound():
 
     edges, skipped = build_code_graph_edges(facts)
 
-    # The writer bound the relation to the topic fact, which cognee has no
-    # model for. The same-named symbol is a different fact — by name the
-    # target is still unique among mapped facts, so name resolution binds
-    # it, exactly as a pre-target_id snapshot would have.
-    assert skipped == 0
-    assert edges[0][1] == fact_node_id(REPO, "symbol", "orders")
+    # An explicit writer identity must never bind to a different same-named fact.
+    assert skipped == 1
+    assert edges == []
 
 
 def test_records_sharing_an_enola_id_collapse_onto_one_node():
@@ -449,7 +446,7 @@ def test_records_sharing_an_enola_id_collapse_onto_one_node():
     assert [point.name for point in data_points] == [REPO, "init", "main"]
     assert skipped == 0
     assert len(edges) == 1
-    assert edges[0][1] == fact_node_id(REPO, "symbol", "init")
+    assert edges[0][1] == fact_node_id(REPO, "symbol", "init", "a.go")
 
 
 # --- insights -----------------------------------------------------------------
@@ -513,7 +510,9 @@ def test_insight_evidence_fact_id_disambiguates_and_metrics_ride_along(tmp_path)
     evidences = [edge for edge in edges if edge[2] == "evidences"]
     # The fact_id-carrying citation binds to lib/db.Database; the bare-name
     # one is ambiguous between the two *.Database symbols and is skipped.
-    assert [edge[1] for edge in evidences] == [fact_node_id(REPO, "symbol", "lib/db.Database")]
+    assert [edge[1] for edge in evidences] == [
+        fact_node_id(REPO, "symbol", "lib/db.Database", "lib/db.py")
+    ]
     assert skipped == 1
 
     by_name = {point.name: point for point in map_facts_to_data_points(parsed, repo_path="/shop")}

@@ -51,6 +51,7 @@ async def _cognify(datasets=("repos",), authorized=None, execute_run=None, **cog
     dataset_data = AsyncMock(side_effect=_fake_dataset_data)
 
     with (
+        patch("cognee.tasks.code_graph.mapping_version.warn_outdated_code_mapping", AsyncMock()),
         patch.object(cognify_module, "ensure_extractor_runtime", runtime),
         patch.object(migrations, "run_migrations_and_block", AsyncMock()),
         patch(
@@ -176,6 +177,8 @@ async def test_a_data_ids_run_probes_providers_only_when_its_rows_need_them(ids,
 async def test_a_run_without_data_ids_keeps_its_probes_before_the_lock():
     _result, pipeline, _runtime, _rows = await _cognify(extractor="llm")
 
-    assert "before_run" not in pipeline.await_args.kwargs
+    # The run's own hooks (the code mapping warning) are not the probe decision: probes stay
+    # in run_pipeline, before the lock, exactly as for every cognify without data_ids.
+    assert "skip_connection_test" not in pipeline.await_args.kwargs
     assert pipeline.await_args.kwargs["needs_llm"] is True
     pipeline.environment.assert_not_awaited()

@@ -3,7 +3,6 @@
 import asyncio
 import hashlib
 import json
-import posixpath
 from collections import Counter
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -25,6 +24,7 @@ from cognee.tasks.code_graph.enola import (
     run_enola_generate,
     snapshot_identity,
 )
+from cognee.tasks.code_graph.imports import ImportIndex
 from cognee.tasks.code_graph.models import (
     ApiEndpoint,
     CodeAssociation,
@@ -41,6 +41,11 @@ from cognee.tasks.code_graph.models import (
     CodeTestReference,
     ExternalDependency,
     StorageResource,
+)
+from cognee.tasks.code_graph.symbol_migration import (
+    CODE_EDGE_OWNER,
+    plan_symbol_migration,
+    transfer_symbol_references,
 )
 
 if TYPE_CHECKING:
@@ -94,7 +99,9 @@ _SWEEP_CHUNK_SIZE = 2000
 # Bump it whenever that mapping changes, so a repository whose snapshot did not
 # change is still loaded again by the new mapping instead of being skipped.
 # 1: doc fields, CodeFlow nodes and declaration-view resolution (SDK-1119).
-CODE_GRAPH_MAPPING_VERSION = 2
+# 4: source-file symbol identity, authoritative target_id resolution, internal import
+#    resolution, edge ownership and mapping diagnostics.
+CODE_GRAPH_MAPPING_VERSION = 4
 
 
 def _is_mappable_fact(kind: Any, name: Any) -> bool:
@@ -102,16 +109,25 @@ def _is_mappable_fact(kind: Any, name: Any) -> bool:
     return isinstance(kind, str) and kind in KIND_TO_MODEL and isinstance(name, str) and name != ""
 
 
-def fact_node_id(repo: str, kind: str, name: str) -> UUID:
-    """Deterministic node id so re-extraction of a repo updates the same nodes.
+def fact_node_id(repo: str, kind: str, name: str, file: str = "") -> UUID:
+    """Stable identity; symbols are scoped to their repository-relative source file.
 
-    Identity is (repo, kind, name): same-named facts of the same kind within a
-    repo intentionally collapse into a single node, because enola relations
-    reference their targets by bare name. Components are length-prefixed so
-    distinct (repo, kind, name) triples can never produce the same hash input.
+    Modules and other logical entities keep their existing identities. Symbol
+    lines are not part of identity, so inserting lines does not replace a node.
     """
-    key = "enola:" + ":".join(f"{len(part)}:{part}" for part in (repo, kind, name))
+    parts = (repo, kind, name, file) if kind == "symbol" and file else (repo, kind, name)
+    key = "enola:" + ":".join(f"{len(part)}:{part}" for part in parts)
     return uuid5(NAMESPACE_OID, key)
+
+
+def _fact_key(fact: dict, repo: str) -> tuple[str, str, str, str]:
+    file = fact.get("file")
+    return (
+        repo,
+        fact["kind"],
+        fact["name"],
+        file if isinstance(file, str) and fact["kind"] == "symbol" else "",
+    )
 
 
 def _fact_repo(fact: dict, fallback_repo: str) -> str:
@@ -292,14 +308,10 @@ def map_facts_to_data_points(
             continue
 
         repo = _fact_repo(fact, fallback_repo)
-        node_id = fact_node_id(repo, kind, name)
+        node_id = fact_node_id(*_fact_key(fact, repo))
         if node_id in seen_ids:
-            # Same-named facts of the same kind collapse into one node (see
-            # fact_node_id). Keep the FIRST occurrence — the same rule the
-            # storage-side deduplication applies — so the stored node content
-            # (and its fact_hash) is deterministic across ingestions. Without
-            # this, two duplicates with different content flip-flop the stored
-            # hash and the fact reads as "updated" on every re-ingestion.
+            # Repeated records for one identity keep their first occurrence.
+            # Symbols in different source files have distinct identities.
             duplicate_facts += 1
             continue
         seen_ids.add(node_id)
@@ -402,9 +414,10 @@ def _short_target_names(name: str) -> set:
 
 def _add_client_route_edges(
     valid_facts: list[tuple[dict, str]],
-    enola_id_index: dict[str, tuple[str, str, str]],
-    fact_index: dict[tuple[str, str, str], dict],
+    enola_id_index: dict[str, tuple[str, str, str, str]],
+    fact_index: dict[tuple[str, str, str, str], dict],
     add_edge: Callable[..., None],
+    diagnostics: list[dict] | None = None,
 ) -> int:
     """Edges from a client route's caller and matched_routes props; returns skips.
 
@@ -415,13 +428,17 @@ def _add_client_route_edges(
     first. The name fallback stays inside the repo the prop names.
     """
 
+    by_name: dict[tuple[str, str, str], list[tuple[str, str, str, str]]] = {}
+    for key in fact_index:
+        by_name.setdefault(key[:3], []).append(key)
+
     def _resolve_ref(fact_id: Any, repo: Any, kind: str, ref_name: Any):
-        if is_enola_id(fact_id) and fact_id in enola_id_index:
-            return enola_id_index[fact_id]
+        if is_enola_id(fact_id):
+            return enola_id_index.get(fact_id)
         if isinstance(repo, str) and isinstance(ref_name, str):
-            key = (repo, kind, ref_name)
-            if key in fact_index:
-                return key
+            candidates = by_name.get((repo, kind, ref_name), [])
+            if len(candidates) == 1:
+                return candidates[0]
         return None
 
     skipped = 0
@@ -431,13 +448,24 @@ def _add_client_route_edges(
         props = fact.get("props")
         if not isinstance(props, dict) or props.get("role") != "client":
             continue
-        route = (source_repo, "route", fact["name"])
+        route = _fact_key(fact, source_repo)
 
         caller = props.get("caller")
         if caller is not None or props.get("caller_id") is not None:
             resolved = _resolve_ref(props.get("caller_id"), source_repo, "symbol", caller)
             if resolved is None:
                 skipped += 1
+                if diagnostics is not None:
+                    diagnostics.append(
+                        {
+                            "repo": source_repo,
+                            "source": fact["name"],
+                            "file": fact.get("file"),
+                            "target": caller,
+                            "relationship": "makes_request",
+                            "reason": "unresolved_caller",
+                        }
+                    )
             else:
                 add_edge(resolved, route, "makes_request")
 
@@ -445,10 +473,30 @@ def _add_client_route_edges(
         for match in matches if isinstance(matches, list) else []:
             if not isinstance(match, dict):
                 skipped += 1
+                if diagnostics is not None:
+                    diagnostics.append(
+                        {
+                            "repo": source_repo,
+                            "source": fact["name"],
+                            "file": fact.get("file"),
+                            "reason": "invalid_route_match",
+                        }
+                    )
                 continue
             resolved = _resolve_ref(match.get("id"), match.get("repo"), "route", match.get("name"))
             if resolved is None:
                 skipped += 1
+                if diagnostics is not None:
+                    diagnostics.append(
+                        {
+                            "repo": source_repo,
+                            "source": fact["name"],
+                            "file": fact.get("file"),
+                            "target": match.get("name"),
+                            "relationship": "reaches_route",
+                            "reason": "unresolved_route",
+                        }
+                    )
                 continue
             if resolved == route:
                 # A call its own repo serves under the same path collapses
@@ -471,29 +519,22 @@ _DECLARATION_VIEW_KINDS = frozenset({"storage", "association"})
 
 
 def _without_declaration_views(
-    candidates: set[tuple[str, str, str]],
-    fact_index: dict[tuple[str, str, str], dict],
-) -> set[tuple[str, str, str]]:
+    candidates: set[tuple[str, str, str, str]],
+    fact_index: dict[tuple[str, str, str, str], dict],
+) -> set[tuple[str, str, str, str]]:
     """Name candidates minus the views of a symbol that is itself a candidate.
 
     A view is a storage or association fact carrying the symbol's own name,
     repo and file. Anything else sharing the name (a fact from another file or
-    repo, a second same-named symbol) stays a rival candidate. When one repo
-    declares the symbol name in several files, the file compared is that of the
-    first such fact, the one its node keeps.
+    repo, a second same-named symbol) stays a rival candidate.
     """
 
-    def _is_view(candidate: tuple[str, str, str]) -> bool:
-        repo, kind, name = candidate
-        symbol = (repo, "symbol", name)
-        if kind not in _DECLARATION_VIEW_KINDS or symbol not in candidates:
+    def _is_view(candidate: tuple[str, str, str, str]) -> bool:
+        repo, kind, name, _file = candidate
+        file = fact_index[candidate].get("file")
+        if kind not in _DECLARATION_VIEW_KINDS or not isinstance(file, str) or not file:
             return False
-        symbol_file = fact_index[symbol].get("file")
-        return (
-            isinstance(symbol_file, str)
-            and symbol_file != ""
-            and fact_index[candidate].get("file") == symbol_file
-        )
+        return (repo, "symbol", name, file) in candidates
 
     return {candidate for candidate in candidates if not _is_view(candidate)}
 
@@ -502,6 +543,7 @@ def build_code_graph_edges(
     facts: list[dict],
     repo_path: str | Path | None = None,
     repo_name: str | None = None,
+    diagnostics: list[dict] | None = None,
 ) -> tuple[list[tuple], int]:
     """Resolve typed relations between facts into explicit graph edge tuples.
 
@@ -520,10 +562,9 @@ def build_code_graph_edges(
     valid_facts = []
     name_index: dict[str, set] = {}
     short_name_index: dict[str, set] = {}
-    enola_id_index: dict[str, tuple[str, str, str]] = {}
-    fact_index: dict[tuple[str, str, str], dict] = {}
-    module_index: dict[tuple[str, str], dict] = {}
-    module_path_repos: dict[str, set[str]] = {}
+    enola_id_index: dict[str, tuple[str, str, str, str]] = {}
+    fact_index: dict[tuple[str, str, str, str], dict] = {}
+    external_index: dict[tuple[str, str], set] = {}
     for fact in facts:
         kind = fact.get("kind")
         name = fact.get("name")
@@ -535,45 +576,72 @@ def build_code_graph_edges(
             # No relation targets a flow, and a flow is named after its entry
             # symbol or route: indexing its name would make those names
             # ambiguous for every relation that resolves by name.
-            name_index.setdefault(name, set()).add((repo, kind))
+            name_index.setdefault(name, set()).add(_fact_key(fact, repo))
             for short_form in _short_target_names(name):
-                short_name_index.setdefault(short_form, set()).add((repo, kind, name))
+                short_name_index.setdefault(short_form, set()).add(_fact_key(fact, repo))
         fact_id = fact.get("id")
         if is_enola_id(fact_id):
             # Records sharing an id share (repo, kind, name, file), hence the node.
-            enola_id_index.setdefault(fact_id, (repo, kind, name))
-        fact_index.setdefault((repo, kind, name), fact)
-        if kind == "module":
-            module_index.setdefault((repo, name), fact)
-            props = fact.get("props")
-            module_path = props.get("modulePath") if isinstance(props, dict) else None
-            if isinstance(module_path, str) and module_path:
-                module_path_repos.setdefault(module_path, set()).add(repo)
+            enola_id_index.setdefault(fact_id, _fact_key(fact, repo))
+        fact_index.setdefault(_fact_key(fact, repo), fact)
+        props = fact.get("props")
+        if kind == "dependency" and isinstance(props, dict) and props.get("type") == "package":
+            package = props.get("package_name")
+            if isinstance(package, str):
+                external_index.setdefault((repo, package), set()).add(_fact_key(fact, repo))
 
+    imports = ImportIndex(facts, fallback_repo)
     edges: list[tuple] = []
     seen_edges = set()
     skipped = 0
+
+    candidate_views: dict[tuple, tuple[set, dict, dict]] = {}
+
+    def _candidate_view(target_name: str, allowed_repos: set[str] | None):
+        """The candidates for a name, grouped by repo and by symbol file, built once per name.
+
+        A hot name (``get``, ``run``) is looked up by every caller, so grouping per lookup
+        would cost callers times definitions.
+        """
+        view_key = (target_name, None if allowed_repos is None else frozenset(allowed_repos))
+        view = candidate_views.get(view_key)
+        if view is None:
+            candidates = set(name_index.get(target_name, ()))
+            if not candidates:
+                # No fact carries this exact name; fall back to unambiguous
+                # suffix matches so bare-name targets (e.g. 'Database' for
+                # 'app/db.Database') still resolve.
+                candidates = set(short_name_index.get(target_name, ()))
+            if allowed_repos is not None:
+                candidates = {
+                    candidate for candidate in candidates if candidate[0] in allowed_repos
+                }
+            # A framework extractor may describe one declaration twice under one
+            # name: the class or method as a ``symbol`` and what it stands for (an
+            # ORM model as ``storage``, a relation method as ``association``). The
+            # writer then withholds ``target_id`` (two identities), but the two are
+            # not rival targets: a reference to the name means the declaration.
+            candidates = _without_declaration_views(candidates, fact_index)
+            by_repo: dict[str, set] = {}
+            by_file: dict[tuple[str, str | None], set] = {}
+            for candidate in candidates:
+                by_repo.setdefault(candidate[0], set()).add(candidate)
+                if candidate[1] == "symbol":
+                    by_file.setdefault((candidate[0], candidate[3]), set()).add(candidate)
+            view = candidate_views[view_key] = (candidates, by_repo, by_file)
+        return view
 
     def _resolve_target(
         target_name: str,
         source_repo: str,
         allowed_repos: set[str] | None = None,
-    ) -> tuple[str, str, str] | None:
-        candidates = {(repo, kind, target_name) for repo, kind in name_index.get(target_name, ())}
-        if not candidates:
-            # No fact carries this exact name; fall back to unambiguous
-            # suffix matches so bare-name targets (e.g. 'Database' for
-            # 'app/db.Database') still resolve.
-            candidates = set(short_name_index.get(target_name, ()))
-        if allowed_repos is not None:
-            candidates = {candidate for candidate in candidates if candidate[0] in allowed_repos}
-        # A framework extractor may describe one declaration twice under one
-        # name: the class or method as a ``symbol`` and what it stands for (an
-        # ORM model as ``storage``, a relation method as ``association``). The
-        # writer then withholds ``target_id`` (two identities), but the two are
-        # not rival targets: a reference to the name means the declaration.
-        candidates = _without_declaration_views(candidates, fact_index)
-        same_repo = {candidate for candidate in candidates if candidate[0] == source_repo}
+        source_file: str | None = None,
+    ) -> tuple[str, str, str, str] | None:
+        candidates, by_repo, by_file = _candidate_view(target_name, allowed_repos)
+        same_file = by_file.get((source_repo, source_file), ())
+        if len(same_file) == 1:
+            return next(iter(same_file))
+        same_repo = by_repo.get(source_repo, ())
         if len(same_repo) == 1:
             return next(iter(same_repo))
         if len(candidates) == 1:
@@ -581,15 +649,13 @@ def build_code_graph_edges(
         return None
 
     def _add_edge(
-        source: tuple[str, str, str],
-        target: tuple[str, str, str],
+        source: tuple[str, str, str, str],
+        target: tuple[str, str, str, str],
         relationship_name: str,
         properties: dict[str, Any] | None = None,
     ) -> None:
-        source_repo, source_kind, source_name = source
-        target_repo, target_kind, target_name = target
-        source_id = fact_node_id(source_repo, source_kind, source_name)
-        target_id = fact_node_id(target_repo, target_kind, target_name)
+        source_id = fact_node_id(*source)
+        target_id = fact_node_id(*target)
         edge_key = (source_id, target_id, relationship_name)
         if edge_key in seen_edges:
             return
@@ -606,6 +672,7 @@ def build_code_graph_edges(
                     "relationship_name": relationship_name,
                     "edge_text": relationship_name.replace("_", " "),
                     "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "producer": CODE_EDGE_OWNER,
                 },
             )
         )
@@ -620,30 +687,52 @@ def build_code_graph_edges(
             normalized = normalize_relation(relation)
             if normalized is None:
                 skipped += 1
+                if diagnostics is not None:
+                    diagnostics.append(
+                        {
+                            "repo": source_repo,
+                            "source": name,
+                            "file": fact.get("file"),
+                            "reason": "invalid_relation",
+                        }
+                    )
                 logger.warning("Skipping relation that could not be normalized: %s", relation)
                 continue
 
             relationship_name, target_name = normalized
             target_id = relation_target_id(relation)
             target = enola_id_index.get(target_id) if target_id else None
-            if target is None:
-                target = _resolve_target(target_name, source_repo)
-            if target is None and relationship_name == "calls" and not name_index.get(target_name):
-                for module_path in sorted(
-                    module_path_repos, key=lambda value: (-len(value), value)
-                ):
-                    if not target_name.startswith(module_path):
-                        continue
-                    provider_repos = module_path_repos[module_path]
+            props = fact.get("props") or {}
+            internal_import = (
+                relationship_name == "imports"
+                and isinstance(props, dict)
+                and props.get("source") == "internal"
+            )
+            external_import = (
+                relationship_name == "imports"
+                and isinstance(props, dict)
+                and props.get("source") == "external"
+            )
+            if target_id is None and internal_import:
+                module = imports.resolve(fact, target_name, source_repo)
+                target = _fact_key(module, source_repo) if module else None
+            elif target_id is None and external_import:
+                packages = external_index.get((source_repo, target_name), set())
+                target = next(iter(packages)) if len(packages) == 1 else None
+            elif target_id is None and not external_import:
+                target = _resolve_target(target_name, source_repo, source_file=fact.get("file"))
+            if (
+                target_id is None
+                and target is None
+                and relationship_name == "calls"
+                and not name_index.get(target_name)
+            ):
+                for module_path in imports.module_path_prefixes(target_name, "/."):
+                    provider_repos = imports.module_path_repos[module_path]
                     if len(provider_repos) != 1:
                         continue
                     suffix = target_name[len(module_path) :]
-                    if suffix.startswith("/"):
-                        normalized_target = suffix[1:]
-                    elif suffix.startswith("."):
-                        normalized_target = "." + suffix
-                    else:
-                        continue
+                    normalized_target = suffix[1:] if suffix.startswith("/") else "." + suffix
                     if normalized_target:
                         target = _resolve_target(
                             normalized_target,
@@ -655,79 +744,78 @@ def build_code_graph_edges(
 
             if target is None:
                 skipped += 1
-                logger.warning(
-                    "Skipping relation '%s' from '%s': target '%s' is %s.",
+                reason = (
+                    "missing_target_id"
+                    if target_id
+                    else "external_dependency"
+                    if external_import
+                    else "unresolved_internal_import"
+                    if internal_import
+                    else "ambiguous"
+                    if name_index.get(target_name) or short_name_index.get(target_name)
+                    else "unresolved"
+                )
+                if diagnostics is not None:
+                    diagnostics.append(
+                        {
+                            "repo": source_repo,
+                            "source": name,
+                            "file": fact.get("file"),
+                            "relationship": relationship_name,
+                            "target": target_name,
+                            "reason": reason,
+                        }
+                    )
+                logger.debug(
+                    "Skipping relation '%s' from '%s': target '%s': %s.",
                     relationship_name,
                     name,
                     target_name,
-                    "ambiguous" if name_index.get(target_name) else "unresolved",
+                    reason,
                 )
                 continue
 
-            target_repo, target_kind, resolved_target_name = target
-            _add_edge(
-                (source_repo, kind, name),
-                (target_repo, target_kind, resolved_target_name),
-                relationship_name,
-            )
+            _add_edge(_fact_key(fact, source_repo), target, relationship_name)
 
-    skipped += _add_client_route_edges(valid_facts, enola_id_index, fact_index, _add_edge)
+    skipped += _add_client_route_edges(
+        valid_facts, enola_id_index, fact_index, _add_edge, diagnostics
+    )
 
     # Enola's query graph connects a dependency import to the modules which
     # contain each side. Materialize the same bridge so Cognee traversals can
     # move between modules without re-reading the snapshot.
-    modules_by_name: dict[str, list[tuple[str, dict]]] = {}
-    for (repo, module_name), module_fact in module_index.items():
-        modules_by_name.setdefault(module_name, []).append((repo, module_fact))
-
     for fact, source_repo in valid_facts:
         if fact["kind"] != "dependency" or not isinstance(fact.get("file"), str):
             continue
-        file_path = fact["file"]
-        source_directories = [posixpath.dirname(file_path) or "."]
-        repo_prefix = source_repo.rstrip("/") + "/"
-        if file_path.startswith(repo_prefix):
-            source_directories.append(posixpath.dirname(file_path[len(repo_prefix) :]) or ".")
-        source_module = next(
-            (
-                module_index[(source_repo, directory)]
-                for directory in source_directories
-                if (source_repo, directory) in module_index
-            ),
-            None,
-        )
+        source_module = imports.module_for_file(source_repo, fact["file"])
         if source_module is None:
             continue
-
         for relation in fact.get("relations") or []:
             normalized = normalize_relation(relation)
             if normalized is None or normalized[0] != "imports":
                 continue
-            target_name = normalized[1]
-            target_module: tuple[str, dict] | None = None
-            candidate_name = target_name
-            while candidate_name:
-                local = module_index.get((source_repo, candidate_name))
-                if local is not None:
-                    target_module = (source_repo, local)
-                    break
-                global_matches = modules_by_name.get(candidate_name, [])
-                if len(global_matches) == 1:
-                    target_module = global_matches[0]
-                    break
-                parent = posixpath.dirname(candidate_name)
-                if parent in (candidate_name, "."):
-                    break
-                candidate_name = parent
-
-            if target_module is None:
-                continue
-            target_repo, target_fact = target_module
-            if source_repo == target_repo and source_module["name"] == target_fact["name"]:
+            target_id = relation_target_id(relation)
+            key = enola_id_index.get(target_id) if target_id else None
+            if target_id:
+                target_fact = fact_index.get(key) if key else None
+                target_repo = key[0] if key else source_repo
+                target_module = (
+                    imports.module_for_file(target_repo, target_fact.get("file", ""))
+                    if target_fact
+                    else None
+                )
+            else:
+                target_repo = source_repo
+                target_module = imports.resolve(fact, normalized[1], source_repo)
+                if target_module is None and not (fact.get("props") or {}).get("source"):
+                    target_module = imports.modules.get((source_repo, normalized[1]))
+            if target_module is None or (
+                source_repo == target_repo and source_module["name"] == target_module["name"]
+            ):
                 continue
             _add_edge(
-                (source_repo, "module", source_module["name"]),
-                (target_repo, "module", target_fact["name"]),
+                _fact_key(source_module, source_repo),
+                _fact_key(target_module, target_repo),
                 "imports",
             )
 
@@ -742,7 +830,8 @@ def build_code_graph_edges(
         if symbol_kind not in {"method", "function"}:
             continue
         owner_name = fact["name"].rsplit(".", 1)[0]
-        owner = fact_index.get((source_repo, "symbol", owner_name))
+        owner_key = (source_repo, "symbol", owner_name, _fact_key(fact, source_repo)[3])
+        owner = fact_index.get(owner_key)
         owner_props = owner.get("props") if owner is not None else None
         if (
             not isinstance(owner_props, dict)
@@ -750,8 +839,8 @@ def build_code_graph_edges(
         ):
             continue
         _add_edge(
-            (source_repo, "symbol", owner_name),
-            (source_repo, "symbol", fact["name"]),
+            owner_key,
+            _fact_key(fact, source_repo),
             "has_method",
         )
 
@@ -914,7 +1003,7 @@ def _current_code_node_ids(facts: list[dict], fallback_repo: str) -> set:
         kind = fact.get("kind")
         name = fact.get("name")
         if _is_mappable_fact(kind, name):
-            ids.add(str(fact_node_id(_fact_repo(fact, fallback_repo), kind, name)))
+            ids.add(str(fact_node_id(*_fact_key(fact, _fact_repo(fact, fallback_repo)))))
     for repo in _snapshot_repos(facts, fallback_repo):
         ids.add(str(fact_node_id(repo, "repository", repo)))
     return ids
@@ -947,6 +1036,8 @@ class _CodeGraphLoadState(list):
     add_code_graph_edges reuse the same single graph read.
     """
 
+    existing_edges: list | None = None
+    migration: Any = None
     existing_edge_keys: set | None = None
     existing_nodes: list | None = None
     node_delta: dict | None = None
@@ -986,6 +1077,7 @@ async def add_code_graph_data_points(
 
     graph_engine = await get_graph_engine()
     existing_nodes, existing_edges = await graph_engine.get_graph_data()
+    migration = plan_symbol_migration(existing_nodes, existing_edges, data_points)
     existing_hashes: dict[str, Any] = {
         str(node_id): properties.get("fact_hash")
         for node_id, properties in existing_nodes
@@ -1031,6 +1123,8 @@ async def add_code_graph_data_points(
 
     state = _CodeGraphLoadState(data_points)
     state.existing_nodes = existing_nodes
+    state.existing_edges = existing_edges
+    state.migration = migration
     state.existing_edge_keys = {
         (str(source), str(target), relationship)
         for source, target, relationship, _properties in existing_edges
@@ -1080,8 +1174,13 @@ async def add_code_graph_edges(
     facts, receipt = await asyncio.to_thread(parse_enola_snapshot, snapshot_dir)
     if namespace:
         facts = await asyncio.to_thread(namespace_snapshot_repos, facts, namespace, repo_path)
+    diagnostics = []
     edges, skipped = await asyncio.to_thread(
-        build_code_graph_edges, facts, repo_path=repo_path, repo_name=repo_name
+        build_code_graph_edges,
+        facts,
+        repo_path=repo_path,
+        repo_name=repo_name,
+        diagnostics=diagnostics,
     )
     logger.info("Resolved %d code graph edge(s), skipped %d.", len(edges), skipped)
 
@@ -1093,22 +1192,38 @@ async def add_code_graph_edges(
         # one read here instead.
         existing_nodes = getattr(data_points, "existing_nodes", None)
         existing_edge_keys = getattr(data_points, "existing_edge_keys", None)
-        if existing_nodes is None or existing_edge_keys is None:
+        existing_edges = getattr(data_points, "existing_edges", None)
+        if existing_nodes is None or existing_edge_keys is None or existing_edges is None:
             existing_nodes, existing_edges = await graph_engine.get_graph_data()
             existing_edge_keys = {
                 (str(source), str(target), relationship)
                 for source, target, relationship, _properties in existing_edges
             }
 
-        # Delta writes: only edges the graph does not already have.
+        migration = getattr(data_points, "migration", None)
+        if migration is None:
+            migration = plan_symbol_migration(existing_nodes, existing_edges or [], data_points)
+        await transfer_symbol_references(graph_engine, migration, existing_edges or [], ctx)
+        existing_edge_keys.update((str(s), str(t), r) for s, t, r, _ in migration.edges)
+        owned_edge_keys = {
+            (str(source), str(target), relation)
+            for source, target, relation, properties in existing_edges or []
+            if isinstance(properties, dict) and properties.get("producer") == CODE_EDGE_OWNER
+        }
+
+        # Delta writes: every edge the graph does not hold as a marked one. An unmarked edge
+        # a snapshot regenerates (written by an earlier mapping) is rewritten once to carry
+        # the producer marker, so the sweep can remove it when its relation disappears.
         new_edges = [
-            edge
-            for edge in edges
-            if (str(edge[0]), str(edge[1]), edge[2]) not in existing_edge_keys
+            edge for edge in edges if (str(edge[0]), str(edge[1]), edge[2]) not in owned_edge_keys
         ]
+        edges_added = sum(
+            (str(edge[0]), str(edge[1]), edge[2]) not in existing_edge_keys for edge in new_edges
+        )
         logger.info(
-            "Code graph edge delta: %d new, %d already present.",
-            len(new_edges),
+            "Code graph edge delta: %d new, %d marked, %d already present.",
+            edges_added,
+            len(new_edges) - edges_added,
             len(edges) - len(new_edges),
         )
         if new_edges:
@@ -1149,6 +1264,7 @@ async def add_code_graph_edges(
             existing_nodes,
             existing_edge_keys,
             repo_name=repo_name,
+            owned_edge_keys=owned_edge_keys,
         )
 
         # Retag: strip node_set names this repo carried before but not anymore.
@@ -1169,12 +1285,23 @@ async def add_code_graph_edges(
         node_delta = getattr(data_points, "node_delta", None) or {}
         delta = {
             **node_delta,
-            "edges_added": len(new_edges),
+            "edges_added": edges_added,
+            "edges_marked": len(new_edges) - edges_added,
             "edges_removed": edges_removed,
             "nodes_removed": nodes_removed,
             "samples_removed": samples_removed,
             "node_set_detagged": detagged,
             "snapshot_id": snapshot_id,
+            "references_migrated": len(migration.edges),
+            "mapping": {
+                "relations_skipped": skipped,
+                "by_reason": dict(Counter(item["reason"] for item in diagnostics)),
+                # An external dependency is not a gap and is by far the most common skip, so
+                # it is counted above and not listed.
+                "unresolved": [
+                    item for item in diagnostics if item["reason"] != "external_dependency"
+                ],
+            },
             "loaded_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -1225,6 +1352,7 @@ async def _sweep_stale_code_graph(
     existing_nodes: list[tuple],
     existing_edge_keys: set,
     repo_name: str | None = None,
+    owned_edge_keys: set | None = None,
 ) -> tuple[int, int, list[str]]:
     """Remove code graph nodes/edges no longer derivable from the snapshot.
 
@@ -1279,7 +1407,7 @@ async def _sweep_stale_code_graph(
         repo = _fact_repo(fact, fallback_repo)
         expected_edge_keys.add(
             (
-                str(fact_node_id(repo, kind, name)),
+                str(fact_node_id(*_fact_key(fact, repo))),
                 str(fact_node_id(repo, "repository", repo)),
                 "part_of",
             )
@@ -1291,6 +1419,7 @@ async def _sweep_stale_code_graph(
         if source in current_ids
         and target in current_ids
         and (source, target, relationship) not in expected_edge_keys
+        and (source, target, relationship) in (owned_edge_keys or set())
     ]
     if stale_edges:
         for start in range(0, len(stale_edges), _SWEEP_CHUNK_SIZE):

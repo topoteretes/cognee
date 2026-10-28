@@ -324,7 +324,7 @@ async def test_capabilities_reports_operations_features_counts_and_limits():
         result = await CodeRetriever(config={"operation": "capabilities"}).get_retrieved_objects("")
 
     assert result["operation"] == "capabilities"
-    assert result["version"] == 1
+    assert result["version"] == 2
     assert result["operations"] == sorted(result["operations"])
     assert {"ask", "search", "neighbors", "subgraph", "flows", "hubs", "capabilities"} <= set(
         result["operations"]

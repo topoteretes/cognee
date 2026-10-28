@@ -85,6 +85,10 @@ async def main():
         # Graphviz, and any other operation accepts the same option.
         code_query={"operation": "architecture", "max_nodes": 40},
     )
+    # Include extractor-labelled React components and hooks, retaining calls
+    # between them and their source file/line. Other symbols roll up to modules.
+    # code_query={"operation": "architecture", "symbol_roles": ["component", "hook"]}
+    # Use node_types=["symbol"] with symbol_roles for just those symbols.
     # search() returns one {dataset_id, dataset_name, search_result} entry per
     # dataset; the CODE operation's result is the (single) search_result item.
     for entry in architecture:

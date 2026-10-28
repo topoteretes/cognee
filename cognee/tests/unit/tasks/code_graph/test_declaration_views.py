@@ -89,8 +89,8 @@ def test_a_model_name_resolves_to_its_class_not_the_storage_view():
 
     edges, skipped = build_code_graph_edges(facts)
 
-    show = fact_node_id(REPO, "symbol", SHOW)
-    model = fact_node_id(REPO, "symbol", MODEL)
+    show = fact_node_id(REPO, "symbol", SHOW, "app/Http/Controllers/UserController.php")
+    model = fact_node_id(REPO, "symbol", MODEL, MODEL_FILE)
     storage = fact_node_id(REPO, "storage", MODEL)
     assert skipped == 0
     assert _edges(edges) == {
@@ -111,9 +111,9 @@ def test_a_relation_method_name_resolves_to_the_method_not_the_association_view(
     assert skipped == 0
     assert _edges(edges) == {
         (
-            fact_node_id(REPO, "symbol", SHOW),
+            fact_node_id(REPO, "symbol", SHOW, "app/Http/Controllers/UserController.php"),
             "calls",
-            fact_node_id(REPO, "symbol", RELATION),
+            fact_node_id(REPO, "symbol", RELATION, MODEL_FILE),
         )
     }
 
@@ -149,9 +149,11 @@ def test_two_same_named_symbols_stay_ambiguous_with_a_view_beside_them():
     assert skipped == 1
     assert _edges(edges) == {
         (
-            fact_node_id("a", "symbol", "App\\Jobs\\Sync::handle"),
+            fact_node_id(
+                "a", "symbol", "App\\Jobs\\Sync::handle", "app/Http/Controllers/UserController.php"
+            ),
             "instantiates",
-            fact_node_id("a", "symbol", MODEL),
+            fact_node_id("a", "symbol", MODEL, MODEL_FILE),
         )
     }
 
@@ -172,7 +174,9 @@ def test_a_view_in_another_repo_is_not_merged_into_the_symbol():
     assert skipped == 1
     assert _edges(edges) == {
         (
-            fact_node_id("b", "symbol", "App\\Jobs\\Sync::handle"),
+            fact_node_id(
+                "b", "symbol", "App\\Jobs\\Sync::handle", "app/Http/Controllers/UserController.php"
+            ),
             "instantiates",
             fact_node_id("b", "storage", MODEL),
         )
@@ -208,9 +212,12 @@ def test_a_jpa_entity_resolves_by_qualified_and_bare_name():
     edges, skipped = build_code_graph_edges(facts)
 
     finder = fact_node_id(
-        "petclinic", "symbol", "src/main/java/org/acme/owner.OwnerController.findOwner"
+        "petclinic",
+        "symbol",
+        "src/main/java/org/acme/owner.OwnerController.findOwner",
+        "app/Http/Controllers/UserController.php",
     )
-    owner = fact_node_id("petclinic", "symbol", entity)
+    owner = fact_node_id("petclinic", "symbol", entity, entity_file)
     assert skipped == 0
     assert _edges(edges) == {(finder, "instantiates", owner), (finder, "calls", owner)}
 
@@ -239,9 +246,11 @@ def test_a_bare_name_with_a_rival_symbol_elsewhere_stays_skipped():
     assert skipped == 1
     assert _edges(edges) == {
         (
-            fact_node_id("petclinic", "symbol", finder_name),
+            fact_node_id(
+                "petclinic", "symbol", finder_name, "app/Http/Controllers/UserController.php"
+            ),
             "instantiates",
-            fact_node_id("petclinic", "symbol", entity),
+            fact_node_id("petclinic", "symbol", entity, entity_file),
         )
     }
 
@@ -261,6 +270,6 @@ def test_insight_evidence_cites_the_model_class():
         (
             fact_node_id(REPO, "insight", insight["name"]),
             "evidences",
-            fact_node_id(REPO, "symbol", MODEL),
+            fact_node_id(REPO, "symbol", MODEL, MODEL_FILE),
         )
     }

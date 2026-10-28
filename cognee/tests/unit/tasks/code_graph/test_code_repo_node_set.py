@@ -50,7 +50,11 @@ FACTS = [
 
 
 def _node_id(kind, name):
-    return str(fact_node_id(REPO, kind, name))
+    file = next(
+        (fact.get("file", "") for fact in FACTS if fact["kind"] == kind and fact["name"] == name),
+        "",
+    )
+    return str(fact_node_id(REPO, kind, name, file))
 
 
 REPO_NODE_ID = _node_id("repository", REPO)
