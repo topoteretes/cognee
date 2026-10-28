@@ -618,9 +618,7 @@ def test_idle_worker_processes_are_reaped(monkeypatch):
     monkeypatch.setattr(extractor_module, "WORKER_IDLE_SECONDS", 0.05)
     shut_down = []
     fake_pool = SimpleNamespace(shutdown=lambda **kwargs: shut_down.append(kwargs))
-    monkeypatch.setattr(
-        extractor_module.ProcessPoolExecutor, "__new__", lambda cls, *a, **k: fake_pool
-    )
+    monkeypatch.setattr(extractor_module, "ProcessPoolExecutor", lambda *a, **k: fake_pool)
     monkeypatch.setattr(extractor_module, "_pool_sizes", lambda: (2, 1))
     pool = extractor_module._acquire_worker_pool("model")
     assert pool.executor is fake_pool and pool.users == 1
@@ -636,9 +634,7 @@ def test_workers_in_use_are_not_reaped(monkeypatch):
     extractor_module.reset_inference_pool()
     monkeypatch.setattr(extractor_module, "WORKER_IDLE_SECONDS", 0.05)
     fake_pool = SimpleNamespace(shutdown=lambda **kwargs: None)
-    monkeypatch.setattr(
-        extractor_module.ProcessPoolExecutor, "__new__", lambda cls, *a, **k: fake_pool
-    )
+    monkeypatch.setattr(extractor_module, "ProcessPoolExecutor", lambda *a, **k: fake_pool)
     monkeypatch.setattr(extractor_module, "_pool_sizes", lambda: (2, 1))
     pool = extractor_module._acquire_worker_pool("model")
     assert extractor_module._acquire_worker_pool("model") is pool  # a second caller
@@ -662,9 +658,9 @@ def test_a_late_broken_release_leaves_a_fresh_pool_alone(monkeypatch):
     extractor_module.reset_inference_pool()
     monkeypatch.setattr(extractor_module, "_pool_sizes", lambda: (2, 1))
     monkeypatch.setattr(
-        extractor_module.ProcessPoolExecutor,
-        "__new__",
-        lambda cls, *a, **k: SimpleNamespace(shutdown=lambda **kwargs: None),
+        extractor_module,
+        "ProcessPoolExecutor",
+        lambda *a, **k: SimpleNamespace(shutdown=lambda **kwargs: None),
     )
     broken = extractor_module._acquire_worker_pool("model")
     assert extractor_module._acquire_worker_pool("model") is broken
@@ -703,3 +699,32 @@ def test_a_worker_takes_its_thread_count_from_the_parent(monkeypatch):
     extractor_module._worker_init("model", 3)
     assert extractor_module._pool_sizes() == (1, 3)
     extractor_module.reset_inference_pool()
+
+
+def spawned_worker_init(model_name, threads):
+    """Start-up of a real worker process: patches do not reach it, so swap the
+    model in here, then run the real start-up."""
+    extractor_module.load_extractor = lambda _name: window_model()
+    extractor_module._worker_init(model_name, threads)
+
+
+def test_a_real_worker_process_runs_its_share(monkeypatch):
+    """processes=2 on a real spawned pool: the start-up arguments, the share and its
+    results cross the process boundary, and the merged result is unchanged."""
+    from cognee.tasks.graph.gliner_demo.schema import GlinerSchema
+
+    model = window_model()  # skips first without gliner2
+    monkeypatch.setattr(extractor_module, "_worker_init", spawned_worker_init)
+    monkeypatch.setattr(extractor_module, "inference_processes", lambda: 2)
+    extractor_module.reset_inference_pool()
+    try:
+        result = extractor_module.extract_batch(
+            model,
+            TEXTS,
+            GlinerSchema({"name": ""}, {}, source="caller"),
+            model_name="model",
+            **OPTIONS,
+        )
+    finally:
+        extractor_module.reset_inference_pool()
+    assert result == sequential_reference(window_model())

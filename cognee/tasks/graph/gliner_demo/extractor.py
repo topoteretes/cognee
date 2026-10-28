@@ -629,12 +629,13 @@ def extract_batch(
     batch_size: int = DEFAULT_BATCH_SIZE,
     window_words: int = DEFAULT_WINDOW_WORDS,
     window_overlap_words: int = DEFAULT_WINDOW_OVERLAP_WORDS,
-    model_name: str = DEFAULT_MODEL,
+    model_name: str,
 ) -> list[Mapping[str, Any]]:
     """Run one batched entity+relation extraction; one result dict per text.
 
     Spread over GLINER_INFERENCE_PROCESSES processes and GLINER_INFERENCE_THREADS
-    threads each; ``model_name`` is what worker processes load.
+    threads each; worker processes load ``model_name``, so it must name the
+    model ``extractor`` was loaded from.
     """
     if not texts:
         return []
