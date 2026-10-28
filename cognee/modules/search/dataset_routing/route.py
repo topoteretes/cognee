@@ -50,13 +50,20 @@ async def route_datasets(
     A dataset without a row has never been through the global context index
     (or lost it), so routing knows nothing about it and never drops it. An
     adapter that cannot score rows by id, or a routing collection built with
-    another embedding width, leaves every dataset unindexed.
+    another embedding width, leaves every dataset unindexed. So does a
+    deployment with no routing collection at all, before the query is
+    embedded: a search type that needs no embedding (CODE, lexical, Cypher)
+    must not start needing one for a routing step that cannot narrow anything.
+    An embedding failure is a warning and leaves every dataset unindexed too,
+    for the same reason: routing is a narrowing, never the search itself.
     """
     if top_k < 1:
         raise ValueError("Dataset routing needs top_k >= 1.")
     candidates = tuple(dataset_ids)
 
     engine = get_dataset_route_engine()
+    if not await engine.has_collection(DATASET_ROUTE_COLLECTION):
+        return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
     if not await routing_width_matches(engine):
         return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
 
@@ -66,7 +73,15 @@ async def route_datasets(
         for row_id in dataset_route_ids(dataset_id, documents.get(dataset_id, [])):
             dataset_by_row[row_id] = dataset_id
 
-    query_vector = (await engine.embedding_engine.embed_text([query_text]))[0]
+    try:
+        query_vector = (await engine.embedding_engine.embed_text([query_text]))[0]
+    except Exception:
+        logger.warning(
+            "Dataset routing is off for this search: the query could not be embedded. "
+            "Searching every readable dataset.",
+            exc_info=True,
+        )
+        return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
     try:
         scored = await engine.score_by_ids(
             DATASET_ROUTE_COLLECTION, list(dataset_by_row), query_vector

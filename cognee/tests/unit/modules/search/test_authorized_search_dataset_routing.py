@@ -6,6 +6,7 @@ from uuid import NAMESPACE_OID, uuid4, uuid5
 
 import pytest
 
+from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.search.dataset_routing import DatasetRoutingConfig, DatasetRoutingDecision
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
@@ -252,6 +253,34 @@ async def test_routed_datasets_without_memory_widen_to_every_dataset(lane):
 
 
 @pytest.mark.asyncio
+async def test_an_empty_row_result_without_a_context_counts_as_nothing_found(lane):
+    """Cypher and natural-language retrievers report rows and no context: with no
+    rows in the routed dataset the search widens to the one that has them."""
+    lane.decision = _narrowed(lane)
+    a, b = lane.readable
+    lane.responses = [[_payload(b, context=None)], [_payload(a, ["row"], context=None)]]
+
+    out = await _search(lane)
+
+    assert lane.fan_out_calls == [[b.id], [a.id, b.id]]
+    assert [payload.dataset_id for payload in out] == [a.id]
+
+
+@pytest.mark.asyncio
+async def test_a_code_seed_the_routed_dataset_cannot_resolve_widens(lane):
+    """The fan-out softens a seed miss per dataset only when it searches several;
+    routed to one, the miss escapes and must widen rather than fail the call."""
+    lane.decision = _narrowed(lane)
+    a, b = lane.readable
+    lane.responses = [CodeSeedNotFoundError("no such symbol"), [_payload(a, ["fact"])]]
+
+    out = await _search(lane)
+
+    assert lane.fan_out_calls == [[b.id], [a.id, b.id]]
+    assert [payload.dataset_id for payload in out] == [a.id]
+
+
+@pytest.mark.asyncio
 async def test_no_data_anywhere_still_raises(lane):
     lane.decision = _narrowed(lane)
     lane.responses = [NoDataError("nothing here")]
@@ -290,6 +319,10 @@ def test_retrieved_nothing_reads_the_context_not_the_completion():
     # Any context: a hit, even with no completion.
     assert _payload(dataset, ["x"]).retrieved_nothing() is False
     assert _payload(dataset, context="passage").retrieved_nothing() is False
-    # No context at all: nothing was retrieved, so not a miss; an error always is.
+    # No context and a completion: nothing was retrieved (an acknowledgement), not a miss.
     assert _payload(dataset, context=None, completion=["Noted."]).retrieved_nothing() is False
+    # No context and no completion: a row-reporting retriever; its rows decide.
+    assert _payload(dataset, context=None).retrieved_nothing() is True
+    assert _payload(dataset, ["row"], context=None).retrieved_nothing() is False
+    # An error always is a miss.
     assert _payload(dataset, context=None, error="no memory").retrieved_nothing() is True

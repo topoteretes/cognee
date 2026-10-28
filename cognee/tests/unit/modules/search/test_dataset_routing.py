@@ -35,11 +35,21 @@ class FakeEngine:
     collection fails here.
     """
 
-    def __init__(self, scores=None, existing=None, score_error=None, stored_width=None):
+    def __init__(
+        self,
+        scores=None,
+        existing=None,
+        score_error=None,
+        stored_width=None,
+        collection_exists=True,
+        embed_error=None,
+    ):
         self.scores = scores or {}
         self.existing = existing or {}
         self.score_error = score_error
         self.stored_width = stored_width  # what the store's vector columns hold; None = empty
+        self.collection_exists = collection_exists
+        self.embed_error = embed_error
         self.created, self.deleted, self.scored_ids, self.embedded = [], [], [], []
         self.dropped = []
         self.embedding_engine = types.SimpleNamespace(
@@ -47,8 +57,14 @@ class FakeEngine:
         )
 
     async def _embed(self, texts):
+        if self.embed_error is not None:
+            raise self.embed_error
         self.embedded.extend(texts)
         return [[0.1, 0.2] for _ in texts]
+
+    async def has_collection(self, collection_name):
+        assert collection_name == DATASET_ROUTE_COLLECTION
+        return self.collection_exists
 
     async def get_stored_vector_size(self):
         return self.stored_width
@@ -179,6 +195,34 @@ async def test_no_collection_or_no_scoring_support_leaves_every_dataset_searched
     assert decision.routed == ()
     assert decision.unindexed == (a, b)
     assert decision.narrowed is False
+
+
+@pytest.mark.asyncio
+async def test_no_routing_collection_means_no_embedding_call(monkeypatch):
+    """A deployment that never built an index: a CODE or lexical search must not
+    start needing an embedding provider for a routing step that cannot narrow."""
+    a, b = uuid4(), uuid4()
+    engine = FakeEngine(collection_exists=False)
+    _patch(monkeypatch, engine, {a: [], b: []})
+
+    decision = await route_datasets("q", [a, b], top_k=1)
+
+    assert decision.unindexed == (a, b) and decision.narrowed is False
+    assert engine.embedded == [] and engine.scored_ids == []
+
+
+@pytest.mark.asyncio
+async def test_an_embedding_failure_warns_and_leaves_every_dataset_searched(monkeypatch, caplog):
+    a, b = uuid4(), uuid4()
+    engine = FakeEngine(embed_error=RuntimeError("provider down"))
+    _patch(monkeypatch, engine, {a: [], b: []})
+
+    with caplog.at_level("WARNING", logger="dataset_routing"):
+        decision = await route_datasets("q", [a, b], top_k=1)
+
+    assert decision.unindexed == (a, b) and decision.narrowed is False
+    assert engine.scored_ids == []
+    assert "could not be embedded" in caplog.text
 
 
 @pytest.mark.asyncio

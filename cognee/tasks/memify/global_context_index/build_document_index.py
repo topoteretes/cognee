@@ -84,11 +84,25 @@ async def build_document_index(
     # The routing collection mirrors this index and reconciles against the full
     # desired set, not the diff, so a row it is missing is written too.
     await sync_dataset_routes(data.dataset_id, list(desired.values()))
+    changed_buckets = [summary for summary in changed if not summary.is_root]
+    # A root the graph lacked took every surviving bucket's summarized_in edge
+    # with it (a document deletion drops the root), so its rebuild links every
+    # bucket to it again, not only the ones whose text changed.
+    root_was_missing = str(create_root_summary_id(data.dataset_id)) not in (
+        data.existing_summary_texts
+    )
     await _persist_bucket_edges(
-        [summary for summary in changed if not summary.is_root],
+        changed_buckets,
         data.dataset_id,
         unified_engine,
         link_documents=link_documents,
+        relink=[
+            summary
+            for summary in desired.values()
+            if not summary.is_root and summary not in changed_buckets
+        ]
+        if root_was_missing
+        else [],
         ctx=ctx,
     )
     return changed
@@ -100,23 +114,29 @@ async def _persist_bucket_edges(
     unified_engine: Any,
     *,
     link_documents: bool,
+    relink: list[GlobalContextSummary] = (),
     ctx: PipelineContext | None,
 ) -> None:
-    """Link the buckets whose text was just written.
+    """Link the buckets whose text was just written, and re-link ``relink`` to the root.
 
-    Both relationships go out in one write, so the run costs one edge statement
-    and one provenance-marker read however many kinds of edge it writes.
+    ``relink`` holds unchanged buckets whose root edge is gone because the
+    root was rebuilt; they get that edge only, their document edge was never
+    touched. Every relationship goes out in one write, so the run costs one
+    edge statement and one provenance-marker read however many kinds of edge
+    it writes.
 
     The root id derives from the dataset id alone, so it never changes and an
     unchanged bucket's edges stay correct. The cost is that a run that crashes
     between the node write and here leaves those buckets unlinked until their
     text changes again; they are reached by vector search, not by traversal.
     """
-    if not buckets:
+    if not buckets and not relink:
         return
 
     root_id = str(create_root_summary_id(dataset_id))
-    edges_by_relationship = {SUMMARIZED_IN: [(str(bucket.id), root_id) for bucket in buckets]}
+    edges_by_relationship = {
+        SUMMARIZED_IN: [(str(bucket.id), root_id) for bucket in (*buckets, *relink)]
+    }
     if link_documents:
         edges_by_relationship[SUMMARIZES] = [
             (str(bucket.id), bucket.document_id) for bucket in buckets

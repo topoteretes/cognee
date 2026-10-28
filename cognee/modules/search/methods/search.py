@@ -279,15 +279,20 @@ async def authorized_search(
 
     # Routed: the best-scoring datasets plus every unindexed one. Retrieving
     # nothing there (judged on the retrieval context, since a completion is
-    # written even over an empty one), or only datasets without searchable
+    # written even over an empty one), only datasets without searchable
     # memory (an unscoped search raises that only when every dataset lacks
-    # it), widens the search back to every readable dataset.
+    # it), or a CODE seed the routed dataset alone cannot resolve (the fan-out
+    # softens a seed miss per dataset only when it searches several), widens
+    # the search back to every readable dataset.
+    from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
+
     try:
         search_results = await _search(routed_datasets)
-    except NoDataError:
+    except (NoDataError, CodeSeedNotFoundError) as error:
         logger.info(
-            "Dataset routing picked datasets with no searchable memory; "
-            "searching every readable dataset."
+            "Dataset routing picked datasets that cannot answer (%s); "
+            "searching every readable dataset.",
+            type(error).__name__,
         )
         return await _search(search_datasets)
     if all(payload.retrieved_nothing() for payload in search_results):

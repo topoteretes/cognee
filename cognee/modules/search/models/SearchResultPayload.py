@@ -80,13 +80,16 @@ class SearchResultPayload(BaseModel):
         Dataset routing's widening reads this, not ``entries()``: a completion is
         written even over an empty context ("the context does not mention..."), and
         a miss marker is a completion too, so only the retrieval context says whether
-        the dataset held anything. A payload with no context and no error ran no
-        retrieval (a session-turn acknowledgement) and is not a miss.
+        the dataset held anything. Without a context, the completion tells the two
+        remaining cases apart: a payload with one ran no retrieval (a session-turn
+        acknowledgement) and is not a miss; one with neither came from a retriever
+        that reports rows and no context (Cypher, natural language), so its rows
+        decide.
         """
         if self.error is not None:
             return True
         if self.context is None:
-            return False
+            return self.completion is None and not any(_as_list(self.result_object))
         return not any(_as_list(self.context))
 
     @field_serializer("result_object")

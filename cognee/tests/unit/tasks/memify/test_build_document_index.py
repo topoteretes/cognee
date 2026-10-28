@@ -290,6 +290,47 @@ async def test_only_changed_nodes_are_written_and_everything_else_is_deleted(mon
     ]
 
 
+@pytest.mark.asyncio
+async def test_a_rebuilt_root_relinks_every_surviving_bucket(monkeypatch):
+    """A document deletion drops the root, and with it every other bucket's edge to
+    it. The build that writes the root again links the unchanged buckets back,
+    with the root edge only: their document edge was never touched."""
+    alpha, beta, root = build_context_summaries(two_document_content())
+    content = two_document_content(
+        existing_summary_texts={
+            str(alpha.id): alpha.text,  # unchanged, but its root edge is gone
+            str(beta.id): "what the last run wrote",
+            # no root: dropped by a document deletion
+        }
+    )
+    edges = []
+
+    async def fake_engine():
+        return SimpleNamespace(graph="graph")
+
+    async def noop(*args, **kwargs):
+        return None
+
+    async def fake_edges(edges_by_relationship, engine, ctx=None):
+        edges.append(edges_by_relationship)
+
+    monkeypatch.setattr(build_document_index_module, "get_unified_engine", fake_engine)
+    monkeypatch.setattr(build_document_index_module, "delete_context_index_nodes", noop)
+    monkeypatch.setattr(build_document_index_module, "persist_context_summaries", noop)
+    monkeypatch.setattr(build_document_index_module, "sync_dataset_routes", noop)
+    monkeypatch.setattr(build_document_index_module, "persist_context_index_edges", fake_edges)
+
+    changed = await build_document_index_module.build_document_index(content)
+
+    assert [summary.id for summary in changed] == [beta.id, root.id]
+    assert edges == [
+        {
+            "summarized_in": [(str(beta.id), str(root.id)), (str(alpha.id), str(root.id))],
+            "summarizes": [(str(beta.id), "d2")],
+        }
+    ]
+
+
 # --- deletion ----------------------------------------------------------------
 
 
