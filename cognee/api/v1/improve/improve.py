@@ -198,7 +198,7 @@ async def improve(
             per-dataset and unaffected.)
         build_global_context_index: Opt in to ``global_context_index``.
         build_truth_subspace: Opt in to ``build_truth_subspace``.
-        review_conflicts: Review dated source facts and update conflict descriptions.
+        review_conflicts: Review dated source facts and store their conflicts.
             Also enabled by ``IMPROVE_REVIEW_CONFLICTS=true``.
         **kwargs: Additional options — see ``ImproveKwargs``.
 

@@ -191,11 +191,10 @@ _IMPROVE_STAGE_DESCRIPTORS: dict[str, dict[str, Any]] = {
     },
     "review_conflicts": {
         "label": "review conflicts",
-        "summary": "Reviews source facts and dates, stores conflicts and updates descriptions.",
+        "summary": "Reviews dated source facts and stores conflicts.",
         "pipeline_name": "memify_pipeline",
         "effects": [
             {"effect": "produces", "target_type": "FactConflict"},
-            {"effect": "modifies", "target_type": "Entity", "property": "description"},
         ],
     },
     "global_context_index": {

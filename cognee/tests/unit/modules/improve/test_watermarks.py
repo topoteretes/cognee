@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.modules.improve import graph_changes
+from cognee.modules.improve import watermarks
 from cognee.modules.pipelines.models import PipelineRunStatus
 
 
@@ -56,13 +56,13 @@ def _install_engine(monkeypatch, answers):
     return session
 
 
-@pytest.mark.parametrize("key", [graph_changes.REVIEW_WATERMARK_KEY])
+@pytest.mark.parametrize("key", [watermarks.REVIEW_WATERMARK_KEY])
 @pytest.mark.asyncio
 async def test_stamp_lookup_filters_in_sql_for_sqlite_and_postgres(monkeypatch, key):
     from sqlalchemy.dialects import postgresql, sqlite
 
     session = _install_engine(monkeypatch, [[]])
-    assert await graph_changes.last_improve_watermark(uuid4(), key) is None
+    assert await watermarks.last_improve_watermark(uuid4(), key) is None
     statement = session.statements[0]
     sqlite_sql = str(
         statement.compile(dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True})
@@ -76,7 +76,7 @@ async def test_stamp_lookup_filters_in_sql_for_sqlite_and_postgres(monkeypatch, 
     assert "LIMIT 1" in sqlite_sql and "LIMIT 1" in postgres_sql
 
 
-@pytest.mark.parametrize("key", [graph_changes.REVIEW_WATERMARK_KEY])
+@pytest.mark.parametrize("key", [watermarks.REVIEW_WATERMARK_KEY])
 @pytest.mark.asyncio
 async def test_stamp_survives_long_history_and_excludes_failed_rows(monkeypatch, tmp_path, key):
     import importlib
@@ -116,7 +116,7 @@ async def test_stamp_survives_long_history_and_excludes_failed_rows(monkeypatch,
                 row(
                     0,
                     pipeline_run_id=operation_id,
-                    run_info=graph_changes.watermark_stamp(key, "completed", start),
+                    run_info=watermarks.watermark_stamp(key, "completed", start),
                 )
             )
             session.add_all(row(i) for i in range(1, 102))
@@ -132,12 +132,12 @@ async def test_stamp_survives_long_history_and_excludes_failed_rows(monkeypatch,
                 session.add(
                     row(
                         offset,
-                        run_info=graph_changes.watermark_stamp(key, "completed", start),
+                        run_info=watermarks.watermark_stamp(key, "completed", start),
                         **fields,
                     )
                 )
             await session.commit()
-        watermark = await graph_changes.last_improve_watermark(
+        watermark = await watermarks.last_improve_watermark(
             dataset_id, key, exclude_operation_id=current_id
         )
         assert (watermark.operation_id, watermark.started_at) == (operation_id, start)
@@ -146,7 +146,7 @@ async def test_stamp_survives_long_history_and_excludes_failed_rows(monkeypatch,
             await session.commit()
         # An invalid newest stamp cannot borrow an older success to skip work.
         assert (
-            await graph_changes.last_improve_watermark(
+            await watermarks.last_improve_watermark(
                 dataset_id, key, exclude_operation_id=current_id
             )
             is None
@@ -188,8 +188,8 @@ async def _pipeline_runs_on_sqlite(monkeypatch, tmp_path, dataset_id, rows):
         "operation_name": "improve",
         "outcome": "succeeded",
         "ended_at": STAMP_START,
-        "run_info": graph_changes.watermark_stamp(
-            graph_changes.GLOBAL_CONTEXT_WATERMARK_KEY, "completed", STAMP_START
+        "run_info": watermarks.watermark_stamp(
+            watermarks.GLOBAL_CONTEXT_WATERMARK_KEY, "completed", STAMP_START
         ),
     }
     # The build's terminal row names its parent; its start row (a case below) does not.
@@ -259,8 +259,8 @@ async def test_every_run_but_a_read_a_noop_or_the_stamped_one_changes_the_datase
 
     async with _pipeline_runs_on_sqlite(monkeypatch, tmp_path, dataset_id, [row]):
         assert (
-            await graph_changes.has_dataset_changed_since_last_improve(
-                dataset_id, graph_changes.GLOBAL_CONTEXT_WATERMARK_KEY
+            await watermarks.has_dataset_changed_since_last_improve(
+                dataset_id, watermarks.GLOBAL_CONTEXT_WATERMARK_KEY
             )
             is changed
         )
@@ -270,12 +270,12 @@ async def test_every_run_but_a_read_a_noop_or_the_stamped_one_changes_the_datase
 async def test_another_datasets_run_counts_only_when_the_graph_is_shared(monkeypatch, tmp_path):
     dataset_id = uuid4()
     other_write = {"dataset_id": uuid4(), "operation_name": "cognify_pipeline"}
-    key = graph_changes.GLOBAL_CONTEXT_WATERMARK_KEY
+    key = watermarks.GLOBAL_CONTEXT_WATERMARK_KEY
 
     async with _pipeline_runs_on_sqlite(monkeypatch, tmp_path, dataset_id, [other_write]):
-        assert await graph_changes.has_dataset_changed_since_last_improve(dataset_id, key) is False
+        assert await watermarks.has_dataset_changed_since_last_improve(dataset_id, key) is False
         assert (
-            await graph_changes.has_dataset_changed_since_last_improve(
+            await watermarks.has_dataset_changed_since_last_improve(
                 dataset_id, key, any_dataset=True
             )
             is True
