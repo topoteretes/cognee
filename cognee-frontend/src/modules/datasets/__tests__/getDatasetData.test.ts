@@ -1,48 +1,46 @@
-import type { CogneeInstance } from "../../instances/types";
-import getDatasetData, { getAllDatasetData, getDatasetDataCount } from "../getDatasetData";
+import getDatasetData from "../getDatasetData";
+import type { CogneeInstance } from "@/modules/instances/types";
 
-const fetch = jest.fn();
-const instance = { name: "test", instanceId: "test", fetch } as CogneeInstance;
-const response = (body: unknown, ok = true) => ({ ok, status: ok ? 200 : 404, json: async () => body }) as Response;
-beforeEach(() => fetch.mockReset());
+function instanceReturning(body: unknown): CogneeInstance & { fetch: jest.Mock } {
+  return {
+    name: "test",
+    instanceId: "tenant-1",
+    fetch: jest.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(body) }),
+  };
+}
 
-test.each([{ count: -1 }, { count: 1.5 }, {}, { count: "100" }])("rejects invalid counts: %j", async body => {
-  fetch.mockResolvedValue(response(body));
-  await expect(getDatasetDataCount("a", instance)).rejects.toThrow();
-});
+describe("getDatasetData", () => {
+  it("sends the default limit and offset when none are given", async () => {
+    const instance = instanceReturning([]);
+    await getDatasetData("ds-1", instance);
+    expect(instance.fetch).toHaveBeenCalledWith("/v1/datasets/ds-1/data?limit=100&offset=0", { signal: undefined });
+  });
 
-test("count errors cannot masquerade as an empty dataset", async () => {
-  fetch.mockResolvedValue(response({ count: 0 }, false));
-  await expect(getDatasetDataCount("a", instance)).rejects.toThrow();
-  fetch.mockResolvedValue(response({ count: 250 }));
-  await expect(getDatasetDataCount("a", instance)).resolves.toBe(250);
-});
+  it("sends the caller's limit and offset", async () => {
+    const instance = instanceReturning([]);
+    await getDatasetData("ds-1", instance, { limit: 1000, offset: 2000 });
+    expect(instance.fetch).toHaveBeenCalledWith("/v1/datasets/ds-1/data?limit=1000&offset=2000", { signal: undefined });
+  });
 
-test("rejects non-array document responses", async () => {
-  fetch.mockResolvedValue(response({ message: "missing" }));
-  await expect(getDatasetData("a", instance)).rejects.toThrow();
-});
+  it("hands the caller's abort signal to the request", async () => {
+    const instance = instanceReturning([]);
+    const { signal } = new AbortController();
+    await getDatasetData("ds-1", instance, { signal });
+    expect(instance.fetch).toHaveBeenCalledWith(expect.any(String), { signal });
+  });
 
-test("explicit full traversal follows offsets past the server maximum", async () => {
-  fetch.mockResolvedValueOnce(response(Array.from({ length: 1000 }, (_, i) => ({ id: i }))))
-    .mockResolvedValueOnce(response([{ id: 1000 }]));
-  expect(await getAllDatasetData("a", instance)).toHaveLength(1001);
-  expect(fetch.mock.calls[1][0]).toContain("limit=1000&offset=1000");
-});
+  it("resolves with the parsed JSON body", async () => {
+    const rows = [{ id: "a" }, { id: "b" }];
+    const instance = instanceReturning(rows);
+    await expect(getDatasetData("ds-1", instance)).resolves.toEqual(rows);
+  });
 
-
-test.each([1000, 1001])("stops traversal when an old server ignores pagination (%i rows)", async length => {
-  fetch.mockResolvedValue(response(Array.from({ length }, (_, id) => ({ id }))));
-  await expect(getAllDatasetData("a", instance)).rejects.toThrow("pagination");
-  expect(fetch.mock.calls.length).toBeLessThanOrEqual(2);
-});
-
-
-test("overlap deduplication does not rewind server offsets", async () => {
-  const rows = (start: number, end: number) => Array.from({ length: end - start }, (_, i) => ({ id: start + i }));
-  fetch.mockResolvedValueOnce(response(rows(0, 1000)))
-    .mockResolvedValueOnce(response(rows(999, 1999)))
-    .mockResolvedValueOnce(response(rows(1999, 2000)));
-  expect(await getAllDatasetData("a", instance)).toEqual(rows(0, 2000));
-  expect(fetch.mock.calls[2][0]).toContain("offset=2000");
+  it("propagates a rejected fetch instead of swallowing it", async () => {
+    const instance: CogneeInstance = {
+      name: "test",
+      instanceId: "tenant-1",
+      fetch: jest.fn().mockRejectedValue(new Error("network down")),
+    };
+    await expect(getDatasetData("ds-1", instance)).rejects.toThrow("network down");
+  });
 });

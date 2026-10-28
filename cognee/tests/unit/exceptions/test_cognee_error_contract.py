@@ -51,6 +51,9 @@ SAMPLE_ARGUMENTS = {
     "attribute": "sample_attribute",
     # CapabilityDeniedError builds its message from the capability it refused.
     "capability": "sample_capability",
+    # SessionNodeSetConflictError: the node_set pinned on the session vs the one requested.
+    "pinned": ("project-a",),
+    "requested": ["project-b"],
     # DatasetNoDataError (search fan-out) wraps a retriever error for one dataset.
     "dataset": SimpleNamespace(
         name="sample_dataset", id="sample-dataset-id", tenant_id="sample-tenant-id"
@@ -67,6 +70,8 @@ SAMPLE_ARGUMENTS = {
     "dataset_id": "sample-dataset-id",
     "detail": "sample detail",
     "dimension": 1,
+    # AfterRunHookError: (dataset_id, dataset_name, error) per dataset whose step failed.
+    "failures": [("sample-dataset-id", "sample_dataset", RuntimeError("sample reason"))],
     "field": "sample_field",
     "got": "sample",
     "max_index": 2,

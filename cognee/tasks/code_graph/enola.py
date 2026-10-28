@@ -5,7 +5,8 @@ deterministically extracts an architectural graph from a codebase.
 `enola --generate <repo>` writes a `.enola/` directory whose contract
 artifacts (documented under docs/schema/ upstream, versioned by the receipt's
 ``format_version``) are `facts.jsonl` (one fact per line), `insights.json`
-(explainer findings with evidence) and `receipt.json` (provenance, counts and
+(explainer findings with evidence), `flows.json` (the ways into the program,
+ranked by what each reaches) and `receipt.json` (provenance, counts and
 extraction quality). Everything else in the directory is internal.
 """
 
@@ -16,6 +17,8 @@ import os
 import platform
 import shutil
 import sysconfig
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +58,10 @@ _RELATION_TARGET_KEYS = ("target", "name", "to", "target_name")
 # ~/.enola) is pure noise here — and the run must stay offline-safe. Prompts
 # and terminal hints assume an interactive shell.
 _SUBPROCESS_ENV_OVERRIDES = {"ENOLA_NO_UPDATE_CHECK": "1", "ENOLA_NO_PROMPTS": "1"}
+
+# Where a cluster config is read from when it is piped rather than written:
+# enola treats a path that names a file as a config, and reads it once.
+_STDIN_CONFIG_PATH = "/dev/stdin"
 
 
 class EnolaNotInstalledError(CogneeConfigurationError):
@@ -113,6 +120,59 @@ def find_enola_binary() -> str:
     raise EnolaNotInstalledError()
 
 
+async def _run_enola(
+    command: list[str],
+    cwd: Path,
+    timeout: float,
+    subject: str,
+    stdin_data: bytes | None = None,
+) -> None:
+    """Run one enola generate command to completion; raise EnolaSnapshotError on failure.
+
+    ``stdin_data`` is fed to the process on its standard input (a cluster
+    config passed as ``/dev/stdin``); without it stdin is left unconnected.
+    """
+    logger.info("Running enola: %s (cwd=%s)", " ".join(command), cwd)
+
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=str(cwd),
+        env={**os.environ, **_SUBPROCESS_ENV_OVERRIDES},
+        stdin=asyncio.subprocess.PIPE if stdin_data is not None else None,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    try:
+        communicating = (
+            process.communicate(stdin_data) if stdin_data is not None else process.communicate()
+        )
+        _stdout, stderr = await asyncio.wait_for(communicating, timeout=timeout)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        raise EnolaSnapshotError(message=f"enola timed out after {timeout} seconds on {subject}.")
+
+    stderr_text = stderr.decode(errors="replace") if stderr else ""
+    if process.returncode != 0:
+        # Artifacts already in .enola/ may be from an earlier run; callers
+        # must not ingest them (the error propagates before parsing).
+        raise EnolaSnapshotError(
+            message=(
+                f"enola exited with code {process.returncode} on {subject}. "
+                f"stderr tail: {stderr_text[-2000:]}"
+            )
+        )
+
+    # enola reports the configuration it resolved on stderr ("enola: using
+    # config ..." / "enola: no mcp-arch.yaml in ..., using built-in defaults").
+    # A config decides which extractors run and which paths are ignored, so
+    # the line belongs in the ingestion log next to the snapshot it shaped.
+    for line in stderr_text.splitlines():
+        if line.startswith("enola:"):
+            logger.info("%s", line.strip())
+
+
 async def run_enola_generate(
     repo_path: str | Path,
     timeout: float = 600.0,
@@ -132,46 +192,8 @@ async def run_enola_generate(
     # AND used as cwd: enola resolves an optional mcp-arch.yaml from the
     # working directory, so this honors a repo-local config while making sure
     # an unrelated one from the caller's cwd can never narrow the run.
-    command = [binary, "--generate", str(repo_path)]
     snapshot_dir = repo_path / ".enola"
-
-    logger.info("Running enola: %s (cwd=%s)", " ".join(command), repo_path)
-
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        cwd=str(repo_path),
-        env={**os.environ, **_SUBPROCESS_ENV_OVERRIDES},
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-
-    try:
-        _stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
-        raise EnolaSnapshotError(
-            message=f"enola timed out after {timeout} seconds on '{repo_path}'."
-        )
-
-    stderr_text = stderr.decode(errors="replace") if stderr else ""
-    if process.returncode != 0:
-        # Artifacts already in .enola/ may be from an earlier run; callers
-        # must not ingest them (the error propagates before parsing).
-        raise EnolaSnapshotError(
-            message=(
-                f"enola exited with code {process.returncode} on '{repo_path}'. "
-                f"stderr tail: {stderr_text[-2000:]}"
-            )
-        )
-
-    # enola reports the configuration it resolved on stderr ("enola: using
-    # config ..." / "enola: no mcp-arch.yaml in ..., using built-in defaults").
-    # A config decides which extractors run and which paths are ignored, so
-    # the line belongs in the ingestion log next to the snapshot it shaped.
-    for line in stderr_text.splitlines():
-        if line.startswith("enola:"):
-            logger.info("%s", line.strip())
+    await _run_enola([binary, "--generate", str(repo_path)], repo_path, timeout, f"'{repo_path}'")
 
     if not (snapshot_dir / "facts.jsonl").is_file():
         raise EnolaSnapshotError(
@@ -181,13 +203,119 @@ async def run_enola_generate(
     return snapshot_dir
 
 
+def _config_via_stdin() -> bool:
+    """Whether enola can read the cluster config from ``/dev/stdin`` here.
+
+    Windows has no ``/dev/stdin``, so the config goes through a temporary
+    file there. A function rather than a constant so tests can pick the path
+    without patching ``os.name`` (which breaks ``pathlib`` on the running
+    interpreter and pytest's own reporting with it).
+    """
+    return os.name != "nt"
+
+
+def render_cluster_config(repo_paths: list[Path], output_dir: str) -> str:
+    """The enola cluster config for these repositories, as YAML text.
+
+    enola accepts a cluster only as a ``repos:`` config, whose entries must be
+    plain path strings. Paths are written absolute, so the config means the
+    same thing wherever enola resolves it from, and as JSON strings, which are
+    valid YAML scalars and quote any path safely. ``output_dir`` replaces
+    ``.enola`` as the snapshot directory; enola joins it to each repository
+    path and refuses an absolute one. enola's per-repository
+    architecture history (revisions under ``~/.enola/graphs``) is switched
+    off: cognee keeps its own record of the snapshot it loaded.
+    """
+    lines = ["output:", f"  dir: {json.dumps(output_dir)}", "repos:"]
+    lines.extend(f"  - {json.dumps(str(path))}" for path in repo_paths)
+    lines.extend(["history:", "  enabled: false"])
+    return "\n".join(lines) + "\n"
+
+
+async def run_enola_cluster(
+    repo_paths: list[Path],
+    output_dir: str,
+    timeout: float = 600.0,
+) -> Path:
+    """Run `enola --generate` over a cluster of repositories; return one snapshot directory.
+
+    enola links the repositories of a cluster config into one graph and
+    writes that whole graph to every member's ``output_dir``, so any member's
+    directory is the cluster's snapshot. The first member's is returned.
+
+    The config is built from the repositories' paths and handed to enola on
+    its standard input (``--generate /dev/stdin``): enola reads the config
+    once, at start, so nothing has to be written to disk for it. Windows has
+    no ``/dev/stdin``; there the config is a temporary file that is removed
+    as soon as enola exits. The working directory is neutral (the system
+    temporary directory), so no repository's own mcp-arch.yaml narrows a run
+    that covers all of them.
+    """
+    binary = find_enola_binary()
+
+    for repo_path in repo_paths:
+        if not repo_path.is_dir():
+            raise EnolaSnapshotError(message=f"Repository path '{repo_path}' is not a directory.")
+
+    config_text = render_cluster_config(repo_paths, output_dir)
+    subject = f"the {len(repo_paths)}-repository cluster {[path.name for path in repo_paths]}"
+    cwd = Path(tempfile.gettempdir())
+
+    if not _config_via_stdin():
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", prefix="cognee-enola-cluster-", suffix=".yaml", delete=False
+        ) as config_file:
+            config_file.write(config_text)
+        try:
+            await _run_enola([binary, "--generate", config_file.name], cwd, timeout, subject)
+        finally:
+            try:
+                os.unlink(config_file.name)
+            except OSError:
+                pass
+    else:
+        await _run_enola(
+            [binary, "--generate", _STDIN_CONFIG_PATH],
+            cwd,
+            timeout,
+            subject,
+            stdin_data=config_text.encode("utf-8"),
+        )
+
+    snapshot_dir = repo_paths[0] / output_dir
+    if not (snapshot_dir / "facts.jsonl").is_file():
+        raise EnolaSnapshotError(
+            message=f"enola completed but no facts.jsonl was found in '{snapshot_dir}'."
+        )
+
+    return snapshot_dir
+
+
+@dataclass(frozen=True)
+class ParsedSnapshot:
+    """A snapshot read once: its directory, facts and receipt.
+
+    extract_code_graph and add_code_graph_edges take it in place of a
+    ``snapshot_dir`` so a load that covers several repositories (a dataset's
+    cluster) parses ``facts.jsonl`` once, not once per task per member.
+    ``edges`` are the typed relation edges already resolved from these facts
+    (``build_code_graph_edges``), when the caller resolved them once as well.
+    """
+
+    snapshot_dir: Path
+    facts: list
+    receipt: dict | None
+    edges: list | None = None
+
+
 def parse_enola_snapshot(
     snapshot_dir: str | Path,
 ) -> tuple[list, dict | None]:
     """Parse facts.jsonl (streamed line by line) and receipt.json from a snapshot dir.
 
     Blank and corrupt lines are skipped with a warning counter. A missing or
-    unparseable receipt.json is not fatal. Returns (facts, receipt).
+    unparseable receipt.json is not fatal. Findings from insights.json and
+    flows from flows.json follow as synthesized facts. Returns (facts, receipt).
     """
     snapshot_dir = Path(snapshot_dir)
     facts_path = snapshot_dir / "facts.jsonl"
@@ -230,14 +358,17 @@ def parse_enola_snapshot(
 
     validate_receipt(receipt, snapshot_dir, fact_count=len(facts))
 
+    repos = {fact["repo"] for fact in facts if isinstance(fact.get("repo"), str) and fact["repo"]}
     insight_facts = _synthesize_insight_facts(snapshot_dir)
-    if insight_facts:
-        facts = facts + insight_facts
+    flow_facts = _synthesize_flow_facts(snapshot_dir, repos, receipt)
+    if insight_facts or flow_facts:
+        facts = facts + insight_facts + flow_facts
 
     logger.info(
-        "Parsed %d fact(s) (%d from insights.json) from %s",
+        "Parsed %d fact(s) (%d from insights.json, %d from flows.json) from %s",
         len(facts),
         len(insight_facts),
+        len(flow_facts),
         facts_path,
     )
     return facts, receipt
@@ -404,6 +535,171 @@ def _synthesize_insight_facts(snapshot_dir: Path) -> list:
     return facts
 
 
+def _synthesize_flow_facts(snapshot_dir: Path, repos: set[str], receipt: dict | None) -> list:
+    """Convert flows.json entry-point flows into fact dicts.
+
+    enola's flows renderer ranks the ways into the program (a served route's
+    handler, a ``main``, a symbol a framework invokes) by what the calls from
+    each reach. Each flow becomes a synthetic fact of kind "flow" whose
+    relations point at its entry (``flow_entry``), its stages
+    (``flow_stage``) and the routes it serves (``flow_route``) — through each
+    ref's writer-resolved fact ``id`` when present, else by name — so the
+    ordinary fact-mapping and edge-resolution paths handle it. The fact keeps
+    the flow's own id and takes the entry's file and line.
+
+    A multi-repo run writes every repository's flows into every output
+    directory, so only flows of ``repos`` (the repo labels facts.jsonl
+    carries) are kept; when facts.jsonl carries no labels, every flow is kept
+    and, like the facts, falls back to the snapshot's repository. A missing
+    flows.json is not an error (older snapshots lack it, and a configuration
+    without the flows renderer writes none).
+
+    Only a flows.json the receipt vouches for is read (_receipt_vouches_for_flows):
+    an enola run without the flows renderer leaves an earlier run's file in
+    place, and its flows would describe other facts than these.
+    """
+    flows_path = snapshot_dir / "flows.json"
+    if not flows_path.is_file():
+        return []
+    try:
+        content = flows_path.read_bytes()
+    except OSError:
+        logger.warning("Could not parse flows.json in %s; ignoring it.", snapshot_dir)
+        return []
+    if not _receipt_vouches_for_flows(receipt, content):
+        logger.info(
+            "Ignoring flows.json in %s: receipt.json does not list these bytes among this "
+            "run's outputs, so another enola run wrote them and their flows may not match "
+            "these facts.",
+            snapshot_dir,
+        )
+        return []
+    try:
+        document = json.loads(content.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        logger.warning("Could not parse flows.json in %s; ignoring it.", snapshot_dir)
+        return []
+    flows = document.get("flows") if isinstance(document, dict) else None
+    if not isinstance(flows, list):
+        return []
+
+    facts = []
+    for flow in flows:
+        if not isinstance(flow, dict):
+            continue
+        name = flow.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        repo = flow.get("repo") if isinstance(flow.get("repo"), str) else None
+        if repos and repo not in repos:
+            continue
+        entry = flow.get("entry") if isinstance(flow.get("entry"), dict) else {}
+        props = {
+            key: flow[key]
+            for key in (
+                "mechanism",
+                "rank",
+                "summary",
+                "metrics",
+                "modules",
+                "side",
+                "routes",
+                "entry",
+                "stages",
+                "same_reach_as",
+                "nested_in",
+            )
+            if flow.get(key) is not None and (key != "side" or flow[key] is True)
+        }
+        relations = []
+        for relation_kind, refs in (
+            ("flow_entry", [entry]),
+            ("flow_stage", flow.get("stages")),
+            ("flow_route", flow.get("routes")),
+        ):
+            for ref in refs if isinstance(refs, list) else []:
+                if not isinstance(ref, dict):
+                    continue
+                target = ref.get("name")
+                if isinstance(target, str) and target:
+                    relation = {"kind": relation_kind, "target": target}
+                    if is_enola_id(ref.get("id")):
+                        relation["target_id"] = ref["id"]
+                    relations.append(relation)
+        fact = {"kind": "flow", "name": name, "props": props, "relations": relations}
+        if repos:
+            # Always one of the facts' own labels here. A label facts.jsonl
+            # does not carry would become the fallback repository of every
+            # unlabelled fact (the first labelled fact decides it).
+            fact["repo"] = repo
+        if entry.get("file") is not None:
+            fact["file"] = entry["file"]
+        if entry.get("line") is not None:
+            fact["line"] = entry["line"]
+        if is_enola_id(flow.get("id")):
+            fact["id"] = flow["id"]
+        facts.append(fact)
+    _disambiguate_flow_names(facts)
+    return facts
+
+
+def _disambiguate_flow_names(facts: list[dict]) -> None:
+    """Give flows that share a name within a repo distinct names, in place.
+
+    A node's identity is (repo, kind, name), and a route flow is named after
+    its route: two services serving ``GET /health`` write two flows with
+    different ids under one name, which would collapse into one node carrying
+    both flows' edges. Each such flow is named after its entry symbol as well,
+    then its enola id if that still collides. A flow with a unique name keeps
+    it, so its node id does not change; looking up the shared name now
+    reports both flows as ambiguous instead of merging them.
+    """
+
+    def _groups() -> dict[tuple[str | None, str], list[dict]]:
+        groups: dict[tuple[str | None, str], list[dict]] = {}
+        for fact in facts:
+            groups.setdefault((fact.get("repo"), fact["name"]), []).append(fact)
+        return groups
+
+    def _entry_name(fact: dict) -> str | None:
+        entry = fact["props"].get("entry")
+        name = entry.get("name") if isinstance(entry, dict) else None
+        return name if isinstance(name, str) and name else None
+
+    for qualifier in (_entry_name, lambda fact: fact.get("id")):
+        for (_repo, name), group in _groups().items():
+            if len(group) < 2:
+                continue
+            for fact in group:
+                tag = qualifier(fact)
+                if tag and not fact["name"].endswith(f"({tag})"):
+                    fact["name"] = f"{name} ({tag})"
+    # Still shared (no entry name and no id to tell them apart): number them in
+    # flows.json order, which enola ranks deterministically.
+    for (_repo, name), group in _groups().items():
+        if len(group) > 1:
+            for index, fact in enumerate(group, start=1):
+                fact["name"] = f"{name} #{index}"
+
+
+def _receipt_vouches_for_flows(receipt: dict | None, content: bytes) -> bool:
+    """Whether receipt.json says this run wrote flows.json, with these bytes.
+
+    enola hashes every artifact it writes into ``output_hashes``, so a file it
+    did not write this run is missing there or hashes differently. A receipt
+    without output hashes vouches through its ``renderers``. Without a receipt
+    there is nothing to check against (historical writers wrote neither a
+    receipt nor flows.json); the file is read.
+    """
+    if not isinstance(receipt, dict):
+        return True
+    output_hashes = receipt.get("output_hashes")
+    if isinstance(output_hashes, dict):
+        return output_hashes.get("flows.json") == ("sha256:" + hashlib.sha256(content).hexdigest())
+    renderers = receipt.get("renderers")
+    return isinstance(renderers, list) and "flows" in renderers
+
+
 def snapshot_identity(snapshot_dir: str | Path, receipt: dict | None) -> str | None:
     """Stable identity of a snapshot's content, used for incremental skip.
 
@@ -412,6 +708,11 @@ def snapshot_identity(snapshot_dir: str | Path, receipt: dict | None) -> str | N
     back to hashing facts.jsonl directly when the receipt is missing. Returns
     None when neither is available; callers must then treat the snapshot as
     changed (load fully, never skip).
+
+    flows.json needs no part in it: only a flows.json the receipt vouches for
+    is read, and the snapshot_id also covers the enola version and the
+    effective configuration (its renderers included), which decide whether
+    and how flows are written.
     """
     if receipt:
         snapshot_id = receipt.get("snapshot_id")

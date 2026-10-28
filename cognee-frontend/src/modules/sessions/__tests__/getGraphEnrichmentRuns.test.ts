@@ -12,6 +12,7 @@ interface RawRun {
   created_at: string;
   pipeline_run_id: string;
   error?: string;
+  error_class?: string;
 }
 
 function makeRun(overrides: Partial<RawRun> & Pick<RawRun, "id" | "status" | "created_at">): RawRun {
@@ -35,6 +36,39 @@ function instanceReturning(rows: RawRun[]): CogneeInstance {
 }
 
 describe("getGraphEnrichmentRuns burst status", () => {
+  it("counts an abandoned stage as failed, not as one still running", async () => {
+    // The card renders three states only, so the runs feed's ABANDONED has to
+    // fold into one of them. Folding it into "running" would leave the card
+    // claiming enrichment is in progress for a worker that died.
+    const runs = await getGraphEnrichmentRuns(
+      instanceReturning([
+        makeRun({ id: "a", status: "ABANDONED", created_at: "2026-07-17T10:00:00", error_class: "WorkerLost" }),
+      ]),
+      DATASET_ID,
+    );
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0].status).toBe("failed");
+    expect(runs[0].error_count).toBe(1);
+    // error_class, not error: the endpoint returns only the former, so this
+    // assertion used to be fiction. It fed an `error` key no pod sends and
+    // passed because the fixture invented the wire shape it was testing.
+    expect(runs[0].failure_reason).toBe("WorkerLost");
+  });
+
+  it("counts a queued stage as running, since it has not finished", async () => {
+    const runs = await getGraphEnrichmentRuns(
+      instanceReturning([
+        makeRun({ id: "a", status: "DATASET_PROCESSING_INITIATED", created_at: "2026-07-17T10:00:00" }),
+      ]),
+      DATASET_ID,
+    );
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0].status).toBe("running");
+    expect(runs[0].error_count).toBe(0);
+  });
+
   it("marks a burst completed when some stages errored but others completed", async () => {
     const runs = await getGraphEnrichmentRuns(
       instanceReturning([

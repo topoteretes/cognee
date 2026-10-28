@@ -21,7 +21,9 @@ from .bucketing.graph.placement import (
 )
 from .bucketing_strategy import BucketingStrategyName
 from .build import build_context_index, group_buckets_by_level
-from .load import dataset_id_from_context, load_context_index_input_from_graph
+from .constants import SUMMARIZED_IN
+from .ids import dataset_id_from_context
+from .load import load_context_index_input_from_graph
 from .models import GlobalContextIndexUpdateData, SummaryNode
 from .persist import delete_context_index_nodes, persist_context_index_edges
 
@@ -253,7 +255,8 @@ async def build_and_persist_context_index(
         ctx=ctx,
     )
 
-    await persist_context_index_edges(assignments, unified_engine, ctx=ctx)
+    pairs = [(assignment.child_id, assignment.parent_id) for assignment in assignments]
+    await persist_context_index_edges({SUMMARIZED_IN: pairs}, unified_engine, ctx=ctx)
     return context_datapoints
 
 

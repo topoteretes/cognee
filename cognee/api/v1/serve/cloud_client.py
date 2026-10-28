@@ -8,21 +8,10 @@ from uuid import UUID
 
 import aiohttp
 
-from cognee.modules.improve import MEMIFY_PASSTHROUGH_KEYS
 from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("serve.cloud_client")
-
-# The memify passthrough surface, partitioned by what the /improve DTO can
-# carry: registry task names (list[str]) and a data string cross the wire.
-# The refused set is derived by subtraction, so a key added to
-# MEMIFY_PASSTHROUGH_KEYS is refused loudly here until the DTO learns it —
-# never silently dropped.
-_SERIALIZABLE_MEMIFY_TASK_KEYS = ("extraction_tasks", "enrichment_tasks")
-_UNSERIALIZABLE_MEMIFY_KEYS = tuple(
-    key for key in MEMIFY_PASSTHROUGH_KEYS if key not in (*_SERIALIZABLE_MEMIFY_TASK_KEYS, "data")
-)
 
 
 def _text_upload_filename(text: str) -> str:
@@ -60,6 +49,9 @@ class CloudClient:
     def __init__(self, service_url: str, api_key: str):
         self.service_url = service_url.rstrip("/")
         self.api_key = api_key
+        # Tenant /api/v1/users/me reported at connect time; read by telemetry
+        # while this client is the active connection.
+        self.tenant_id = ""
         self._session: aiohttp.ClientSession | None = None
 
     # Default for ordinary API calls: aiohttp's standard 5-minute total,
@@ -71,6 +63,9 @@ class CloudClient:
     # can legitimately exceed any fixed total; per-read inactivity stays
     # bounded instead. Applied per-request, only to archive uploads.
     UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=600)
+    # The tenant lookup only feeds telemetry; a slow instance must not delay
+    # serve(), so it gives up quickly and the connection proceeds without it.
+    TENANT_LOOKUP_TIMEOUT = aiohttp.ClientTimeout(total=5)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -119,6 +114,33 @@ class CloudClient:
                 "Falling back to None after error in CloudClient._auth_check", exc_info=True
             )
             return None
+
+    async def _get_tenant_id(self) -> str:
+        """Tenant id of the connected API key's user, or "" when there is none.
+
+        Every instance answers ``/api/v1/users/me`` with fastapi-users'
+        ``UserRead``. On a Cloud tenant instance its ``tenant_id`` is the
+        control-plane ``tenants.id``; a self-hosted server reports its own
+        local tenant. Both are recorded — analytics tells them apart by host.
+        Any failure, including a timeout after ``TENANT_LOOKUP_TIMEOUT``,
+        returns "": this must never fail or stall a connection.
+        """
+        try:
+            session = await self._get_session()
+            async with session.get(
+                f"{self.service_url}/api/v1/users/me", timeout=self.TENANT_LOOKUP_TIMEOUT
+            ) as resp:
+                if resp.status != 200:
+                    return ""
+                data = await resp.json()
+            tenant_id = data.get("tenant_id") if isinstance(data, dict) else None
+            return str(UUID(str(tenant_id))) if tenant_id else ""
+        except Exception:
+            logger.debug(
+                "Falling back to no tenant after error in CloudClient._get_tenant_id",
+                exc_info=True,
+            )
+            return ""
 
     # ----- V2 Operations -----
 
@@ -314,8 +336,6 @@ class CloudClient:
             payload["dataset_name"] = str(dataset)
         if kwargs.get("run_in_background"):
             payload["run_in_background"] = True
-        if kwargs.get("node_name"):
-            payload["node_name"] = kwargs["node_name"]
         if kwargs.get("session_ids"):
             payload["session_ids"] = list(kwargs["session_ids"])
         if kwargs.get("build_global_context_index"):
@@ -326,10 +346,11 @@ class CloudClient:
             payload["review_conflicts"] = True
         if kwargs.get("feedback_alpha") is not None:
             payload["feedback_alpha"] = kwargs["feedback_alpha"]
-        # Memify passthrough: the improve DTO takes registry task names and a
-        # data string; Task objects and the db-config overrides cannot cross
-        # the wire, so they fail loudly instead of silently running defaults.
-        for key in _SERIALIZABLE_MEMIFY_TASK_KEYS:
+        # Deprecated custom tasks (SDK-1115): the /improve DTO takes registry task
+        # names, a data string and node_name. Task objects and the other scoping
+        # options cannot cross the wire, so they fail loudly instead of the
+        # server silently running without them.
+        for key in ("extraction_tasks", "enrichment_tasks"):
             tasks = kwargs.get(key)
             if tasks:
                 if not all(isinstance(task, str) for task in tasks):
@@ -340,11 +361,12 @@ class CloudClient:
                 payload[key] = list(tasks)
         if kwargs.get("data") is not None:
             payload["data"] = kwargs["data"]
-        for key in _UNSERIALIZABLE_MEMIFY_KEYS:
+        if kwargs.get("node_name") is not None:
+            payload["node_name"] = kwargs["node_name"]
+        for key in ("node_type", "vector_db_config", "graph_db_config"):
             if kwargs.get(key) is not None:
                 raise ValueError(
-                    f"improve({key}=...) is not supported on a remote instance; "
-                    "run it locally or extend the /improve payload."
+                    f"improve({key}=...) is not supported on a remote instance; run it locally."
                 )
 
         async with session.post(
@@ -462,22 +484,90 @@ class CloudClient:
             # UUIDs as UUID objects, the fallback reason as its enum member.
             return UpdateResult.model_validate(await resp.json()).model_dump()
 
-    async def list_data(self, dataset_id: UUID) -> list:
+    # Set when the server's listing route has been probed for ``content_hash``;
+    # a class default so instances built without ``__init__`` (tests) start
+    # unknown too.
+    _content_hash_lookup_supported: bool | None = None
+
+    _CONTENT_HASH_UNSUPPORTED = (
+        "Remote server does not support content_hash lookup on "
+        "GET /api/v1/datasets/{dataset_id}/data: it predates the content_hash filter and "
+        "sends no contentHash on its rows, so find_data() cannot tell a match from the "
+        "rest of the dataset. Upgrade the server to use find_data() over serve()."
+    )
+
+    async def supports_content_hash_lookup(self) -> bool | None:
+        """Whether the server's dataset listing takes a ``content_hash`` query param.
+
+        FastAPI drops an unknown query param without an error, so a server
+        older than the content-hash lookup answers ``?content_hash=`` with the
+        whole dataset listing, which ``find_data()`` would then hand back as
+        matches. Probed once per client from ``/openapi.json`` (the check the
+        MCP server makes for ``QAEntry.node_set``). ``None`` means unknown (no
+        schema served, or no listing route in it) and is not cached, so a
+        later call can still find out; the row-level check in ``list_data``
+        fails closed either way.
+        """
+        if self._content_hash_lookup_supported is not None:
+            return self._content_hash_lookup_supported
+        try:
+            session = await self._get_session()
+            async with session.get(f"{self.service_url}/openapi.json") as resp:
+                if resp.status >= 400:
+                    return None
+                schema = await resp.json()
+            parameters = schema["paths"]["/api/v1/datasets/{dataset_id}/data"]["get"].get(
+                "parameters", []
+            )
+        except (aiohttp.ClientError, ValueError, KeyError, TypeError, AttributeError):
+            logger.warning(
+                "find_data: could not read the server schema to check content_hash support"
+            )
+            return None
+        self._content_hash_lookup_supported = any(
+            isinstance(parameter, dict)
+            and parameter.get("name") == "content_hash"
+            and parameter.get("in") == "query"
+            for parameter in parameters
+        )
+        if not self._content_hash_lookup_supported:
+            logger.warning(
+                "find_data: the remote server predates the content_hash lookup; "
+                "lookups over serve() are refused until it is upgraded"
+            )
+        return self._content_hash_lookup_supported
+
+    async def list_data(self, dataset_id: UUID, *, content_hash: str | None = None) -> list:
         """Traverse bounded pages, deduplicating overlaps during concurrent ingest.
 
         This is not a snapshot: inserts/deletes can make rows unreachable during
         offset traversal. Above offset 1,000,000 the server rejects requests;
         /data/count still reports the full dataset size.
+
+        ``content_hash`` narrows the listing to the caller's rows holding that
+        content. A server that knows the filter applies it (``?content_hash=``)
+        and pages the matches; the rows are filtered again here on
+        ``contentHash`` so a server that ignored the param can never turn a
+        lookup into the whole dataset. A server known (from the schema probe)
+        or found (rows without ``contentHash``) to predate the filter is
+        refused with ``RuntimeError`` rather than guessed at: it has nothing
+        the rows could be matched on.
         """
+        if content_hash is not None and await self.supports_content_hash_lookup() is False:
+            raise RuntimeError(self._CONTENT_HASH_UNSUPPORTED)
+
         session = await self._get_session()
         rows = []
         seen_ids = set()
         limit = 1000
         offset = 0
         while True:
+            params: dict = {"limit": limit, "offset": offset}
+            if content_hash is not None:
+                params["content_hash"] = content_hash
             async with session.get(
                 f"{self.service_url}/api/v1/datasets/{dataset_id}/data",
-                params={"limit": limit, "offset": offset},
+                params=params,
             ) as resp:
                 if resp.status >= 400:
                     body = await resp.text()
@@ -496,7 +586,52 @@ class CloudClient:
                     seen_ids.add(row_id)
                     rows.append(row)
             if len(page) < limit:
-                return rows
+                break
+
+        if content_hash is None:
+            return rows
+        return self._rows_holding(rows, content_hash)
+
+    @classmethod
+    def _rows_holding(cls, rows: list, content_hash: str) -> list:
+        """Keep the rows whose ``contentHash`` is ``content_hash``; fail closed.
+
+        A row without the key comes from a server that predates the lookup
+        (its DataDTO had no ``contentHash``), so nothing in the listing can be
+        matched and returning it unfiltered would hand the caller the whole
+        dataset as "matches".
+        """
+        matches = []
+        for row in rows:
+            if not isinstance(row, dict) or "contentHash" not in row:
+                raise RuntimeError(cls._CONTENT_HASH_UNSUPPORTED)
+            if row["contentHash"] == content_hash:
+                matches.append(row)
+        return matches
+
+    async def sparql(
+        self,
+        dataset_id: UUID,
+        query: str,
+        *,
+        base_iri: str | None = None,
+        limit: int = 1000,
+    ) -> dict:
+        """POST /api/v1/datasets/{dataset_id}/sparql — read-only SPARQL over the graph."""
+        session = await self._get_session()
+
+        payload: dict = {"query": query, "limit": limit}
+        if base_iri:
+            payload["baseIri"] = base_iri
+
+        async with session.post(
+            f"{self.service_url}/api/v1/datasets/{dataset_id}/sparql",
+            json=payload,
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote SPARQL query failed ({resp.status}): {body}")
+            return await resp.json()
 
     async def cognify(self, datasets: Any = None, **kwargs) -> dict:
         """POST /api/v1/cognify — build the knowledge graph."""
@@ -591,6 +726,8 @@ class CloudClient:
             payload["data_id"] = str(kwargs["data_id"])
         if kwargs.get("memory_only") is not None:
             payload["memory_only"] = bool(kwargs["memory_only"])
+        if kwargs.get("clean_history"):
+            payload["clean_history"] = True
 
         async with session.post(
             f"{self.service_url}/api/v1/forget",

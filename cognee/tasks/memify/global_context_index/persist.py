@@ -12,8 +12,7 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization.models import GlobalContextSummary
 
-from .constants import GLOBAL_CONTEXT_SUMMARY_COLLECTION, SUMMARIZED_IN
-from .models import BucketAssignment
+from .constants import GLOBAL_CONTEXT_SUMMARY_COLLECTION
 
 
 async def safe_delete_context_vectors(vector_engine: Any, ids: list[str]) -> None:
@@ -49,20 +48,23 @@ def ensure_global_context_storage_context(
     return ctx
 
 
-def build_context_index_edges(assignments: list[BucketAssignment]) -> list:
+def build_context_index_edges(
+    pairs: list[tuple[str, str]],
+    relationship_name: str,
+) -> list:
     edges = []
     updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-    for assignment in assignments:
+    for source_id, target_id in pairs:
         edges.append(
             (
-                assignment.child_id,
-                assignment.parent_id,
-                SUMMARIZED_IN,
+                source_id,
+                target_id,
+                relationship_name,
                 {
-                    "source_node_id": assignment.child_id,
-                    "target_node_id": assignment.parent_id,
-                    "relationship_name": SUMMARIZED_IN,
+                    "source_node_id": source_id,
+                    "target_node_id": target_id,
+                    "relationship_name": relationship_name,
                     "updated_at": updated_at,
                 },
             )
@@ -107,12 +109,23 @@ def _context_index_source_ref(ctx: PipelineContext | None) -> tuple[str | None, 
 
 
 async def persist_context_index_edges(
-    assignments: list[BucketAssignment],
+    edges_by_relationship: dict[str, list[tuple[str, str]]],
     unified_engine: Any,
     ctx: PipelineContext | None = None,
 ) -> None:
-    summarized_in_edges = build_context_index_edges(assignments)
-    if not summarized_in_edges:
+    """Write every kind of index edge in one statement.
+
+    Keyed by relationship name, each with its (source id, target id) pairs,
+    because the caller may write more than one kind at a time, and the
+    provenance-marker read below is a round trip worth paying once per run
+    rather than once per kind.
+    """
+    index_edges = [
+        edge
+        for relationship_name, pairs in edges_by_relationship.items()
+        for edge in build_context_index_edges(pairs, relationship_name)
+    ]
+    if not index_edges:
         return
 
     # Structural global context index edges are written directly by this task.
@@ -125,7 +138,7 @@ async def persist_context_index_edges(
         source_ref_key, pipeline_run_id = _context_index_source_ref(ctx)
 
     await unified_engine.graph.add_edges(
-        summarized_in_edges,
+        index_edges,
         source_ref_key=source_ref_key,
         pipeline_run_id=pipeline_run_id,
     )

@@ -149,6 +149,7 @@ def test_shipped_slugs_are_pinned():
         "postgres_graph_provenance_columns",
         "ladybug_graph_provenance_columns",
         "rekey_fork_document_ids",
+        "pgvector_hnsw_indexes",
     ]
 
 

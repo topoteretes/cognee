@@ -14,19 +14,26 @@ from cognee.modules.engine.utils import generate_edge_object_id
 
 @dataclass
 class DeletedGraphElements:
-    """Node/edge identities hard-deleted from the graph by a delete operation."""
+    """Node/edge identities hard-deleted from the graph by a delete operation.
+
+    ``owned`` is whether the deleted id owned any graph element before the delete,
+    including elements that survive because other data still owns them.
+    """
 
     node_ids: set[str] = field(default_factory=set)
     edge_ids: set[str] = field(default_factory=set)
+    owned: bool = False
 
     def merge(self, other: "DeletedGraphElements") -> None:
         self.node_ids |= other.node_ids
         self.edge_ids |= other.edge_ids
+        self.owned |= other.owned
 
     @classmethod
-    def from_ledger_rows(cls, nodes: list, edges: list) -> "DeletedGraphElements":
+    def from_ledger_rows(cls, nodes: list, edges: list, *, owned: bool) -> "DeletedGraphElements":
         """Build from relational-ledger Node/Edge rows (slug = graph node id)."""
         return cls(
+            owned=owned,
             node_ids={str(node.slug) for node in nodes},
             edge_ids={
                 str(
@@ -44,6 +51,7 @@ class DeletedGraphElements:
     def from_source_ref_removal(cls, result) -> "DeletedGraphElements":
         """Build from a graph-provenance ``SourceRefRemovalResult``."""
         return cls(
+            owned=result.matched,
             node_ids={str(node_id) for node_id in result.deleted_node_ids},
             edge_ids={
                 str(

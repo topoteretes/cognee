@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import pathlib
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
@@ -12,6 +12,7 @@ import cognee
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.search.types import SearchType
@@ -106,11 +107,15 @@ async def _mock_structured_output(text_input, system_prompt, response_model, **k
 async def test_permissions_example_flow(permissions_example_env):
     """Pytest version of `examples/python/permissions_example.py` (same scenarios, asserts instead of prints)."""
     # Patch LLM calls so GRAPH_COMPLETION can run without external API keys.
-    llm_patch = patch(
-        "cognee.infrastructure.llm.LLMGateway.LLMGateway.acreate_structured_output",
+    llm_patch = patch.object(
+        LLMGateway,
+        "acreate_structured_output",
         new_callable=AsyncMock,
         side_effect=_mock_structured_output,
     )
+    # Without an LLM key recall() returns the prompt instead of asking the LLM;
+    # report the mocked one as available.
+    llm_available_patch = patch("cognee.modules.preflight.llm_available", return_value=True)
 
     # Resolve example data file path (repo-shipped PDF).
     repo_root = pathlib.Path(__file__).resolve().parent
@@ -149,7 +154,7 @@ async def test_permissions_example_flow(permissions_example_env):
     assert ai_dataset_id is not None
     assert quantum_dataset_id is not None
 
-    with llm_patch:
+    with llm_patch, llm_available_patch:
         # user_1 can read own dataset.
         recall_results = await cognee.recall(
             query_type=SearchType.GRAPH_COMPLETION,
@@ -184,7 +189,7 @@ async def test_permissions_example_flow(permissions_example_env):
     # user_2 grants read permission to user_1 for QUANTUM dataset.
     await authorized_give_permission_on_datasets(user_1.id, [quantum_dataset_id], "read", user_2.id)
 
-    with llm_patch:
+    with llm_patch, llm_available_patch:
         # Now user_1 can read QUANTUM dataset via dataset_id.
         recall_results = await cognee.recall(
             query_type=SearchType.GRAPH_COMPLETION,
@@ -231,7 +236,7 @@ async def test_permissions_example_flow(permissions_example_env):
         role_id, [quantum_cognee_lab_dataset_id], "read", user_2.id
     )
 
-    with llm_patch:
+    with llm_patch, llm_available_patch:
         # user_3 can read via role permission.
         recall_results = await cognee.recall(
             query_type=SearchType.GRAPH_COMPLETION,
@@ -249,7 +254,7 @@ async def test_permissions_example_flow(permissions_example_env):
     await remove_user_from_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)
 
     # user_3 can no longer read the tenant dataset after being removed.
-    with pytest.raises(PermissionDeniedError), llm_patch:
+    with pytest.raises(PermissionDeniedError), llm_patch, llm_available_patch:
         await cognee.recall(
             query_type=SearchType.GRAPH_COMPLETION,
             query_text="What is in the document?",
@@ -368,31 +373,29 @@ async def test_improve_permission_matrix(permissions_example_env):
     dataset_id = (await get_datasets_by_name(["IMPROVE_PERMS"], owner.id))[0].id
 
     class memify_patch:
-        """Mock the memify engine and force the triplet-enrichment stage to run.
+        """Mock the memify engine behind the global-context-index stage and open its gate.
 
-        improve() gates that stage on the cognify ``triplet_embedding`` setting
-        (off by default, so the stage is *skipped* and memify is never called).
-        The permission checks under test happen before any stage, but case 3
-        also asserts that the stage receives the authorized dataset, so the gate
-        is opened here with a patched config.
+        That stage is opt-in (``build_global_context_index=True``) and skipped
+        without a usable LLM. The permission checks under test happen before
+        any stage, but case 3 also asserts that the stage receives the
+        authorized dataset, so the LLM gate is opened here.
         """
 
         def __init__(self):
             self._memify = patch(
-                "cognee.modules.memify.memify", new_callable=AsyncMock, return_value={}
+                "cognee.memify_pipelines.global_context_index.run_memify_tasks",
+                new_callable=AsyncMock,
+                return_value={},
             )
-            self._config = patch(
-                "cognee.modules.cognify.config.get_cognify_config",
-                return_value=MagicMock(triplet_embedding=True),
-            )
+            self._llm = patch("cognee.modules.improve.stages.llm_available", return_value=True)
 
         def __enter__(self):
-            self._config.__enter__()
+            self._llm.__enter__()
             return self._memify.__enter__()
 
         def __exit__(self, *exc):
             self._memify.__exit__(*exc)
-            self._config.__exit__(*exc)
+            self._llm.__exit__(*exc)
             return False
 
     # 1. No grant on an existing dataset: refused with 403.
@@ -412,22 +415,26 @@ async def test_improve_permission_matrix(permissions_example_env):
     # 3. Write grant allows it, and the engine receives the authorized dataset.
     await authorized_give_permission_on_datasets(other.id, [dataset_id], "write", owner.id)
     with memify_patch() as memify_mock:
-        await cognee.improve(dataset=dataset_id, user=other)
+        await cognee.improve(dataset=dataset_id, user=other, build_global_context_index=True)
     memify_mock.assert_awaited_once()
     assert memify_mock.await_args.kwargs["dataset"] == dataset_id
 
     # 4. Names are owner-scoped: improving the owner's dataset *name* as another
     #    user creates that user's own dataset and never touches the owner's.
     with memify_patch():
-        await cognee.improve(dataset="IMPROVE_PERMS", user=other)
+        await cognee.improve(dataset="IMPROVE_PERMS", user=other, build_global_context_index=True)
     others_datasets = await get_datasets_by_name(["IMPROVE_PERMS"], other.id)
     assert len(others_datasets) == 1
     assert others_datasets[0].id != dataset_id
 
     # 5. memify (improve's engine) enforces the same write requirement directly.
-    from cognee.modules.memify import memify as real_memify
+    from cognee.modules.memify import run_memify_tasks
+    from cognee.modules.pipelines.tasks.task import Task
+
+    async def passthrough(data):
+        return data
 
     await cognee.add(["second fixture"], dataset_name="IMPROVE_PERMS_2", user=owner)
     dataset_2_id = (await get_datasets_by_name(["IMPROVE_PERMS_2"], owner.id))[0].id
     with pytest.raises(PermissionDeniedError):
-        await real_memify(dataset=dataset_2_id, user=other)
+        await run_memify_tasks([Task(passthrough)], [], dataset=dataset_2_id, user=other)

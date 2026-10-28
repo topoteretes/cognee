@@ -9,4 +9,5 @@ from .exceptions import (
     FindClosestMatchError,
     GetSubgraphError,
     EmptyOntologyInStrictModeError,
+    OntologyReasoningDependencyError,
 )
