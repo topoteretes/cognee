@@ -23,7 +23,9 @@ from fastapi.testclient import TestClient
 from cognee.api.v1.users.routers.get_auth_router import get_auth_router
 from cognee.modules.users.methods import get_authenticated_user
 
-ROUTER = "cognee.api.v1.users.routers.get_auth_router"
+# The routers package re-exports get_auth_router under the module's name, so a dotted
+# patch target resolves to the function on Python 3.10; patch the module object instead.
+ROUTER = importlib.import_module("cognee.api.v1.users.routers.get_auth_router")
 # The package re-exports the object under the module's name, so look the module up by name.
 TRANSPORT_FILE = importlib.import_module(
     "cognee.modules.users.authentication.default.default_transport"
@@ -82,9 +84,9 @@ def test_login_sets_secure_from_the_environment(monkeypatch, value, secure):
     backend = MagicMock(get_strategy=MagicMock(return_value=strategy))
 
     with (
-        patch(f"{ROUTER}.default_transport", transport),
-        patch(f"{ROUTER}.authenticate_user", AsyncMock(return_value=user)),
-        patch(f"{ROUTER}.get_client_auth_backend", return_value=backend),
+        patch.object(ROUTER, "default_transport", transport),
+        patch.object(ROUTER, "authenticate_user", AsyncMock(return_value=user)),
+        patch.object(ROUTER, "get_client_auth_backend", return_value=backend),
     ):
         response = _client(user).post(
             "/api/v1/auth/login", data={"username": "a@b.test", "password": "pw"}
@@ -111,7 +113,7 @@ def test_logout_deletes_with_the_attributes_login_set(monkeypatch):
     transport.cookie_domain = "x.test"
     user = MagicMock(email="a@b.test")
 
-    with patch(f"{ROUTER}.default_transport", transport):
+    with patch.object(ROUTER, "default_transport", transport):
         response = _client(user).post("/api/v1/auth/logout")
 
     assert response.status_code == 200
