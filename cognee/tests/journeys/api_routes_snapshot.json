@@ -15,6 +15,7 @@
   "DELETE /api/v1/permissions/tenants/{tenant_id}/users/{user_id}",
   "DELETE /api/v1/permissions/users/{user_id}/roles",
   "DELETE /api/v1/search/history",
+  "DELETE /api/v1/sessions/{session_id}",
   "DELETE /api/v1/skills/{skill_id}",
   "DELETE /api/v1/users/{id}",
   "GET /",
