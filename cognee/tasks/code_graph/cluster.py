@@ -269,10 +269,9 @@ async def snapshot_dataset_code_repos(
 class RefreshPlan:
     """What rebuilding a dataset's code graph for new repositories will do.
 
-    Decided — and the enola run taken — before the dataset lock, from the
-    new repositories' directories and the dataset's other ``code_repo`` rows:
-    the snapshot needs directories, not rows, so the slow part never holds
-    the lock. ``snapshot`` members for the new repositories carry no Data
+    Decided — and the enola run taken — under the dataset lock, before the
+    new repositories' rows are stored, from their directories and the
+    dataset's other ``code_repo`` rows. ``snapshot`` members for the new repositories carry no Data
     row yet (``data`` is None); :func:`refresh_dataset_code_graph` binds
     them to the rows the caller stored, by directory. ``existing`` are the
     dataset's other rows rebuilt inline; ``deferred`` are the ones left to
@@ -577,7 +576,6 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
             run.done = True
         run.is_cluster = snapshot is not None
     return run.is_cluster
-    return True
 
 
 async def _load_cluster_members(snapshot: DatasetCodeSnapshot, ctx: "PipelineContext") -> None:

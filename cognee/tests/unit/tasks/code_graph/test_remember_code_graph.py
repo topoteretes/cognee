@@ -350,13 +350,14 @@ async def test_row_write_run_and_stamp_hold_the_dataset_lock(code_remember_env, 
     await remember("/some/repo", content_type="code")
 
     dataset_id = code_remember_env["dataset"].id
-    # The clone (resolve) and the enola run (snapshot) are the slow parts and
-    # read no dataset state: both happen before the lock, so nothing else on
-    # the dataset waits for them; only the row write, load and stamp hold it.
+    # The clone (resolve) is the slow part and reads no dataset state: it
+    # happens before the lock, so nothing else on the dataset waits for it.
+    # The enola run (snapshot) writes the dataset's snapshot directory, which
+    # a concurrent cognify() rewrites, so it holds the lock with the rest.
     assert events == [
         ("resolve", None),
-        ("snapshot", None),
         ("lock", dataset_id),
+        ("snapshot", None),
         ("add_repo", None),
         ("pipeline", None),
         ("mark_processed", None),

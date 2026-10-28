@@ -1785,28 +1785,29 @@ async def _remember_inner(
                         raise
                     _isolate(item, exc, position)
 
-            # The dataset's repositories are extracted together, so the ones
-            # already in it are rebuilt with the ones this call adds: that is
-            # where the edges between repositories come from. The enola run
-            # needs the directories, not the rows, so it too runs before the
-            # lock; a failure is recorded once the rows exist, below, so the
-            # caller still gets their ids.
-            plan, plan_error = None, None
-            if cloned:
-                try:
-                    plan = await plan_dataset_refresh(
-                        dataset, [repo_path for _position, _spec, _item, repo_path in cloned]
-                    )
-                except Exception as exc:
-                    plan_error = exc
-                    if isolate_failures:
-                        logger.exception("Code-graph extraction failed for the dataset")
-
             # The Data rows' stamps are read-modify-written as a whole: holding
             # the dataset lock from the first row write to the final stamp keeps
             # a concurrent add()/cognify() of the dataset from overwriting them.
             # The lock is re-entrant, so add() and the pipeline run inside it.
             async with dataset_lock(dataset.id):
+                # The dataset's repositories are extracted together, so the ones
+                # already in it are rebuilt with the ones this call adds: that is
+                # where the edges between repositories come from. The enola run
+                # writes the dataset's snapshot directory, which the pipeline
+                # reads below and a cognify() of the dataset rewrites, so it runs
+                # under the lock. A failure is recorded once the rows exist, so
+                # the caller still gets their ids.
+                plan, plan_error = None, None
+                if cloned:
+                    try:
+                        plan = await plan_dataset_refresh(
+                            dataset, [repo_path for _position, _spec, _item, repo_path in cloned]
+                        )
+                    except Exception as exc:
+                        plan_error = exc
+                        if isolate_failures:
+                            logger.exception("Code-graph extraction failed for the dataset")
+
                 stored = []
                 for position, spec, item, repo_path in cloned:
                     try:
