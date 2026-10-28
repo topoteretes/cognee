@@ -102,9 +102,7 @@ def test_concurrent_path_matches_the_runtimes_sequential_long_text_path(pool_siz
     pool_size(4)
     reference = sequential_reference(window_model())
     model = window_model()
-    concurrent = extractor_module._extract_long_concurrently(
-        model, TEXTS, object(), threads=4, **OPTIONS
-    )
+    concurrent = extractor_module._extract_long_concurrently(model, TEXTS, object(), **OPTIONS)
     assert concurrent == reference
     assert len(model.threads) > 1, "batches did not run on more than one thread"
 
@@ -124,7 +122,7 @@ def test_every_batch_keeps_its_single_threaded_members(pool_size):
     ]
     size = OPTIONS["batch_size"]
     expected = [windows[start : start + size] for start in range(0, len(windows), size)]
-    extractor_module._extract_long_concurrently(model, TEXTS, object(), threads=3, **OPTIONS)
+    extractor_module._extract_long_concurrently(model, TEXTS, object(), **OPTIONS)
     assert sorted(model.batches) == sorted(expected)
 
 
@@ -422,11 +420,9 @@ def test_a_failing_batch_raises_and_the_pool_keeps_working(pool_size):
 
     model.batch_extract = failing
     with pytest.raises(RuntimeError, match="model failed on this batch"):
-        extractor_module._extract_long_concurrently(model, TEXTS, object(), threads=3, **OPTIONS)
+        extractor_module._extract_long_concurrently(model, TEXTS, object(), **OPTIONS)
     model.batch_extract = real_batch_extract
-    recovered = extractor_module._extract_long_concurrently(
-        model, TEXTS, object(), threads=3, **OPTIONS
-    )
+    recovered = extractor_module._extract_long_concurrently(model, TEXTS, object(), **OPTIONS)
     assert recovered == sequential_reference(window_model())
 
 
@@ -453,7 +449,6 @@ def test_concurrent_callers_share_the_pool_without_mixing_results(pool_size):
             model,
             TEXTS,
             object(),
-            threads=4,
             **OPTIONS,
         )
         future_b = callers.submit(
@@ -461,7 +456,6 @@ def test_concurrent_callers_share_the_pool_without_mixing_results(pool_size):
             model,
             other_texts,
             object(),
-            threads=4,
             **OPTIONS,
         )
         assert future_a.result() == expected_a
@@ -474,7 +468,7 @@ def test_repeated_extraction_does_not_grow_the_thread_count(monkeypatch):
     extractor_module.reset_inference_pool()
     model = window_model()
     for _ in range(10):
-        extractor_module._extract_long_concurrently(model, TEXTS, object(), threads=3, **OPTIONS)
+        extractor_module._extract_long_concurrently(model, TEXTS, object(), **OPTIONS)
     gliner_threads = [t for t in threading.enumerate() if t.name.startswith("gliner")]
     assert 0 < len(gliner_threads) <= 3
     extractor_module.reset_inference_pool()
@@ -497,7 +491,6 @@ def test_worker_processes_take_every_nth_batch_and_the_result_is_unchanged(monke
             local,
             TEXTS,
             object(),
-            threads=1,
             processes=3,
             schema=GlinerSchema({"name": ""}, {}, source="caller"),
             process_pool=stand_in_for_processes,
@@ -587,10 +580,10 @@ def test_a_broken_worker_pool_is_dropped_so_the_next_call_starts_fresh(monkeypat
     assert pool.users == 0
 
 
-def test_a_call_never_has_more_batches_in_flight_than_its_own_limit(pool_size):
-    """A call limited to 2 on a pool of 5 keeps at most 2 batches running at once."""
+def test_no_more_batches_run_at_once_than_the_pool_has_threads(pool_size):
+    """A pool of 2: batches overlap, but never more than 2 run at once."""
     model = window_model()
-    pool_size(5)
+    pool_size(2)
     in_flight, peak, lock = [0], [0], threading.Lock()
     real = model.batch_extract
 
@@ -605,16 +598,16 @@ def test_a_call_never_has_more_batches_in_flight_than_its_own_limit(pool_size):
                 in_flight[0] -= 1
 
     model.batch_extract = counting
-    extractor_module._extract_long_concurrently(model, TEXTS, object(), threads=2, **OPTIONS)
-    assert extractor_module._thread_pool()._max_workers == 5
+    extractor_module._extract_long_concurrently(model, TEXTS, object(), **OPTIONS)
+    assert extractor_module._thread_pool()._max_workers == 2
     assert peak[0] == 2
 
 
 def test_one_thread_runs_the_batches_in_turn_on_the_calling_thread():
-    """threads=1 keeps the historic path: sequential batches, no pool thread involved."""
+    """One configured thread keeps the historic path: sequential batches, no pool thread."""
     model = window_model()
     extractor_module._run_batches(
-        model, object(), [["Pierre"], ["Natasha"]], 1, threshold=0.5, batch_size=4, window_words=60
+        model, object(), [["Pierre"], ["Natasha"]], threshold=0.5, batch_size=4, window_words=60
     )
     assert model.batches == [["Pierre"], ["Natasha"]]
     assert model.threads == {threading.current_thread().name}

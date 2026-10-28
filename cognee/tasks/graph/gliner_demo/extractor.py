@@ -56,7 +56,6 @@ import threading
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import (
-    FIRST_COMPLETED,
     Executor,
     Future,
     ProcessPoolExecutor,
@@ -463,20 +462,17 @@ def _run_batches(
     extractor: Any,
     built: Any,
     batches: Sequence[list[str]],
-    threads: int,
     *,
     threshold: float,
     batch_size: int,
     window_words: int,
 ) -> list[list[dict[str, Any]]]:
-    """Run model batches with at most ``threads`` in flight; one result list per batch.
+    """Run model batches; one result list per batch.
 
     With no pool (one configured thread) the batches run in turn on the calling
     thread, taking turns with other callers' batches on the inference lock.
-    Otherwise every call goes through the shared pool, submitting only
-    ``threads`` batches at a time, so a call with a small limit never occupies
-    pool threads it is not allowed to use and every batch counts against the
-    pool's bound.
+    Otherwise they all go to the shared pool, whose size bounds how many run at
+    once across every caller in the process.
     """
 
     def run_batch(batch: list[str]) -> list[dict[str, Any]]:
@@ -501,25 +497,12 @@ def _run_batches(
                 results.append(run_batch(batch))
         return results
 
-    results: list = [None] * len(batches)
-    queue = iter(enumerate(batches))
-    pending: dict = {}
-
-    def top_up() -> None:
-        while len(pending) < threads:
-            try:
-                index, batch = next(queue)
-            except StopIteration:
-                return
-            pending[pool.submit(run_batch, batch)] = index
-
-    top_up()
-    while pending:
-        done, _ = wait(pending, return_when=FIRST_COMPLETED)
-        for future in done:
-            results[pending.pop(future)] = future.result()
-        top_up()
-    return results
+    futures = [pool.submit(run_batch, batch) for batch in batches]
+    try:
+        return [future.result() for future in futures]
+    except BaseException:
+        _abandon_shares(futures)
+        raise
 
 
 def _worker_init(model_name: str, threads: int) -> None:
@@ -530,12 +513,12 @@ def _worker_init(model_name: str, threads: int) -> None:
 
 
 def _worker_run_share(
-    schema: GlinerSchema, batches: list[list[str]], threads: int, options: dict[str, Any]
+    schema: GlinerSchema, batches: list[list[str]], options: dict[str, Any]
 ) -> list[list[dict[str, Any]]]:
     """Worker process entry point: run this process's share of the batches."""
     extractor = _worker["extractor"]
     built = build_gliner_schema(extractor, schema)
-    return _run_batches(extractor, built, batches, threads, **options)
+    return _run_batches(extractor, built, batches, **options)
 
 
 def _abandon_shares(futures: Iterable[Future]) -> None:
@@ -552,7 +535,6 @@ def _extract_long_concurrently(
     texts: Sequence[str],
     built: Any,
     *,
-    threads: int,
     processes: int = 1,
     schema: GlinerSchema | None = None,
     process_pool: Executor | None = None,
@@ -595,13 +577,13 @@ def _extract_long_concurrently(
         if process_pool is None or schema is None:
             raise ValueError("processes > 1 needs a process_pool and the schema for the workers")
         remote = {
-            index: process_pool.submit(_worker_run_share, schema, share, threads, options)
+            index: process_pool.submit(_worker_run_share, schema, share, options)
             for index, share in enumerate(shares)
             if index > 0 and share
         }
     per_batch: list = [None] * len(batches)
     try:
-        per_batch[0::processes] = _run_batches(extractor, built, shares[0], threads, **options)
+        per_batch[0::processes] = _run_batches(extractor, built, shares[0], **options)
         for index, future in remote.items():
             per_batch[index::processes] = future.result()
     except BaseException:
@@ -682,7 +664,6 @@ def extract_batch(
             extractor,
             texts,
             built,
-            threads=threads,
             processes=processes,
             schema=schema,
             process_pool=worker_pool.executor if worker_pool is not None else None,
