@@ -12,7 +12,7 @@ export default function GoogleIntegrationsSection() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const provider = PROVIDERS.find((key) => params.has(key));
+    const provider = [...PROVIDERS, "github"].find((key) => params.has(key));
     if (provider && window.opener && window.opener !== window) {
       stashOAuthOutcome(provider, params.get(provider));
       window.close();

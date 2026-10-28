@@ -27,7 +27,7 @@ export default function SourceDetailCard({ detail, onClose }: SourceDetailCardPr
         </button>
       </div>
       <div className="mt-1 text-xs text-[#7E8CA6]">
-        {detail.entityCount} entities · {detail.docCount} document{detail.docCount === 1 ? "" : "s"}
+        In this view: {detail.entityCount} entities · {detail.docCount} document{detail.docCount === 1 ? "" : "s"}
         {detail.bridgeCount
           ? ` · bridges to ${detail.bridgeCount} other source${detail.bridgeCount === 1 ? "" : "s"}`
           : ""}

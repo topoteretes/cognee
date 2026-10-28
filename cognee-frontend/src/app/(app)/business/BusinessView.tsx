@@ -40,6 +40,7 @@ import { useBusinessAutoInsights } from "@/modules/business/useBusinessAutoInsig
 import SearchBar from "@/modules/business/panels/SearchBar";
 import BusinessLegend from "@/modules/business/panels/BusinessLegend";
 import BusinessDock from "@/modules/business/panels/BusinessDock";
+import GraphReadScope from "@/modules/business/panels/GraphReadScope";
 import BusinessLoading from "@/modules/business/panels/BusinessLoading";
 import BusinessEmptyState from "@/modules/business/panels/BusinessEmptyState";
 import ScrollFadeContainer from "@/modules/business/panels/ScrollFadeContainer";
@@ -98,6 +99,9 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
   const [spotlight, setSpotlight] = useState<Spotlight | null>(null);
   const { setFilter: setRowFilter } = structured;
   const { clearSelection } = selection;
+  useEffect(() => {
+    clearSelection();
+  }, [cogniInstance.instanceId, scene.activeDatasetId, clearSelection]);
   const changeRowFilter = useCallback((filter: RowFilter) => {
     setRowFilter(filter);
     clearSelection();
@@ -285,11 +289,6 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
     return countLinksTouching(scene.brainState.docLinks, entity.id);
   };
 
-  const connectionCountFor = (entity: BusinessEntity | null): number => {
-    if (!entity || !scene.brainState) return 0;
-    return countLinksTouching(scene.brainState.graphLinks, entity.id);
-  };
-
   // Ports "the rendered dataset's sources dim too when this user can't read
   // it" (customer_tutorial.html ~6085-6088) — true (unaffected) whenever no
   // principal is hovered or there's no active dataset to check against.
@@ -380,13 +379,13 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
       if (!scene.brainState) return;
       const result = computeWhatIfRemoval(entityId, scene.brainState.semanticLinks);
       if (!result.orphanedIds.size) {
-        narrate(`removing ${entityName} wouldn't disconnect anything, no single point of failure here`, "#56DB7D");
+        narrate(`removing ${entityName} does not split its connected neighborhood in the loaded graph`, "#56DB7D");
         return;
       }
       const startedAt = performance.now();
       setSpotlight({ ids: result.orphanedIds, startedAt, until: startedAt + WHAT_IF_SPOTLIGHT_MS, source: "whatIf" });
       narrate(
-        `removing ${entityName} would split the model into ${result.islandCount} disconnected pieces, ${result.orphanedIds.size} record${result.orphanedIds.size === 1 ? "" : "s"} stranded`,
+        `removing ${entityName} splits its loaded neighborhood into ${result.islandCount} pieces; ${result.orphanedIds.size} record${result.orphanedIds.size === 1 ? "" : "s"} separate from the main group`,
         "#F5566B",
       );
       if (flyCamera) requestAnimationFrame(() => canvasRef.current?.focusOnIds(result.orphanedIds));
@@ -504,7 +503,8 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
           "sources" heading. bottom offset leaves room for
           GraphConstructionLog (h-[104px], anchored bottom-24) below it in
           the same left column (COG-6233). */}
-      <div className="absolute left-0 top-[68px] bottom-[208px] w-[196px]">
+      <div className="absolute left-0 top-[68px] bottom-[208px] flex w-[196px] flex-col">
+        <GraphReadScope graph={scene.layerData[CONTENT_LAYER_ID] ?? null} sources={focusSets} types={focusTypes} />
         {/* CLO-660: a type-keyed lens sits beside the source one, in the same
             rail — reuses the exact card UI, no new screen space. Switching
             tabs keeps the other lens's selection active in the background
@@ -532,7 +532,8 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
             {railTab !== "types" && focusTypes && <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-[#43D9E8]" />}
           </button>
         </div>
-        <ScrollFadeContainer className="h-[calc(100%-32px)] overflow-y-auto">
+        <div className="min-h-0 flex-1">
+        <ScrollFadeContainer className="h-full overflow-y-auto">
           {railTab === "sources" ? (
             <SourcesRail
               brainState={scene.brainState}
@@ -600,6 +601,7 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
             />
           )}
         </ScrollFadeContainer>
+        </div>
       </div>
       {/* Docked above the legend rather than floating near the search bar:
           an arriving answer is a passing notice, not something that should
@@ -656,10 +658,21 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
       />
       {selection.selectedEntity ? (
         <NodePanel
+          key={`${cogniInstance.instanceId}:${scene.activeDatasetId ?? "none"}:${selection.selectedEntity.id}`}
           entity={selection.selectedEntity}
           docCount={docCountFor(selection.selectedEntity)}
-          connectionCount={connectionCountFor(selection.selectedEntity)}
           events={live.events}
+          instance={cogniInstance}
+          datasetId={scene.activeDatasetId}
+          graphLinks={scene.brainState?.graphLinks ?? []}
+          docLinks={scene.brainState?.docLinks ?? []}
+          nodesById={scene.brainState?.byId ?? {}}
+          onSelectEntity={(node) => {
+            const loaded = scene.brainState?.byId[node.id];
+            selection.selectEntity(loaded ?? node);
+            if (loaded) requestAnimationFrame(() => canvasRef.current?.focusOnIds(new Set([node.id])));
+            else narrate("showing details for an item outside the loaded graph", "#43D9E8");
+          }}
           onClose={selection.clearSelection}
           pathTargetName={selection.pathTargetName}
           pathHops={selection.pathHops}

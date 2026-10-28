@@ -52,7 +52,7 @@ export default function BusinessDock({
                 key={label}
                 type="button"
                 onClick={() => onAltimeterLevel(level)}
-                title={isRecords ? "toggle the raw records layer — chunks, documents and summaries behind the entities" : undefined}
+                title={isRecords ? "toggle raw records in the loaded view — chunks, documents and summaries" : undefined}
                 className={`rounded-[6px] px-2.5 py-[3px] ${
                   active ? "bg-[#141D33] text-[#E9EEF6]" : "text-[#7E8CA6] hover:text-[#E9EEF6]"
                 }`}

@@ -17,7 +17,15 @@ export const CODE_NODE_TYPES = new Set([
   "CodeRepository",
   "CodeExtractionAccount",
   "StorageResource",
+  "CodeService",
+  "CodeFlow",
+  "CodeIntent",
+  "CodeAssociation",
+  "CodeLintFinding",
 ]);
+
+// CodeSource (a symbol's own source text, mapping version 5) is deliberately not listed: the
+// server keeps it out of CODE reads, so it is not an inspectable code node here.
 
 // belongs_to_set/source_node_set are null on every code node observed so
 // far, the same shape UNCATEGORIZED_SOURCE (computeBrainState.ts) exists

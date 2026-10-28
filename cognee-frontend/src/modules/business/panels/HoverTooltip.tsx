@@ -39,7 +39,7 @@ export default function HoverTooltip({ hit, docCount, connectionCount, x, y, con
     const names = tn.members.slice(0, MAX_MEMBER_NAMES).map((m) => String(m.name || "")).join(", ");
     return (
       <div className={className} style={style}>
-        <b className="text-[#E9EEF6]">{tn.name}</b> · {tn.members.length} record{tn.members.length === 1 ? "" : "s"}
+        <b className="text-[#E9EEF6]">{tn.name}</b> · {tn.members.length} record{tn.members.length === 1 ? "" : "s"} in this view
         <br />
         <span className="text-[#7E8CA6]">
           {names}{tn.members.length > MAX_MEMBER_NAMES ? "…" : ""}
@@ -72,7 +72,7 @@ export default function HoverTooltip({ hit, docCount, connectionCount, x, y, con
         {structuredTypeName(entity) || entity.type || ""}
         {sets.length ? ` · from ${sets.join(", ")}` : ""}
         {docCount ? ` · seen in ${docCount} places` : ""}
-        {connectionCount ? ` · ${connectionCount} connection${connectionCount === 1 ? "" : "s"}` : ""}
+        {connectionCount ? ` · ${connectionCount} connection${connectionCount === 1 ? "" : "s"} in this view` : ""}
       </span>
     </div>
   );

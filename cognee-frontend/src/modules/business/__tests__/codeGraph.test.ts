@@ -1,5 +1,7 @@
+import { existsSync, readFileSync } from "fs";
+import { resolve } from "path";
 import type { BusinessGraphNode } from "../types";
-import { CODE_SOURCE, codeDisplayName, normalizeCodeNodes } from "../codeGraph";
+import { CODE_NODE_TYPES, CODE_SOURCE, codeDisplayName, normalizeCodeNodes } from "../codeGraph";
 
 function node(id: string, overrides: Partial<BusinessGraphNode> = {}): BusinessGraphNode {
   return { id, stage: "other", ...overrides };
@@ -77,9 +79,22 @@ describe("normalizeCodeNodes", () => {
       "CodeSymbol", "ExternalDependency", "CodeFileReference", "CodeTestReference",
       "CodeModule", "ApiEndpoint", "CodeInsight", "CodeRepository",
       "CodeExtractionAccount", "StorageResource",
+      "CodeService", "CodeFlow", "CodeIntent", "CodeAssociation", "CodeLintFinding",
     ];
     const results = normalizeCodeNodes(types.map((t, i) => node(String(i), { type: t })));
     results.forEach((r) => expect(r.stage).toBe("entity"));
+  });
+
+  it("knows every node type the backend's CODE index serves", () => {
+    // Read from the backend source so a type added there fails here.
+    const file = resolve(process.cwd(), "../cognee/modules/retrieval/code_retriever.py");
+    if (!existsSync(file)) return; // The frontend is built outside the repository.
+    const source = readFileSync(file, "utf8");
+    const block = source.match(/CODE_NODE_TYPES\s*=\s*\(([\s\S]*?)^\)/m)?.[1] ?? "";
+    const backend = [...block.matchAll(/"(\w+)"/g)].map((m) => m[1]);
+    // The tuple holds comments with parentheses, so a capture that stops early would compare fewer.
+    expect(backend.length).toBeGreaterThanOrEqual(14);
+    expect(backend.filter((type) => !CODE_NODE_TYPES.has(type))).toEqual([]);
   });
 
   it("returns an empty array for no nodes", () => {

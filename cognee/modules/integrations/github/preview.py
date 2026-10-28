@@ -1,4 +1,5 @@
-"""Preview GitHub file selection without downloading blobs or changing memory."""
+"""List an installation's repositories and preview their file selection, without downloading
+blobs or changing memory."""
 
 from urllib.parse import quote
 
@@ -34,6 +35,17 @@ def tree_listing(payload: dict) -> str:
     return "".join(records)
 
 
+async def _installation_repositories(
+    credential: IntegrationCredential,
+) -> tuple[IntegrationCredential, str, list[dict]]:
+    """The active credential, an installation token and the repositories it can read."""
+    credential = await require_active_credential(credential)
+    if credential.provider != "github":
+        raise ValueError("A GitHub connection is required")
+    token, _ = await mint_installation_token(int(credential.provider_account_id))
+    return credential, token, await list_installation_repository_records(token)
+
+
 async def preview_repository(
     credential: IntegrationCredential,
     repository_id: str,
@@ -44,12 +56,8 @@ async def preview_repository(
     Truncated trees are errors, never partial previews. The returned tree SHA lets
     callers distinguish this preview from a later sync of a changed branch.
     """
-    credential = await require_active_credential(credential)
-    if credential.provider != "github":
-        raise ValueError("A GitHub connection is required")
+    credential, token, repositories = await _installation_repositories(credential)
     settings = GithubRepositorySettings.model_validate(settings)
-    token, _ = await mint_installation_token(int(credential.provider_account_id))
-    repositories = await list_installation_repository_records(token)
     repository = next((item for item in repositories if str(item["id"]) == repository_id), None)
     if repository is None:
         raise ValueError("Repository is not available to this GitHub installation")
@@ -79,3 +87,16 @@ async def preview_repository(
         "tree_sha": payload.get("sha"),
         **result,
     }
+
+
+async def list_repositories(credential: IntegrationCredential) -> list[dict]:
+    """The repositories this installation can read: id, full name and default branch."""
+    _, _, records = await _installation_repositories(credential)
+    return [
+        {
+            "id": str(record["id"]),
+            "full_name": record["full_name"],
+            "default_branch": record.get("default_branch"),
+        }
+        for record in records
+    ]
