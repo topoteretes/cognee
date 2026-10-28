@@ -1,1 +1,1 @@
-"""Review source-backed facts and persist disputes without changing the facts."""
+"""Review entity facts and store their conflicts without changing the facts."""

@@ -981,6 +981,7 @@ class SessionManager:
             user_id=user_id,
             session_id=session_id,
         )
-        if deleted:
-            await delete_session_qa_vectors(user_id=user_id, session_id=session_id)
+        # Unconditionally: cache entries expire (session TTL) while their Q&A
+        # vectors, which hold the question and answer text, do not.
+        await delete_session_qa_vectors(user_id=user_id, session_id=session_id)
         return deleted

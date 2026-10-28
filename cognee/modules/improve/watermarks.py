@@ -23,7 +23,7 @@ from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
 
-logger = get_logger("improve.graph_changes")
+logger = get_logger("improve.watermarks")
 
 # Operations that only read a dataset.
 READ_OPERATION_NAMES = ("search", "recall")
@@ -35,7 +35,7 @@ REVIEW_WATERMARK_KEY = "review_conflicts"
 GLOBAL_CONTEXT_WATERMARK_KEY = "global_context_index"
 
 
-class ImproveWatermark(NamedTuple):
+class StageWatermark(NamedTuple):
     """The newest succeeded improve row carrying one stage's stamp."""
 
     operation_id: UUID
@@ -65,7 +65,7 @@ def _stamped_stage_start(run_info, key: str) -> datetime | None:
 
 async def last_improve_watermark(
     dataset_id: UUID, key: str, *, exclude_operation_id: UUID | None = None
-) -> ImproveWatermark | None:
+) -> StageWatermark | None:
     """Read the newest succeeded operation carrying this stage's stamp."""
     from sqlalchemy import select
 
@@ -94,7 +94,7 @@ async def last_improve_watermark(
         return None
     started_at = _stamped_stage_start(row[1], key)
     # _stamped_stage_start accepted it, so row[1][key] is a dict carrying a date.
-    return ImproveWatermark(row[0], started_at, row[1][key]) if started_at is not None else None
+    return StageWatermark(row[0], started_at, row[1][key]) if started_at is not None else None
 
 
 async def has_dataset_changed_since_last_improve(
