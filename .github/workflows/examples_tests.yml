@@ -122,7 +122,7 @@ jobs:
         env:
           ENV: 'dev'
           CACHING: 'true'
-          CACHE_BACKEND: 'fs'
+          CACHE_BACKEND: 'sqlite'
           OPENAI_API_KEY: "mock-not-used"
           LLM_API_KEY: "mock-not-used"
           EMBEDDING_DIMENSIONS: 300
@@ -251,6 +251,8 @@ jobs:
           DB_PORT: 5432
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
+          # The default sqlite cache.db cannot live on the S3 system root.
+          CACHE_BACKEND: 'postgres'
         run: uv run python cognee/tests/utils/run_mocked.py ./examples/demos/permissions/user_permissions_and_access_control_example.py
 
   # Docling test - NO container (runs on macOS, container only works on Linux)

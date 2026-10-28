@@ -46,7 +46,7 @@ await cognee.wait_for_background_tasks()  # before a script exits
 | Read a session | `cognee.session.get_session(session_id, last_n=...)` |
 
 Requirements: `CACHING=true` (default). The cache backend is
-`CACHE_BACKEND`, one of `sqlite` (default), `postgres`, `redis`, `fs`,
+`CACHE_BACKEND`, one of `sqlite` (default), `postgres`, `redis`,
 `tapes`. Sessions expire after `SESSION_TTL_SECONDS` (default 7 days).
 
 ### What improve() does: nine stages, in order

@@ -28,9 +28,9 @@ from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRe
 delete_module = importlib.import_module("cognee.modules.session_lifecycle.delete_session")
 
 
-@pytest_asyncio.fixture(params=["fs", "sql"])
-async def stores(request):
-    """A real session cache (fs or SQL) and a real SQLite relational DB, wired into the delete."""
+@pytest_asyncio.fixture
+async def stores():
+    """A real SQL session cache and a real SQLite relational DB, wired into the delete."""
     with tempfile.TemporaryDirectory() as tmpdir:
         relational = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{tmpdir}/relational.db")
         async with relational.engine.begin() as connection:
@@ -39,22 +39,9 @@ async def stores(request):
                 tables=[SessionRecord.__table__, SessionModelUsage.__table__],
             )
 
-        if request.param == "fs":
-            with patch(
-                "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-                return_value={"data_root_directory": tmpdir},
-            ):
-                from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                    FSCacheAdapter,
-                )
+        from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 
-                adapter = FSCacheAdapter()
-        else:
-            from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import (
-                SqlCacheAdapter,
-            )
-
-            adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmpdir}/cache.db")
+        adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmpdir}/cache.db")
 
         manager = SessionManager(cache_engine=adapter)
         vectors = AsyncMock()
@@ -71,10 +58,7 @@ async def stores(request):
         ):
             yield SimpleNamespace(manager=manager, relational=relational, vectors=vectors)
 
-        if request.param == "fs":
-            adapter.cache.close()
-        else:
-            await adapter.close()
+        await adapter.close()
         await relational.engine.dispose()
 
 
