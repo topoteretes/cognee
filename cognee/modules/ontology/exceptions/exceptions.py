@@ -1,6 +1,6 @@
 from fastapi import status
 
-from cognee.exceptions import CogneeSystemError
+from cognee.exceptions import CogneeConfigurationError, CogneeSystemError
 
 
 class OntologyInitializationError(CogneeSystemError):
@@ -33,6 +33,20 @@ class EmptyOntologyInStrictModeError(CogneeSystemError):
             "so the run is refused instead."
         ),
         name: str = "EmptyOntologyInStrictModeError",
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class OntologyReasoningDependencyError(CogneeConfigurationError):
+    def __init__(
+        self,
+        message: str = (
+            "ONTOLOGY_REASONING=owl_rl requires the optional 'owlrl' package, which is "
+            "not installed. Install it with `pip install owlrl` (or the `cognee[ontology]` "
+            "extra), or set ONTOLOGY_REASONING=none."
+        ),
+        name: str = "OntologyReasoningDependencyError",
         status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
     ):
         super().__init__(message, name, status_code)

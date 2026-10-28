@@ -14,7 +14,7 @@ only when X is shown.
 from dataclasses import dataclass, field, replace
 
 from cognee.modules.retrieval.hybrid.facts import FactCandidates, select_facts_from_candidates
-from cognee.modules.retrieval.hybrid.results import result_id
+from cognee.modules.retrieval.utils.results import result_id
 
 
 @dataclass(frozen=True)

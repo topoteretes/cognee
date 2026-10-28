@@ -8,16 +8,39 @@ from cognee.infrastructure.llm.exceptions import (
     raise_if_budget_exhausted_record,
 )
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.session_node_set import bridge_node_set
 from cognee.infrastructure.session.session_persist_watermark import (
     SessionPersistWindow,
     save_persisted_qa_count,
 )
+from cognee.modules.improve.config import get_improve_config
 from cognee.modules.improve.constants import USER_SESSIONS_NODE_SET
-from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
+from cognee.modules.pipelines.exceptions import AfterRunHookError
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    get_after_run_failures,
+    get_errored_run_info,
+)
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.data_item import DataItem
 
 logger = get_logger("cognify_session")
+
+
+def _dated_content(window: SessionPersistWindow) -> str | DataItem:
+    """The window's text, carrying its last entry time as the document's source date.
+
+    Conflict review orders competing facts by that date, so a window that has one
+    is added as a DataItem under IMPROVE_EFFECTIVE_DATE_KEY. literal_text keeps
+    session text that happens to look like a URL or a path from being fetched.
+    """
+    if not window.last_entry_time:
+        return window.text
+    return DataItem(
+        data=window.text,
+        external_metadata={get_improve_config().effective_date_key: window.last_entry_time},
+        literal_text=True,
+    )
 
 
 async def cognify_session(
@@ -51,6 +74,8 @@ async def cognify_session(
     Raises:
         CogneeValidationError: If no valid, non-empty window was provided.
         LLMPaymentRequiredError: If the LLM budget is exhausted.
+        AfterRunHookError: If the step after a window's completed cognify run
+            failed, once every window ran; those windows' watermarks moved.
         CogneeSystemError: If cognee operations fail for any other reason.
     """
     windows = data if isinstance(data, list) else [data]
@@ -63,6 +88,7 @@ async def cognify_session(
         logger.warning("No session windows provided to cognify_session task, skipping")
         raise CogneeValidationError(message="Session window cannot be empty", log=False)
 
+    hook_failures = []
     try:
         for window in valid_windows:
             logger.info(
@@ -71,13 +97,14 @@ async def cognify_session(
                 window.persisted_qa_count,
             )
 
+            node_set = bridge_node_set([USER_SESSIONS_NODE_SET], window.node_set)
             await cognee.add(
-                window.text,
+                _dated_content(window),
                 dataset_id=dataset_id,
-                node_set=[USER_SESSIONS_NODE_SET],
+                node_set=node_set,
                 user=user,
             )
-            logger.debug("Session data added to cognee with node_set: %s", USER_SESSIONS_NODE_SET)
+            logger.debug("Session data added to cognee with node_set: %s", node_set)
             # raise_on_error=False: one window's failed build must not kill the
             # whole memify run — inspect the run info instead, keep this
             # window's watermark put (so it is re-extracted and retried on the
@@ -85,6 +112,11 @@ async def cognify_session(
             cognify_result = await cognee.cognify(
                 datasets=[dataset_id], user=user, raise_on_error=False
             )
+            # A failed step after a completed run comes back on the run as
+            # ``after_run_error``. The window is stored, so its watermark still
+            # moves and the window is not rebuilt; the error is raised once every
+            # window ran.
+            hook_failures.extend(get_after_run_failures(cognify_result))
             errored_run = get_errored_run_info(cognify_result)
             if errored_run is not None:
                 logger.error(
@@ -127,3 +159,5 @@ async def cognify_session(
         raise_if_budget_exhausted(e)
         logger.exception("Error cognifying session data")
         raise CogneeSystemError(message=f"Failed to cognify session data: {e!s}", log=False)
+    if hook_failures:
+        raise AfterRunHookError(hook_failures)

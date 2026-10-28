@@ -3,7 +3,7 @@ from typing import Any
 
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
-from cognee.modules.retrieval.hybrid.results import first_display_value, payload, result_id
+from cognee.modules.retrieval.utils.results import first_display_value, payload, result_id
 
 MIN_FACT_WORD_COUNT = 3
 
@@ -137,8 +137,12 @@ def _fact_display_text(text: str) -> str:
     return stripped[:1].upper() + stripped[1:]
 
 
-def format_facts(facts: list[dict]) -> str:
-    texts = [fact["text"] for fact in facts or [] if fact.get("text")]
+def format_facts(facts: list[dict], *, exclude_texts=()) -> str:
+    texts = [
+        fact["text"]
+        for fact in facts or []
+        if fact.get("text") and fact["text"] not in exclude_texts
+    ]
     if not texts:
         return ""
     return "## Related facts\n" + "\n".join(f"- {text}" for text in texts)

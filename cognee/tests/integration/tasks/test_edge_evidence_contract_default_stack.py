@@ -28,6 +28,7 @@ from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
@@ -71,7 +72,7 @@ def _mock_llm_output(text_input, system_prompt, response_model):
 
 
 async def _fake_embed(self, text):
-    return [[0.0] * (self.dimensions or 8) for _ in text]
+    return EmbeddingResult(vectors=[[0.0] * (self.dimensions or 8) for _ in text], tokens=0)
 
 
 async def _setup(tmp_path):
@@ -88,7 +89,7 @@ async def _ingest():
     r2 = await cognee.add(DOC2)
     d1 = UUID(str(r1.data_ingestion_info[0]["data_id"]))
     d2 = UUID(str(r2.data_ingestion_info[0]["data_id"]))
-    cognify_result = await cognee.cognify()
+    cognify_result = await cognee.cognify(extractor="llm")
     dataset_id = UUID(str(next(iter(cognify_result.keys()))))
     return dataset_id, d1, d2
 
@@ -154,7 +155,7 @@ async def test_edge_evidence_follows_the_graph_through_its_lifecycle(mock_struct
         await cognee.forget(dataset_id=dataset_id, memory_only=True)
         assert await _evidence_rows() == []
 
-        await cognee.cognify()
+        await cognee.cognify(extractor="llm")
         recaptured = await _evidence_rows()
         assert recaptured
         assert {row.data_id for row in recaptured} == {d1}

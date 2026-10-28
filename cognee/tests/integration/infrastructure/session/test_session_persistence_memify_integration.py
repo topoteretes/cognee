@@ -21,6 +21,7 @@ from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
     persist_sessions_in_knowledge_graph_pipeline,
 )
 from cognee.modules.engine.models import NodeSet
+from cognee.modules.preflight import llm_available
 from cognee.modules.users.methods import get_default_user
 
 logger = logging.getLogger(__name__)
@@ -134,7 +135,12 @@ async def session_persistence_env(event_loop):
     with (
         patch.dict(
             os.environ,
-            {"CACHE_BACKEND": "fs", "COGNEE_SKIP_CONNECTION_TEST": "true"},
+            # Skipping the provider probe only applies to a configured LLM: with no
+            # key it would also switch off the keyless defaults (fork PRs).
+            {
+                "CACHE_BACKEND": "fs",
+                **({"COGNEE_SKIP_CONNECTION_TEST": "true"} if llm_available() else {}),
+            },
             clear=False,
         ),
         tempfile.TemporaryDirectory(prefix="cognee_session_persistence_system_") as system_path,
