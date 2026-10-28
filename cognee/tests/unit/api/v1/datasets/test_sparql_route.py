@@ -197,6 +197,28 @@ def test_base_iri_is_applied_to_minted_iris(client):
     assert response.json()["rows"][0][0] == "https://example.org/mem/node/person-1"
 
 
+@pytest.mark.parametrize("base_iri", [None, "https://example.org/mem/"])
+def test_view_prefixes_work_without_a_prefix_declaration(client, base_iri):
+    """``cognee:`` / ``cprop:`` are bound by the view and follow the request's base IRI."""
+    query = (
+        "SELECT ?o WHERE { ?s cprop:knows ?o . ?s rdfs:label ?n "
+        "FILTER(STRSTARTS(STR(?s), STR(cognee:))) }"
+    )
+    extra = {"base_iri": base_iri} if base_iri else {}
+
+    response = _sparql(client, query, **extra)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["rows"] == [[f"{base_iri or DEFAULT_BASE_IRI}node/person-2"]]
+
+
+def test_undeclared_prefix_is_400(client):
+    response = _sparql(client, "SELECT ?o WHERE { ?s nope:x ?o }")
+
+    assert response.status_code == 400, response.text
+    assert "Unknown namespace prefix" in response.json()["message"]
+
+
 # --- HTTP: guards -------------------------------------------------------------
 
 
@@ -403,6 +425,24 @@ def test_slow_query_is_504(client, monkeypatch):
     assert "0.05s" in response.json()["message"]
 
 
+def test_parsing_counts_toward_the_timeout(client, monkeypatch):
+    """A query that is slow to parse answers 504 too, not only a slow export or evaluation."""
+    import time
+
+    parse = sparql_module.prepare_query
+
+    def _slow_parse(query):
+        time.sleep(0.5)
+        return parse(query)
+
+    monkeypatch.setenv("SPARQL_QUERY_TIMEOUT_SECONDS", "0.05")
+    monkeypatch.setattr(sparql_module, "prepare_query", _slow_parse)
+
+    response = _sparql(client, SELECT_LABELS)
+
+    assert response.status_code == 504, response.text
+
+
 def test_unauthorized_dataset_is_404_like_the_other_dataset_routes(client):
     client.authorized.datasets = []
 
@@ -421,6 +461,15 @@ async def test_query_memory_graph_sparql_runs_a_read_only_query():
     rows = await query_memory_graph_sparql(SELECT_LABELS, graph_engine=FakeGraphEngine())
 
     assert [str(row[1]) for row in rows] == ["Ada", "Grace", "Person"]
+
+
+@pytest.mark.asyncio
+async def test_query_memory_graph_sparql_knows_the_view_prefixes():
+    rows = await query_memory_graph_sparql(
+        "SELECT ?o WHERE { ?s cprop:knows ?o }", graph_engine=FakeGraphEngine()
+    )
+
+    assert [str(row[0]) for row in rows] == [f"{DEFAULT_BASE_IRI}node/person-2"]
 
 
 @pytest.mark.asyncio

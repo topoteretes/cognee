@@ -14,9 +14,9 @@ request. Three guards keep that cost bounded:
 * the dataset's node count is checked *before* the export, and graphs above
   ``SPARQL_MAX_GRAPH_NODES`` are refused with a pointer at the RDF export, which
   streams the same triples without holding a query engine in memory;
-* the export + query run in a worker thread under a wall-clock timeout
-  (``SPARQL_QUERY_TIMEOUT_SECONDS``), so a pathological query cannot pin the
-  event loop. Python threads cannot be cancelled, so a timed-out query keeps
+* parsing, export and evaluation run in worker threads under one wall-clock
+  timeout (``SPARQL_QUERY_TIMEOUT_SECONDS``), so a pathological query cannot pin
+  the event loop. Python threads cannot be cancelled, so a timed-out query keeps
   running in the background until it finishes; the caller only stops waiting.
 
 The pure pieces (keyword guard, term conversion, result formatting) take plain
@@ -32,7 +32,7 @@ from typing import Any
 from uuid import UUID
 
 from pyparsing import ParseException, ParseResults
-from rdflib import BNode
+from rdflib import BNode, Graph
 from rdflib.plugins.sparql.algebra import translateQuery
 from rdflib.plugins.sparql.parser import parseQuery
 from rdflib.plugins.sparql.parserutils import CompValue
@@ -225,20 +225,34 @@ def assert_no_external_access(parse_tree: ParseResults) -> None:
             )
 
 
-def prepare_query(query: str) -> Query:
-    """Check and compile ``query`` once: read-only, parses, no external access.
+def prepare_query(query: str) -> ParseResults:
+    """Check ``query`` and return its parse tree: read-only, parses, no external access.
 
-    The returned ``Query`` is what ``Graph.query`` runs, so the text is never
-    parsed a second time. Raises ``SparqlUpdateNotAllowedError``,
-    ``SparqlSyntaxError`` or ``SparqlExternalAccessNotAllowedError``.
+    Pass the tree to ``compile_query`` against the graph it runs on, so the text is
+    parsed once. Raises ``SparqlUpdateNotAllowedError``, ``SparqlSyntaxError`` or
+    ``SparqlExternalAccessNotAllowedError``.
     """
     assert_read_only(query)
     parse_tree = _parse(query)
     assert_no_external_access(parse_tree)
+    return parse_tree
+
+
+def compile_query(parse_tree: ParseResults, graph: Graph) -> Query:
+    """Compile a ``prepare_query`` tree with ``graph``'s prefixes, as ``Graph.query`` does.
+
+    The RDF view binds ``cognee:`` and ``cprop:`` (``graph_data_to_rdf``), so queries
+    may use them without a ``PREFIX`` line.
+    """
     try:
-        return translateQuery(parse_tree)
+        return translateQuery(parse_tree, initNs=dict(graph.namespaces()))
     except RecursionError as error:
         raise _too_complex_error(error) from error
+    except Exception as error:
+        # rdflib raises a bare Exception for an undeclared prefix.
+        if str(error).startswith("Unknown namespace prefix"):
+            raise SparqlSyntaxError(f"Invalid SPARQL query: {error}") from error
+        raise
 
 
 def term_to_json(term: Any) -> str | None:
@@ -297,17 +311,18 @@ def format_sparql_result(result: Result, limit: int = DEFAULT_LIMIT) -> dict[str
 def run_sparql_on_graph_data(
     nodes: list,
     edges: list,
-    query: Query,
+    parse_tree: ParseResults,
     base_iri: str = DEFAULT_BASE_IRI,
     limit: int = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
-    """Build the RDF view from ``(nodes, edges)`` and run ``query`` on it, synchronously.
+    """Build the RDF view from ``(nodes, edges)`` and run the query on it, synchronously.
 
-    ``query`` comes from ``prepare_query``. Everything CPU-bound lives here (RDF
-    build, evaluate, format) so the async caller can push the whole unit onto a
-    worker thread.
+    ``parse_tree`` comes from ``prepare_query``. Everything CPU-bound lives here
+    (RDF build, compile, evaluate, format) so the async caller can push the whole
+    unit onto a worker thread.
     """
     graph = graph_data_to_rdf(nodes, edges, base_iri=base_iri)
+    query = compile_query(parse_tree, graph)
     try:
         result = graph.query(query)
         return format_sparql_result(result, limit=limit)
@@ -338,35 +353,37 @@ async def query_dataset_sparql(
             ``FROM NAMED``.
         SparqlGraphTooLargeError: the graph has more nodes than
             ``SPARQL_MAX_GRAPH_NODES``.
-        SparqlQueryTimeoutError: export + query exceeded
+        SparqlQueryTimeoutError: parse, export and query together exceeded
             ``SPARQL_QUERY_TIMEOUT_SECONDS``.
     """
     if not 1 <= limit <= MAX_LIMIT:
         raise ValueError(f"limit must be between 1 and {MAX_LIMIT}, got {limit}")
-    # Parsing is CPU-bound; it runs before the graph is read, so a refused query costs nothing.
-    prepared = await asyncio.to_thread(prepare_query, query)
 
     base_iri = base_iri or DEFAULT_BASE_IRI
     max_nodes = max_graph_nodes()
     timeout = query_timeout_seconds()
 
-    async with set_database_global_context_variables(dataset_id, owner_id):
-        graph_engine = await get_graph_engine()
+    async def _parse_export_and_query() -> dict[str, Any]:
+        # Parsing is CPU-bound; it runs before the graph is read, so a refused query
+        # costs nothing.
+        parse_tree = await asyncio.to_thread(prepare_query, query)
 
-        num_nodes, _ = await graph_engine.get_graph_counts()
-        if num_nodes > max_nodes:
-            raise SparqlGraphTooLargeError(num_nodes, max_nodes)
+        async with set_database_global_context_variables(dataset_id, owner_id):
+            graph_engine = await get_graph_engine()
 
-        async def _export_and_query() -> dict[str, Any]:
+            num_nodes, _ = await graph_engine.get_graph_counts()
+            if num_nodes > max_nodes:
+                raise SparqlGraphTooLargeError(num_nodes, max_nodes)
+
             nodes, edges = await graph_engine.get_graph_data()
             logger.info(
                 "SPARQL over dataset %s: %d nodes, %d edges", dataset_id, len(nodes), len(edges)
             )
             return await asyncio.to_thread(
-                run_sparql_on_graph_data, nodes, edges, prepared, base_iri, limit
+                run_sparql_on_graph_data, nodes, edges, parse_tree, base_iri, limit
             )
 
-        try:
-            return await asyncio.wait_for(_export_and_query(), timeout=timeout)
-        except asyncio.TimeoutError as error:
-            raise SparqlQueryTimeoutError(timeout) from error
+    try:
+        return await asyncio.wait_for(_parse_export_and_query(), timeout=timeout)
+    except asyncio.TimeoutError as error:
+        raise SparqlQueryTimeoutError(timeout) from error

@@ -94,14 +94,14 @@ def parse_rdf_content(content: str | bytes, formats: Iterable[str]) -> tuple[Gra
     raise ValueError("Tried formats: " + "; ".join(parse_errors))
 
 
-def parse_rdf_file(graph: Graph, file_path: str) -> None:
+def parse_rdf_file(graph: Graph, file_path: str, rdf_format: str | None = None) -> None:
     """Parse the local file ``file_path`` into ``graph``.
 
-    rdflib picks the format from the extension (turtle when it cannot tell) and
-    takes the base IRI from the file's location, as before; a file it would read as
-    JSON-LD is checked by ``refuse_remote_jsonld_contexts`` first.
+    Without ``rdf_format`` rdflib picks the format from the extension (turtle when
+    it cannot tell). The base IRI is the file's location, as with ``Graph.parse``;
+    a file read as JSON-LD is checked by ``refuse_remote_jsonld_contexts`` first.
     """
-    rdf_format = guess_format(file_path)
+    rdf_format = rdf_format or guess_format(file_path)
     if rdf_format is not None and _is_jsonld_format(rdf_format):
         with open(file_path, "rb") as file:
             refuse_remote_jsonld_contexts(file.read())

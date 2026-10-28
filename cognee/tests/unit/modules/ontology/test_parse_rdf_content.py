@@ -18,6 +18,7 @@ from cognee.modules.ontology.rdf_xml.parse_rdf_content import (
     refuse_remote_jsonld_contexts,
 )
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.tasks.graph.gliner_demo.schema import schema_from_ontology
 from cognee.tests.utils.recording_http_server import recording_http_server
 
 LABEL = "http://www.w3.org/2000/01/rdf-schema#label"
@@ -159,3 +160,15 @@ def test_parse_rdf_file_keeps_the_file_location_as_base_iri(tmp_path):
     expected.parse(str(ontology_file))
     assert set(graph) == set(expected)
     assert str(next(iter(graph))[0]).startswith("file://")
+
+
+def test_gliner_schema_refuses_an_ontology_file_with_a_remote_context(tmp_path):
+    """The keyless extractor reads ONTOLOGY_FILE_PATH itself; it gets the same check."""
+    with recording_http_server(CONTEXT_BODY, "application/ld+json") as (url, requests):
+        ontology_file = tmp_path / "ontology.jsonld"
+        ontology_file.write_text(_remote(url))
+
+        with pytest.raises(ValueError, match="references an external document"):
+            schema_from_ontology(str(ontology_file))
+
+    assert requests == []

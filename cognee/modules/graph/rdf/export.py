@@ -163,8 +163,8 @@ async def query_memory_graph_sparql(
     the graph is read.
     """
     # Imported here: sparql.py imports this module.
-    from cognee.modules.graph.rdf.sparql import prepare_query
+    from cognee.modules.graph.rdf.sparql import compile_query, prepare_query
 
-    prepared = prepare_query(query)
+    parse_tree = prepare_query(query)
     graph = await export_memory_graph_to_rdf(base_iri=base_iri, graph_engine=graph_engine)
-    return list(graph.query(prepared))
+    return list(graph.query(compile_query(parse_tree, graph)))
