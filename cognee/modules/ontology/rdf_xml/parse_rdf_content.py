@@ -1,11 +1,11 @@
-"""Parse untrusted RDF content without letting the parser reach outside it.
+"""Parse RDF content and files without letting the parser reach outside them.
 
 Uploaded ontologies are stored as ``.owl`` whatever their real syntax, so they are
 parsed by trying rdflib formats in turn. rdflib's JSON-LD parser fetches every
 ``@context`` / ``@import`` given as a string (a URL, a relative path or a ``file:``
-path), so a crafted upload would make the server send requests or read local files
-whenever it is parsed. rdflib has no switch for this, so such documents are refused
-before the JSON-LD parser sees them; contexts written out inline still parse.
+path), so a crafted document would make the server send requests or read local
+files whenever it is parsed. rdflib has no switch for this, so such documents are
+refused before the JSON-LD parser sees them; contexts written out inline still parse.
 """
 
 import json
@@ -16,6 +16,7 @@ from rdflib.parser import Parser
 from rdflib.plugin import PluginException
 from rdflib.plugin import get as get_plugin
 from rdflib.plugins.parsers.jsonld import JsonLDParser
+from rdflib.util import guess_format
 
 from cognee.shared.logging_utils import get_logger
 
@@ -91,3 +92,17 @@ def parse_rdf_content(content: str | bytes, formats: Iterable[str]) -> tuple[Gra
         return graph, rdf_format
 
     raise ValueError("Tried formats: " + "; ".join(parse_errors))
+
+
+def parse_rdf_file(graph: Graph, file_path: str) -> None:
+    """Parse the local file ``file_path`` into ``graph``.
+
+    rdflib picks the format from the extension (turtle when it cannot tell) and
+    takes the base IRI from the file's location, as before; a file it would read as
+    JSON-LD is checked by ``refuse_remote_jsonld_contexts`` first.
+    """
+    rdf_format = guess_format(file_path)
+    if rdf_format is not None and _is_jsonld_format(rdf_format):
+        with open(file_path, "rb") as file:
+            refuse_remote_jsonld_contexts(file.read())
+    graph.parse(file_path, format=rdf_format)

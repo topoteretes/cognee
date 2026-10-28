@@ -22,6 +22,7 @@ from cognee.modules.ontology.ontology_env_config import (
 from cognee.modules.ontology.rdf_xml.parse_rdf_content import (
     FALLBACK_FORMATS,
     parse_rdf_content,
+    parse_rdf_file,
 )
 from cognee.shared.logging_utils import get_logger
 
@@ -127,7 +128,7 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                     loaded_files = []
                     for file_path in files_to_load:
                         if os.path.exists(file_path):
-                            self.graph.parse(file_path)
+                            parse_rdf_file(self.graph, file_path)
                             loaded_files.append(file_path)
                             logger.info("Ontology loaded successfully from file: %s", file_path)
                         else:

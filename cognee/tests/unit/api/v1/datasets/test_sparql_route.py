@@ -14,7 +14,7 @@ from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.namespace import XSD
 
 from cognee.modules.graph.rdf import sparql as sparql_module
-from cognee.modules.graph.rdf.export import DEFAULT_BASE_IRI
+from cognee.modules.graph.rdf.export import DEFAULT_BASE_IRI, query_memory_graph_sparql
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.tests.utils.recording_http_server import recording_http_server
 
@@ -37,6 +37,14 @@ EDGES = [
 ]
 
 SELECT_LABELS = "SELECT ?s ?name WHERE { ?s rdfs:label ?name } ORDER BY ?name"
+
+
+def _long_query(patterns: int) -> str:
+    return (
+        "SELECT * WHERE { "
+        + " ".join(f"?s <http://x/p{i}> ?o{i} ." for i in range(patterns))
+        + " }"
+    )
 
 
 class FakeGraphEngine:
@@ -242,6 +250,43 @@ def test_malformed_query_is_400(client):
     assert client.graph.get_graph_data_calls == 0
 
 
+def test_query_too_long_to_parse_is_400_not_500(client):
+    """rdflib's parser exhausts the recursion limit at about 90 triple patterns."""
+    response = _sparql(client, _long_query(200))
+
+    assert response.status_code == 400, response.text
+    assert "too long or too deeply nested" in response.json()["message"]
+    assert client.graph.get_graph_data_calls == 0
+
+
+def test_a_long_query_below_the_parser_limit_still_runs(client):
+    response = _sparql(client, _long_query(60))
+
+    assert response.status_code == 200, response.text
+
+
+def test_query_is_parsed_once(client, monkeypatch):
+    """The checked parse tree is what runs; ``Graph.query`` does not parse the text again."""
+    from rdflib.plugins.sparql import processor
+
+    calls = []
+
+    def _counting(parse):
+        def _wrapped(*args, **kwargs):
+            calls.append(args[0])
+            return parse(*args, **kwargs)
+
+        return _wrapped
+
+    monkeypatch.setattr(sparql_module, "parseQuery", _counting(sparql_module.parseQuery))
+    monkeypatch.setattr(processor, "parseQuery", _counting(processor.parseQuery))
+
+    response = _sparql(client, SELECT_LABELS)
+
+    assert response.status_code == 200, response.text
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize(
     "query",
     [
@@ -368,6 +413,39 @@ def test_unauthorized_dataset_is_404_like_the_other_dataset_routes(client):
     assert client.graph.contexts == []
 
 
+# --- query_memory_graph_sparql (Python-only helper) --------------------------
+
+
+@pytest.mark.asyncio
+async def test_query_memory_graph_sparql_runs_a_read_only_query():
+    rows = await query_memory_graph_sparql(SELECT_LABELS, graph_engine=FakeGraphEngine())
+
+    assert [str(row[1]) for row in rows] == ["Ada", "Grace", "Person"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query, error",
+    [
+        (
+            "SELECT * WHERE {{ SERVICE <{url}/internal> {{ ?s ?p ?o }} }}",
+            "SparqlExternalAccessNotAllowedError",
+        ),
+        ("SELECT * FROM <{url}/graph> WHERE {{ ?s ?p ?o }}", "SparqlExternalAccessNotAllowedError"),
+        ("LOAD <{url}/graph>", "SparqlUpdateNotAllowedError"),
+    ],
+)
+async def test_query_memory_graph_sparql_refuses_external_access(internal_server, query, error):
+    url, requests = internal_server
+    engine = FakeGraphEngine()
+
+    with pytest.raises(getattr(sparql_module, error)):
+        await query_memory_graph_sparql(query.format(url=url), graph_engine=engine)
+
+    assert requests == []
+    assert engine.get_graph_data_calls == 0
+
+
 # --- pure helpers -------------------------------------------------------------
 
 
@@ -475,6 +553,20 @@ async def test_sdk_sparql_refuses_service(monkeypatch, graph):
         await datasets_module.datasets.sparql(
             DATASET_ID, "SELECT * WHERE { SERVICE <http://x/> { ?s ?p ?o } }", user=object()
         )
+
+    assert graph.get_graph_data_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_sdk_sparql_reports_a_query_too_long_to_parse_as_a_syntax_error(monkeypatch, graph):
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+    dataset = SimpleNamespace(id=DATASET_ID, owner_id=OWNER_ID)
+
+    with (
+        patch.object(datasets_module, "get_authorized_dataset", AsyncMock(return_value=dataset)),
+        pytest.raises(sparql_module.SparqlSyntaxError, match="too long or too deeply nested"),
+    ):
+        await datasets_module.datasets.sparql(DATASET_ID, _long_query(200), user=object())
 
     assert graph.get_graph_data_calls == 0
 

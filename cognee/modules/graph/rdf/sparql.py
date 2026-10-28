@@ -33,8 +33,10 @@ from uuid import UUID
 
 from pyparsing import ParseException, ParseResults
 from rdflib import BNode
+from rdflib.plugins.sparql.algebra import translateQuery
 from rdflib.plugins.sparql.parser import parseQuery
 from rdflib.plugins.sparql.parserutils import CompValue
+from rdflib.plugins.sparql.sparql import Query
 from rdflib.query import Result
 
 from cognee.context_global_variables import set_database_global_context_variables
@@ -189,18 +191,31 @@ def _parse_tree_node_names(node: Any, names: set[str]) -> set[str]:
     return names
 
 
-def assert_no_external_access(query: str) -> None:
-    """Refuse a query that reads beyond the dataset view.
+def _too_complex_error(error: RecursionError) -> SparqlSyntaxError:
+    # rdflib's parser and algebra recurse per triple pattern; around 90 patterns
+    # exhaust Python's default recursion limit.
+    return SparqlSyntaxError(
+        "SPARQL query is too long or too deeply nested to process; split it into "
+        f"smaller queries ({error})."
+    )
+
+
+def _parse(query: str) -> ParseResults:
+    try:
+        return parseQuery(query)
+    except ParseException as error:
+        raise SparqlSyntaxError(f"Invalid SPARQL query: {error}") from error
+    except RecursionError as error:
+        raise _too_complex_error(error) from error
+
+
+def assert_no_external_access(parse_tree: ParseResults) -> None:
+    """Refuse a parsed query that reads beyond the dataset view.
 
     Checks the parse tree, not the text, so ``SERVICE`` is found wherever it is
     nested (subquery, ``OPTIONAL``, ``UNION``) and a literal or variable that merely
-    spells "service" passes. Raises ``SparqlSyntaxError`` when the query does not parse.
+    spells "service" passes.
     """
-    try:
-        parse_tree = parseQuery(query)
-    except ParseException as error:
-        raise SparqlSyntaxError(f"Invalid SPARQL query: {error}") from error
-
     node_names = _parse_tree_node_names(parse_tree, set())
     for node_name, clause in _EXTERNAL_ACCESS_NODES.items():
         if node_name in node_names:
@@ -210,10 +225,20 @@ def assert_no_external_access(query: str) -> None:
             )
 
 
-def validate_query(query: str) -> None:
-    """Every check that needs only the query text: read-only, then no external access."""
+def prepare_query(query: str) -> Query:
+    """Check and compile ``query`` once: read-only, parses, no external access.
+
+    The returned ``Query`` is what ``Graph.query`` runs, so the text is never
+    parsed a second time. Raises ``SparqlUpdateNotAllowedError``,
+    ``SparqlSyntaxError`` or ``SparqlExternalAccessNotAllowedError``.
+    """
     assert_read_only(query)
-    assert_no_external_access(query)
+    parse_tree = _parse(query)
+    assert_no_external_access(parse_tree)
+    try:
+        return translateQuery(parse_tree)
+    except RecursionError as error:
+        raise _too_complex_error(error) from error
 
 
 def term_to_json(term: Any) -> str | None:
@@ -272,21 +297,22 @@ def format_sparql_result(result: Result, limit: int = DEFAULT_LIMIT) -> dict[str
 def run_sparql_on_graph_data(
     nodes: list,
     edges: list,
-    query: str,
+    query: Query,
     base_iri: str = DEFAULT_BASE_IRI,
     limit: int = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
     """Build the RDF view from ``(nodes, edges)`` and run ``query`` on it, synchronously.
 
-    Everything CPU-bound lives here (RDF build, parse, evaluate, format) so the
-    async caller can push the whole unit onto a worker thread.
+    ``query`` comes from ``prepare_query``. Everything CPU-bound lives here (RDF
+    build, evaluate, format) so the async caller can push the whole unit onto a
+    worker thread.
     """
     graph = graph_data_to_rdf(nodes, edges, base_iri=base_iri)
     try:
         result = graph.query(query)
-    except ParseException as error:
-        raise SparqlSyntaxError(f"Invalid SPARQL query: {error}") from error
-    return format_sparql_result(result, limit=limit)
+        return format_sparql_result(result, limit=limit)
+    except RecursionError as error:
+        raise _too_complex_error(error) from error
 
 
 async def query_dataset_sparql(
@@ -318,7 +344,7 @@ async def query_dataset_sparql(
     if not 1 <= limit <= MAX_LIMIT:
         raise ValueError(f"limit must be between 1 and {MAX_LIMIT}, got {limit}")
     # Parsing is CPU-bound; it runs before the graph is read, so a refused query costs nothing.
-    await asyncio.to_thread(validate_query, query)
+    prepared = await asyncio.to_thread(prepare_query, query)
 
     base_iri = base_iri or DEFAULT_BASE_IRI
     max_nodes = max_graph_nodes()
@@ -337,7 +363,7 @@ async def query_dataset_sparql(
                 "SPARQL over dataset %s: %d nodes, %d edges", dataset_id, len(nodes), len(edges)
             )
             return await asyncio.to_thread(
-                run_sparql_on_graph_data, nodes, edges, query, base_iri, limit
+                run_sparql_on_graph_data, nodes, edges, prepared, base_iri, limit
             )
 
         try:

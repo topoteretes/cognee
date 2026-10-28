@@ -8,11 +8,13 @@ import json
 from io import StringIO
 
 import pytest
+from rdflib import Graph
 
 from cognee.modules.ontology.exceptions import OntologyInitializationError
 from cognee.modules.ontology.rdf_xml.parse_rdf_content import (
     FALLBACK_FORMATS,
     parse_rdf_content,
+    parse_rdf_file,
     refuse_remote_jsonld_contexts,
 )
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
@@ -121,3 +123,39 @@ def test_resolver_keeps_the_safe_file_when_one_upload_is_refused():
 
     assert requests == []
     assert len(resolver.graph) == 1
+
+
+@pytest.mark.parametrize("suffix", [".jsonld", ".json"])
+def test_resolver_refuses_an_ontology_file_path_with_a_remote_context(tmp_path, suffix):
+    """Paths from ONTOLOGY_FILE_PATH / SDK arguments get the same check as uploads."""
+    with recording_http_server(CONTEXT_BODY, "application/ld+json") as (url, requests):
+        ontology_file = tmp_path / f"ontology{suffix}"
+        ontology_file.write_text(_remote(url))
+
+        with pytest.raises(OntologyInitializationError, match="references an external document"):
+            RDFLibOntologyResolver(ontology_file=str(ontology_file))
+
+    assert requests == []
+
+
+def test_resolver_loads_an_ontology_file_path_with_an_inline_context(tmp_path):
+    ontology_file = tmp_path / "ontology.jsonld"
+    ontology_file.write_text(json.dumps({"@context": {"label": LABEL}, **NODE}))
+
+    resolver = RDFLibOntologyResolver(ontology_file=str(ontology_file))
+
+    assert len(resolver.graph) == 1
+
+
+def test_parse_rdf_file_keeps_the_file_location_as_base_iri(tmp_path):
+    """Relative IRIs resolve against the file, exactly as ``Graph.parse(path)`` did."""
+    ontology_file = tmp_path / "ontology.ttl"
+    ontology_file.write_text("<#a> <http://example.org/p> <#b> .")
+
+    graph = Graph()
+    parse_rdf_file(graph, str(ontology_file))
+
+    expected = Graph()
+    expected.parse(str(ontology_file))
+    assert set(graph) == set(expected)
+    assert str(next(iter(graph))[0]).startswith("file://")
