@@ -1348,6 +1348,7 @@ anthropic = [
     { name = "anthropic" },
 ]
 aws = [
+    { name = "boto3" },
     { name = "s3fs" },
 ]
 azure = [
@@ -1460,6 +1461,9 @@ notebook = [
 ollama = [
     { name = "transformers" },
 ]
+ontology = [
+    { name = "owlrl" },
+]
 postgres = [
     { name = "asyncpg" },
     { name = "pgvector" },
@@ -1523,6 +1527,7 @@ requires-dist = [
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.15.0,<2" },
     { name = "baml-py", marker = "extra == 'baml'", specifier = "==0.206.0" },
     { name = "beautifulsoup4", marker = "extra == 'scraping'", specifier = ">=4.13.1" },
+    { name = "boto3", marker = "extra == 'aws'", specifier = ">=1.43.1,<2" },
     { name = "cbor2", specifier = ">=5.8.0" },
     { name = "certifi", specifier = ">=2026.10.19" },
     { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.3.2,<8" },
@@ -1599,6 +1604,7 @@ requires-dist = [
     { name = "opentelemetry-exporter-otlp-proto-grpc", marker = "extra == 'tracing'", specifier = ">=1.20.0,<2" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'tracing'", specifier = ">=1.20.0,<2" },
     { name = "opentelemetry-sdk", marker = "extra == 'tracing'", specifier = ">=1.20.0,<2" },
+    { name = "owlrl", marker = "extra == 'ontology'", specifier = ">=7.1.4,<7.2" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "pandas", specifier = ">=2.2.2,<3.0.0" },
     { name = "pandas", marker = "extra == 'evals'", specifier = ">=2.2.2,<3.0.0" },
@@ -1613,7 +1619,7 @@ requires-dist = [
     { name = "psutil", marker = "extra == 'gliner'", specifier = ">=5.9" },
     { name = "psycopg2", marker = "extra == 'postgres'", specifier = ">=2.9.10,<3" },
     { name = "psycopg2-binary", marker = "extra == 'postgres-binary'", specifier = ">=2.9.10,<3.0.0" },
-    { name = "pydantic", specifier = ">=2.10.5" },
+    { name = "pydantic", specifier = ">=2.13" },
     { name = "pydantic-settings", specifier = ">=2.7.0,!=2.12.*,!=2.13.*,!=2.14.0,!=2.14.1,<3" },
     { name = "pylance", specifier = ">=12.0.0,<12.1.0" },
     { name = "pympler", specifier = ">=1.1,<2.0.0" },
@@ -1630,7 +1636,7 @@ requires-dist = [
     { name = "rdflib", specifier = ">=7.1.4,<7.2.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0.3,<6.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.2,<=0.16.6" },
-    { name = "s3fs", extras = ["boto3"], marker = "extra == 'aws'", specifier = "==2026.9.0" },
+    { name = "s3fs", marker = "extra == 'aws'", specifier = "==2026.9.0" },
     { name = "scikit-learn", marker = "extra == 'evals'", specifier = ">=1.6.1,<2" },
     { name = "sentencepiece", marker = "extra == 'gliner'", specifier = ">=0.2.0" },
     { name = "sqlalchemy", specifier = ">=2.0.39,<3.0.0" },
@@ -1652,7 +1658,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]
-provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "gmail", "google-drive", "google-calendar", "baml", "dev", "debug", "redis", "tracing", "docling", "docling-full", "gliner", "rapidocr"]
+provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "gmail", "google-drive", "google-calendar", "baml", "dev", "debug", "redis", "tracing", "ontology", "docling", "docling-full", "gliner", "rapidocr"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -7708,6 +7714,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/36/86/b585f53236dec60aba864e050778b25045f857e17f6e5ea0ae95fe80edd2/overrides-7.7.0.tar.gz", hash = "sha256:55158fa3d93b98cc75299b1e67078ad9003ca27945c76162c1c0766d6f91820a", size = 22812, upload-time = "2024-01-27T21:01:33.423Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2c/ab/fc8290c6a4c722e5514d80f62b2dc4c4df1a68a41d1364e625c35990fcf3/overrides-7.7.0-py3-none-any.whl", hash = "sha256:c7ed9d062f78b8e4c1a7b70bd8796b35ead4d9f510227ef9c5dc7626c60d7e49", size = 17832, upload-time = "2024-01-27T21:01:31.393Z" },
+]
+
+[[package]]
+name = "owlrl"
+version = "7.1.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "rdflib" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d1/fc/ce12482d096d65fff01af58f555a6f25e9dbf416fad5d99f91eaab0e11ca/owlrl-7.1.4.tar.gz", hash = "sha256:60bd4067e346b9111f0a2924565afe97ac6595b98b2bbe953928b5113971daf7", size = 44420, upload-time = "2025-07-29T00:17:27.608Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/78/f857ff1a7207e967dc5e8414bbcc15e0aa5cf45f693b1d2ebe2afb3eb1ce/owlrl-7.1.4-py3-none-any.whl", hash = "sha256:e78b46020169783345636da93a467d318f18700c483184dd15e885850cf64775", size = 51981, upload-time = "2025-07-29T00:17:26.229Z" },
 ]
 
 [[package]]

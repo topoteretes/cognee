@@ -31,8 +31,9 @@ error (the query string ends up in browser history and access logs).
 The ``/plugins/{plugin_key}/…`` routes are a separate concern sharing the
 router: agent plugins (claude-code, codex, MCP clients, ...) are not OAuth
 providers but clients of cognee itself. Each connected plugin gets its own
-agent sub-user + labeled API key, so status, attribution, and revocation
-key off that identity instead of a shared tenant key. Declared before the
+agent sub-user, holding one labeled API key per machine the plugin runs on, so
+status, attribution, and revocation key off that identity instead of a shared
+tenant key. Declared before the
 generic ``{provider}`` routes so ``plugins`` is never captured as a
 provider name.
 """
@@ -52,6 +53,7 @@ from pydantic import Field
 from sqlalchemy.exc import IntegrityError
 
 from cognee.api.DTO import InDTO, OutDTO
+from cognee.api.v1.integrations.routers.get_sync_progress_router import get_sync_progress_router
 from cognee.infrastructure.background_tasks import register_background_task
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.list_agents import list_agents
@@ -77,6 +79,11 @@ from cognee.modules.integrations.oauth_flow import (
     make_state,
     validate_state,
 )
+from cognee.modules.integrations.plugin_keys import (
+    PluginAgentKeyLimitError,
+    add_plugin_agent_key,
+    revoke_plugin_agent_keys,
+)
 from cognee.modules.integrations.plugin_status import (
     PluginStatusRow,
     as_utc,
@@ -90,8 +97,8 @@ from cognee.modules.integrations.plugins import KNOWN_PLUGINS, get_plugin
 from cognee.modules.integrations.registry import get_integration, supported_integrations
 from cognee.modules.observability import new_span
 from cognee.modules.session_lifecycle.visibility import visible_user_ids
-from cognee.modules.users.api_key.create_api_key import create_api_key
 from cognee.modules.users.api_key.delete_api_key import delete_api_key
+from cognee.modules.users.api_key.exceptions import ApiKeyNotFoundError
 from cognee.modules.users.api_key.get_api_keys import get_api_keys
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.methods.get_principal_configuration import (
@@ -197,7 +204,24 @@ class PluginProvisionDTO(OutDTO):
     plugin_key: str
     agent_id: UUID
     api_key: str
+    key_id: UUID
     created: bool
+
+
+class PluginKeyDTO(OutDTO):
+    id: UUID
+    name: str | None = None
+    label: str | None = None
+    created_at: datetime | None = None
+    last_used_at: datetime | None = None
+
+
+class PluginKeyListDTO(OutDTO):
+    keys: list[PluginKeyDTO]
+
+
+class PluginKeyRevokeResultDTO(OutDTO):
+    revoked: bool
 
 
 class IntegrationStatusItemDTO(OutDTO):
@@ -280,7 +304,7 @@ async def _record_plugin_on_agent(agent_user_id: UUID, plugin_key: str) -> None:
 
     Stored under the same ``AGENT_CONFIG_NAME`` blob the agent-connection
     registry persists to, so no ``User`` schema change is needed. The first
-    ``provisioned_at`` sticks across re-provisions (key rotation isn't a new
+    ``provisioned_at`` sticks across re-provisions (another machine's key isn't a new
     install) — but only if it still parses as a datetime: the blob is
     agent-writable, so a tampered value is repaired here rather than
     preserved.
@@ -308,18 +332,25 @@ async def _record_plugin_on_agent(agent_user_id: UUID, plugin_key: str) -> None:
     )
 
 
-async def _rotate_agent_api_key(agent_user: User, plugin_key: str) -> str:
-    """Mint a fresh labeled key, then revoke every other key the agent holds.
+async def _add_plugin_key(agent_user_id: UUID, plugin_key: str):
+    """Add a key for this machine; a full agent is a 409, never an eviction."""
+    try:
+        return await add_plugin_agent_key(agent_user_id, plugin_key)
+    except PluginAgentKeyLimitError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"The {plugin_key!r} agent already holds the maximum of {error.limit} API "
+                "keys. Revoke an old machine's key (GET and DELETE "
+                f"/api/v1/integrations/plugins/{plugin_key}/keys) and try again."
+            ),
+        )
 
-    Order matters: each key operation commits its own transaction, so minting
-    first means a failure anywhere in the rotation never leaves the plugin
-    keyless — at worst the old key briefly outlives the new one.
-    """
-    old_keys = await get_api_keys(agent_user)
-    new_key = await create_api_key(agent_user, plugin_key)
-    for old_key in old_keys:
-        await delete_api_key(agent_user, old_key.id)
-    return new_key.api_key
+
+def _reject_agent_caller(user: User) -> None:
+    """The key routes manage an agent's keys on behalf of its human owner only."""
+    if user.parent_user_id is not None:
+        raise HTTPException(status_code=403, detail="An agent cannot manage plugin keys.")
 
 
 # The state proves an install was started by some cognee user; it does not
@@ -436,6 +467,7 @@ def _frontend_redirect(integration: OAuthIntegration, outcome: str) -> RedirectR
 
 def get_integrations_router():
     integrations_router = APIRouter(lifespan=linear_resume_lifespan)
+    integrations_router.include_router(get_sync_progress_router())
 
     # ------------------------------------------------------------------ #
     # Aggregate status (fixed /status path — before the {provider} routes)
@@ -542,17 +574,27 @@ def get_integrations_router():
     # Agent plugins (fixed /plugins prefix — before the {provider} routes)
     # ------------------------------------------------------------------ #
 
-    @integrations_router.post("/plugins/{plugin_key}/provision")
+    @integrations_router.post(
+        "/plugins/{plugin_key}/provision",
+        # Capability marker: plugins read it from /openapi.json to learn that
+        # provisioning here only adds keys, so it is safe to call on any machine.
+        openapi_extra={"x-cognee-additive-plugin-keys": True},
+    )
     async def provision_plugin(
         plugin_key: str, user: User = Depends(get_authenticated_user)
     ) -> PluginProvisionDTO:
-        """Provision (or re-key) a dedicated agent identity for a plugin.
+        """Provision a dedicated agent identity for a plugin, and add a key for it.
 
         Idempotent get-or-create: the first call creates an agent sub-user
-        for ``(user, plugin_key)`` with a labeled API key; every later call
-        returns the same agent but rotates the key (old keys are revoked —
-        re-provision *is* the rotation flow). The returned key is shown once
-        and never retrievable again.
+        for ``(user, plugin_key)``; every later call returns the same agent.
+        Every call adds one new key, so each machine holds its own. The
+        returned key is shown once and never retrievable again.
+
+        Provisioning never deletes a key. An agent already holding
+        ``MAX_USER_API_KEYS`` keys (default 10) answers 409 and nothing changes:
+        free a slot through ``DELETE /plugins/{plugin_key}/keys/{key_id}``.
+        Provisioning does not revoke a leaked key either: revoke it the same
+        way, or every key through ``DELETE /plugins/{plugin_key}``.
 
         ## Path Parameters
         - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
@@ -563,14 +605,15 @@ def get_integrations_router():
 
             created = True
             try:
-                agent_user, api_key = await create_agent(plugin_key, user)
+                # Every key goes through add_plugin_agent_key below.
+                agent_user, _ = await create_agent(plugin_key, user, issue_api_key=False)
             except (UserAlreadyExists, IntegrityError):
-                # Already provisioned — same agent, new key (rotation).
+                # Already provisioned — same agent, one more key.
                 # IntegrityError covers the concurrent-first-provision race:
                 # fastapi-users' create is check-then-insert, so two
                 # simultaneous calls can both pass the email check and the
                 # loser hits the unique-email constraint instead of
-                # UserAlreadyExists. Same recovery: resolve and rotate.
+                # UserAlreadyExists. Same recovery: resolve the agent and add.
                 created = False
                 agent_user = await _find_plugin_agent(user, plugin_key)
                 if agent_user is None:
@@ -581,7 +624,8 @@ def get_integrations_router():
                         status_code=409,
                         detail=f"Plugin agent for {plugin_key!r} exists but could not be resolved.",
                     )
-                api_key = await _rotate_agent_api_key(agent_user, plugin_key)
+
+            new_key = await _add_plugin_key(agent_user.id, plugin_key)
 
             await _record_plugin_on_agent(agent_user.id, plugin_key)
 
@@ -601,13 +645,73 @@ def get_integrations_router():
                 metadata={"plugin_key": plugin_key},
             )
 
-            span.set_attribute("cognee.integrations.outcome", "created" if created else "rotated")
+            span.set_attribute("cognee.integrations.outcome", "created" if created else "added")
             return PluginProvisionDTO(
                 plugin_key=plugin_key,
                 agent_id=agent_user.id,
-                api_key=api_key,
+                api_key=new_key.api_key,
+                key_id=new_key.id,
                 created=created,
             )
+
+    @integrations_router.get("/plugins/{plugin_key}/keys")
+    async def list_plugin_keys(
+        plugin_key: str, user: User = Depends(get_authenticated_user)
+    ) -> PluginKeyListDTO:
+        """List the API keys of the caller's agent for a plugin — one per machine.
+
+        Metadata only (id, name, label, created, last used); the key
+        itself is never returned. Empty when the plugin was never provisioned.
+        An agent caller is a 403: only the agent's owner manages its keys.
+
+        ## Path Parameters
+        - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
+        """
+        _plugin_or_404(plugin_key)
+        _reject_agent_caller(user)
+        agent_user = await _find_plugin_agent(user, plugin_key)
+        if agent_user is None:
+            return PluginKeyListDTO(keys=[])
+        return PluginKeyListDTO(
+            keys=[
+                PluginKeyDTO(
+                    id=key.id,
+                    name=key.name,
+                    label=key.label,
+                    created_at=key.created_at,
+                    last_used_at=key.last_used_at,
+                )
+                for key in await get_api_keys(agent_user)
+            ]
+        )
+
+    @integrations_router.delete("/plugins/{plugin_key}/keys/{key_id}")
+    async def revoke_plugin_key(
+        plugin_key: str, key_id: UUID, user: User = Depends(get_authenticated_user)
+    ) -> PluginKeyRevokeResultDTO:
+        """Revoke one key of the caller's agent for a plugin (e.g. a retired machine).
+
+        Scoped to that plugin's agent of the authenticated user: a key of any
+        other principal is a 404, exactly like an unknown id. Other machines'
+        keys stay valid; ``DELETE /plugins/{plugin_key}`` revokes them all. An
+        agent caller is a 403.
+
+        ## Path Parameters
+        - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
+        - **key_id** (UUID): Id of the key (see GET /plugins/{plugin_key}/keys).
+        """
+        with new_span("cognee.integrations.plugins.revoke_key") as span:
+            span.set_attribute("cognee.integrations.plugin", plugin_key)
+            _plugin_or_404(plugin_key)
+            _reject_agent_caller(user)
+            agent_user = await _find_plugin_agent(user, plugin_key)
+            if agent_user is None:
+                raise HTTPException(status_code=404, detail="API key not found")
+            try:
+                await delete_api_key(agent_user, key_id)
+            except ApiKeyNotFoundError:
+                raise HTTPException(status_code=404, detail="API key not found")
+            return PluginKeyRevokeResultDTO(revoked=True)
 
     @integrations_router.delete("/plugins/{plugin_key}")
     async def disconnect_plugin(
@@ -631,8 +735,7 @@ def get_integrations_router():
             if agent_user is None:
                 return DisconnectResultDTO(disconnected=False)
 
-            for api_key in await get_api_keys(agent_user):
-                await delete_api_key(agent_user, api_key.id)
+            await revoke_plugin_agent_keys(agent_user.id)
 
             connection_id = build_agent_connection_id(
                 agent_session_name=_plugin_session_name(plugin_key),
