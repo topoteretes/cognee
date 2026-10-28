@@ -124,3 +124,33 @@ async def test_text_metadata_is_complete(storage_root):
     assert stored.metadata["extension"] == "txt"
     assert stored.metadata["mime_type"] == "text/plain"
     assert stored.metadata["file_size"] == len(b"a plain note")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("input_type", ["text", "upload", "literal_text", "url"])
+async def test_materialized_inputs_carry_storage_provenance(storage_root, monkeypatch, input_type):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    storage_module = importlib.import_module("cognee.tasks.ingestion.save_data_item_to_storage")
+    monkeypatch.setattr(storage_module.settings, "accept_local_file_path", False)
+    content = "A materialized document."
+    if input_type == "upload":
+        item = SimpleNamespace(file=io.BytesIO(content.encode()), filename="upload.txt")
+    elif input_type == "literal_text":
+        item = DataItem(data=content, literal_text=True)
+    elif input_type == "url":
+        item = "https://example.com/document"
+        monkeypatch.setattr(storage_module, "validate_outbound_url", AsyncMock())
+        monkeypatch.setattr(
+            storage_module, "fetch_page_content", AsyncMock(return_value={item: content})
+        )
+    else:
+        item = content
+
+    stored = await storage_module.save_data_item_to_storage_detailed(item)
+    assert stored.is_internal_storage is True
+    async with open_data_file(stored.file_path) as file:
+        assert file.read() == content.encode()

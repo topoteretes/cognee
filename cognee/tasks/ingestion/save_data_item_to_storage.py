@@ -59,9 +59,9 @@ async def save_data_item_to_storage_detailed(
     """
     if "llama_index" in str(type(data_item)):
         # Dynamic import is used because the llama_index module is optional.
-        from .transform_data import get_data_from_llama_index
+        from .transform_data import get_data_from_llama_index_detailed
 
-        return StoredFile(file_path=await get_data_from_llama_index(data_item))
+        return await get_data_from_llama_index_detailed(data_item)
 
     if "docling" in str(type(data_item)):
         from docling_core.types import DoclingDocument
