@@ -68,8 +68,8 @@ Run the same `remember` call again whenever you want to sync.
 | `project_gids` | The projects to sync: a non-empty list or tuple of gid strings | required |
 | `access_token` | Asana personal access token or OAuth access token. Never read from the environment | needed unless `service` is given |
 | `max_requests` | Budget of all the requests of one run, the listing's and the task reads' (three a task). An int of at least 3 | 1500 |
-| `check_active` | Host checkpoint, called before every request | none |
-| `service` | Pre-built client, from `build_asana_service(access_token)` | built from `access_token` |
+| `check_active` | Host checkpoint, called before each attempt of each request, a retry included. What it raises stops the run as it is | none |
+| `service` | Pre-built client, from `build_asana_service(access_token)`. A client of your own must accept `request(method, path, *, params, check_active)` and call `check_active` before each attempt it makes | built from `access_token` |
 
 `project_gids` is sorted and repeats are dropped, so the same selection in another order is the
 same selection. A bare string, an empty list, a blank gid or a gid with anything but letters and
@@ -145,7 +145,9 @@ sync token per project: a comment that was added or edited (Asana leaves `modifi
 both), a subtask that was renamed or removed (the parent is found through a subtask-to-parent
 index), and the name of a project or a section that changed, which re-reads every task of that
 project. An expired or missing sync token (HTTP 412) also re-reads the whole project, as does
-the very first run. Events are followed page by page until Asana says there are no more.
+the very first run. Events are followed page by page until Asana says there are no more. A sync
+token that comes back twice in one read of the feed while it says there are more raises instead
+of looping, as a pagination offset that comes back twice does.
 
 **Reading a task** costs three requests: the task, one page of comments and one page of
 subtasks (more pages cost more). Fresh tasks are read first, sorted by gid as text, then the tasks
@@ -158,18 +160,21 @@ removes the row on `merge`, and cognee's orphan cleanup removes the document, gr
 vectors. A run that fails, or is cut inside the listing, forgets nothing.
 
 **A task that cannot be read.** A task that is still listed but answers 403, 404, a 5xx or
-nothing (after three attempts, backing off 1 s then 2 s) keeps its **old document**. It is kept
-for a retry (`state["retry"]`), asked again at the end of the next run's order, never forgotten
-and never given up on; it fails at most once per run. A task answering 403 or 404 never stops
-another task from being read and never counts toward an outage. An answer of 5xx or nothing
-counts in the streak of its own part of the run (the retry tail for a retried task) and, three
-in a row, stops the run, see "A run that stops" and "Known gaps". A body whose
-`memberships` is malformed (see below), or whose `custom_fields` is not a list of fields, is told
-the same way: the task is counted in `failed`, kept for a retry and never skipped silently, and the
-run does not raise. Only a task that leaves a complete listing and is confirmed gone is
-forgotten. Known gap: a task Asana will not show you keeps a stale document
-for as long as it stays listed, and one that becomes readable again is read again with no change
-to `modified_at`.
+nothing (after three attempts, backing off 1 s then 2 s), or a 200 of the wrong shape, keeps its
+**old document**. It is kept for a retry (`state["retry"]`), asked again at the end of the next
+run's order, never forgotten and never given up on; it fails at most once per run. A task
+answering 403 or 404 never stops another task from being read and never counts toward an outage.
+An answer of 5xx or nothing counts in the streak of its own part of the run (the retry tail for a
+retried task) and, three in a row, stops the run, see "A run that stops" and "Known gaps". A 200
+of the wrong shape is told the same way and never counts toward an outage: a task body that is not
+an object, a comment or a subtask that is not an object, a broken pagination of those two lists
+(`next_page` without an offset, an offset that comes back twice), a `memberships` that is
+malformed (see below) or a `custom_fields` that is not a list of fields. The task is counted in
+`failed`, kept for a retry and never skipped silently, and the run does not raise, so one
+malformed task never blocks the others. Only a task that leaves a complete listing and is
+confirmed gone is forgotten. Known gap: a task Asana will not show you, or keeps answering with a
+body of the wrong shape, keeps a stale document for as long as it stays listed, and one that
+becomes readable again is read again with no change to `modified_at`.
 
 **A task that left the selection** between the listing and its read (it was moved to a project
 you did not select) is not rendered: no document is built for it. It stays known until the next
@@ -200,10 +205,14 @@ unanswered request after the retries in the listing, the events feed or a projec
 project read other than 403 or 404, a task check other than 403, 404, 5xx or nothing, and a
 pagination offset Asana rejects (HTTP 400, see "Known gaps"). A task read or a check answering
 5xx or nothing is kept instead, as described above. A 200 that is not the expected object or
-list raises `AsanaResponseError`, so does a check whose `memberships` is malformed: none of these is read as an
-empty project. A budget the run spent without any progress raises
-`AsanaSourceError` too, see "A budget too small". dlt drops the state of a run that raises, so the
-next run starts from the last good state and forgets nothing.
+list in a listing, the events feed or a project read raises `AsanaResponseError`, so does a check
+of a missing task whose body is of the wrong shape or whose `memberships` is malformed: none of
+these is read as an empty project. Only the read of one task keeps the task instead, see "A task
+that cannot be read". A pagination offset that comes back twice in one listing and a sync token
+that comes back twice in one read of the events feed raise `AsanaResponseError` as well. A budget
+the run spent without any progress raises `AsanaSourceError` too, see "A budget too small". dlt
+drops the state of a run that raises, so the next run starts from the last good state and forgets
+nothing.
 
 **A listing cut by a rate limit or the budget.** The listing is a pass over the selected
 projects, and a pass can take several runs. When a run is cut inside it (HTTP 429 or a spent
@@ -232,12 +241,14 @@ and its project's events or listing render it on a later pass. An answer of 5xx 
 unknown, not gone: the task stays known, it counts in `failed` like a read that failed and in
 the outage streak (three in a row stop the run cleanly with `failed_unavailable`, so a hung
 Asana does not spend the budget on checks); one such task alone never stops the others. A 200
-whose `memberships` is malformed raises `AsanaResponseError` instead of being read as "no
-project": that is a `memberships` that is not a list, an entry that is not an object, a `project`
-that is not an object, or a project without a string gid. An entry with no `project` (absent or
-null, for example a task on someone's My Tasks list) is not a project membership and is skipped:
-a task with one selected project and one such entry is selected, and a task with such entries
-only is in no project (a render read does not build a document for it, a check forgets it).
+of the wrong shape raises `AsanaResponseError`, and so does one whose `memberships` is malformed,
+instead of being read as "no project": unlike a task read, a check does not keep the task and go
+on, because it decides whether a task is forgotten. A malformed `memberships` is one that is not
+a list, an entry that is not an object, a `project` that is not an object, or a project without a
+string gid. An entry with no `project` (absent or null, for example a task on someone's My Tasks
+list) is not a project membership and is skipped: a task with one selected project and one such
+entry is selected, and a task with such entries only is in no project (a render read does not
+build a document for it, a check forgets it).
 A confirmed-live task is not remembered: the next pass lists again and finds it in the fresh
 listing, and only a pass that misses it again asks again.
 
@@ -345,7 +356,10 @@ completes.
 - **Lock hold time.** A run holds cognee's process-wide staging lock while it walks. The listing
   and the reads share `max_requests`, so a run holds the lock for at most that many requests plus
   the client's retries of each (three attempts, backing off 1 s then 2 s). There is no wall-clock
-  deadline, no cap on projects or pages and no other limit.
+  deadline, no cap on projects or pages and no other limit. `check_active` is called before each
+  attempt and before each backoff, so a host that revokes the run is noticed before the next
+  attempt, not after the retries; a revoked run still finishes the attempt in flight (10 s to
+  connect, 30 s to read) and sends the one that follows a backoff already begun.
 - **Renaming a project or a section** changes the text of every task in it (each task names its
   projects and sections), so each of those tasks is read again (three requests each) and
   cognified again: LLM extraction and a summary on your key. The node set uses the project gid,
@@ -358,6 +372,12 @@ completes.
   cognify for each.
 - **No sleeping.** A 429 stops the run at once; whatever `Retry-After` says. Asana limits requests
   per minute, so the next run (a minute later) usually continues.
+- **A plan with a low per-minute limit** ends a run at the limit, long before `max_requests`: the
+  run stops with `failed_rate_limit`, keeps what it rendered and the listing it finished, and
+  the next run continues. A first sync of a big selection then takes as many runs as the limit
+  needs (a task costs three requests, and every pass lists its projects again). The connector does
+  not pace its requests, and `max_requests` only bounds a run, it is not tuned to a plan. The
+  per-plan limits are not checked against Asana here.
 - Subtasks of subtasks, attachments, task history other than comments, tags, followers and
   dependencies are not read. A subtask is only part of its parent's document.
 - If the token loses access to every task but the listing still works, a run ends with no reason

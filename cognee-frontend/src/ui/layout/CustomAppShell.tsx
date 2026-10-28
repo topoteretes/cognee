@@ -9,6 +9,8 @@ import PageLoading from "@/ui/elements/PageLoading";
 import PodUnreachableCard from "@/ui/elements/PodUnreachableCard";
 import ProvisioningBanner from "./ProvisioningBanner";
 import WorkspaceProvisioning from "./WorkspaceProvisioning";
+import WorkspaceWaking from "./WorkspaceWaking";
+import { NEW_ONBOARDING_PATH } from "@/utils/onboardingPaths";
 
 const SHELL_HIDDEN_PATHS = [
   "/account",
@@ -32,6 +34,24 @@ export const POD_DEPENDENT_PATHS = [
   "/knowledge-graph",
   "/sessions",
   "/business",
+  // `useDashboardTelemetry`'s query is `enabled: tenantReady && ...`, so on a
+  // suspended or unreachable workspace it never runs: `isPending` stays true
+  // and `isError` stays false forever, and the page rendered nothing but
+  // `AnalyticsSkeleton` with no error and no way out. Gating it here the same
+  // way as the other pod-dependent routes means the shell shows
+  // `PodUnreachableCard`/`WorkspaceWaking` before the page (and its query) ever
+  // mounts, instead of the page having to duplicate that guard itself.
+  "/analytics",
+  // Loads its model straight off the pod, so refreshing it on a sleeping
+  // workspace failed the load while the wake was still finishing. Gating it
+  // here keeps the editor from mounting, and loading, until the pod answers.
+  "/graph-models",
+  // Its whole content is two pod endpoints. Left out, a dead pod left the
+  // route on a permanent skeleton: the query is disabled while tenantReady is
+  // false, a disabled react-query stays `isPending` forever, so `loading` never
+  // cleared and no error ever surfaced — no banner, no PodUnreachableCard, no
+  // way out. Exactly what the split below exists to prevent.
+  "/activity",
 ];
 
 function isPodDependent(pathname: string): boolean {
@@ -42,7 +62,7 @@ export default function CustomAppShell({ children }: PropsWithChildren) {
   const pathname = usePathname();
   const hideShell = SHELL_HIDDEN_PATHS.includes(pathname);
   const { cogniInstance, statusMessage, isInitializing } = useCogniInstance();
-  const { tenantReady, podUnreachable } = useTenant();
+  const { tenantReady, podUnreachable, wakeState, wakeStartedAt, currentName } = useTenant();
 
   if (hideShell) {
     return <>{children}</>;
@@ -57,15 +77,26 @@ export default function CustomAppShell({ children }: PropsWithChildren) {
   const onPodDependent = isPodDependent(pathname);
   const podUnreachableHere = onPodDependent && podUnreachable;
   const podPending = onPodDependent && !podUnreachable && (!tenantReady || !cogniInstance);
-  const isDashboard = pathname === "/dashboard";
+  // The new onboarding window renders the same dashboard tree, so it brings the
+  // dashboard's skeleton and waking screen too.
+  const isDashboard = pathname === "/dashboard" || pathname === NEW_ONBOARDING_PATH;
+  // `/` re-exports OverviewPage, so it renders the dashboard tree and brings
+  // its own waking screen with it.
+  const rendersDashboard = isDashboard || pathname === "/";
+  // Only the routes that actually put a waking screen on screen may drop the
+  // banner. Everywhere else it is the sole indication anything is happening,
+  // and suppressing it there left eleven routes silently waiting out a wake.
+  const showsWakingScreen = wakeState === "waking" && (podPending || rendersDashboard);
 
   return (
     <div
       className="flex flex-col h-screen"
       style={{
-        backgroundColor: "#000000",
+        // Lighter and finer than the auth/onboarding pages' pure-black 33px
+        // grid, which stays as is: their Tetris blocks are aligned to it.
+        backgroundColor: "#111111",
         backgroundImage: "linear-gradient(rgba(244,244,244,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(244,244,244,0.10) 1px, transparent 1px)",
-        backgroundSize: "33px 33px",
+        backgroundSize: "16px 16px",
       }}
     >
       <TopBar />
@@ -80,11 +111,19 @@ export default function CustomAppShell({ children }: PropsWithChildren) {
               Suppressed once podUnreachable is terminal, otherwise the
               "Setting up your workspace" banner contradicted the "trouble
               reaching your workspace" error card by rendering alongside it. */}
-          {!isInitializing && !tenantReady && !podUnreachable && <ProvisioningBanner />}
+          {/* Suppressed only where WorkspaceWaking is on screen saying the same
+              thing, since two live regions with one message talk over each
+              other. On every other route the banner is the whole signal, so it
+              stays and switches to the wake wording instead. */}
+          {!isInitializing && !tenantReady && !podUnreachable && !showsWakingScreen && (
+            <ProvisioningBanner waking={wakeState === "waking"} />
+          )}
           {isInitializing && !isDashboard ? (
             <PageLoading name={statusMessage?.title ?? ""} />
           ) : podUnreachableHere ? (
-            <PodUnreachableCard pageName="Workspace" />
+            <PodUnreachableCard pageName="Workspace" wakeFailed={wakeState === "failed"} workspaceName={currentName} />
+          ) : podPending && wakeState === "waking" ? (
+            <WorkspaceWaking workspaceName={currentName} startedAt={wakeStartedAt} />
           ) : podPending ? (
             <WorkspaceProvisioning />
           ) : children}

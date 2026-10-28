@@ -142,8 +142,8 @@ That is why these are *not* auto-routed, even though they are valid
   report`, `ticket 2048` or `Q4 2024` stay on the default. Known limitation: a
   four-digit quantity after a preposition (`in 2048 bytes`) reads as a year;
   the retriever then finds no window and answers as HYBRID. With no LLM
-  configured, recall picks `CHUNKS` before the router runs, so a temporal
-  question never reaches the interval extraction.
+  configured, a routed temporal question runs as `HYBRID_COMPLETION` with
+  `only_context=True`, so it never reaches the interval extraction.
 - `CODE` *is* routed, but only when a question has code phrasing with an
   identifier right next to the code word. A wrong guess costs a wasted `CODE`
   search before the default answers, so one signal alone is not enough: `what calls the billing service?` names no
@@ -154,7 +154,8 @@ That is why these are *not* auto-routed, even though they are valid
   because domains and `e.g.` look like them. The route runs `ask` over the
   question's identifiers only, so words like `defined` or `calls` do not
   become search terms. Known limitation: an acronym-led name (`HTTPError`) is
-  not recognised as an identifier.
+  not recognised as an identifier. `CODE` calls no LLM, so it is routed with
+  no LLM configured too.
 - `BROAD` *is* routed, but only on a question that opens with `how many` or
   `total number of`. It reads the whole dataset into a record store on every
   question and makes at least two LLM calls, so it needs a signal that is a
@@ -169,7 +170,8 @@ That is why these are *not* auto-routed, even though they are valid
   has none; a count scoped to a date (`how many incidents in 2019`) goes to
   `BROAD`, because `TEMPORAL` only reranks HYBRID's top results. When `BROAD`
   cannot answer (no working SQL query, a document larger than a batch) the
-  question is retried as the default; see below.
+  question is retried as the default; see below. With no LLM configured, a
+  routed count runs as `HYBRID_COMPLETION` with `only_context=True`.
 - "Exact"/"verbatim" phrasing does not select `CHUNKS_LEXICAL`. BM25 tokenizes
   the raw query, so the trigger word itself becomes a rare, high-IDF search
   term and skews the ranking it was meant to sharpen. `quoted_phrase` has no
@@ -214,11 +216,14 @@ there is nothing left to fall back to, so the error is real.
 | REST `POST /api/v1/recall` | omit `searchType` or pass `null` (default) | pass a value |
 | CLI `cognee-cli recall` | omit `--query-type` | `--query-type X` (choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES`) |
 
-All three surfaces auto-route by default — with one exception. When no usable
-LLM key is configured, recall picks `CHUNKS` before the router is consulted,
-because nothing can write a completion answer; the router never runs and an
-explicit `query_type` is the only way to select a strategy. That branch keys
-off LLM availability, not off the extractor that built the graph.
+All three surfaces auto-route by default, also when no usable LLM key is
+configured. Then nothing can write a completion answer, so `HYBRID_COMPLETION`,
+`GRAPH_COMPLETION` and `RAG_COMPLETION` run with `only_context=True` and return
+the assembled prompt instead of an answer, whether routed or pinned. A routed
+type that needs an LLM to retrieve (`TEMPORAL`) resolves to the default,
+`HYBRID_COMPLETION` with `only_context=True`; `CHUNKS_LEXICAL` and
+`CODING_RULES` run as they are. This keys off LLM availability, not off the
+extractor that built the graph.
 
 On every surface, omitting the type also makes the session a search source
 whenever a `session_id` is given: alone it short-circuits the graph on a hit,

@@ -743,9 +743,7 @@ async def _run_incremental_update(
         return {**_unchanged_result(0, bundle["stored_count"]), "pipeline_run_id": None}
 
     pipeline_id = generate_pipeline_id(user.id, dataset.id, RUN_PIPELINE_NAME)
-    pipeline_run = await log_pipeline_run_start(
-        pipeline_id, RUN_PIPELINE_NAME, dataset.id, [data_id]
-    )
+    pipeline_run = await log_pipeline_run_start(pipeline_id, RUN_PIPELINE_NAME, dataset.id)
     send_telemetry(
         "Incremental Update Run Started",
         user,
@@ -775,12 +773,11 @@ async def _run_incremental_update(
             pipeline_id,
             RUN_PIPELINE_NAME,
             dataset.id,
-            [data_id],
             error,
         )
         raise
     await log_pipeline_run_complete(
-        pipeline_run.pipeline_run_id, pipeline_id, RUN_PIPELINE_NAME, dataset.id, result
+        pipeline_run.pipeline_run_id, pipeline_id, RUN_PIPELINE_NAME, dataset.id
     )
     send_telemetry(
         "Incremental Update Run Completed",

@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import re
+import threading
 from typing import Any, get_type_hints
 from uuid import UUID
 
@@ -19,6 +20,7 @@ from cognee.infrastructure.databases.relational import get_relational_config, ge
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.shared.logging_utils import get_logger
 
@@ -203,10 +205,15 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Postgres schema this adapter is pinned to ("" = default/public search path).
         # Read by schema-scoped overrides of get_table_names()/delete_database().
         self.schema: str = schema or ""
-        self.VECTOR_DB_LOCK = asyncio.Lock()
+        # Loop-agnostic: the adapter is cached across event loops, and an
+        # asyncio.Lock binds to the first loop that awaits it.
+        self.VECTOR_DB_LOCK = LoopAgnosticLock()
         # pgvector's extversion, read on first use (see _pgvector_version).
         self._pgvector_version_cache: PgvectorVersion | None = None
-        self._write_locks: dict[str, asyncio.Lock] = {}
+        self._write_locks: dict[str, LoopAgnosticLock] = {}
+        # Guards the check-then-insert in ``_get_write_lock``: callers on
+        # different threads/loops must get the same lock for a collection.
+        self._write_locks_guard = threading.Lock()
         self._metadata = MetaData()
         # True when this adapter created its own engine and must dispose it on close().
         # False when the engine is borrowed from the relational adapter.
@@ -348,10 +355,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if self._owns_engine:
             await self.engine.dispose(close=True)
 
-    def _get_write_lock(self, collection_name: str) -> asyncio.Lock:
-        if collection_name not in self._write_locks:
-            self._write_locks[collection_name] = asyncio.Lock()
-        return self._write_locks[collection_name]
+    def _get_write_lock(self, collection_name: str) -> LoopAgnosticLock:
+        with self._write_locks_guard:
+            lock = self._write_locks.get(collection_name)
+            if lock is None:
+                lock = LoopAgnosticLock()
+                self._write_locks[collection_name] = lock
+            return lock
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         """

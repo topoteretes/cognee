@@ -17,10 +17,21 @@ to an absolute date, where the target is HYBRID's own candidates reranked by
 that date and never a smaller context. Other question-shaped intent (summary,
 reasoning, context extension) stays reachable only through an explicit
 ``query_type``.
+
+The rules see only the query text. What the deployment can run is applied
+afterwards, in one place, from ``RoutingConstraints``: whether an LLM is
+available and whether Cypher queries are allowed. With no LLM the router still
+routes, but only to types that can execute without one: retrieval-only types
+run as they are, completion types whose single LLM call is the final answer run
+with ``only_context=True`` (recall returns the assembled prompt, the session
+layer is read-only), and types that need an LLM during retrieval resolve to the
+fallback. A pinned ``query_type`` is not rerouted: it runs as given, except that
+with no LLM a pinned completion type also runs with ``only_context=True``
+(``pinned_route``).
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
@@ -31,12 +42,38 @@ ROUTER_FALLBACK_TYPE = SearchType.HYBRID_COMPLETION
 
 
 @dataclass(frozen=True)
+class RoutingConstraints:
+    """What the deployment can run, read once per recall.
+
+    ``llm_available`` is ``llm_available()`` from the preflight: the configured
+    provider either needs no key, has one, or has a live sampling session.
+    ``cypher_allowed`` is the ``ALLOW_CYPHER_QUERY`` gate the retriever factory
+    enforces. Both default to True so callers without a deployment in hand (tests,
+    tooling) get the unconstrained router.
+    """
+
+    llm_available: bool = True
+    cypher_allowed: bool = True
+
+    @classmethod
+    def from_config(cls, llm_config=None) -> "RoutingConstraints":
+        from cognee.modules.preflight import llm_available
+        from cognee.modules.search.methods.get_search_type_retriever_instance import (
+            cypher_queries_allowed,
+        )
+
+        return cls(llm_available=llm_available(llm_config), cypher_allowed=cypher_queries_allowed())
+
+
+@dataclass(frozen=True)
 class RouteDecision:
-    """Routing decision: the chosen search type, the rule that picked it, and
-    the retriever config the type needs (CODE: which operation to run)."""
+    """Routing decision: the search type, the rule that picked it, whether the
+    search must run with ``only_context=True`` because no LLM can write the answer,
+    and the retriever config the type needs (CODE: which operation to run)."""
 
     search_type: SearchType
     rule: str
+    only_context: bool = False
     retriever_config: dict | None = None
 
 
@@ -120,6 +157,24 @@ _CODE_USAGE = (
 # detected by its capital letters.
 _CODE_QUESTION = re.compile(rf"{_CODE_VERB_QUESTION}|{_CODE_DEFINITION}|{_CODE_USAGE}")
 
+# Routed types that never call an LLM: with no LLM they run as they are. Any other
+# routed type that is not in COMPLETION_ONLY_TYPES resolves to the fallback, so a new
+# LLM-free rule target must be added here to keep its own type on a keyless install.
+LLM_FREE_TYPES: frozenset[SearchType] = frozenset(
+    {SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES, SearchType.CODE}
+)
+# The only LLM call is the final completion: runs with only_context=True with no LLM,
+# returning the prompt the completion would have received.
+COMPLETION_ONLY_TYPES: frozenset[SearchType] = frozenset(
+    {
+        SearchType.HYBRID_COMPLETION,
+        SearchType.GRAPH_COMPLETION,
+        SearchType.RAG_COMPLETION,
+    }
+)
+# Run the query text as Cypher, directly or after an LLM writes it.
+CYPHER_TYPES: frozenset[SearchType] = frozenset({SearchType.CYPHER, SearchType.NATURAL_LANGUAGE})
+
 # (rule name, pattern, search type). Shape rules (what the input looks like) come
 # first and win: a quoted string is handled as what it is, even when its text
 # also reads as intent — `"coding rules"` is a lexical search. A code question
@@ -188,26 +243,74 @@ def _retriever_config(search_type: SearchType, query: str) -> dict | None:
     return {"operation": "ask", "question": " ".join(names)}
 
 
-def route_query(query: str) -> RouteDecision:
-    """Classify a query into a SearchType using ordered rules.
+def default_route(constraints: RoutingConstraints | None = None) -> RouteDecision:
+    """The decision for a query no rule matched, under the given constraints."""
+    return constrain(RouteDecision(search_type=ROUTER_FALLBACK_TYPE, rule="default"), constraints)
+
+
+def pinned_route(query_type: SearchType, constraints: RoutingConstraints) -> RouteDecision:
+    """The decision for a caller's explicit type: never rerouted, but with no LLM a
+    completion type runs with ``only_context=True`` instead of failing at the answer."""
+    forced = not constraints.llm_available and query_type in COMPLETION_ONLY_TYPES
+    return RouteDecision(search_type=query_type, rule="pinned", only_context=forced)
+
+
+def constrain(
+    decision: RouteDecision, constraints: RoutingConstraints | None = None
+) -> RouteDecision:
+    """Resolve a rule's pick against what the deployment can run.
+
+    Applied after the rules so the rules stay about the query text only. The
+    fallback itself is a completion type, so with no LLM it becomes
+    ``HYBRID_COMPLETION`` with ``only_context=True``.
+    """
+    if constraints is None:
+        return decision
+    search_type = decision.search_type
+
+    if not constraints.cypher_allowed and search_type in CYPHER_TYPES:
+        logger.debug(
+            "query_router: %s disabled by ALLOW_CYPHER_QUERY; using fallback", search_type.value
+        )
+        search_type = ROUTER_FALLBACK_TYPE
+
+    if constraints.llm_available:
+        return RouteDecision(search_type=search_type, rule=decision.rule)
+
+    if search_type in LLM_FREE_TYPES:
+        return RouteDecision(search_type=search_type, rule=decision.rule)
+    if search_type not in COMPLETION_ONLY_TYPES:
+        logger.debug(
+            "query_router: %s needs an LLM during retrieval and none is available; using fallback",
+            search_type.value,
+        )
+        search_type = ROUTER_FALLBACK_TYPE
+    return RouteDecision(search_type=search_type, rule=decision.rule, only_context=True)
+
+
+def route_query(query: str, constraints: RoutingConstraints | None = None) -> RouteDecision:
+    """Classify a query into a SearchType using ordered rules, then apply the constraints.
 
     Args:
         query: The user's natural-language query.
+        constraints: What the deployment can run; ``None`` means unconstrained.
 
     Returns:
-        RouteDecision with the chosen search_type and the name of the rule that
-        matched, or ``"default"`` when nothing did.
+        RouteDecision with the chosen search_type, the name of the rule that
+        matched (``"default"`` when nothing did), whether the search must run
+        with ``only_context=True``, and the retriever config the type needs.
     """
     stripped = query.strip()
 
     for rule, pattern, search_type in _RULES:
         if pattern.search(stripped):
             logger.debug("query_router: rule=%s routed=%s", rule, search_type.value)
-            return RouteDecision(
-                search_type=search_type,
-                rule=rule,
-                retriever_config=_retriever_config(search_type, stripped),
+            decision = constrain(RouteDecision(search_type=search_type, rule=rule), constraints)
+            # The config of the type the constraints left, so a CODE pick that fell
+            # back to the default carries no ``ask`` config.
+            return replace(
+                decision, retriever_config=_retriever_config(decision.search_type, stripped)
             )
 
     logger.debug("query_router: rule=default routed=%s", ROUTER_FALLBACK_TYPE.value)
-    return RouteDecision(search_type=ROUTER_FALLBACK_TYPE, rule="default")
+    return default_route(constraints)

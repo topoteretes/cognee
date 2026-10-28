@@ -20,7 +20,11 @@ from cognee.modules.data.methods import (
     resolve_data_id,
 )
 from cognee.modules.data.models import Data
-from cognee.modules.engine.models.node_set import NodeSet, validate_node_set_names
+from cognee.modules.engine.models.node_set import (
+    NodeSet,
+    parse_node_set_names,
+    validate_node_set_names,
+)
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion.identify_many import identify_many
 from cognee.modules.users.methods import get_default_user
@@ -52,6 +56,61 @@ def _display_file_name(file_metadata: dict | None, actual_file_path: str) -> str
     extension = (file_metadata or {}).get("extension")
 
     return f"{name}.{extension}" if extension else name
+
+
+def merge_existing_row_metadata(
+    stored_metadata: dict[str, Any] | None,
+    stored_node_set: str | None,
+    content_metadata: dict[str, Any],
+    item_external_metadata: dict[str, Any] | None,
+    node_set: list[str] | None,
+    source_uri: str | None = None,
+    content_changed: bool = False,
+) -> tuple[dict[str, Any], list[str] | None]:
+    """Resolve the metadata and node set a re-ingested row ends up with.
+
+    A re-ingest of an existing row is a PATCH: a field the request does not carry
+    keeps its stored value, an explicit empty value clears it, a value replaces it.
+    ``label`` already follows this rule in the update branch; this applies it to
+    ``external_metadata`` (``None`` keeps, ``{}`` clears, a dict replaces) and to
+    ``node_set`` (``None`` keeps, ``[]`` clears, a list replaces). Content-derived
+    metadata always refreshes on top, since it describes the new content:
+    ``content_metadata``, and ``source_uri`` (where the new content came from) in
+    ``_cognee.source_uri``. New content without a ``source_uri`` (an upload, raw
+    text) drops the stored one, which described the old content; unchanged
+    content keeps it. A new row is built the same way, with nothing stored, so
+    every row gets one metadata shape. Stored metadata or a stored ``_cognee`` that is not a
+    dict, which older versions could write, counts as empty. Returns
+    ``(external_metadata, node_set)`` for the row.
+    """
+    kept = stored_metadata if isinstance(stored_metadata, dict) else {}
+    metadata = dict(kept) if item_external_metadata is None else {}
+    metadata.update(content_metadata)
+    if item_external_metadata:
+        metadata.update(item_external_metadata)
+
+    if source_uri or content_changed:
+        cognee_metadata = metadata.get("_cognee")
+        cognee_metadata = dict(cognee_metadata) if isinstance(cognee_metadata, dict) else {}
+        if source_uri:
+            cognee_metadata["source_uri"] = source_uri
+        else:
+            cognee_metadata.pop("source_uri", None)
+        if cognee_metadata:
+            metadata["_cognee"] = cognee_metadata
+        else:
+            metadata.pop("_cognee", None)
+
+    if node_set is None:
+        resolved_node_set = parse_node_set_names(stored_node_set) or None
+    else:
+        resolved_node_set = node_set or None
+
+    if resolved_node_set:
+        metadata["node_set"] = resolved_node_set
+    else:
+        metadata.pop("node_set", None)
+    return metadata, resolved_node_set
 
 
 def _pipeline_dataset_for(ctx, dataset_name: str | None, dataset_id: UUID | None, user: User):
@@ -107,7 +166,10 @@ def _source_uri_from_input(data_item: Any) -> str | None:
             return None
         return None
 
-    filename = getattr(data_item, "filename", None) or getattr(data_item, "name", None)
+    # A file object's ``name`` is the path it was opened with. An upload's
+    # ``filename`` is only the client's name for it, not a path on this
+    # machine, so an upload has no source location, like raw text.
+    filename = getattr(data_item, "name", None)
     if isinstance(filename, str) and filename and not filename.startswith("<"):
         try:
             return Path(filename).resolve().as_uri()
@@ -441,22 +503,8 @@ async def ingest_data(
             data_point = existing_data_map.get(str(data_id))
 
             # TODO: Maybe allow getting of external metadata through ingestion loader?
-            ext_metadata = get_external_metadata_dict(data_item)
-
-            # Merge DataItem.external_metadata if present
-            if item_external_metadata:
-                ext_metadata.update(item_external_metadata)
-
+            content_metadata = get_external_metadata_dict(data_item)
             source_uri = cached.get("source_uri")
-            if source_uri:
-                cognee_metadata = ext_metadata.get("_cognee")
-                if not isinstance(cognee_metadata, dict):
-                    cognee_metadata = {}
-                    ext_metadata["_cognee"] = cognee_metadata
-                cognee_metadata.setdefault("source_uri", source_uri)
-
-            if effective_node_set:
-                ext_metadata["node_set"] = effective_node_set
 
             if data_point is not None:
                 # Content-change detection: reset pipeline_status when content changed
@@ -496,7 +544,24 @@ async def ingest_data(
                 data_point.content_hash = new_content_hash
                 data_point.raw_content_hash = storage_file_metadata["content_hash"]
                 data_point.data_size = original_file_metadata["file_size"]
-                data_point.external_metadata = ext_metadata
+                # PATCH rule, see merge_existing_row_metadata: absent keeps the stored
+                # metadata and node set, an explicit empty value clears them. The
+                # node set counts as passed when the call or the item carries one;
+                # then it is their union, and an empty union clears.
+                requested_node_set = (
+                    None
+                    if node_set is None and item_node_set is None
+                    else (effective_node_set or [])
+                )
+                data_point.external_metadata, row_node_set = merge_existing_row_metadata(
+                    data_point.external_metadata,
+                    data_point.node_set,
+                    content_metadata,
+                    item_external_metadata,
+                    requested_node_set,
+                    source_uri,
+                    content_changed,
+                )
                 # System metadata is the route stamp of the CONTENT (a DLT
                 # manifest, a code file), so it follows the content: new content
                 # gets the stamp its own item carries, including none. Keeping
@@ -505,10 +570,9 @@ async def ingest_data(
                 # and break every later cognify of the dataset.
                 if item_system_metadata is not None or content_changed:
                     data_point.system_metadata = item_system_metadata
-                data_point.node_set = json.dumps(effective_node_set) if effective_node_set else None
+                data_point.node_set = json.dumps(row_node_set) if row_node_set else None
                 data_point.tenant_id = user.tenant_id if user.tenant_id else None
-                # Absent means "leave unchanged": a re-ingest without a label
-                # (current_label None) must not clear a previously stored one.
+                # Same PATCH rule for the label: absent means "leave unchanged".
                 if current_label is not None:
                     data_point.label = current_label
 
@@ -521,6 +585,16 @@ async def ingest_data(
                 if str(data_id) in dataset_data_map:
                     continue
 
+                # A new row is a re-ingest with nothing stored, so both build
+                # their metadata the same way.
+                ext_metadata, _ = merge_existing_row_metadata(
+                    None,
+                    None,
+                    content_metadata,
+                    item_external_metadata,
+                    effective_node_set,
+                    source_uri,
+                )
                 data_point = Data(
                     id=data_id,
                     dataset_id=dataset.id,

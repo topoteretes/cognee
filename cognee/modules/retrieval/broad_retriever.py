@@ -546,7 +546,7 @@ class BroadRetriever(CompletionRetriever):
         return None
 
     def get_context_evidence(self, retrieved_objects: Any, dataset_id: Any = None):
-        return None
+        return []
 
     async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
         return completions

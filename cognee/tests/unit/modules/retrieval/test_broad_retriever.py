@@ -277,3 +277,8 @@ async def test_a_dataset_over_store_mb_is_represented_by_its_most_similar_parts(
     assert found.route == "sql" and found.rows == [(3, "b")]  # only b's three lines were loaded
     assert "1 parts of the dataset most similar" in found.coverage
     assert "over the 1 parts of the dataset most similar" in found.note
+
+
+def test_broad_reports_no_structured_evidence_as_an_empty_list():
+    retriever = BroadRetriever.__new__(BroadRetriever)
+    assert retriever.get_context_evidence({"route": "small"}, dataset_id="d") == []

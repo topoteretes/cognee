@@ -26,8 +26,12 @@ narrow it; that is also faster.
 ### How the search type is picked
 
 1. An explicit `query_type=SearchType.X` always wins.
-2. Otherwise, with no usable LLM key, `CHUNKS` (plain vector search).
-3. Otherwise the router (`auto_route=True`, the default). It is five regex
+2. With no usable LLM key nothing can write an answer, so on both paths
+   `HYBRID_COMPLETION`, `GRAPH_COMPLETION` and `RAG_COMPLETION` run with
+   `only_context=True` (the assembled prompt instead of an answer), and a routed
+   `TEMPORAL` or `BROAD` becomes `HYBRID_COMPLETION` with `only_context=True`;
+   a routed `CODE` needs no LLM and runs as it is.
+3. Without an explicit type, the router (`auto_route=True`, the default). It is five regex
    rules, first match wins, no LLM call:
    - the whole query is one `"quoted phrase"` → `CHUNKS_LEXICAL`
    - mentions coding rules/standards/conventions or code-review guidelines

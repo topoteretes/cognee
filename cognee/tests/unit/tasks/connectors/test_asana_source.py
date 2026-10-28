@@ -6,9 +6,10 @@ listing ever forgets one.
 The walk is driven with a plain dict as dlt resource state, and then through a real ``dlt``
 pipeline into SQLite. What a task that cannot be read does is the heart of it: while it is still
 listed it keeps its old document, is asked again on the next run after every fresh task, never
-counts toward an outage and never stops another task. A run that stops (a rejected token after
-rows, a rate limit, a spent budget, an outage) keeps what it emitted, queues the rest and
-forgets nothing; a 429 is never waited out.
+counts toward an outage and never stops another task. So does a 200 of the wrong shape in its own
+read, while one in a listing, the events feed, a project read or a check raises. A run that stops
+(a rejected token after rows, a rate limit, a spent budget, an outage) keeps what it emitted,
+queues the rest and forgets nothing; a 429 is never waited out.
 """
 
 import copy
@@ -30,8 +31,11 @@ from cognee.tasks.ingestion.connectors.asana import (
     AsanaSourceError,
     _documents_for,
     _event_task_gids,
+    _instant,
     _iter_rows,
+    _overlap_start,
     _renamed,
+    _stamp,
     new_stats,
     render_task,
 )
@@ -475,6 +479,88 @@ def test_a_first_sync_emits_the_project_and_every_task_with_its_comments_and_sub
     assert stats == {**new_stats(), "scanned": 2, "requests": LISTING_REQUESTS + 2 * TASK_REQUESTS}
 
 
+# --- timestamp forms ---
+# Timestamps are compared as strings, which orders them only in one form: UTC, three decimals,
+# ``Z``. Asana sends that form; these are the other valid ISO spellings of the same instants.
+_FORMS = {
+    "no milliseconds": lambda sec: f"2026-10-01T09:00:{sec:02d}Z",
+    "microseconds": lambda sec: f"2026-10-01T09:00:{sec:02d}.000000Z",
+    "utc offset": lambda sec: f"2026-10-01T09:00:{sec:02d}.000+00:00",
+    "east offset": lambda sec: f"2026-10-01T11:00:{sec:02d}.000+02:00",
+    "west offset": lambda sec: f"2026-10-01T04:00:{sec:02d}.000-05:00",
+}
+
+
+def _canonical(sec: int) -> str:
+    return f"2026-10-01T09:00:{sec:02d}.000Z"
+
+
+def _stamped_runs(form) -> tuple[dict, dict[str, str], dict, tuple[list[str], int]]:
+    """Three runs over tasks whose ``modified_at`` instants are written in ``form``: a first
+    sync, one after tasks 2 and 4 changed (listing only: no event) and one with no change.
+
+    Returns the state after the first run, the tasks the second run rendered, its state, and
+    what the third rendered with its request count.
+    """
+    fake = FakeAsana()
+    fake.add_project("P1")
+    for gid in range(1, 5):
+        fake.add_task(str(gid), notes=f"Body {gid}.", modified_at=form(gid))
+    state: dict = {}
+    _sync(fake, state)
+    first = copy.deepcopy(state)
+    for gid, sec in (("2", 30), ("4", 31)):
+        fake.tasks[gid].update(notes=f"Edit of {gid}.", modified_at=form(sec))
+    rows, _ = _sync(fake, state)
+    second = copy.deepcopy(state)
+    changed = {gid: row["content"] for gid, row in _tasks(rows).items()}
+    rows, stats = _sync(fake, state)
+    return first, changed, second, (sorted(_tasks(rows)), stats["requests"])
+
+
+@pytest.mark.parametrize("form", _FORMS.values(), ids=_FORMS)
+def test_the_same_instants_in_another_form_give_the_same_state_and_the_same_changes(form):
+    expected = _stamped_runs(_canonical)
+
+    assert _stamped_runs(form) == expected
+
+    first, changed, second, (unchanged, requests) = expected
+    assert first["projects"]["P1"]["cursor"] == _canonical(4)
+    assert second["projects"]["P1"]["cursor"] == _canonical(31)
+    assert second["projects"]["P1"]["seen"] == {
+        gid: _canonical(sec) for gid, sec in (("1", 1), ("2", 30), ("3", 3), ("4", 31))
+    }
+    assert sorted(changed) == ["task:2", "task:4"]
+    assert "Edit of 2." in changed["task:2"] and "Edit of 4." in changed["task:4"]
+    assert (unchanged, requests) == ([], LISTING_REQUESTS), "an unchanged run renders nothing"
+
+
+def test_a_task_changed_inside_the_overlap_window_is_seen_whatever_the_offset_of_its_stamp():
+    """The instant is 09:00:20 UTC, after the window start (08:59:02). Written as 04:00:20-05:00
+    its string sorts before the start, so a string comparison would miss the edit."""
+    fake = FakeAsana()
+    fake.add_project("P1")
+    fake.add_task("1", modified_at=_canonical(1))
+    fake.add_task("2", modified_at=_canonical(2))
+    state: dict = {}
+    _sync(fake, state)
+    fake.tasks["1"].update(notes="Edited.", modified_at=_FORMS["west offset"](20))
+
+    rows, _ = _sync(fake, state)
+
+    assert "Edited." in _tasks(rows)["task:1"]["content"]
+    assert state["projects"]["P1"]["cursor"] == _canonical(20)
+
+
+def test_a_stamp_is_kept_in_asanas_form_and_read_back_unchanged():
+    assert _overlap_start("") == ""
+    assert _stamp(_instant("2026-10-09T19:14:27.123Z")) == "2026-10-09T19:14:27.123Z"
+    assert _stamp(_instant("2026-10-09T21:14:27.123456+02:00")) == "2026-10-09T19:14:27.123Z"
+    assert _overlap_start("2026-10-09T19:14:27.123Z") == "2026-10-09T19:13:27.123Z"
+    with pytest.raises(ValueError, match="without an offset"):
+        _stamp(_instant("2026-10-09T19:14:27"))
+
+
 def test_an_unchanged_second_sync_reads_no_task():
     fake = _workspace()
     state: dict = {}
@@ -616,13 +702,67 @@ def test_an_events_answer_without_a_sync_token_is_an_error():
         _sync(fake, {})
 
 
+def _state_with_sync(fake: FakeAsana, token: str) -> dict:
+    return {"projects": {"P1": {"cursor": fake.stamp(), "sync": token, "seen": {}}}}
+
+
 def test_an_events_feed_whose_token_does_not_advance_raises_instead_of_looping():
     fake = _workspace()
     fake.answers["/events"] = {"data": [], "sync": "same", "has_more": True}
-    state = {"projects": {"P1": {"cursor": fake.stamp(), "sync": "same", "seen": {}}}}
+    state = _state_with_sync(fake, "same")
 
-    with pytest.raises(AsanaResponseError, match="did not advance"):
+    with pytest.raises(AsanaResponseError, match="sync token came back twice"):
         _sync(fake, state)
+
+
+def test_an_events_feed_whose_first_token_is_the_stored_one_raises():
+    fake = _workspace()
+    fake.event_feed = [("S", True), ("A", False)]
+    state = _state_with_sync(fake, "S")
+
+    with pytest.raises(AsanaResponseError, match="sync token came back twice"):
+        _sync(fake, state)
+
+    assert len(fake.requested("/events")) == 1
+
+
+@pytest.mark.parametrize(
+    ("cycle", "requests"), [(["A", "B"], 3), (["A", "B", "C"], 4)], ids=["A-B-A", "A-B-C-A"]
+)
+def test_an_events_feed_that_cycles_through_its_tokens_raises_instead_of_looping(cycle, requests):
+    """Each page's token differs from the one before it, so only remembering them all finds it."""
+    fake = _workspace()
+    fake.event_feed = [(token, True) for token in cycle * 100]
+    state = _state_with_sync(fake, "S")
+    before = copy.deepcopy(state)
+
+    with pytest.raises(AsanaResponseError, match="Asana /events: a sync token came back twice"):
+        _sync(fake, state)
+
+    assert len(fake.requested("/events")) == requests
+    assert state == before
+
+
+def test_an_events_feed_of_many_distinct_tokens_is_read_in_full():
+    fake = _workspace()
+    fake.event_feed = [(f"t{n}", True) for n in range(49)] + [("end", False)]
+    state = _state_with_sync(fake, "S")
+
+    _sync(fake, state)
+
+    assert len(fake.requested("/events")) == 50
+    assert state["projects"]["P1"]["sync"] == "end"
+
+
+def test_a_last_page_that_repeats_the_token_is_not_a_cycle():
+    """A quiet feed answers its own token with nothing more to read."""
+    fake = _workspace()
+    fake.event_feed = [("S", False)]
+    state = _state_with_sync(fake, "S")
+
+    _sync(fake, state)
+
+    assert state["projects"]["P1"]["sync"] == "S"
 
 
 def test_a_task_in_two_selected_projects_is_one_document_naming_both():
@@ -2208,6 +2348,10 @@ def test_a_listing_that_fails_forgets_nothing_and_moves_no_state(prefix, status)
         {"data": [{"gid": "1"}]},
         {"data": [{"gid": "1", "modified_at": None}]},
         {"data": [{"gid": "1", "modified_at": "yesterday"}]},
+        {"data": [{"gid": "1", "modified_at": ""}]},
+        {"data": [{"gid": "1", "modified_at": 20261001}]},
+        {"data": [{"gid": "1", "modified_at": "2026-10-01T10:00:00"}]},  # no offset: no instant
+        {"data": [{"gid": "1", "modified_at": "0001-01-01T00:00:00+02:00"}]},  # before UTC's year 1
         {"data": [], "next_page": {}},
         {"data": [], "next_page": "x"},
         {"data": [], "next_page": {"offset": ""}},
@@ -2239,27 +2383,159 @@ def test_a_repeated_pagination_offset_raises_instead_of_looping():
         _sync(fake, {})
 
 
+def _malformed_task_workspace(path: str, answer) -> tuple[FakeAsana, dict, dict]:
+    """Three synced tasks, all edited, with ``answer`` (a 200) served for ``path`` of task 2."""
+    fake = _workspace()
+    state: dict = {}
+    _sync(fake, state)
+    before = copy.deepcopy(state)
+    fake.edit_task("1")
+    fake.edit_task("2", notes="Rewritten.")
+    fake.edit_task("3")
+    fake.answers[path] = answer
+    return fake, state, before
+
+
+def _assert_task_2_kept_and_recovers(fake: FakeAsana, state: dict, before: dict, path: str):
+    rows, stats = _sync(fake, state)
+
+    assert set(_tasks(rows)) == {"task:1", "task:3"}, "the other tasks of the run are rendered"
+    assert _tombstones(rows) == set() and stats["deleted"] == 0, "the old document stays"
+    assert "task:2" in state["known_ids"]
+    assert (stats["failed"], stats["kept"]) == (1, 1)
+    assert _reasons(stats) == set(), "a malformed body is no outage and no stopped run"
+    assert state["retry"] == ["2"] and state["pending"] == []
+    assert state["projects"]["P1"]["cursor"] > before["projects"]["P1"]["cursor"], "committed"
+
+    del fake.answers[path]
+    rows, stats = _sync(fake, state)
+
+    assert "Rewritten." in _tasks(rows)["task:2"]["content"]
+    assert (stats["failed"], stats["kept"], state["retry"]) == (0, 0, [])
+
+
 @pytest.mark.parametrize("answer", [{}, {"data": []}, {"data": "x"}])
-def test_a_task_answer_of_the_wrong_shape_aborts_the_run(answer):
+def test_a_task_answer_of_the_wrong_shape_keeps_the_task_and_the_run_goes_on(answer):
+    fake, state, before = _malformed_task_workspace("/tasks/2", answer)
+
+    _assert_task_2_kept_and_recovers(fake, state, before, "/tasks/2")
+
+
+@pytest.mark.parametrize("answer", [{"data": [1, 2]}, {"data": "x"}, {}])
+def test_a_comment_listing_of_the_wrong_shape_keeps_the_task_and_the_run_goes_on(answer):
+    fake, state, before = _malformed_task_workspace("/tasks/2/stories", answer)
+
+    _assert_task_2_kept_and_recovers(fake, state, before, "/tasks/2/stories")
+
+
+@pytest.mark.parametrize("answer", [{"data": [1]}, {"data": [{"gid": "s"}, "x"]}, {"data": None}])
+def test_a_subtask_listing_of_the_wrong_shape_keeps_the_task_and_the_run_goes_on(answer):
+    fake, state, before = _malformed_task_workspace("/tasks/2/subtasks", answer)
+
+    _assert_task_2_kept_and_recovers(fake, state, before, "/tasks/2/subtasks")
+
+
+@pytest.mark.parametrize("listing", ["stories", "subtasks"])
+@pytest.mark.parametrize(
+    "next_page",
+    [{}, {"offset": ""}, {"offset": 5}, "x"],
+    ids=["no offset", "empty offset", "offset not a string", "not an object"],
+)
+def test_a_next_page_without_a_usable_offset_inside_a_task_keeps_the_task(listing, next_page):
+    path = f"/tasks/2/{listing}"
+    fake, state, before = _malformed_task_workspace(path, {"data": [], "next_page": next_page})
+
+    _assert_task_2_kept_and_recovers(fake, state, before, path)
+
+
+@pytest.mark.parametrize("listing", ["stories", "subtasks"])
+def test_a_repeated_pagination_offset_inside_a_task_keeps_the_task_instead_of_looping(listing):
+    path = f"/tasks/2/{listing}"
+    # The same page, and so the same next offset, comes back every time it is asked for.
+    fake, state, before = _malformed_task_workspace(
+        path, {"data": [], "next_page": {"offset": "again"}}
+    )
+
+    _assert_task_2_kept_and_recovers(fake, state, before, path)
+
+
+def test_a_malformed_task_never_stops_the_run_not_even_three_in_a_row_across_runs():
+    fake = _workspace(tasks=6)
+    fake.answers["/tasks/2"] = {"data": "x"}
+    fake.answers["/tasks/3/stories"] = {"data": [1]}
+    fake.answers["/tasks/4/subtasks"] = {"data": [1]}
+    state: dict = {}
+
+    rows, stats = _sync(fake, state)
+
+    assert set(_tasks(rows)) == {"task:1", "task:5", "task:6"}, "the tasks after them are read"
+    assert (stats["failed"], stats["kept"], stats["scanned"]) == (3, 3, 6)
+    assert _reasons(stats) == set(), "three malformed bodies in a row are no outage"
+    assert state["retry"] == ["2", "3", "4"] and state["pending"] == []
+    assert state["known_ids"] == ["project:P1", "task:1", "task:5", "task:6"], "never ingested"
+
+    for run in range(3):
+        fake.add_task(f"9{run}")
+        fake.edit_task("5", notes=f"Edit {run}.")
+        fake.calls.clear()
+        rows, stats = _sync(fake, state)
+
+        assert set(_tasks(rows)) == {"task:5", f"task:9{run}"}, "fresh tasks never wait for them"
+        assert _fetched(fake) == ["5", f"9{run}", "2", "3", "4"], "the retries go last, once each"
+        assert (stats["failed"], _reasons(stats)) == (3, set()), "no outage in the retry tail"
+        assert state["retry"] == ["2", "3", "4"]
+
+    fake.answers.clear()
+    rows, stats = _sync(fake, state)
+
+    assert {"task:2", "task:3", "task:4"} <= set(_tasks(rows)) and state["retry"] == []
+    assert (stats["failed"], stats["kept"]) == (0, 0)
+
+
+def test_a_malformed_task_neither_counts_nor_resets_the_streak_of_tasks_answering_5xx():
+    fake = _workspace(tasks=6)
+    fake.fail("/tasks/1", 500)
+    fake.fail("/tasks/2", 500)
+    fake.answers["/tasks/3"] = {"data": "x"}
+    fake.fail("/tasks/4", 500)
+    state: dict = {}
+
+    _, stats = _sync(fake, state)
+
+    assert (stats["failed"], _reasons(stats)) == (4, {"failed_unavailable"})
+    assert _fetched(fake) == ["1", "2", "3", "4"], "the third 5xx in a row stops the run"
+
+
+def test_a_project_listing_answer_of_the_wrong_shape_still_raises_though_a_task_answer_is_kept():
     fake = _workspace()
     state: dict = {}
     _sync(fake, state)
     fake.edit_task("2")
+    fake.answers["/tasks/2"] = {"data": "x"}
+    _sync(fake, state)
     before = copy.deepcopy(state)
+    fake.answers["/tasks"] = {"data": "x"}
+
+    with pytest.raises(AsanaResponseError):
+        _sync(fake, state)
+
+    assert state == before and state["retry"] == ["2"], "the kept task is still queued"
+
+
+@pytest.mark.parametrize("answer", [{}, {"data": []}, {"data": "x"}])
+def test_a_check_answer_of_the_wrong_shape_raises_and_forgets_nothing(answer):
+    """Unlike a task read, a check decides about forgetting: it raises, it never guesses."""
+    fake = _workspace(tasks=2)
+    state: dict = {}
+    _sync(fake, state)
+    fake.delete_task("2")
     fake.answers["/tasks/2"] = answer
+    before = copy.deepcopy(state)
 
     with pytest.raises(AsanaResponseError):
         _sync(fake, state)
 
     assert state == before
-
-
-def test_a_comment_listing_of_the_wrong_shape_aborts_the_run():
-    fake = _workspace()
-    fake.answers["/tasks/1/stories"] = {"data": [1, 2]}
-
-    with pytest.raises(AsanaResponseError, match="not an object"):
-        _sync(fake, {})
 
 
 # --- a task that cannot be read ---
@@ -2695,7 +2971,7 @@ def test_check_active_raising_stops_the_run_before_the_next_request():
 
 
 def test_an_oserror_from_check_active_is_not_retried_or_swallowed(monkeypatch):
-    """The checkpoint runs outside the client's retry loop, so a host bridge that fails with an
+    """The checkpoint runs outside the client's try/except, so a host bridge that fails with an
     OSError (a dropped socket) is neither retried like a network error nor read as a failed task."""
     fake = _workspace()
     sleeps: list[float] = []
@@ -2726,6 +3002,63 @@ def test_an_oserror_from_check_active_in_the_middle_of_a_task_is_not_a_failed_ta
     with pytest.raises(OSError):
         _sync(client, state, check_active=flaky)
 
+    assert state == {}
+
+
+def test_a_request_the_budget_refuses_is_not_sent_and_asks_the_host_nothing():
+    fake = _workspace()
+    asked: list[int] = []
+
+    _, stats = _sync(fake, {}, max_requests=3, check_active=lambda: asked.append(1))
+
+    assert stats["failed_budget"] == 1
+    assert len(asked) == len(fake.calls) == 3
+
+
+def test_a_retried_request_asks_the_host_per_attempt_and_counts_once_against_the_budget(
+    monkeypatch,
+):
+    fake = _workspace(tasks=2)
+    monkeypatch.setattr("requests.request", serve_over_http(fake))
+    _, plain = _sync(AsanaClient(TOKEN, sleep=lambda _: None), {})
+    fake.calls.clear()
+    fake.fail("/tasks/2", 500, times=1)
+    asked: list[int] = []
+
+    _, stats = _sync(
+        AsanaClient(TOKEN, sleep=lambda _: None),
+        {},
+        max_requests=plain["requests"],
+        check_active=lambda: asked.append(1),
+    )
+
+    assert stats["requests"] == plain["requests"] and "failed_budget" not in stats
+    assert len(fake.calls) == len(asked) == plain["requests"] + 1
+
+
+def test_a_host_that_revokes_during_a_tasks_retry_stops_the_run_and_loses_that_task(monkeypatch):
+    """The read of task 2 answers 500 once; the host refuses the retry. The run stops with the
+    host's own error, task 2 is not emitted and the state is as the run found it."""
+    fake = _workspace(tasks=2)
+    fake.fail("/tasks/2", 500, times=1)
+    monkeypatch.setattr("requests.request", serve_over_http(fake))
+    sleeps: list[float] = []
+    client = AsanaClient(TOKEN, sleep=sleeps.append)
+    error = PermissionError("access revoked")
+
+    def check():
+        if fake.calls and fake.calls[-1][0] == "/tasks/2":
+            raise error
+
+    state: dict = {}
+    emitted: list[str] = []
+    with pytest.raises(PermissionError) as raised:
+        for row in _iter_rows(client, state, new_stats(), project_gids=["P1"], check_active=check):
+            emitted.append(row["id"])
+
+    assert raised.value is error
+    assert "task:1" in emitted and "task:2" not in emitted
+    assert [path for path, _ in fake.calls].count("/tasks/2") == 1 and sleeps == []
     assert state == {}
 
 
@@ -3020,6 +3353,26 @@ def test_unreadable_tasks_never_block_new_ones_across_real_runs(tmp_path):
     fake.heal()
     staged = _run(tmp_path, _source(fake))
     assert {"task:2", "task:3", "task:4"} <= set(staged)
+
+
+def test_a_malformed_task_keeps_its_document_and_never_blocks_new_ones_across_real_runs(tmp_path):
+    fake = _workspace()
+    _run(tmp_path, _source(fake))
+    fake.edit_task("2", notes="Rewritten.")
+    fake.answers["/tasks/2/stories"] = {"data": [1]}
+
+    for run in range(3):
+        fake.add_task(f"9{run}")
+        source = _source(fake)
+        staged = _run(tmp_path, source)
+        assert f"task:9{run}" in staged, "a new task is ingested whatever the others do"
+        assert "Body 2." in staged["task:2"], "the old document stays"
+        assert (source.cognee_sync_stats["failed"], source.cognee_sync_stats["kept"]) == (1, 1)
+        assert _reasons(source.cognee_sync_stats) == set()
+
+    del fake.answers["/tasks/2/stories"]
+    staged = _run(tmp_path, _source(fake))
+    assert "Rewritten." in staged["task:2"]
 
 
 def test_an_ingested_task_that_cannot_be_read_keeps_its_document_until_it_leaves(tmp_path):

@@ -724,6 +724,8 @@ class TestForgetCommand:
         assert "everything" in actions
         assert "memory_only" in actions
         assert actions["memory_only"].default is False
+        assert "clean_history" in actions
+        assert actions["clean_history"].default is False
 
     @patch("cognee.cli.commands.forget_command.asyncio.run", side_effect=_mock_run)
     def test_execute_threads_memory_only_flag(self, mock_asyncio_run):
@@ -741,6 +743,7 @@ class TestForgetCommand:
                 data_id=None,
                 everything=False,
                 memory_only=True,
+                clean_history=False,
             )
             command.execute(args)
 
@@ -750,7 +753,40 @@ class TestForgetCommand:
             dataset_id=None,
             everything=False,
             memory_only=True,
+            clean_history=False,
         )
+
+    @patch("cognee.cli.commands.forget_command.fmt.success")
+    @patch("cognee.cli.commands.forget_command.fmt.warning")
+    @patch("cognee.cli.commands.forget_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_reports_not_found_instead_of_success(
+        self, mock_asyncio_run, mock_warning, mock_success
+    ):
+        """A ``not_found`` receipt (wrong id, or already deleted) must not print the
+        green 'Done' line: nothing was deleted."""
+        data_id = "11111111-1111-1111-1111-111111111111"
+        mock_cognee = MagicMock()
+        mock_cognee.forget = AsyncMock(
+            return_value={"status": "not_found", "dataset_id": "ds", "data_id": data_id}
+        )
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = ForgetCommand()
+            args = argparse.Namespace(
+                dataset="my_dataset",
+                dataset_id=None,
+                data_id=data_id,
+                everything=False,
+                memory_only=False,
+                clean_history=False,
+            )
+            command.execute(args)
+
+        mock_success.assert_not_called()
+        mock_warning.assert_called_once()
+        message = mock_warning.call_args.args[0]
+        assert "not found" in message and data_id in message
+        assert "Done" not in message
 
     def test_execute_everything_with_memory_only_errors(self):
         """--memory-only has no effect with --everything (which deletes
@@ -761,7 +797,12 @@ class TestForgetCommand:
         with patch.dict(sys.modules, {"cognee": mock_cognee}):
             command = ForgetCommand()
             args = argparse.Namespace(
-                dataset=None, dataset_id=None, data_id=None, everything=True, memory_only=True
+                dataset=None,
+                dataset_id=None,
+                data_id=None,
+                everything=True,
+                memory_only=True,
+                clean_history=False,
             )
             # Should not raise, just print an error and return without calling forget().
             command.execute(args)
@@ -771,7 +812,12 @@ class TestForgetCommand:
     def test_execute_no_forget_target(self):
         command = ForgetCommand()
         args = argparse.Namespace(
-            dataset=None, dataset_id=None, data_id=None, everything=False, memory_only=False
+            dataset=None,
+            dataset_id=None,
+            data_id=None,
+            everything=False,
+            memory_only=False,
+            clean_history=False,
         )
 
         # Should not raise, just print an error and return.
@@ -788,6 +834,7 @@ class TestForgetCommand:
             data_id=None,
             everything=False,
             memory_only=False,
+            clean_history=False,
         )
 
         with pytest.raises(CliCommandException):

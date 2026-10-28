@@ -42,6 +42,7 @@ from cognee.infrastructure.databases.provenance.source_refs import (
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticEvent, LoopAgnosticLock
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.observability import new_span
@@ -485,19 +486,24 @@ class LadybugAdapter(GraphDBInterface):
                 self._ensure_schema()
             else:
                 self._initialize_connection()
-        self.LADYBUG_ASYNC_LOCK = asyncio.Lock()
-        self._source_ref_change_lock = asyncio.Lock()
+        # Loop-agnostic: the adapter is cached across event loops, and an
+        # asyncio.Lock binds to the first loop that awaits it.
+        self.LADYBUG_ASYNC_LOCK = LoopAgnosticLock()
+        self._source_ref_change_lock = LoopAgnosticLock()
         # Serializes the probe -> create -> update sequence in add_nodes /
         # add_edges (see the bulk upsert statements above): those reads decide
         # what the following writes do, so two concurrent callers must not
         # interleave them.
-        self._bulk_write_lock = asyncio.Lock()
-        self._connection_lock = asyncio.Lock()
+        self._bulk_write_lock = LoopAgnosticLock()
+        self._connection_lock = LoopAgnosticLock()
         # Set when ``open_connections == 0``; used by transient teardown
         # paths (e.g. ``delete_graph``) to wait for in-flight queries to
-        # finish before dropping native resources. ``close()`` does NOT use
-        # this — see ``close()``'s docstring for the cross-loop reason.
-        self._all_queries_drained = asyncio.Event()
+        # finish before dropping native resources. Loop-agnostic like the
+        # locks above: the waiting teardown and the query that finally sets
+        # it may run on different loops (an ``asyncio.Event`` is bound to
+        # one loop and its ``set()`` is not thread-safe). ``close()`` does
+        # NOT use this — see ``close()``'s docstring for the reason.
+        self._all_queries_drained = LoopAgnosticEvent()
         self._all_queries_drained.set()
         # Brief sync lock for atomic counter+event mutations. Cannot reuse
         # ``_connection_lock`` here: teardown holds that lock across the
@@ -1027,8 +1033,9 @@ class LadybugAdapter(GraphDBInterface):
         Used by transient-teardown paths (currently ``delete_graph`` and
         the shared-lock per-query cleanup) so ``_drop_native_resources``
         doesn't tear out a connection an executor thread is still using.
-        ``close()`` does NOT use this — see its docstring for why
-        (cross-loop ``asyncio.Event.wait()`` would raise).
+        The event is loop-agnostic, so a query finishing on another loop
+        (or thread) wakes this wait. ``close()`` does NOT use this — see
+        its docstring for why.
 
         Reads the counter under ``_counter_lock`` so a stale ``set()``
         from a finishing query can't race a fresh increment from a new
@@ -1176,63 +1183,18 @@ class LadybugAdapter(GraphDBInterface):
 
     async def add_node(self, node: DataPoint) -> None:
         """
-        Add a single node to the graph if it doesn't exist.
+        Upsert a single node: create it, or overwrite name/type/properties on match.
 
-        This method constructs and executes a query to add a node to the graph, ensuring that it
-        is not duplicated by checking its existence first. An error is raised if the operation
-        fails.
+        Delegates to ``add_nodes`` so there is one MERGE write path. That path keeps
+        ``created_at`` on an existing node, refreshes ``updated_at``, and checkpoints
+        after the write. An error is raised if the operation fails.
 
         Parameters:
         -----------
 
             - node (DataPoint): The node to be added, represented as a DataPoint.
         """
-        try:
-            properties = node.model_dump() if hasattr(node, "model_dump") else vars(node)
-
-            # Extract core fields with defaults if not present
-            core_properties = {
-                "id": str(properties.get("id", "")),
-                "name": str(properties.get("name", "")),
-                "type": str(properties.get("type", "")),
-            }
-
-            # Remove core fields from other properties
-            for key in core_properties:
-                properties.pop(key, None)
-
-            # Provenance lives in declared STRING columns, never the JSON blob.
-            for key in PROVENANCE_COLUMNS:
-                properties.pop(key, None)
-
-            core_properties["properties"] = json.dumps(properties, cls=JSONEncoder)
-
-            # Add timestamps for new node
-            now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
-            fields = []
-            params = {}
-            for key, value in core_properties.items():
-                if value is not None:
-                    param_name = f"param_{key}"
-                    fields.append(f"{key}: ${param_name}")
-                    params[param_name] = value
-
-            # Add timestamp fields
-            fields.extend(
-                ["created_at: TIMESTAMP($created_at)", "updated_at: TIMESTAMP($updated_at)"]
-            )
-            params.update({"created_at": now, "updated_at": now})
-
-            merge_query = f"""
-            MERGE (n:Node {{id: $param_id}})
-            ON CREATE SET n += {{{", ".join(fields)}}}
-            """
-            await self.query(merge_query, params)
-            await self.checkpoint()
-
-        except Exception as e:
-            logger.error(f"Failed to add node: {e}")
-            raise
+        await self.add_nodes([node])
 
     async def add_nodes(
         self,

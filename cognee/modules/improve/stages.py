@@ -164,7 +164,9 @@ class PersistSessionQAStage(BaseStage):
     """Stage 2: cognify session Q&A into the graph (``user_sessions_from_cache``).
 
     The single fail-closed stage (decision D2): losing Q&A would be data loss,
-    so an error here stops the run instead of being swallowed.
+    so an error here stops the run instead of being swallowed. A failed step
+    after the completed cognify (``AfterRunHookError``) is recorded as errored
+    without stopping it: the Q&A is stored.
     """
 
     name = "persist_session_qa"

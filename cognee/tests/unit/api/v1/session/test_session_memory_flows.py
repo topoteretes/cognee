@@ -1013,7 +1013,11 @@ class TestRecallRoutedConfig:
         authorized_search = AsyncMock(side_effect=search)
         with (
             patch("cognee.shared.utils.send_telemetry", lambda *args, **kwargs: None),
-            patch.object(recall_mod, "llm_available", return_value=True),
+            patch.object(
+                _mod_query_router.RoutingConstraints,
+                "from_config",
+                return_value=_mod_query_router.RoutingConstraints(),
+            ),
             patch.object(recall_mod, "get_default_user", AsyncMock(return_value=user)),
             patch.object(recall_mod, "set_session_user_context_variable", AsyncMock()),
             patch.object(_mod_search_methods, "authorized_search", authorized_search),
@@ -1061,7 +1065,8 @@ class TestRecallRoutedConfig:
 
         recall_mod = _get_recall_module()
         monkeypatch.setattr("cognee.shared.utils.send_telemetry", lambda *args, **kwargs: None)
-        monkeypatch.setattr(recall_mod, "llm_available", MagicMock(return_value=True))
+        constraints = _mod_query_router.RoutingConstraints
+        monkeypatch.setattr(constraints, "from_config", MagicMock(return_value=constraints()))
         monkeypatch.setattr(
             recall_mod, "get_default_user", AsyncMock(return_value=MagicMock(id=uuid4()))
         )
