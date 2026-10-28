@@ -172,3 +172,46 @@ async def test_re_adding_a_changed_file_is_refused_and_update_is_the_way(add_env
     await cognee.add(str(report), dataset_name="another")
     # And another user's dataset is out of scope by construction (dedup scope),
     # which the query shares with identify_many.
+
+
+@pytest.mark.asyncio
+async def test_add_binary_streams_and_refusal_semantics(add_env):
+    """Issue #6392: add() accepts open file objects (BufferedReader) and BytesIO."""
+    await reset_backend_state()
+    import cognee
+    from cognee.api.v1.exceptions import DocumentUpdateRequiredError
+    from cognee.modules.data.methods import get_datasets
+    from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+    from cognee.modules.users.methods import get_default_user
+
+    dataset_name = "stream_test_dataset"
+    stream_file = add_env / "binary_doc.txt"
+    stream_file.write_text("Binary stream document version one ENTSTREAM.\n")
+
+    # 1. Add BufferedReader (open binary file object)
+    with open(stream_file, "rb") as f:
+        await cognee.add(f, dataset_name=dataset_name)
+        assert not f.closed, "Caller stream must not be closed"
+
+    # 2. Add in-memory BytesIO
+    bio = io.BytesIO(b"In memory content ENTMEMORY.\n")
+    await cognee.add(bio, dataset_name=dataset_name)
+    assert not bio.closed, "Caller BytesIO must not be closed"
+
+    user = await get_default_user()
+    dataset = next(d for d in await get_datasets(user.id) if d.name == dataset_name)
+    rows = {row.name: row for row in await get_dataset_data(dataset.id)}
+    assert "binary_doc" in rows
+    assert len(rows) == 2
+
+    # 3. Idempotent re-add: unchanged binary streams do not duplicate rows
+    with open(stream_file, "rb") as f:
+        await cognee.add(f, dataset_name=dataset_name)
+    assert len(await get_dataset_data(dataset.id)) == 2
+
+    # 4. Changed content on a named file stream raises DocumentUpdateRequiredError
+    stream_file.write_text("Binary stream document version two ENTSTREAM2.\n")
+    with pytest.raises(DocumentUpdateRequiredError) as refused, open(stream_file, "rb") as f:
+        await cognee.add(f, dataset_name=dataset_name)
+    assert refused.value.status_code == 409
+    assert refused.value.conflicts[0]["data_id"] == rows["binary_doc"].id
