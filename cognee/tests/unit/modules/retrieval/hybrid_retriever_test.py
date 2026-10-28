@@ -1175,12 +1175,15 @@ def _graph(nodes=None, edges=None):
 
 
 @pytest.mark.asyncio
-async def test_user_resolution_overrides_rejected_passage_and_standalone_fact():
+async def test_user_resolution_preserves_passage_and_summary_and_replaces_standalone_fact():
     old, selected = "Company has CEO Bob", "Company has CEO Alice"
+    passage = f"{old}. The company was founded in 1998."
+    summary = "Founded in 1998, with Bob as CEO."
     vector = MagicMock()
     vector.has_collection = AsyncMock(return_value=False)
     vector.search = _vector_search(
-        chunks=[_result("chunk-1", {"id": "chunk-1", "text": old})],
+        chunks=[_result("chunk-1", {"id": "chunk-1", "text": passage})],
+        summaries=[_result("summary", {"source_chunk_id": "chunk-1", "text": summary})],
         edge_types=[_edge_hit(old)],
     )
     graph = _graph()
@@ -1198,7 +1201,7 @@ async def test_user_resolution_overrides_rejected_passage_and_standalone_fact():
         ],
         [],
     )
-    retriever = HybridRetriever(text_summaries_top_k=0, facts_top_k=1)
+    retriever = HybridRetriever(text_summaries_top_k=1, facts_top_k=1)
     with patch(
         "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
         new_callable=AsyncMock,
@@ -1208,8 +1211,10 @@ async def test_user_resolution_overrides_rejected_passage_and_standalone_fact():
         context = await retriever.get_context_from_objects(
             query="Who is CEO?", retrieved_objects=objects
         )
-    assert selected in context
-    assert old not in context
+    assert passage in context
+    assert f"Accepted by user: {selected}" in context
+    assert objects["chunk_summaries"] == {"chunk-1": summary}
+    assert [fact["text"] for fact in objects["facts"]] == [selected]
 
 
 @pytest.mark.asyncio

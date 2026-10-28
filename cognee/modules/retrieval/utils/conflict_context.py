@@ -12,7 +12,10 @@ from dataclasses import dataclass, field
 from cognee.context_global_variables import current_dataset_id
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.utils.fact_conflicts import CONFLICT_CITES, effective_date_display
-from cognee.modules.retrieval.utils.resolved_context import read_user_resolutions
+from cognee.modules.retrieval.utils.resolved_context import (
+    read_user_resolutions,
+    user_resolution_text,
+)
 from cognee.modules.retrieval.utils.results import payload, result_id
 from cognee.shared.logging_utils import get_logger
 
@@ -86,6 +89,7 @@ def _conflicts_by_chunk(nodes, edges, *, requested_ids: set[str]) -> dict[str, C
             and (dataset_id is None or str(properties.get("dataset_id")) == str(dataset_id))
         ):
             chunk.resolutions[conflict_id] = properties["selected_fact"]
+            chunk.conflicts[conflict_id] = user_resolution_text(properties["selected_fact"])
     return by_chunk
 
 
@@ -146,19 +150,14 @@ async def attach_chunk_conflicts(hits, *, graph_engine=None, summaries: bool = F
         for chunk_id in set(resolution["sources"]) & payloads_by_chunk_id.keys():
             chunk = conflicts_by_chunk_id.setdefault(chunk_id, ChunkConflicts())
             chunk.resolutions[resolution["id"]] = resolution["selected_fact"]
-            chunk.conflicts[resolution["id"]] = (
-                resolution.get("text") or resolution["selected_fact"]
-            )
+            chunk.conflicts[resolution["id"]] = user_resolution_text(resolution["selected_fact"])
     for chunk_id, chunk_conflicts in conflicts_by_chunk_id.items():
         explanations = [chunk_conflicts.conflicts[key] for key in sorted(chunk_conflicts.conflicts)]
         header = passage_header(chunk_conflicts.document, chunk_conflicts.effective_date)
         for hit_payload in payloads_by_chunk_id[chunk_id]:
             hit_payload["conflicts"] = list(explanations)
             if chunk_conflicts.resolutions:
-                # A passage may contain both competing assertions. Return the accepted
-                # facts instead of exposing the rejected assertion as current evidence.
-                # Only this search result changes; original documents remain untouched.
-                hit_payload["text"] = "\n".join(sorted(set(chunk_conflicts.resolutions.values())))
+                # Preserve unrelated passage content and state which claim takes precedence.
                 hit_payload["resolved_facts"] = dict(chunk_conflicts.resolutions)
             hit_payload[PASSAGE_HEADER_KEY] = header
 

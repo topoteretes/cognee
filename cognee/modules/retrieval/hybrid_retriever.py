@@ -46,7 +46,6 @@ from cognee.modules.retrieval.utils.global_context import (
     load_root_text,
     search_top_global_context_summaries,
 )
-from cognee.modules.retrieval.utils.results import payload, result_id
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.modules.user_preferences import load_preference_text, load_preference_weights
 from cognee.shared.logging_utils import get_logger
@@ -199,9 +198,6 @@ class HybridRetriever(BaseRetriever):
         await attach_chunk_conflicts(
             chunk_objects.get("chunks", []), graph_engine=self._unified_engine.graph
         )
-        for chunk in chunk_objects.get("chunks", []):
-            if payload(chunk).get("resolved_facts"):
-                chunk_objects["chunk_summaries"].pop(result_id(chunk), None)
         return HybridCandidates(
             chunks=chunk_objects["chunks"],
             chunk_summaries=chunk_objects["chunk_summaries"],
@@ -272,13 +268,18 @@ class HybridRetriever(BaseRetriever):
     ) -> Any:
         if query_batch:
             global_contexts = await asyncio.gather(
-                *[self._build_global_context_section(q) for q in query_batch]
+                *[
+                    self._build_global_context_section(q, objects)
+                    for q, objects in zip(query_batch, retrieved_objects)
+                ]
             )
             return format_hybrid_context_batch(global_contexts, retrieved_objects)
-        global_context = await self._build_global_context_section(query)
+        global_context = await self._build_global_context_section(query, retrieved_objects)
         return format_hybrid_context(global_context, retrieved_objects)
 
-    async def _build_global_context_section(self, query: str | None) -> str:
+    async def _build_global_context_section(
+        self, query: str | None, retrieved_objects: Any = None
+    ) -> str:
         if not self.include_global_context_index or not query:
             return ""
 
@@ -291,8 +292,6 @@ class HybridRetriever(BaseRetriever):
         )
 
         resolutions = await read_user_resolutions(self._unified_engine.graph)
-        if resolutions:
-            return accepted_facts_context(resolutions)
         root_text, top_summaries = await asyncio.gather(
             load_root_text(),
             search_top_global_context_summaries(
@@ -302,9 +301,12 @@ class HybridRetriever(BaseRetriever):
             ),
         )
         prelude = format_global_context_prelude(root_text, top_summaries)
-        if not prelude:
-            return ""
-        return f"## Global context\n{prelude}"
+        used_ids = extract_hybrid_object_ids(retrieved_objects) or {}
+        accepted = accepted_facts_context(
+            resolutions, used_ids.get("node_ids", []), self.global_context_index_top_k
+        )
+        global_context = f"## Global context\n{prelude}" if prelude else ""
+        return "\n\n".join(section for section in (global_context, accepted) if section)
 
     async def get_completion_from_context(
         self,

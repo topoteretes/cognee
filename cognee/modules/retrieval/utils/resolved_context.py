@@ -36,19 +36,12 @@ async def read_user_resolutions(graph) -> list[dict]:
 
 
 def apply_graph_resolutions(edges: list, resolutions: list[dict]) -> list:
-    """Replace rejected claims with the selected claim and sanitize cited source text."""
+    """Replace only explicitly rejected edges, preserving all other retrieved content."""
     if not resolutions:
         return edges
     rejected = {
         fid: resolution for resolution in resolutions for fid in resolution["rejected_fact_ids"]
     }
-    by_chunk: dict[str, set[str]] = {}
-    by_entity: dict[str, set[str]] = {}
-    for resolution in resolutions:
-        for chunk_id in resolution["sources"]:
-            by_chunk.setdefault(chunk_id, set()).add(resolution["selected_fact"])
-        for node_id in (resolution["about_id"], *resolution.get("values", [])):
-            by_entity.setdefault(str(node_id), set()).add(resolution["selected_fact"])
     result = []
     for edge in edges:
         updated = copy(edge)
@@ -79,28 +72,6 @@ def apply_graph_resolutions(edges: list, resolutions: list[dict]) -> list:
             target.id = resolution["about_id"]
             target.attributes = {"name": "Subject of the user resolution"}
             updated.node1, updated.node2 = source, target
-        else:
-            source_facts: set[str] = set()
-            for field in ("node1", "node2"):
-                node = getattr(edge, field)
-                chunk_id = str(node.attributes.get("source_chunk_id") or node.id)
-                if chunk_id in by_chunk:
-                    source_facts.update(by_chunk[chunk_id])
-                    node = copy(node)
-                    node.attributes = {
-                        **node.attributes,
-                        "text": "\n".join(sorted(by_chunk[chunk_id])),
-                    }
-                    setattr(updated, field, node)
-                elif str(node.id) in by_entity:
-                    node = copy(node)
-                    node.attributes = {
-                        **node.attributes,
-                        "description": "\n".join(sorted(by_entity[str(node.id)])),
-                    }
-                    setattr(updated, field, node)
-            if source_facts:
-                updated.attributes["edge_text"] = "\n".join(sorted(source_facts))
         result.append(updated)
     return result
 
@@ -132,17 +103,7 @@ def apply_fact_hit_resolutions(hits: list, resolutions: list[dict]) -> list:
 
 def apply_entity_resolutions(entities: list[dict], resolutions: list[dict]) -> None:
     """Attach accepted facts even if the selected edge fell outside the top-k window."""
-    by_chunk: dict[str, set[str]] = {}
-    for item in resolutions:
-        for chunk_id in item.get("sources", []):
-            by_chunk.setdefault(chunk_id, set()).add(item["selected_fact"])
     for entity in entities:
-        for edge in entity.get("edges", []):
-            source_facts = by_chunk.get(str(edge.get("source_id")), set()) | by_chunk.get(
-                str(edge.get("target_id")), set()
-            )
-            if source_facts:
-                edge["text"] = "\n".join(sorted(source_facts))
         relevant = [
             item
             for item in resolutions
@@ -150,8 +111,14 @@ def apply_entity_resolutions(entities: list[dict], resolutions: list[dict]) -> N
         ]
         if not relevant:
             continue
-        accepted = sorted({item["selected_fact"] for item in relevant})
-        entity["conflicts"] = sorted(set(entity.get("conflicts", [])) | set(accepted))
+        accepted = {user_resolution_text(item["selected_fact"]) for item in relevant}
+        # Neighborhood marks and conflict nodes may already carry the same decision.
+        existing_decisions = {
+            text for item in relevant for text in (item["selected_fact"], item.get("text")) if text
+        }
+        entity["conflicts"] = sorted(
+            (set(entity.get("conflicts", [])) - existing_decisions) | accepted
+        )
         rejected = {fid for item in relevant for fid in item["rejected_fact_ids"]}
         entity["edges"] = [
             edge
@@ -160,9 +127,27 @@ def apply_entity_resolutions(entities: list[dict], resolutions: list[dict]) -> N
         ]
 
 
-def accepted_facts_context(resolutions: list[dict]) -> str:
-    if not resolutions:
+def user_resolution_text(selected_fact: str) -> str:
+    """Give a stored user decision precedence over competing source claims."""
+    return f"Accepted by user: {selected_fact}; ignore competing claims."
+
+
+def accepted_facts_context(resolutions: list[dict], node_ids: list[str], limit: int) -> str:
+    """Bound the optional prelude to decisions about the retrieved nodes and sources."""
+    if limit <= 0:
         return ""
-    return "## Accepted facts (user resolved)\n" + "\n".join(
-        sorted({item["selected_fact"] for item in resolutions})
-    )
+    retrieved_ids = set(node_ids)
+    accepted = sorted(
+        {
+            user_resolution_text(item["selected_fact"])
+            for item in resolutions
+            if retrieved_ids.intersection(
+                str(node_id)
+                for node_id in (item.get("about_id"), *item["values"], *item["sources"])
+                if node_id is not None
+            )
+        }
+    )[:limit]
+    if not accepted:
+        return ""
+    return "## Accepted facts (user resolved)\n" + "\n".join(accepted)

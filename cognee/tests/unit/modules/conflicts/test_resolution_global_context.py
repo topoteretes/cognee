@@ -1,0 +1,128 @@
+"""User decisions supplement the global index only for the current retrieved set."""
+
+import importlib
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+
+
+def _objects(retriever_type, node_id):
+    if retriever_type is HybridRetriever:
+        return {"chunks": [{"id": node_id, "text": "Retrieved passage"}], "entities": []}
+    return [Edge(Node(node_id, {"name": "Retrieved node"}), Node("neighbor"))]
+
+
+def _retriever(monkeypatch, retriever_type, resolutions, limit):
+    retriever = retriever_type(include_global_context_index=True, global_context_index_top_k=limit)
+    retriever._unified_engine = SimpleNamespace(
+        graph=SimpleNamespace(get_filtered_graph_data=AsyncMock(return_value=(resolutions, []))),
+        vector=object(),
+    )
+    module = importlib.import_module(retriever_type.__module__)
+    monkeypatch.setattr(module, "load_root_text", AsyncMock(return_value="Root summary"))
+    search_summaries = AsyncMock(return_value=["Area summary"])
+    monkeypatch.setattr(module, "search_top_global_context_summaries", search_summaries)
+    return retriever, search_summaries
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retriever_type", [HybridRetriever, GraphCompletionRetriever])
+@pytest.mark.parametrize("link_field", ["about_id", "values", "sources"])
+async def test_global_context_keeps_summaries_and_bounds_relevant_decisions(
+    monkeypatch, retriever_type, link_field
+):
+    def decision(fact, node_id):
+        return {
+            "resolution_source": "user",
+            "selected_fact": fact,
+            link_field: node_id if link_field == "about_id" else [node_id],
+        }
+
+    resolutions = [
+        ("unrelated", decision("Unrelated decision", "elsewhere")),
+        ("a", decision("Accepted fact A", "retrieved")),
+        ("b", decision("Accepted fact B", "retrieved")),
+        ("c", decision("Accepted fact C", "retrieved")),
+    ]
+    retriever, search_summaries = _retriever(monkeypatch, retriever_type, resolutions, limit=2)
+    context = await retriever.get_context_from_objects(
+        query="q", retrieved_objects=_objects(retriever_type, "retrieved")
+    )
+    assert "Root summary" in context and "Area summary" in context
+    if retriever_type is HybridRetriever:
+        assert context.startswith("## Global context\n")
+    assert "Accepted by user: Accepted fact A" in context
+    assert "Accepted by user: Accepted fact B" in context
+    assert "Accepted fact C" not in context
+    assert "Unrelated decision" not in context
+    assert context.count("Accepted by user:") == 2
+    search_summaries.assert_awaited_once_with("q", 2, retriever._unified_engine.vector)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retriever_type", [HybridRetriever, GraphCompletionRetriever])
+async def test_unrelated_decision_does_not_replace_global_index(monkeypatch, retriever_type):
+    retriever, _ = _retriever(
+        monkeypatch,
+        retriever_type,
+        [
+            (
+                "conflict",
+                {
+                    "resolution_source": "user",
+                    "selected_fact": "CEO is Alice",
+                    "about_id": "company",
+                },
+            )
+        ],
+        limit=3,
+    )
+    context = await retriever.get_context_from_objects(
+        query="q", retrieved_objects=_objects(retriever_type, "unrelated")
+    )
+    assert "Root summary" in context and "Area summary" in context
+    assert "CEO is Alice" not in context
+    assert "## Accepted facts" not in context
+
+
+@pytest.mark.asyncio
+async def test_batch_decisions_are_selected_for_each_queries_retrieved_objects(monkeypatch):
+    retriever, search_summaries = _retriever(
+        monkeypatch,
+        HybridRetriever,
+        [
+            (
+                "first",
+                {
+                    "resolution_source": "user",
+                    "selected_fact": "First decision",
+                    "about_id": "first",
+                },
+            ),
+            (
+                "second",
+                {
+                    "resolution_source": "user",
+                    "selected_fact": "Second decision",
+                    "sources": ["second"],
+                },
+            ),
+        ],
+        limit=1,
+    )
+    contexts = await retriever.get_context_from_objects(
+        query_batch=["first query", "second query"],
+        retrieved_objects=[_objects(HybridRetriever, "first"), _objects(HybridRetriever, "second")],
+    )
+    for context in contexts:
+        assert context.startswith("## Global context\n")
+        assert "Root summary" in context and "Area summary" in context
+        assert context.count("Accepted by user:") == 1
+    assert "First decision" in contexts[0] and "Second decision" not in contexts[0]
+    assert "Second decision" in contexts[1] and "First decision" not in contexts[1]
+    assert search_summaries.await_count == 2

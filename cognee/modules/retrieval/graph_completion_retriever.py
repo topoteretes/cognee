@@ -352,7 +352,7 @@ class GraphCompletionRetriever(BaseRetriever):
                 return ""
             return graph_context
 
-        prelude = await self._build_global_context_prelude(query)
+        prelude = await self._build_global_context_prelude(query, triplets)
         if not prelude and not graph_context:
             logger.warning("Empty context was provided to the completion")
             return ""
@@ -362,7 +362,7 @@ class GraphCompletionRetriever(BaseRetriever):
             return prelude
         return f"{prelude}\n\n{graph_context}"
 
-    async def _build_global_context_prelude(self, query: str | None) -> str:
+    async def _build_global_context_prelude(self, query: str | None, retrieved_objects=None) -> str:
         if not query:
             return ""
         if self._unified_engine is None:
@@ -373,13 +373,16 @@ class GraphCompletionRetriever(BaseRetriever):
         )
 
         resolutions = await read_user_resolutions(self._unified_engine.graph)
-        if resolutions:
-            return accepted_facts_context(resolutions)
         root_text = await load_root_text()
         top_summaries = await search_top_global_context_summaries(
             query, self.global_context_index_top_k, self._unified_engine.vector
         )
-        return format_global_context_prelude(root_text, top_summaries)
+        prelude = format_global_context_prelude(root_text, top_summaries)
+        used_ids = self.extract_context_object_ids(retrieved_objects) or {}
+        accepted = accepted_facts_context(
+            resolutions, used_ids.get("node_ids", []), self.global_context_index_top_k
+        )
+        return "\n\n".join(section for section in (prelude, accepted) if section)
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
         return merge_ranked(

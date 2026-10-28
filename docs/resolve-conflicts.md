@@ -45,17 +45,20 @@ result = await cognee.resolve_conflict(
 ```
 
 Normal graph, hybrid, chunk, lexical, and summary retrieval uses the accepted
-information. A passage that cites a user-resolved conflict is returned as the
-accepted fact text, since the source passage can contain both competing claims.
-This affects retrieved copies only: original documents and graph facts remain
-available for inspection and raw graph queries. An old vector hit is mapped to
-the accepted fact without waiting for re-embedding. Cached answers and lessons
-with recorded references to the affected facts are invalidated.
+information. Passages and summaries keep their full source text and carry
+`resolved_facts` plus an explicit annotation giving the selected fact precedence
+over competing claims. Unrelated graph edges and node descriptions remain intact;
+only explicitly rejected fact edges and standalone fact hits are mapped to the
+accepted fact without waiting for re-embedding. These changes affect retrieved
+copies only: original documents and graph facts remain available for inspection
+and raw graph queries. Cached answers and lessons with recorded references to the
+affected facts are invalidated.
 
-When a dataset has user decisions, the optional global-context prelude uses
-the accepted facts instead of previously generated summaries, which may still
-repeat rejected information. Reading decisions is required for normal retrieval;
-a graph failure surfaces an error rather than returning an unchecked old hit.
+The optional global-context prelude keeps its root and top-k summaries. It appends
+only user decisions whose subject, values, or sources intersect the retrieved
+nodes, capped at `global_context_index_top_k` decisions per query. Reading
+decisions is required for normal retrieval; a graph failure surfaces an error
+rather than returning an unchecked old hit.
 Custom retrievers and raw graph queries must apply the same resolution policy
 if they are used to generate answers. Cache cleanup relies on recorded fact
 references; old untracked turns and append-only cache adapters cannot be cleaned

@@ -110,9 +110,12 @@ async def test_resolution_survives_real_graph_writes_and_overrides_old_vector_hi
             apply_fact_hit_resolutions([old_hit], resolutions)[0].payload["text"]
             == "Company has CEO Alice"
         )
-        chunks = [{"id": str(chunk.id), "text": "Company has CEO Bob"}]
+        passage = "Company has CEO Bob. Revenue grew 20 percent."
+        chunks = [{"id": str(chunk.id), "text": passage}]
         await attach_chunk_conflicts(chunks, graph_engine=graph)
-        assert chunks[0]["text"] == "Company has CEO Alice"
+        assert chunks[0]["text"] == passage
+        assert chunks[0]["resolved_facts"] == {str(conflict.id): "Company has CEO Alice"}
+        assert "Accepted by user: Company has CEO Alice" in chunks[0]["conflicts"][0]
         # Both source facts still exist for audit/history.
         _, edges = await graph.get_neighborhood([str(company.id)], depth=1)
         assert len([e for e in edges if e[2] == "has_ceo"]) == 2
