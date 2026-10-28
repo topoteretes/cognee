@@ -518,3 +518,39 @@ async def test_list_unattributed_sessions_returns_null_dataset_id_rows():
                 if row:
                     await session.delete(row)
             await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_bounds_parallel_sessions_and_finishes_them_before_strict_failure(
+    monkeypatch,
+):
+    import asyncio
+    import importlib
+
+    module = importlib.import_module("cognee.modules.session_lifecycle.invalidate_sessions")
+    sessions = [(uuid4(), f"session-{i}") for i in range(20)]
+    manager = type("Manager", (), {"is_available": True})()
+    monkeypatch.setattr(module, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(module, "list_sessions_for_dataset", AsyncMock(return_value=sessions))
+    monkeypatch.setattr(module, "list_unattributed_sessions", AsyncMock(return_value=[]))
+    active = peak = completed = 0
+
+    async def clean(*args, session_id, **kwargs):
+        nonlocal active, peak, completed
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0)
+            if session_id == "session-0":
+                raise RuntimeError("cache write failed")
+            return 1, 0
+        finally:
+            active -= 1
+            completed += 1
+
+    monkeypatch.setattr(module, "_invalidate_session_entries", clean)
+    with pytest.raises(RuntimeError, match="cache write failed"):
+        await module.invalidate_sessions_for_deleted_data(uuid4(), {"node"}, set(), strict=True)
+    assert 1 < peak <= 8
+    assert completed == len(sessions)
+    assert active == 0

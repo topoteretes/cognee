@@ -4,6 +4,9 @@ Vector rows and source documents remain historical evidence. This overlay change
 only retrieved copies, and never relies on a later re-embedding or improve run.
 """
 
+import asyncio
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from copy import copy
 
 from cognee.context_global_variables import current_dataset_id
@@ -12,9 +15,42 @@ from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.fact_conflicts import read_list_property
 from cognee.modules.retrieval.utils.results import payload, result_id
 
+_resolution_reads: ContextVar[dict | None] = ContextVar("resolution_reads", default=None)
+
+
+@asynccontextmanager
+async def user_resolution_scope():
+    """Share reads within one search, including concurrent lanes and follow-up queries."""
+    if _resolution_reads.get() is not None:
+        yield
+        return
+    reads = {}
+    token = _resolution_reads.set(reads)
+    try:
+        yield
+    finally:
+        _resolution_reads.reset(token)
+        pending = [task for task in reads.values() if not task.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
 
 async def read_user_resolutions(graph) -> list[dict]:
-    nodes, _ = await graph.get_filtered_graph_data([{"type": ["FactConflict"]}])
+    reads = _resolution_reads.get()
+    if reads is None:
+        return await _read_user_resolutions(graph)
+    key = (id(graph), current_dataset_id.get())
+    if key not in reads:
+        reads[key] = asyncio.create_task(_read_user_resolutions(graph))
+    return await reads[key]
+
+
+async def _read_user_resolutions(graph) -> list[dict]:
+    nodes, _ = await graph.get_filtered_graph_data(
+        [{"type": ["FactConflict"]}], include_edges=False
+    )
     dataset_id = current_dataset_id.get()
     resolutions = []
     for node_id, props in nodes:

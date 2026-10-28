@@ -46,6 +46,7 @@ from cognee.modules.retrieval.utils.global_context import (
     load_root_text,
     search_top_global_context_summaries,
 )
+from cognee.modules.retrieval.utils.resolved_context import user_resolution_scope
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.modules.user_preferences import load_preference_text, load_preference_weights
 from cognee.shared.logging_utils import get_logger
@@ -116,6 +117,7 @@ class HybridRetriever(BaseRetriever):
         user_id = getattr(user, "id", None)
         return bool(user_id and CacheConfig().caching)
 
+    @user_resolution_scope()
     async def get_retrieved_objects(
         self, query: str | None = None, query_batch: list[str] | None = None
     ) -> Any:
@@ -260,6 +262,7 @@ class HybridRetriever(BaseRetriever):
             entity_edge_budget=max_ranked_bullets,
         )
 
+    @user_resolution_scope()
     async def get_context_from_objects(
         self,
         query: str | None = None,
@@ -386,6 +389,7 @@ class HybridRetriever(BaseRetriever):
     def extract_context_object_ids(self, retrieved_objects: Any) -> dict[str, list[str]] | None:
         return extract_hybrid_object_ids(retrieved_objects)
 
+    @user_resolution_scope()
     async def get_completion(
         self, query: str | None = None, query_batch: list[str] | None = None
     ) -> list[Any]:

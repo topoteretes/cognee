@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
+from cognee.modules.retrieval.utils.resolved_context import user_resolution_scope
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -154,6 +155,7 @@ class BaseRetriever(ABC):
 
             return SessionTurnPreparation(should_answer=True, effective_query=query or "")
 
+    @user_resolution_scope()
     async def get_completion(self, query: str) -> list[str] | list[dict]:
         """
         Generates a final output or answer based on the query and retrieved context.

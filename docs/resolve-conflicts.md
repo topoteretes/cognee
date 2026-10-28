@@ -3,8 +3,11 @@
 Conflict review (`improve(review_conflicts=True)`) creates `FactConflict` nodes.
 A user with dataset write permission can choose one of a conflict's facts.
 The choice marks the conflict `resolved`, records who made it, when, and why,
-and survives subsequent automatic reviews. Choosing a different fact explicitly
-revises the decision. Repeating the same choice is idempotent.
+and survives subsequent automatic reviews while the selected fact still exists.
+If its supporting document is forgotten and the fact disappears, the next conflict
+review replaces or drops the decision and clears its obsolete rejection marks.
+Choosing a different fact explicitly revises the decision. Repeating the same
+choice is idempotent.
 
 Inspect the candidates:
 
@@ -64,9 +67,12 @@ if they are used to generate answers. Cache cleanup relies on recorded fact
 references; old untracked turns and append-only cache adapters cannot be cleaned
 by this mechanism.
 
-Resolution uses the same per-process dataset lock as ingestion and improve.
-As with those operations, applications with several API workers must route
-writes for a dataset through one worker. A failed multi-store write remains
-marked `write_pending` and can be retried with the same request.
+Resolution protects graph writes with the same per-process dataset lock as
+ingestion and improve. Cache cleanup runs outside that lock, with bounded
+concurrency across sessions; the decision remains `write_pending` until cleanup
+succeeds. Finalization checks for a newer decision or a deleted conflict before
+writing. Failed writes or cleanup can be retried with the same request. As with
+ingestion, applications with several API workers must route writes for a dataset
+through one worker.
 
 See [the runnable example](../examples/guides/resolve_conflicts.py).

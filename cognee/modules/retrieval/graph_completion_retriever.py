@@ -30,6 +30,7 @@ from cognee.modules.retrieval.utils.merge_results import (
     edge_identity,
     merge_ranked,
 )
+from cognee.modules.retrieval.utils.resolved_context import user_resolution_scope
 from cognee.modules.retrieval.utils.used_graph_elements import (
     extract_from_edges,
     is_edge_list,
@@ -135,6 +136,7 @@ class GraphCompletionRetriever(BaseRetriever):
                     collections.append(f"{subclass.__name__}_{field_name}")
         return collections
 
+    @user_resolution_scope()
     async def get_retrieved_objects(
         self, query: str | None = None, query_batch: list[str] | None = None
     ) -> list[Edge] | list[list[Edge]]:
@@ -523,6 +525,7 @@ class GraphCompletionRetriever(BaseRetriever):
         # post-hoc vector lookup.
         return await self.append_references(completions, retrieved_objects)
 
+    @user_resolution_scope()
     async def get_completion(
         self, query: str | None = None, query_batch: list[str] | None = None
     ) -> list[Any]:

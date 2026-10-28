@@ -25,6 +25,7 @@ deletes also scan every dataset-unattributed session (``dataset_id IS NULL``);
 element-id matching keeps that scan precise (COG-6292).
 """
 
+import asyncio
 from uuid import UUID
 
 from cognee.infrastructure.locks import session_lock
@@ -115,9 +116,12 @@ async def invalidate_sessions_for_deleted_data(
             sessions.append(candidate)
     totals["sessions_considered"] = len(sessions)
 
-    for session_user_id, session_id in sessions:
-        try:
-            counts = await _invalidate_session_entries(
+    # Bound concurrent cache I/O without holding a dataset lock or dropping sessions.
+    semaphore = asyncio.Semaphore(8)
+
+    async def invalidate_one(session_user_id, session_id):
+        async with semaphore:
+            return await _invalidate_session_entries(
                 session_manager,
                 user_id=str(session_user_id),
                 session_id=session_id,
@@ -125,19 +129,28 @@ async def invalidate_sessions_for_deleted_data(
                 deleted_edge_ids=deleted_edge_ids,
                 strict=strict,
             )
-            totals["qa_entries_deleted"] += counts[0]
-            totals["context_entries_deleted"] += counts[1]
-        except Exception as error:
-            if strict:
-                raise
+
+    # Wait for every cleanup before raising in strict mode: no orphan cache writes
+    # may outlive the request or race with its retry/finalization.
+    results = await asyncio.gather(
+        *(invalidate_one(session_user_id, session_id) for session_user_id, session_id in sessions),
+        return_exceptions=True,
+    )
+    for (session_user_id, session_id), result in zip(sessions, results):
+        if isinstance(result, BaseException):
+            if strict or not isinstance(result, Exception):
+                raise result
             logger.warning(
                 "Session invalidation: targeted cleanup failed for session %s, user %s "
                 "(non-fatal): %s",
                 session_id,
                 session_user_id,
-                error,
-                exc_info=True,
+                result,
+                exc_info=(type(result), result, result.__traceback__),
             )
+        else:
+            totals["qa_entries_deleted"] += result[0]
+            totals["context_entries_deleted"] += result[1]
 
     if totals["qa_entries_deleted"] or totals["context_entries_deleted"]:
         logger.info(

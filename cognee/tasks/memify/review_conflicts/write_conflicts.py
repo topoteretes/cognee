@@ -63,6 +63,8 @@ def _preserve_user_resolutions(to_write: ConflictsToWrite) -> None:
             continue  # An explicit API resolution, including a revision of a prior choice.
         if not incoming and not dropping:
             continue
+        if stored.get("selected_fact_id") not in to_write.scope.facts:
+            continue  # Its evidence was forgotten; let the current review replace or drop it.
         if dropping and stored["about_id"] not in to_write.scope.entities:
             continue  # The subject itself was deleted.
         statuses = {
@@ -163,7 +165,16 @@ def _restate_marks(
     """
     for change in changes:
         status = change.fact_statuses.get(fact_id)
-        restated = status is not None or change.dropped or fact_id in to_write.shown_fact_ids
+        retired_user_choice = (
+            change.stored.get("resolution_source") == "user"
+            and change.stored.get("selected_fact_id") not in to_write.scope.facts
+        )
+        restated = (
+            status is not None
+            or change.dropped
+            or fact_id in to_write.shown_fact_ids
+            or retired_user_choice
+        )
         if not restated:
             continue
         marks = [mark for mark in marks if str(mark["conflict_id"]) != change.conflict_id]
@@ -375,7 +386,9 @@ async def _write_conflict_changes(unified, to_write: ConflictsToWrite, ctx) -> N
 async def _finalize_run(graph_engine, to_finalize: ConflictsToFinalize) -> None:
     """Clear or delete every conflict the run touched; no further write depends on them."""
     for accepted in to_finalize.accepted_conflicts:
-        conflict = accepted.conflict.model_copy(update={"write_pending": False})
+        conflict = accepted.conflict.model_copy(
+            update={"write_pending": accepted.conflict.cache_cleanup_pending}
+        )
         await graph_engine.add_nodes([conflict])
     for conflict_id in to_finalize.dropped_conflict_ids:
         await graph_engine.delete_nodes([conflict_id])

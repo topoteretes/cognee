@@ -6,7 +6,10 @@ from uuid import UUID, uuid4
 import pytest
 
 from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.locks.dataset_lock import dataset_lock, held_datasets
 from cognee.modules.conflicts import methods
+from cognee.modules.graph.utils.fact_conflicts import is_rejected_fact
+from cognee.modules.retrieval.utils.resolved_context import read_user_resolutions
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.tasks.memify.review_conflicts import write_conflicts
 from cognee.tasks.memify.review_conflicts.models import ConflictsToFinalize, ConflictsToWrite
@@ -27,7 +30,7 @@ def lane(store, monkeypatch):  # noqa: F811 -- imported pytest fixture
     monkeypatch.setattr(methods, "get_authorized_existing_datasets", permissions)
     monkeypatch.setattr(methods, "get_graph_engine", AsyncMock(return_value=store.graph))
     store.graph.get_filtered_graph_data = AsyncMock(
-        side_effect=lambda *a: (list(store.nodes.items()), [])
+        side_effect=lambda *a, **kw: (list(store.nodes.items()), [])
     )
     monkeypatch.setattr(methods, "read_entity_facts", AsyncMock(return_value=store.scope))
     invalidation = AsyncMock(return_value={})
@@ -81,7 +84,7 @@ async def test_choose_fact_persists_decision_marks_and_invalidates_cached_answer
         fact.status == "superseded" for fact in result.facts if fact.id != result.selected_fact_id
     )
     lane.permissions.assert_awaited_once_with([lane.dataset.id], "write", lane.user)
-    assert lane.contexts == [(lane.dataset.id, lane.dataset.owner_id)]
+    assert lane.contexts == [(lane.dataset.id, lane.dataset.owner_id)] * 2
     assert lane.invalidation.call_args.kwargs["deleted_edge_ids"] == set(lane.store.scope.facts)
     # A resolution affects this conflict only, preserving other conflict marks.
     for fact in lane.store.scope.facts.values():
@@ -180,3 +183,107 @@ async def test_cache_cleanup_failure_does_not_finalize_resolution(lane):
     result = await resolve(lane)
     assert not result.write_pending
     assert lane.invalidation.call_args.kwargs["strict"] is True
+
+
+@pytest.mark.asyncio
+async def test_listing_reads_only_conflict_subjects_without_the_write_lock(lane, monkeypatch):
+    @asynccontextmanager
+    async def forbidden_lock(*args):
+        raise AssertionError("Listing must not take the dataset write lock")
+        yield
+
+    monkeypatch.setattr(methods, "dataset_lock", forbidden_lock)
+    results = await methods.list_conflicts(lane.dataset.id, user=lane.user)
+    assert len(results) == 1
+    assert methods.read_entity_facts.await_args.kwargs["entity_ids"] == [
+        lane.store.nodes[lane.store.cid]["about_id"]
+    ]
+    methods.read_entity_facts.reset_mock()
+    lane.store.nodes.clear()
+    assert await methods.list_conflicts(lane.dataset.id, user=lane.user) == []
+    methods.read_entity_facts.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("review_drops", [False, True])
+async def test_review_retires_a_user_choice_when_its_selected_fact_was_forgotten(
+    lane, review_drops
+):
+    selected = await resolve(lane)
+    del lane.store.scope.facts[str(selected.selected_fact_id)]
+    batch = lane.store.batch
+    if review_drops:
+        batch = ConflictsToWrite(lane.store.scope, dropped_conflict_ids=[lane.store.cid])
+    else:
+        incoming = batch.accepted_conflicts[0]
+        incoming.fact_statuses = {fid: "current" for fid in lane.store.scope.facts}
+        incoming.conflict.text = "Company has CEO Bob"
+        # Even marks on facts left out of the review must lose the obsolete user choice.
+        batch.shown_fact_ids.clear()
+    await write_conflicts.write_conflicts([batch], lane.store.ctx)
+    await write_conflicts.write_conflicts(
+        [ConflictsToFinalize(batch.accepted_conflicts, batch.dropped_conflict_ids)], lane.store.ctx
+    )
+    assert await read_user_resolutions(lane.store.graph) == []
+    for fact in lane.store.scope.facts.values():
+        assert not is_rejected_fact(fact["properties"])
+        assert all(not mark.get("selected_fact") for mark in fact["properties"]["conflict_marks"])
+    if not review_drops:
+        assert lane.store.nodes[lane.store.cid]["resolution_source"] == "review"
+        assert lane.store.nodes[lane.store.cid]["selected_fact"] is None
+
+
+@pytest.mark.asyncio
+async def test_cache_cleanup_releases_dataset_lock_and_keeps_decision_pending(lane):
+    async def clean(*args, **kwargs):
+        assert lane.dataset.id not in held_datasets.get()
+        assert lane.store.nodes[lane.store.cid]["write_pending"]
+        async with dataset_lock(lane.dataset.id):
+            pass
+
+    lane.invalidation.side_effect = clean
+    await resolve(lane)
+    assert not lane.store.nodes[lane.store.cid]["write_pending"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("concurrent_change", ["delete", "revise"])
+async def test_cleanup_finalization_does_not_resurrect_or_overwrite_a_newer_decision(
+    lane, concurrent_change
+):
+    async def clean(*args, **kwargs):
+        if concurrent_change == "delete":
+            lane.store.nodes.pop(lane.store.cid)
+        else:
+            lane.store.nodes[lane.store.cid].update(
+                selected_fact_id=str(uuid4()), selected_fact="A newer decision", resolved_at="later"
+            )
+
+    lane.invalidation.side_effect = clean
+    await resolve(lane)
+    if concurrent_change == "delete":
+        assert lane.store.cid not in lane.store.nodes
+    else:
+        assert lane.store.nodes[lane.store.cid]["selected_fact"] == "A newer decision"
+        assert lane.store.nodes[lane.store.cid]["write_pending"]
+
+
+@pytest.mark.asyncio
+async def test_automatic_review_cannot_finalize_incomplete_cache_cleanup(lane):
+    async def review_while_cleaning(*args, **kwargs):
+        await write_conflicts.write_conflicts([lane.store.batch], lane.store.ctx)
+        await write_conflicts.write_conflicts(
+            [ConflictsToFinalize(lane.store.batch.accepted_conflicts)], lane.store.ctx
+        )
+        assert lane.store.nodes[lane.store.cid]["write_pending"]
+        raise RuntimeError("cache unavailable")
+
+    lane.invalidation.side_effect = review_while_cleaning
+    with pytest.raises(RuntimeError, match="cache unavailable"):
+        await resolve(lane)
+    assert lane.store.nodes[lane.store.cid]["cache_cleanup_pending"]
+    assert lane.store.nodes[lane.store.cid]["write_pending"]
+    lane.invalidation.side_effect = None
+    await resolve(lane)
+    assert not lane.store.nodes[lane.store.cid]["cache_cleanup_pending"]
+    assert not lane.store.nodes[lane.store.cid]["write_pending"]

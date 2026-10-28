@@ -2,6 +2,7 @@
 
 import importlib
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -13,26 +14,32 @@ from cognee.infrastructure.databases.unified.capabilities import EngineCapabilit
 from cognee.infrastructure.databases.unified.unified_store_engine import UnifiedStoreEngine
 from cognee.modules.engine.models import Entity, FactConflict
 from cognee.modules.engine.utils.generate_edge_object_id import generate_edge_object_id
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.modules.graph.utils.fact_conflicts import is_rejected_fact
+from cognee.modules.graph.utils.resolve_edges_to_text import resolve_edges_to_text
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.retrieval.utils.conflict_context import attach_chunk_conflicts
 from cognee.modules.retrieval.utils.resolved_context import (
     apply_fact_hit_resolutions,
+    apply_graph_resolutions,
     read_user_resolutions,
 )
-from cognee.tasks.memify.review_conflicts import write_conflicts
+from cognee.tasks.memify.review_conflicts import read_facts, write_conflicts
 from cognee.tasks.memify.review_conflicts.models import (
     AcceptedConflict,
     ConflictsToFinalize,
     ConflictsToWrite,
     ReviewScope,
 )
+from cognee.tasks.memify.review_conflicts.schema import ReviewResponse
 from cognee.tests.integration.tasks.test_review_conflicts import RecordingVectors
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("forget_selected", [False, True])
 async def test_resolution_survives_real_graph_writes_and_overrides_old_vector_hit(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, forget_selected
 ):
     graph = LadybugAdapter(str(tmp_path / "graph"), kuzu_buffer_pool_size=128 * 1024 * 1024)
     vector = RecordingVectors()
@@ -55,11 +62,17 @@ async def test_resolution_survives_real_graph_writes_and_overrides_old_vector_hi
         company, alice, bob, chunk = [
             Entity(name=n, description=n) for n in ["Company", "Alice", "Bob", "Source"]
         ]
-        await graph.add_nodes(
-            [company, alice, bob, chunk], source_ref_key=make_source_ref_key(dataset, uuid4())
-        )
         facts = {}
+        documents = {}
+        source_chunks = []
         for value in (alice, bob):
+            source_chunk = (
+                chunk if value is alice else Entity(name="Other source", description="Other source")
+            )
+            source_chunks.append(str(source_chunk.id))
+            data_id = uuid4()
+            owner = make_source_ref_key(dataset, data_id)
+            await graph.add_nodes([company, value, source_chunk], source_ref_key=owner)
             fid = str(generate_edge_object_id(str(company.id), str(value.id), "has_ceo"))
             facts[fid] = {
                 "id": fid,
@@ -69,12 +82,15 @@ async def test_resolution_survives_real_graph_writes_and_overrides_old_vector_hi
                 "properties": {"edge_object_id": fid, "edge_text": f"Company has CEO {value.name}"},
                 "effective_date": None,
                 "sources": [
-                    {"chunk_id": str(chunk.id), "document": "Report", "effective_date": None}
+                    {"chunk_id": str(source_chunk.id), "document": "Report", "effective_date": None}
                 ],
             }
-        await graph.add_edges(
-            [(f["source"], f["target"], f["relationship"], f["properties"]) for f in facts.values()]
-        )
+            f = facts[fid]
+            documents[fid] = data_id
+            await graph.add_edges(
+                [(f["source"], f["target"], f["relationship"], f["properties"])],
+                source_ref_key=owner,
+            )
         winner, loser = facts
         conflict = FactConflict(
             dataset_id=str(dataset),
@@ -84,7 +100,7 @@ async def test_resolution_survives_real_graph_writes_and_overrides_old_vector_hi
             status="resolved",
             text="Resolved: Company has CEO Alice",
             values=[str(alice.id), str(bob.id)],
-            sources=[str(chunk.id)],
+            sources=source_chunks,
             resolution_source="user",
             selected_fact_id=winner,
             selected_fact="Company has CEO Alice",
@@ -119,5 +135,51 @@ async def test_resolution_survives_real_graph_writes_and_overrides_old_vector_hi
         # Both source facts still exist for audit/history.
         _, edges = await graph.get_neighborhood([str(company.id)], depth=1)
         assert len([e for e in edges if e[2] == "has_ceo"]) == 2
+        if forget_selected:
+            # Use the same provenance deletion as forget(data_id=...), retaining the
+            # shared subject and the other document's fact.
+            await unified.delete_by_document(str(dataset), str(documents[winner]))
+            monkeypatch.setattr(read_facts, "get_graph_engine", AsyncMock(return_value=graph))
+            monkeypatch.setattr(read_facts, "get_edge_sources", AsyncMock(return_value=[]))
+            monkeypatch.setattr(read_facts, "backend_access_control_enabled", lambda: True)
+            scope = await read_facts.read_entity_facts(None, entity_ids=[str(company.id)], ctx=ctx)
+            assert winner not in scope.facts and loser in scope.facts
+            review = importlib.import_module("cognee.tasks.memify.review_conflicts.review_entities")
+            monkeypatch.setattr(
+                review,
+                "get_llm_tokenizer",
+                lambda: SimpleNamespace(count_tokens=lambda text: len(text.split())),
+            )
+            monkeypatch.setattr(review, "get_llm_token_ceiling", lambda: 16384)
+
+            async def drop_obsolete_conflict(prompt, system_prompt):
+                labels = [
+                    label
+                    for label, node_id in prompt.node_labels.items()
+                    if node_id in prompt.shown_facts
+                ]
+                return ReviewResponse(reviewed=labels, drop=list(prompt.conflict_labels))
+
+            monkeypatch.setattr(review, "_ask_llm", drop_obsolete_conflict)
+            async for batch in review.review_entities(scope, [], []):
+                await write_conflicts.write_conflicts([batch], ctx)
+            assert await read_user_resolutions(graph) == []
+            _, edges = await graph.get_neighborhood([str(company.id)], depth=1)
+            surviving = [e for e in edges if e[2] == "has_ceo"]
+            assert len(surviving) == 1 and not is_rejected_fact(surviving[0][3])
+            triplets = [
+                Edge(Node(s), Node(t), attributes={**props, "relationship_name": rel})
+                for s, t, rel, props in surviving
+            ]
+            context = await resolve_edges_to_text(
+                apply_graph_resolutions(triplets, await read_user_resolutions(graph))
+            )
+            assert "Company has CEO Bob" in context
+            assert "Company has CEO Alice" not in context
+            assert not any(
+                "Company has CEO Alice" in text
+                for text in vector.points["EdgeType_relationship_name"].values()
+            )
+
     finally:
         await graph.close()

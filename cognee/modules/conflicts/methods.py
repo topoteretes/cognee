@@ -21,7 +21,6 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.tasks.memify.review_conflicts.models import (
     AcceptedConflict,
-    ConflictsToFinalize,
     ConflictsToWrite,
 )
 from cognee.tasks.memify.review_conflicts.read_facts import _to_conflict_record, read_entity_facts
@@ -88,15 +87,26 @@ async def list_conflicts(
             message="status must be resolved or unresolved", status_code=422
         )
     user, dataset = await _authorized_dataset(dataset_id, user, "read")
-    async with (
-        dataset_lock(dataset.id),
-        set_database_global_context_variables(dataset.id, dataset.owner_id),
-    ):
-        scope = await read_entity_facts(None, ctx=PipelineContext(user=user, dataset=dataset))
+    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+        graph = await get_graph_engine()
+        rows, _ = await graph.get_filtered_graph_data(
+            [{"type": ["FactConflict"]}], include_edges=False
+        )
+        conflicts = [
+            _to_conflict_record(node_id, props)
+            for node_id, props in rows
+            if str(props.get("dataset_id")) == str(dataset.id)
+            and (status is None or props.get("status") == status)
+        ]
+        if not conflicts:
+            return []
+        scope = await read_entity_facts(
+            None,
+            entity_ids=sorted({stored["about_id"] for stored in conflicts}),
+            ctx=PipelineContext(user=user, dataset=dataset),
+        )
         return [
-            conflict_detail(stored, scope)
-            for _, stored in sorted(scope.conflicts.items())
-            if status is None or stored["status"] == status
+            conflict_detail(stored, scope) for stored in sorted(conflicts, key=lambda c: c["id"])
         ]
 
 
@@ -111,86 +121,114 @@ async def resolve_conflict(
     """Choose an existing competing fact; keep rejected facts as historical evidence.
 
     Repeating a choice is idempotent. A new choice explicitly revises the prior
-    decision. Automatic improve runs cannot replace a user decision.
+    decision. Automatic improve preserves the choice while its selected fact exists.
     """
     user, dataset = await _authorized_dataset(dataset_id, user, "write")
     conflict_id, selected_fact_id = str(conflict_id), str(selected_fact_id)
-    async with (
-        dataset_lock(dataset.id),
-        set_database_global_context_variables(dataset.id, dataset.owner_id),
-    ):
-        graph = await get_graph_engine()
-        rows, _ = await graph.get_filtered_graph_data([{"id": [conflict_id]}])
-        stored = next(
-            (
-                _to_conflict_record(node_id, props)
-                for node_id, props in rows
-                if str(node_id) == conflict_id
-                and props.get("type") == "FactConflict"
-                and str(props.get("dataset_id")) == str(dataset.id)
-            ),
-            None,
-        )
-        if stored is None:
-            raise EntityNotFoundError(message="Conflict not found in this dataset")
-        ctx = PipelineContext(user=user, dataset=dataset)
-        scope = await read_entity_facts(None, entity_ids=[stored["about_id"]], ctx=ctx)
-        statuses = _conflict_facts(conflict_id, scope)
-        if selected_fact_id not in statuses:
-            raise CogneeValidationError(
-                message="selected_fact_id must be an existing fact belonging to this conflict",
-                status_code=422,
+    async with record_operation("resolve_conflict") as operation:
+        operation.set_user(user)
+        operation.set_dataset(dataset.id)
+        async with (
+            dataset_lock(dataset.id),
+            set_database_global_context_variables(dataset.id, dataset.owner_id),
+        ):
+            graph = await get_graph_engine()
+            rows, _ = await graph.get_filtered_graph_data(
+                [{"id": [conflict_id]}], include_edges=False
             )
-        same_choice = (
-            stored.get("resolution_source") == "user"
-            and stored.get("selected_fact_id") == selected_fact_id
-            and stored.get("resolution_reason") == reason
-        )
-        selected_text = _fact_text(scope.facts[selected_fact_id], scope.nodes)
-        resolved = _rebuild_stored_conflict(
-            stored,
-            status="resolved",
-            resolution_source="user",
-            selected_fact_id=selected_fact_id,
-            selected_fact=selected_text,
-            rejected_fact_ids=sorted(fid for fid in statuses if fid != selected_fact_id),
-            rejected_fact_texts=sorted(
-                {
-                    _fact_text(scope.facts[fid], scope.nodes)
-                    for fid in statuses
-                    if fid != selected_fact_id
-                }
-            ),
-            resolved_by=stored.get("resolved_by") if same_choice else str(user.id),
-            resolved_at=stored.get("resolved_at")
-            if same_choice
-            else datetime.now(timezone.utc).isoformat(),
-            resolution_reason=reason,
-            text=f"Resolved by user: {selected_text}. Use this accepted fact; competing claims are superseded.",
-        )
-        accepted = AcceptedConflict(
-            resolved,
-            {fid: "current" if fid == selected_fact_id else "superseded" for fid in statuses},
-        )
-        async with record_operation("resolve_conflict") as operation:
-            operation.set_user(user)
-            operation.set_dataset(dataset.id)
+            stored = next(
+                (
+                    _to_conflict_record(node_id, props)
+                    for node_id, props in rows
+                    if str(node_id) == conflict_id
+                    and props.get("type") == "FactConflict"
+                    and str(props.get("dataset_id")) == str(dataset.id)
+                ),
+                None,
+            )
+            if stored is None:
+                raise EntityNotFoundError(message="Conflict not found in this dataset")
+            ctx = PipelineContext(user=user, dataset=dataset)
+            scope = await read_entity_facts(None, entity_ids=[stored["about_id"]], ctx=ctx)
+            statuses = _conflict_facts(conflict_id, scope)
+            if selected_fact_id not in statuses:
+                raise CogneeValidationError(
+                    message="selected_fact_id must be an existing fact belonging to this conflict",
+                    status_code=422,
+                )
+            same_choice = (
+                stored.get("resolution_source") == "user"
+                and stored.get("selected_fact_id") == selected_fact_id
+                and stored.get("resolution_reason") == reason
+            )
+            selected_text = _fact_text(scope.facts[selected_fact_id], scope.nodes)
+            resolved = _rebuild_stored_conflict(
+                stored,
+                status="resolved",
+                resolution_source="user",
+                cache_cleanup_pending=True,
+                selected_fact_id=selected_fact_id,
+                selected_fact=selected_text,
+                rejected_fact_ids=sorted(fid for fid in statuses if fid != selected_fact_id),
+                rejected_fact_texts=sorted(
+                    {
+                        _fact_text(scope.facts[fid], scope.nodes)
+                        for fid in statuses
+                        if fid != selected_fact_id
+                    }
+                ),
+                resolved_by=stored.get("resolved_by") if same_choice else str(user.id),
+                resolved_at=stored.get("resolved_at")
+                if same_choice
+                else datetime.now(timezone.utc).isoformat(),
+                resolution_reason=reason,
+                text=f"Resolved by user: {selected_text}. Use this accepted fact; competing claims are superseded.",
+            )
+            accepted = AcceptedConflict(
+                resolved,
+                {fid: "current" if fid == selected_fact_id else "superseded" for fid in statuses},
+            )
             if not same_choice or stored.get("write_pending"):
                 await write_conflicts(
                     [ConflictsToWrite(scope, [accepted], shown_fact_ids=set(statuses))], ctx
                 )
             else:
                 await graph.add_nodes([resolved.model_copy(update={"write_pending": True})])
-            # Remove cached answers/lessons based on either side, not unrelated sessions.
-            # Retry this on an idempotent request too, including after a partial failure.
-            await invalidate_sessions_for_deleted_data(
-                dataset.id,
-                deleted_node_ids={conflict_id, stored["about_id"], *stored.get("sources", [])},
-                deleted_edge_ids=set(statuses),
-                user_id=user.id,
-                strict=True,
-            )
-            await write_conflicts([ConflictsToFinalize(accepted_conflicts=[accepted])], ctx)
-        return conflict_detail(
-            resolved.model_copy(update={"write_pending": False}).model_dump(mode="json"), scope
+            result = conflict_detail(resolved.model_dump(mode="json"), scope)
+
+        # Session storage is independent of the dataset lock and database queue slot.
+        # The pending marker survives a cleanup failure, so an identical request retries it.
+        await invalidate_sessions_for_deleted_data(
+            dataset.id,
+            deleted_node_ids={conflict_id, stored["about_id"], *stored.get("sources", [])},
+            deleted_edge_ids=set(statuses),
+            user_id=user.id,
+            strict=True,
         )
+        async with (
+            dataset_lock(dataset.id),
+            set_database_global_context_variables(dataset.id, dataset.owner_id),
+        ):
+            graph = await get_graph_engine()
+            rows, _ = await graph.get_filtered_graph_data(
+                [{"id": [conflict_id]}], include_edges=False
+            )
+            current = next((props for node_id, props in rows if str(node_id) == conflict_id), None)
+            # Another resolution, review or forget may have run during cache cleanup.
+            # Finalize only this decision, using the fresh node so new evidence survives.
+            if (
+                current
+                and current.get("resolution_source") == "user"
+                and current.get("selected_fact_id") == resolved.selected_fact_id
+                and current.get("resolved_at") == resolved.resolved_at
+            ):
+                await graph.add_nodes(
+                    [
+                        _rebuild_stored_conflict(
+                            _to_conflict_record(conflict_id, current),
+                            write_pending=False,
+                            cache_cleanup_pending=False,
+                        )
+                    ]
+                )
+        return result.model_copy(update={"write_pending": False})
