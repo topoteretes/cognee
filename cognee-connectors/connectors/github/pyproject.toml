@@ -1,0 +1,62 @@
+[build-system]
+# Pinned together with cognee's: the build backend decides the wheel's
+# Metadata-Version, and the PyPI publish action validates it with a pinned
+# twine. Bump this together with the release workflow's publish-action pin.
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cognee-connector-github"
+version = "0.1.0"
+description = "GitHub connector for cognee: indexes the repositories a GitHub App installation covers into cognee's code graph"
+readme = "README.md"
+requires-python = ">=3.10,<3.15"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Cognee team" }]
+keywords = ["cognee", "ai-memory", "connector", "github"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+# No DLT source: GitHub syncs run cognee's code-graph ingestion over clone
+# URLs, so the plain core (without the `dlt` extra) is enough. Ranges copied
+# from cognee's pyproject.toml for the same libraries.
+dependencies = [
+    "cognee-connectors-core>=0.1,<1",
+    "aiohttp>=3.13.5,<4.0.0",
+    # The app JWT is signed by hand with cryptography; no JWT library.
+    "cryptography>=43.0.0,<51",
+]
+
+[project.optional-dependencies]
+# The cognee_host/ adapter needs cognee; nothing else in the package does.
+cognee = ["cognee>=1.6.5,<2"]
+
+[project.urls]
+Homepage = "https://github.com/topoteretes/cognee/tree/main/cognee-connectors/connectors/github"
+Repository = "https://github.com/topoteretes/cognee"
+Issues = "https://github.com/topoteretes/cognee/issues"
+Documentation = "https://docs.cognee.ai"
+
+[project.entry-points."cognee.connectors"]
+github = "cognee_connector_github:CONNECTOR"
+
+# No "cognee.sources" entry point: the package ships no DLT source. A sync is
+# `remember(content_type="code")` over the installation's repositories.
+
+[project.entry-points."cognee.integrations"]
+github = "cognee_connector_github.cognee_host:register"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cognee_connector_github"]
+
+[tool.hatch.build.targets.sdist]
+include = ["cognee_connector_github", "tests", "README.md", "LICENSE", "pyproject.toml"]

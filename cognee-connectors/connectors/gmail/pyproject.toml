@@ -1,0 +1,70 @@
+[build-system]
+# Pinned together with cognee's: the build backend decides the wheel's
+# Metadata-Version, and the PyPI publish action validates it with a pinned
+# twine. Bump this together with the release workflow's publish-action pin.
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cognee-connector-gmail"
+version = "0.1.0"
+description = "Gmail connector for cognee: syncs a mailbox's messages into cognee memory, incrementally through Gmail's history feed and with forget-on-delete"
+readme = "README.md"
+requires-python = ">=3.10,<3.15"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Cognee team" }]
+keywords = ["cognee", "ai-memory", "connector", "gmail", "google"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "cognee-connectors-core[dlt]>=0.1,<1",
+    # The shared Google OAuth client, settings base and connector contract.
+    "cognee-connector-google>=0.1,<1",
+    # The provider's own libraries, with the ranges cognee's pyproject.toml uses
+    # (its gmail extra): the Gmail API client and the two auth libraries the source
+    # builds its clients from, limits for the per-mailbox quota pacing (a core
+    # dependency of cognee), pydantic-settings for the GOOGLE_GMAIL_* settings class.
+    "google-api-python-client>=2.100.0,<3",
+    "google-auth>=2.23.0,<3",
+    "google-auth-oauthlib>=1.1.0,<2",
+    "limits>=4.4.1,<6",
+    "pydantic-settings>=2.7.0,!=2.12.*,!=2.13.*,!=2.14.0,!=2.14.1,<3",
+]
+
+[project.optional-dependencies]
+# The cognee_host/ adapter needs cognee; nothing else in the package does. A sync
+# needs a cognee whose ingestion scopes DLT document cleanup by table
+# (DOCUMENT_SYNC_VERSION 1); an older host is refused with a clear message when the
+# source is built, not at install time.
+cognee = ["cognee>=1.6.5,<2"]
+
+[project.urls]
+Homepage = "https://github.com/topoteretes/cognee/tree/main/cognee-connectors/connectors/gmail"
+Repository = "https://github.com/topoteretes/cognee"
+Issues = "https://github.com/topoteretes/cognee/issues"
+Documentation = "https://docs.cognee.ai"
+
+[project.entry-points."cognee.connectors"]
+gmail = "cognee_connector_gmail:CONNECTOR"
+
+[project.entry-points."cognee.sources"]
+gmail = "cognee_connector_gmail:gmail_source"
+
+[project.entry-points."cognee.integrations"]
+gmail = "cognee_connector_gmail.cognee_host:register"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cognee_connector_gmail"]
+
+[tool.hatch.build.targets.sdist]
+include = ["cognee_connector_gmail", "tests", "examples", "README.md", "LICENSE", "pyproject.toml"]

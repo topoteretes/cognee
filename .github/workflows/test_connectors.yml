@@ -1,0 +1,270 @@
+name: test | connectors
+# Checks for the data-source connector packages under cognee-connectors/: lint,
+# the inventory and pin checks, every package's test suite, the core suite on
+# the other supported interpreters, and a clean install of every package into a
+# venv without cognee (no connector may depend on cognee at runtime).
+#
+# The workspace locks cognee from PyPI, like cognee-mcp, but the suites run
+# against the cognee in this checkout by default, so a change under cognee/ that
+# breaks a connector fails here before it is released. The packages are
+# discovered from the workspace (scripts/packages.py): adding a connector needs
+# no edit to this file. `connectors-tests` is the one job to require.
+
+on:
+  push:
+    branches: [ main, dev ]
+    paths: &paths
+      - "cognee-connectors/**"
+      - "cognee/**"
+      - "pyproject.toml"
+      - ".github/workflows/test_connectors.yml"
+  pull_request:
+    branches: [ main, dev ]
+    types: [opened, synchronize, reopened]
+    paths: *paths
+  workflow_dispatch:
+    inputs:
+      cognee_version:
+        description: "PyPI version of cognee to test against, e.g. 1.6.6. `local` (default) installs cognee from this checkout"
+        required: false
+        type: string
+        default: "local"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Cancel superseded PR runs, never a push-to-dev run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TELEMETRY_DISABLED: "1"
+  LITELLM_MODE: PRODUCTION
+  # The suites never call an LLM; cognee only needs a key to look configured.
+  LLM_API_KEY: sk-test-dummy
+  COGNEE_VERSION: ${{ inputs.cognee_version || 'local' }}
+
+defaults:
+  run:
+    working-directory: cognee-connectors
+
+jobs:
+  code-quality:
+    name: connectors code-quality
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install 3.11
+
+      - name: Validate uv lockfile
+        # Before the sync on purpose: `uv sync` refreshes a stale lock in the
+        # runner's checkout, and a check after it would pass against what it
+        # had just written.
+        run: uv lock --check || { echo "'uv lock --check' failed. Run 'uv lock' in cognee-connectors/ and push your changes."; exit 1; }
+
+      - name: Install the workspace
+        if: ${{ !cancelled() }}
+        run: uv sync --all-packages --group dev
+
+      - name: Ruff check
+        if: ${{ !cancelled() }}
+        run: uv run --no-sync ruff check .
+
+      - name: Ruff format check
+        if: ${{ !cancelled() }}
+        run: uv run --no-sync ruff format --check .
+
+      - name: Validate inventory.yml
+        if: ${{ !cancelled() }}
+        run: uv run --no-sync python scripts/validate_inventory.py
+
+      - name: README connector table is current
+        if: ${{ !cancelled() }}
+        run: uv run --no-sync python scripts/render_inventory.py --check
+
+      - name: Check package pins
+        if: ${{ !cancelled() }}
+        run: uv run --no-sync python scripts/check_pins.py
+
+      - name: Every package can be released
+        # release_connectors.yml lists the packages as a dispatch choice; a
+        # package missing there could only be released through `all`.
+        if: ${{ !cancelled() }}
+        run: |
+          status=0
+          for name in $(uv run --no-sync python scripts/packages.py --all-names); do
+            if ! grep -qx "          - ${name}" ../.github/workflows/release_connectors.yml; then
+              echo "::error::${name} is missing from the connector choice in .github/workflows/release_connectors.yml."
+              status=1
+            fi
+          done
+          exit "${status}"
+
+  detect:
+    name: Detect connector packages
+    runs-on: ubuntu-22.04
+    outputs:
+      packages: ${{ steps.packages.outputs.packages }}
+      tested: ${{ steps.packages.outputs.tested }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: List the workspace packages
+        id: packages
+        run: |
+          python scripts/packages.py --json > packages.json
+          echo "packages=$(jq -c '[.[].name]' packages.json)" >> "$GITHUB_OUTPUT"
+          echo "tested=$(jq -c '[.[] | select(.has_tests) | .name]' packages.json)" >> "$GITHUB_OUTPUT"
+          jq -r '.[] | "\(.name) \(.version) tests=\(.has_tests)"' packages.json
+
+  package-tests:
+    name: connectors tests (${{ matrix.package }})
+    needs: detect
+    if: ${{ needs.detect.outputs.tested != '[]' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.detect.outputs.tested) }}
+        python: ["3.11"]
+    steps: &test-steps
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Install Python ${{ matrix.python }}
+        run: uv python install ${{ matrix.python }}
+
+      - name: Install the workspace
+        run: uv sync --all-packages --group dev --python ${{ matrix.python }}
+
+      - name: Install cognee (${{ inputs.cognee_version || 'local' }})
+        run: |
+          uv pip uninstall cognee
+          if [ "${COGNEE_VERSION}" = "local" ]; then
+            # --no-deps: the dependencies are already installed from uv.lock; a
+            # fresh resolution would upgrade them one at a time past their locked,
+            # exactly-pinned partners (as in .github/actions/install_cognee).
+            uv pip install --no-deps --force-reinstall -e ..
+          else
+            uv pip install --force-reinstall "cognee==${COGNEE_VERSION}"
+          fi
+          uv pip show cognee | grep Version
+
+      - name: Run ${{ matrix.package }} tests
+        env:
+          # cognee raises when COGNEE_ENV_FILE is not a file (/dev/null is not
+          # one), so an empty file is what keeps it from loading any .env.
+          COGNEE_ENV_FILE: ${{ runner.temp }}/empty.env
+        run: |
+          : > "${COGNEE_ENV_FILE}"
+          PACKAGE_DIR="$(uv run --no-sync python scripts/packages.py --dir "${{ matrix.package }}")"
+          uv run --no-sync pytest "${PACKAGE_DIR}/tests" -q
+
+  core-python-matrix:
+    name: connectors tests (${{ matrix.package }}, Python ${{ matrix.python }})
+    needs: detect
+    if: ${{ contains(fromJSON(needs.detect.outputs.tested), 'cognee-connectors-core') }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [cognee-connectors-core]
+        # 3.11 is covered by the package matrix above.
+        python: ["3.10", "3.12", "3.13"]
+    steps: *test-steps
+
+  clean-install-package:
+    name: connectors clean-install (${{ matrix.package }})
+    needs: detect
+    if: ${{ needs.detect.outputs.packages != '[]' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.detect.outputs.packages) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Resolve the package
+        id: package
+        run: |
+          echo "dir=$(python scripts/packages.py --dir "${{ matrix.package }}")" >> "$GITHUB_OUTPUT"
+          echo "module=$(python scripts/packages.py --module "${{ matrix.package }}")" >> "$GITHUB_OUTPUT"
+
+      - name: Create a cognee-free venv
+        run: uv venv .venv-clean --python 3.11
+
+      - name: Install ${{ matrix.package }} and its workspace dependencies from the checkout
+        run: bash scripts/clean_install.sh "${{ steps.package.outputs.dir }}"
+
+      - name: The package imports without cognee
+        run: .venv-clean/bin/python scripts/check_cognee_free.py "${{ steps.package.outputs.module }}"
+
+      - name: The entry points resolve
+        env:
+          PACKAGE_DIR: ${{ steps.package.outputs.dir }}
+        run: |
+          # Every connector must advertise its contract object; core has no entry points.
+          REQUIRE=()
+          case "${PACKAGE_DIR}" in
+            connectors/*) REQUIRE=(--require-group cognee.connectors) ;;
+          esac
+          .venv-clean/bin/python scripts/check_entry_points.py "${{ matrix.package }}" "${REQUIRE[@]}"
+
+      - name: Build distributions
+        run: uv build --package "${{ matrix.package }}" --out-dir dist
+
+  connectors-tests:
+    name: connectors-tests
+    needs: [code-quality, detect, package-tests, core-python-matrix, clean-install-package]
+    runs-on: ubuntu-22.04
+    if: always()
+    steps:
+      - name: Check status
+        working-directory: .
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          # Fails when any job failed or was cancelled; a skipped job (an empty
+          # matrix) passes.
+          echo "${RESULTS}" | jq -r 'to_entries[] | "\(.key)=\(.value.result)"'
+          if echo "${RESULTS}" | jq -e 'any(.[]; .result == "failure" or .result == "cancelled")' > /dev/null; then
+            echo "One or more connector checks failed."
+            exit 1
+          fi
+          echo "All connector checks passed."

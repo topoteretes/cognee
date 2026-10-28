@@ -1,0 +1,256 @@
+name: release_connectors.yml
+# Publish the data-source connector packages under cognee-connectors/ to PyPI.
+#
+# Every package (cognee-connectors-core and each cognee-connector-<provider>)
+# versions independently of the cognee library and of each other, like
+# cognee-mcp does, so this workflow is separate from release.yml. One run
+# releases either one package or, with `all`, every package whose current
+# version is not on PyPI yet. release.yml dispatches the `all` run at the end of
+# every stable cognee release; the packages whose version did not change are
+# skipped, so that run publishes only what was bumped since.
+#
+# Order: core first, then cognee-connector-google (the Google family depends on
+# it), then the rest. A tier only starts when the one before it did not fail, so
+# no connector reaches PyPI while the core version it needs is missing. Within
+# the last tier one connector failing does not stop the others.
+#
+# Per package the job builds, attests, publishes, and only then pushes the tag
+# `<distribution>-v<version>` (no GitHub Release, as for cognee-mcp). A version
+# that is already on PyPI is refused when asked for explicitly and skipped under
+# `all`.
+#
+# Auth: PyPI Trusted Publishing with one GitHub environment per package,
+# `pypi-<distribution>`. PyPI refuses two pending publishers with the same
+# repository, workflow and environment, so a shared environment cannot cover the
+# first upload of thirteen new projects. The per-package environment also lets a
+# reviewer gate be put on one package. cognee-connectors/docs/RELEASE.md has the
+# PyPI fields and the rollout of the first releases.
+on:
+  workflow_dispatch:
+    inputs:
+      connector:
+        description: "Package to release, or `all` for every package whose version is not on PyPI yet"
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - cognee-connectors-core
+          - cognee-connector-apollo
+          - cognee-connector-asana
+          - cognee-connector-github
+          - cognee-connector-gmail
+          - cognee-connector-google
+          - cognee-connector-google-calendar
+          - cognee-connector-google-drive
+          - cognee-connector-linear
+          - cognee-connector-notion
+          - cognee-connector-obsidian
+          - cognee-connector-onenote
+          - cognee-connector-slack
+
+# Minimal default permissions (OSSF Scorecard: Token-Permissions). The release
+# jobs opt in to exactly what they need.
+permissions:
+  contents: read
+
+# One connector release at a time: a second dispatch queues behind the first
+# instead of racing it to the same versions.
+concurrency:
+  group: release-connectors
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan the connector release from ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.plan.outputs.core }}
+      base: ${{ steps.plan.outputs.base }}
+      connectors: ${{ steps.plan.outputs.connectors }}
+    defaults:
+      run:
+        working-directory: cognee-connectors
+    steps:
+      - name: Check out ${{ github.ref_name }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Pick the packages to release
+        id: plan
+        env:
+          CONNECTOR: ${{ inputs.connector }}
+        run: |
+          # Every workspace package with its version, discovered from the
+          # workspace itself (scripts/packages.py), so a new connector needs no
+          # edit here beyond its entry in the `connector` choice above.
+          python scripts/packages.py --json | jq -c '[.[] | {name, version}]' > packages.json
+          if [ "${CONNECTOR}" != "all" ] && ! jq -e --arg n "${CONNECTOR}" 'any(.[]; .name == $n)' packages.json > /dev/null; then
+            echo "::error::${CONNECTOR} is not a package of the cognee-connectors workspace."
+            exit 1
+          fi
+
+          : > selected.txt
+          while IFS=$'\t' read -r NAME VERSION; do
+            if [ "${CONNECTOR}" != "all" ] && [ "${NAME}" != "${CONNECTOR}" ]; then
+              continue
+            fi
+            STATUS="$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/${NAME}/${VERSION}/json")"
+            if [ "${STATUS}" = "200" ]; then
+              if [ "${CONNECTOR}" = "all" ]; then
+                echo "Skipping ${NAME} ${VERSION}: already on PyPI."
+                continue
+              fi
+              echo "::error::${NAME} ${VERSION} is already on PyPI. Bump the version in its pyproject.toml first."
+              exit 1
+            fi
+            if [ "${STATUS}" != "404" ]; then
+              echo "::error::PyPI answered HTTP ${STATUS} for ${NAME} ${VERSION}; refusing to guess whether it is published."
+              exit 1
+            fi
+            echo "Releasing ${NAME} ${VERSION}."
+            echo "${NAME}" >> selected.txt
+          done < <(jq -r '.[] | [.name, .version] | @tsv' packages.json)
+
+          # Split into the three tiers described at the top of this file.
+          pick() { jq -R -s -c "split(\"\n\") | map(select(length > 0)) | map(select($1))" selected.txt; }
+          {
+            echo "core=$(pick '. == "cognee-connectors-core"')"
+            echo "base=$(pick '. == "cognee-connector-google"')"
+            echo "connectors=$(pick '. != "cognee-connectors-core" and . != "cognee-connector-google"')"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  release-core:
+    name: Release ${{ matrix.package }}
+    needs: plan
+    if: ${{ needs.plan.outputs.core != '[]' }}
+    strategy:
+      matrix:
+        package: ${{ fromJSON(needs.plan.outputs.core) }}
+    environment: &environment
+      name: pypi-${{ matrix.package }}
+      url: https://pypi.org/project/${{ matrix.package }}/
+    permissions: &permissions
+      contents: write       # push the <distribution>-v<version> tag
+      id-token: write       # OIDC: Trusted Publishing + signing attestations
+      attestations: write   # Persist the SLSA build provenance attestation
+    runs-on: ubuntu-latest
+    env: &env
+      UV_PYTHON: "3.11"
+      PACKAGE: ${{ matrix.package }}
+    defaults: &defaults
+      run:
+        working-directory: cognee-connectors
+    steps: &release-steps
+      - name: Check out ${{ github.ref_name }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+
+      - name: Install Python
+        run: uv python install 3.11
+
+      - name: Resolve version and tag
+        id: meta
+        run: |
+          VERSION="$(uv run --no-project python scripts/packages.py --version "${PACKAGE}")"
+          TAG="${PACKAGE}-v${VERSION}"
+          echo "Package: ${PACKAGE}, version ${VERSION}, tag ${TAG}"
+
+          # The plan job checked PyPI already; check again right before the
+          # upload, in case another run published the version in between.
+          STATUS="$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/${PACKAGE}/${VERSION}/json")"
+          if [ "${STATUS}" = "200" ]; then
+            echo "::error::${PACKAGE} ${VERSION} is already on PyPI. Bump the version in its pyproject.toml first."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" > /dev/null 2>&1; then
+            echo "::error::Tag ${TAG} already exists but ${PACKAGE} ${VERSION} is not on PyPI. Delete the tag or bump the version."
+            exit 1
+          fi
+          {
+            echo "version=${VERSION}"
+            echo "tag=${TAG}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build distributions
+        # Only this package: the workspace root is never published and the other
+        # members release in their own jobs. The build backend is pinned in every
+        # package's pyproject (hatchling==1.32.0) because it decides the wheel's
+        # Metadata-Version, which the publish action validates with a pinned twine.
+        run: uv build --package "${PACKAGE}" --out-dir dist
+
+      - name: Verify the distributions carry the release version
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          ls -l dist/
+          ls dist/*-"${VERSION}".tar.gz dist/*-"${VERSION}"-*.whl > /dev/null \
+            || { echo "::error::dist/ does not hold an sdist and a wheel for version ${VERSION}."; exit 1; }
+
+      - name: Attest build provenance for distributions
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: "cognee-connectors/dist/*"
+
+      - name: Publish ${{ matrix.package }} to PyPI
+        # Trusted Publishing (OIDC), no API token; the action also uploads PEP
+        # 740 attestations. It fails with `invalid-publisher` when the package
+        # has no publisher for this workflow and its `pypi-<distribution>`
+        # environment yet (cognee-connectors/docs/RELEASE.md).
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2 (twine 7.0.0: accepts Metadata-Version 2.5)
+        with:
+          packages-dir: cognee-connectors/dist/
+
+      - name: Create and push git tag
+        # After the upload on purpose: a failed publish leaves no tag behind, so
+        # the next run can retry the same version.
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          git config user.name "Cognee Team"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${TAG}"
+          git push origin "${TAG}"
+
+  release-base:
+    name: Release ${{ matrix.package }}
+    needs: [plan, release-core]
+    # Runs when core succeeded or had nothing to release, never after a failed
+    # or cancelled core release.
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.release-core.result != 'failure' && needs.plan.outputs.base != '[]' }}
+    strategy:
+      matrix:
+        package: ${{ fromJSON(needs.plan.outputs.base) }}
+    environment: *environment
+    permissions: *permissions
+    runs-on: ubuntu-latest
+    env: *env
+    defaults: *defaults
+    steps: *release-steps
+
+  release-connectors:
+    name: Release ${{ matrix.package }}
+    needs: [plan, release-core, release-base]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.release-core.result != 'failure' && needs.release-base.result != 'failure' && needs.plan.outputs.connectors != '[]' }}
+    strategy:
+      # One connector failing (a missing publisher, a PyPI hiccup) does not
+      # cancel the others; rerun the failed jobs once it is fixed.
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.plan.outputs.connectors) }}
+    environment: *environment
+    permissions: *permissions
+    runs-on: ubuntu-latest
+    env: *env
+    defaults: *defaults
+    steps: *release-steps

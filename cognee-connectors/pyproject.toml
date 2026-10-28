@@ -1,0 +1,124 @@
+# Workspace root of cognee-connectors: one uv workspace, one package per data source.
+# This root is never published (`package = false`). Every member under core/ and
+# connectors/ carries its own pyproject.toml, version and release (docs/RELEASE.md).
+[project]
+name = "cognee-connectors-workspace"
+version = "0.0.0"
+description = "uv workspace for cognee's data-source connector packages (not published)"
+requires-python = ">=3.10,<3.15"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["core", "connectors/*"]
+
+# Workspace members resolve each other from this checkout, never from PyPI. Sources
+# declared at the workspace root apply to every member, so a connector lists only
+# `cognee-connectors-core[dlt]>=0.1,<1` (and, for the Google family,
+# `cognee-connector-google`) in its own dependencies.
+[tool.uv.sources]
+cognee-connectors-core = { workspace = true }
+cognee-connector-notion = { workspace = true }
+cognee-connector-linear = { workspace = true }
+cognee-connector-github = { workspace = true }
+cognee-connector-google = { workspace = true }
+cognee-connector-google-drive = { workspace = true }
+cognee-connector-gmail = { workspace = true }
+cognee-connector-google-calendar = { workspace = true }
+cognee-connector-slack = { workspace = true }
+cognee-connector-apollo = { workspace = true }
+cognee-connector-asana = { workspace = true }
+cognee-connector-obsidian = { workspace = true }
+cognee-connector-onenote = { workspace = true }
+
+[dependency-groups]
+# cognee is a development dependency of the workspace, not of any package: the
+# integration tests and the cognee_host/ adapters need it, no connector requires it
+# at runtime (docs/ARCHITECTURE.md, rule 1). Test tooling ranges follow cognee's
+# pyproject; ruff is pinned to the pre-commit hook's version so CI and the hook
+# agree on every finding.
+dev = [
+    # 1.6.6rc1 is the first release whose ingestion reads the per-row structure
+    # column (DOCUMENT_SYNC_VERSION 3), which the Notion, Obsidian and OneNote
+    # sources require; the packages themselves accept any cognee >= 1.6.5 and
+    # refuse such a sync on an older host with a clear message.
+    "cognee>=1.6.6rc1,<2",
+    "pytest>=7.4.0,<8",
+    "pytest-asyncio>=0.21.1,<0.22",
+    "pytest-cov>=6.1.1,<7.0.0",
+    "ruff==0.16.6",
+    "pre-commit>=4.0.1,<5",
+]
+
+[tool.pytest.ini_options]
+# `pytest` with no path collects the core suite and every connector's tests/ tree.
+# No asyncio_mode: like cognee, the suites mark their coroutine tests explicitly
+# (`@pytest.mark.asyncio`), so pytest-asyncio stays in its strict default mode.
+testpaths = ["core/tests", "connectors"]
+
+[tool.ruff]
+line-length = 100
+# First-party resolution for isort: every package directory is a source root, so
+# `import cognee_connector_notion` in connectors/notion/tests sorts as first-party.
+src = ["core", "connectors/*"]
+exclude = [
+    "build/",           # Ignore build directory
+]
+
+[tool.ruff.lint]
+# E402 is not in ruff 0.16's default set, but cognee's pre-commit hook has enforced
+# it all along; select it so CI and the hook agree and the `# noqa: E402` comments
+# that satisfy the hook are not reported as stale.
+extend-select = ["E402"]
+# The ignore list is cognee's, so code moved from cognee lints exactly as it did there.
+ignore = [
+    "F401",
+    # N999: module names that are public import paths.
+    "N999",
+    # RUF012: `metadata: dict = {...}` on DataPoint subclasses is a pydantic field
+    # default, which ruff cannot recognise because the pydantic base is indirect.
+    "RUF012",
+    # TRY004: raise TypeError from an isinstance check. Pydantic validators (only
+    # ValueError becomes a ValidationError there) and shape checks on decoded
+    # provider payloads, which callers and tests catch as ValueError, both conflict
+    # with the rule's advice.
+    "TRY004",
+    # ASYNC230/220/221/251: blocking file, subprocess and sleep calls inside async
+    # functions. Local-file connectors (Obsidian) and the moved sync code do their
+    # file IO synchronously by design today, as in cognee (SDK-600). Re-enable when
+    # that lands there.
+    "ASYNC230",
+    "ASYNC220",
+    "ASYNC221",
+    "ASYNC251",
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependency-injection defaults are evaluated per request, not at import.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Form",
+    "fastapi.File",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Security",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Package init order is load-bearing (side-effect registration, circular-import
+# avoidance); sorting these breaks the package imports.
+"__init__.py" = ["I001"]
+# Route signatures declare query defaults as literals (`datasets: ... = []`); they
+# are API defaults FastAPI hands to the handler, never mutated, and a None default
+# would change the OpenAPI schema. Applies to every provider's cognee_host routers.
+"connectors/*/cognee_connector_*/cognee_host/routers.py" = ["B006"]
+
+[tool.ruff.lint.isort]
+# The connector template's placeholder module name, so the templates lint as the
+# generated package will (first-party imports last).
+known-first-party = ["__MODULE__"]

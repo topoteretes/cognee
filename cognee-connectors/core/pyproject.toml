@@ -1,0 +1,90 @@
+[build-system]
+# Pinned together with cognee's: the build backend decides the wheel's
+# Metadata-Version, and the PyPI publish action validates it with a pinned
+# twine. Bump this together with the release workflow's publish-action pin.
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cognee-connectors-core"
+version = "0.1.0"
+description = "The contract every cognee connector implements: OAuth2 descriptors, webhook verification, DLT conventions and the registry hosts load connectors through."
+readme = "README.md"
+requires-python = ">=3.10,<3.15"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Cognee team" }]
+keywords = ["cognee", "ai-memory", "connector", "oauth2", "dlt", "webhooks"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+# Ranges copied from cognee's pyproject.toml for the same libraries, so a
+# connector installed next to cognee never pulls a version cognee refuses.
+dependencies = [
+    # GHSA-4xgf-cpjx-pc3j: 2.12.0–2.14.1 vulnerable, fixed in 2.14.2.
+    "pydantic-settings>=2.7.0,!=2.12.*,!=2.13.*,!=2.14.0,!=2.14.1,<3",
+    "aiohttp>=3.13.5,<4.0.0",
+]
+
+[project.optional-dependencies]
+# The one place the dlt range is pinned for the whole repo: connectors that
+# ship a DLT source depend on cognee-connectors-core[dlt].
+dlt = ["dlt>=1.9.0,<1.31"]
+
+[project.urls]
+Homepage = "https://github.com/topoteretes/cognee/tree/main/cognee-connectors/core"
+Repository = "https://github.com/topoteretes/cognee"
+Issues = "https://github.com/topoteretes/cognee/issues"
+Documentation = "https://docs.cognee.ai"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cognee_connectors_core"]
+
+[tool.hatch.build.targets.sdist]
+include = ["cognee_connectors_core", "tests", "README.md", "LICENSE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+# No asyncio_mode: like cognee and the workspace root, coroutine tests carry an
+# explicit `@pytest.mark.asyncio`, so pytest-asyncio stays in strict mode.
+testpaths = ["tests"]
+
+# A copy of the workspace root's [tool.ruff] (which is cognee's), so the package
+# lints and formats identically whether ruff is run here, from the repo root,
+# or on a standalone checkout: ruff reads only the closest configuration file
+# to each file it checks, and with this one closest the package resolves as
+# first-party in its own tests. Keep the two in step.
+[tool.ruff]
+line-length = 100
+exclude = ["build/"]
+
+[tool.ruff.lint]
+extend-select = ["E402"]
+ignore = [
+    "F401",
+    "N999",
+    "RUF012",
+    # TRY004: the contract raises RuntimeError for a provider response of the
+    # wrong shape on purpose — callers and tests catch it as the same failure
+    # as any other bad exchange, not as a type error in the caller.
+    "TRY004",
+    "ASYNC230",
+    "ASYNC220",
+    "ASYNC221",
+    "ASYNC251",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["I001"]

@@ -1,0 +1,65 @@
+[build-system]
+# Pinned together with cognee's: the build backend decides the wheel's
+# Metadata-Version, and the PyPI publish action validates it with a pinned
+# twine. Bump this together with the release workflow's publish-action pin.
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cognee-connector-linear"
+version = "0.1.0"
+description = "Linear connector for cognee: syncs a team's issues, comments and projects into cognee memory, and answers Linear agent sessions from it on a cognee server"
+readme = "README.md"
+requires-python = ">=3.10,<3.15"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Cognee team" }]
+keywords = ["cognee", "ai-memory", "connector", "linear"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "cognee-connectors-core[dlt]>=0.1,<1",
+    # The async GraphQL client (client.py) the connector and the agent loop use;
+    # cognee's range.
+    "aiohttp>=3.13.5,<4.0.0",
+    # The validated settings field (resume_interval_seconds); cognee's range.
+    "pydantic>=2.13",
+    # The DLT source's synchronous GraphQL client (source.py). A transitive
+    # dependency in cognee's pyproject, so there is no range to copy; the floor is
+    # the first release past the advisories on 2.31.
+    "requests>=2.32.3,<3",
+]
+
+[project.optional-dependencies]
+# The cognee_host/ adapter needs cognee; nothing else in the package does.
+cognee = ["cognee>=1.6.5,<2"]
+
+[project.urls]
+Homepage = "https://github.com/topoteretes/cognee/tree/main/cognee-connectors/connectors/linear"
+Repository = "https://github.com/topoteretes/cognee"
+Issues = "https://github.com/topoteretes/cognee/issues"
+Documentation = "https://docs.cognee.ai"
+
+[project.entry-points."cognee.connectors"]
+linear = "cognee_connector_linear:CONNECTOR"
+
+[project.entry-points."cognee.sources"]
+linear = "cognee_connector_linear:linear_source"
+
+[project.entry-points."cognee.integrations"]
+linear = "cognee_connector_linear.cognee_host:register"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cognee_connector_linear"]
+
+[tool.hatch.build.targets.sdist]
+include = ["cognee_connector_linear", "tests", "README.md", "LICENSE", "pyproject.toml"]

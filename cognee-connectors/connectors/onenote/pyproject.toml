@@ -1,0 +1,65 @@
+[build-system]
+# Pinned together with cognee's: the build backend decides the wheel's
+# Metadata-Version, and the PyPI publish action validates it with a pinned
+# twine. Bump this together with the release workflow's publish-action pin.
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cognee-connector-onenote"
+version = "0.1.0"
+description = "OneNote connector for cognee: syncs a notebook's pages from Microsoft Graph into cognee memory, incrementally and with forget-on-delete"
+readme = "README.md"
+requires-python = ">=3.10,<3.15"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Cognee team" }]
+keywords = ["cognee", "ai-memory", "connector", "onenote", "microsoft-graph"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "cognee-connectors-core[dlt]>=0.1,<1",
+    # The provider's own libraries, with the ranges cognee's pyproject.toml uses: httpx is
+    # the Graph client (loaded on the first request) and beautifulsoup4 renders a page's
+    # HTML to text (loaded when the first page is fetched).
+    "httpx>=0.28.1",
+    "beautifulsoup4>=4.13.1",
+]
+
+[project.optional-dependencies]
+# The integration tests run the sync through cognee. Nothing in the package needs it:
+# cognee_host/register() has nothing to register (see cognee_host/__init__.py). A sync
+# needs a cognee whose ingestion reads per-row structure (DOCUMENT_SYNC_VERSION 3,
+# cognee 1.6.6rc1); an older host is refused with a clear message when the source is
+# built, not at install time.
+cognee = ["cognee>=1.6.5,<2"]
+
+[project.urls]
+Homepage = "https://github.com/topoteretes/cognee/tree/main/cognee-connectors/connectors/onenote"
+Repository = "https://github.com/topoteretes/cognee"
+Issues = "https://github.com/topoteretes/cognee/issues"
+Documentation = "https://docs.cognee.ai"
+
+[project.entry-points."cognee.connectors"]
+onenote = "cognee_connector_onenote:CONNECTOR"
+
+[project.entry-points."cognee.sources"]
+onenote = "cognee_connector_onenote:onenote_source"
+
+# No "cognee.integrations" entry point: OneNote has no OAuth flow and no host adapter in
+# cognee, so a cognee server has nothing to register for it (cognee_host/__init__.py).
+
+[tool.hatch.build.targets.wheel]
+packages = ["cognee_connector_onenote"]
+
+[tool.hatch.build.targets.sdist]
+include = ["cognee_connector_onenote", "tests", "README.md", "LICENSE", "pyproject.toml"]
