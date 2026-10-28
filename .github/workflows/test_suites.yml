@@ -241,8 +241,9 @@ jobs:
       # aws/neptune/langchain/dlt: the CI-image copy of the unit suite (deleted
       # -- it was the slowest of eight identical copies, behind a 3-minute image
       # pull) was the only leg with these, and four test files importorskip on
-      # them. Resolved from the existing lock on 3.10.
-      extra-dependencies: 'postgres aws neptune langchain dlt'
+      # them. Resolved from the existing lock. google-drive: the token
+      # renewal test drives Google's real auth transport and skips without it.
+      extra-dependencies: 'postgres aws neptune langchain dlt google-drive'
     secrets: inherit
 
   different-os-tests-extended:

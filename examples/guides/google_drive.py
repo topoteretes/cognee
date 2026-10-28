@@ -38,6 +38,13 @@ Auth setup — pick ONE of the two modes below.
 
 Also set the usual cognee LLM_API_KEY (see .env.template) — this example
 calls cognee.recall(), which needs an LLM for the final completion.
+
+Hosts supplying short-lived access tokens can use
+``build_drive_service_from_access_token(token, expires_at=expiry,
+refresh_access_token=renew)`` in their ``service_factory``. ``renew(used_token)``
+returns a token and its UTC expiry, or raises ``TokenRenewalError``; it runs on the fetching
+thread when Google's transport needs to renew. Share and serialize renewal across worker clients.
+See the connector's google_drive.md for a host-managed-token example.
 """
 
 import asyncio
