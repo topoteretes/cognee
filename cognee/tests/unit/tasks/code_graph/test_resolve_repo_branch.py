@@ -37,8 +37,7 @@ async def test_only_a_usable_branch_name_reaches_git_and_a_local_path_takes_none
 
 def test_each_branch_has_a_directory_of_its_own(tmp_path):
     default = resolve_module.clone_dir(_URL, clones_dir=tmp_path)
-    # The directory every clone of the URL had before a branch could be chosen.
-    assert default == tmp_path / "github.com-org-repo"
+    assert default.parent == tmp_path and len(default.name) == 64
 
     branches = ["dev", "Dev", "feature/x", "feature-x", "release/" + "x" * 300]
     dirs = [resolve_module.clone_dir(_URL, branch, tmp_path) for branch in branches]
@@ -69,3 +68,16 @@ async def test_a_missing_branch_is_reported_before_cloning_without_the_url_token
     assert "tok-SECRET" not in str(error.value)
     assert f"Branch 'gone' was not found in '{_URL}'" in str(error.value)
     assert git_calls == ["ls-remote"]
+    assert error.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_the_host_check_sees_the_url_without_its_token(monkeypatch, tmp_path):
+    validate = AsyncMock(side_effect=ssrf_module.SSRFProtectionError("blocked"))
+    monkeypatch.setattr(ssrf_module, "validate_outbound_url", validate)
+    monkeypatch.setattr(resolve_module, "_run_git", AsyncMock())
+
+    with pytest.raises(resolve_module.CodeRepositoryError, match="Refusing to clone"):
+        await resolve_module.resolve_repo_source(_TOKEN_URL, clones_dir=tmp_path)
+
+    validate.assert_awaited_once_with(_URL)

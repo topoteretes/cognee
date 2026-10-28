@@ -10,6 +10,7 @@ and after a crashed run.
 
 import importlib
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -619,4 +620,46 @@ async def test_repo_route_rejects_a_malformed_manifest_node_set(tmp_path, monkey
 
     with pytest.raises(InvalidNodeSetError):
         await extract_code_repo_graph([item])
+    extract.assert_not_awaited()
+
+
+def _remote_manifest_item(tmp_path, manifest):
+    item = _repo_manifest_item(tmp_path, {})
+    repo_dir = str(tmp_path / "repo")
+    Path(item.raw_data_location).write_text(json.dumps({"repo_path": repo_dir, **manifest}))
+    item.system_metadata = {"source": "code_repo", "repo_url": "https://github.com/acme/api"}
+    return item
+
+
+@pytest.mark.asyncio
+async def test_a_remote_manifest_without_the_current_identity_is_legacy(tmp_path, monkeypatch):
+    from cognee.tasks.code_graph.code_repo import LegacyRepositoryError, extract_code_repo_graph
+
+    extract = _stub_code_graph_tasks(monkeypatch)
+    item = _remote_manifest_item(tmp_path, {"commit": "c" * 40})
+
+    with pytest.raises(LegacyRepositoryError):
+        await extract_code_repo_graph([item])
+    extract.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        {"identity_version": 2, "repo_key": "github.com/acme/api"},
+        {"identity_version": 2, "commit": "c" * 40, "repo_key": "github.com/other/api"},
+    ],
+    ids=["no_commit", "another_repository"],
+)
+async def test_an_invalid_remote_manifest_asks_for_a_re_add(tmp_path, monkeypatch, manifest):
+    from cognee.tasks.code_graph.code_repo import CodeRepositoryError, extract_code_repo_graph
+
+    extract = _stub_code_graph_tasks(monkeypatch)
+    item = _remote_manifest_item(tmp_path, manifest)
+
+    with pytest.raises(CodeRepositoryError, match="Invalid remote manifest") as error:
+        await extract_code_repo_graph([item])
+
+    assert error.value.status_code == 409
     extract.assert_not_awaited()

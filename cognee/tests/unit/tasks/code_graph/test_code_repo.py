@@ -8,6 +8,8 @@ the document pipeline, and binaries/dotfiles can never abort an add.
 
 import importlib
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -34,6 +36,38 @@ def _make_repo(tmp_path):
     # crash on it — repo partition must skip media outright.
     (tmp_path / "logo-loop.mp4").write_bytes(b"\x00\x00\x00 ftypisom")
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def isolated_clone_paths(tmp_path, monkeypatch):
+    import cognee.tasks.code_graph.resolve_repo as resolver
+
+    # The fake clones in these tests are built directly under tmp_path, so it is the root.
+    monkeypatch.setattr(resolver, "default_clones_dir", lambda: tmp_path)
+
+
+def _commit_fixture(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    git_env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], env=git_env, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        env=git_env,
+        check=True,
+    )
 
 
 def test_project_marker_detection(tmp_path):
@@ -179,6 +213,7 @@ async def test_add_code_repository_stores_the_pinned_repo_item(tmp_path, monkeyp
     from unittest.mock import AsyncMock
     from uuid import uuid4
 
+    import cognee.tasks.code_graph.code_repo as code_repo_module
     from cognee.tasks.code_graph.code_repo import add_code_repository
 
     # importlib, not `import a.b as m`: these packages re-export a function under
@@ -188,6 +223,8 @@ async def test_add_code_repository_stores_the_pinned_repo_item(tmp_path, monkeyp
     unique_id_module = importlib.import_module("cognee.modules.data.methods.get_unique_data_id")
 
     repo = _make_repo(tmp_path)
+    _commit_fixture(repo)
+    monkeypatch.setattr(code_repo_module, "_reject_legacy_repo_row", AsyncMock())
     user = SimpleNamespace(id=uuid4())
     dataset = SimpleNamespace(id=uuid4(), name="my_code")
     pinned_id = uuid4()
@@ -311,6 +348,7 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
 
     async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         cloned_specs.append((spec, branch))
+        _commit_fixture(clone)
         return clone
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
@@ -321,7 +359,9 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
 
     # The clone gets the normalised URL, not the browser one, and the branch asked for.
     assert cloned_specs == [("https://github.com/org/repo", "dev")]
-    manifest_items = [item for item in resolved if isinstance(item, DataItem)]
+    manifest_items = [
+        item for item in resolved if isinstance(item, DataItem) and item.system_metadata
+    ]
     assert len(manifest_items) == 1
     manifest = manifest_items[0]
     assert manifest.system_metadata["source"] == "code_repo"
@@ -330,11 +370,23 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
     assert manifest.system_metadata["file_count"] == 3
     # The repo's documents ride along individually; unrelated items pass through.
     string_items = [item for item in resolved if isinstance(item, str)]
-    assert {Path(item).name for item in string_items if item != "plain text note"} == {
+    document_items = [
+        item for item in resolved if isinstance(item, DataItem) and not item.system_metadata
+    ]
+    assert {Path(item.data.file_path).name for item in document_items} == {
         "README.md",
         "notes.txt",
     }
     assert "plain text note" in string_items
+    (clone / "README.md").write_text("new checkout bytes")
+    from cognee.infrastructure.files.utils.open_data_file import open_data_file
+
+    readme = next(
+        item for item in document_items if item.external_metadata["repo_path"] == "README.md"
+    )
+    async with open_data_file(readme.data.file_path, mode="r", encoding="utf-8") as source:
+        assert source.read() == "# Sample\n\nDocs live here.\n"
+    assert readme.data.metadata["extension"] == "md"
 
 
 @pytest.mark.asyncio
@@ -350,6 +402,7 @@ async def test_repository_url_credentials_are_redacted_from_the_manifest(
 
     async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         cloned_specs.append(spec)
+        _commit_fixture(clone)
         return clone
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
@@ -366,19 +419,22 @@ async def test_repository_url_credentials_are_redacted_from_the_manifest(
 @pytest.mark.asyncio
 async def test_a_repository_url_keeps_one_data_row_whatever_the_branch(tmp_path, monkeypatch):
     """Each branch is cloned into its own directory, but a dataset keeps one row per URL,
-    keyed as every URL row was before branches existed, so existing rows keep their ids."""
+    keyed by canonical remote identity independently of clone location."""
     from unittest.mock import AsyncMock, Mock
     from uuid import uuid4
 
     import cognee.tasks.code_graph.code_repo as code_repo_module
-    from cognee.tasks.code_graph.resolve_repo import clone_dir
+    from cognee.tasks.code_graph.resolve_repo import repo_identity
 
     async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         directory = tmp_path / (branch or "default")
         directory.mkdir()
-        return _make_repo(directory)
+        _make_repo(directory)
+        _commit_fixture(directory)
+        return directory
 
     keys = []
+    monkeypatch.setattr(code_repo_module, "_reject_legacy_repo_row", AsyncMock())
 
     async def record_key(identifier, user, dataset_id=None):
         keys.append(identifier)
@@ -401,7 +457,7 @@ async def test_a_repository_url_keeps_one_data_row_whatever_the_branch(tmp_path,
             "https://github.com/org/repo", user=Mock(), dataset_id=uuid4(), branch=branch
         )
 
-    assert keys == [f"code_repo:{clone_dir('https://github.com/org/repo')}"] * 2
+    assert keys == [f"code_repo:remote:{repo_identity('https://github.com/org/repo')}"] * 2
 
 
 @pytest.mark.asyncio
@@ -442,6 +498,7 @@ async def test_a_repository_url_clones_with_the_credentials_and_leaves_out_docum
 
     async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         seen.update(spec=spec, credentials=credentials, branch=branch)
+        _commit_fixture(clone)
         return clone
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
@@ -475,6 +532,7 @@ async def test_resolving_a_repository_url_passes_the_options_to_the_clone(
 
     async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         seen.append(credentials)
+        _commit_fixture(clone)
         return clone
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
@@ -499,41 +557,72 @@ async def test_resolving_a_local_project_honours_include_documents(tmp_path, llm
 
 
 @pytest.mark.asyncio
-async def test_a_repository_url_is_cloned_outside_the_dataset_lock_and_stamped_under_it(
+async def test_the_stamp_is_reset_under_the_dataset_lock_after_the_clone_lock_is_released(
     tmp_path, monkeypatch
 ):
-    """The clone must not block the dataset's other runs; the stamp reset is a
-    read-modify-write of the row, which only the dataset lock protects."""
-    from unittest.mock import AsyncMock, Mock
+    """cognify takes the dataset lock and then the clone lock, so the dataset lock must
+    never be taken inside the clone lock. The clone and manifest run under the clone lock
+    without the dataset lock; the stamp reset, a read-modify-write of the row, runs under
+    the dataset lock once the clone lock is released."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import Mock
     from uuid import uuid4
 
     import cognee.tasks.code_graph.code_repo as code_repo_module
     from cognee.infrastructure.locks import held_datasets
 
+    resolve = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
+    monkeypatch.setattr(resolve, "default_clones_dir", lambda: tmp_path)
     dataset_id = uuid4()
-    held = {}
+    seen = {}
+
+    def locks():
+        task = asyncio.current_task()
+        return {
+            "clone_lock": bool(resolve._HELD_CLONE_LOCKS.get(task)),
+            "dataset_lock": dataset_id in held_datasets.get(),
+        }
 
     async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
-        held["clone"] = dataset_id in held_datasets.get()
-        return _make_repo(tmp_path)
+        return tmp_path / "clone"
+
+    async def fake_resolve_code_repository(directory, **kwargs):
+        seen["resolve"] = locks()
+        seen["reset_stamp"] = kwargs["reset_stamp"]
+        return SimpleNamespace(data='{"commit": "c1"}', data_id=uuid4()), [], 0
 
     async def fake_reset(*_args, **_kwargs):
-        held["reset"] = dataset_id in held_datasets.get()
+        seen["reset"] = locks()
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+    monkeypatch.setattr(code_repo_module, "resolve_code_repository", fake_resolve_code_repository)
     monkeypatch.setattr(
         importlib.import_module("cognee.modules.data.methods"),
         "reset_data_pipeline_status",
         fake_reset,
-    )
-    monkeypatch.setattr(
-        importlib.import_module("cognee.modules.data.methods.get_unique_data_id"),
-        "get_unique_data_id",
-        AsyncMock(return_value=uuid4()),
     )
 
     await code_repo_module.resolve_code_repository_url(
         "https://github.com/org/repo", user=Mock(), dataset_id=dataset_id
     )
 
-    assert held == {"clone": False, "reset": True}
+    assert seen["reset_stamp"] is False
+    assert seen["resolve"] == {"clone_lock": True, "dataset_lock": False}
+    assert seen["reset"] == {"clone_lock": False, "dataset_lock": True}
+
+
+@pytest.mark.parametrize("access_control, shared_graph", [("true", False), ("false", True)])
+def test_the_legacy_error_names_the_shared_graph_only_when_there_is_one(
+    monkeypatch, access_control, shared_graph
+):
+    """A new dataset is a fix only while graphs are isolated per dataset."""
+    from cognee.tasks.code_graph.code_repo import LegacyRepositoryError
+
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", access_control)
+
+    message = LegacyRepositoryError("a remote repository row").message
+
+    assert "Create a new dataset" in message
+    assert "(found: a remote repository row)" in message
+    assert ("forget the legacy repository first" in message) is shared_graph

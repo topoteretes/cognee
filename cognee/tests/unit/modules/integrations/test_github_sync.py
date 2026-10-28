@@ -389,3 +389,182 @@ async def test_the_token_never_reaches_the_log_of_a_failed_repository(mocks, cap
 
     assert "failed for acme/api" in caplog.text
     assert "tok123" not in caplog.text
+
+
+@pytest.fixture
+def legacy(monkeypatch, mocks):
+    """The dataset and legacy rows of a repository and the calls that forget them, with the
+    real add and cognify replaced as in every sync test."""
+    code_repo = importlib.import_module("cognee.tasks.code_graph.code_repo")
+    forget_module = importlib.import_module("cognee.api.v1.forget")
+    data_methods = importlib.import_module("cognee.modules.data.methods")
+    dataset = SimpleNamespace(id=uuid4())
+    ids = [uuid4(), uuid4()]
+    forget = AsyncMock(return_value={"status": "success"})
+    datasets = AsyncMock(return_value=[dataset])
+    row_ids = AsyncMock(return_value=ids)
+    monkeypatch.setattr(forget_module, "forget", forget)
+    monkeypatch.setattr(data_methods, "get_authorized_existing_datasets", datasets)
+    monkeypatch.setattr(code_repo, "legacy_repository_row_ids", row_ids)
+    return SimpleNamespace(
+        forget=forget,
+        datasets=datasets,
+        row_ids=row_ids,
+        dataset=dataset,
+        ids=ids,
+        legacy_error=code_repo.LegacyRepositoryError,
+        changed_error=code_repo.RepositoryChangedError,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_repository_is_forgotten_and_built_again_once(mocks, legacy, caplog):
+    mocks.add.side_effect = [legacy.legacy_error("a remote repository row"), _added(), _added()]
+
+    with caplog.at_level(logging.INFO):
+        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert [call.kwargs for call in legacy.forget.await_args_list] == [
+        {"data_id": data_id, "dataset_id": legacy.dataset.id, "user": mocks.owner}
+        for data_id in legacy.ids
+    ]
+    assert mocks.add.await_count == 3 and mocks.cognify.await_count == 2
+    assert mocks.observations[-1].state == "succeeded"
+    assert "forgot 2 row(s)" in caplog.text and "tok123" not in caplog.text
+    assert "success" in caplog.text  # the forget receipt is logged
+
+
+@pytest.mark.asyncio
+async def test_the_legacy_rows_are_looked_up_in_the_dataset_the_owner_can_write(mocks, legacy):
+    mocks.add.side_effect = [legacy.legacy_error("a remote repository row"), _added()]
+
+    await sync_module.sync_repositories(_credential(), ["acme/api"])
+
+    legacy.datasets.assert_awaited_once_with(["github_acme_org"], "write", mocks.owner, strict=True)
+    legacy.row_ids.assert_awaited_once_with("https://github.com/acme/api.git", legacy.dataset.id)
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_error_without_a_legacy_row_is_not_retried(mocks, legacy, caplog):
+    """A legacy graph that no row owns cannot be healed by forgetting rows: the error
+    must not be hidden behind a second build that fails the same way."""
+    legacy.row_ids.return_value = []
+    mocks.add.side_effect = [_added(), _added()]
+    mocks.cognify.side_effect = [legacy.legacy_error("a graph written before"), {}]
+
+    with caplog.at_level(logging.WARNING):
+        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    legacy.forget.assert_not_awaited()
+    assert mocks.add.await_count == 2 and mocks.cognify.await_count == 2  # web is built
+    assert "forgot" not in caplog.text
+    assert mocks.observations[-1].state == "partial"
+
+
+@pytest.mark.asyncio
+async def test_a_repository_that_stays_legacy_fails_alone_after_one_rebuild(mocks, legacy):
+    mocks.add.side_effect = [
+        legacy.legacy_error("a remote repository row"),
+        legacy.legacy_error("a remote repository row"),
+        _added(),
+    ]
+
+    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert legacy.forget.await_count == len(legacy.ids)  # forgotten once, never in a loop
+    assert mocks.add.await_count == 3 and mocks.cognify.await_count == 1
+    assert mocks.observations[-1].state == "partial"
+
+
+@pytest.mark.asyncio
+async def test_a_dataset_that_cannot_be_resolved_fails_that_repository_alone(mocks, legacy):
+    from cognee.modules.data.exceptions import DatasetNotFoundError
+
+    legacy.datasets.side_effect = DatasetNotFoundError(message="gone")
+    mocks.add.side_effect = [legacy.legacy_error("a remote repository row"), _added()]
+
+    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    legacy.forget.assert_not_awaited()
+    assert mocks.add.await_count == 2 and mocks.cognify.await_count == 1
+    assert mocks.observations[-1].state == "partial"
+
+
+@pytest.mark.asyncio
+async def test_a_failing_forget_aborts_the_sync(mocks, legacy):
+    """A forget that fails for a reason of its own is not one repository's failure."""
+    legacy.forget.side_effect = RuntimeError("database is gone")
+    mocks.add.side_effect = [legacy.legacy_error("a remote repository row"), _added()]
+
+    with pytest.raises(RuntimeError, match="database is gone"):
+        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert mocks.add.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wrapped", [False, True], ids=["raised", "reported_as_errored_run"])
+async def test_a_repository_that_moved_after_add_is_added_and_built_again(
+    mocks, legacy, caplog, wrapped
+):
+    """Two overlapping syncs, or an upstream change between add and cognify: the second
+    add pins the current revision. With RAISE_INCREMENTAL_LOADING_ERRORS off cognify
+    raises the errored run as CognifyFailedError carrying the error class."""
+    changed = (
+        CognifyFailedError(error_class="RepositoryChangedError", error_message="moved")
+        if wrapped
+        else legacy.changed_error()
+    )
+    mocks.add.side_effect = [_added(), _added(), _added()]
+    mocks.cognify.side_effect = [changed, {}, {}]
+
+    with caplog.at_level(logging.WARNING):
+        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert mocks.add.await_count == 3 and mocks.cognify.await_count == 3
+    assert "changed while it was being built" in caplog.text
+    assert mocks.observations[-1].state == "succeeded"
+    legacy.forget.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_failure_of_another_kind_is_not_retried(mocks, legacy):
+    mocks.cognify.side_effect = [
+        CognifyFailedError(error_class="RuntimeError", error_message="graph write failed"),
+        {},
+    ]
+
+    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert mocks.add.await_count == 2 and mocks.cognify.await_count == 2
+    assert mocks.observations[-1].state == "partial"
+
+
+@pytest.mark.asyncio
+async def test_a_repository_that_keeps_moving_fails_after_one_more_build(mocks, legacy):
+    mocks.cognify.side_effect = [legacy.changed_error(), legacy.changed_error(), {}]
+
+    await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert mocks.add.await_count == 3 and mocks.cognify.await_count == 3  # web is built
+    assert mocks.observations[-1].state == "partial"
+
+
+@pytest.mark.asyncio
+async def test_an_add_reported_as_moved_is_added_and_built_again(mocks, legacy, caplog):
+    """With RAISE_INCREMENTAL_LOADING_ERRORS off add() returns the error as an errored run."""
+    moved = PipelineRunErrored(
+        pipeline_run_id=uuid4(),
+        dataset_id=uuid4(),
+        dataset_name="github_acme_org",
+        error_class="RepositoryChangedError",
+        error_message="moved",
+    )
+    mocks.add.side_effect = [moved, _added(), _added()]
+
+    with caplog.at_level(logging.WARNING):
+        await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
+
+    assert mocks.add.await_count == 3 and mocks.cognify.await_count == 2
+    assert "changed while it was being built" in caplog.text
+    assert mocks.observations[-1].state == "succeeded"

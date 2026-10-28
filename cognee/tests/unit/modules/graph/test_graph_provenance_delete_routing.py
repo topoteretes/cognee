@@ -218,11 +218,17 @@ async def test_api_delete_data_uses_graph_provenance_when_ledger_has_no_nodes():
     delete_data_row.assert_awaited_once_with(data, dataset_id)
 
 
-async def test_api_delete_data_uses_legacy_when_no_ledger_nodes_and_unmarked_graph():
+@pytest.mark.parametrize("supports_legacy_delete", [True, False])
+async def test_api_delete_data_uses_legacy_when_no_ledger_nodes_and_unmarked_graph(
+    supports_legacy_delete,
+):
     dataset_id, data_id, user_id, owner_id = uuid4(), uuid4(), uuid4(), uuid4()
     user = SimpleNamespace(id=user_id)
     dataset = SimpleNamespace(id=dataset_id, owner_id=owner_id)
     data = SimpleNamespace(id=data_id, dataset_id=dataset_id)
+    graph = SimpleNamespace()
+    if supports_legacy_delete:
+        graph.get_document_subgraph = AsyncMock()
 
     with (
         patch.object(datasets_module, "get_authorized_dataset", AsyncMock(return_value=dataset)),
@@ -234,6 +240,7 @@ async def test_api_delete_data_uses_legacy_when_no_ledger_nodes_and_unmarked_gra
             lambda *_args, **_kwargs: _context(),
         ),
         patch.object(datasets_module, "has_data_related_nodes", AsyncMock(return_value=False)),
+        patch.object(datasets_module, "get_graph_engine", AsyncMock(return_value=graph)),
         patch.object(
             datasets_module,
             "try_delete_data_by_graph_provenance",
@@ -252,7 +259,10 @@ async def test_api_delete_data_uses_legacy_when_no_ledger_nodes_and_unmarked_gra
     assert result["status"] == "success"
     graph_delete.assert_awaited_once_with(dataset_id, data_id)
     ledger_delete.assert_not_called()
-    legacy_delete.assert_awaited_once_with(data, "soft")
+    if supports_legacy_delete:
+        legacy_delete.assert_awaited_once_with(data, "soft")
+    else:
+        legacy_delete.assert_not_called()
     delete_data_row.assert_awaited_once_with(data, dataset_id)
 
 

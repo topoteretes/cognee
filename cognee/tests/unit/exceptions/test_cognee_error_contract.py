@@ -90,6 +90,7 @@ SAMPLE_ARGUMENTS = {
     "configured_model": "sample-provider/new-model",
     "configured_dimensions": 1536,
     "value": 1,
+    "where": "repository manifest",
 }
 
 
