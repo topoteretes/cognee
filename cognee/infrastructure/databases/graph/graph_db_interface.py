@@ -1029,7 +1029,7 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def get_filtered_graph_data(
-        self, attribute_filters: list[dict[str, list[str | int]]]
+        self, attribute_filters: list[dict[str, list[str | int]]], *, include_edges: bool = True
     ) -> tuple[list[Node], list[EdgeData]]:
         """
         Retrieve nodes and edges filtered by the provided attribute criteria.
@@ -1039,6 +1039,7 @@ class GraphDBInterface(ABC):
 
             - attribute_filters: A list of dictionaries where keys are attribute names and values
               are lists of attribute values to filter by.
+            - include_edges: False reads only nodes; no edge query is performed.
         """
         raise NotImplementedError
 

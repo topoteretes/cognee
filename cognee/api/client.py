@@ -33,6 +33,7 @@ from cognee.api.v1.agents.routers import get_agents_router
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
 from cognee.api.v1.cloud.routers import get_checks_router
 from cognee.api.v1.cognify.routers import get_cognify_router
+from cognee.api.v1.conflicts.routers import get_conflicts_router
 from cognee.api.v1.datasets.routers import get_datasets_router
 from cognee.api.v1.delete.routers import get_delete_router
 from cognee.api.v1.forget.routers import get_forget_router
@@ -403,6 +404,8 @@ app.include_router(
     prefix="/api/v1/permissions",
     tags=["permissions"],
 )
+
+app.include_router(get_conflicts_router(), prefix="/api/v1/conflicts", tags=["conflicts"])
 
 app.include_router(get_datasets_router(), prefix="/api/v1/datasets", tags=["datasets"])
 

@@ -17,6 +17,7 @@ from cognee.modules.retrieval.utils.conflict_context import ChunkConflicts
 @pytest.fixture
 def graph():
     graph = AsyncMock()
+    graph.get_filtered_graph_data.return_value = ([], [])
     graph.get_neighborhood.return_value = (
         [
             (
@@ -138,7 +139,9 @@ async def test_scoped_fallback_cannot_expose_a_description_from_the_vector_paylo
 
 
 @pytest.mark.asyncio
-async def test_chunk_attachment_supports_results_dicts_tuples_and_summary_sources(monkeypatch):
+async def test_chunk_attachment_supports_results_dicts_tuples_and_summary_sources(
+    monkeypatch, graph
+):
     lookup = AsyncMock(
         return_value={
             "c1": ChunkConflicts("Report", "2026-01-10T09:00:00Z", {"f2": "Second", "f1": "First"})

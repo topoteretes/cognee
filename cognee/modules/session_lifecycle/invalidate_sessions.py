@@ -13,9 +13,9 @@ exist (COG-5835). This module removes the contaminated session state:
   (turn -> feedback entry -> context lesson -> later turns that consumed the
   lesson) to a fixpoint.
 
-Both are best-effort by contract: they must never fail the delete that
-triggered them, so callers wrap them in non-fatal try/except and all cache
-lookups fail open.
+Deletion callers use best-effort cleanup: it must never fail the delete that
+triggered it. Conflict resolution opts into strict cleanup so reported cache
+deletion failures leave its decision pending for retry.
 
 Known limits (documented, deliberate): agent-trace entries carry context text
 without element ids and are not matched; the tapes cache backend is
@@ -25,6 +25,7 @@ deletes also scan every dataset-unattributed session (``dataset_id IS NULL``);
 element-id matching keeps that scan precise (COG-6292).
 """
 
+import asyncio
 from uuid import UUID
 
 from cognee.infrastructure.locks import session_lock
@@ -80,6 +81,8 @@ async def invalidate_sessions_for_deleted_data(
     deleted_node_ids: set[str],
     deleted_edge_ids: set[str],
     user_id: UUID | None = None,
+    *,
+    strict: bool = False,
 ) -> dict:
     """Remove session entries contaminated by a deleted data item.
 
@@ -95,6 +98,10 @@ async def invalidate_sessions_for_deleted_data(
     default session, which carries no dataset attribution. Element-id matching
     keeps the wider scan precise (COG-6292). ``user_id`` is accepted for
     callers and does not filter the unattributed query.
+    ``strict=True`` is used by conflict resolution: a failed cleanup must keep
+    that decision pending, so a retry can finish invalidating obsolete answers.
+    An entry that is already gone when its delete runs counts as cleaned, and an
+    unreadable session context raises instead of reading as empty.
     """
     totals = {"sessions_considered": 0, "qa_entries_deleted": 0, "context_entries_deleted": 0}
     if not deleted_node_ids and not deleted_edge_ids:
@@ -111,26 +118,41 @@ async def invalidate_sessions_for_deleted_data(
             sessions.append(candidate)
     totals["sessions_considered"] = len(sessions)
 
-    for session_user_id, session_id in sessions:
-        try:
-            counts = await _invalidate_session_entries(
+    # Bound concurrent cache I/O without holding a dataset lock or dropping sessions.
+    semaphore = asyncio.Semaphore(8)
+
+    async def invalidate_one(session_user_id, session_id):
+        async with semaphore:
+            return await _invalidate_session_entries(
                 session_manager,
                 user_id=str(session_user_id),
                 session_id=session_id,
                 deleted_node_ids=deleted_node_ids,
                 deleted_edge_ids=deleted_edge_ids,
+                strict=strict,
             )
-            totals["qa_entries_deleted"] += counts[0]
-            totals["context_entries_deleted"] += counts[1]
-        except Exception as error:
+
+    # Wait for every cleanup before raising in strict mode: no orphan cache writes
+    # may outlive the request or race with its retry/finalization.
+    results = await asyncio.gather(
+        *(invalidate_one(session_user_id, session_id) for session_user_id, session_id in sessions),
+        return_exceptions=True,
+    )
+    for (session_user_id, session_id), result in zip(sessions, results):
+        if isinstance(result, BaseException):
+            if strict or not isinstance(result, Exception):
+                raise result
             logger.warning(
                 "Session invalidation: targeted cleanup failed for session %s, user %s "
                 "(non-fatal): %s",
                 session_id,
                 session_user_id,
-                error,
-                exc_info=True,
+                result,
+                exc_info=(type(result), result, result.__traceback__),
             )
+        else:
+            totals["qa_entries_deleted"] += result[0]
+            totals["context_entries_deleted"] += result[1]
 
     if totals["qa_entries_deleted"] or totals["context_entries_deleted"]:
         logger.info(
@@ -143,6 +165,14 @@ async def invalidate_sessions_for_deleted_data(
     return totals
 
 
+async def _context_entry_exists(session_manager, *, user_id: str, session_id: str, entry_id: str):
+    """Whether a session-context entry is still stored, read fresh after a failed delete."""
+    entries = await session_manager.get_session_context_entries(
+        user_id=user_id, session_id=session_id, raise_on_error=True
+    )
+    return any(entry.get("id") == entry_id for entry in entries or [])
+
+
 async def _invalidate_session_entries(
     session_manager,
     *,
@@ -150,6 +180,7 @@ async def _invalidate_session_entries(
     session_id: str,
     deleted_node_ids: set[str],
     deleted_edge_ids: set[str],
+    strict: bool = False,
 ) -> tuple[int, int]:
     """Targeted cleanup of one session. Returns (qa_deleted, context_deleted)."""
     entries = await session_manager.get_session(user_id=user_id, session_id=session_id)
@@ -167,8 +198,10 @@ async def _invalidate_session_entries(
     if not contaminated_qa_ids:
         return (0, 0)
 
+    # Fail-open for best-effort deletes; strict cleanup must not mistake an unreadable
+    # session context for one without lessons.
     context_entries = await session_manager.get_session_context_entries(
-        user_id=user_id, session_id=session_id
+        user_id=user_id, session_id=session_id, raise_on_error=strict
     )
 
     # Propagate contamination along the intra-session provenance chain until
@@ -202,6 +235,10 @@ async def _invalidate_session_entries(
                 contaminated_qa_ids.add(entry.qa_id)
                 changed = True
 
+    # A delete that finds nothing is done, not failed: a concurrent cleanup, forget or
+    # TTL may have removed the entry first. delete_qa raises on a cache error, so its
+    # False only ever means "not found"; the context-entry delete is fail-open, so in
+    # strict mode a False there is believed only once a re-read shows the entry gone.
     qa_deleted = 0
     for qa_id in contaminated_qa_ids:
         if await session_manager.delete_qa(user_id=user_id, qa_id=qa_id, session_id=session_id):
@@ -213,6 +250,10 @@ async def _invalidate_session_entries(
             user_id=user_id, entry_id=entry_id, session_id=session_id
         ):
             context_deleted += 1
+        elif strict and await _context_entry_exists(
+            session_manager, user_id=user_id, session_id=session_id, entry_id=entry_id
+        ):
+            raise RuntimeError("Could not invalidate a cached lesson for the resolved conflict")
 
     # Clamp the persist watermark to the surviving entry count. A watermark
     # above the count reads as "session was rebuilt" and makes the next

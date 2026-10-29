@@ -5,6 +5,7 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion_batch
 from cognee.modules.retrieval.utils.query_state import QueryState
+from cognee.modules.retrieval.utils.resolved_context import user_resolution_scope
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.shared.logging_utils import get_logger
 
@@ -55,6 +56,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         )
         self.context_extension_rounds = context_extension_rounds
 
+    @user_resolution_scope()
     async def get_retrieved_objects(
         self, query: str | None = None, query_batch: list[str] | None = None
     ) -> list[Edge] | list[list[Edge]]:

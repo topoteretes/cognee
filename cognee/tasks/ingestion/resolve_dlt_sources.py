@@ -1134,6 +1134,8 @@ async def _delete_dlt_orphans(
     proved, and deleting another source's data is worse than retaining residue.
     """
     from cognee.context_global_variables import set_database_global_context_variables
+    from cognee.infrastructure.locks import dataset_lock
+    from cognee.modules.conflicts.methods import retire_forgotten_decisions
     from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.data.methods.delete_data import delete_data
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
@@ -1203,8 +1205,13 @@ async def _delete_dlt_orphans(
     # engines — the background-ingest path invokes orphan_cleanup before any
     # pipeline establishes the context — so the graph + vector purge silently
     # targets the wrong DB and leaves the forgotten row's chunks/entities
-    # searchable under ENABLE_BACKEND_ACCESS_CONTROL.
-    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+    # searchable under ENABLE_BACKEND_ACCESS_CONTROL. The dataset lock comes
+    # first, as in datasets.delete_data: retiring conflict decisions rewrites
+    # conflict nodes that a pipeline or a resolve_conflict call may be writing.
+    async with (
+        dataset_lock(dataset.id),
+        set_database_global_context_variables(dataset.id, dataset.owner_id),
+    ):
         purged: list = []  # (orphan, its deleted graph elements)
         for orphan in orphans:
             try:
@@ -1227,8 +1234,15 @@ async def _delete_dlt_orphans(
         # serialize thousands of commits under the dataset lock), then the
         # rows. A row whose delete fails keeps its Data row, so the next index
         # build rewrites what was removed for it.
+        #
+        # A row removed upstream is forgotten like forget(data_id=...): a user
+        # decision whose chosen fact went with it is retired before the rows go.
+        # One pass covers every purged row, since it reads what the graph holds
+        # now; a failure keeps the rows for the next ingest's retry.
+        retired: set[str] = set()
         if purged:
             try:
+                retired = await retire_forgotten_decisions(dataset, user)
                 await delete_data([orphan for orphan, _ in purged], dataset.id)
             except Exception:
                 failed.extend(orphan.id for orphan, _ in purged)
@@ -1238,10 +1252,13 @@ async def _delete_dlt_orphans(
                     exc_info=True,
                 )
 
-        # Invalidate session answers that used the orphans' graph elements
-        # (best-effort; must not fail the cleanup). The graph purge above is
-        # what they depend on, not the row delete.
-        for _orphan, deleted_elements in purged:
+        # Invalidate session answers that used the orphans' graph elements or a
+        # retired decision (best-effort; must not fail the cleanup). The graph
+        # purge above is what they depend on, not the row delete.
+        invalidations = [(deleted.node_ids, deleted.edge_ids) for _orphan, deleted in purged]
+        if retired:
+            invalidations.append((retired, set()))
+        for node_ids, edge_ids in invalidations:
             try:
                 from cognee.modules.session_lifecycle.invalidate_sessions import (
                     invalidate_sessions_for_deleted_data,
@@ -1249,8 +1266,8 @@ async def _delete_dlt_orphans(
 
                 await invalidate_sessions_for_deleted_data(
                     dataset.id,
-                    deleted_elements.node_ids,
-                    deleted_elements.edge_ids,
+                    node_ids,
+                    edge_ids,
                     user_id=user.id,
                 )
             except Exception:
