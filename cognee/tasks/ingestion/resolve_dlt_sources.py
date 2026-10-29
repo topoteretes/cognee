@@ -976,6 +976,8 @@ async def _delete_dlt_orphans(
     proved, and deleting another source's data is worse than retaining residue.
     """
     from cognee.context_global_variables import set_database_global_context_variables
+    from cognee.infrastructure.locks import dataset_lock
+    from cognee.modules.conflicts.methods import retire_forgotten_decisions
     from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.data.methods.delete_data import delete_data
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
@@ -1031,8 +1033,13 @@ async def _delete_dlt_orphans(
     # engines — the background-ingest path invokes orphan_cleanup before any
     # pipeline establishes the context — so the graph + vector purge silently
     # targets the wrong DB and leaves the forgotten row's chunks/entities
-    # searchable under ENABLE_BACKEND_ACCESS_CONTROL.
-    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+    # searchable under ENABLE_BACKEND_ACCESS_CONTROL. The dataset lock comes
+    # first, as in datasets.delete_data: retiring conflict decisions rewrites
+    # conflict nodes that a pipeline or a resolve_conflict call may be writing.
+    async with (
+        dataset_lock(dataset.id),
+        set_database_global_context_variables(dataset.id, dataset.owner_id),
+    ):
         for orphan in orphans:
             try:
                 # Called unconditionally: gating on has_data_related_nodes would
@@ -1040,6 +1047,10 @@ async def _delete_dlt_orphans(
                 # relational ledger (the function handles both paths and no-ops
                 # when nothing is related).
                 deleted_elements = await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
+                # A row removed upstream is forgotten like forget(data_id=...): a user
+                # decision whose chosen fact went with it is retired before the Data
+                # row goes, so a failure keeps the row for the next ingest's retry.
+                retired = await retire_forgotten_decisions(dataset, user)
                 await delete_data(orphan, dataset.id)
                 # Invalidate session answers that used the orphan's graph
                 # elements (best-effort; must not fail the cleanup).
@@ -1050,7 +1061,7 @@ async def _delete_dlt_orphans(
 
                     await invalidate_sessions_for_deleted_data(
                         dataset.id,
-                        deleted_elements.node_ids,
+                        set(deleted_elements.node_ids) | retired,
                         deleted_elements.edge_ids,
                         user_id=user.id,
                     )
