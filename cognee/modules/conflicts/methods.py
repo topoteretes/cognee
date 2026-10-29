@@ -268,10 +268,12 @@ async def resolve_conflict(
 async def retire_forgotten_decisions(dataset, user: User) -> set[str]:
     """Delete the user decisions whose chosen fact no longer exists, and return their ids.
 
-    Run after a document is deleted, inside the dataset's lock and database context.
-    A fact supported by several documents stays in the graph until the last of them
-    is deleted, so its decision stays until then too. The check reads what the graph
-    holds now rather than what one delete removed, so a retried delete still finds it.
+    Run after a document is deleted, inside the dataset's lock and database context;
+    ``update()``'s chunk-level path runs it once the edit is written instead (see
+    ``retire_decisions_after_edit``). A fact supported by several documents stays in
+    the graph until the last of them is deleted, so its decision stays until then too.
+    The check reads what the graph holds now rather than what one delete removed, so a
+    retried delete still finds it.
     """
     graph = await get_graph_engine()
     rows, _ = await graph.get_filtered_graph_data([{"type": ["FactConflict"]}], include_edges=False)
@@ -300,3 +302,19 @@ async def retire_forgotten_decisions(dataset, user: User) -> set[str]:
         await write_conflicts([ConflictsToWrite(scope, dropped_conflict_ids=list(forgotten))], ctx)
         await write_conflicts([ConflictsToFinalize(dropped_conflict_ids=list(forgotten))], ctx)
     return set(forgotten)
+
+
+async def retire_decisions_after_edit(dataset, user: User) -> set[str]:
+    """Retire the decisions an edit left without their chosen fact, and invalidate sessions.
+
+    ``update()``'s chunk-level path drops the facts of the chunks an edit touched and
+    extracts the new chunks. A decision whose fact the new extraction does not restore,
+    because the text changed or the fact came back under another relationship, would go
+    on presenting it as accepted and hiding its competitors. Run inside the dataset's
+    lock and database context, after the edit was written: a failed write may only not
+    have restored the fact yet. A failed session invalidation fails the update.
+    """
+    retired = await retire_forgotten_decisions(dataset, user)
+    if retired:
+        await invalidate_sessions_for_deleted_data(dataset.id, retired, set(), user_id=user.id)
+    return retired

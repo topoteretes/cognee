@@ -77,6 +77,7 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import GLINER_DEMO_EXTRACTOR, LLM_EXTRACTOR, get_cognify_config
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
+from cognee.modules.conflicts.methods import retire_decisions_after_edit
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
     StagedContent,
@@ -767,6 +768,10 @@ async def _run_incremental_update(
                 chunker=chunker,
                 extractor=extractor,
             )
+            # An edit can remove the fact a user chose, or restate it under another
+            # relationship; its decision must not outlive it. Read once the new
+            # chunks' facts are written, so a fact the edit kept is still found.
+            await retire_decisions_after_edit(dataset, user)
     except Exception as error:
         await log_pipeline_run_error(
             pipeline_run.pipeline_run_id,
