@@ -1,9 +1,10 @@
 "use client";
 
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { Tooltip } from "@mantine/core";
 import SkeletonBar from "@/ui/elements/SkeletonBar";
 import PlusIcon from "@/ui/elements/PlusIcon";
+import { isPendingDataset } from "@/app/(app)/datasets/brainsTypes";
 import type { DatasetProcessing } from "@/modules/datasets/useDatasetProcessing";
 
 export type BrainStatus =
@@ -16,11 +17,15 @@ export type BrainStatus =
   | "loading";
 
 export interface BrainListItem {
+  /** Only the selected dataset has it; the rest show their run status alone. */
   processingCounts?: DatasetProcessing;
   id: string;
   name: string;
   status: BrainStatus;
-  documents: number;
+  // -1 = the count fetch hasn't resolved yet (renders a skeleton). null = it
+  // resolved but couldn't produce an exact number (renders "N/A"). Both are
+  // distinct from a real count and must not collide.
+  documents: number | null;
 }
 
 const STATUS_DOT: Record<BrainStatus, string> = {
@@ -56,11 +61,16 @@ const STATUS_HINT: Record<BrainStatus, string> = {
 const OUTDATED_DOT = "#F97316";
 const OUTDATED_LABEL = "Outdated";
 const OUTDATED_HINT = "Config changed — needs rebuilding";
+const INCOMPLETE_DOT = "#F59E0B";
+const INCOMPLETE_LABEL = "Partially processed";
+const INCOMPLETE_HINT = "Some imported items are not ready to search";
 
 export default function BrainList<T extends BrainListItem>({
   brains,
   selectedId,
   outdatedIds,
+  toolbar = null,
+  emptyLabel = null,
   onSelect,
   onCreate,
   onDelete,
@@ -68,6 +78,10 @@ export default function BrainList<T extends BrainListItem>({
   brains: T[];
   selectedId: string | null;
   outdatedIds: Set<string>;
+  /** Rendered between the header and the list, e.g. search and filters. */
+  toolbar?: ReactNode;
+  /** Shown instead of the rows when a filter leaves nothing to list. */
+  emptyLabel?: string | null;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onDelete: (brain: T) => void;
@@ -75,31 +89,38 @@ export default function BrainList<T extends BrainListItem>({
   return (
     <div style={{ width: 312, flexShrink: 0, borderRight: "1px solid rgba(255,255,255,0.1)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div style={{ height: 44, padding: "0 14px", borderBottom: "1px solid rgba(255,255,255,0.1)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Brain</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.55)", letterSpacing: "0.08em", textTransform: "uppercase" }}>Datasets</span>
         <button onClick={onCreate} className="hover:bg-[#5A0ED6] cursor-pointer" style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}>
-          <PlusIcon /> New brain
+          <PlusIcon /> New dataset
         </button>
       </div>
+      {toolbar}
       <div style={{ flex: 1, overflowY: "auto" }}>
+        {brains.length === 0 && emptyLabel && (
+          <p style={{ padding: "24px 14px", margin: 0, textAlign: "center", fontSize: 12, color: "rgba(237,236,234,0.35)" }}>{emptyLabel}</p>
+        )}
         {brains.map((ds, i) => {
           const active = ds.id === selectedId;
           const statusLoading = ds.status === "loading";
-          const docsLoadingRow = ds.documents < 0;
+          const docsLoadingRow = ds.documents === -1;
+          const docsUnknown = ds.documents === null;
           // Doc counts are unreliable while the pipeline runs — hide them
           // until the dataset reaches a terminal status.
           const processing = ds.status === "pending" || ds.status === "running";
-          const incomplete = !processing && ds.status === "completed" && (ds.processingCounts?.pending ?? 0) > 0;
+          // A completed run says the pipeline finished, not that every imported
+          // item made it through, so the stored item counts can still disagree.
+          const incomplete = ds.status === "completed" && (ds.processingCounts?.pending ?? 0) > 0;
           const isOutdated = outdatedIds.has(ds.id);
-          const dotColor = isOutdated ? OUTDATED_DOT : incomplete ? "#F59E0B" : STATUS_DOT[ds.status];
-          const statusLabel = isOutdated ? OUTDATED_LABEL : incomplete ? "Partially processed" : STATUS_LABEL[ds.status];
-          const statusHint = isOutdated ? OUTDATED_HINT : incomplete ? "Some imported items are not ready to search" : STATUS_HINT[ds.status];
+          const dotColor = isOutdated ? OUTDATED_DOT : incomplete ? INCOMPLETE_DOT : STATUS_DOT[ds.status];
+          const statusLabel = isOutdated ? OUTDATED_LABEL : incomplete ? INCOMPLETE_LABEL : STATUS_LABEL[ds.status];
+          const statusHint = isOutdated ? OUTDATED_HINT : incomplete ? INCOMPLETE_HINT : STATUS_HINT[ds.status];
           return (
-            <div key={ds.id} onClick={() => onSelect(ds.id)}
+            <div key={ds.id} onClick={() => { if (!isPendingDataset(ds.id)) onSelect(ds.id); }}
               style={{
                 display: "flex", alignItems: "center", gap: 8,
                 padding: "8px 14px",
                 borderBottom: i < brains.length - 1 ? "1px solid rgba(255,255,255,0.07)" : "none",
-                cursor: "pointer",
+                cursor: isPendingDataset(ds.id) ? "default" : "pointer",
                 background: active ? "rgba(188,155,255,0.20)" : "transparent",
                 userSelect: "none",
               }}
@@ -125,18 +146,20 @@ export default function BrainList<T extends BrainListItem>({
               )}
               <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: "#EDECEA", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 <span title={ds.name}>{ds.name}</span>
-                {ds.processingCounts && <span style={{ display: "block", fontSize: 11, fontWeight: 400, color: "rgba(237,236,234,0.6)", marginTop: 4 }}>
-                  {ds.processingCounts.completed} / {ds.processingCounts.total} ready · {ds.processingCounts.pending} remaining
-                </span>}
+                {ds.processingCounts && (
+                  <span style={{ display: "block", fontSize: 11, fontWeight: 400, color: "rgba(237,236,234,0.6)", marginTop: 4 }}>
+                    {ds.processingCounts.completed} / {ds.processingCounts.total} ready · {ds.processingCounts.pending} remaining
+                  </span>
+                )}
               </span>
               <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)", flexShrink: 0, minWidth: 16, textAlign: "right" }}>
-                {docsLoadingRow ? <SkeletonBar width={14} height={8} /> : processing ? "processing" : ds.documents}
+                {docsLoadingRow ? <SkeletonBar width={14} height={8} /> : processing ? "processing" : docsUnknown ? "N/A" : ds.documents}
               </span>
-              {ds.name !== "default_dataset" && (
+              {ds.name !== "default_dataset" && !isPendingDataset(ds.id) && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onDelete(ds); }}
                   style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 500, color: "rgba(237,236,234,0.7)", cursor: "pointer", flexShrink: 0 }}
-                  title="Delete brain"
+                  title="Delete dataset"
                 >
                   Delete
                 </button>

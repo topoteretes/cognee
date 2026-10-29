@@ -19,7 +19,11 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 from uuid import UUID
 
-from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
+from cognee.modules.data.methods.get_existing_data_ids import (
+    DATA_ID_BATCH_SIZE,
+    get_existing_data_ids,
+)
+from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id, get_unique_data_ids
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -315,6 +319,7 @@ async def resolve_dlt_sources(
                     user,
                     manifest_data_ids,
                     manifest_source_names=ingested_source_names,
+                    dataset_id=dataset_id,
                 )
             if do_document_cleanup:
                 await _delete_dlt_orphans(
@@ -323,6 +328,7 @@ async def resolve_dlt_sources(
                     document_fresh_ids,
                     sources=tuple({source for source, _ in document_scopes}),
                     document_scopes=document_scopes,
+                    dataset_id=dataset_id,
                 )
 
         orphan_cleanup = _cleanup
@@ -417,12 +423,14 @@ async def _build_source_manifest_item(
     # Stable per-row node ids via the shared identifier formula. FK lookup
     # maps (table, pk_value) → node_id; when multiple rows share a PK value,
     # the last one wins (best-effort).
-    # TODO: add a batch variant of get_unique_data_id (one query per source
-    # instead of one per row) after the incremental load PR reshapes it.
-    node_ids: dict[tuple[str, str, str], UUID] = {
-        key: await get_unique_data_id(_dlt_row_identifier(row), user)
-        for key, row in unique_rows.items()
-    }
+    node_ids: dict[tuple[str, str, str], UUID] = dict(
+        zip(
+            unique_rows,
+            await get_unique_data_ids(
+                [_dlt_row_identifier(row) for row in unique_rows.values()], user
+            ),
+        )
+    )
 
     fk_lookup: dict[tuple[str, str], UUID] = {}
     shadowed: dict[str, int] = {}
@@ -626,28 +634,15 @@ async def _stable_row_ids(rows: list[DltRowData], user: User, dataset_id: UUID) 
     if not rows:
         return []
 
-    new_ids = [await get_unique_data_id(_dlt_row_identifier(row), user, dataset_id) for row in rows]
-    old_ids = [await get_unique_data_id(_dlt_row_identifier(row), user) for row in rows]
-
-    from sqlalchemy import select
-
     from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.data.models import Data
 
+    identifiers = [_dlt_row_identifier(row) for row in rows]
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
-        adopted = set(
-            (
-                await session.execute(
-                    select(Data.id).filter(Data.id.in_(old_ids), Data.dataset_id == dataset_id)
-                )
-            ).scalars()
-        )
+        new_ids = await get_unique_data_ids(identifiers, user, dataset_id, session)
+        old_ids = await get_unique_data_ids(identifiers, user, session=session)
+        adopted = await get_existing_data_ids(session, old_ids, dataset_id)
     return [old_id if old_id in adopted else new_id for old_id, new_id in zip(old_ids, new_ids)]
-
-
-# Within SQLite's bind-parameter limit.
-_STRUCTURE_REFRESH_BATCH = 500
 
 
 async def _refresh_row_structure(items: list[DataItem], dataset_id: UUID) -> None:
@@ -669,10 +664,10 @@ async def _refresh_row_structure(items: list[DataItem], dataset_id: UUID) -> Non
 
     ids = list(wanted)
     async with get_relational_engine().get_async_session() as session:
-        for start in range(0, len(ids), _STRUCTURE_REFRESH_BATCH):
+        for start in range(0, len(ids), DATA_ID_BATCH_SIZE):
             rows = await session.execute(
                 select(Data).filter(
-                    Data.id.in_(ids[start : start + _STRUCTURE_REFRESH_BATCH]),
+                    Data.id.in_(ids[start : start + DATA_ID_BATCH_SIZE]),
                     Data.dataset_id == dataset_id,
                 )
             )
@@ -764,8 +759,14 @@ def _reserved_json_column(row: DltRowData, source_tag: str, column: str, raise_s
     return raw
 
 
-def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
+def _row_node_set(row: DltRowData, source_tag: str) -> list[str]:
     """The node sets a document row names in its ``cognee_node_set`` column.
+
+    A row states its full current node sets, so a row without the column, or
+    with an empty list, has none: ``[]``, never ``None``. Re-ingesting an
+    existing document treats ``None`` as "keep the stored node sets" (the
+    PATCH rule of update()), which would leave a page that lost all its labels
+    in the node sets it was removed from; ``[]`` clears them.
 
     The column must hold a JSON list of names. It comes back as that list (a
     json column) or as its JSON text (SQLite). Any other shape raises: the
@@ -784,7 +785,7 @@ def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
     """
     raw = _reserved_json_column(row, source_tag, NODE_SET_COLUMN, _raise_node_set_shape)
     if raw is None:
-        return None
+        return []
     if not isinstance(raw, list):
         _raise_node_set_shape(row, source_tag, f"a JSON {type(raw).__name__}")
     # No cap on the number or length of names, on purpose. A cap would cut a
@@ -805,7 +806,7 @@ def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
         except UnicodeEncodeError:
             _raise_node_set_shape(row, source_tag, "an entry that cannot be encoded as a name")
         unique.setdefault(key, name)
-    return list(unique.values()) or None
+    return list(unique.values())
 
 
 _STRUCTURE_ENTRY_KEYS = {"kind", "id", "name", "document"}
@@ -1099,6 +1100,7 @@ async def _delete_dlt_orphans(
     sources: tuple[str, ...] = ("dlt", "dlt_source"),
     manifest_source_names: set[str] | None = None,
     document_scopes: set[tuple[str, str]] | None = None,
+    dataset_id: UUID | None = None,
 ) -> None:
     """Delete dlt-sourced Data records (and their graph/vector artifacts) that
     are no longer present in the freshly-ingested dlt sources.
@@ -1106,6 +1108,11 @@ async def _delete_dlt_orphans(
     This handles the case where rows are deleted from the upstream database
     and the user re-ingests.  dlt cleans its own staging DB, but cognee's
     relational, graph, and vector stores still hold stale data.
+
+    ``dataset_id`` is the dataset the rows were just written to and is
+    authoritative when given: a name resolves only among the caller's own
+    datasets, so for a shared dataset written by id a name lookup would pick
+    the caller's own same-named dataset (and sweep its rows) or nothing at all.
 
     ``sources`` restricts cleanup to Data whose ``system_metadata["source"]``
     is one of the given tags: the default covers relational manifests and
@@ -1128,12 +1135,26 @@ async def _delete_dlt_orphans(
     from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
         delete_data_nodes_and_edges,
     )
+    from cognee.modules.users.exceptions import PermissionDeniedError
 
     # Find the dataset — if it doesn't exist yet this is a first ingestion,
-    # so there can be no orphans.
-    existing_datasets = await get_authorized_existing_datasets(
-        user=user, permission_type="write", datasets=[dataset_name]
-    )
+    # so there can be no orphans. Prefer the id: add() already resolved and
+    # authorized it, and a name only matches datasets the caller owns.
+    # Cleanup deletes, so it needs delete permission; a write-only grantee's
+    # rows are committed by now, so skip the sweep instead of failing add().
+    try:
+        existing_datasets = await get_authorized_existing_datasets(
+            user=user,
+            permission_type="delete",
+            datasets=[dataset_id] if dataset_id is not None else [dataset_name],
+        )
+    except PermissionDeniedError:
+        logger.warning(
+            "Skipping dlt orphan cleanup for dataset '%s': no delete permission, "
+            "so rows deleted upstream stay in the dataset.",
+            dataset_name,
+        )
+        return
     if not existing_datasets:
         return
 
@@ -1179,6 +1200,7 @@ async def _delete_dlt_orphans(
     # targets the wrong DB and leaves the forgotten row's chunks/entities
     # searchable under ENABLE_BACKEND_ACCESS_CONTROL.
     async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+        purged: list = []  # (orphan, its deleted graph elements)
         for orphan in orphans:
             try:
                 # Called unconditionally: gating on has_data_related_nodes would
@@ -1186,30 +1208,49 @@ async def _delete_dlt_orphans(
                 # relational ledger (the function handles both paths and no-ops
                 # when nothing is related).
                 deleted_elements = await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
-                await delete_data(orphan, dataset.id)
-                # Invalidate session answers that used the orphan's graph
-                # elements (best-effort; must not fail the cleanup).
-                try:
-                    from cognee.modules.session_lifecycle.invalidate_sessions import (
-                        invalidate_sessions_for_deleted_data,
-                    )
-
-                    await invalidate_sessions_for_deleted_data(
-                        dataset.id,
-                        deleted_elements.node_ids,
-                        deleted_elements.edge_ids,
-                        user_id=user.id,
-                    )
-                except Exception:
-                    logger.warning(
-                        "Session invalidation after orphan cleanup failed (non-fatal).",
-                        exc_info=True,
-                    )
+                purged.append((orphan, deleted_elements))
             except Exception:
                 failed.append(orphan.id)
                 logger.warning(
                     "Failed to delete orphaned dlt row data_id=%s, skipping.",
                     orphan.id,
+                    exc_info=True,
+                )
+
+        # One call for every purged row: their index nodes and routing rows go
+        # in one round of store writes (per row, a sweep of thousands would
+        # serialize thousands of commits under the dataset lock), then the
+        # rows. A row whose delete fails keeps its Data row, so the next index
+        # build rewrites what was removed for it.
+        if purged:
+            try:
+                await delete_data([orphan for orphan, _ in purged], dataset.id)
+            except Exception:
+                failed.extend(orphan.id for orphan, _ in purged)
+                logger.warning(
+                    "Failed to delete %d orphaned dlt row(s), skipping.",
+                    len(purged),
+                    exc_info=True,
+                )
+
+        # Invalidate session answers that used the orphans' graph elements
+        # (best-effort; must not fail the cleanup). The graph purge above is
+        # what they depend on, not the row delete.
+        for _orphan, deleted_elements in purged:
+            try:
+                from cognee.modules.session_lifecycle.invalidate_sessions import (
+                    invalidate_sessions_for_deleted_data,
+                )
+
+                await invalidate_sessions_for_deleted_data(
+                    dataset.id,
+                    deleted_elements.node_ids,
+                    deleted_elements.edge_ids,
+                    user_id=user.id,
+                )
+            except Exception:
+                logger.warning(
+                    "Session invalidation after orphan cleanup failed (non-fatal).",
                     exc_info=True,
                 )
 

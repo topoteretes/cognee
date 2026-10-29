@@ -18,7 +18,12 @@ from cognee.modules.engine.utils.generate_edge_object_id import generate_edge_ob
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.memify.review_conflicts import read_facts, write_conflicts
-from cognee.tasks.memify.review_conflicts.models import AcceptedConflict, ReviewBatch, ReviewScope
+from cognee.tasks.memify.review_conflicts.models import (
+    AcceptedConflict,
+    ConflictsToFinalize,
+    ConflictsToWrite,
+    ReviewScope,
+)
 
 
 class RecordingVectors:
@@ -46,7 +51,7 @@ class RecordingVectors:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("count", [1, 400])
-async def test_review_writes_preserve_ownership_and_dataset_delete_removes_conflicts(
+async def test_review_writes_are_dataset_owned_and_dataset_delete_removes_conflicts(
     tmp_path, monkeypatch, count
 ):
     graph = LadybugAdapter(str(tmp_path / "graph"), kuzu_buffer_pool_size=128 * 1024 * 1024)
@@ -71,7 +76,7 @@ async def test_review_writes_preserve_ownership_and_dataset_delete_removes_confl
         pipeline_run_id=uuid4(),
     )
     scope = ReviewScope(str(dataset_id), {}, {})
-    accepted, descriptions, nodes, edges = [], {}, [], []
+    accepted, nodes, edges = [], [], []
     try:
         await mark_graph_provenance_if_empty(graph)
         for i in range(count):
@@ -92,10 +97,6 @@ async def test_review_writes_preserve_ownership_and_dataset_delete_removes_confl
                 str, (subject.id, first.id, current.id, chunk.id)
             )
             statuses = {}
-            for entity in (subject, first, current):
-                eid = str(entity.id)
-                scope.entities[eid] = entity.model_dump(mode="json")
-                descriptions[eid] = "After review"
             for value_id, status in [(first_id, "superseded"), (current_id, "current")]:
                 fid = generate_edge_object_id(subject_id, value_id, "has_ceo")
                 props = {"edge_text": "CEO fact", "edge_object_id": fid, "weight": 3}
@@ -136,22 +137,22 @@ async def test_review_writes_preserve_ownership_and_dataset_delete_removes_confl
         await graph.add_nodes(
             [survivor], source_ref_key=make_source_ref_key(other_dataset, uuid4())
         )
-        batch = ReviewBatch(scope, descriptions, accepted, shown_fact_ids=set(scope.facts))
-        state = write_conflicts.ReviewWriteState()
-        await write_conflicts.write_review_batch([batch], ctx, state)
-        pending, dropped = await read_facts.find_conflicts_with_lost_citations(graph, dataset_id)
-        assert len(pending) == count
-        assert dropped == []
-        await write_conflicts.write_review_batch([ReviewBatch(scope, final=True)], ctx, state)
-        assert await read_facts.find_conflicts_with_lost_citations(graph, dataset_id) == ([], [])
+        batch = ConflictsToWrite(scope, accepted, shown_fact_ids=set(scope.facts))
+        await write_conflicts.write_conflicts([batch], ctx)
+        stored = await read_facts.read_stored_conflicts(graph, dataset_id, None)
+        assert len(stored.ids_to_review) == count
+        assert stored.ids_to_drop == []
+        await write_conflicts.write_conflicts(
+            [ConflictsToFinalize(accepted_conflicts=accepted)], ctx
+        )
+        stored = await read_facts.read_stored_conflicts(graph, dataset_id, None)
+        assert stored.ids_to_review == stored.ids_to_drop == []
         saved = await graph.get_nodes([str(accepted[0].conflict.id)])
-        assert saved[0]["review_pending"] is False
+        assert saved[0]["write_pending"] is False
         assert saved[0]["sources"] == accepted[0].conflict.sources
         assert len(vectors.points["EdgeType_relationship_name"]) == count
         ownership = await graph.find_node_source_refs_by_dataset(str(dataset_id))
         assert str(accepted[0].conflict.id) in ownership
-        # Updating an Entity during review must retain the document's original ownership.
-        assert owner in ownership[next(iter(scope.entities))]
         await unified.delete_by_dataset_id(str(dataset_id))
         assert await graph.get_nodes([str(item.conflict.id) for item in accepted]) == []
         assert (

@@ -1,4 +1,5 @@
 import type { BusinessEntity } from "../sceneTypes";
+import type { ColorEncoding } from "../colorEncoding";
 import type { Transform } from "./businessHitTest";
 import { setsOf } from "../computeBrainState";
 
@@ -89,7 +90,8 @@ export function minimapWorldPoint(
 export function drawMinimap(
   ctx: CanvasRenderingContext2D,
   entities: BusinessEntity[],
-  setColor: Record<string, string>,
+  encoding: ColorEncoding,
+  entityType: Record<string, string>,
   transform: Transform,
   width: number,
   height: number,
@@ -110,8 +112,7 @@ export function drawMinimap(
   entities.forEach((n) => {
     if (n.x == null || n.y == null) return;
     const px = p.ox + (n.x - p.x0) * p.scale, py = p.oy + (n.y - p.y0) * p.scale;
-    const set = setsOf(n)[0];
-    ctx.fillStyle = (set && setColor[set]) || "#8A7BD8";
+    ctx.fillStyle = encoding.entityFill(setsOf(n), entityType[n.id]);
     ctx.globalAlpha = 0.8;
     ctx.fillRect(px - 1, py - 1, 2, 2);
   });
