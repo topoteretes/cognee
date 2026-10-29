@@ -136,12 +136,15 @@ class CogneeApiClient:
         item only, see ``named_text.check_name``). Returns the parts and the
         file handles to close once the request is sent.
         """
-        from cognee.cli.named_text import check_name, upload_filename
+        from cognee.cli.named_text import check_name, inline_text_indices, upload_filename
 
         check_name(data_items, name)
+        # check_name allows URLs and directories next to the one named text, so
+        # the name goes on that text's index only, never on every non-file item.
+        named_index = inline_text_indices(data_items)[0] if name else None
         files: list[tuple] = []
         opened = []
-        for item in data_items:
+        for index, item in enumerate(data_items):
             if os.path.isfile(item):
                 mime, _ = mimetypes.guess_type(item)
                 fh = open(item, "rb")  # noqa: SIM115
@@ -150,7 +153,9 @@ class CogneeApiClient:
                     ("data", (os.path.basename(item), fh, mime or "application/octet-stream"))
                 )
             else:
-                filename = upload_filename(name) if name else f"text_{len(files)}.txt"
+                filename = (
+                    upload_filename(name) if index == named_index else f"text_{len(files)}.txt"
+                )
                 files.append(("data", (filename, io.BytesIO(item.encode()), "text/plain")))
         return files, opened
 

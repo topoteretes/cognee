@@ -159,6 +159,7 @@ async def run_tasks_data_item_incremental(
     # re-resolves fresh content inside the session that records the status.
     content_hash = None
     data_point = None
+    stored = None
     if not isinstance(data_item, Data):
         # If the DataItem carries a stable data_id (e.g. from DLT), prefer it
         # over the content lookup so lookups stay consistent.
@@ -208,6 +209,15 @@ async def run_tasks_data_item_incremental(
     if data_point:
         status_for_pipeline = (data_point.pipeline_status or {}).get(pipeline_name) or {}
         if is_data_item_completed(status_for_pipeline.get(str(dataset.id))):
+            # The pre-save above already wrote this item. The same content under
+            # another name lands on another key (``<hash>/<name>``) that the
+            # existing row never points at, so release it rather than leave an
+            # object no Data row references and no forget() can reach.
+            if stored is not None and stored.file_path not in (
+                data_point.raw_data_location,
+                data_point.original_data_location,
+            ):
+                await db_engine.remove_data_file_if_unreferenced(stored.file_path)
             yield {
                 "run_info": PipelineRunAlreadyCompleted(
                     pipeline_run_id=pipeline_run_id,

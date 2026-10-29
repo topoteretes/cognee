@@ -172,6 +172,10 @@ async def test_completed_content_is_skipped_without_a_second_lookup(monkeypatch)
             name="doc",
             label=None,
             external_metadata={},
+            # The pre-save landed on the key the row already holds (same content,
+            # same name), so the skip has no stored object to release.
+            raw_data_location="file:///tmp/x.txt",
+            original_data_location="file:///tmp/x.txt",
         )
 
     # Build the row after we know the dataset id: wire once, then patch the row.

@@ -222,6 +222,17 @@ class TestAddFileDetection:
             files_arg = http.post.call_args.kwargs["files"]
             assert files_arg[0][1][0] == "Q3 plan.txt"
 
+    def test_only_the_inline_text_is_named_next_to_a_url_or_directory(self, tmp_path):
+        """check_name lets a URL or directory sit beside the named text; the name
+        must still land on that one text, not on every non-file item."""
+        with patch("cognee.cli.api_client._import_httpx"):
+            client, http = self._posting_client()
+
+            client.add(["https://example.com/a", "my note", str(tmp_path)], "ds", name="Note")
+
+            filenames = [part[1][0] for part in http.post.call_args.kwargs["files"]]
+            assert filenames == ["text_0.txt", "Note.txt", "text_2.txt"]
+
     def test_a_name_with_two_texts_is_refused_before_anything_is_sent(self):
         with patch("cognee.cli.api_client._import_httpx"):
             client, http = self._posting_client()

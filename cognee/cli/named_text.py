@@ -9,7 +9,6 @@ and the option is refused unless exactly one item is inline text.
 
 import os
 import re
-from pathlib import PurePath
 
 NAME_HELP = (
     "Document name for text given inline (e.g. --name 'Q3 plan'); without it the "
@@ -49,9 +48,14 @@ def check_name(data_items: list[str], name: str | None) -> None:
 
 
 def upload_filename(name: str) -> str:
-    """The multipart filename for a named text: its basename, ending in ``.txt``."""
-    base = PurePath(name.strip().replace("\\", "/")).name.strip() or "text"
-    return base if base.lower().endswith(".txt") else f"{base}.txt"
+    """The multipart filename for a named text: the ``.txt`` basename cognee stores it under.
+
+    The same rule the in-process lane applies (``text_file_name``), so a name is
+    stored identically whichever lane carries it.
+    """
+    from cognee.modules.ingestion.data_types.TextData import text_file_name
+
+    return text_file_name(name) or "text.txt"
 
 
 def name_inline_text(data_items: list[str], name: str | None) -> list:

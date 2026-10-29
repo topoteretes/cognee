@@ -512,7 +512,10 @@ async def ingest_data(
                 content_changed = str(data_point.content_hash) != str(new_content_hash)
 
                 new_original_location = original_file_metadata["file_path"]
-                if content_changed and data_point.original_data_location != new_original_location:
+                # Content-addressed keys also carry the name (``<hash>/<name>``),
+                # so the same content under a new name moves to a new key too;
+                # the old object is released either way (kept while still shared).
+                if data_point.original_data_location != new_original_location:
                     replaced_original_locations.append(data_point.original_data_location)
 
                 # Rows are dataset-scoped (the startup migration backfills
