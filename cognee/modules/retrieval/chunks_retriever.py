@@ -36,6 +36,7 @@ class ChunksRetriever(BaseRetriever):
         top_k: int | None = 5,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
+        node_ids: list[str] | None = None,
     ):
         """
         Initializes the chunk retriever.
@@ -54,6 +55,7 @@ class ChunksRetriever(BaseRetriever):
         self.top_k = top_k
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
+        self.node_ids = node_ids
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
@@ -136,6 +138,7 @@ class ChunksRetriever(BaseRetriever):
                 include_payload=True,
                 node_name=self.node_name,
                 node_name_filter_operator=self.node_name_filter_operator,
+                **({"node_ids": self.node_ids} if self.node_ids is not None else {}),
             )
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found in vector database")

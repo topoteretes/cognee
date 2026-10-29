@@ -51,6 +51,135 @@ async def test_feeling_lucky_delegates_to_select_search_type(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_document_chunk_search_resolves_document_to_chunk_ids(monkeypatch):
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.data.processing.document_types import TextDocument
+    from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
+
+    doc_id = "doc-a"
+    chunk_id = "chunk-a"
+    graph = AsyncMock()
+    graph.get_nodeset_subgraph = AsyncMock(
+        return_value=(
+            [
+                (doc_id, {"type": "TextDocument", "name": "doc_a"}),
+                (chunk_id, {"type": "DocumentChunk"}),
+            ],
+            [(chunk_id, doc_id, "is_part_of", {})],
+        )
+    )
+    monkeypatch.setattr(mod, "get_graph_engine", AsyncMock(return_value=graph))
+
+    retriever = await mod.get_search_type_retriever_instance(
+        SearchType.CHUNKS,
+        query_text="fruit",
+        node_type=TextDocument,
+        node_name=["doc_a"],
+    )
+
+    assert isinstance(retriever, ChunksRetriever)
+    assert retriever.node_ids == [chunk_id]
+    assert retriever.node_name is None
+    graph.get_nodeset_subgraph.assert_awaited_once_with(
+        node_type=TextDocument,
+        node_name=["doc_a"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_document_chunk_and_scope_intersects_chunks(monkeypatch):
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.data.processing.document_types import TextDocument
+
+    graph = AsyncMock()
+    graph.get_nodeset_subgraph = AsyncMock(
+        return_value=(
+            [
+                ("doc-a", {"type": "TextDocument", "name": "doc_a"}),
+                ("doc-b", {"type": "TextDocument", "name": "doc_b"}),
+                ("chunk-shared", {"type": "DocumentChunk"}),
+                ("chunk-a", {"type": "DocumentChunk"}),
+                ("chunk-b", {"type": "DocumentChunk"}),
+            ],
+            [
+                ("chunk-shared", "doc-a", "is_part_of", {}),
+                ("chunk-a", "doc-a", "is_part_of", {}),
+                ("chunk-shared", "doc-b", "is_part_of", {}),
+                ("chunk-b", "doc-b", "is_part_of", {}),
+            ],
+        )
+    )
+    monkeypatch.setattr(mod, "get_graph_engine", AsyncMock(return_value=graph))
+
+    retriever = await mod.get_search_type_retriever_instance(
+        SearchType.RAG_COMPLETION,
+        query_text="fruit",
+        node_type=TextDocument,
+        node_name=["doc_a", "doc_b"],
+        node_name_filter_operator="AND",
+    )
+
+    assert retriever.node_ids == ["chunk-shared"]
+    assert retriever.node_name is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("search_type", "node_type"),
+    [
+        (SearchType.SUMMARIES, None),
+        (SearchType.BROAD, None),
+        (SearchType.HYBRID_COMPLETION, None),
+        (SearchType.CHUNKS, int),
+    ],
+)
+async def test_node_name_scope_rejects_search_types_that_cannot_honor_it(search_type, node_type):
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.data.processing.document_types import TextDocument
+    from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+
+    kwargs = {"node_name": ["doc_a"]}
+    if node_type is not None:
+        kwargs["node_type"] = node_type
+    elif search_type in (SearchType.HYBRID_COMPLETION, SearchType.CHUNKS):
+        kwargs["node_type"] = TextDocument
+
+    with pytest.raises(QueryValidationError, match="does not support node_name filtering"):
+        await mod.get_search_type_retriever_instance(search_type, query_text="q", **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_feeling_lucky_limited_to_search_types_supporting_document_scope(monkeypatch):
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.data.processing.document_types import TextDocument
+
+    async def _select(query_text, allowed_search_types=None):
+        assert query_text == "fruit"
+        assert SearchType.SUMMARIES not in allowed_search_types
+        assert SearchType.CHUNKS in allowed_search_types
+        return SearchType.CHUNKS
+
+    graph = AsyncMock()
+    graph.get_nodeset_subgraph = AsyncMock(
+        return_value=(
+            [("doc-a", {"type": "TextDocument", "name": "doc_a"})],
+            [],
+        )
+    )
+    monkeypatch.setattr(mod, "select_search_type", _select)
+    monkeypatch.setattr(mod, "get_graph_engine", AsyncMock(return_value=graph))
+
+    retriever = await mod.get_search_type_retriever_instance(
+        SearchType.FEELING_LUCKY,
+        query_text="fruit",
+        node_type=TextDocument,
+        node_name=["doc_a"],
+    )
+
+    assert retriever.node_ids == []
+
+
+@pytest.mark.asyncio
 async def test_disallowed_cypher_search_types_raise(monkeypatch):
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
 

@@ -3,6 +3,8 @@ from collections.abc import Callable
 
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.data.processing.document_types import Document
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -40,7 +42,10 @@ from cognee.modules.retrieval.skills_retriever import SkillsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
 from cognee.modules.search.exceptions import SearchTypeDisabledError, UnsupportedSearchTypeError
-from cognee.modules.search.operations import select_search_type
+from cognee.modules.search.operations.select_search_type import (
+    select_search_type,
+    supported_search_types_for_node_name,
+)
 from cognee.modules.search.types import SearchType
 from cognee.modules.search.types.SearchType import DEPRECATED_SEARCH_TYPES
 from cognee.shared.logging_utils import get_logger
@@ -48,6 +53,55 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 CYPHER_SEARCH_TYPES = (SearchType.CYPHER, SearchType.NATURAL_LANGUAGE)
+
+
+def supports_node_name_filter(query_type: SearchType, node_type: type | None) -> bool:
+    return query_type in supported_search_types_for_node_name(node_type)
+
+
+def validate_node_name_scope(
+    query_type: SearchType, node_name: list[str] | None, node_type: type | None
+) -> None:
+    if node_name and not supports_node_name_filter(query_type, node_type):
+        node_type_name = getattr(node_type, "__name__", "None")
+        raise QueryValidationError(
+            message=(
+                f"{query_type.value} search does not support node_name filtering "
+                f"for node_type={node_type_name}. Choose a search type that supports this scope."
+            ),
+            name="UnsupportedNodeNameFilter",
+        )
+
+
+async def _resolve_document_chunk_ids(
+    node_type: type[Document], node_name: list[str], node_name_filter_operator: str
+) -> list[str]:
+    graph_engine = await get_graph_engine()
+    nodes, edges = await graph_engine.get_nodeset_subgraph(
+        node_type=node_type,
+        node_name=node_name,
+    )
+    node_types = {str(node_id): properties.get("type") for node_id, properties in nodes}
+    document_names = {
+        str(node_id): properties.get("name")
+        for node_id, properties in nodes
+        if properties.get("type") == node_type.__name__ and properties.get("name") in node_name
+    }
+    chunks_by_name = {name: set() for name in node_name}
+    for source_id, target_id, relationship_name, _properties in edges:
+        if relationship_name != "is_part_of":
+            continue
+        source_id = str(source_id)
+        target_id = str(target_id)
+        if target_id in document_names and node_types.get(source_id) == "DocumentChunk":
+            chunks_by_name[document_names[target_id]].add(source_id)
+        if source_id in document_names and node_types.get(target_id) == "DocumentChunk":
+            chunks_by_name[document_names[source_id]].add(target_id)
+
+    if node_name_filter_operator == "AND":
+        return list(set.intersection(*chunks_by_name.values())) if chunks_by_name else []
+    return list(set.union(*chunks_by_name.values())) if chunks_by_name else []
+
 
 # Returned to the caller: says what to change, without detailing the risk.
 CYPHER_DISABLED_MESSAGE = "{search_type} search is disabled by default for security reasons."
@@ -128,6 +182,28 @@ async def get_search_type_retriever_instance(
     include_references = kwargs.get("include_references", False)
     dataset = kwargs.get("dataset")
 
+    if query_type is SearchType.FEELING_LUCKY:
+        if node_name:
+            query_type = await select_search_type(
+                query_text,
+                allowed_search_types=supported_search_types_for_node_name(node_type),
+            )
+        else:
+            query_type = await select_search_type(query_text)
+
+    validate_node_name_scope(query_type, node_name, node_type)
+
+    document_chunk_ids = None
+    if (
+        query_type in (SearchType.CHUNKS, SearchType.RAG_COMPLETION)
+        and node_name
+        and isinstance(node_type, type)
+        and issubclass(node_type, Document)
+    ):
+        document_chunk_ids = await _resolve_document_chunk_ids(
+            node_type, node_name, node_name_filter_operator
+        )
+
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, tuple[BaseRetriever, dict]] = {
         SearchType.CODE: (
@@ -149,8 +225,9 @@ async def get_search_type_retriever_instance(
             ChunksRetriever,
             {
                 "top_k": top_k,
-                "node_name": node_name,
+                "node_name": None if document_chunk_ids is not None else node_name,
                 "node_name_filter_operator": node_name_filter_operator,
+                **({"node_ids": document_chunk_ids} if document_chunk_ids is not None else {}),
             },
         ),
         # No top_k: BROAD reads the whole dataset (SDK-324).
@@ -180,8 +257,9 @@ async def get_search_type_retriever_instance(
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
                 "include_references": include_references,
-                "node_name": node_name,
+                "node_name": None if document_chunk_ids is not None else node_name,
                 "node_name_filter_operator": node_name_filter_operator,
+                **({"node_ids": document_chunk_ids} if document_chunk_ids is not None else {}),
                 "wide_search_top_k": wide_search_top_k,
             },
         ),
@@ -444,10 +522,6 @@ async def get_search_type_retriever_instance(
             neighborhood_seed_top_k=neighborhood_seed_top_k,
             include_references=include_references,
         )
-
-    # If the query type is FEELING_LUCKY, select the search type intelligently
-    if query_type is SearchType.FEELING_LUCKY:
-        query_type = await select_search_type(query_text)
 
     if query_type in CYPHER_SEARCH_TYPES and not cypher_queries_allowed():
         logger.warning(CYPHER_DISABLED_LOG_MESSAGE.format(search_type=query_type.value))

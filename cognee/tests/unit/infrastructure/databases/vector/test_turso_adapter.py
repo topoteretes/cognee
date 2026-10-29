@@ -159,6 +159,35 @@ async def test_nodeset_and_filtering(adapter):
 
 
 @pytest.mark.asyncio
+async def test_search_filters_by_ids(adapter):
+    docs = _docs()
+    await adapter.create_data_points("DocumentChunk_text", docs)
+
+    results = await adapter.search(
+        "DocumentChunk_text",
+        query_text="quantum",
+        limit=None,
+        node_ids=[docs[0].id, docs[2].id],
+    )
+
+    assert {str(result.id) for result in results} == {str(docs[0].id), str(docs[2].id)}
+
+
+@pytest.mark.asyncio
+async def test_search_empty_id_filter_returns_no_results(adapter):
+    await adapter.create_data_points("DocumentChunk_text", _docs())
+
+    results = await adapter.search(
+        "DocumentChunk_text",
+        query_text="quantum",
+        limit=None,
+        node_ids=[],
+    )
+
+    assert results == []
+
+
+@pytest.mark.asyncio
 async def test_nodeset_filtering_matches_escaped_names(adapter):
     # Payloads are stored with json.dumps, so these names are JSON escapes in the
     # stored text; the filter must still match them, in both modes.

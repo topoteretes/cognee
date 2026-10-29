@@ -185,6 +185,28 @@ async def test_get_context_forwards_nodeset_filter_to_vector_search(mock_vector_
 
 
 @pytest.mark.asyncio
+async def test_get_context_forwards_resolved_node_ids(mock_vector_engine):
+    mock_vector_engine.search.return_value = []
+    retriever = ChunksRetriever(top_k=4, node_ids=["chunk-1", "chunk-2"])
+
+    with patch(
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=_make_unified_mock(mock_vector_engine),
+    ):
+        await retriever.get_retrieved_objects("fruit")
+
+    mock_vector_engine.search.assert_awaited_once_with(
+        "DocumentChunk_text",
+        "fruit",
+        limit=4,
+        include_payload=True,
+        node_name=None,
+        node_name_filter_operator="OR",
+        node_ids=["chunk-1", "chunk-2"],
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_context(mock_vector_engine):
     """Test get_completion returns provided context."""
     retriever = ChunksRetriever()
