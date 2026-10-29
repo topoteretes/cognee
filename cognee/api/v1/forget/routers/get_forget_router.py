@@ -39,9 +39,10 @@ class ForgetPayloadDTO(InDTO):
     )
     everything: bool = Field(
         default=False,
-        description="DANGER: when true, permanently deletes ALL datasets and data the user "
-        "owns (relational records, graph, vector embeddings, session cache). "
-        "Ignores dataId/dataset/datasetId.",
+        description="DANGER: when true, permanently deletes every dataset the user may "
+        "delete (relational records, graph, vector embeddings) and every session the "
+        "user owns or that belongs to one of those datasets. Other users' sessions "
+        "stay. Ignores dataId/dataset/datasetId.",
     )
     memory_only: bool = Field(
         default=False,
@@ -93,8 +94,9 @@ def get_forget_router() -> APIRouter:
           `dataset` or `datasetId` to also be set.
         - **dataset** (Optional[str]): Name of the dataset to delete or clear.
         - **datasetId** (Optional[UUID]): UUID of the dataset, alternative to `dataset`.
-        - **everything** (bool): When true, permanently deletes ALL datasets and data the
-          user owns (default: false).
+        - **everything** (bool): When true, permanently deletes every dataset the user
+          may delete, and every session the user owns or that belongs to one of those
+          datasets (default: false).
         - **memoryOnly** (bool): When true, delete only memory (graph + vector embeddings),
           preserving raw files and data records (default: false).
         - **cleanHistory** (bool): When true, also delete the caller's own search and

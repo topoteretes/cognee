@@ -393,9 +393,10 @@ def get_sessions_router() -> APIRouter:
         caller, their child agents, and dataset-shared sessions. On top
         of that base scope, a tenant owner/admin (same check
         ``GET /tenants/{id}/users`` uses) additionally sees every
-        member's spend. A regular member — or anyone with no tenant,
-        i.e. single-user/local mode — just keeps the base scope rather
-        than being denied outright.
+        member's spend on the tenant's own datasets; a member's sessions
+        in another tenant, or with no dataset, do not appear. A regular
+        member — or anyone with no tenant, i.e. single-user/local mode —
+        just keeps the base scope rather than being denied outright.
 
         ## Query Parameters
         - **range** (Literal['24h', '7d', '30d', 'all']): Time window filtered on last_activity_at:

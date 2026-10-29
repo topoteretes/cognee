@@ -893,3 +893,70 @@ async def test_member_removed_from_tenant_cannot_see_it_through_an_owned_dataset
     assert "Tenant" not in by_type
     assert "Role" not in by_type
     assert f"user:{colleague}" not in by_type.get("User", set())
+
+
+@pytest.mark.asyncio
+async def test_grant_dataset_scope_withholds_grants_and_membership_the_caller_may_not_share():
+    """SDK-1237: a read grant on a dataset does not list who else holds access
+    or who is in a role; an empty share set projects no grant at all."""
+    from cognee.api.v1.visualize.memory_provenance import get_memory_provenance_graph
+
+    seed = await _seed()
+    role_id = str(seed["role_id"])
+    dataset_id = str(seed["dataset_id"])
+    member_id = str(seed["member_id"])
+
+    _, edges = await get_memory_provenance_graph(
+        scope_tenant_ids=[seed["tenant_id"]],
+        scope_dataset_ids=[seed["dataset_id"]],
+        grant_dataset_ids=[],
+    )
+    edge_set = {(s, t, rel) for s, t, rel, _ in edges}
+    assert (f"role:{role_id}", f"dataset:{dataset_id}", "reads") not in edge_set
+    assert (f"user:{member_id}", f"dataset:{dataset_id}", "reads") not in edge_set
+    assert (f"role:{role_id}", f"user:{member_id}", "has_member") not in edge_set
+
+    _, edges = await get_memory_provenance_graph(
+        scope_tenant_ids=[seed["tenant_id"]],
+        scope_dataset_ids=[seed["dataset_id"]],
+        grant_dataset_ids=[seed["dataset_id"]],
+    )
+    edge_set = {(s, t, rel) for s, t, rel, _ in edges}
+    assert (f"role:{role_id}", f"dataset:{dataset_id}", "reads") in edge_set
+    assert (f"role:{role_id}", f"user:{member_id}", "has_member") in edge_set
+
+
+@pytest.mark.asyncio
+async def test_provenance_actor_scope_narrows_a_member_to_their_own_activity():
+    """A plain member sees their own agents and sessions and no grants: the
+    seed gives them read on the dataset, not share."""
+    from sqlalchemy import select
+
+    from cognee.api.v1.visualize.routers.get_schema_router import (
+        _provenance_actor_scope,
+        _provenance_scope,
+    )
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.users.models import User
+
+    seed = await _seed()
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        member = (
+            (await session.execute(select(User).where(User.id == seed["member_id"])))
+            .scalars()
+            .one()
+        )
+        _, _, dataset_ids = await _provenance_scope(member)
+        visible_user_ids, grant_dataset_ids = await _provenance_actor_scope(member, dataset_ids)
+
+    assert visible_user_ids == [seed["member_id"]]
+    assert grant_dataset_ids == []
+
+
+@pytest.mark.asyncio
+async def test_provenance_actor_scope_leaves_an_administrator_unscoped():
+    from cognee.api.v1.visualize.routers.get_schema_router import _provenance_actor_scope
+
+    assert await _provenance_actor_scope(object(), None) == (None, None)

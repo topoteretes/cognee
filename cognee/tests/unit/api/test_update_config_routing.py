@@ -81,6 +81,11 @@ def _patches(
     runtime = runtime if runtime is not None else AsyncMock()
     stack = ExitStack()
     for patched in (
+        patch.object(
+            data_methods_module,
+            "get_authorized_dataset",
+            AsyncMock(return_value=SimpleNamespace(id=uuid4(), name="ds")),
+        ),
         patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=data_id)),
         patch.object(
             relational_module,
