@@ -9,7 +9,8 @@ of the providers' client libraries.
 
 import asyncio
 import json
-from collections.abc import Callable
+import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from hashlib import sha256
 from importlib import import_module
@@ -51,6 +52,18 @@ def _linear_service(access_token: str) -> Any:
     return build_linear_service(access_token)
 
 
+def _apollo_service(api_key: str) -> Any:
+    from cognee.tasks.ingestion.connectors.apollo import build_apollo_service
+
+    return build_apollo_service(api_key)
+
+
+def _asana_service(access_token: str) -> Any:
+    from cognee.tasks.ingestion.connectors.asana import build_asana_service
+
+    return build_asana_service(access_token)
+
+
 _PROVIDERS: dict[str, _Provider] = {
     "google_drive": _Provider(
         prefix="google_drive_files",
@@ -64,11 +77,42 @@ _PROVIDERS: dict[str, _Provider] = {
         source_name="gmail_source",
         service_builder=_google_service_builder("gmail", "v1"),
     ),
+    "google_calendar": _Provider(
+        prefix="google_calendar_events",
+        source_module="cognee.tasks.ingestion.connectors.google_calendar",
+        source_name="google_calendar_source",
+        service_builder=_google_service_builder("calendar", "v3"),
+    ),
     "linear": _Provider(
         prefix="linear",
         source_module="cognee.tasks.ingestion.connectors.linear",
         source_name="linear_source",
         service_builder=_linear_service,
+    ),
+    # ``notion_source`` takes the token itself, so there is no service to build.
+    "notion": _Provider(
+        prefix="notion_pages",
+        source_module="cognee.tasks.ingestion.connectors.notion",
+        source_name="notion_source",
+    ),
+    # No service builder: ``onenote_source`` takes the delegated token itself, and the host
+    # injects any HTTP client through ``service=`` or ``http_client=``.
+    "onenote": _Provider(
+        prefix="onenote",
+        source_module="cognee.tasks.ingestion.connectors.onenote",
+        source_name="onenote_source",
+    ),
+    "apollo": _Provider(
+        prefix="apollo",
+        source_module="cognee.tasks.ingestion.connectors.apollo",
+        source_name="apollo_source",
+        service_builder=_apollo_service,
+    ),
+    "asana": _Provider(
+        prefix="asana",
+        source_module="cognee.tasks.ingestion.connectors.asana",
+        source_name="asana_source",
+        service_builder=_asana_service,
     ),
 }
 
@@ -93,6 +137,24 @@ def resource_name(provider: str, credential: Any, scope: str = "") -> str:
     identity = [str(credential.user_id), str(credential.provider_account_id), scope]
     digest = sha256(json.dumps(identity).encode()).hexdigest()[:24]
     return f"{prefix}_{digest}"
+
+
+def dataset_name_for_account(prefix: str, email: str, account_id: str = "") -> str:
+    """``{prefix}_{email slug}``, plus a 10 hex suffix of ``account_id`` when it is given.
+
+    The name is a stored identifier, so the slug rule and the suffix length must not change
+    once a provider has synced: every dataset already created under the old name would be
+    orphaned. The suffix keeps accounts apart whose slugs collide (``a.b`` and ``a_b``).
+    """
+    slug = re.sub(r"[^A-Za-z0-9_]+", "_", email or "").strip("_").lower()
+    name = f"{prefix}_{slug or 'account'}"
+    return f"{name}_{sha256(account_id.encode()).hexdigest()[:10]}" if account_id else name
+
+
+def dataset_name_for_credential(prefix: str, credential: Any) -> str:
+    """The dataset a connected account syncs into, named from its stored email and id."""
+    email = (credential.provider_metadata or {}).get("email") or ""
+    return dataset_name_for_account(prefix, str(email), str(credential.provider_account_id))
 
 
 def source_factory(provider: str) -> Callable[..., Any]:
@@ -160,6 +222,44 @@ def extraction_checkpoint(credential: Any) -> Callable[[], None]:
     return check_active
 
 
+class _SourceProgress:
+    """Bridge cumulative source counters to the sync's reporter on the API loop."""
+
+    def __init__(self, credential: Any, counts: dict[str, int]):
+        from cognee.modules.integrations.sync_progress import get_current_sync_progress
+
+        self.source = None
+        self.counts = counts
+        self.check_active = extraction_checkpoint(credential)
+        # The extraction worker need not inherit the sync's context variables.
+        self.reporter = get_current_sync_progress()
+        self.loop = asyncio.get_running_loop()
+
+    async def publish_counts(self) -> None:
+        observed = dict(self.counts)
+        add_source_counts(observed, self.source)
+        if self.reporter is not None:
+            await self.reporter.report(counts=observed)
+
+    def checkpoint(self) -> None:
+        # Credential checks remain authoritative; reporting is best effort.
+        self.check_active()
+        if self.reporter is None:
+            return
+        # Not awaited: the extraction thread must not wait on the API loop for telemetry.
+        try:
+            asyncio.run_coroutine_threadsafe(self.publish_counts(), self.loop).add_done_callback(
+                self._log_failure
+            )
+        except Exception:
+            logger.exception("Reporting integration sync progress failed", exc_info=False)
+
+    @staticmethod
+    def _log_failure(future: Any) -> None:
+        if not future.cancelled() and future.exception() is not None:
+            logger.error("Reporting integration sync progress failed")
+
+
 async def retire_resources(
     provider: str, credential: Any, dataset_name: str, retained: set[str]
 ) -> None:
@@ -173,6 +273,7 @@ async def retire_resources(
 
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Data, Dataset
+    from cognee.modules.integrations.sync_progress import report_sync_progress
 
     async with get_relational_engine().get_async_session() as db:
         result = await db.execute(
@@ -193,8 +294,9 @@ async def retire_resources(
     from cognee.api.v1.remember.remember import remember
     from cognee.modules.users.methods import get_user
 
+    await report_sync_progress(phase="finalizing", completed=0, total=len(retired), unit="scopes")
     owner = await get_user(credential.user_id)
-    for table in sorted(retired):
+    for completed, table in enumerate(sorted(retired), start=1):
         await require_active_credential(credential)
         result = await remember(
             empty_resource(provider, table, extraction_checkpoint(credential)),
@@ -207,6 +309,7 @@ async def retire_resources(
         )
         if getattr(result, "status", None) == "errored":
             raise RuntimeError("Failed to remove deselected resource data")
+        await report_sync_progress(completed=completed)
 
 
 async def sync_scopes(
@@ -229,16 +332,22 @@ async def sync_scopes(
     """
     from cognee.api.v1.remember.remember import remember
     from cognee.modules.integrations.credentials import CredentialInactiveError
+    from cognee.modules.integrations.sync_progress import report_sync_progress
     from cognee.modules.users.methods import get_user
 
     owner = await get_user(credential.user_id)
     retained: set[str] = set()
-    for scope in scopes:
+    await report_sync_progress(
+        phase="processing", completed=0, total=len(scopes), unit="scopes", counts=counts
+    )
+    for completed, scope in enumerate(scopes, start=1):
         await require_active_credential(credential)
         source = None
         try:
             name = resource_name(provider, credential, scope)
-            source = make_source(scope, name, extraction_checkpoint(credential))
+            progress = _SourceProgress(credential, counts)
+            source = make_source(scope, name, progress.checkpoint)
+            progress.source = source
             retained.add(name)
             result = await remember(
                 source,
@@ -266,7 +375,70 @@ async def sync_scopes(
             )
         finally:
             add_source_counts(counts, source)
+        await report_sync_progress(completed=completed, counts=counts)
     return retained
+
+
+async def sync_selected_resources(
+    provider: str,
+    credential: Any,
+    counts: dict[str, int],
+    *,
+    selection: list[str] | None,
+    selection_kwarg: str,
+    dataset_name: str,
+    access_token_for: Callable[[Any], Awaitable[str]],
+) -> tuple[str, dict[str, int]]:
+    """Ingest the connection's whole selection through one source and return the sync outcome.
+
+    The source takes the selection as the ``selection_kwarg`` keyword (``label_ids``,
+    ``calendar_ids``) and keeps its own per-resource state, so a changed selection
+    needs no extra resource here. An empty selection ingests nothing and retires
+    everything the account synced. A failed ingestion keeps the old tables and marks
+    the sync degraded; the deselected ones are retired only after a clean run. The
+    caller checks the shape of ``selection``.
+    """
+    from cognee.api.v1.remember.remember import remember
+    from cognee.modules.integrations.sync_progress import report_sync_progress
+    from cognee.modules.users.methods import get_user
+
+    if selection == []:
+        await retire_resources(provider, credential, dataset_name, set())
+        return "ok", {"scanned": 0, "skipped": 0, "failed": 0}
+
+    make_source = source_factory(provider)
+    service = build_service(provider, await access_token_for(credential))
+    owner = await get_user(credential.user_id)
+    name = resource_name(provider, credential)
+    progress = _SourceProgress(credential, counts)
+    source = make_source(
+        **{selection_kwarg: selection},
+        service=service,
+        resource_name=name,
+        check_active=progress.checkpoint,
+    )
+    progress.source = source
+    await require_active_credential(credential)
+    await report_sync_progress(phase="processing", counts=counts)
+    try:
+        result = await remember(
+            source,
+            dataset_name=dataset_name,
+            user=owner,
+            write_disposition="merge",
+            primary_key="id",
+            max_rows_per_table=0,
+            self_improvement=False,
+        )
+    finally:
+        add_source_counts(counts, source)
+        await report_sync_progress(counts=counts)
+    if getattr(result, "status", None) == "errored":
+        counts["failed"] += 1
+        counts["failed_ingestion"] = 1
+    else:
+        await retire_resources(provider, credential, dataset_name, {name})
+    return ("degraded" if counts["failed"] else "ok"), counts
 
 
 # This local API runs one worker. A multi-worker deployment must replace this
@@ -280,7 +452,11 @@ def sync_is_running(provider: str, account_id: str) -> bool:
 
 async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
     """Serialize each account's DLT cursor and expose actual in-flight state."""
-    from cognee.modules.integrations.credentials import record_sync_result
+    from cognee.modules.integrations.credentials import (
+        CredentialInactiveError,
+        record_sync_result,
+    )
+    from cognee.modules.integrations.sync_progress import track_sync
 
     key = (provider, str(credential.provider_account_id))
     if key in _running_syncs:
@@ -288,21 +464,43 @@ async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
     _running_syncs.add(key)
     counts = {"scanned": 0, "skipped": 0, "failed": 0}
     try:
-        try:
-            credential = await require_active_credential(credential)
-            status, counts = await sync_source(credential, counts)
-        except Exception as exc:
-            counts["failed"] = max(1, counts["failed"])
-            # Store a safe category, never provider exception text (which may
-            # include message IDs, URLs, or user content).
-            message = str(exc).lower()
-            if isinstance(exc, RateLimitedError) or any(
-                term in message for term in ("ratelimitexceeded", "quota exceeded", "http 429")
-            ):
-                counts["failed_rate_limit"] = 1
-            await record_sync_result(credential, status="degraded", counts=counts)
-            raise
-        await record_sync_result(credential, status=status, counts=counts)
+        async with track_sync(provider, credential) as progress:
+            await progress.report(phase="checking", counts=counts)
+            try:
+                credential = await require_active_credential(credential)
+                status, counts = await sync_source(credential, counts)
+            except Exception as exc:
+                counts["failed"] = max(1, counts["failed"])
+                # Store a safe category, never provider exception text (which may
+                # include message IDs, URLs, or user content).
+                message = str(exc).lower()
+                if isinstance(exc, RateLimitedError) or any(
+                    term in message for term in ("ratelimitexceeded", "quota exceeded", "http 429")
+                ):
+                    counts["failed_rate_limit"] = 1
+                reason = (
+                    "connection_changed"
+                    if isinstance(exc, CredentialInactiveError)
+                    else "rate_limited"
+                    if counts.get("failed_rate_limit")
+                    else "provider_error"
+                )
+                await progress.finish("failed", counts=counts, reason=reason)
+                await record_sync_result(credential, status="degraded", counts=counts)
+                raise
+            await record_sync_result(credential, status=status, counts=counts)
+            partial = status == "degraded" or bool(counts.get("failed"))
+            await progress.finish(
+                "partial" if partial else "succeeded",
+                counts=counts,
+                reason=(
+                    "rate_limited"
+                    if counts.get("failed_rate_limit")
+                    else "incomplete"
+                    if partial
+                    else None
+                ),
+            )
     finally:
         _running_syncs.discard(key)
 

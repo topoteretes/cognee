@@ -9,7 +9,8 @@ import re
 import threading
 from collections import defaultdict
 from collections.abc import Sequence
-from typing import Optional
+from contextvars import ContextVar
+from typing import Any, Optional
 
 try:
     from opentelemetry import trace
@@ -106,6 +107,30 @@ def _check_otel_available() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Trace ownership
+# ---------------------------------------------------------------------------
+# The user a request runs as, so the in-memory buffer can tell whose traces it
+# holds and GET /activity/spans can return only the caller's. Kept in the
+# buffer only, never set as a span attribute, so no user id reaches OTLP or
+# Langfuse. Background tasks started by a request inherit it.
+_trace_owner_id: ContextVar[str | None] = ContextVar("trace_owner_id", default=None)
+
+
+def bind_trace_owner(user: Any) -> None:
+    """Mark spans finished in the current context as belonging to ``user``.
+
+    Called by ``get_authenticated_user``. A deployment that overrides that
+    dependency must call it too, or its /activity/spans stays empty.
+    """
+    user_id = getattr(user, "id", None)
+    _trace_owner_id.set(str(user_id) if user_id is not None else None)
+
+
+def current_trace_owner() -> str | None:
+    return _trace_owner_id.get()
+
+
+# ---------------------------------------------------------------------------
 # In-memory span exporter
 # ---------------------------------------------------------------------------
 _MAX_TRACES = 50
@@ -121,14 +146,20 @@ class CogneeSpanExporter(_ExporterBase):
 
     Spans are grouped by trace_id. The buffer is bounded to the last
     ``_MAX_TRACES`` distinct traces.
+
+    Each trace also records the owners (``bind_trace_owner``) its spans
+    finished under. That relies on a synchronous SimpleSpanProcessor, so
+    ``export`` runs in the context that ended the span.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._traces: dict[str, list[dict]] = defaultdict(list)
         self._trace_order: list[str] = []
+        self._owners: dict[str, set[str]] = defaultdict(set)
 
     def export(self, spans: Sequence) -> "SpanExportResult":
+        owner = current_trace_owner()
         with self._lock:
             for span in spans:
                 trace_id = format(span.context.trace_id, "032x")
@@ -150,6 +181,8 @@ class CogneeSpanExporter(_ExporterBase):
                     "attributes": dict(span.attributes) if span.attributes else {},
                 }
                 self._traces[trace_id].append(span_dict)
+                if owner is not None:
+                    self._owners[trace_id].add(owner)
                 if trace_id not in self._trace_order:
                     self._trace_order.append(trace_id)
 
@@ -157,6 +190,7 @@ class CogneeSpanExporter(_ExporterBase):
             while len(self._trace_order) > _MAX_TRACES:
                 oldest = self._trace_order.pop(0)
                 self._traces.pop(oldest, None)
+                self._owners.pop(oldest, None)
 
         return SpanExportResult.SUCCESS if _OTEL_AVAILABLE else None
 
@@ -179,10 +213,25 @@ class CogneeSpanExporter(_ExporterBase):
         with self._lock:
             return {tid: list(spans) for tid, spans in self._traces.items()}
 
+    def get_traces_owned_by(self, user_ids: set[str]) -> dict[str, list[dict]]:
+        """The traces with an owner, all of whose owners are in ``user_ids``.
+
+        A trace with no owner (startup or background work no request started)
+        is left out. Spans without an owner inside an owned trace, such as an
+        HTTP span opened before authentication, come with their trace.
+        """
+        with self._lock:
+            return {
+                tid: list(spans)
+                for tid, spans in self._traces.items()
+                if self._owners.get(tid) and self._owners[tid] <= user_ids
+            }
+
     def clear(self) -> None:
         with self._lock:
             self._traces.clear()
             self._trace_order.clear()
+            self._owners.clear()
 
 
 # ---------------------------------------------------------------------------

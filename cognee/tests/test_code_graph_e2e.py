@@ -492,21 +492,67 @@ async def main():
                 f"Repositories left pending for {pipeline_name}: {processing}"
             )
 
+        # Two repositories in one dataset are one enola cluster: both come from
+        # the same snapshot, and each keeps the path it was remembered from.
+        async with set_database_global_context_variables(remember_dataset.id, user.id):
+            nodes, edges = await _graph_snapshot()
+        repositories = _named(_by_type(nodes, "CodeRepository"))
+        assert set(repositories) == {repo_path.name, second_repo_path.name}, repositories
+        assert len({repo.get("last_snapshot_id") for repo in repositories.values()}) == 1, (
+            f"The dataset's repositories were not extracted together: {repositories}"
+        )
+        for path in (repo_path, second_repo_path):
+            stored_path = repositories[path.name].get("path")
+            assert os.path.realpath(stored_path) == os.path.realpath(path), (
+                f"Repository '{path.name}' does not carry its own path: {stored_path}"
+            )
+        dangling = [e for e in edges if e[0] not in nodes or e[1] not in nodes]
+        assert not dangling, f"Cluster load left dangling edges: {dangling[:3]}"
+
         await cognee.forget(data_id=UUID(first_data_id), dataset_id=remember_dataset.id)
 
         async with set_database_global_context_variables(remember_dataset.id, user.id):
             nodes, edges = await _graph_snapshot()
-        # Exactly one repository left, fully linked, no dangling edges: the
-        # forgotten repository's nodes and edges are all gone.
-        _assert_typed_code_graph(nodes, edges, repo_name=second_repo_path.name)
+        # Exactly one repository left, no dangling edges: the forgotten
+        # repository's nodes and edges are all gone. The survivor is still in
+        # the form the cluster snapshot gave it (file paths carry the repo
+        # label) — a delete never runs enola — so the per-repository checks
+        # wait for the rebuild below.
+        repositories = _by_type(nodes, "CodeRepository")
+        assert [repo.get("name") for repo in repositories.values()] == [second_repo_path.name], (
+            f"forget(data_id) left repositories: {[r.get('name') for r in repositories.values()]}"
+        )
+        assert {p.get("repo") for p in nodes.values() if p.get("repo")} == {second_repo_path.name}
+        dangling = [e for e in edges if e[0] not in nodes or e[1] not in nodes]
+        assert not dangling, f"forget(data_id) left dangling edges: {dangling[:3]}"
         remaining_rows = await datasets.list_data(remember_dataset.id, user=user)
         assert [str(row.id) for row in remaining_rows] == [second_data_id]
+        # The survivor is marked for re-extraction so the next cognify() of
+        # the dataset rebuilds it without the deleted repository.
+        cluster_snapshot_id = next(iter(repositories.values())).get("last_snapshot_id")
+        processing = await get_dataset_processing_status(remember_dataset.id)
+        assert processing["pending"] == 1, (
+            f"forget(data_id) of a cluster member left the survivor stamped as done: {processing}"
+        )
+
+        # The survivor is rebuilt on its own, from a fresh snapshot, by the
+        # next cognify() of the dataset.
+        await cognee.cognify(datasets=[REMEMBER_DATASET])
+        async with set_database_global_context_variables(remember_dataset.id, user.id):
+            nodes, edges = await _graph_snapshot()
+        _assert_typed_code_graph(nodes, edges, repo_name=second_repo_path.name)
+        rebuilt = next(iter(_by_type(nodes, "CodeRepository").values()))
+        assert rebuilt.get("last_snapshot_id") != cluster_snapshot_id, (
+            "cognify() after forget(data_id) kept the cluster snapshot instead of rebuilding"
+        )
+        processing = await get_dataset_processing_status(remember_dataset.id)
+        assert processing["pending"] == 0, processing
 
         # --- 4. add(<project dir>) + cognify(): the CODE_REPO route -----------
-        # cognify() runs the LLM/embedding connection test unconditionally,
-        # even when every item routes to an LLM-free task list. Skip it via
-        # the documented switch — set only NOW so the remember() steps above
-        # still prove that remember(content_type="code") is keyless on its own.
+        # cognify() probes the embedding provider on a dataset's first run even
+        # when every item routes to an LLM-free task list. Skip it via the
+        # documented switch — set only NOW so the remember()/cognify() steps
+        # above still prove that the code route is keyless on its own.
         os.environ["COGNEE_SKIP_CONNECTION_TEST"] = "true"
         cognify_repo_path = _copy_fixture(os.path.join(scratch_root, "cognify"))
         await cognee.add(str(cognify_repo_path), dataset_name=COGNIFY_DATASET)

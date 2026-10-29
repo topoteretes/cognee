@@ -3,10 +3,10 @@ import os
 import pytest
 
 import cognee
-from cognee.api.v1.search import SearchType
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import ERROR, setup_logging
+from cognee.tests.utils.ci_search_type import completion_or_chunks
 
 
 class LanceDBTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
@@ -116,9 +116,7 @@ async def _run_custom_dataset_database_handler_flow():
     query_text = "Tell me about NLP"
     print(f"Searching cognee for insights with query: '{query_text}'")
     # Query cognee for insights on the added text
-    search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION, query_text=query_text
-    )
+    search_results = await cognee.search(query_type=completion_or_chunks(), query_text=query_text)
 
     print("Search results:")
     # Display results

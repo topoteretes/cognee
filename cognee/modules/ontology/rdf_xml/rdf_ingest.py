@@ -98,7 +98,9 @@ def load_rdf_graph(source: str | list[str] | IO | list[IO] | Graph) -> Graph:
     # Reuse the resolver's format detection / fallback parsing for files.
     from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
-    resolver = RDFLibOntologyResolver(ontology_file=source)
+    # Ingest the asserted triples only: OWL-RL reasoning is for entity grounding,
+    # not for what gets stored as data.
+    resolver = RDFLibOntologyResolver(ontology_file=source, ontology_reasoning="none")
     if resolver.graph is None:
         raise ValueError("Could not parse any RDF triples from the provided source.")
     return resolver.graph
