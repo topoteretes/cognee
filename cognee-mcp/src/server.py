@@ -395,7 +395,7 @@ async def remember(
         name, so the memory can be recognised in a dataset listing instead
         of showing up as a content hash (text_<md5>). Pass one whenever the
         text has an obvious subject. Permanent memory only; a file upload is
-        named by `filename` instead.
+        named by `filename` instead, and a URL or a path cannot take a name.
     filename : str, optional
         Original filename for a file upload. Used to derive the stored
         document's name. Requires content_base64.

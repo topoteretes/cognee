@@ -12,11 +12,9 @@ import hashlib
 import json
 import mimetypes
 import os
-import re
 import sys
 import tempfile
 from contextlib import redirect_stdout
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -98,9 +96,11 @@ class CogneeClient:
         resolved_scheme = api_auth_scheme or os.environ.get("COGNEE_API_AUTH_SCHEME")
         self.api_auth_scheme = resolved_scheme.lower().strip() if resolved_scheme else None
         self.use_api = bool(api_url)
-        # Whether the server's QAEntry schema has ``node_set``; probed once (see
-        # _server_takes_entry_node_set).
+        # Whether the server's QAEntry schema has ``node_set``, and its remember
+        # form ``names``; each probed once (see _server_takes_entry_node_set and
+        # _server_takes_text_names).
         self._entry_node_set_supported: bool | None = None
+        self._text_names_supported: bool | None = None
 
         # Extract tenant ID from tenant URL pattern: tenant-<uuid>.*.cognee.ai
         self.tenant_id: str | None = None
@@ -163,79 +163,12 @@ class CogneeClient:
             return parsed
         return {"status": "success", "result": parsed}
 
-    _UNTITLED_LINE_LENGTH = 60
-    # Byte budget for the name stem: NAME_MAX is 255 bytes, minus "-<md5[:8]>.txt".
-    _NAME_BYTES = 200
-
     @staticmethod
-    def _untitled_text_name(content: str) -> str:
-        """A readable name for text nobody named: when it was saved, and its first line.
-
-        A dataset listing of memories saved without a name used to be a wall of
-        ``text_<md5>`` entries. The first non-empty line (a heading or the
-        opening sentence) says what the text is about, and the timestamp says
-        when it was remembered, which is how a person looks for a memory.
-        """
-        first_line = ""
-        for line in content.splitlines():
-            line = re.sub(r"^[\s#*\->]+", "", line).strip()
-            if line:
-                first_line = line
-                break
-        first_line = re.sub(r"[\s/\\:]+", " ", first_line).strip()
-        if len(first_line) > CogneeClient._UNTITLED_LINE_LENGTH:
-            first_line = first_line[: CogneeClient._UNTITLED_LINE_LENGTH].rstrip() + "…"
-        return f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H%M')} {first_line or 'memory'}"
-
-    @staticmethod
-    def _text_filename(content: str, name: str | None = None) -> str:
-        """The filename a text payload is stored under: ``<name>-<md5[:8]>.txt``.
-
-        ``name`` is what the caller called the text, reduced to its basename
-        like ``filename`` is, so it cannot carry path components. Text nobody
-        named gets ``<timestamp> <first line>`` (``_untitled_text_name``)
-        instead of the old content-hash name, which told a reader nothing.
-        The hash suffix keeps the upload unique per content either way: two
-        writes with the same name and different content stay two documents
-        rather than one "document already exists, use update" 409 or one
-        overwrite, which is what the content-addressed name was for.
-        """
-        digest = hashlib.md5(content.encode("utf-8")).hexdigest()
-        safe_name = Path(name or "").name.strip().strip(". ") if name else ""
-        if safe_name.lower().endswith(".txt"):
-            safe_name = safe_name[: -len(".txt")].rstrip(". ")
-        if not safe_name:
-            safe_name = CogneeClient._untitled_text_name(content)
-        if len(safe_name.encode("utf-8")) > CogneeClient._NAME_BYTES:
-            # Cut on the byte budget without splitting a code point.
-            safe_name = (
-                safe_name.encode("utf-8")[: CogneeClient._NAME_BYTES]
-                .decode("utf-8", errors="ignore")
-                .rstrip(". ")
-            )
-        return f"{safe_name}-{digest[:8]}.txt"
-
-    @staticmethod
-    def _cognee_names_text() -> bool:
-        """Whether the installed cognee can store text under a name (``DataItem.name``).
-
-        Older releases cannot; there a named direct-mode remember keeps the
-        content-hash name instead of failing on an unknown argument.
-        """
-        from cognee.tasks.ingestion.data_item import DataItem
-
-        return "name" in getattr(DataItem, "__dataclass_fields__", {})
-
-    @staticmethod
-    def _text_upload(data: Any, name: str | None = None) -> dict[str, tuple[str, str, str]]:
-        """Create a text upload for API-mode ingestion, named per ``_text_filename``.
-
-        Every text upload carries a readable name now; ``text_<md5>.txt`` is
-        gone from this client (the hash lives on as the suffix, see
-        ``_text_filename``).
-        """
+    def _text_upload(data: Any) -> dict[str, tuple[str, str, str]]:
+        """Create a content-addressed text upload for API-mode ingestion."""
         content = str(data)
-        return {"data": (CogneeClient._text_filename(content, name), content, "text/plain")}
+        digest = hashlib.md5(content.encode("utf-8")).hexdigest()
+        return {"data": (f"text_{digest}.txt", content, "text/plain")}
 
     @staticmethod
     def _decode_upload(filename: str, content_base64: str) -> tuple[str, bytes]:
@@ -275,15 +208,12 @@ class CogneeClient:
         data: Any = None,
         filename: str | None = None,
         content_base64: str | None = None,
-        name: str | None = None,
     ) -> dict[str, tuple[str, Any, str]]:
         """Pick the multipart upload for an API-mode ingestion payload.
 
         Base64 uploads and readable local files keep their original
-        basename; anything else is uploaded as text under ``name`` when the
-        caller gave it one, else under a timestamp and its first line, with a
-        content-hash suffix so repeated writes don't collide (see
-        ``_text_filename``).
+        basename; anything else is uploaded as content-addressed
+        text so repeated writes don't collide.
         """
         if content_base64:
             return CogneeClient._file_upload(filename, content_base64)
@@ -302,7 +232,7 @@ class CogneeClient:
                 if not settings.accept_local_file_path:
                     raise IngestionError(message="Local files are not accepted.")
                 return CogneeClient._path_upload(data)
-        return CogneeClient._text_upload(data, name)
+        return CogneeClient._text_upload(data)
 
     async def add(
         self, data: Any, dataset_name: str = "main_dataset", node_set: list[str] | None = None
@@ -688,6 +618,18 @@ class CogneeClient:
                 direction=direction,
             )
 
+    async def _openapi_schema(self, purpose: str) -> dict | None:
+        """The server's ``/openapi.json``, or None when it cannot be read."""
+        try:
+            response = await self.client.get(
+                f"{self.api_url}/openapi.json", headers=self._get_headers()
+            )
+            response.raise_for_status()
+            return response.json()
+        except (httpx.HTTPError, ValueError):
+            logger.warning("remember: could not read the server schema to check %s", purpose)
+            return None
+
     async def _server_takes_entry_node_set(self) -> bool | None:
         """Whether the server's ``QAEntry`` schema has a ``node_set`` property.
 
@@ -699,17 +641,32 @@ class CogneeClient:
         """
         if self._entry_node_set_supported is not None:
             return self._entry_node_set_supported
+        schema = await self._openapi_schema("node_set support")
         try:
-            response = await self.client.get(
-                f"{self.api_url}/openapi.json", headers=self._get_headers()
-            )
-            response.raise_for_status()
-            schema = response.json()["components"]["schemas"]["QAEntry"]
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
-            logger.warning("remember: could not read the server schema to check node_set support")
+            entry = schema["components"]["schemas"]["QAEntry"]
+        except (KeyError, TypeError):
             return None
-        self._entry_node_set_supported = "node_set" in schema.get("properties", {})
+        self._entry_node_set_supported = "node_set" in entry.get("properties", {})
         return self._entry_node_set_supported
+
+    async def _server_takes_text_names(self) -> bool | None:
+        """Whether the server's ``POST /api/v1/remember`` form has a ``names`` field.
+
+        A server older than CLO-1023 ignores unknown form fields, so named text
+        would be stored as ``text_<md5>`` and still succeed. Probed and cached
+        like ``_server_takes_entry_node_set``; ``None`` means unknown.
+        """
+        if self._text_names_supported is not None:
+            return self._text_names_supported
+        schema = await self._openapi_schema("text name support")
+        try:
+            body = schema["paths"]["/api/v1/remember"]["post"]["requestBody"]["content"]
+            ref = body["multipart/form-data"]["schema"]["$ref"]
+            form = schema["components"]["schemas"][ref.rsplit("/", 1)[-1]]
+        except (KeyError, TypeError):
+            return None
+        self._text_names_supported = "names" in form.get("properties", {})
+        return self._text_names_supported
 
     # -- V2 API methods -----------------------------------------------------
 
@@ -739,7 +696,9 @@ class CogneeClient:
         ontology_key selects one or more uploaded ontologies for permanent
         extraction; local mode resolves keys for the default user.
         `name` names a text `data` document (permanent memory only); without
-        it the text is stored under a content-hash name.
+        it the text is stored under a content-hash name. A name for anything
+        that is not text (a URL, a path) is refused by cognee, and so is a name
+        a cognee too old to store it would silently drop.
         node_set tags permanent data and, with session_id, pins the session's
         node set (the typed entry's ``node_set`` field in API mode, the
         call-level kwarg in local mode); a different set on a pinned session
@@ -755,6 +714,8 @@ class CogneeClient:
             raise ValueError("`name` applies to text `data`; a file upload is named by `filename`.")
         if name and session_id:
             raise ValueError("`name` applies to permanent memory; omit session_id.")
+        if name and isinstance(data, (str, Path)) and os.path.isfile(data):
+            raise ValueError("`name` applies to text `data`; a file keeps its own filename.")
 
         ontology_keys = [ontology_key] if isinstance(ontology_key, str) else ontology_key
         ontology_keys = [key.strip() for key in (ontology_keys or []) if key.strip()]
@@ -806,8 +767,20 @@ class CogneeClient:
                 return response.json()
 
             endpoint = f"{self.api_url}/api/v1/remember"
-            files = self._build_upload(data, filename, content_base64, name=name)
             form_data: dict[str, Any] = {"datasetName": dataset_name}
+            if name:
+                if await self._server_takes_text_names() is False:
+                    raise ValueError(
+                        "This Cognee server does not support naming text and would store "
+                        "it under a content-hash name. Upgrade the server, or omit name."
+                    )
+                # Named text goes as a raw_data entry with its name in ``names``:
+                # the server stores it under that name (see the route's names field).
+                files = None
+                form_data["raw_data"] = [str(data)]
+                form_data["names"] = json.dumps([name])
+            else:
+                files = self._build_upload(data, filename, content_base64)
             if custom_prompt:
                 form_data["custom_prompt"] = custom_prompt
             if ontology_keys:
@@ -860,18 +833,18 @@ class CogneeClient:
                     remember_data = os.path.join(tmp_dir, safe_name)
                     with open(remember_data, "wb") as f:
                         f.write(raw_bytes)
-                elif name and isinstance(data, str) and self._cognee_names_text():
-                    # Named text is handed to cognee as a literal, named
-                    # document: it keeps the readable name without being
-                    # staged on disk, so local-file settings never apply and
-                    # the text is never read as a URL or a path. Unnamed text
-                    # and session entries are handed over as they are, so a
-                    # URL, an s3 path or a directory is still resolved by cognee.
+                elif name:
+                    # Named text is a DataItem carrying the name, as the HTTP
+                    # names field builds it, so both modes store it alike and
+                    # cognee refuses a name for a URL or a path in both.
                     from cognee.tasks.ingestion.data_item import DataItem
 
-                    remember_data = DataItem(
-                        data=data, name=self._text_filename(data, name), literal_text=True
-                    )
+                    if "name" not in getattr(DataItem, "__dataclass_fields__", {}):
+                        raise ValueError(
+                            "The installed cognee cannot store text under a name and would "
+                            "store it under a content-hash name. Upgrade cognee, or omit name."
+                        )
+                    remember_data = DataItem(data=data, name=name)
                 else:
                     remember_data = data
 
