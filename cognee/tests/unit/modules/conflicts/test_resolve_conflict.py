@@ -345,8 +345,8 @@ async def test_resolution_invalidates_answers_that_used_the_competing_facts_or_t
     stored = lane.store.nodes[lane.store.cid]
     kwargs = lane.invalidation.call_args.kwargs
     assert kwargs["deleted_edge_ids"] == set(lane.store.scope.facts)
-    # Passages cited before the choice and after it, which cites only live chunks.
-    assert kwargs["deleted_node_ids"] == {lane.store.cid, *cited_before, *stored["sources"]}
+    # Every passage the conflict cited, including one no fact cites any more.
+    assert kwargs["deleted_node_ids"] == {lane.store.cid, *cited_before}
     # The subject is a hub: answers that only mention the company stay cached.
     assert stored["about_id"] not in kwargs["deleted_node_ids"]
 

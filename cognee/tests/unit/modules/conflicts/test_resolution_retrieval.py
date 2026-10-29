@@ -383,13 +383,15 @@ async def test_a_retrieved_selected_edge_states_the_decision_once():
 
 
 @pytest.mark.asyncio
-async def test_the_selected_edge_keeps_the_decision_visible_next_to_later_evidence():
-    """Evidence a review found after the decision and another conflict's review status
-    must not leave graph context without the user's choice."""
+async def test_the_decision_node_labels_the_selected_edge_next_to_later_evidence():
+    """A rebuilt document re-creates the selected edge without its marks; the decision
+    node still labels it, ahead of another conflict's review status, so graph context
+    keeps the choice next to evidence a review found later."""
     company = Node("company", {"name": "Company"})
     decision = {
         "id": "conflict",
         "about_id": "company",
+        "dataset_id": "dataset",
         "selected_fact": "Company has CEO Alice",
         "selected_fact_id": "alice-fact",
         "rejected_fact_ids": ["bob-fact"],
@@ -403,16 +405,13 @@ async def test_the_selected_edge_keeps_the_decision_visible_next_to_later_eviden
             "edge_object_id": "alice-fact",
             "edge_text": "Company has CEO Alice",
             "effective_date": "2024-01-01",
-            "conflict_marks": [
-                {
-                    "conflict_id": "conflict",
-                    "resolution_source": "user",
-                    "selected_fact": "Company has CEO Alice",
-                    "status": "current",
-                },
-                {"conflict_id": "employer", "status": "conflicting"},
-            ],
+            "conflict_marks": [{"conflict_id": "employer", "status": "conflicting"}],
         },
+    )
+    bob = Edge(
+        company,
+        Node("bob", {"name": "Bob"}),
+        attributes={"edge_object_id": "bob-fact", "edge_text": "Company has CEO Bob"},
     )
     carol = Edge(
         company,
@@ -424,6 +423,15 @@ async def test_the_selected_edge_keeps_the_decision_visible_next_to_later_eviden
             "conflict_marks": [{"conflict_id": "conflict", "status": "current"}],
         },
     )
-    text = await resolve_edges_to_text(apply_graph_resolutions([alice, carol], [decision]))
+    token = current_dataset_id.set("dataset")
+    try:
+        result = apply_graph_resolutions([alice, bob, carol], [decision])
+        text = await resolve_edges_to_text(result)
+    finally:
+        current_dataset_id.reset(token)
     assert "--[Company has CEO Alice]--> Alice [accepted by user; as of 2024-01-01]" in text
     assert "--[Company has CEO Carol]--> Carol [as of 2026-06-01]" in text
+    assert "Company has CEO Bob" not in text and "accepted_fact" not in text
+    assert alice.attributes["conflict_marks"] == [
+        {"conflict_id": "employer", "status": "conflicting"}
+    ]

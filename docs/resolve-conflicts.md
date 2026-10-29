@@ -57,13 +57,15 @@ information. Passages and summaries keep their full source text and carry
 `resolved_facts` plus an explicit annotation giving the selected fact precedence
 over competing claims. Unrelated graph edges and node descriptions remain intact;
 only explicitly rejected fact edges and standalone fact hits are mapped to the
-accepted fact without waiting for re-embedding. The selected fact is labelled
-`[accepted by user]` wherever a fact's status is shown, and a rejected edge
-retrieved together with it is dropped, so one retrieval states each decision once.
-These changes affect retrieved copies only: original documents and graph facts
-remain available for inspection and raw graph queries. Cached answers and lessons with recorded references to a
-competing fact, the conflict, or a passage cited for it are invalidated; answers
-that only mention the subject entity are kept.
+accepted fact without waiting for re-embedding. Graph context and hybrid fact
+lists label the selected fact `[accepted by user]`, and a rejected edge retrieved
+together with it is dropped, so the edges of one retrieval round state each
+decision once. Entity and passage annotations, and the optional prelude, restate
+the decision. These changes affect retrieved copies only: original documents and
+graph facts remain available for inspection and raw graph queries. Cached answers
+and lessons with recorded references to a competing fact, the conflict, or a
+passage cited for it are invalidated; answers that only mention the subject entity
+are kept.
 
 The optional global-context prelude keeps its root and top-k summaries. It appends
 every user decision whose subject, values, or sources intersect the retrieved

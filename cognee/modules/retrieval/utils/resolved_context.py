@@ -12,7 +12,7 @@ from copy import copy
 from cognee.context_global_variables import current_dataset_id
 from cognee.modules.engine.utils.generate_edge_object_id import generate_edge_object_id
 from cognee.modules.graph.models.EdgeType import EdgeType
-from cognee.modules.graph.utils.fact_conflicts import read_list_property
+from cognee.modules.graph.utils.fact_conflicts import read_conflict_marks, read_list_property
 from cognee.modules.retrieval.utils.results import payload, result_id
 
 _resolution_reads: ContextVar[dict | None] = ContextVar("resolution_reads", default=None)
@@ -87,8 +87,9 @@ def _fact_id(edge) -> str:
 def apply_graph_resolutions(edges: list, resolutions: list[dict]) -> list:
     """Replace only explicitly rejected edges, preserving all other retrieved content.
 
-    Each decision is stated once in these edges. A rejected edge is dropped when its
-    decision's selected edge was retrieved too, which is labelled as the user's choice.
+    Each decision is stated once in these edges, read from the decision node: a document
+    rebuild re-creates its edges without their marks. A retrieved selected edge is
+    labelled as the user's choice, and the rejected edges retrieved with it are dropped.
     Otherwise the decision's first rejected edge becomes one synthetic link carrying
     the accepted fact, and its other rejected edges are dropped.
     """
@@ -96,6 +97,11 @@ def apply_graph_resolutions(edges: list, resolutions: list[dict]) -> list:
         return edges
     rejected = {
         fid: resolution for resolution in resolutions for fid in resolution["rejected_fact_ids"]
+    }
+    selected = {
+        str(resolution["selected_fact_id"]): resolution
+        for resolution in resolutions
+        if resolution.get("selected_fact_id")
     }
     fact_ids = [_fact_id(edge) for edge in edges]
     retrieved = {fact_id for fact_id in fact_ids if fact_id not in rejected}
@@ -126,6 +132,22 @@ def apply_graph_resolutions(edges: list, resolutions: list[dict]) -> list:
             target.id = resolution["about_id"]
             target.attributes = {"name": "Subject of the user resolution"}
             updated.node1, updated.node2 = source, target
+        elif fact_id in selected:
+            decision = selected[fact_id]
+            updated.attributes["conflict_marks"] = [
+                *(
+                    mark
+                    for mark in read_conflict_marks(edge.attributes)
+                    if str(mark.get("conflict_id")) != decision["id"]
+                ),
+                {
+                    "conflict_id": decision["id"],
+                    "status": "current",
+                    "resolution_source": "user",
+                    "dataset_id": decision.get("dataset_id"),
+                    "selected_fact": decision["selected_fact"],
+                },
+            ]
         result.append(updated)
     return result
 
