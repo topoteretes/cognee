@@ -156,6 +156,7 @@ async def test_improve_background_runs_global_context_index_in_the_chain(monkeyp
         user=SimpleNamespace(id="user-id"),
         run_in_background=True,
         build_global_context_index=True,
+        review_conflicts=False,
     )
 
     assert result.status == "running"

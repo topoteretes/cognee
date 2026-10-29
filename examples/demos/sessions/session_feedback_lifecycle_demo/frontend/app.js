@@ -651,7 +651,7 @@ async function validateRequiredDemoSettings() {
     "Demo blocked: set these env vars and restart the server:",
     "CACHING=True",
     "AUTO_FEEDBACK=True",
-    "CACHE_BACKEND=fs",
+    "CACHE_BACKEND=sqlite",
     "",
     ...(mismatchLines.length ? ["Current mismatches:", ...mismatchLines] : []),
   ].join("\n");

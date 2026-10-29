@@ -38,7 +38,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`recall_core.py`](guides/recall_core.py) | `recall` semantics and parameters |
 | [`improve_quickstart.py`](guides/improve_quickstart.py) | Graph enrichment before/after `improve()` |
 | [`agent_memory_quickstart.py`](guides/agent_memory_quickstart.py) | Wrap an LLM agent with `@cognee.agent_memory` |
-| [`no_llm_remember_recall.py`](guides/no_llm_remember_recall.py) | `remember → recall` with no LLM key at all: GLiNER graph + `CHUNKS` recall (needs `cognee[gliner]`) |
+| [`no_llm_remember_recall.py`](guides/no_llm_remember_recall.py) | `remember → recall` with no LLM key at all: GLiNER graph + `HYBRID_COMPLETION` recall with `only_context=True` (needs `cognee[gliner]`) |
 
 ### Sessions & self-improvement
 | Script | Demonstrates |
@@ -71,7 +71,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Authoring tasks and composing a pipeline |
 | [`ontology_quickstart.py`](guides/ontology_quickstart.py) | Grounding extraction in an OWL ontology |
 | [`entity_deduplication.py`](guides/entity_deduplication.py) | Merging duplicate entities (dry-run, then real) |
-| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Deprecated: use `review_conflicts.py` for Entity descriptions |
+| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Deprecated: `review_conflicts.py` reviews facts instead and leaves descriptions as extracted |
 | [`low_level_llm.py`](guides/low_level_llm.py) | Direct LLM-gateway structured output |
 
 ### Ingestion
@@ -84,6 +84,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`gmail.py`](guides/gmail.py) | Ingest Gmail with the bundled SDK connector, incremental sync and delete propagation (needs `cognee[gmail]`) |
 | [`google_drive.py`](guides/google_drive.py) | Ingest a Drive folder with the bundled SDK connector (needs `cognee[google-drive]`) |
 | [`google_calendar.py`](guides/google_calendar.py) | Ingest a Google Calendar with the bundled SDK connector, incremental sync through Google's sync token (needs `cognee[google-calendar]`) |
+| [`obsidian.py`](guides/obsidian.py) | Ingest a local Obsidian vault with the bundled SDK connector: an edited note replaces its old version and a deleted note is forgotten on the next sync |
 | [`presort_downloads.py`](guides/presort_downloads.py) | Presorting a messy folder before ingestion: `remember(dry_run="presort")`, then ingest the report |
 
 ### Visualization
@@ -128,6 +129,7 @@ with `remember()`, then runs one agent over that memory with `recall()`.
 | [`personalized_email/`](cookbooks/personalized_email/) | Granola + Gmail memory and a draft agent that answers an email with what you discussed, what you promised, and in your own tone |
 | [`company_brain/follow_up_agent/`](cookbooks/company_brain/follow_up_agent/) | Granola + Gmail + Linear memory and an agent that turns your latest call into next steps (owner, team, deadline, tracked issue) and posts them to Slack |
 | [`self_hosted_companion/`](cookbooks/self_hosted_companion/) | A chat companion that remembers your notes folder and every earlier chat |
+| [`import_agent_sessions/`](cookbooks/import_agent_sessions/) | Your Claude Code and Codex session history in one memory, answered over every agent at once and over each alone |
 | [`google_workspace_memory/`](cookbooks/google_workspace_memory/) | Google Calendar + Gmail + Drive memory and an agent that prepares your client meetings: which orders are late or at risk, why, and what to say |
 
 ### [`company_brain/`](cookbooks/company_brain/) — one memory for a whole company

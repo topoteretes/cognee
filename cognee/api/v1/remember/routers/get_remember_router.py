@@ -20,6 +20,7 @@ from cognee.tasks.ingestion.data_item import (
     pair_labels_with_data,
     parse_external_metadata,
     parse_labels,
+    parse_names,
 )
 
 logger = get_logger()
@@ -147,6 +148,20 @@ def get_remember_router() -> APIRouter:
                 "JSON. Stored on each file's data record and returned when listing "
                 "dataset data. Only supported for normal ingestion — rejected when combined "
                 "with session_id or content_type."
+            ),
+        ),
+        names: str | None = Form(
+            default=None,
+            examples=[""],
+            description=(
+                'Per-item document names, e.g. ["", "Q3 plan"] — the Nth name applies to '
+                "the Nth data item (uploads first, then raw_data entries), one entry per "
+                "item, an empty entry skips that item. Names raw_data text, which is "
+                "otherwise stored as text_<md5>; an uploaded file keeps its filename, so "
+                "its entry must be empty, and a URL or path entry cannot take one. Same "
+                "format as labels: a name with a comma needs the JSON form. Only "
+                "supported for normal ingestion — rejected when combined with session_id "
+                "or content_type."
             ),
         ),
         external_metadata: str | None = Form(
@@ -322,6 +337,10 @@ def get_remember_router() -> APIRouter:
           ["finance", "people", ""], paired positionally with the uploaded files (one
           entry per file; an empty entry skips that file). Stored on each file's data
           record. Normal ingestion only — rejected with session_id or content_type.
+        - **names** (Optional[str]): JSON array of per-item document names, e.g.
+          ["", "Q3 plan"], paired positionally like labels. Names raw_data text
+          (otherwise stored as text_<md5>); entries for uploads must be empty. Normal
+          ingestion only — rejected with session_id or content_type.
         - **external_metadata** (Optional[str]): JSON array of per-file metadata objects,
           e.g. [{"source": "crm"}, null], paired positionally with the uploaded files
           (one entry per file; null or {} skips that file). Merged into each file's
@@ -415,19 +434,22 @@ def get_remember_router() -> APIRouter:
         # Invalid JSON raises a CogneeApiError (400) via the global handler.
         parsed_labels = parse_labels(labels)
         parsed_metadata = parse_external_metadata(external_metadata)
+        parsed_names = parse_names(names)
 
-        # Labels and metadata live on the Data records that normal add+cognify
+        # Labels, metadata and names live on the Data records that normal add+cognify
         # ingestion creates. The session-cache, skills, and archive paths never
         # create those records, so they would be silently dropped — reject
         # instead.
-        if (any(parsed_labels or []) or any(entry for entry in (parsed_metadata or []))) and (
-            session_id or content_type
-        ):
+        if (
+            any(parsed_labels or [])
+            or any(entry for entry in (parsed_metadata or []))
+            or any(parsed_names or [])
+        ) and (session_id or content_type):
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "labels and external_metadata are only supported for normal ingestion — "
-                    "remove session_id and content_type to use them."
+                    "labels, external_metadata and names are only supported for normal "
+                    "ingestion — remove session_id and content_type to use them."
                 ),
             )
 
@@ -445,10 +467,10 @@ def get_remember_router() -> APIRouter:
                 ),
             )
 
-        # Labels and metadata ride on DataItems, which ingestion unwraps to
+        # Labels, metadata and names ride on DataItems, which ingestion unwraps to
         # store them on each file's Data record. A count mismatch raises a
         # CogneeApiError (400), returned by the global handler.
-        data = pair_labels_with_data(data, parsed_labels, parsed_metadata)
+        data = pair_labels_with_data(data, parsed_labels, parsed_metadata, parsed_names)
 
         if content_type == "cogx-archive":
             if not data:

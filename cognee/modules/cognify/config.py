@@ -16,11 +16,17 @@ class CognifyConfig(BaseSettings):
     classification_model: object = DefaultContentPrediction
     summarization_model: object = SummarizedContent
     # How each chunk's TextSummary is written (env: SUMMARY_METHOD, or
-    # cognify(summary_method=...)). "llm" (default): one LLM call per chunk.
-    # "from_extraction": one "Type: name, name" line per extracted type, then
-    # the chunk's relation texts, one per line, no LLM call.
-    summary_method: Literal["llm", "from_extraction"] = "llm"
+    # cognify(summary_method=...)). "from_extraction" (default): one
+    # "Type: name, name" line per extracted type, then the chunk's relation
+    # texts, one per line, no LLM call. "llm": one LLM call per chunk.
+    summary_method: Literal["llm", "from_extraction"] = "from_extraction"
     chunks_per_batch: int | None = None
+    # Write chunks (and their documents) to the graph and vector stores right
+    # after chunking, before the LLM extraction (env: EARLY_CHUNK_INDEXING).
+    # On (default): chunk-based searches answer while entities are still being
+    # extracted; the final write skips re-embedding those chunks. Off: the
+    # dataset becomes searchable only when the whole pipeline has finished.
+    early_chunk_indexing: bool = True
     # Opt-in audit-grade provenance ledger (env: PROVENANCE_TRACKING). Default
     # OFF so the standard cognify pipeline is unchanged.
     provenance_tracking: bool = False
@@ -49,6 +55,7 @@ class CognifyConfig(BaseSettings):
             "classification_model": self.classification_model,
             "summarization_model": self.summarization_model,
             "chunks_per_batch": self.chunks_per_batch,
+            "early_chunk_indexing": self.early_chunk_indexing,
             "provenance_tracking": self.provenance_tracking,
             "graph_extractor": self.graph_extractor,
             "gliner_auto_install": self.gliner_auto_install,
@@ -66,8 +73,8 @@ def _warn_if_contradiction_detection_is_set() -> None:
     """
     if os.getenv("CONTRADICTION_DETECTION") is not None:
         logger.warning(
-            "CONTRADICTION_DETECTION is ignored; use improve(review_conflicts=True) "
-            "or IMPROVE_REVIEW_CONFLICTS instead."
+            "CONTRADICTION_DETECTION is ignored; improve() reviews conflicts by default "
+            "(IMPROVE_REVIEW_CONFLICTS turns it off)."
         )
 
 

@@ -120,7 +120,9 @@ async def test_fresh_content_uses_two_sessions_and_resolves_in_the_status_sessio
     calls = []
     # Pre-check: no row yet (identify_data returns None, own session).
     # Post-run: the row exists now; identify_data must be handed the status session.
-    row_after = SimpleNamespace(id=uuid4(), pipeline_status={})
+    row_after = SimpleNamespace(
+        id=uuid4(), pipeline_status={}, name="doc", label=None, external_metadata={}
+    )
     state = {"row": None}
 
     factory, run, dataset = _wire(monkeypatch, existing_row=None, identify_data_calls=calls)
@@ -167,6 +169,13 @@ async def test_completed_content_is_skipped_without_a_second_lookup(monkeypatch)
             pipeline_status={
                 "add_pipeline": {str(dataset.id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED}
             },
+            name="doc",
+            label=None,
+            external_metadata={},
+            # The pre-save landed on the key the row already holds (same content,
+            # same name), so the skip has no stored object to release.
+            raw_data_location="file:///tmp/x.txt",
+            original_data_location="file:///tmp/x.txt",
         )
 
     # Build the row after we know the dataset id: wire once, then patch the row.

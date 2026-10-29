@@ -11,9 +11,19 @@ from cognee.modules.ontology.exceptions import (
     FindClosestMatchError,
     GetSubgraphError,
     OntologyInitializationError,
+    OntologyReasoningDependencyError,
 )
 from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy, MatchingStrategy
 from cognee.modules.ontology.models import AttachedOntologyNode
+from cognee.modules.ontology.ontology_env_config import (
+    get_ontology_env_config,
+    normalize_ontology_reasoning,
+)
+from cognee.modules.ontology.rdf_xml.parse_rdf_content import (
+    FALLBACK_FORMATS,
+    parse_rdf_content,
+    parse_rdf_file,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("OntologyAdapter")
@@ -31,7 +41,14 @@ CONTENT_TYPE_FORMATS = {
     "application/ld+json": "json-ld",
 }
 
-FALLBACK_FORMATS = ("xml", "turtle", "n3", "nt", "json-ld", "trig", "nquads")
+# Predicates the OWL-RL closure asserts reflexively for every term it touches.
+REFLEXIVE_CLOSURE_PREDICATES = (
+    RDFS.subClassOf,
+    RDFS.subPropertyOf,
+    OWL.equivalentClass,
+    OWL.equivalentProperty,
+    OWL.sameAs,
+)
 
 
 class RDFLibOntologyResolver(BaseOntologyResolver):
@@ -39,15 +56,25 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
 
     This implementation uses RDFLib to parse and work with RDF/OWL ontology files.
     It provides fuzzy matching and subgraph extraction capabilities for ontology entities.
+
+    ``ontology_reasoning`` selects what the lookup and subgraph walk see: ``"none"``
+    (the asserted triples only) or ``"owl_rl"`` (the OWL 2 RL closure of the parsed
+    graph, so ``owl:inverseOf``, ``rdfs:domain``/``rdfs:range`` typing,
+    ``owl:equivalentClass``, ``owl:sameAs`` and transitive properties are honoured).
+    ``None`` falls back to the ONTOLOGY_REASONING environment value.
     """
 
     def __init__(
         self,
         ontology_file: str | list[str] | IO | list[IO] | None = None,
         matching_strategy: MatchingStrategy | None = None,
+        ontology_reasoning: str | None = None,
     ) -> None:
         super().__init__(matching_strategy)
         self.ontology_file = ontology_file
+        if ontology_reasoning is None:
+            ontology_reasoning = get_ontology_env_config().ontology_reasoning
+        self.ontology_reasoning = normalize_ontology_reasoning(ontology_reasoning)
         try:
             self.graph = None
             if ontology_file is not None:
@@ -101,7 +128,7 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                     loaded_files = []
                     for file_path in files_to_load:
                         if os.path.exists(file_path):
-                            self.graph.parse(file_path)
+                            parse_rdf_file(self.graph, file_path)
                             loaded_files.append(file_path)
                             logger.info("Ontology loaded successfully from file: %s", file_path)
                         else:
@@ -127,10 +154,55 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                 )
                 self.graph = None
 
+            self._apply_reasoning()
             self.build_lookup()
+        except OntologyReasoningDependencyError:
+            # A missing optional dependency is a configuration problem, not a parse
+            # failure: surface it as-is so the fix (install the extra) is visible.
+            raise
         except Exception as e:
             logger.exception("Failed to load ontology")
             raise OntologyInitializationError(f"Failed to load ontology: {e}") from e
+
+    def _apply_reasoning(self) -> None:
+        """Expand the parsed graph with its OWL 2 RL closure when reasoning is enabled.
+
+        Runs between parsing and ``build_lookup`` so the inferred triples take part in
+        class/individual lookup and in ``get_subgraph``. The closure is materialised
+        in place; its cost grows with ontology size, which is why it is opt-in.
+        """
+        if self.ontology_reasoning != "owl_rl" or self.graph is None:
+            return
+
+        try:
+            import owlrl
+        except ImportError as e:
+            raise OntologyReasoningDependencyError() from e
+
+        triples_before = len(self.graph)
+        owlrl.DeductiveClosure(owlrl.OWLRL_Semantics).expand(self.graph)
+        self._prune_closure_tautologies()
+        logger.info(
+            "OWL-RL reasoning expanded the ontology from %d to %d triples",
+            triples_before,
+            len(self.graph),
+        )
+
+    def _prune_closure_tautologies(self) -> None:
+        """Drop the closure's bookkeeping triples that carry no domain knowledge.
+
+        OWL-RL's schema rules make every class/property reflexive (``A subClassOf A``,
+        ``A sameAs A``) and declare ``owl:Thing``/``owl:Nothing`` as classes above
+        everything. Left in, they turn into ``is_a`` self-loops in ``get_subgraph`` and
+        let a fuzzy match ground an entity type to ``owl:Thing``.
+        """
+        for predicate in REFLEXIVE_CLOSURE_PREDICATES:
+            for subject, _, obj in list(self.graph.triples((None, predicate, None))):
+                if subject == obj:
+                    self.graph.remove((subject, predicate, obj))
+        for top_term in (OWL.Thing, OWL.Nothing):
+            self.graph.remove((top_term, None, None))
+            self.graph.remove((None, None, top_term))
 
     def _uri_to_key(self, uri: URIRef) -> str:
         uri_str = str(uri)
@@ -183,34 +255,23 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                 f"Ontology file object returned unsupported content type: {type(content)}"
             )
 
-        candidate_formats = self._get_candidate_formats(file_obj)
-        parse_errors = []
+        try:
+            parsed_graph, rdf_format = parse_rdf_content(
+                content, self._get_candidate_formats(file_obj)
+            )
+        except ValueError as error:
+            raise ValueError(
+                f"Unable to parse ontology file object '{self._get_file_object_name(file_obj)}'. "
+                f"{error}"
+            ) from error
 
-        for rdf_format in candidate_formats:
-            parsed_graph = Graph()
-            try:
-                parsed_graph.parse(data=content, format=rdf_format)
-            except Exception as error:
-                logger.debug(
-                    "Skipping item after error in RDFLibOntologyResolver._parse_file_object",
-                    exc_info=True,
-                )
-                parse_errors.append(f"{rdf_format}: {error}")
-                continue
+        for prefix, namespace in parsed_graph.namespaces():
+            target_graph.bind(prefix, namespace, override=False)
 
-            for prefix, namespace in parsed_graph.namespaces():
-                target_graph.bind(prefix, namespace, override=False)
+        for triple in parsed_graph:
+            target_graph.add(triple)
 
-            for triple in parsed_graph:
-                target_graph.add(triple)
-
-            return rdf_format
-
-        raise ValueError(
-            f"Unable to parse ontology file object '{self._get_file_object_name(file_obj)}'. "
-            f"Tried formats: {', '.join(candidate_formats)}. "
-            f"Last error: {parse_errors[-1] if parse_errors else 'unknown error'}"
-        )
+        return rdf_format
 
     def build_lookup(self) -> None:
         try:

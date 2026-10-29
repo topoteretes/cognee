@@ -2,6 +2,7 @@
 rollback) and closed as ERRORED with the STARTED row's own metadata; nothing else is touched."""
 
 import asyncio
+import inspect
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ import pytest
 from cognee.modules.cognify import recovery as recovery_module
 from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
 from cognee.modules.pipelines.models import PipelineRunStatus
+from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
 
 TWO_HOURS_AGO = datetime.now(timezone.utc) - timedelta(hours=2)
 
@@ -55,7 +57,7 @@ def _run(pipeline_name, status=PipelineRunStatus.DATASET_PROCESSING_STARTED, **o
         "started_at": TWO_HOURS_AGO,
         "user_id": uuid4(),
         "tenant_id": uuid4(),
-        "run_info": {"data": ["doc-1", "doc-2"]},
+        "run_info": {},
         "origin": "api",
         "parent_operation_id": uuid4(),
     }
@@ -83,6 +85,8 @@ def _wire(monkeypatch, runs, datasets, *, rollback_fails=False, users=None):
         calls.append(("rollback", kwargs))
 
     async def _log_error(**kwargs):
+        # A stale kwarg would be swallowed by recovery's broad except and retried on every startup.
+        inspect.signature(log_pipeline_run_error).bind(**kwargs)
         calls.append(("error", kwargs))
 
     async def _latest_runs():
@@ -138,7 +142,6 @@ async def test_cognify_run_is_rolled_back_then_closed_with_its_own_metadata(monk
     assert error["tenant_id"] == run.tenant_id
     assert "user" not in error
     assert error["started_at"] == run.started_at
-    assert error["data_info"] == ["doc-1", "doc-2"]
     assert error["origin"] == "api"
     assert error["parent_operation_id"] == run.parent_operation_id
 

@@ -52,6 +52,10 @@ def test_a_url_or_directory_next_to_the_text_does_not_count(tmp_path):
         ("roadmap.docx", "roadmap.docx.txt"),
         ("../../etc/passwd", "passwd.txt"),
         ("dir\\sub\\note", "note.txt"),
+        # The same sanitising as the in-process lane (text_file_name): control
+        # characters and leading dots go, and the name fits a 255-byte basename.
+        ("\x00.hidden\x1fname", "hiddenname.txt"),
+        ("日本語" * 90, "日本語" * 21 + "日本.txt"),
     ],
 )
 def test_upload_filename_is_a_txt_basename(name, expected):

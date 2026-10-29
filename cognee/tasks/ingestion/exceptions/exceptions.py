@@ -101,3 +101,23 @@ class ExternalMetadataCountMismatchError(CogneeValidationError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
         super().__init__(message, name, status_code)
+
+
+class NameCountMismatchError(CogneeValidationError):
+    def __init__(
+        self,
+        message: str = "names count does not match data item count.",
+        name: str = "NameCountMismatchError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class InvalidNamesError(CogneeValidationError):
+    def __init__(
+        self,
+        message: str = 'names must be a JSON array of strings, e.g. ["Q3 plan", ""].',
+        name: str = "InvalidNamesError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        super().__init__(message, name, status_code)

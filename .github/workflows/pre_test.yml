@@ -27,3 +27,75 @@ jobs:
 
       - name: Run pre-commit hooks
         uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
+
+      # Each check below reports on its own: a red step earlier in the job
+      # does not hide the later ones.
+      - name: Install dependencies
+        if: ${{ !cancelled() }}
+        run: uv sync --extra dev
+
+      # Exception-handling rules are enforced without escape hatch: `--ignore-noqa`
+      # makes a `# noqa` comment on these rules count as a finding, so a silent
+      # `except Exception` has to be fixed (log with traceback, re-raise, or narrow
+      # the type), not suppressed. Scope: BLE001 blind except, S110/S112 try-except
+      # pass/continue, G201 exc_info logging, TRY201 verbose raise, TRY002 vanilla
+      # Exception raise.
+      - name: Ruff exception-handling rules (strict, noqa ignored)
+        if: ${{ !cancelled() }}
+        run: uv run ruff check . --select BLE001,S110,S112,G201,TRY201,TRY002 --ignore-noqa
+
+      - name: Ty type check
+        if: ${{ !cancelled() }}
+        run: uv run ty check .
+
+  # Fails when a dependency's license would extend to cognee's Apache-2.0 code:
+  # strong copyleft (GPL, AGPL) in a package cognee imports or a native library
+  # it vendors. Installs every extra, so optional dependencies are covered too.
+  # uv.lock resolves other packages and versions on each supported Python
+  # (scipy 1.17.1 only on 3.11, lxml 5.4.0 only on 3.13, ...), so it runs on
+  # every one. Windows- and macOS-only packages are not covered.
+  # The result depends only on the resolved dependencies, so the install and
+  # scan run only when they (or the check itself) change. With no base to
+  # compare against (workflow_dispatch, a new branch), it always runs.
+  license-compatibility:
+    name: License Compatibility (Python ${{ matrix.python }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Detect dependency changes
+        id: deps
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE" ] && git diff --quiet "$BASE" HEAD -- uv.lock pyproject.toml \
+              scripts/check_license_compatibility.py \
+              cognee/tests/unit/ci/test_license_compatibility.py \
+              .github/workflows/pre_test.yml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Dependencies unchanged; skipping the license check."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install uv
+        if: steps.deps.outputs.changed == 'true'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Install every extra on Python ${{ matrix.python }}
+        if: steps.deps.outputs.changed == 'true'
+        run: uv sync --locked --all-extras --no-install-project --python ${{ matrix.python }}
+
+      - name: Check dependency licenses against Apache-2.0
+        if: steps.deps.outputs.changed == 'true'
+        run: uv run --no-sync python scripts/check_license_compatibility.py
