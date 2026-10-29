@@ -28,6 +28,7 @@ from cognee.modules.users.models import User
 from cognee.tasks.memify.review_conflicts.accept_review import _collect_conflict_values
 from cognee.tasks.memify.review_conflicts.models import (
     AcceptedConflict,
+    ConflictsToFinalize,
     ConflictsToWrite,
 )
 from cognee.tasks.memify.review_conflicts.read_facts import _to_conflict_record, read_entity_facts
@@ -262,3 +263,40 @@ async def resolve_conflict(
                     ]
                 )
         return result.model_copy(update={"write_pending": False})
+
+
+async def retire_forgotten_decisions(dataset, user: User) -> set[str]:
+    """Delete the user decisions whose chosen fact no longer exists, and return their ids.
+
+    Run after a document is deleted, inside the dataset's lock and database context.
+    A fact supported by several documents stays in the graph until the last of them
+    is deleted, so its decision stays until then too. The check reads what the graph
+    holds now rather than what one delete removed, so a retried delete still finds it.
+    """
+    graph = await get_graph_engine()
+    rows, _ = await graph.get_filtered_graph_data([{"type": ["FactConflict"]}], include_edges=False)
+    decisions = {
+        str(node_id): props
+        for node_id, props in rows
+        if str(props.get("dataset_id")) == str(dataset.id)
+        and props.get("resolution_source") == "user"
+    }
+    if not decisions:
+        return set()
+    ctx = PipelineContext(user=user, dataset=dataset)
+    scope = await read_entity_facts(
+        None,
+        entity_ids=sorted({str(decision["about_id"]) for decision in decisions.values()}),
+        ctx=ctx,
+    )
+    forgotten = sorted(
+        conflict_id
+        for conflict_id, decision in decisions.items()
+        if decision.get("selected_fact_id") not in scope.facts
+    )
+    if forgotten:
+        # The same drop a conflict review makes: the node goes, and the marks it left
+        # on the remaining facts are cleared.
+        await write_conflicts([ConflictsToWrite(scope, dropped_conflict_ids=list(forgotten))], ctx)
+        await write_conflicts([ConflictsToFinalize(dropped_conflict_ids=list(forgotten))], ctx)
+    return set(forgotten)
