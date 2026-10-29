@@ -44,6 +44,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | Script | Demonstrates |
 |---|---|
 | [`review_conflicts.py`](guides/review_conflicts.py) | Review dated source facts, print stored conflicts and fact status marks |
+| [`resolve_conflicts.py`](guides/resolve_conflicts.py) | Settle a conflict review cannot decide with `list_conflicts` / `resolve_conflict`, and compare recall before and after |
 | [`sessions.py`](guides/sessions.py) | Session-scoped memory via `session_id` |
 | [`session_node_sets.py`](guides/session_node_sets.py) | Per-project session memory: pin a `node_set` on a session, bridge it with `improve()`, recall with `node_name` |
 | [`session_distillation.py`](guides/session_distillation.py) | Distilling a session into durable preferences |
@@ -265,7 +266,3 @@ Then: make sure it runs with `uv run python <path>` after `uv sync` and a config
 and add a row to the matching table in this README.
 
 See [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the broader contribution flow.
-
-### Resolve a fact conflict
-
-[resolve_conflicts.py](guides/resolve_conflicts.py) lists competing facts and records a user choice that future retrieval honors. See [the API guide](../docs/resolve-conflicts.md).
