@@ -336,6 +336,27 @@ def test_parse_message_excludes_self_closing_non_void_html_elements(tag):
 
 
 @pytest.mark.parametrize(
+    ("tag", "ignored"),
+    [
+        ("script", 'const tag = "<style>";'),
+        ("style", 'p::before { content: "<script>"; }'),
+        ("title", "Metadata with literal <style> text"),
+    ],
+)
+@pytest.mark.parametrize("self_closing", [False, True])
+def test_parse_message_keeps_body_after_markup_looking_ignored_text(tag, ignored, self_closing):
+    slash = "/" if self_closing else ""
+    message = {
+        "id": "ignored_raw_text",
+        "payload": {
+            "mimeType": "text/html",
+            "body": {"data": _b64(f"<{tag}{slash}>{ignored}</{tag}><p>Visible body</p>")},
+        },
+    }
+    assert parse_message(message)["content"] == "Visible body"
+
+
+@pytest.mark.parametrize(
     "attachment",
     [
         {"mimeType": "text/plain", "filename": "notes.txt", "body": {"data": _b64("secret")}},
