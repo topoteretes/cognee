@@ -18,6 +18,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+from cognee.modules.engine.models.StructureContainer import CHILD_OF
 from cognee.modules.improve.constants import (
     AGENT_TRACE_FEEDBACKS_NODE_SET,
     SESSION_LEARNINGS_NODE_SET,
@@ -28,12 +29,12 @@ from cognee.modules.improve.constants import (
 # ── Constants ────────────────────────────────────────────────────────────────
 
 
-SCHEMA_GRAPH_NODE_TYPES = {
-    "DatabaseSchema",
-    "SchemaTable",
-    "SchemaRelationship",
-    "TableType",
-}
+SCHEMA_TABLE_NODE_TYPES = {"SchemaTable", "TableType"}
+
+# Schema view column for database tables, after the Context column, so a SQL
+# dataset's tables are not titled "Chunks" like the rank their nodes carry
+# in the Story view.
+SCHEMA_TABLE_RANK: int = 6
 
 # Maximum sample instance names attached to each schema type node.
 SCHEMA_SAMPLES_PER_TYPE: int = 5
@@ -99,9 +100,11 @@ _STRUCTURAL_RELATIONS: frozenset = frozenset(
         "is_a",
         "part_of",
         "is_part_of",
+        "is_table_of",
         "has_relationship",
         "made_from",
         "summarized_in",
+        CHILD_OF,
     }
 )
 
@@ -125,6 +128,7 @@ _TYPE_COLOR_MAP: dict[str, str] = {
     "DltRow": "#0DFF00",
     "SchemaTable": "#A550FF",
     "DatabaseSchema": "#6510F4",
+    "StructureContainer": "#0EA5A4",
     "SchemaRelationship": "#323332",
     "default": "#7c3aed",
 }
@@ -372,51 +376,47 @@ def extract_schema_fields(node):
 
 
 def extract_schema_graph_data(nodes_list, links_list):
-    """Build the DLT/structured-schema graph from SchemaTable/SchemaRelationship nodes.
+    """Build the Schema view's graph, one card per table for DLT/SQL-ingested data.
 
-    Falls back to ``extract_type_schema_graph_data`` when no schema nodes are present.
+    A dataset ingested from a database carries SchemaTable and SchemaRelationship
+    nodes. They come out in the shape the Schema view already draws for the type
+    graph (GraphNodeType cards, GraphRelationshipType edges), so the view has one
+    shape to read. Falls back to ``extract_type_schema_graph_data`` when there
+    are no tables.
     """
-    schema_nodes = []
-    schema_node_ids = set()
+    table_nodes = [n for n in nodes_list if n.get("type") in SCHEMA_TABLE_NODE_TYPES]
+    if not table_nodes:
+        return extract_type_schema_graph_data(nodes_list, links_list)
 
-    for node in nodes_list:
-        if node.get("type") not in SCHEMA_GRAPH_NODE_TYPES:
-            continue
-
-        schema_node_ids.add(node["id"])
-        schema_nodes.append(
-            {
-                "id": node["id"],
-                "name": node.get("name") or node["id"],
-                "type": node.get("type"),
-                "description": node.get("description"),
-                "fields": extract_schema_fields(node),
-                "source_table": node.get("source_table"),
-                "target_table": node.get("target_table"),
-                "relationship_type": node.get("relationship_type"),
-            }
-        )
-
-    if schema_nodes:
-        schema_links = []
-        seen_links = set()
-        for link in links_list:
-            source = str(link["source"])
-            target = str(link["target"])
-            if source not in schema_node_ids or target not in schema_node_ids:
-                continue
-
-            label = _link_relation(link)
-            link_key = (source, target, label)
-            if link_key in seen_links:
-                continue
-
-            seen_links.add(link_key)
-            schema_links.append({"source": source, "target": target, "label": label})
-
-        return {"nodes": schema_nodes, "links": schema_links}
-
-    return extract_type_schema_graph_data(nodes_list, links_list)
+    schema_nodes = [
+        {
+            "id": node["id"],
+            "name": node.get("name") or node["id"],
+            "type": "GraphNodeType",
+            "rank": SCHEMA_TABLE_RANK,
+            "fields": extract_schema_fields(node),
+            "instance_count": None,
+            "samples": [],
+            "relationships": [],
+        }
+        for node in table_nodes
+    ]
+    table_names = {node["name"] for node in schema_nodes}
+    schema_links = [
+        {
+            "id": node["id"],
+            "type": "GraphRelationshipType",
+            "source_type": node["source_table"],
+            "target_type": node["target_table"],
+            "relationship_label": node.get("relationship_type") or node.get("name") or "related",
+            "edge_count": 1,
+        }
+        for node in nodes_list
+        if node.get("type") == "SchemaRelationship"
+        and node.get("source_table") in table_names
+        and node.get("target_table") in table_names
+    ]
+    return {"nodes": schema_nodes + schema_links, "links": []}
 
 
 def _schema_value_type(value):

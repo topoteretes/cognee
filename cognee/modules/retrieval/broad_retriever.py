@@ -15,6 +15,7 @@ A query runs read-only in SQLite, and the model phrases its result. Code appends
 answer was reached, and the full result when it has more than one row.
 """
 
+import json
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -68,6 +69,11 @@ _MIN_CHUNK_TOKENS = 256
 
 class BroadLimitError(ValueError):
     """The dataset exceeds a BROAD limit; the message names the setting to raise."""
+
+
+class BroadNoTextError(NoDataError):
+    """The dataset holds no document text for BROAD to read. Narrower than an empty
+    graph: code or custom DataPoints may still be there for other search types."""
 
 
 class DecisionSmall(BaseModel):
@@ -247,6 +253,7 @@ class BroadRetriever(CompletionRetriever):
         engine = await get_unified_engine()
         store = RecordStore()
         try:
+            store.add_dlt_tables(await self.dlt_foreign_keys(engine.graph))
             total = await self.dataset_size()
             corpus = None
             if total is None:
@@ -255,7 +262,7 @@ class BroadRetriever(CompletionRetriever):
             if total > self.store_chars:
                 chars, parts = await self.build_most_similar(store, engine.vector, query)
                 if not chars:
-                    raise NoDataError("No data found in the system, please add data first.")
+                    raise BroadNoTextError("BROAD found no document text in this dataset.")
                 coverage = (
                     f"the {parts:,} parts of the dataset most similar to the question "
                     f"({chars / 1e6:.1f} MB of {total / 1e6:,.0f} MB; the rest was not searched)"
@@ -275,7 +282,7 @@ class BroadRetriever(CompletionRetriever):
             corpus = corpus or await self.open_corpus(engine.graph)
             whole, chars = await self.build(store, corpus)
             if not chars:
-                raise NoDataError("No data found in the system, please add data first.")
+                raise BroadNoTextError("BROAD found no document text in this dataset.")
             fits = bool(whole) and len(self.tokenizer.extract_tokens(whole)) <= self.context_tokens
             logger.info("BROAD dataset: %d characters, shown whole: %s", chars, fits)
             return await self.decide(query, store, whole if fits else None)
@@ -295,6 +302,24 @@ class BroadRetriever(CompletionRetriever):
         return int(total or 0)
 
     # --- loading ----------------------------------------------------------------------
+
+    async def dlt_foreign_keys(self, graph_engine) -> dict[str, list[str]]:
+        """Each DLT table's foreign keys, read from its SchemaTable nodes.
+
+        Rows are shown as one table per table name, so the keys of every source's
+        table of that name are listed together. The keys are JSON cognee wrote
+        itself, so a node whose keys do not parse is a bug and raises.
+        """
+        nodes, _ = await graph_engine.get_filtered_graph_data([{"type": ["SchemaTable"]}])
+        foreign_keys: dict[str, list[str]] = {}
+        for _, props in nodes:
+            lines = [
+                f"{fk['column']} references {fk['ref_table']}.{fk['ref_column']}"
+                for fk in json.loads(props["foreign_keys"])
+            ]
+            listed = foreign_keys.setdefault(str(props["name"]), [])
+            listed.extend(line for line in lines if line not in listed)
+        return foreign_keys
 
     async def open_corpus(self, graph_engine) -> Corpus:
         """The dataset's documents, their names and stored sizes; text is fetched later."""
@@ -398,7 +423,7 @@ class BroadRetriever(CompletionRetriever):
             decision = await self._ask(prompt, "broad_decide_small.txt", DecisionSmall)
             if decision.sql is None:
                 if not decision.answer:
-                    raise ValueError("BROAD decision returned neither an answer nor a query")
+                    raise BroadQueryError("BROAD decision returned neither an answer nor a query")
                 return BroadContext(
                     "answer", "", "(Answered from the whole dataset.)", answer=decision.answer
                 )
@@ -541,7 +566,7 @@ class BroadRetriever(CompletionRetriever):
         return None
 
     def get_context_evidence(self, retrieved_objects: Any, dataset_id: Any = None):
-        return None
+        return []
 
     async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
         return completions

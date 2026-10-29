@@ -22,9 +22,9 @@ The dataset's graph is exported as a COGX archive and imported on the remote
 instance, preserving locally extracted entities and relationships instead of
 re-deriving them from raw files.
 
-Authentication reuses the serve credentials: run `cognee serve` once to log
-in, then push any time. Alternatively pass --url/--api-key or set
-COGNEE_SERVICE_URL and COGNEE_API_KEY.
+Authentication reuses the saved serve connection: run
+`cognee serve --url <instance> --api-key <key>` once, then push any time.
+Alternatively pass --url/--api-key or set COGNEE_SERVICE_URL and COGNEE_API_KEY.
 
 Import modes:
   preserve   (default) map exported entities/facts directly — zero LLM calls

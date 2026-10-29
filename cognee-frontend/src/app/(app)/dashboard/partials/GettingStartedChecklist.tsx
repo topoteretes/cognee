@@ -49,10 +49,10 @@ function ChecklistStep({ label, done, isNext, stepNumber }: ChecklistItem & { is
 // Distinct from AgentConnectionSection's cards (which teach *how* to connect
 // an agent) — this tracks *whether* the user has actually done the three
 // things that predict retention, and disappears once they have. Activity is
-// judged the same way useOnboardingRedirect does (pipeline runs / sessions),
-// never by dataset count/name — the onboarding-uploaded dataset and the
-// auto-provisioned empty placeholder share the same "default_dataset" name,
-// so dataset presence alone can't tell them apart.
+// judged from pipeline runs and sessions, never by dataset count/name — the
+// onboarding-uploaded dataset and the auto-provisioned empty placeholder share
+// the same "default_dataset" name, so dataset presence alone can't tell them
+// apart.
 export function GettingStartedChecklist({ items }: { items: ChecklistItem[] }) {
   if (items.every((item) => item.done)) return null;
 

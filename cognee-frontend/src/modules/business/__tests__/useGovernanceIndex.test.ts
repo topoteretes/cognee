@@ -1,5 +1,5 @@
 import type { GovernanceIndex } from "../useGovernanceIndex";
-import { userLabel } from "../useGovernanceIndex";
+import { narrowToReadable, userLabel } from "../useGovernanceIndex";
 import type { BusinessGraphNode } from "../types";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -47,5 +47,56 @@ describe("userLabel", () => {
   it("falls back to 'member N' when the user has no name at all", () => {
     const index = indexWithUsers([user("u1", undefined), user("u2", "jane@topoteretes.com")]);
     expect(userLabel(index, index.users[0])).toBe("member 1");
+  });
+});
+
+// The provenance payload behind this index is tenant-scoped, so it carries
+// datasets the caller holds no grant on. Every panel renders straight off the
+// index, so this is the one place that decides what they may see.
+describe("narrowToReadable", () => {
+  function tenantIndex(): GovernanceIndex {
+    const datasets: BusinessGraphNode[] = [
+      { id: "ds-mine", name: "luca-onboarding", type: "Dataset" },
+      { id: "ds-theirs", name: "acme-payroll", type: "Dataset" },
+    ];
+    return {
+      tenants: [],
+      users: [user("u1", "luca@acme.com"), user("u2", "mara@acme.com")],
+      agents: [],
+      datasets,
+      datasetById: Object.fromEntries(datasets.map((d) => [d.id, d])),
+      access: {
+        u1: { "ds-mine": { owns: true, perms: new Set(["read"]) } },
+        u2: { "ds-theirs": { owns: true, perms: new Set(["read"]) } },
+      },
+      agentOwnerId: {},
+    };
+  }
+
+  it("drops a dataset the readable list does not vouch for", () => {
+    const narrowed = narrowToReadable(tenantIndex(), ["ds-mine"]);
+    expect(narrowed.datasets.map((d) => d.id)).toEqual(["ds-mine"]);
+    expect(narrowed.datasetById["ds-theirs"]).toBeUndefined();
+  });
+
+  it("drops the access slots of a dropped dataset, so the rails cannot count it", () => {
+    // "access · 1/2" would disclose that a second dataset exists even with
+    // its name gone.
+    const narrowed = narrowToReadable(tenantIndex(), ["ds-mine"]);
+    expect(narrowed.access.u2).toBeUndefined();
+    expect(Object.keys(narrowed.access.u1)).toEqual(["ds-mine"]);
+  });
+
+  it("narrows to nothing when the readable list is unknown", () => {
+    // null is "the list has not answered, or failed". An unknown grant is not
+    // a grant: falling back to the tenant's list is what leaked the names.
+    const narrowed = narrowToReadable(tenantIndex(), null);
+    expect(narrowed.datasets).toEqual([]);
+    expect(narrowed.access).toEqual({});
+  });
+
+  it("keeps the workspace's principals, which are not what this narrows", () => {
+    const narrowed = narrowToReadable(tenantIndex(), ["ds-mine"]);
+    expect(narrowed.users.map((u) => u.id)).toEqual(["u1", "u2"]);
   });
 });

@@ -106,9 +106,8 @@ async def test_add_and_get_node(adapter):
     kg = _load_demo_kg()
     node = kg.nodes[0]  # Alice
 
-    # Use add_nodes (batch) with a single node — add_node uses a
-    # different Cypher path that has a known Kuzu compatibility issue.
-    await adapter.add_nodes([node])
+    # add_node delegates to add_nodes, so the single-node path is the batch path.
+    await adapter.add_node(node)
 
     result = await adapter.get_node(node.id)
     assert result is not None

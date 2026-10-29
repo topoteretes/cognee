@@ -3,10 +3,11 @@
 import { Tooltip } from "@mantine/core";
 import { sourceLabel, sourceTooltipLabel } from "../computeBrainState";
 import type { BrainState } from "../sceneTypes";
+import type { ColorEncoding } from "../colorEncoding";
 
 type SourcesBrainState = Pick<
   BrainState,
-  "sourceNames" | "setEntityCount" | "setDocCount" | "setMemberCount" | "setColor"
+  "sourceNames" | "setEntityCount" | "setDocCount" | "setMemberCount"
 >;
 
 // Above this many sources, a full card per source (name, color bar,
@@ -24,6 +25,7 @@ const TOP_SOURCE_CARD_LIMIT = 8;
 
 interface SourcesRailProps {
   brainState: SourcesBrainState | null;
+  encoding: ColorEncoding;
   focusSets: Set<string> | null;
   onToggleFocus: (name: string) => void;
   // Lets the canvas draw the drifting-particle filament from this card to
@@ -43,7 +45,8 @@ interface SourcesRailProps {
 
 interface SourceCardProps {
   name: string;
-  brainState: SourcesBrainState | null;
+  brainState: SourcesBrainState;
+  encoding: ColorEncoding;
   focused: boolean;
   dimmed: boolean;
   flashSourceName?: string | null;
@@ -52,11 +55,11 @@ interface SourceCardProps {
 }
 
 function SourceCard({
-  name, brainState, focused, dimmed, flashSourceName, registerCardRef, onToggleFocus,
+  name, brainState, encoding, focused, dimmed, flashSourceName, registerCardRef, onToggleFocus,
 }: SourceCardProps) {
-  const entities = brainState?.setEntityCount[name] ?? 0;
-  const docs = brainState?.setDocCount[name] ?? 0;
-  const members = brainState?.setMemberCount[name] ?? 0;
+  const entities = brainState.setEntityCount[name] ?? 0;
+  const docs = brainState.setDocCount[name] ?? 0;
+  const members = brainState.setMemberCount[name] ?? 0;
   return (
     <button
       ref={(el) => registerCardRef(name, el)}
@@ -70,7 +73,7 @@ function SourceCard({
     >
       <span
         className="absolute left-0 top-2 bottom-2 w-[3px] rounded"
-        style={{ background: brainState?.setColor[name] || "#7E8CA6" }}
+        style={{ background: encoding.sourceColor(name) }}
       />
       {/* A native `title` tooltip is slow to appear, inconsistent across
           browsers, and never fires on touch — the only way to see a
@@ -138,14 +141,14 @@ function SourceChip({ name, count, color, focused, dimmed, onToggleFocus }: Sour
 // is what wires up the `focusSets` plumbing already threaded through
 // BusinessCanvas/businessDraw (hulls, entity dimming) to an actual control.
 export default function SourcesRail({
-  brainState, focusSets, onToggleFocus, registerCardRef, flashSourceName, reachableByHoveredPrincipal = true,
+  brainState, encoding, focusSets, onToggleFocus, registerCardRef, flashSourceName, reachableByHoveredPrincipal = true,
 }: SourcesRailProps) {
-  const sourceNames = brainState?.sourceNames ?? [];
-  if (!sourceNames.length) return null;
+  if (!brainState || !brainState.sourceNames.length) return null;
+  const { sourceNames } = brainState;
 
   const overflowing = sourceNames.length > TOP_SOURCE_CARD_LIMIT;
   const ranked = overflowing
-    ? [...sourceNames].sort((a, b) => (brainState?.setEntityCount[b] ?? 0) - (brainState?.setEntityCount[a] ?? 0))
+    ? [...sourceNames].sort((a, b) => (brainState.setEntityCount[b] ?? 0) - (brainState.setEntityCount[a] ?? 0))
     : sourceNames;
   const topNames = overflowing ? ranked.slice(0, TOP_SOURCE_CARD_LIMIT) : ranked;
   const tailNames = overflowing ? ranked.slice(TOP_SOURCE_CARD_LIMIT) : [];
@@ -168,6 +171,7 @@ export default function SourcesRail({
             key={name}
             name={name}
             brainState={brainState}
+            encoding={encoding}
             focused={focusSets?.has(name) ?? false}
             dimmed={(focusSets ? !focusSets.has(name) : false) || !reachableByHoveredPrincipal}
             flashSourceName={flashSourceName}
@@ -183,8 +187,8 @@ export default function SourcesRail({
             <SourceChip
               key={name}
               name={name}
-              count={brainState?.setEntityCount[name] ?? 0}
-              color={brainState?.setColor[name] || "#7E8CA6"}
+              count={brainState.setEntityCount[name] ?? 0}
+              color={encoding.sourceColor(name)}
               focused={focusSets?.has(name) ?? false}
               dimmed={(focusSets ? !focusSets.has(name) : false) || !reachableByHoveredPrincipal}
               onToggleFocus={onToggleFocus}

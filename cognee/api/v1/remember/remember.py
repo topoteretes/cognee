@@ -39,9 +39,11 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.operations import record_operation
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
+from cognee.modules.pipelines.utils import iter_ingestion_entries
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
 
@@ -153,7 +155,14 @@ _ADD_ONLY = frozenset(
     }
 )
 _COGNIFY_ONLY = frozenset(
-    {"graph_model", "extractor", "summary_method", "chunks_per_batch", "config"}
+    {
+        "graph_model",
+        "extractor",
+        "summary_method",
+        "early_chunk_indexing",
+        "chunks_per_batch",
+        "config",
+    }
 )
 _SHARED = frozenset(
     {
@@ -361,26 +370,6 @@ def _entry_with_node_set(entry: "MemoryEntry", node_set) -> "MemoryEntry":
             f"node_set={requested}; pass one of them"
         )
     return entry
-
-
-async def _rearm_session_improve_debounce(session_id: str, user) -> None:
-    """Refund the debounce window a lock-held bridge spent without persisting."""
-    from cognee.api.v1.remember.auto_improve_debounce import (
-        debounce_active,
-        rearm_auto_improve_debounce,
-    )
-
-    if not debounce_active():
-        return
-    user_id = str(user.id) if user is not None and hasattr(user, "id") else None
-    if not user_id:
-        return
-
-    from cognee.infrastructure.session.get_session_manager import get_session_manager
-
-    sm = get_session_manager()
-    if sm.is_available:
-        await rearm_auto_improve_debounce(sm, user_id, session_id)
 
 
 async def _session_improve_due(session_id: str, user) -> bool:
@@ -754,6 +743,13 @@ class RememberResult:
         improve_error: Why the automatic improve failed, when it did. The
             remember itself succeeded in that case: ``status`` stays
             ``"completed"`` / ``"session_stored"`` and only this field is set.
+        after_run_error: Why the step after the completed cognify run failed
+            (``AfterRunHookError``: the vector store compaction or the document
+            structure pass), when it did. The data is stored and cognified and the
+            automatic improve still runs. A blocking remember then raises the
+            error; with ``raise_on_error=False`` or in the background it is only
+            reported here and ``status`` stays ``"completed"``. The step runs
+            again on the dataset's next cognify.
         improve_skipped: Why the automatic improve was not started, when the
             host application's admission check declined it
             (``cognee.modules.improve.register_auto_improve_admission``): a
@@ -808,6 +804,8 @@ class RememberResult:
         # (A5). An improve failure never flips `status`; it lands here.
         self.improve: ImproveResult | None = None
         self.improve_error: str | None = None
+        # A failed step after the completed cognify; never flips `status` either.
+        self.after_run_error: str | None = None
         # The reason a host admission check gave for not starting it at all.
         self.improve_skipped: str | None = None
         self._task: asyncio.Task | None = None
@@ -843,6 +841,8 @@ class RememberResult:
             parts.append(f"improve={getattr(self.improve, 'status', None)!r}")
         if self.improve_error:
             parts.append(f"improve_error={self.improve_error!r}")
+        if self.after_run_error:
+            parts.append(f"after_run_error={self.after_run_error!r}")
         if self.improve_skipped:
             parts.append(f"improve_skipped={self.improve_skipped!r}")
         return f"RememberResult({', '.join(parts)})"
@@ -877,12 +877,15 @@ class RememberResult:
             d["improve"] = dump(mode="json") if callable(dump) else self.improve
         if self.improve_error:
             d["improve_error"] = self.improve_error
+        if self.after_run_error:
+            d["after_run_error"] = self.after_run_error
         if self.improve_skipped:
             d["improve_skipped"] = self.improve_skipped
         return d
 
     def _attach_improve_payload(self, payload: dict) -> None:
-        """Rebuild ``improve`` / ``improve_error`` / ``improve_skipped`` from a server's JSON."""
+        """Rebuild ``improve`` / ``improve_error`` / ``after_run_error`` / ``improve_skipped``
+        from a server's JSON."""
         if not isinstance(payload, dict):
             return
         improve_payload = payload.get("improve")
@@ -896,6 +899,8 @@ class RememberResult:
                 self.improve = improve_payload  # type: ignore[assignment]
         if payload.get("improve_error"):
             self.improve_error = str(payload["improve_error"])
+        if payload.get("after_run_error"):
+            self.after_run_error = str(payload["after_run_error"])
         if payload.get("improve_skipped"):
             self.improve_skipped = str(payload["improve_skipped"])
 
@@ -954,7 +959,8 @@ class RememberResult:
             self.dataset_name = run_dataset_name
 
         if hasattr(run_info, "status"):
-            self.status = "errored" if "Errored" in run_info.status else "completed"
+            self.status = "errored" if run_info.status == "PipelineRunErrored" else "completed"
+            self.after_run_error = getattr(run_info, "after_run_error", None)
             if hasattr(run_info, "pipeline_run_id"):
                 self.pipeline_run_id = str(run_info.pipeline_run_id)
         else:
@@ -989,15 +995,11 @@ class RememberResult:
             ingestion_info = getattr(run_info, "data_ingestion_info", None)
             if ingestion_info and isinstance(ingestion_info, list):
                 processed = 0
-                for entry in ingestion_info:
-                    if not isinstance(entry, dict):
-                        continue
-                    status = getattr(entry.get("run_info"), "status", "")
-                    if "Errored" in status:
+                for status, entry_data_ids in iter_ingestion_entries(ingestion_info):
+                    if status == "PipelineRunErrored":
                         continue
                     processed += 1
-                    if entry.get("data_id") is not None:
-                        self.items.append({"id": str(entry["data_id"])})
+                    self.items.extend({"id": str(data_id)} for data_id in entry_data_ids)
                 self.items_processed = processed
 
     def _fail(self, exc: BaseException):
@@ -1539,6 +1541,13 @@ async def _remember_inner(
                 "branch is not supported while connected to a remote Cognee instance. "
                 "Call cognee.disconnect() to clone the branch locally."
             )
+        if kwargs.get("early_chunk_indexing") is not None:
+            # Same as extractor: the remote runs its own setting, and
+            # client.remember() would drop this one, as cognify() refuses it.
+            raise ValueError(
+                "early_chunk_indexing is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to choose it locally."
+            )
         if session_ids:
             # Same discipline as extractor: POST /remember carries no
             # session_ids field, so forwarding would silently drop them.
@@ -1648,10 +1657,13 @@ async def _remember_inner(
 
         from cognee import __version__ as cognee_version
         from cognee.infrastructure.locks.dataset_lock import dataset_lock
-        from cognee.modules.data.methods import mark_data_processed
-        from cognee.modules.run_custom_pipeline import run_custom_pipeline
+        from cognee.modules.integrations.sync_progress import report_sync_progress
         from cognee.shared.utils import send_telemetry
-        from cognee.tasks.code_graph import get_code_graph_tasks
+        from cognee.tasks.code_graph.cluster import (
+            pipeline_errored,
+            plan_dataset_refresh,
+            refresh_dataset_code_graph,
+        )
         from cognee.tasks.code_graph.code_repo import add_code_repository
         from cognee.tasks.code_graph.resolve_repo import (
             is_remote_repo,
@@ -1714,60 +1726,63 @@ async def _remember_inner(
             if run_id is not None:
                 item["pipeline_run_id"] = str(run_id)
                 result.pipeline_run_id = str(run_id)
-            if "Errored" in getattr(run_info, "status", ""):
+            if getattr(run_info, "status", "") == "PipelineRunErrored":
                 item["status"] = "errored"
                 item["error"] = (
                     getattr(run_info, "error_message", None) or "code_graph_pipeline errored"
                 )
 
-        async def _run_one_repo(spec, item: dict) -> None:
+        async def _clone_repo(spec, item: dict) -> Path:
+            # Resolving a spec may clone a remote repository: network-bound
+            # work that needs no dataset state, so it runs before the lock.
             repo_path = await resolve_repo_source(spec, credentials=repo_credentials)
             item["path"] = str(repo_path)
-            # The Data row's stamps are read-modify-written as a whole: holding
-            # the dataset lock from the row write to the final stamp keeps a
-            # concurrent add()/cognify() of the dataset from overwriting them.
-            # The lock is re-entrant, so add() and the pipeline run inside it.
-            async with dataset_lock(dataset.id):
+            return repo_path
+
+        async def _store_repo(spec, item: dict, repo_path: Path):
+            # One Data row per repository gives the caller a data_id for
+            # forget() and lists the repo on the dataset. Running the pipeline
+            # over that row lets the graph writes record it as their owner, so
+            # forget(data_id=...) removes the nodes this row wrote. Code node
+            # ids are keyed on the repository name (its directory basename), so
+            # two rows whose repos share a name share nodes, and only the first
+            # writer owns the unchanged ones.
+            data = await add_code_repository(
+                repo_path,
+                user=user,
+                dataset=dataset,
+                source_url=item["source"] if is_remote_repo(spec) else None,
                 # The default (graph-only) pipeline performs no LLM or embedding
                 # calls, so it must not demand an API key on first run. With
                 # index_vectors=True embeddings are used, so the checks stay on.
-                skip_connection_test = not bool(index_vectors)
-                # One Data row per repository gives the caller a data_id for
-                # forget() and lists the repo on the dataset. Running the pipeline
-                # over that row lets the graph writes record it as their owner, so
-                # forget(data_id=...) removes the nodes this row wrote. Code node
-                # ids are keyed on the repository name (its directory basename), so
-                # two rows whose repos share a name share nodes, and only the first
-                # writer owns the unchanged ones.
-                data = await add_code_repository(
-                    repo_path,
-                    user=user,
-                    dataset=dataset,
-                    source_url=item["source"] if is_remote_repo(spec) else None,
-                    skip_connection_test=skip_connection_test,
-                )
-                item["id"] = str(data.id)
-                pipeline_result = await run_custom_pipeline(
-                    tasks=get_code_graph_tasks(str(repo_path), index_vectors=bool(index_vectors)),
-                    data=[data],
-                    dataset=dataset.id,
-                    user=user,
-                    pipeline_name="code_graph_pipeline",
-                    skip_connection_test=skip_connection_test,
-                )
-                _apply_code_run_info(item, pipeline_result)
-                if item.get("status") != "errored":
-                    # The row's graph is built, exactly as the cognify CODE_REPO
-                    # route would build it: stamp cognify completion so a later
-                    # cognify() of the dataset does not rerun enola for it, and the
-                    # code graph pipeline's own slot for per-item status.
-                    await mark_data_processed(
-                        data.id,
-                        dataset.id,
-                        pipeline_names=("cognify_pipeline", "code_graph_pipeline"),
-                    )
+                skip_connection_test=not bool(index_vectors),
+            )
+            item["id"] = str(data.id)
+            return data
+
+        def _fail(item: dict, exc: Exception) -> None:
+            item["status"] = "errored"
+            item["error"] = str(exc)
+
+        def _isolate(item: dict, exc: Exception, position: int) -> None:
+            # Isolating (background runs, and raise_on_error=False as the
+            # HTTP router and the GitHub sync pass): one failing repo must
+            # not abort the rest of the batch, so record the failure per
+            # item and keep going.
+            # Specs can embed URL credentials — never log spec-derived values.
+            logger.exception("Code-graph run failed for repo %d of %d", position, len(repo_specs))
+            _fail(item, exc)
 
         async def _run_repos(isolate_failures: bool) -> None:
+            # One phase for the whole batch: a per-repo phase change would reset
+            # the repository counter and its estimate.
+            await report_sync_progress(
+                phase="processing", completed=0, total=len(repo_specs), unit="repositories"
+            )
+            # Clone first, outside the lock: a remote repository's clone is
+            # the slow, network-bound part and reads no dataset state, so
+            # nothing else on the dataset should wait for it.
+            cloned = []
             for position, spec in enumerate(repo_specs, start=1):
                 # redact: connector-supplied URLs may carry a token in the
                 # userinfo, which must not surface in results or logs. The
@@ -1776,27 +1791,124 @@ async def _remember_inner(
                 item = {"kind": "code_repository", "source": redact_repo_spec(spec)}
                 result.items.append(item)
                 try:
-                    await _run_one_repo(spec, item)
+                    cloned.append((position, spec, item, await _clone_repo(spec, item)))
                 except Exception as exc:
                     if not isolate_failures:
                         raise
-                    # Isolating (background runs, and raise_on_error=False as
-                    # the HTTP router and the GitHub sync pass): one failing
-                    # repo must not abort the rest of the batch, so record the
-                    # failure per item and keep going.
-                    # Specs can embed URL credentials — never log spec-derived values.
-                    logger.exception(
-                        "Code-graph run failed for repo %d of %d", position, len(repo_specs)
+                    _isolate(item, exc, position)
+
+            # The Data rows' stamps are read-modify-written as a whole: holding
+            # the dataset lock from the first row write to the final stamp keeps
+            # a concurrent add()/cognify() of the dataset from overwriting them.
+            # The lock is re-entrant, so add() and the pipeline run inside it.
+            async with dataset_lock(dataset.id):
+                # The dataset's repositories are extracted together, so the ones
+                # already in it are rebuilt with the ones this call adds: that is
+                # where the edges between repositories come from. The enola run
+                # writes the dataset's snapshot directory, which the pipeline
+                # reads below and a cognify() of the dataset rewrites, so it runs
+                # under the lock. A failure is recorded once the rows exist, so
+                # the caller still gets their ids.
+                plan, plan_error = None, None
+                if cloned:
+                    try:
+                        plan = await plan_dataset_refresh(
+                            dataset, [repo_path for _position, _spec, _item, repo_path in cloned]
+                        )
+                    except Exception as exc:
+                        plan_error = exc
+                        if isolate_failures:
+                            logger.exception("Code-graph extraction failed for the dataset")
+
+                stored = []
+                for position, spec, item, repo_path in cloned:
+                    try:
+                        stored.append((item, await _store_repo(spec, item, repo_path), repo_path))
+                    except Exception as exc:
+                        if not isolate_failures:
+                            raise
+                        _isolate(item, exc, position)
+
+                if plan_error is not None:
+                    if not isolate_failures:
+                        raise plan_error
+                    for item, _data, _repo_path in stored:
+                        _fail(item, plan_error)
+
+                runs = []
+                if stored and plan_error is None:
+                    try:
+                        runs = await refresh_dataset_code_graph(
+                            dataset,
+                            user,
+                            known_repos=[(data, repo_path) for _item, data, repo_path in stored],
+                            index_vectors=bool(index_vectors),
+                            plan=plan,
+                        )
+                    except Exception as exc:
+                        if not isolate_failures:
+                            raise
+                        logger.exception("Code-graph extraction failed for the dataset")
+                        for item, _data, _repo_path in stored:
+                            _fail(item, exc)
+
+                pending = list(stored)
+                other_errors = []
+                for run in runs:
+                    item = next(
+                        (
+                            entry
+                            for entry in pending
+                            if entry[1] is run.data and entry[2] == run.repo_path
+                        ),
+                        None,
                     )
-                    item["status"] = "errored"
-                    item["error"] = str(exc)
+                    if item is None:
+                        # A repository already in the dataset, rebuilt with this
+                        # batch. Its failure is reported, never raised: the rows
+                        # this call stored are built and stamped by now.
+                        if run.error is not None or pipeline_errored(run.pipeline_result):
+                            other_errors.append(
+                                f"{run.repo_path.name}: "
+                                f"{run.error or 'code_graph_pipeline errored'}"
+                            )
+                        continue
+                    if run.error is not None and not isolate_failures:
+                        raise run.error
+                    pending.remove(item)
+                    if run.error is not None:
+                        _fail(item[0], run.error)
+                    else:
+                        _apply_code_run_info(item[0], run.pipeline_result)
+
+                # A stored row no run built (its directory was gone by the
+                # time the graph was loaded) has no graph: never a success.
+                for item, _data, repo_path in pending:
+                    if item.get("status") != "errored":
+                        error = RuntimeError(f"code graph not built for '{repo_path.name}'")
+                        if not isolate_failures:
+                            raise error
+                        _fail(item, error)
+
+            # The repositories are extracted together, so they finish together:
+            # one report for the whole batch.
+            failed = len([item for item in result.items if item.get("status") == "errored"])
+            await report_sync_progress(
+                phase="processing",
+                completed=len(repo_specs),
+                total=len(repo_specs),
+                unit="repositories",
+                counts={"processed": len(repo_specs) - failed, "failed": failed},
+            )
             result.items_processed = len(
                 [item for item in result.items if item.get("status") != "errored"]
             )
             errored = [item for item in result.items if item.get("status") == "errored"]
-            if errored:
+            if errored or other_errors:
                 result.status = "errored"
-                result.error = "; ".join(f"{item['source']}: {item['error']}" for item in errored)
+                result.error = "; ".join(
+                    [f"{item['source']}: {item['error']}" for item in errored] + other_errors
+                )
             elif result.status == "running":
                 result.status = "completed"
             result.elapsed_seconds = time.monotonic() - result._started_at
@@ -2035,7 +2147,7 @@ async def _remember_inner(
 
         # Session memory: store in session cache, then optionally bridge to graph
         if session_id:
-            operation_context.set_session_id(session_id)
+            operation_context.set_session_ids([session_id])
             await _add_to_session(session_id, data, user, node_set=add_kwargs.get("node_set"))
             result = RememberResult(
                 status="session_stored",
@@ -2076,26 +2188,6 @@ async def _remember_inner(
                                 "remember: session improve reported errors (non-fatal): %s",
                                 result.improve_error,
                             )
-                        elif result.improve.lock_held and result.improve.rerun_requested:
-                            # The holder of this session runs one more pass
-                            # before releasing, so this entry is bridged by it;
-                            # the debounce window stands.
-                            logger.info(
-                                "remember: session '%s' bridge deferred to the in-flight "
-                                "improve, which runs one more pass",
-                                session_id,
-                            )
-                        elif result.improve.lock_held:
-                            # Nothing was persisted — never log this as bridged.
-                            # Refund the debounce window so the next remember()
-                            # retries instead of waiting out a window this
-                            # bridge never used.
-                            await _rearm_session_improve_debounce(session_id, user)
-                            logger.info(
-                                "remember: session '%s' bridge skipped, another improve "
-                                "holds the lock; the next remember() retries",
-                                session_id,
-                            )
                         else:
                             logger.info(
                                 "remember: session '%s' bridged to permanent graph", session_id
@@ -2132,23 +2224,33 @@ async def _remember_inner(
 
             datasets_arg = [dataset_name] if dataset_id is None else [dataset_id]
 
-            cognify_result = await cognify(
-                datasets=datasets_arg,
-                chunker=chunker,
-                chunk_size=chunk_size,
-                custom_prompt=custom_prompt,
-                run_in_background=False,
-                # Loud-by-default: a failed build raises CognifyFailedError
-                # (typed, classified, with a remedy) out of blocking remember()
-                # instead of returning a silently "errored" result nobody
-                # inspects. In background remember() a raise has nowhere to go
-                # and would skip _resolve(), losing pipeline_run_id/dataset_id/
-                # raw_result — so take the errored-run-info path there and let
-                # _resolve() record the failure on the result.
-                raise_on_error=raise_on_error and not run_in_background,
-                **shared_kwargs,
-                **cognify_kwargs,
-            )
+            after_run_hook_error: AfterRunHookError | None = None
+            try:
+                cognify_result = await cognify(
+                    datasets=datasets_arg,
+                    chunker=chunker,
+                    chunk_size=chunk_size,
+                    custom_prompt=custom_prompt,
+                    run_in_background=False,
+                    # Loud-by-default: a failed build raises CognifyFailedError
+                    # (typed, classified, with a remedy) out of blocking remember()
+                    # instead of returning a silently "errored" result nobody
+                    # inspects. In background remember() a raise has nowhere to go
+                    # and would skip _resolve(), losing pipeline_run_id/dataset_id/
+                    # raw_result — so take the errored-run-info path there and let
+                    # _resolve() record the failure on the result.
+                    raise_on_error=raise_on_error and not run_in_background,
+                    **shared_kwargs,
+                    **cognify_kwargs,
+                )
+            except AfterRunHookError as error:
+                # The data is stored and cognified; only the step after the run
+                # failed. The run is resolved and improve still runs, then the
+                # error is raised. _resolve reads the reason off the run
+                # (``after_run_error``), as it does when raise_on_error=False
+                # returned it instead of raising.
+                after_run_hook_error = error
+                cognify_result = error.run_info
 
             result._resolve(cognify_result)
 
@@ -2176,8 +2278,11 @@ async def _remember_inner(
                             result.improve_error,
                         )
 
+            if after_run_hook_error is not None:
+                raise after_run_hook_error
+
         if session_ids:
-            operation_context.set_session_id(session_ids[0] if len(session_ids) == 1 else None)
+            operation_context.set_session_ids(session_ids)
 
         if run_in_background:
             # outcome="succeeded" on this row means "accepted and started"

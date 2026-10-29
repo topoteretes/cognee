@@ -7,8 +7,8 @@ class DltRowData:
     """Carries per-row information from ingest_dlt_source back to ingest_data."""
 
     table_name: str
-    primary_key_column: str
-    primary_key_value: str
+    primary_key_columns: list[str]  # Several for a composite key.
+    primary_key_value: str  # The key columns' values, joined with ":".
     row_data: dict
     content_hash: str
     schema_info: object  # list[dict] for SQLite, dict for Postgres

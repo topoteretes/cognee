@@ -19,7 +19,11 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 from uuid import UUID
 
-from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
+from cognee.modules.data.methods.get_existing_data_ids import (
+    DATA_ID_BATCH_SIZE,
+    get_existing_data_ids,
+)
+from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id, get_unique_data_ids
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -34,7 +38,13 @@ from .create_dlt_source import (
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
 from .dlt_temporal import temporal_cells
-from .dlt_utils import NODE_SET_COLUMN, column_selected, document_source_tag
+from .dlt_utils import (
+    NODE_SET_COLUMN,
+    SOURCE_LABEL_ATTR,
+    STRUCTURE_COLUMN,
+    column_selected,
+    document_source_tag,
+)
 from .ingest_dlt_source import ingest_dlt_source
 
 logger = get_logger("resolve_dlt_sources")
@@ -226,9 +236,12 @@ async def resolve_dlt_sources(
         # derivation would pin the same id when one source loads into two
         # datasets — a hard collision on the foreign-pin guard.
         row_ids = await _stable_row_ids(rows, user, dataset_id)
+        source_items = []
         for row, data_id in zip(rows, row_ids):
             document_fresh_ids.add(data_id)
-            document_data_items.append(_build_document_data_item(row, data_id, source_tag))
+            source_items.append(_build_document_data_item(row, data_id, source_tag))
+        await _refresh_row_structure(source_items, dataset_id)
+        document_data_items.extend(source_items)
 
     # --- Relational sources: one manifest DataItem per source -----------
     expanded_items: list[DataItem] = []
@@ -249,6 +262,7 @@ async def resolve_dlt_sources(
             user,
             column_value_columns=column_value_columns,
             temporal_columns=temporal_columns,
+            source_label=getattr(dlt_item, SOURCE_LABEL_ATTR, None),
         )
         if item is not None:
             if item.data_id in manifest_data_ids:
@@ -305,6 +319,7 @@ async def resolve_dlt_sources(
                     user,
                     manifest_data_ids,
                     manifest_source_names=ingested_source_names,
+                    dataset_id=dataset_id,
                 )
             if do_document_cleanup:
                 await _delete_dlt_orphans(
@@ -313,6 +328,7 @@ async def resolve_dlt_sources(
                     document_fresh_ids,
                     sources=tuple({source for source, _ in document_scopes}),
                     document_scopes=document_scopes,
+                    dataset_id=dataset_id,
                 )
 
         orphan_cleanup = _cleanup
@@ -373,8 +389,13 @@ async def _build_source_manifest_item(
     user: User,
     column_value_columns: dict | None = None,
     temporal_columns: dict | None = None,
+    source_label: str | None = None,
 ) -> DataItem | None:
     """Build a single manifest DataItem describing a whole DLT source.
+
+    ``source_label`` names the database a connection-string source reads
+    (``SOURCE_LABEL_ATTR``); the manifest records it so the source's table nodes
+    can name it.
 
     Rows are deduplicated by identity (table, pk_value, content_hash) — DLT
     child tables can contain rows that are byte-identical once dlt bookkeeping
@@ -402,34 +423,52 @@ async def _build_source_manifest_item(
     # Stable per-row node ids via the shared identifier formula. FK lookup
     # maps (table, pk_value) → node_id; when multiple rows share a PK value,
     # the last one wins (best-effort).
-    # TODO: add a batch variant of get_unique_data_id (one query per source
-    # instead of one per row) after the incremental load PR reshapes it.
-    node_ids: dict[tuple[str, str, str], UUID] = {
-        key: await get_unique_data_id(_dlt_row_identifier(row), user)
-        for key, row in unique_rows.items()
-    }
+    node_ids: dict[tuple[str, str, str], UUID] = dict(
+        zip(
+            unique_rows,
+            await get_unique_data_ids(
+                [_dlt_row_identifier(row) for row in unique_rows.values()], user
+            ),
+        )
+    )
 
     fk_lookup: dict[tuple[str, str], UUID] = {}
+    shadowed: dict[str, int] = {}
     for key, row in unique_rows.items():
-        node_id = node_ids[key]
         fk_key = (row.table_name, row.primary_key_value)
-        existing = fk_lookup.get(fk_key)
-        if existing is not None and existing != node_id:
-            logger.warning(
-                "Duplicate primary key during FK resolution: table=%s pk=%s. "
-                "FK edges targeting this key resolve to the last row "
-                "(content_hash=%s); earlier rows with this key are shadowed.",
-                row.table_name,
-                row.primary_key_value,
-                row.content_hash,
+        if fk_key in fk_lookup:
+            shadowed[row.table_name] = shadowed.get(row.table_name, 0) + 1
+        fk_lookup[fk_key] = node_ids[key]
+    for table_name, count in shadowed.items():
+        logger.warning(
+            "Table '%s': %d rows share a primary key value with an earlier row; a foreign "
+            "key to such a value resolves to the last of those rows.",
+            table_name,
+            count,
+        )
+    # The columns each table's rows are keyed on: an FK to those finds its target
+    # row through fk_lookup; an FK to other columns through an index of their values.
+    key_columns = {row.table_name: row.primary_key_columns for row in unique_rows.values()}
+    rows_of: dict[str, list[tuple[DltRowData, UUID]]] = {}
+    for key, row in unique_rows.items():
+        rows_of.setdefault(row.table_name, []).append((row, node_ids[key]))
+    column_indexes: dict[tuple[str, tuple[str, ...]], dict] = {}
+
+    def column_lookup(table_name: str, columns: tuple[str, ...]) -> dict:
+        if (table_name, columns) not in column_indexes:
+            column_indexes[(table_name, columns)] = _column_index(
+                rows_of.get(table_name, []), columns
             )
-        fk_lookup[fk_key] = node_id
+        return column_indexes[(table_name, columns)]
 
     tables: dict[str, dict] = {}
     manifest_rows: list[dict] = []
     # (source_table, fk_column, ref_table, fk_value) for FKs whose target row
     # was not loaded — collected here and reported once after the loop.
     missing_fk_targets: list[tuple[str, str, str, str]] = []
+    # (source_table, fk_columns, ref_table, ref_columns) for FKs to a UNIQUE column
+    # whose value several loaded rows hold.
+    ambiguous_fks: set[tuple[str, str, str, str]] = set()
     for key, row in unique_rows.items():
         if row.table_name not in tables:
             tables[row.table_name] = {
@@ -441,31 +480,38 @@ async def _build_source_manifest_item(
         manifest_row = {
             "node_id": str(node_ids[key]),
             "table_name": row.table_name,
-            "primary_key_column": row.primary_key_column,
+            "primary_key_column": ", ".join(row.primary_key_columns),
             "primary_key_value": row.primary_key_value,
             "content_hash": row.content_hash,
             "text": _build_schema_context_text(row),
-            "fk_references": _resolve_fk_references(row, fk_lookup, missing_fk_targets),
+            "fk_references": _resolve_fk_references(
+                row, fk_lookup, missing_fk_targets, key_columns, column_lookup, ambiguous_fks
+            ),
         }
-        column_values = _selected_column_values(row, column_value_columns)
-        if column_values:
-            manifest_row["column_values"] = column_values
         timestamps = temporal_cells(row, temporal_columns)
         if timestamps:
             manifest_row["timestamps"] = timestamps
+        # A date cell that anchors to a Timestamp is already a shared node for
+        # its value, so it is not a ColumnValue as well: one node per cell.
+        column_values = {
+            column: value
+            for column, value in _selected_column_values(row, column_value_columns).items()
+            if column not in timestamps
+        }
+        if column_values:
+            manifest_row["column_values"] = column_values
         manifest_rows.append(manifest_row)
 
-    if missing_fk_targets:
-        sample = ", ".join(
-            f"{src}.{col} -> {ref}:{val}" for src, col, ref, val in missing_fk_targets[:5]
-        )
+    _report_missing_fk_targets(missing_fk_targets, set(key_columns))
+    for src, col, ref, ref_col in sorted(ambiguous_fks):
         logger.warning(
-            "%d foreign key reference(s) could not be resolved to a loaded row "
-            "and were dropped (no edge created). The target row was likely not "
-            "ingested (e.g. it is beyond max_rows_per_table). "
-            "Sample (source_table.column -> ref_table:value): %s",
-            len(missing_fk_targets),
-            sample,
+            "Foreign key %s.%s -> %s.%s skipped values that several rows of '%s' hold; "
+            "a foreign key must reference a unique column, so none of them is linked.",
+            src,
+            col,
+            ref,
+            ref_col,
+            ref,
         )
 
     # Deterministic ordering so the manifest content hash is stable across
@@ -478,6 +524,8 @@ async def _build_source_manifest_item(
         "tables": tables,
         "rows": manifest_rows,
     }
+    if source_label:
+        manifest["source_label"] = source_label
     manifest_text = json.dumps(manifest, sort_keys=True, separators=(",", ":"), default=str)
 
     # The data_id is STABLE — seeded from (dataset, source name) with no
@@ -552,7 +600,7 @@ def _selected_column_values(dlt_row: DltRowData, selection: dict | None) -> dict
     fk_columns = {fk.get("column", "") for fk in dlt_row.foreign_keys}
     picked = {}
     for column, value in dlt_row.row_data.items():
-        if column == dlt_row.primary_key_column or column in fk_columns:
+        if column in dlt_row.primary_key_columns or column in fk_columns:
             continue
         if not column_selected(selection, dlt_row.table_name, column):
             continue
@@ -592,24 +640,49 @@ async def _stable_row_ids(rows: list[DltRowData], user: User, dataset_id: UUID) 
     if not rows:
         return []
 
-    new_ids = [await get_unique_data_id(_dlt_row_identifier(row), user, dataset_id) for row in rows]
-    old_ids = [await get_unique_data_id(_dlt_row_identifier(row), user) for row in rows]
+    from cognee.infrastructure.databases.relational import get_relational_engine
+
+    identifiers = [_dlt_row_identifier(row) for row in rows]
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        new_ids = await get_unique_data_ids(identifiers, user, dataset_id, session)
+        old_ids = await get_unique_data_ids(identifiers, user, session=session)
+        adopted = await get_existing_data_ids(session, old_ids, dataset_id)
+    return [old_id if old_id in adopted else new_id for old_id, new_id in zip(old_ids, new_ids)]
+
+
+async def _refresh_row_structure(items: list[DataItem], dataset_id: UUID) -> None:
+    """Write the tree position onto rows that are already ingested. add() skips a
+    record whose content is unchanged, so a moved row would otherwise keep its old
+    parent. Only the ``structure`` key changes, and only where it differs."""
+    wanted = {
+        item.data_id: item.system_metadata["structure"]
+        for item in items
+        if "structure" in item.system_metadata
+    }
+    if not wanted:
+        return
 
     from sqlalchemy import select
 
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Data
 
-    engine = get_relational_engine()
-    async with engine.get_async_session() as session:
-        adopted = set(
-            (
-                await session.execute(
-                    select(Data.id).filter(Data.id.in_(old_ids), Data.dataset_id == dataset_id)
+    ids = list(wanted)
+    async with get_relational_engine().get_async_session() as session:
+        for start in range(0, len(ids), DATA_ID_BATCH_SIZE):
+            rows = await session.execute(
+                select(Data).filter(
+                    Data.id.in_(ids[start : start + DATA_ID_BATCH_SIZE]),
+                    Data.dataset_id == dataset_id,
                 )
-            ).scalars()
-        )
-    return [old_id if old_id in adopted else new_id for old_id, new_id in zip(old_ids, new_ids)]
+            )
+            for data in rows.scalars():
+                if data.system_metadata.get("structure") != wanted[data.id]:
+                    data.system_metadata = {**data.system_metadata, "structure": wanted[data.id]}
+            # One transaction per batch: the first sync after the upgrade touches every row.
+            await session.commit()
+            session.expunge_all()
 
 
 def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -> DataItem:
@@ -620,7 +693,9 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     routes the document through normal cognify entity extraction rather
     than the deterministic manifest path. A ``cognee_node_set`` column names
     the row's own node sets (``_row_node_set``); they ride on the DataItem and
-    ingest_data unions them with the call-level node_set.
+    ingest_data unions them with the call-level node_set. A ``cognee_structure``
+    column says where the row sits in its source's tree (``_row_structure``);
+    it is kept in ``system_metadata["structure"]`` for the structure pass.
 
     ``literal_text=True`` because ``content`` is provider data cognee did not
     write: an untitled row (no "# title" prefix) whose content happens to be
@@ -641,6 +716,12 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
         system_metadata["url"] = row_data["url"]
     if row_data.get("id"):
         system_metadata["external_id"] = str(row_data["id"])
+    structure = _row_structure(row, source_tag)
+    if structure is not None:
+        if "external_id" not in system_metadata:
+            # Without an external_id the structure pass could not find this row as a parent.
+            _raise_structure_shape(row, source_tag, "a structure on a row with no id")
+        system_metadata["structure"] = structure
 
     return DataItem(
         data=text,
@@ -652,8 +733,46 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     )
 
 
-def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
+def _reserved_json_column(row: DltRowData, source_tag: str, column: str, raise_shape) -> Any:
+    """The parsed value of a json-hinted reserved column, ``None`` when unset.
+
+    The column is loaded with a json type hint, so dlt moves a value that is
+    not a list or object (a bare string, a number) into a variant column such
+    as ``<column>__v_text`` and leaves the column itself NULL. Reading only the
+    column would then ingest the row without it and no sign of it, so a
+    variant raises through ``raise_shape``. The value comes back as parsed json
+    or, on SQLite, as its JSON text, which text that is not JSON also raises
+    for.
+    """
+    variants = sorted(
+        name
+        for name, value in row.row_data.items()
+        if name.startswith(f"{column}__v_") and value is not None
+    )
+    if variants:
+        raise_shape(row, source_tag, f"a value dlt stored in {', '.join(variants)}")
+    raw = row.row_data.get(column)
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            # ValueError only, no RecursionError guard: the column is loaded with a
+            # json type hint (DOCUMENT_COLUMN_HINTS) and dlt refuses a value nested
+            # deep enough to break json.loads, failing at extract before the row is
+            # stored (checked on dlt 1.28.2: 200 levels load, 1000 fail). On Postgres
+            # the value comes back already parsed. There is no input to guard against.
+            raise_shape(row, source_tag, "text that is not JSON")
+    return raw
+
+
+def _row_node_set(row: DltRowData, source_tag: str) -> list[str]:
     """The node sets a document row names in its ``cognee_node_set`` column.
+
+    A row states its full current node sets, so a row without the column, or
+    with an empty list, has none: ``[]``, never ``None``. Re-ingesting an
+    existing document treats ``None`` as "keep the stored node sets" (the
+    PATCH rule of update()), which would leave a page that lost all its labels
+    in the node sets it was removed from; ``[]`` clears them.
 
     The column must hold a JSON list of names. It comes back as that list (a
     json column) or as its JSON text (SQLite). Any other shape raises: the
@@ -670,26 +789,9 @@ def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
     An entry that is not a non-empty string raises too, matching what
     ingest_data does for a node_set passed to add().
     """
-    variants = sorted(
-        column
-        for column, value in row.row_data.items()
-        if column.startswith(f"{NODE_SET_COLUMN}__v_") and value is not None
-    )
-    if variants:
-        _raise_node_set_shape(row, source_tag, f"a value dlt stored in {', '.join(variants)}")
-    raw = row.row_data.get(NODE_SET_COLUMN)
+    raw = _reserved_json_column(row, source_tag, NODE_SET_COLUMN, _raise_node_set_shape)
     if raw is None:
-        return None
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except ValueError:
-            # ValueError only, no RecursionError guard: this column is loaded with a
-            # json type hint (NODE_SET_COLUMN_HINT) and dlt refuses a list nested
-            # deep enough to break json.loads, failing at extract before the row is
-            # stored (checked on dlt 1.28.2: 200 levels load, 1000 fail). On Postgres
-            # the value comes back already parsed. There is no input to guard against.
-            _raise_node_set_shape(row, source_tag, "text that is not JSON")
+        return []
     if not isinstance(raw, list):
         _raise_node_set_shape(row, source_tag, f"a JSON {type(raw).__name__}")
     # No cap on the number or length of names, on purpose. A cap would cut a
@@ -710,7 +812,53 @@ def _row_node_set(row: DltRowData, source_tag: str) -> list[str] | None:
         except UnicodeEncodeError:
             _raise_node_set_shape(row, source_tag, "an entry that cannot be encoded as a name")
         unique.setdefault(key, name)
-    return list(unique.values()) or None
+    return list(unique.values())
+
+
+_STRUCTURE_ENTRY_KEYS = {"kind", "id", "name", "document"}
+
+
+def _row_structure(row: DltRowData, source_tag: str) -> dict | None:
+    """The row's ``cognee_structure`` (``dlt_utils.STRUCTURE_COLUMN``), or ``None`` when
+    unset, which is not the empty list of a row at the top of its tree. Any other
+    shape stops the sync, naming the row, like a bad node set does."""
+    raw = _reserved_json_column(row, source_tag, STRUCTURE_COLUMN, _raise_structure_shape)
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or not isinstance(raw.get("ancestors"), list):
+        _raise_structure_shape(row, source_tag, "a value without an ancestors list")
+    # No check for text a backend cannot store: dlt refuses a lone surrogate at
+    # extract (checked on 1.28.2), and a graph write that refuses a value fails loudly.
+    for position, entry in enumerate(raw["ancestors"]):
+        if (
+            not isinstance(entry, dict)
+            or set(entry) - _STRUCTURE_ENTRY_KEYS
+            or not all(isinstance(entry.get(key), str) and entry[key] for key in ("kind", "id"))
+            or not isinstance(entry.get("name", ""), str)
+            or not isinstance(entry.get("document", False), bool)
+        ):
+            _raise_structure_shape(row, source_tag, "an ancestor that is not a valid entry")
+        if entry.get("document") and position != len(raw["ancestors"]) - 1:
+            _raise_structure_shape(row, source_tag, "an ancestor after a document ancestor")
+        if entry.get("document") and entry["id"] == str(row.row_data.get("id")):
+            _raise_structure_shape(row, source_tag, "the row itself as its parent")
+    return {"ancestors": raw["ancestors"]}
+
+
+def _raise_structure_shape(row: DltRowData, source_tag: str, found: str) -> NoReturn:
+    """Stop the sync: a row's ``cognee_structure`` is not a valid tree position."""
+    from cognee.exceptions import CogneeValidationError
+
+    raise CogneeValidationError(
+        message=(
+            f"Source '{source_tag}' table '{row.table_name}' row '{row.primary_key_value}': "
+            f"{STRUCTURE_COLUMN} must be an object with an ancestors list of "
+            '{"kind", "id", "name"?, "document"?} entries, but it holds '
+            f"{found}. Fix the source and re-sync the affected rows. "
+            "No document from this sync was stored."
+        ),
+        name="DltStructureColumnInvalid",
+    )
 
 
 def _raise_node_set_shape(row: DltRowData, source_tag: str, found: str) -> NoReturn:
@@ -734,52 +882,16 @@ def _clean(value: Any) -> str:
 
 
 def _build_schema_context_text(dlt_row: DltRowData) -> str:
-    """Build a human-readable, schema-enriched text representation of a DLT row.
+    """Build the text of a DLT row: its table, then one line per cell.
 
-    This text is stored as the document content and used for vector search.
-    DLT rows bypass LLM extraction — their graph is built deterministically
-    from the relational schema by ``extract_dlt_source_edges``.
+    The text is the row's document content and what vector search embeds, so it
+    holds only what is specific to the row; the table's columns and foreign keys
+    are on its SchemaTable node. DLT rows bypass LLM extraction — their graph is
+    built deterministically from the relational schema by
+    ``extract_dlt_source_edges``.
     """
-    lines = []
-    lines.append(f"Table: {dlt_row.table_name}")
-
-    # Build column descriptions
-    schema_info = dlt_row.schema_info
-    col_descriptions = []
-    if isinstance(schema_info, list):
-        # SQLite format: [{"name": "col", "type": "TEXT"}, ...]
-        for col in schema_info:
-            col_name = col.get("name", "")
-            col_type = col.get("type", "")
-            col_descriptions.append(f"  - {col_name} ({col_type})")
-    elif isinstance(schema_info, dict):
-        # Postgres format: {"col_name": {"type": "TEXT", ...}, ...}
-        for col_name, col_info in schema_info.items():
-            col_type = col_info.get("type", "") if isinstance(col_info, dict) else str(col_info)
-            col_descriptions.append(f"  - {col_name} ({col_type})")
-
-    if col_descriptions:
-        lines.append("Columns:")
-        lines.extend(col_descriptions)
-
-    # Add FK context
-    if dlt_row.foreign_keys:
-        fk_lines = []
-        for fk in dlt_row.foreign_keys:
-            col = fk.get("column", "")
-            ref_table = fk.get("ref_table", "")
-            ref_col = fk.get("ref_column", "")
-            fk_lines.append(f"  - {col} references {ref_table}.{ref_col}")
-        if fk_lines:
-            lines.append("Foreign Keys:")
-            lines.extend(fk_lines)
-
-    # Add the actual row data
-    lines.append("")
-    lines.append("Row Data:")
-    for key, value in dlt_row.row_data.items():
-        lines.append(f"  {key}: {value}")
-
+    lines = [f"Table: {dlt_row.table_name}", "Row Data:"]
+    lines.extend(f"  {key}: {value}" for key, value in dlt_row.row_data.items())
     return "\n".join(lines)
 
 
@@ -787,42 +899,72 @@ def _resolve_fk_references(
     dlt_row: DltRowData,
     row_id_lookup: dict,
     missing_targets: list | None = None,
+    key_columns: dict[str, list[str]] | None = None,
+    column_lookup=None,
+    ambiguous_fks: set | None = None,
 ) -> list:
     """Resolve foreign key columns to target row node ids for graph edge creation.
 
     Returns a list of dicts:
-    [{"column": "dept_id", "target_table": "departments", "target_pk_value": "10",
-      "target_node_id": "uuid-string", "relationship_name": "dept_id_references_departments"}]
+    [{"column": "dept_id", "target_table": "departments", "target_column": "id",
+      "target_pk_value": "10", "target_node_id": "uuid-string",
+      "relationship_name": "dept_id_references_departments"}]
+    ``target_pk_value`` is the referenced value, which is the target's key value
+    unless the FK references a UNIQUE column.
 
     When ``missing_targets`` is provided, FK references whose target row was not
     loaded are appended to it as ``(source_table, column, ref_table, value)`` so
     the caller can report the dropped edges instead of silently losing them.
+
+    ``row_id_lookup`` finds a row by the whole key its table is keyed on, given per
+    table in ``key_columns``, so the row's per-column FKs are first grouped into the
+    keys they form (``_fk_keys``): a composite FK finds its row by all its columns,
+    in the target's key order. An FK that references other columns (a UNIQUE
+    column) finds its row through ``column_lookup(ref_table, ref_columns)``, a
+    ``_column_index`` of the target's rows. A value several rows hold creates no
+    edge and is recorded in ``ambiguous_fks`` as
+    ``(source_table, columns, ref_table, ref_columns)``, each joined by ", ".
+
+    Both lookups hold only the rows of this manifest, so an FK finds its target
+    only when both tables are loaded by the same ``add()``. A target loaded by an
+    earlier or a later ``add()`` is never linked, and nothing revisits this row
+    when it arrives. Loading the tables separately does not help within one dataset
+    either: every connection-string source is named ``sql_database``, so a second
+    ``add()`` of the same database maps to the same manifest id and is skipped as
+    already completed.
     """
     references = []
-    for fk in dlt_row.foreign_keys:
-        fk_column = fk.get("column", "")
-        ref_table = fk.get("ref_table", "")
-        ref_column = fk.get("ref_column", "")
-
-        if not fk_column or not ref_table:
+    key_columns = key_columns or {}
+    for ref_table, pairs, target_key_columns in _fk_keys(dlt_row.foreign_keys, key_columns):
+        fk_columns = [column for column, _ in pairs]
+        ref_columns = [ref_column for _, ref_column in pairs]
+        fk_values = [dlt_row.row_data.get(column) for column in fk_columns]
+        if any(value is None for value in fk_values):
             continue
 
-        # Get the FK value from the row data
-        fk_value = dlt_row.row_data.get(fk_column)
-        if fk_value is None:
-            continue
-
-        fk_value_str = str(fk_value)
-        target_key = (ref_table, fk_value_str)
-        target_node_id = row_id_lookup.get(target_key)
+        # Joined like the target's primary_key_value (see _key_value).
+        fk_value_str = ":".join(str(value) for value in fk_values)
+        fk_column = ", ".join(fk_columns)
+        if target_key_columns is not None:
+            target_node_id = row_id_lookup.get((ref_table, fk_value_str))
+        else:
+            index = column_lookup(ref_table, tuple(ref_columns)) if column_lookup else {}
+            target_node_id = index.get(fk_value_str)
+            if target_node_id is None and fk_value_str in index:
+                if ambiguous_fks is not None:
+                    ambiguous_fks.add(
+                        (dlt_row.table_name, fk_column, ref_table, ", ".join(ref_columns))
+                    )
+                continue
 
         if target_node_id is not None:
-            relationship_name = f"{fk_column}_references_{ref_table}"
+            # The bare table name, so Postgres' "<dataset>.<table>" names the edge as SQLite does.
+            relationship_name = f"{'_'.join(fk_columns)}_references_{ref_table.split('.')[-1]}"
             references.append(
                 {
                     "column": fk_column,
                     "target_table": ref_table,
-                    "target_column": ref_column,
+                    "target_column": ", ".join(target_key_columns or ref_columns),
                     "target_pk_value": fk_value_str,
                     "target_node_id": str(target_node_id),
                     "relationship_name": relationship_name,
@@ -832,6 +974,125 @@ def _resolve_fk_references(
             missing_targets.append((dlt_row.table_name, fk_column, ref_table, fk_value_str))
 
     return references
+
+
+def _report_missing_fk_targets(missing_targets: list, loaded_tables: set[str]) -> None:
+    """Warn about FK references that found no target row, by why they missed.
+
+    ``missing_targets`` holds ``(source_table, column, ref_table, value)`` tuples
+    from ``_resolve_fk_references``; ``loaded_tables`` are the tables with rows in
+    this manifest. A key whose target table has no rows here gets one warning of
+    its own: edges are made only within one ``add()``, so loading that table in a
+    separate one never links these rows (see ``_resolve_fk_references``). Misses
+    against a table that was loaded keep the row-limit hint, where it can apply.
+    """
+    unloaded: dict[tuple[str, str, str], int] = {}
+    unresolved = []
+    for src, col, ref, val in missing_targets:
+        if ref in loaded_tables:
+            unresolved.append((src, col, ref, val))
+        else:
+            unloaded[(src, col, ref)] = unloaded.get((src, col, ref), 0) + 1
+
+    for (src, col, ref), count in sorted(unloaded.items()):
+        logger.warning(
+            "Foreign key %s.%s -> %s: %d row(s) get no edge, because this add() loaded "
+            "no rows of '%s'. Foreign keys link rows only within one add(): load '%s' "
+            "in the same add() as '%s' to link them.",
+            src,
+            col,
+            ref,
+            count,
+            ref,
+            ref,
+            src,
+        )
+    if unresolved:
+        sample = ", ".join(f"{src}.{col} -> {ref}:{val}" for src, col, ref, val in unresolved[:5])
+        logger.warning(
+            "%d foreign key reference(s) could not be resolved to a loaded row "
+            "and were dropped (no edge created). The target row was likely not "
+            "ingested (e.g. it is beyond max_rows_per_table). "
+            "Sample (source_table.column -> ref_table:value): %s",
+            len(unresolved),
+            sample,
+        )
+
+
+def _fk_keys(foreign_keys: list, key_columns: dict[str, list[str]]):
+    """Group per-column FKs into the keys they form against their target's key.
+
+    dlt lists every FK to one table as aligned column pairs, a composite FK's
+    columns next to each other, so consecutive pairs to one table that together
+    cover the target's key columns are one FK. Yields
+    ``(ref_table, [(column, ref_column), ...], target_key_columns)`` with the pairs
+    in the target's key order.
+
+    ``target_key_columns`` is None for pairs that reference columns the target's
+    rows are not keyed on (a UNIQUE column, or part of a composite key); the row
+    is then found by those columns' values (``_column_index``). Consecutive such
+    pairs to one table are one group, the way dlt lists a composite UNIQUE key.
+    dlt's merged hints cannot tell that from separate single-column FKs that sit
+    next to each other; matching them together only finds fewer rows, never a
+    wrong one. A target with no loaded rows has no known key, and its pairs are
+    taken one column each, to be reported as unresolved.
+    """
+    open_keys: dict[str, list[tuple[str, str]]] = {}
+    open_columns: dict[str, list[tuple[str, str]]] = {}
+
+    def close(groups, ref_table):
+        pairs = groups.pop(ref_table, None)
+        if pairs:
+            yield ref_table, pairs, None
+
+    for fk in foreign_keys:
+        # Hints are written by _dlt_key_hints with all three fields; one without
+        # them is a bug, not a key to skip.
+        column, ref_table, ref_column = fk["column"], fk["ref_table"], fk["ref_column"]
+        if not column or not ref_table or not ref_column:
+            raise ValueError(f"Foreign key hint {fk!r} does not name its column, table and target")
+        key = key_columns.get(ref_table)
+        if key is None:
+            yield ref_table, [(column, ref_column)], [ref_column]
+            continue
+        if ref_column not in key:
+            yield from close(open_keys, ref_table)
+            if any(ref_column == taken for _, taken in open_columns.get(ref_table, [])):
+                yield from close(open_columns, ref_table)
+            open_columns.setdefault(ref_table, []).append((column, ref_column))
+            continue
+        yield from close(open_columns, ref_table)
+        pairs = open_keys.setdefault(ref_table, [])
+        if any(ref_column == taken for _, taken in pairs):
+            yield from close(open_keys, ref_table)
+            pairs = open_keys.setdefault(ref_table, [])
+        pairs.append((column, ref_column))
+        if len(pairs) == len(key):
+            open_keys.pop(ref_table)
+            by_key_column = {taken: column for column, taken in pairs}
+            yield ref_table, [(by_key_column[k], k) for k in key], key
+
+    for groups in (open_keys, open_columns):
+        for ref_table in list(groups):
+            yield from close(groups, ref_table)
+
+
+def _column_index(rows: list[tuple[DltRowData, UUID]], columns: tuple[str, ...]) -> dict:
+    """Each value of ``columns`` among ``rows``, joined like a key value, to its row's
+    node id, or to None when several rows hold it.
+
+    A foreign key may only reference a primary key or a UNIQUE column set, so one
+    loaded row holding the value is the referenced row. Several means the data
+    breaks that constraint, and no row is the right one.
+    """
+    index: dict[str, UUID | None] = {}
+    for row, node_id in rows:
+        values = [row.row_data.get(column) for column in columns]
+        if any(value is None for value in values):
+            continue
+        value = ":".join(str(v) for v in values)
+        index[value] = None if value in index else node_id
+    return index
 
 
 async def _delete_dlt_orphans(
@@ -844,6 +1105,7 @@ async def _delete_dlt_orphans(
     sources: tuple[str, ...] = ("dlt", "dlt_source"),
     manifest_source_names: set[str] | None = None,
     document_scopes: set[tuple[str, str]] | None = None,
+    dataset_id: UUID | None = None,
 ) -> None:
     """Delete dlt-sourced Data records (and their graph/vector artifacts) that
     are no longer present in the freshly-ingested dlt sources.
@@ -851,6 +1113,11 @@ async def _delete_dlt_orphans(
     This handles the case where rows are deleted from the upstream database
     and the user re-ingests.  dlt cleans its own staging DB, but cognee's
     relational, graph, and vector stores still hold stale data.
+
+    ``dataset_id`` is the dataset the rows were just written to and is
+    authoritative when given: a name resolves only among the caller's own
+    datasets, so for a shared dataset written by id a name lookup would pick
+    the caller's own same-named dataset (and sweep its rows) or nothing at all.
 
     ``sources`` restricts cleanup to Data whose ``system_metadata["source"]``
     is one of the given tags: the default covers relational manifests and
@@ -867,18 +1134,34 @@ async def _delete_dlt_orphans(
     proved, and deleting another source's data is worse than retaining residue.
     """
     from cognee.context_global_variables import set_database_global_context_variables
+    from cognee.infrastructure.locks import dataset_lock
+    from cognee.modules.conflicts.methods import retire_forgotten_decisions
     from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.data.methods.delete_data import delete_data
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
     from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
         delete_data_nodes_and_edges,
     )
+    from cognee.modules.users.exceptions import PermissionDeniedError
 
     # Find the dataset — if it doesn't exist yet this is a first ingestion,
-    # so there can be no orphans.
-    existing_datasets = await get_authorized_existing_datasets(
-        user=user, permission_type="write", datasets=[dataset_name]
-    )
+    # so there can be no orphans. Prefer the id: add() already resolved and
+    # authorized it, and a name only matches datasets the caller owns.
+    # Cleanup deletes, so it needs delete permission; a write-only grantee's
+    # rows are committed by now, so skip the sweep instead of failing add().
+    try:
+        existing_datasets = await get_authorized_existing_datasets(
+            user=user,
+            permission_type="delete",
+            datasets=[dataset_id] if dataset_id is not None else [dataset_name],
+        )
+    except PermissionDeniedError:
+        logger.warning(
+            "Skipping dlt orphan cleanup for dataset '%s': no delete permission, "
+            "so rows deleted upstream stay in the dataset.",
+            dataset_name,
+        )
+        return
     if not existing_datasets:
         return
 
@@ -922,8 +1205,14 @@ async def _delete_dlt_orphans(
     # engines — the background-ingest path invokes orphan_cleanup before any
     # pipeline establishes the context — so the graph + vector purge silently
     # targets the wrong DB and leaves the forgotten row's chunks/entities
-    # searchable under ENABLE_BACKEND_ACCESS_CONTROL.
-    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+    # searchable under ENABLE_BACKEND_ACCESS_CONTROL. The dataset lock comes
+    # first, as in datasets.delete_data: retiring conflict decisions rewrites
+    # conflict nodes that a pipeline or a resolve_conflict call may be writing.
+    async with (
+        dataset_lock(dataset.id),
+        set_database_global_context_variables(dataset.id, dataset.owner_id),
+    ):
+        purged: list = []  # (orphan, its deleted graph elements)
         for orphan in orphans:
             try:
                 # Called unconditionally: gating on has_data_related_nodes would
@@ -931,30 +1220,59 @@ async def _delete_dlt_orphans(
                 # relational ledger (the function handles both paths and no-ops
                 # when nothing is related).
                 deleted_elements = await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
-                await delete_data(orphan, dataset.id)
-                # Invalidate session answers that used the orphan's graph
-                # elements (best-effort; must not fail the cleanup).
-                try:
-                    from cognee.modules.session_lifecycle.invalidate_sessions import (
-                        invalidate_sessions_for_deleted_data,
-                    )
-
-                    await invalidate_sessions_for_deleted_data(
-                        dataset.id,
-                        deleted_elements.node_ids,
-                        deleted_elements.edge_ids,
-                        user_id=user.id,
-                    )
-                except Exception:
-                    logger.warning(
-                        "Session invalidation after orphan cleanup failed (non-fatal).",
-                        exc_info=True,
-                    )
+                purged.append((orphan, deleted_elements))
             except Exception:
                 failed.append(orphan.id)
                 logger.warning(
                     "Failed to delete orphaned dlt row data_id=%s, skipping.",
                     orphan.id,
+                    exc_info=True,
+                )
+
+        # One call for every purged row: their index nodes and routing rows go
+        # in one round of store writes (per row, a sweep of thousands would
+        # serialize thousands of commits under the dataset lock), then the
+        # rows. A row whose delete fails keeps its Data row, so the next index
+        # build rewrites what was removed for it.
+        #
+        # A row removed upstream is forgotten like forget(data_id=...): a user
+        # decision whose chosen fact went with it is retired before the rows go.
+        # One pass covers every purged row, since it reads what the graph holds
+        # now; a failure keeps the rows for the next ingest's retry.
+        retired: set[str] = set()
+        if purged:
+            try:
+                retired = await retire_forgotten_decisions(dataset, user)
+                await delete_data([orphan for orphan, _ in purged], dataset.id)
+            except Exception:
+                failed.extend(orphan.id for orphan, _ in purged)
+                logger.warning(
+                    "Failed to delete %d orphaned dlt row(s), skipping.",
+                    len(purged),
+                    exc_info=True,
+                )
+
+        # Invalidate session answers that used the orphans' graph elements or a
+        # retired decision (best-effort; must not fail the cleanup). The graph
+        # purge above is what they depend on, not the row delete.
+        invalidations = [(deleted.node_ids, deleted.edge_ids) for _orphan, deleted in purged]
+        if retired:
+            invalidations.append((retired, set()))
+        for node_ids, edge_ids in invalidations:
+            try:
+                from cognee.modules.session_lifecycle.invalidate_sessions import (
+                    invalidate_sessions_for_deleted_data,
+                )
+
+                await invalidate_sessions_for_deleted_data(
+                    dataset.id,
+                    node_ids,
+                    edge_ids,
+                    user_id=user.id,
+                )
+            except Exception:
+                logger.warning(
+                    "Session invalidation after orphan cleanup failed (non-fatal).",
                     exc_info=True,
                 )
 

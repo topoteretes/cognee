@@ -4,8 +4,11 @@ import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import useBoolean from "@/utils/useBoolean";
+import isCloudEnvironment from "@/utils/isCloudEnvironment";
 import useOutsideClick from "@/utils/useOutsideClick";
 import ExtractionSettingsModal from "./ExtractionSettingsModal";
+import { useReleases } from "@/modules/releases/useReleases";
+import { displayVersion, formatReleaseDate, latestWithNotes, whatsNewLines } from "@/modules/releases/releaseLog";
 
 function DocsIcon() {
   return (
@@ -75,21 +78,25 @@ const MENU_ITEMS = [
   { label: "Discord community", href: "https://discord.gg/m63hxKsp4p", external: true, icon: <DiscordIcon /> },
 ];
 
-const CHANGELOG_ITEMS = [
-  { label: "Full agent support — create agents, track sessions, live status, and per-agent metrics", date: "May 8" },
-  { label: "Custom graph models, custom prompts, and ontology uploads for memory customization", date: "Apr 24" },
-];
-
 export default function HelpMenu() {
   const router = useRouter();
   const { value: isOpen, toggle, setFalse: close } = useBoolean(false);
   const closeCallback = useCallback(() => close(), [close]);
   const containerRef = useOutsideClick<HTMLDivElement>(closeCallback, isOpen);
   const [extractionOpen, setExtractionOpen] = useState(false);
+  // The release log (CLO-1080): the newest release with notes feeds "What's
+  // new", the running image tag the version line. The link to the log is
+  // always there; the notes and the version fill in once the backend serves
+  // them, and nothing hand-written stands in for them while it does not.
+  const { data: releaseLog } = useReleases();
+  const latestRelease = releaseLog?.available ? latestWithNotes(releaseLog.releases) : null;
+  const runningVersion = displayVersion(releaseLog?.runningVersion);
 
   function startOnboarding() {
     close();
-    router.push("/onboarding");
+    // ?replay=1 tells the route guard this is a deliberate re-entry — without
+    // it an already-onboarded user is redirected back to /dashboard.
+    router.push("/onboarding?replay=1");
   }
 
   function openExtractionSettings() {
@@ -120,15 +127,16 @@ export default function HelpMenu() {
             width: 260,
             background: "rgba(10,10,10,0.92)",
             backdropFilter: "blur(16px)",
-            borderRadius: 10,
+            borderRadius: 0,
             boxShadow: "0px 8px 30px rgba(0,0,0,0.5), 0px 0px 0px 1px rgba(255,255,255,0.1)",
             padding: 6,
           }}
         >
           {/* Onboarding */}
+          {isCloudEnvironment() && (
           <button
             onClick={startOnboarding}
-            className="flex items-center gap-[10px] rounded-[6px] px-3 py-[10px] w-full cursor-pointer"
+            className="flex items-center gap-[10px] rounded-none px-3 py-[10px] w-full cursor-pointer"
             style={{ fontSize: 13, color: "rgba(237,236,234,0.8)", background: "none", border: "none", textAlign: "left", fontFamily: "inherit" }}
             onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.07)")}
             onMouseLeave={e => (e.currentTarget.style.background = "none")}
@@ -136,11 +144,12 @@ export default function HelpMenu() {
             <OnboardingIcon />
             Onboarding
           </button>
+          )}
 
           {/* Extraction Settings */}
           <button
             onClick={openExtractionSettings}
-            className="flex items-center gap-[10px] rounded-[6px] px-3 py-[10px] w-full cursor-pointer"
+            className="flex items-center gap-[10px] rounded-none px-3 py-[10px] w-full cursor-pointer"
             style={{ fontSize: 13, color: "rgba(237,236,234,0.8)", background: "none", border: "none", textAlign: "left", fontFamily: "inherit" }}
             onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.07)")}
             onMouseLeave={e => (e.currentTarget.style.background = "none")}
@@ -159,7 +168,7 @@ export default function HelpMenu() {
               target="_blank"
               rel="noopener noreferrer"
               onClick={close}
-              className="flex items-center gap-[10px] rounded-[6px] px-3 py-[10px]"
+              className="flex items-center gap-[10px] rounded-none px-3 py-[10px]"
               style={{ fontSize: 13, color: "rgba(237,236,234,0.8)", textDecoration: "none" }}
               onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.07)")}
               onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = "transparent")}
@@ -174,7 +183,7 @@ export default function HelpMenu() {
 
           {/* Keyboard shortcuts */}
           <div
-            className="flex items-center justify-between gap-[10px] rounded-[6px] px-3 py-[10px] cursor-default"
+            className="flex items-center justify-between gap-[10px] rounded-none px-3 py-[10px] cursor-default"
             style={{ fontSize: 13, color: "rgba(237,236,234,0.8)" }}
           >
             <div className="flex items-center gap-[10px]">
@@ -182,7 +191,7 @@ export default function HelpMenu() {
               Keyboard shortcuts
             </div>
             <kbd
-              className="flex items-center justify-center rounded-[4px]"
+              className="flex items-center justify-center rounded-none"
               style={{
                 background: "rgba(255,255,255,0.08)",
                 border: "1px solid rgba(255,255,255,0.12)",
@@ -198,7 +207,7 @@ export default function HelpMenu() {
 
           {/* System status */}
           <div
-            className="flex items-center gap-[10px] rounded-[6px] px-3 py-[10px] cursor-default"
+            className="flex items-center gap-[10px] rounded-none px-3 py-[10px] cursor-default"
             style={{ fontSize: 13, color: "rgba(237,236,234,0.8)" }}
           >
             <StatusIcon />
@@ -212,31 +221,51 @@ export default function HelpMenu() {
           {/* Separator */}
           <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "2px -6px" }} />
 
-          {/* What's new */}
-          <div style={{ padding: "8px 12px 4px", fontSize: 11, fontWeight: 500, color: "rgba(237,236,234,0.35)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            {"What's new"}
+          {/* What's new: the newest release with notes, and always the link to the log */}
+          <div
+            className="flex items-center justify-between gap-[10px]"
+            style={{ padding: "8px 12px 4px", fontSize: 11, fontWeight: 500, color: "rgba(237,236,234,0.35)", textTransform: "uppercase", letterSpacing: "0.05em" }}
+          >
+            <span>{"What's new"}</span>
+            {latestRelease && (
+              <span style={{ textTransform: "none", letterSpacing: 0 }}>
+                {displayVersion(latestRelease.version) ?? latestRelease.version} · {formatReleaseDate(latestRelease.releasedAt)}
+              </span>
+            )}
           </div>
-          {CHANGELOG_ITEMS.map((item) => (
-            <div
-              key={item.label}
-              className="flex items-start gap-[10px] rounded-[6px] px-3 py-[8px] cursor-default"
-              style={{ fontSize: 13, color: "rgba(237,236,234,0.7)" }}
-            >
-              <span
-                className="mt-[5px] rounded-full flex-shrink-0"
-                style={{
-                  width: 6,
-                  height: 6,
-                  border: "1.5px solid rgba(188,155,255,0.60)",
-                  background: "transparent",
-                }}
-              />
-              <div>
-                <div>{item.label}</div>
-                <div style={{ fontSize: 11, color: "rgba(237,236,234,0.35)" }}>{item.date}</div>
+          {latestRelease ? (
+            whatsNewLines(latestRelease).map((line) => (
+              <div
+                key={line}
+                className="flex items-start gap-[10px] rounded-none px-3 py-[6px] cursor-default"
+                style={{ fontSize: 13, color: "rgba(237,236,234,0.7)" }}
+              >
+                <span
+                  className="mt-[5px] rounded-full flex-shrink-0"
+                  style={{ width: 6, height: 6, border: "1.5px solid rgba(188,155,255,0.60)", background: "transparent" }}
+                />
+                <div>{line}</div>
               </div>
+            ))
+          ) : releaseLog?.available ? (
+            <div className="px-3 py-[6px] cursor-default" style={{ fontSize: 13, color: "rgba(237,236,234,0.5)" }}>
+              No release notes yet
             </div>
-          ))}
+          ) : null}
+          <Link
+            href="/releases"
+            onClick={close}
+            className="block rounded-none px-3 py-[8px]"
+            style={{ fontSize: 12, color: "rgba(188,155,255,0.85)", textDecoration: "none" }}
+          >
+            All release notes →
+          </Link>
+
+          {runningVersion && (
+            <div className="px-3 pt-[6px] pb-[2px] cursor-default" style={{ fontSize: 11, color: "rgba(237,236,234,0.35)" }}>
+              Cloud {runningVersion}
+            </div>
+          )}
         </div>
       )}
     </div>

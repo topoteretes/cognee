@@ -19,6 +19,7 @@ from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
+from cognee.tests.utils.ci_search_type import completion_or_chunks
 
 logger = get_logger()
 
@@ -91,7 +92,7 @@ async def run_graph_db_test(provider: str):
 
         # Test GRAPH_COMPLETION search (exercises graph adapter)
         search_results = await cognee.search(
-            query_type=SearchType.GRAPH_COMPLETION, query_text=random_node_name
+            query_type=completion_or_chunks(), query_text=random_node_name
         )
         assert len(search_results) != 0, f"{provider}: GRAPH_COMPLETION returned no results"
 

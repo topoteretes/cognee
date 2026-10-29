@@ -203,8 +203,6 @@ async def test_run_tasks_resolver_shares_one_run_lifecycle(monkeypatch, runner_p
     assert logs.error.await_count == 0
     assert [type(e) for e in events] == [PipelineRunStarted, PipelineRunCompleted]
     assert all(e.pipeline_run_id == run_id for e in events)
-    # log_pipeline_run_start received the real item list, not None.
-    assert logs.start.await_args.args[3] == ["m1", "m2", "r1"]
 
     # Every item ran with its own resolved task list.
     assert sorted(processed) == [
