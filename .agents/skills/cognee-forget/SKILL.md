@@ -158,7 +158,7 @@ combinations return 422.
 - **`everything`** → `datasets.delete_all()` over every dataset the user has
   `delete` on in the current tenant, plus a full prune of the session cache
   (when caching or usage logging is on). This wipes **every user's**
-  sessions (Redis FLUSHDB / the whole fs cache / all SQL cache tables), not
+  sessions (Redis FLUSHDB / all SQL cache tables), not
   just this user's.
 
 Key files:

@@ -1433,65 +1433,6 @@ jobs:
           DB_PASSWORD: cognee
         run: uv run python ./cognee/tests/test_conversation_history.py
 
-  run_conversation_sessions_test_fs:
-    name: Conversation sessions test (FS)
-    if: ${{ inputs.has-secrets }}
-    runs-on: ubuntu-latest
-    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    defaults:
-      run:
-        shell: bash
-    services:
-      postgres:
-        image: ghcr.io/topoteretes/pgvector:pg17
-        credentials:
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-        env:
-          POSTGRES_USER: cognee
-          POSTGRES_PASSWORD: cognee
-          POSTGRES_DB: cognee_db
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-          extra-dependencies: "postgres"
-
-      - name: Run Conversation session tests (FS)
-        env:
-          ENV: dev
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_DIMENSIONS: 300
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          GRAPH_DATABASE_PROVIDER: 'kuzu'
-          CACHING: true
-          AUTO_FEEDBACK: true
-          CACHE_BACKEND: 'fs'
-          DB_PROVIDER: 'postgres'
-          DB_NAME: 'cognee_db'
-          DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
-          DB_PORT: 5432
-          DB_USERNAME: cognee
-          DB_PASSWORD: cognee
-        run: uv run python ./cognee/tests/test_conversation_history.py
-
   run_conversation_sessions_test_postgres:
     name: Conversation sessions test (Postgres)
     if: ${{ inputs.has-secrets }}
@@ -1631,7 +1572,7 @@ jobs:
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           CACHING: true
           AUTO_FEEDBACK: false
-          CACHE_BACKEND: 'fs'
+          CACHE_BACKEND: 'sqlite'
           DB_PROVIDER: 'postgres'
           DB_NAME: 'cognee_db'
           DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
@@ -1674,7 +1615,7 @@ jobs:
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
           CACHING: true
           AUTO_FEEDBACK: false
-          CACHE_BACKEND: 'fs'
+          CACHE_BACKEND: 'sqlite'
           ENABLE_BACKEND_ACCESS_CONTROL: false
         run: uv run python ./cognee/tests/test_feedback_weights_memify_pipeline.py
 
