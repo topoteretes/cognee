@@ -224,7 +224,9 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 )
                 self._na_exception_handler(e, query_string)
 
-    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
+    async def retrieve(
+        self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False
+    ):
         """
         Retrieve data points from a collection using their IDs.
 
@@ -233,7 +235,13 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             - collection_name (str): The name of the collection from which to retrieve data
               points.
             - data_point_ids (list[str]): A list of IDs of the data points to retrieve.
+            - include_vector (bool): Not supported by this adapter; True raises
+              NotImplementedError.
         """
+        if include_vector:
+            raise NotImplementedError(
+                "NeptuneAnalyticsAdapter.retrieve does not return stored vectors"
+            )
         # Do the fetch for each node
         params = {"node_ids": data_point_ids, "collection_name": collection_name}
         query_string = (
