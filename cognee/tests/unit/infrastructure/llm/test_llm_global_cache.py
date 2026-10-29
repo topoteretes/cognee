@@ -16,7 +16,7 @@ from cognee.context_global_variables import (
 from cognee.context_global_variables import (
     set_database_global_context_variables,
 )
-from cognee.infrastructure.llm.config import LLMConfig, get_llm_context_config
+from cognee.infrastructure.llm.config import LLMConfig, get_llm_config, get_llm_context_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
     _get_llm_client_cached,
     get_llm_client,
@@ -40,8 +40,19 @@ def _openai_config() -> LLMConfig:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_llm_global_cache():
-    """Keep each test hermetic: clear the LRU cache and reset the ContextVar."""
+def _isolate_llm_global_cache(monkeypatch):
+    """Keep each test hermetic: a known global config, cleared caches, a reset ContextVar.
+
+    The "global" config these tests compare against is a process-wide cached
+    object. Other tests mutate it in place (``cognee.config.set("llm_provider",
+    ...)``) or rebuild it under their own environment, so whichever test ran
+    before this file would otherwise decide which provider the global client
+    resolves to — and a provider whose extra is not installed turns the
+    precondition below into an ImportError. Pin the provider and rebuild.
+    """
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    get_llm_config.cache_clear()
     _get_llm_client_cached.cache_clear()
     token = llm_config_ctx.set(None)
     try:
@@ -49,6 +60,7 @@ def _isolate_llm_global_cache():
     finally:
         llm_config_ctx.reset(token)
         _get_llm_client_cached.cache_clear()
+        get_llm_config.cache_clear()
 
 
 @pytest.mark.asyncio

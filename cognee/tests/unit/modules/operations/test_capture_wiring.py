@@ -1,0 +1,528 @@
+"""Eval-capture wirings (SDK-529): record_operation and run_tasks open a run
+scope only when capture is active, the manifest carries the (late-bound)
+dataset plus the operation's name/outcome/error class, neither wiring drains
+(the pipeline runner holds its dataset's lock; the manifest is rendered at
+delivery, so its accounting is exact anyway), and the FastAPI lifespan shuts
+capture down on exit.
+
+``record_operation``'s row writer is stubbed; ``run_tasks`` is driven through
+``runner_plumbing``; the real ``lifespan`` runs with its startup collaborators
+stubbed. No LLM, no network, no database.
+"""
+
+import asyncio
+import importlib
+import time
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import pytest
+
+import cognee.modules.pipelines.operations.run_tasks as run_tasks_module
+from cognee.modules.observability import capture
+from cognee.modules.observability.capture import KIND_RUN_MANIFEST, KIND_SUMMARY_GENERATED
+
+record_operation_mod = importlib.import_module("cognee.modules.operations.record_operation")
+
+pytestmark = pytest.mark.usefixtures("capture_reset")
+
+
+@pytest.fixture
+def no_row_writes(monkeypatch):
+    monkeypatch.setattr(record_operation_mod, "_write_operation_row", AsyncMock())
+
+
+@pytest.fixture
+def drain_spy(monkeypatch):
+    """Replace capture.drain with a spy; returns (spy, real_drain)."""
+    real_drain = capture.drain
+    spy = AsyncMock()
+    monkeypatch.setattr(capture, "drain", spy)
+    return spy, real_drain
+
+
+def _manifests(sink):
+    return [record for record in sink.records if record["kind"] == KIND_RUN_MANIFEST]
+
+
+# ---------------------------------------------------------------------------
+# 14: record_operation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_record_operation_opens_no_scope_when_capture_is_off(monkeypatch, no_row_writes):
+    monkeypatch.delenv("COGNEE_CAPTURE_ENABLED", raising=False)
+
+    async with record_operation_mod.record_operation("search") as context:
+        assert capture.is_active() is False
+        assert capture.current_scope() is None
+        context.set_dataset(uuid4())
+
+    from cognee.modules.observability.capture import hook
+
+    assert not hook._runtime.buffer
+    assert not hook._runtime.flushers
+
+
+@pytest.mark.asyncio
+async def test_record_operation_emits_manifest_without_draining(
+    no_row_writes, fake_capture_sink, drain_spy
+):
+    spy, real_drain = drain_spy
+    dataset_id = uuid4()
+
+    async with record_operation_mod.record_operation("search") as context:
+        scope = capture.current_scope()
+        assert scope is not None
+        assert scope.kind == "operation"
+        assert scope.run_id == context.operation_id
+        assert scope.dataset_id is None
+        capture.emit(KIND_SUMMARY_GENERATED, "inside", payload_kind="text")
+        # Bound mid-body, the way recall/search do it.
+        context.set_dataset(dataset_id)
+
+    spy.assert_not_awaited()
+    assert capture.current_scope() is None
+
+    await real_drain()
+
+    [manifest] = _manifests(fake_capture_sink)
+    assert manifest["run_id"] == str(context.operation_id)
+    assert manifest["dataset_id"] == str(dataset_id)
+    assert manifest["payload"]["kind"] == "operation"
+    assert manifest["payload"]["dataset_id"] == str(dataset_id)
+    # The row's attribution fields are mirrored into the manifest.
+    assert manifest["payload"]["operation"] == "search"
+    assert manifest["payload"]["outcome"] == "succeeded"
+    assert manifest["payload"]["error_class"] is None
+    # The event buffered before set_dataset() picked the dataset up too.
+    [event] = [r for r in fake_capture_sink.records if r["kind"] == KIND_SUMMARY_GENERATED]
+    assert event["run_id"] == str(context.operation_id)
+    assert event["dataset_id"] == str(dataset_id)
+
+
+@pytest.mark.asyncio
+async def test_set_dataset_reaches_events_flushed_while_the_operation_is_still_running(
+    no_row_writes, fake_capture_sink
+):
+    """The reproduction of the ``nodataset/`` split: search() binds its dataset on
+    the OperationContext before retrieval runs, retrieval emits, and the flusher
+    ticks (every FLUSH_INTERVAL_S) while the LLM completion is still running.
+    Forwarding only in record_operation's ``finally`` filed those events under
+    ``nodataset/`` and the manifest under ``<dataset>/``. The bind must reach the
+    capture scope the moment the caller makes it."""
+    dataset_id = uuid4()
+
+    async with record_operation_mod.record_operation("search") as context:
+        context.set_dataset(dataset_id)
+        assert capture.current_scope().dataset_id == dataset_id
+        capture.emit(KIND_SUMMARY_GENERATED, "candidates", payload_kind="text")
+        # A flush tick lands mid-body, long before the operation ends.
+        await capture.drain()
+        [event] = [r for r in fake_capture_sink.records if r["kind"] == KIND_SUMMARY_GENERATED]
+        assert event["dataset_id"] == str(dataset_id)
+
+    await capture.drain()
+    [manifest] = _manifests(fake_capture_sink)
+    assert manifest["dataset_id"] == str(dataset_id)
+    assert manifest["payload"]["dataset_id"] == str(dataset_id)
+
+
+@pytest.mark.asyncio
+async def test_record_operation_stamps_the_user_and_tenant_on_every_record(
+    no_row_writes, fake_capture_sink
+):
+    """The identity product telemetry sends — the cognee user and tenant UUIDs —
+    rides on every record's envelope, so a warehouse row joins to the telemetry
+    rows of the same user. Bound late through ``set_user`` it reaches events
+    buffered before the caller knew its user, like ``set_dataset``."""
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    late_user = SimpleNamespace(id=uuid4(), tenant_id=None)
+
+    async with record_operation_mod.record_operation("search", user=user) as known:
+        capture.emit(KIND_SUMMARY_GENERATED, "known user", payload_kind="text")
+    async with record_operation_mod.record_operation("recall") as late:
+        capture.emit(KIND_SUMMARY_GENERATED, "before set_user", payload_kind="text")
+        late.set_user(late_user)
+    await capture.drain()
+
+    records = fake_capture_sink.records
+    assert len(records) == 4  # two events, two manifests
+    by_run = {str(known.operation_id): user, str(late.operation_id): late_user}
+    for record in records:
+        expected = by_run[record["run_id"]]
+        assert record["user_id"] == str(expected.id)
+        assert record["tenant_id"] == (
+            None if expected.tenant_id is None else str(expected.tenant_id)
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_nested_operation_inherits_the_enclosing_runs_user(fake_capture_sink):
+    pipeline_user, tenant = uuid4(), uuid4()
+    pipeline = capture.run_scope(
+        uuid4(), uuid4(), kind="pipeline", user_id=pipeline_user, tenant_id=tenant
+    )
+    with pipeline, capture.run_scope(uuid4(), kind="operation"):
+        capture.emit(KIND_SUMMARY_GENERATED, "nested", payload_kind="text")
+    await capture.drain()
+
+    [event] = [r for r in fake_capture_sink.records if r["kind"] == KIND_SUMMARY_GENERATED]
+    assert event["user_id"] == str(pipeline_user)
+    assert event["tenant_id"] == str(tenant)
+
+
+@pytest.mark.asyncio
+async def test_record_operation_failure_still_emits_manifest_and_reraises(
+    no_row_writes, fake_capture_sink, drain_spy
+):
+    spy, real_drain = drain_spy
+
+    with pytest.raises(ValueError, match="boom"):
+        async with record_operation_mod.record_operation("recall") as context:
+            raise ValueError("boom")
+
+    spy.assert_not_awaited()
+    await real_drain()
+
+    [manifest] = _manifests(fake_capture_sink)
+    assert manifest["run_id"] == str(context.operation_id)
+    assert manifest["dataset_id"] is None
+    assert manifest["payload"]["operation"] == "recall"
+    assert manifest["payload"]["outcome"] == "failed"
+    assert manifest["payload"]["error_class"] == "ValueError"
+
+
+# ---------------------------------------------------------------------------
+# 15: run_tasks
+# ---------------------------------------------------------------------------
+
+
+async def _drive(run_tasks_module_, dataset):
+    events = []
+    async for event in run_tasks_module_.run_tasks(
+        tasks=[],
+        dataset_id=dataset.id,
+        data=["a"],
+        user=SimpleNamespace(id=uuid4(), tenant_id=None),
+        pipeline_name="cognify_pipeline",
+        extras={"graph_extractor": "gliner_demo"},  # as cognify passes it
+    ):
+        events.append(event)
+    return events
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_stamps_the_pipelines_user_and_tenant_on_every_record(
+    monkeypatch, runner_plumbing, fake_capture_sink
+):
+    dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
+    runner_plumbing(run_tasks_module, dataset)
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+
+    async def fake_item(*args, **kwargs):
+        capture.emit(KIND_SUMMARY_GENERATED, "from a task", payload_kind="text")
+        return {"run_info": "ok"}
+
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", fake_item)
+
+    async for _ in run_tasks_module.run_tasks(
+        tasks=[], dataset_id=dataset.id, data=["a"], user=user, pipeline_name="cognify_pipeline"
+    ):
+        pass
+    await capture.drain()  # the runner queues; delivery is the flusher's (or a drain's)
+
+    records = fake_capture_sink.records
+    assert {record["kind"] for record in records} == {KIND_SUMMARY_GENERATED, KIND_RUN_MANIFEST}
+    assert all(record["user_id"] == str(user.id) for record in records)
+    assert all(record["tenant_id"] == str(user.tenant_id) for record in records)
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_queues_its_manifest_after_the_terminal_log_and_never_drains(
+    monkeypatch, runner_plumbing, fake_capture_sink
+):
+    """The runner executes under its dataset's lock, so it must not wait on
+    sink I/O there: it finishes the scope (one append) and leaves delivery to
+    the flusher. The manifest's accounting is exact all the same — it is
+    rendered when the flusher writes it, after the run's events."""
+    dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
+    logs = runner_plumbing(run_tasks_module, dataset)
+    capture.hook._configure(flush_interval_s=60.0)  # nothing is delivered on its own
+
+    order = []
+    logs.complete.side_effect = lambda *args, **kwargs: order.append("complete")
+    real_drain = capture.drain
+
+    async def spy_drain(timeout=None):
+        order.append("drain")
+        return await real_drain(timeout)
+
+    monkeypatch.setattr(capture, "drain", spy_drain)
+
+    seen_scopes = []
+
+    async def fake_item(*args, **kwargs):
+        seen_scopes.append(capture.current_scope())
+        capture.emit(KIND_SUMMARY_GENERATED, "from a task", payload_kind="text")
+        return {"run_info": "ok"}
+
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", fake_item)
+
+    events = await _drive(run_tasks_module, dataset)
+    pipeline_run_id = events[0].pipeline_run_id
+
+    # The terminal log, then the manifest queued — and no drain under the lock.
+    assert order == ["complete"]
+    [scope] = seen_scopes
+    assert scope.kind == "pipeline"
+    assert scope.run_id == pipeline_run_id
+    assert scope.dataset_id == dataset.id
+    assert scope.sampled is True
+    assert scope.finished is True
+    assert capture.current_scope() is None
+
+    # Queued behind the run's event, not delivered: the flusher's job. The
+    # scope's exit — after the terminal yield — did not enqueue a duplicate.
+    assert [event.kind for event in capture.hook._runtime.buffer] == [
+        KIND_SUMMARY_GENERATED,
+        KIND_RUN_MANIFEST,
+    ]
+    assert fake_capture_sink.records == []
+    assert scope.delivered == 0
+
+    await real_drain()
+
+    assert not capture.hook._runtime.buffer
+    [manifest] = _manifests(fake_capture_sink)
+    assert manifest["run_id"] == str(pipeline_run_id)
+    assert manifest["dataset_id"] == str(dataset.id)
+    payload = manifest["payload"]
+    assert payload["kind"] == "pipeline"
+    assert payload["sampled"] is True
+    # The pipeline log's attribution, mirrored like an operation manifest mirrors its row.
+    assert payload["pipeline_name"] == "cognify_pipeline"
+    assert payload["outcome"] == "succeeded"
+    assert payload["error_class"] is None
+    # The setup the run started under, extractor included.
+    assert payload["setup"]["graph_extractor"] == "gliner_demo"
+    assert payload["setup_fingerprint"].startswith("sha256:")
+    # Exact per-run accounting, rendered when the manifest was written — after
+    # the run's event, in the same flush.
+    assert payload["events_emitted"] == 1
+    assert payload["events_delivered"] == 1
+    assert payload["events_dropped"] == 0
+    assert payload["capture_complete"] is True
+    assert len(_manifests(fake_capture_sink)) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_reports_the_failure_on_the_error_path(
+    monkeypatch, runner_plumbing, fake_capture_sink
+):
+    dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
+    logs = runner_plumbing(run_tasks_module, dataset)
+
+    order = []
+    logs.error.side_effect = lambda *args, **kwargs: order.append("error")
+    real_drain = capture.drain
+
+    async def spy_drain(timeout=None):
+        order.append("drain")
+        return await real_drain(timeout)
+
+    monkeypatch.setattr(capture, "drain", spy_drain)
+
+    async def failing_item(*args, **kwargs):
+        raise RuntimeError("item exploded")
+
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", failing_item)
+
+    with pytest.raises(RuntimeError, match="item exploded"):
+        await _drive(run_tasks_module, dataset)
+
+    # The error log, then the manifest queued — no drain on this path either.
+    assert order == ["error"]
+    logs.complete.assert_not_awaited()
+    assert [event.kind for event in capture.hook._runtime.buffer] == [KIND_RUN_MANIFEST]
+    await real_drain()
+    # A failed run is identifiable from its manifest alone: an eval must be able
+    # to exclude a cognify that died halfway without joining back to the logs.
+    [manifest] = _manifests(fake_capture_sink)
+    assert manifest["payload"]["kind"] == "pipeline"
+    assert manifest["payload"]["pipeline_name"] == "cognify_pipeline"
+    assert manifest["payload"]["outcome"] == "failed"
+    assert manifest["payload"]["error_class"] == "RuntimeError"
+    await real_drain()
+    assert len(_manifests(fake_capture_sink)) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_returns_without_waiting_on_a_wedged_sink(monkeypatch, runner_plumbing):
+    """The runner holds its dataset's lock, so a sink that never answers must
+    not hold the run — and the lock — for a drain budget. No drain is
+    attempted at all: the manifest is queued and left to the flusher / the
+    atexit hook."""
+    dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
+    runner_plumbing(run_tasks_module, dataset)
+
+    async def wedged(records):
+        await asyncio.Event().wait()
+
+    capture.register_capture_sink(wedged)
+    capture.hook._configure(flush_interval_s=60.0, sink_timeout_s=0.1)
+    drain_spy = AsyncMock()
+    monkeypatch.setattr(capture, "drain", drain_spy)
+    monkeypatch.setattr(
+        run_tasks_module, "run_tasks_data_item", AsyncMock(return_value={"run_info": "ok"})
+    )
+
+    started = time.monotonic()
+    await _drive(run_tasks_module, dataset)
+
+    assert time.monotonic() - started < 1.0
+    drain_spy.assert_not_awaited()
+    # Finished (so exit will not emit a duplicate) and buffered, not delivered.
+    assert [event.kind for event in capture.hook._runtime.buffer] == [KIND_RUN_MANIFEST]
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_manifest_is_queued_before_the_terminal_yield(
+    monkeypatch, runner_plumbing, fake_capture_sink
+):
+    """By the time the consumer receives the terminal event the manifest is
+    already queued behind the run's event — before the scope exits with the
+    generator — so the flusher's next pass, or a consumer's drain, delivers the
+    whole run with nothing else having to happen first.
+    """
+    dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
+    runner_plumbing(run_tasks_module, dataset)
+    capture.hook._configure(flush_interval_s=60.0)
+
+    async def fake_item(*args, **kwargs):
+        capture.emit(KIND_SUMMARY_GENERATED, "from a task", payload_kind="text")
+        return {"run_info": "ok"}
+
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", fake_item)
+
+    queued_at_yield = []
+    async for event in run_tasks_module.run_tasks(
+        tasks=[],
+        dataset_id=dataset.id,
+        data=["a"],
+        user=SimpleNamespace(id=uuid4(), tenant_id=None),
+        pipeline_name="cognify_pipeline",
+    ):
+        queued = [buffered.kind for buffered in capture.hook._runtime.buffer]
+        queued_at_yield.append((type(event).__name__, queued))
+
+    assert queued_at_yield == [
+        ("PipelineRunStarted", []),
+        ("PipelineRunCompleted", [KIND_SUMMARY_GENERATED, KIND_RUN_MANIFEST]),
+    ]
+    assert _manifests(fake_capture_sink) == []
+
+    await capture.drain()
+
+    assert not capture.hook._runtime.buffer
+    [manifest] = _manifests(fake_capture_sink)
+    assert manifest["payload"]["kind"] == "pipeline"
+    # The task's event and the manifest share the run id: joinable offline.
+    [event] = [r for r in fake_capture_sink.records if r["kind"] == KIND_SUMMARY_GENERATED]
+    assert event["run_id"] == manifest["run_id"]
+    # And the event was delivered before the manifest counted it.
+    assert manifest["payload"]["events_delivered"] == manifest["payload"]["events_emitted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_skips_capture_when_off(monkeypatch, runner_plumbing):
+    monkeypatch.delenv("COGNEE_CAPTURE_ENABLED", raising=False)
+    dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
+    runner_plumbing(run_tasks_module, dataset)
+
+    spy = AsyncMock()
+    monkeypatch.setattr(capture, "drain", spy)
+
+    seen_scopes = []
+
+    async def fake_item(*args, **kwargs):
+        seen_scopes.append(capture.current_scope())
+        return {"run_info": "ok"}
+
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", fake_item)
+
+    await _drive(run_tasks_module, dataset)
+
+    assert seen_scopes == [None]
+    spy.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# 16: FastAPI lifespan
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def quiet_lifespan_startup(monkeypatch):
+    """Stub the lifespan's startup collaborators so the real ``lifespan`` runs
+    with no database: migrations, default-user creation and stale-run recovery.
+    They are imported lazily inside ``lifespan``, so the patch targets the
+    source modules, not ``cognee.api.client``. Resolved through importlib:
+    ``cognee/__init__.py`` re-exports ``run_migrations`` the function, so
+    ``import cognee.run_migrations as m`` would bind that, not the module."""
+    recovery_mod = importlib.import_module("cognee.modules.cognify.recovery")
+    users_methods = importlib.import_module("cognee.modules.users.methods")
+    run_migrations_mod = importlib.import_module("cognee.run_migrations")
+
+    monkeypatch.setattr(run_migrations_mod, "run_migrations", AsyncMock())
+    monkeypatch.setattr(users_methods, "get_default_user", AsyncMock())
+
+    # The recovery service brackets the whole serving period (``async with
+    # pipeline_recovery_service(): yield``) and polls the relational store.
+    @asynccontextmanager
+    async def no_recovery_service():
+        yield
+
+    monkeypatch.setattr(recovery_mod, "pipeline_recovery_service", no_recovery_service)
+
+
+@pytest.mark.asyncio
+async def test_lifespan_shutdown_flushes_capture_and_stops_the_flusher(
+    quiet_lifespan_startup, fake_capture_sink
+):
+    import asyncio
+
+    import cognee.api.client as client_module
+
+    async with client_module.lifespan(client_module.app):
+        # One request's worth of events: buffered, not yet flushed.
+        capture.emit(KIND_SUMMARY_GENERATED, "last request", payload_kind="text")
+        [flusher] = capture.hook._runtime.flushers.values()
+        assert not fake_capture_sink.records
+
+    # Delivered by the lifespan's own shutdown — not a flusher tick, not atexit.
+    assert [r["payload"] for r in fake_capture_sink.records] == ["last request"]
+    assert not capture.hook._runtime.buffer
+    assert flusher.task.cancelled()
+    # The stopped flusher stays as a tombstone: a late emit during teardown
+    # must not start a fresh flusher on a loop that is going away.
+    assert capture.hook._runtime.flushers[asyncio.get_running_loop()] is flusher
+
+
+@pytest.mark.asyncio
+async def test_lifespan_shutdown_skips_capture_when_off(monkeypatch, quiet_lifespan_startup):
+    monkeypatch.delenv("COGNEE_CAPTURE_ENABLED", raising=False)
+    spy = AsyncMock()
+    monkeypatch.setattr(capture, "shutdown", spy)
+
+    import cognee.api.client as client_module
+
+    async with client_module.lifespan(client_module.app):
+        pass
+
+    assert capture.is_active() is False
+    spy.assert_not_awaited()
+    assert not capture.hook._runtime.flushers

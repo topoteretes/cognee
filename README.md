@@ -305,6 +305,14 @@ For the research behind Cognee's graph/LLM interface, see [Optimizing the Interf
 - **[v1.6.0 — Keyless workflows & pipeline reliability](https://github.com/topoteretes/cognee/releases/tag/v1.6.0)** (September 18, 2026): build and search text memory with local models and no cloud LLM key; LLM-dependent improvement stages skip when no LLM is configured, and pipeline recovery preserves completed documents after crashes.
 
 
+## Telemetry and eval capture
+
+Cognee sends anonymous product telemetry: event names, counts and durations, provider and model names, and pseudonymous ids (a random installation id, your Cognee user id, a hash of your LLM key). Never your documents, queries or answers. `TELEMETRY_DISABLED=1` turns it off; `ENV=test` or `ENV=dev` does too.
+
+Eval capture is a separate, opt-in feature (`COGNEE_CAPTURE_ENABLED=true`) that records what each run produced (chunk graphs, retrieval candidate pools, run manifests) for offline evaluation. With the default `COGNEE_CAPTURE_SINK=storage` it writes to a directory you own (`COGNEE_CAPTURE_DIR`) and nothing leaves your machine. `COGNEE_CAPTURE_SINK=proxy` (or `both`) also sends records to Cognee's analytics proxy, **metadata only**: ids, counts, scores, hashes and model names, with graph and chunk ids replaced by pseudonyms under a key that stays on your machine (`~/.cognee/.capture_id_key`, or `COGNEE_CAPTURE_ID_KEY`). Extracted text (entity names, descriptions, relationship labels, matched ontology terms) leaves only if you also set `COGNEE_CAPTURE_PROXY_CONTENT=true`, which sends content derived from your documents and needs a data processing agreement with us; the proxy refuses such records from a tenant it has no agreement with. `TELEMETRY_DISABLED=1` blocks the proxy sink as well, checked on every send: it is the one switch that guarantees nothing leaves.
+
+What we keep: capture records are stored in the United States (AWS us-east-1, encrypted at rest, and MotherDuck) and deleted 90 days after they arrive; the per-run summaries kept longer carry no user or installation identifier past that window. To have everything tied to your installation deleted sooner, email social@cognee.ai with the id in `~/.cognee/.persistent_id` (and your Cognee user id if you use Cognee Cloud). What each record carries is documented in [`.env.template`](.env.template) under `COGNEE_CAPTURE_SINK` and in `cognee/modules/observability/capture/proxy_sink.py`.
+
 ## Community & Support
 
 ### Contributing

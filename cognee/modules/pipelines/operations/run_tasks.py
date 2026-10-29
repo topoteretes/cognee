@@ -13,7 +13,7 @@ from cognee.modules.operations import scrub_error_message
 from cognee.modules.operations.usage_accumulator import operation_usage_scope, parent_run_scope
 from cognee.modules.pipelines.exceptions import AfterRunHookError, PipelineRunFailedError
 from cognee.modules.pipelines.layers.validate_pipeline_tasks import validate_pipeline_tasks
-from cognee.modules.pipelines.models import PipelineContext
+from cognee.modules.pipelines.models import OperationOutcome, PipelineContext
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunErrored,
@@ -103,6 +103,23 @@ async def run_tasks(
         # log_pipeline_run_start with plain namespaces lacking the field.
         run_started_at = getattr(pipeline_run, "started_at", None)
 
+        # Eval capture (SDK-529): lazy import keeps ``import cognee`` free of the
+        # capture package. Pipeline scopes are always sampled. The scope is
+        # entered on the exit stack after the start-event handoff (like the
+        # usage and parent-run scopes) and so exits only once the consumer
+        # finishes the generator — later than the terminal yield; the run
+        # finishes the scope right after its terminal log instead, so the
+        # manifest is queued before that yield (exit then skips the duplicate).
+        # Nothing here drains: this generator runs under the dataset's lock
+        # (run_pipeline_per_dataset), and a drain would hold it for the drain
+        # budget. Delivery is the flusher's; the manifest is rendered when it
+        # is delivered, after the run's events, so its accounting is final.
+        # The manifest mirrors the pipeline log's attribution (pipeline_name,
+        # outcome, error_class), like an operation manifest mirrors its
+        # pipeline_runs row.
+        from cognee.modules.observability import capture as eval_capture
+
+        capture_scope = None
         telemetry_properties = pipeline_run_telemetry_properties(
             pipeline_id,
             pipeline_run_id,
@@ -131,6 +148,21 @@ async def run_tasks(
                 # context scopes only after the handoff; the start event is already sent.
                 run_usage = stack.enter_context(operation_usage_scope())
                 stack.enter_context(parent_run_scope(pipeline_run_id))
+                if eval_capture.is_active():
+                    capture_scope = stack.enter_context(
+                        eval_capture.run_scope(
+                            pipeline_run_id,
+                            dataset.id,
+                            kind="pipeline",
+                            # cognify's resolved extractor (llm / gliner_demo): part of
+                            # the run's setup snapshot, like the telemetry above.
+                            graph_extractor=(extras or {}).get("graph_extractor"),
+                            # The identity the telemetry above carries, on every record.
+                            user_id=getattr(user, "id", None),
+                            tenant_id=getattr(user, "tenant_id", None),
+                        )
+                    )
+                    capture_scope.note("pipeline_name", pipeline_name)
                 await stack.enter_async_context(
                     set_database_global_context_variables(
                         dataset.id,
@@ -346,6 +378,15 @@ async def run_tasks(
                         PIPELINE_RUN_COMPLETED, user, additional_properties=telemetry_properties
                     )
 
+                # Eval capture: queue the manifest, no drain (see the scope's
+                # comment above). Cheap — one append — so the dataset lock is
+                # not held for any sink I/O.
+                if capture_scope is not None:
+                    capture_scope.note("outcome", OperationOutcome.SUCCEEDED.value)
+                    # None on success, kept for a stable manifest shape.
+                    capture_scope.note("error_class", None)
+                    capture_scope.finish()
+
                 yield PipelineRunCompleted(
                     pipeline_run_id=pipeline_run_id,
                     dataset_id=dataset.id,
@@ -401,6 +442,14 @@ async def run_tasks(
                 )
 
                 ownership.closed = True
+                # Eval capture: mirror the error record on the manifest and queue
+                # it, like the success path — no drain, no await. A consumer
+                # closing the generator (GeneratorExit) gets no await beyond
+                # cleanup either way.
+                if capture_scope is not None:
+                    capture_scope.note("outcome", OperationOutcome.FAILED.value)
+                    capture_scope.note("error_class", type(root_error).__name__)
+                    capture_scope.finish()
                 if isinstance(error, GeneratorExit):
                     raise
                 items_failed = items_failed or isinstance(error, PipelineRunFailedError)

@@ -21,7 +21,7 @@ Guarantees:
 """
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
@@ -88,6 +88,10 @@ class OperationContext:
         self.session_id = session_id
         self.background = background
         self.parent_operation_id = parent_operation_id
+        # The eval-capture run scope opened for this operation, when capture is
+        # active (SDK-529). Bound by ``record_operation`` so ``set_dataset``
+        # can forward the dataset the moment the caller learns it.
+        self._capture_scope = None
         self.started_at = datetime.now(timezone.utc)
         # An explicit outcome for the row, set by operations whose success is
         # not "the body did not raise" (improve marks a run with an errored
@@ -99,15 +103,33 @@ class OperationContext:
         self.run_info = None
 
     def set_user(self, user) -> None:
-        """Bind the triggering user (tolerates None and partial objects)."""
+        """Bind the triggering user (tolerates None and partial objects).
+
+        Forwarded to the eval-capture scope like ``set_dataset``, so records
+        buffered before the caller knew its user still carry it.
+        """
         if user is None:
             return
         self.user_id = getattr(user, "id", None)
         self.tenant_id = getattr(user, "tenant_id", None)
+        capture_scope = self._capture_scope
+        if capture_scope is not None:
+            capture_scope.set_user(self.user_id, self.tenant_id)
 
     def set_dataset(self, dataset_id: UUID | None) -> None:
-        """Bind the target dataset, when the operation has exactly one."""
+        """Bind the target dataset, when the operation has exactly one.
+
+        Forwarded to the eval-capture scope immediately, not at operation exit:
+        capture resolves an event's dataset when the event is FLUSHED, and the
+        flusher ticks every ``FLUSH_INTERVAL_S`` (2 s) while a search's LLM
+        completion runs for longer than that. Binding only in the ``finally``
+        filed essentially every search's ``retrieval.candidates`` under
+        ``nodataset/`` while its manifest landed under ``<dataset>/``.
+        """
         self.dataset_id = dataset_id
+        capture_scope = self._capture_scope
+        if capture_scope is not None:
+            capture_scope.set_dataset(dataset_id)
 
     def set_session_id(self, session_id: str | None) -> None:
         """Bind the active session-cache id (joins SessionModelUsage)."""
@@ -227,45 +249,87 @@ async def record_operation(
         outcome = OperationOutcome.SUCCEEDED
         error_class: str | None = None
         error_message: str | None = None
-        try:
-            with parent_run_scope(context.operation_id):
-                yield context
-        except BaseException as exc:
-            outcome = OperationOutcome.FAILED
-            error_class = type(exc).__name__
-            error_message = scrub_error_message(exc)
-            raise
-        finally:
-            _current_operation.reset(context_token)
-            # A deferred close writes nothing here: the background work the
-            # operation started owns the row (``finish_operation``), so it
-            # carries the run's end time and outcome, not the launch's.
-            if not context.close_deferred:
+
+        # Eval capture (SDK-529). Imported lazily so ``import cognee`` never pays
+        # for the capture package; is_active() is one global read once
+        # initialized, and the OFF path constructs no scope at all. No drain()
+        # here: this wraps the user-facing recall/search path, and the manifest
+        # lands within FLUSH_INTERVAL_S like any other event. The manifest
+        # mirrors the row's attribution fields (operation, outcome,
+        # error_class) so a captured run can be filtered offline without
+        # joining back to ``pipeline_runs``.
+        from cognee.modules.observability import capture as eval_capture
+
+        capture_scope_cm = (
+            eval_capture.run_scope(
+                context.operation_id,
+                dataset_id,
+                kind="operation",
+                user_id=context.user_id,
+                tenant_id=context.tenant_id,
+            )
+            if eval_capture.is_active()
+            else nullcontext()
+        )
+        with capture_scope_cm as capture_scope:
+            if capture_scope is not None:
+                capture_scope.note("operation", operation_name)
+                # So context.set_dataset() reaches the scope as soon as the
+                # caller resolves its dataset; the ``finally`` below is only a
+                # backstop for callers that never call it.
+                context._capture_scope = capture_scope
+            try:
+                with parent_run_scope(context.operation_id):
+                    yield context
+            except BaseException as exc:
+                outcome = OperationOutcome.FAILED
+                error_class = type(exc).__name__
+                error_message = scrub_error_message(exc)
+                raise
+            finally:
+                _current_operation.reset(context_token)
+                # An operation may declare its own outcome (improve marks a run
+                # with an errored stage as failed); a raised exception still wins.
                 if outcome is OperationOutcome.SUCCEEDED and context.outcome is not None:
                     outcome = context.outcome
-                try:
-                    await _write_operation_row(
-                        context, context.started_at, outcome.value, error_class, error_message
-                    )
-                except OperationalError as write_error:
-                    # An unreachable relational store is an expected state
-                    # around the operations that manage the store itself:
-                    # prune deletes the database the ledger lives in, and
-                    # nothing exists before setup() — the quickstart examples
-                    # hit both. A warning with a traceback made every example
-                    # run look broken, so the skipped write logs at debug.
-                    logger.debug(
-                        "record_operation: skipping %s record, relational store unavailable (%s)",
-                        operation_name,
-                        write_error,
-                    )
-                except Exception as write_error:
-                    logger.warning(
-                        "record_operation: failed to persist %s record (%s)",
-                        operation_name,
-                        write_error,
-                        exc_info=True,
-                    )
+                if capture_scope is not None:
+                    # Backstop: set_dataset() already forwarded the dataset when
+                    # the caller bound it; this covers a dataset passed at entry.
+                    capture_scope.set_dataset(context.dataset_id)
+                    capture_scope.note("outcome", outcome.value)
+                    # None on success, kept for a stable manifest shape.
+                    capture_scope.note("error_class", error_class)
+                    # A deferred close means the row — with the real end time and
+                    # outcome — is written later by finish_operation(); this
+                    # manifest describes the launch.
+                    capture_scope.note("close_deferred", context.close_deferred)
+                # A deferred close writes nothing here: the background work the
+                # operation started owns the row (``finish_operation``), so it
+                # carries the run's end time and outcome, not the launch's.
+                if not context.close_deferred:
+                    try:
+                        await _write_operation_row(
+                            context, context.started_at, outcome.value, error_class, error_message
+                        )
+                    except OperationalError as write_error:
+                        # An unreachable relational store is an expected state
+                        # around the operations that manage the store itself:
+                        # prune deletes the database the ledger lives in, and
+                        # nothing exists before setup() — the quickstart examples
+                        # hit both. A warning with a traceback made every example
+                        # run look broken, so the skipped write logs at debug.
+                        logger.debug(
+                            "record_operation: skipping %s record, relational store unavailable (%s)",
+                            operation_name,
+                            write_error,
+                        )
+                    except Exception as write_error:
+                        logger.warning(
+                            "record_operation: failed to persist %s record (%s)",
+                            operation_name,
+                            write_error,
+                            exc_info=True,
+                        )
 
 
 async def finish_operation(context: OperationContext, error: BaseException | None = None) -> None:
