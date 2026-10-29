@@ -42,6 +42,7 @@ def accept_review_response(
     drops = _accept_drops(
         response.drop, scope, prompt, reviewed, accepted_conflicts, shown_fact_ids
     )
+    drops += _retire_orphaned_user_decisions(scope, prompt, reviewed, accepted_conflicts, drops)
     return ConflictsToWrite(
         scope=scope,
         accepted_conflicts=accepted_conflicts,
@@ -247,6 +248,32 @@ def _is_ordering_reversed_by_dates(facts: list[dict], statuses: dict[str, str]) 
 
 
 # --- drops -------------------------------------------------------------------
+
+
+def _retire_orphaned_user_decisions(
+    scope: ReviewScope,
+    prompt: ReviewPrompt,
+    reviewed: set[str],
+    accepted: list[AcceptedConflict],
+    drops: list[str],
+) -> list[str]:
+    """Drop the user decisions whose chosen fact no longer exists.
+
+    When the document behind the fact a user chose is forgotten, the decision must go
+    too, or retrieval keeps presenting the forgotten fact as the accepted one. The LLM
+    is not reliable at this: it may drop or replace the conflict, or not mention it at
+    all. This returns the decisions it left in place, for the subjects this call reviewed.
+    """
+    replaced = {str(item.conflict.id) for item in accepted}
+    return [
+        conflict_id
+        for conflict_id in prompt.conflict_labels.values()
+        if conflict_id not in replaced
+        and conflict_id not in drops
+        and str(scope.conflicts[conflict_id]["about_id"]) in reviewed
+        and scope.conflicts[conflict_id].get("resolution_source") == "user"
+        and scope.conflicts[conflict_id].get("selected_fact_id") not in scope.facts
+    ]
 
 
 def _accept_drops(

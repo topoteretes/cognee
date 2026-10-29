@@ -37,9 +37,14 @@ from cognee.tests.integration.tasks.test_review_conflicts import RecordingVector
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("forget_selected", [False, True])
+@pytest.mark.parametrize(
+    "forget_selected, review_drops",
+    # After the forget, the review either drops the decision itself or leaves it out of
+    # its response; either way the decision retires.
+    [(False, False), (True, True), (True, False)],
+)
 async def test_resolution_survives_real_graph_writes_and_overrides_old_vector_hit(
-    tmp_path, monkeypatch, forget_selected
+    tmp_path, monkeypatch, forget_selected, review_drops
 ):
     graph = LadybugAdapter(str(tmp_path / "graph"), kuzu_buffer_pool_size=128 * 1024 * 1024)
     vector = RecordingVectors()
@@ -152,15 +157,16 @@ async def test_resolution_survives_real_graph_writes_and_overrides_old_vector_hi
             )
             monkeypatch.setattr(review, "get_llm_token_ceiling", lambda: 16384)
 
-            async def drop_obsolete_conflict(prompt, system_prompt):
+            async def review_subject(prompt, system_prompt):
                 labels = [
                     label
                     for label, node_id in prompt.node_labels.items()
                     if node_id in prompt.shown_facts
                 ]
-                return ReviewResponse(reviewed=labels, drop=list(prompt.conflict_labels))
+                drop = list(prompt.conflict_labels) if review_drops else []
+                return ReviewResponse(reviewed=labels, drop=drop)
 
-            monkeypatch.setattr(review, "_ask_llm", drop_obsolete_conflict)
+            monkeypatch.setattr(review, "_ask_llm", review_subject)
             async for batch in review.review_entities(scope, [], []):
                 await write_conflicts.write_conflicts([batch], ctx)
             assert await read_user_resolutions(graph) == []
