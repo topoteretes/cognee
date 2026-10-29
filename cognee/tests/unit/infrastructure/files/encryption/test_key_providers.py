@@ -129,14 +129,36 @@ def test_kms_provider_uses_generate_data_key_and_decrypt_with_context():
     assert decrypt[1]["EncryptionContext"] == KMS_ENCRYPTION_CONTEXT
 
 
-def test_kms_provider_wraps_client_errors():
+def test_kms_provider_lets_client_errors_through_unchanged():
+    """A refused Decrypt is AWS's error, not a corrupt file: it must not be
+    re-labelled as a FileDecryptionError."""
+
     class Failing(FakeKms):
         def decrypt(self, **kwargs):
             raise RuntimeError("AccessDeniedException")
 
     provider = AwsKmsKeyProvider("alias/x", client=Failing())
-    with pytest.raises(FileDecryptionError, match="AccessDeniedException"):
+    with pytest.raises(RuntimeError, match="AccessDeniedException"):
         provider.unwrap_data_key(b"blob", "arn")
+
+
+def test_kms_provider_without_boto3_is_a_configuration_error(monkeypatch):
+    """Unwrapping on a host without the aws extra names the missing package and
+    its remediation instead of reporting a decryption failure."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_boto3(name, *args, **kwargs):
+        if name == "boto3":
+            raise ImportError("No module named 'boto3'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_boto3)
+    provider = AwsKmsKeyProvider("alias/x")
+    with pytest.raises(FileEncryptionConfigurationError, match="boto3") as info:
+        provider.unwrap_data_key(b"blob", "arn")
+    assert "cognee" in (info.value.remediation or "")
 
 
 def test_kms_provider_requires_key_id():
