@@ -46,6 +46,14 @@ def get_activity_router() -> APIRouter:
                 "unrelated operation records."
             ),
         ),
+        session_id: str | None = Query(
+            None,
+            description=(
+                "Return only rows that belong to this session-cache id: the operation "
+                "record of a session-bound call (e.g. an improve given one or more "
+                "sessions) and the pipeline runs it launched."
+            ),
+        ),
         limit: int = Query(50, ge=1, le=500, description="Page size (max 500)."),
         offset: int = Query(0, ge=0, description="Rows to skip for pagination."),
         user: User = Depends(get_authenticated_user),
@@ -64,6 +72,15 @@ def get_activity_router() -> APIRouter:
         - **dataset_id** (Optional[UUID]): Restrict to one dataset (403 if not readable).
         - **pipeline_name** (Optional[str]): Exact-match filter; also excludes
           operation records, which have no `pipeline_name`.
+        - **session_id** (Optional[str]): Rows that belong to this session-cache
+          id. Pipeline runs inherit their sessions from the operation that
+          launched them, so `pipeline_name=memify_pipeline&session_id=…` lists
+          every memify run of each improve given that session: the stages that
+          bridge the session and the graph-wide stages (conflict review, the
+          global context index) alike, and an improve over several sessions is
+          listed under each of them. Each row lists its sessions in
+          `session_ids`. Rows written before that inheritance carry it on the
+          operation record only.
         - **limit** (int): Page size, 1-500 (default: 50).
         - **offset** (int): Rows to skip for pagination (default: 0).
 
@@ -121,6 +138,10 @@ def get_activity_router() -> APIRouter:
         from cognee.infrastructure.databases.relational import get_relational_engine
         from cognee.modules.data.models.Dataset import Dataset
         from cognee.modules.pipelines.models import PipelineRun
+        from cognee.modules.pipelines.operations.run_sessions import (
+            get_run_session_ids,
+            rows_of_session,
+        )
         from cognee.modules.users.models import User
 
         if dataset_id is not None:
@@ -170,9 +191,13 @@ def get_activity_router() -> APIRouter:
             )
             if pipeline_name is not None:
                 stmt = stmt.where(PipelineRun.pipeline_name == pipeline_name)
+            if session_id is not None:
+                stmt = stmt.where(PipelineRun.id.in_(rows_of_session(session_id)))
 
             result = await session.execute(stmt)
             rows = result.all()
+
+        sessions_by_row = await get_run_session_ids(run.id for run, *_ in rows)
 
         return [
             {
@@ -213,7 +238,10 @@ def get_activity_router() -> APIRouter:
                 "started_at": run.started_at.isoformat() if run.started_at else None,
                 "ended_at": run.ended_at.isoformat() if run.ended_at else None,
                 "user_id": str(run.user_id) if run.user_id else None,
-                "session_id": run.session_id,
+                # Every session the row belongs to: one for a session-bound
+                # search or recall, several for an improve over several
+                # sessions, none for most rows. Stored in pipeline_run_sessions.
+                "session_ids": sessions_by_row.get(run.id, []),
                 "parent_operation_id": str(run.parent_operation_id)
                 if run.parent_operation_id
                 else None,
