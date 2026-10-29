@@ -40,17 +40,6 @@ def _agent() -> FakeUser:
 def _app_for(user, monkeypatch) -> tuple[FastAPI, list[dict[str, Any]]]:
     payloads: list[dict[str, Any]] = []
 
-    def capture(payload: dict[str, Any]):
-        # Recorded when send_telemetry builds the event, not when its
-        # fire-and-forget task runs, so events raised after the response
-        # (the exception middleware) are never missed.
-        payloads.append(payload)
-
-        async def noop() -> None:
-            return None
-
-        return noop()
-
     async def get_user(_user_id):
         return user
 
@@ -58,7 +47,9 @@ def _app_for(user, monkeypatch) -> tuple[FastAPI, list[dict[str, Any]]]:
     monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
     monkeypatch.setattr(utils, "get_anonymous_id", lambda: "anonymous-test-id")
     monkeypatch.setattr(utils, "get_persistent_id", lambda: "persistent-test-id")
-    monkeypatch.setattr(utils, "_send_telemetry_request", capture)
+    # Recorded when send_telemetry queues the event, so events raised after the
+    # response (the exception middleware) are never missed.
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", payloads.append)
     monkeypatch.setattr(auth_module, "get_user", get_user)
 
     app = FastAPI()
