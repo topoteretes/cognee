@@ -257,11 +257,12 @@ def _retire_orphaned_user_decisions(
     accepted: list[AcceptedConflict],
     drops: list[str],
 ) -> list[str]:
-    """User decisions whose selected fact is gone, which the response neither replaced nor dropped.
+    """Drop the user decisions whose chosen fact no longer exists.
 
-    A decision protects only a live fact. Once that fact's document is forgotten, the
-    review of its subject retires the decision whatever the response said about it, so
-    a response that leaves it out cannot keep the forgotten text in retrieval.
+    When the document behind the fact a user chose is forgotten, the decision must go
+    too, or retrieval keeps presenting the forgotten fact as the accepted one. The LLM
+    is not reliable at this: it may drop or replace the conflict, or not mention it at
+    all. This returns the decisions it left in place, for the subjects this call reviewed.
     """
     replaced = {str(item.conflict.id) for item in accepted}
     return [
