@@ -82,11 +82,11 @@ async def test_origin_defaults_to_sdk_and_scopes_override(ops_engine):
 
 @pytest.mark.asyncio
 async def test_session_id_is_persisted(ops_engine):
-    async with record_operation("recall", session_id="session-abc"):
+    async with record_operation("recall", session_ids=["session-abc"]):
         pass
 
     async with record_operation("search") as context:
-        context.set_session_id("session-xyz")
+        context.set_session_ids(["session-xyz"])
 
     rows = await _fetch_rows(ops_engine)
     sessions = {}

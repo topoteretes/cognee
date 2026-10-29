@@ -2147,7 +2147,7 @@ async def _remember_inner(
 
         # Session memory: store in session cache, then optionally bridge to graph
         if session_id:
-            operation_context.set_session_id(session_id)
+            operation_context.set_session_ids([session_id])
             await _add_to_session(session_id, data, user, node_set=add_kwargs.get("node_set"))
             result = RememberResult(
                 status="session_stored",

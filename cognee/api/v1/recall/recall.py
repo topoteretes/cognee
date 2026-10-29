@@ -664,7 +664,7 @@ async def recall(
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
             return results
 
-        async with record_operation("recall", user=user, session_id=session_id):
+        async with record_operation("recall", user=user, session_ids=[session_id]):
             merged: list[RecallResponse] = []
 
             async def _run_session() -> list[RecallResponse]:

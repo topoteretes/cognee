@@ -96,7 +96,7 @@ async def _run_memify(dataset_id):
 async def test_pipeline_rows_carry_the_operations_session_id(ops_engine):
     """improve binds the session after the scope opens; the stamp is read at write time."""
     async with record_operation("improve") as operation:
-        operation.set_session_id("chat_1")
+        operation.set_session_ids(["chat_1"])
         run_id = await _run_memify(uuid4())
 
     rows = await _rows(ops_engine)
@@ -115,7 +115,7 @@ async def test_pipeline_rows_carry_the_operations_session_id(ops_engine):
 async def test_errored_row_carries_the_session_id(ops_engine):
     run_id = uuid4()
     async with record_operation("improve") as operation:
-        operation.set_session_id("chat_1")
+        operation.set_session_ids(["chat_1"])
         await error_mod.log_pipeline_run_error(
             run_id, uuid4(), "memify_pipeline", uuid4(), ValueError("boom")
         )
@@ -168,7 +168,7 @@ async def test_background_run_keeps_the_session_after_the_scope_exits(ops_engine
         run_ids.append(await _run_memify(uuid4()))
 
     async with record_operation("improve") as operation:
-        operation.set_session_id("chat_1")
+        operation.set_session_ids(["chat_1"])
         operation.defer_close()
         task = asyncio.create_task(stages())
 
@@ -201,7 +201,7 @@ async def test_session_ids_keep_order_and_drop_duplicates_and_blanks(ops_engine)
     async with record_operation("improve") as operation:
         operation.set_session_ids(["chat_2", "", "chat_1", "chat_2", None])
         assert operation.session_ids == ("chat_2", "chat_1")
-        operation.set_session_id("chat_1")
+        operation.set_session_ids(["chat_1"])
         assert operation.session_ids == ("chat_1",)
 
 

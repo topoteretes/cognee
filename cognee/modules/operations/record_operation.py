@@ -20,7 +20,7 @@ Guarantees:
   is swallowed by design.)
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -72,6 +72,14 @@ def get_current_session_ids() -> tuple[str, ...]:
     return context.session_ids if context is not None else ()
 
 
+def _normalize_session_ids(session_ids: Iterable[str | None]) -> tuple[str, ...]:
+    """The session ids an operation is bound to: in order, deduplicated, blanks dropped.
+
+    A call with no session passes ``[None]`` or ``()``; both bind nothing.
+    """
+    return tuple(dict.fromkeys(s for s in session_ids if s))
+
+
 class OperationContext:
     """Mutable attribution context for one recorded operation."""
 
@@ -82,7 +90,7 @@ class OperationContext:
         tenant_id: UUID | None = None,
         dataset_id: UUID | None = None,
         usage: OperationUsage | None = None,
-        session_id: str | None = None,
+        session_ids: Iterable[str | None] = (),
         background: bool | None = None,
         parent_operation_id: UUID | None = None,
     ):
@@ -98,7 +106,7 @@ class OperationContext:
         self.usage = usage or OperationUsage()
         # Every session this operation is bound to, stored one row per session
         # in pipeline_run_sessions with each pipeline_runs row it writes.
-        self.session_ids: tuple[str, ...] = (session_id,) if session_id else ()
+        self.session_ids: tuple[str, ...] = _normalize_session_ids(session_ids)
         self.background = background
         self.parent_operation_id = parent_operation_id
         self.started_at = datetime.now(timezone.utc)
@@ -122,14 +130,9 @@ class OperationContext:
         """Bind the target dataset, when the operation has exactly one."""
         self.dataset_id = dataset_id
 
-    def set_session_id(self, session_id: str | None) -> None:
-        """Bind one active session-cache id."""
-        if session_id:
-            self.session_ids = (session_id,)
-
-    def set_session_ids(self, session_ids) -> None:
-        """Bind every session this operation works on, in order, without duplicates."""
-        self.session_ids = tuple(dict.fromkeys(s for s in session_ids or () if s))
+    def set_session_ids(self, session_ids: Iterable[str | None]) -> None:
+        """Bind every session this operation works on (see ``_normalize_session_ids``)."""
+        self.session_ids = _normalize_session_ids(session_ids)
 
     def set_background(self, background: bool) -> None:
         """Mark whether this call launched background work.
@@ -219,7 +222,7 @@ async def record_operation(
     operation_name: str,
     user: Optional["User"] = None,
     dataset_id: UUID | None = None,
-    session_id: str | None = None,
+    session_ids: Iterable[str | None] = (),
     background: bool | None = None,
 ) -> AsyncIterator[OperationContext]:
     """Record one non-pipeline operation as a single ``pipeline_runs`` row."""
@@ -230,7 +233,7 @@ async def record_operation(
             operation_name=operation_name,
             dataset_id=dataset_id,
             usage=usage,
-            session_id=session_id,
+            session_ids=session_ids,
             background=background,
             # The innermost enclosing run — an operation OR a pipeline (a
             # search inside a custom pipeline parents to that pipeline run).

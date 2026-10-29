@@ -305,10 +305,10 @@ def test_legacy_row_returns_every_new_column_as_null(monkeypatch):
         "started_at",
         "ended_at",
         "user_id",
-        "session_id",
         "parent_operation_id",
     ):
         assert body[0][column] is None, column
+    assert body[0]["session_ids"] == []
 
 
 def test_kind_distinguishes_pipeline_rows_from_operation_rows(monkeypatch):
@@ -467,8 +467,7 @@ def test_rows_list_every_session_they_belong_to(monkeypatch):
     rows = _client(user_id).get("/activity/pipeline-runs").json()
 
     assert [r["session_ids"] for r in rows] == [["chat_1", "chat_2"], ["chat_1"], []]
-    # session_id is derived from session_ids: the session when there is exactly one.
-    assert [r["session_id"] for r in rows] == [None, "chat_1", None]
+    assert all("session_id" not in r for r in rows)
 
 
 def test_no_session_id_leaves_the_filter_out(monkeypatch):
