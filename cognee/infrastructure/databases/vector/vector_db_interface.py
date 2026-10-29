@@ -99,14 +99,22 @@ class VectorDBInterface(Protocol):
         """
         Upsert already-computed vectors into the specified collection.
 
-        This is for small system-owned vector state where re-embedding from text would be
-        incorrect. Adapters that do not support raw vector writes should raise
+        Each point is ``{"id", "vector", "payload"}``. The embedding engine is never
+        called, and a point whose id exists replaces the stored payload and vector (unlike
+        ``create_data_points``, which keeps the stored vector on conflict). With
+        ``retrieve(..., include_vector=True)`` this moves a row between stores without
+        re-embedding its text: pass the payload that call returned, minus ``"vector"``.
+        The payload is stored in the shape an ingested row of ``payload_schema`` has
+        (for a DataPoint that includes its ``id``); LanceDB requires the schema to shape
+        the table. Adapters that do not support raw vector writes should raise
         NotImplementedError.
         """
         raise NotImplementedError("upsert_raw_vectors is not implemented for this adapter")
 
     @abstractmethod
-    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
+    async def retrieve(
+        self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False
+    ):
         """
         Retrieve data points from a collection using their IDs.
 
@@ -116,6 +124,9 @@ class VectorDBInterface(Protocol):
             - collection_name (str): The name of the collection from which to retrieve data
               points.
             - data_point_ids (Union[List[str], list[str]]): A list of IDs of the data points to retrieve.
+            - include_vector (bool): When True, each result carries its stored embedding as
+              ``payload["vector"]`` (a list of floats), so it can be written elsewhere with
+              ``upsert_raw_vectors``. The default result is the payload alone.
         """
         raise NotImplementedError
 

@@ -617,14 +617,27 @@ class LanceDBAdapter(VectorDBInterface):
         points: list[dict],
         payload_schema: type[BaseModel] | None = None,
     ) -> None:
-        """Upsert caller-provided vectors without invoking the embedding engine."""
+        """Upsert caller-provided vectors without invoking the embedding engine.
+
+        A DataPoint schema is stored in the same shape ``create_data_points`` gives it
+        (``get_data_point_schema``: ``id`` and ``belongs_to_set`` columns, nested models
+        and ``metadata`` dropped), so a row copied from another store is indistinguishable
+        from one ingested here; a plain BaseModel payload (system-owned state such as
+        truth centroids) is stored as declared. A conflicting id takes the new payload
+        and the new vector.
+        """
         if not points:
             return
         if payload_schema is None:
             raise ValueError("payload_schema is required for LanceDB raw vector upserts")
 
         vector_size = self.embedding_engine.get_vector_size()
-        LanceDataPoint = self._make_lance_datapoint_cls(payload_schema, vector_size)
+        payload_model = (
+            self.get_data_point_schema(payload_schema)
+            if issubclass(payload_schema, DataPoint)
+            else payload_schema
+        )
+        LanceDataPoint = self._make_lance_datapoint_cls(payload_model, vector_size)
 
         if not await self.has_collection(collection_name):
             async with self.VECTOR_DB_LOCK:
@@ -655,7 +668,9 @@ class LanceDBAdapter(VectorDBInterface):
                 LanceDataPoint(
                     id=str(point_id),
                     vector=vector,
-                    payload=payload_schema.model_validate(payload_value).model_dump(),
+                    payload=payload_model.model_validate(
+                        serialize_data(payload_value)
+                    ).model_dump(),
                 )
             )
 
@@ -1242,10 +1257,9 @@ class LanceDBAdapter(VectorDBInterface):
     ):
         """Return rows from `collection_name` whose id is in `data_point_ids`.
 
-        ``include_vector`` is a LanceDB-only extension (the shared interface is
-        unchanged): when True, the stored embedding is attached to each result
-        under ``payload["vector"]``. The semantic memory map is the consumer;
-        it needs the raw vectors the plain retrieve path drops.
+        With ``include_vector`` the stored embedding is attached to each result
+        under ``payload["vector"]``, as the shared interface specifies; the plain
+        retrieve path drops it.
         """
         if not data_point_ids:
             # No ids requested. Avoid building an "id IN ()" filter, which lance

@@ -24,6 +24,8 @@ import threading
 from typing import Any
 from uuid import UUID
 
+from pydantic import BaseModel
+
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.databases.turso import (
     begin_statement,
@@ -442,11 +444,67 @@ class TursoVectorAdapter(VectorDBInterface):
         # stale payload.
         await retry_on_conflict(lambda: asyncio.to_thread(self._transaction, work))
 
-    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
-        """Return rows from ``collection_name`` matching any of ``data_point_ids``."""
+    async def upsert_raw_vectors(
+        self,
+        collection_name: str,
+        points: list[dict],
+        payload_schema: type[BaseModel] | None = None,
+    ) -> None:
+        """Upsert caller-provided vectors without invoking the embedding engine.
+
+        Payloads are stored as given (the payload column is schemaless JSON text;
+        ``payload_schema`` only names the collection's type for ``create_collection``),
+        so a row read with ``retrieve(..., include_vector=True)`` lands here unchanged.
+        A conflicting id takes the new payload and the new vector (``_upsert_rows``
+        keeps the stored vector, which is right for re-ingested text but not for a
+        vector copy). The same id twice in one call is written once, last point wins.
+        """
+        if not points:
+            return
+
+        if not await self.has_collection(collection_name):
+            await self.create_collection(collection_name, payload_schema=payload_schema)
+
+        vector_size = self.embedding_engine.get_vector_size()
+        rows: dict[str, tuple[str, str]] = {}
+        for point in points:
+            point_id = point.get("id")
+            vector = point.get("vector")
+            payload = point.get("payload")
+            if point_id is None:
+                raise ValueError("Raw vector point is missing id")
+            if not isinstance(vector, list):
+                raise ValueError("Raw vector point vector must be a list")
+            if len(vector) != vector_size:
+                raise ValueError(
+                    f"Raw vector size {len(vector)} does not match expected size {vector_size}"
+                )
+            rows[str(point_id)] = (json.dumps(serialize_data(payload)), _vector_literal(vector))
+
+        insert_sql = (
+            f'INSERT INTO "{collection_name}" (id, payload, vector) '
+            f"VALUES (?, ?, vector32(?)) "
+            f"ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, vector = excluded.vector"
+        )
+
+        def work(connection):
+            for row_id, (payload_json, vector_json) in rows.items():
+                connection.execute(insert_sql, (row_id, payload_json, vector_json))
+
+        await retry_on_conflict(lambda: asyncio.to_thread(self._transaction, work))
+
+    async def retrieve(
+        self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False
+    ):
+        """Return rows from ``collection_name`` matching any of ``data_point_ids``.
+
+        With ``include_vector`` the stored embedding rides along as ``payload["vector"]``
+        (``vector_extract`` renders the ``F32_BLOB`` back as a JSON array).
+        """
         if not await self.has_collection(collection_name):
             return []
 
+        columns = "id, payload, vector_extract(vector)" if include_vector else "id, payload"
         results = []
         seen_ids = set()
         ids = [str(data_point_id) for data_point_id in data_point_ids]
@@ -454,7 +512,7 @@ class TursoVectorAdapter(VectorDBInterface):
             id_batch = ids[start : start + QUERY_BATCH_SIZE]
             placeholders = ",".join("?" for _ in id_batch)
             rows = await self._execute(
-                f'SELECT id, payload FROM "{collection_name}" WHERE id IN ({placeholders})',
+                f'SELECT {columns} FROM "{collection_name}" WHERE id IN ({placeholders})',
                 id_batch,
                 fetch=True,
             )
@@ -462,13 +520,10 @@ class TursoVectorAdapter(VectorDBInterface):
                 if row[0] in seen_ids:
                     continue
                 seen_ids.add(row[0])
-                results.append(
-                    ScoredResult(
-                        id=parse_id(row[0]),
-                        payload=json.loads(row[1]) if row[1] else {},
-                        score=0,
-                    )
-                )
+                payload = json.loads(row[1]) if row[1] else {}
+                if include_vector:
+                    payload = {**payload, "vector": json.loads(row[2])}
+                results.append(ScoredResult(id=parse_id(row[0]), payload=payload, score=0))
         return results
 
     async def score_by_ids(

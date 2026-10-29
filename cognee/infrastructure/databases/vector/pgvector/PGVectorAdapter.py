@@ -6,6 +6,7 @@ from typing import Any, get_type_hints
 from uuid import UUID
 
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
+from pydantic import BaseModel
 from sqlalchemy import JSON, Column, MetaData, Table, cast, delete, exc, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import make_url
@@ -729,8 +730,70 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 )
             await session.commit()
 
-    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
-        """Return rows from `collection_name` matching any of `data_point_ids`."""
+    async def upsert_raw_vectors(
+        self,
+        collection_name: str,
+        points: list[dict],
+        payload_schema: type[BaseModel] | None = None,
+    ) -> None:
+        """Upsert caller-provided vectors without invoking the embedding engine.
+
+        Payloads are stored as given (the JSON column has no schema; ``payload_schema``
+        only names the collection's type for ``create_collection``), so a row read with
+        ``retrieve(..., include_vector=True)`` lands here unchanged. A conflicting id
+        takes the new payload and the new vector. The same id twice in one call is
+        written once, last point wins (one INSERT cannot touch a row twice).
+        """
+        if not points:
+            return
+
+        if not await self.has_collection(collection_name):
+            await self.create_collection(collection_name, payload_schema=payload_schema)
+        table = await self.get_table(collection_name)
+
+        vector_size = self.embedding_engine.get_vector_size()
+        rows: dict[str, dict] = {}
+        for point in points:
+            point_id = point.get("id")
+            vector = point.get("vector")
+            payload = point.get("payload")
+            if point_id is None:
+                raise ValueError("Raw vector point is missing id")
+            if not isinstance(vector, list):
+                raise ValueError("Raw vector point vector must be a list")
+            if len(vector) != vector_size:
+                raise ValueError(
+                    f"Raw vector size {len(vector)} does not match expected size {vector_size}"
+                )
+            rows[str(point_id)] = {
+                "id": point_id,
+                "vector": vector,
+                "payload": sanitize_relational_payload(serialize_data(payload)),
+            }
+
+        row_list = list(rows.values())
+        async with self._get_write_lock(collection_name), self.get_async_session() as session:
+            for start_index in range(0, len(row_list), QUERY_BATCH_SIZE):
+                statement = insert(table).values(
+                    row_list[start_index : start_index + QUERY_BATCH_SIZE]
+                )
+                statement = statement.on_conflict_do_update(
+                    index_elements=["id"],
+                    set_={
+                        "payload": statement.excluded.payload,
+                        "vector": statement.excluded.vector,
+                    },
+                )
+                await session.execute(statement)
+            await session.commit()
+
+    async def retrieve(
+        self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False
+    ):
+        """Return rows from `collection_name` matching any of `data_point_ids`.
+
+        With ``include_vector`` the stored embedding rides along as ``payload["vector"]``.
+        """
         # Get PGVectorDataPoint Table from database
         try:
             PGVectorDataPoint = await self.get_table(collection_name)
@@ -756,7 +819,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 unique_results.append(result)
 
             return [
-                ScoredResult(id=parse_id(result.id), payload=result.payload, score=0)
+                ScoredResult(
+                    id=parse_id(result.id),
+                    # pgvector hands the column back as a numpy array; callers get floats.
+                    payload={**result.payload, "vector": [float(v) for v in result.vector]}
+                    if include_vector
+                    else result.payload,
+                    score=0,
+                )
                 for result in unique_results
             ]
 
