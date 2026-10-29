@@ -215,7 +215,10 @@ async def test_recovery_carries_every_session_of_the_started_row(ops_engine):
     class _Dataset:
         id = started.dataset_id
 
-    await recovery_mod._close_as_abandoned(started, _Dataset())
+    # Recovery reads every candidate's sessions in one batch and hands each
+    # run its own; the closer itself runs no query.
+    session_ids = (await _sessions(ops_engine))[started.id]
+    await recovery_mod._close_as_abandoned(started, _Dataset(), session_ids)
 
     errored = [
         row

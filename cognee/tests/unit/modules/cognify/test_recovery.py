@@ -177,6 +177,31 @@ async def test_every_pipeline_with_a_stale_started_run_is_closed(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_sessions_are_read_once_per_pass_and_each_closed_run_gets_its_own(monkeypatch):
+    """One pipeline_run_sessions lookup for every candidate, not one per closed run."""
+    runs = [_run("memify_pipeline"), _run("add_pipeline"), _run("cognify_pipeline")]
+    calls = _wire(monkeypatch, runs, {r.dataset_id: _dataset_for(r) for r in runs})
+    lookups = []
+    sessions = {runs[0].id: ["chat_1", "chat_2"], runs[1].id: ["chat_1"]}
+
+    async def _sessions(row_ids):
+        lookups.append(sorted(row_ids, key=str))
+        return sessions
+
+    monkeypatch.setattr(recovery_module, "get_run_session_ids", _sessions)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert lookups == [sorted((r.id for r in runs), key=str)]
+    by_name = {kw["pipeline_name"]: kw["session_ids"] for name, kw in calls if name == "error"}
+    assert by_name == {
+        "memify_pipeline": ("chat_1", "chat_2"),
+        "add_pipeline": ("chat_1",),
+        "cognify_pipeline": (),
+    }
+
+
+@pytest.mark.asyncio
 async def test_only_what_the_query_returns_is_touched(monkeypatch):
     """Selection lives in get_unterminated_pipeline_runs (newest row per run is STARTED);
     recovery closes exactly what it is handed and nothing else."""

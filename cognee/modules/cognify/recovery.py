@@ -73,6 +73,8 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
     """
     try:
         recovery_candidates = await get_unterminated_pipeline_runs()
+        # One lookup for every candidate's sessions, not one per closed run.
+        sessions_by_row = await get_run_session_ids(run.id for run in recovery_candidates)
     except Exception:
         logger.exception("Failed to load pipeline runs for startup recovery.")
         return
@@ -122,7 +124,9 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
                                 keep_completed_data=True,
                                 pipeline_name=current.pipeline_name,
                             )
-                        await _close_as_abandoned(current, dataset)
+                        await _close_as_abandoned(
+                            current, dataset, sessions_by_row.get(current.id, [])
+                        )
                     ownership.closed = True
                     logger.info("Recovery closed run %s as abandoned", current.pipeline_run_id)
                     _send_abandoned_run_telemetry(current, await _run_principal(current))
@@ -149,9 +153,11 @@ async def pipeline_recovery_service():
             await task
 
 
-async def _close_as_abandoned(pipeline_run, dataset) -> None:
-    """Write the ERRORED row for ``pipeline_run``, carrying the STARTED row's metadata."""
-    session_ids = (await get_run_session_ids([pipeline_run.id])).get(pipeline_run.id, [])
+async def _close_as_abandoned(pipeline_run, dataset, session_ids: list[str]) -> None:
+    """Write the ERRORED row for ``pipeline_run``, carrying the STARTED row's metadata.
+
+    ``session_ids`` are the STARTED row's, read in one batch by the caller.
+    """
     await log_pipeline_run_error(
         pipeline_run_id=pipeline_run.pipeline_run_id,
         pipeline_id=pipeline_run.pipeline_id,

@@ -75,9 +75,12 @@ def get_activity_router() -> APIRouter:
         - **session_id** (Optional[str]): Rows that belong to this session-cache
           id. Pipeline runs inherit their sessions from the operation that
           launched them, so `pipeline_name=memify_pipeline&session_id=…` lists
-          the improve runs over that session, including an improve over several
-          sessions. Each row lists its sessions in `session_ids`. Rows written
-          before that inheritance carry it on the operation record only.
+          every memify run of each improve given that session: the stages that
+          bridge the session and the graph-wide stages (conflict review, the
+          global context index) alike, and an improve over several sessions is
+          listed under each of them. Each row lists its sessions in
+          `session_ids`. Rows written before that inheritance carry it on the
+          operation record only.
         - **limit** (int): Page size, 1-500 (default: 50).
         - **offset** (int): Rows to skip for pagination (default: 0).
 
