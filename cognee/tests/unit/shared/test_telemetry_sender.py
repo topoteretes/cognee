@@ -2,6 +2,7 @@
 
 import json
 import time
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -21,8 +22,6 @@ class FakeProxy:
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.bodies.append(json.loads(request.content))
         response = self._responses.pop(0) if self._responses else 200
-        if isinstance(response, httpx.Response):
-            return response
         if isinstance(response, Exception):
             raise response
         return httpx.Response(response)
@@ -106,7 +105,7 @@ def test_sender_restarts_after_close(make_sender):
     assert proxy.bodies == [[{"n": 0}], [{"n": 1}]]
 
 
-def test_full_queue_drops_newest_events(make_sender, monkeypatch):
+def test_full_queue_drops_oldest_events(make_sender, monkeypatch):
     monkeypatch.setattr(telemetry_sender, "FLUSH_INTERVAL_SECONDS", 10)
     monkeypatch.setattr(telemetry_sender, "QUEUE_CAP", 5)
     proxy = FakeProxy()
@@ -116,8 +115,61 @@ def test_full_queue_drops_newest_events(make_sender, monkeypatch):
         sender.enqueue(event)
     sender.close()
 
-    assert proxy.bodies == [_events(5)]
-    assert sender.snapshot()["dropped_queue"] == 3
+    assert proxy.bodies == [_events(5, start=3)]
+
+
+def test_queue_over_its_byte_cap_drops_oldest_events(make_sender, monkeypatch):
+    monkeypatch.setattr(telemetry_sender, "FLUSH_INTERVAL_SECONDS", 10)
+    # Room for three '{"n":0}' events of 7 bytes each.
+    monkeypatch.setattr(telemetry_sender, "QUEUE_BYTES", 21)
+    proxy = FakeProxy()
+    sender = make_sender(proxy)
+
+    for event in _events(5):
+        sender.enqueue(event)
+    sender.close()
+
+    assert proxy.bodies == [_events(3, start=2)]
+
+
+def test_batches_stay_within_their_byte_cap(make_sender, monkeypatch):
+    monkeypatch.setattr(telemetry_sender, "FLUSH_INTERVAL_SECONDS", 10)
+    # '[' + two 7-byte events + ',' + ']': exactly two events per request body.
+    monkeypatch.setattr(telemetry_sender, "BATCH_BYTES", 17)
+    proxy = FakeProxy()
+    sender = make_sender(proxy)
+
+    for event in _events(5):
+        sender.enqueue(event)
+    sender.close()
+
+    assert proxy.bodies == [_events(2), _events(2, start=2), _events(1, start=4)]
+
+
+def test_event_larger_than_a_batch_is_sent_alone(make_sender, monkeypatch):
+    # Smaller than one 7-byte event in brackets: no batch can hold even one.
+    monkeypatch.setattr(telemetry_sender, "BATCH_BYTES", 5)
+    proxy = FakeProxy()
+    sender = make_sender(proxy)
+
+    for event in _events(2):
+        sender.enqueue(event)
+    sender.close()
+
+    assert proxy.bodies == [_events(1), _events(1, start=1)]
+
+
+def test_bad_or_oversized_event_is_dropped_alone(make_sender, monkeypatch):
+    monkeypatch.setattr(telemetry_sender, "FLUSH_INTERVAL_SECONDS", 10)
+    proxy = FakeProxy()
+    sender = make_sender(proxy)
+    oversized = {"pad": "x" * telemetry_sender.EVENT_BYTES}
+
+    for event in [{"n": 0}, {"id": uuid4()}, {"n": float("nan")}, oversized, {"n": 1}]:
+        sender.enqueue(event)
+    sender.close()
+
+    assert proxy.bodies == [_events(2)]
 
 
 def test_server_errors_and_network_errors_are_retried(make_sender):
@@ -143,37 +195,22 @@ def test_batch_is_dropped_after_the_last_retry(make_sender):
     assert proxy.bodies == [[{"n": 0}]] * telemetry_sender.RETRY_ATTEMPTS + [[{"n": 1}]]
 
 
-def test_proxy_without_batch_support_gets_single_events(make_sender):
-    proxy = FakeProxy(httpx.Response(422, headers={"X-Cognee-Telemetry-Batch": "unsupported"}))
+def test_client_errors_drop_the_batch_without_retrying_or_splitting_it(make_sender):
+    proxy = FakeProxy(422, 413, 429)
     sender = make_sender(proxy)
 
-    for event in _events(2):
-        sender.enqueue(event)
-    _wait_until(lambda: len(proxy.bodies) == 3)
-    sender.enqueue({"n": 2})
-    sender.close()
+    for n in range(3):
+        sender.enqueue({"n": n})
+        _wait_until(lambda n=n: len(proxy.bodies) == n + 1)
 
-    assert proxy.bodies == [_events(2), {"n": 0}, {"n": 1}, {"n": 2}]
-
-
-def test_client_errors_are_not_retried(make_sender):
-    proxy = FakeProxy(422, 400)
-    sender = make_sender(proxy)
-
-    sender.enqueue({"n": 0})
-    _wait_until(lambda: len(proxy.bodies) == 1)
-    sender.enqueue({"n": 1})
-    _wait_until(lambda: len(proxy.bodies) == 2)
-
-    assert proxy.bodies == [[{"n": 0}], [{"n": 1}]]
-    assert sender.snapshot()["exported_events"] == 0
+    assert proxy.bodies == [[{"n": 0}], [{"n": 1}], [{"n": 2}]]
 
 
 def test_close_gives_up_at_the_first_failure(make_sender, monkeypatch):
     monkeypatch.setattr(telemetry_sender, "BATCH_SIZE", 2)
     proxy = FakeProxy(503)
     sender = make_sender(proxy)
-    # Three batches queued before the thread exists, so its first send is already closing.
+    # Three batches queued before the thread can run, so its first send is already closing.
     with sender._condition:
         for event in _events(6):
             sender.enqueue(event)

@@ -8,13 +8,13 @@ payload, and the whole run costs a handful of requests instead of one per event.
 from __future__ import annotations
 
 import json
+from itertools import pairwise
 
 import httpx
 import pytest
 
 import cognee
 from cognee.shared import telemetry_sender, utils
-from cognee.shared.telemetry_limits import MILESTONE_EVENTS, TelemetryLimits
 from cognee.shared.telemetry_sender import TelemetrySender
 
 DATASET = "journey_telemetry"
@@ -39,14 +39,13 @@ async def test_remember_telemetry_arrives_intact_in_few_requests(
     assert len(queued) > 10, f"expected dozens of events, got {len(queued)}"
     posted = [event for body in bodies for event in body]
     assert posted == queued
-    # Milestones and detail events use separate batches to protect the reserve.
-    assert len(bodies) < len(queued)
     for body in bodies:
         assert len(body) <= telemetry_sender.BATCH_SIZE
-        assert (
-            len(json.dumps(body, separators=(",", ":")).encode()) <= TelemetryLimits().batch_bytes
-        )
-        assert len({event["event_name"] in MILESTONE_EVENTS for event in body}) == 1
+        assert _wire_size(body) <= telemetry_sender.BATCH_BYTES
+    # Every request but the last is a full batch: by count, or by size.
+    for body, next_body in pairwise(bodies):
+        full_by_count = len(body) == telemetry_sender.BATCH_SIZE
+        assert full_by_count or _wire_size(body + next_body[:1]) > telemetry_sender.BATCH_BYTES
 
 
 def _route_telemetry_to_fake_proxy(monkeypatch) -> tuple[list, list[dict]]:
@@ -55,7 +54,7 @@ def _route_telemetry_to_fake_proxy(monkeypatch) -> tuple[list, list[dict]]:
     monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
     monkeypatch.setattr(utils, "get_anonymous_id", lambda: "anonymous-test-id")
     monkeypatch.setattr(utils, "get_persistent_id", lambda: "persistent-test-id")
-    # Buffer this small journey until close; admission limits still apply.
+    # Only full batches and the flush on close send, so every batch but the last is full.
     monkeypatch.setattr(telemetry_sender, "FLUSH_INTERVAL_SECONDS", 3600)
 
     bodies: list = []
@@ -75,3 +74,8 @@ def _route_telemetry_to_fake_proxy(monkeypatch) -> tuple[list, list[dict]]:
     monkeypatch.setattr(sender, "enqueue", record_and_enqueue)
     monkeypatch.setattr(utils, "_telemetry_sender", sender)
     return bodies, queued
+
+
+def _wire_size(events: list[dict]) -> int:
+    """Bytes of ``events`` as one request body, encoded as the sender encodes them."""
+    return len(json.dumps(events, separators=(",", ":")).encode())

@@ -1,10 +1,11 @@
 """Unit tests for telemetry identity helpers."""
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from cognee.shared import utils
-from cognee.shared.utils import _get_api_key_tracking_id, send_telemetry
+from cognee.shared.utils import CLOUD_TELEMETRY_EVENTS, _get_api_key_tracking_id, send_telemetry
 
 
 def test_api_key_tracking_id_uses_full_key_not_visible_tail(monkeypatch):
@@ -32,6 +33,17 @@ def test_api_key_tracking_id_supports_deployment_salt(monkeypatch):
     second = _get_api_key_tracking_id()
 
     assert first != second
+
+
+def test_api_key_tracking_id_is_derived_once_per_key(monkeypatch):
+    """PBKDF2 runs once per key, not on every telemetry event."""
+    monkeypatch.setenv("LLM_API_KEY", "provider-prefix-cached-key")
+    utils._derive_api_key_tracking_id.cache_clear()
+
+    first = _get_api_key_tracking_id()
+
+    assert _get_api_key_tracking_id() == first
+    assert utils._derive_api_key_tracking_id.cache_info().hits == 1
 
 
 def test_send_telemetry_includes_api_key_tracking_id(monkeypatch):
@@ -72,13 +84,55 @@ def test_send_telemetry_includes_origin_from_env(monkeypatch):
 
     # Unset -> defaults to "sdk".
     monkeypatch.delenv("TELEMETRY_ORIGIN", raising=False)
-    send_telemetry("Pipeline Run Started", "user-123")
+    send_telemetry("test_event", "user-123")
     assert payloads[-1]["properties"]["telemetry_origin"] == "sdk"
 
     # Set -> honored (the managed cloud sets this to "cloud").
     monkeypatch.setenv("TELEMETRY_ORIGIN", "cloud")
     send_telemetry("Pipeline Run Started", "user-123")
     assert payloads[-1]["properties"]["telemetry_origin"] == "cloud"
+
+
+def test_cloud_origin_sends_only_allowlisted_events(monkeypatch):
+    sent: list[str] = []
+    monkeypatch.setenv("ENV", "prod")
+    monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", lambda p: sent.append(p["event_name"]))
+
+    monkeypatch.setenv("TELEMETRY_ORIGIN", "cloud")
+    send_telemetry("Task Started", "user-123")
+    send_telemetry("Pipeline Run Started", "user-123")
+    monkeypatch.setenv("TELEMETRY_ORIGIN", "sdk")
+    send_telemetry("Task Started", "user-123")
+
+    assert sent == ["Pipeline Run Started", "Task Started"]
+
+
+def test_cloud_allowlist_names_only_events_cognee_emits():
+    package = Path(utils.__file__).resolve().parents[1]
+    sources = [
+        path.read_text()
+        for path in package.rglob("*.py")
+        if "tests" not in path.parts and path != Path(utils.__file__).resolve()
+    ]
+
+    missing = {
+        name for name in CLOUD_TELEMETRY_EVENTS if not any(f'"{name}"' in s for s in sources)
+    }
+
+    assert not missing, f"Allowlisted events nothing emits: {missing}"
+
+
+def test_event_properties_cannot_override_the_origin(monkeypatch):
+    payloads: list[dict[str, Any]] = []
+    monkeypatch.setenv("ENV", "prod")
+    monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
+    monkeypatch.setenv("TELEMETRY_ORIGIN", "cloud")
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", payloads.append)
+
+    send_telemetry("cognee.recall", "user-123", {"telemetry_origin": "sdk"})
+
+    assert payloads[0]["properties"]["telemetry_origin"] == "cloud"
 
 
 def test_send_telemetry_stamps_event_time(monkeypatch):
@@ -89,7 +143,7 @@ def test_send_telemetry_stamps_event_time(monkeypatch):
     monkeypatch.setattr(utils._telemetry_sender, "enqueue", payloads.append)
 
     before = datetime.now(timezone.utc)
-    send_telemetry("Pipeline Run Started", "user-123")
+    send_telemetry("test_event", "user-123")
     event_time = datetime.fromisoformat(payloads[0]["event_time"])
 
     assert event_time.tzinfo == timezone.utc

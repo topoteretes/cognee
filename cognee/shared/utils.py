@@ -138,6 +138,31 @@ TELEMETRY_DATASET_NAME_PROPERTIES = ["dataset_name", "dataset"]
 
 # Deployments may override the operation context's origin for telemetry.
 TELEMETRY_ORIGIN_ENV = "TELEMETRY_ORIGIN"
+# The only events a "cloud" origin sends: operation outcomes and run milestones.
+# Task, item start/completion and endpoint events stay local (CLO-799).
+CLOUD_TELEMETRY_EVENTS = frozenset(
+    {
+        "Pipeline Run Started",
+        "Pipeline Run Completed",
+        "Pipeline Run Errored",
+        "Incremental Update Run Started",
+        "Incremental Update Run Completed",
+        "cognee.cognify DEFAULT TASKS CREATION ERRORED",
+        "cognee.remember",
+        "cognee.remember.code_graph",
+        "cognee.remember.import",
+        "cognee.recall",
+        "cognee.recall ERRORED",
+        "cognee.improve",
+        "cognee.forget",
+        "cognee.push",
+        "cognee.export",
+        "cognee.search EXECUTION STARTED",
+        "cognee.search EXECUTION COMPLETED",
+        "cognee.search EXECUTION ERRORED",
+        "Pipeline Item Errored",
+    }
+)
 # A model setting that is a filesystem path (a local GGUF, a mounted checkpoint)
 # carries the account name in it. It leaves the process as this closed value.
 TELEMETRY_LOCAL_PATH_LABEL = "local_path"
@@ -387,7 +412,7 @@ async def flush_telemetry() -> None:
     """Send queued telemetry and stop the sender thread, waiting at most one request timeout.
 
     Called from the FastAPI lifespan shutdown; scripts are covered by the
-    process-wide telemetry ``atexit`` hook. Telemetry sent afterwards starts a new thread.
+    sender's own ``atexit`` hook. Telemetry sent afterwards starts a new thread.
     """
     # close() blocks; keep the event loop free while it waits.
     await asyncio.to_thread(_telemetry_sender.close)
@@ -418,11 +443,7 @@ def _get_api_key_tracking_id() -> str:
 
 @lru_cache(maxsize=1)
 def _derive_api_key_tracking_id(key: str, salt: bytes) -> str:
-    """Bounded last-key cache; rotation of either key or salt invalidates the lookup.
-
-    Cold concurrent callers may compute the same value; no global derivation
-    lock serializes the product threads. Only the most recent pair is retained.
-    """
+    """PBKDF2 is slow; cache the latest key/salt pair. A rotated key or salt recomputes."""
     import hashlib
 
     derived = hashlib.pbkdf2_hmac(
@@ -516,24 +537,12 @@ def send_telemetry(
     env = os.getenv("ENV")
     if env in ["test", "dev"]:
         return
-    try:
-        origin = telemetry_origin()
-        with _telemetry_sender.prepare(event_name, origin, additional_properties) as admitted:
-            if admitted:
-                _build_telemetry_payload(
-                    event_name, user, additional_properties, user_id, tenant_id, origin
-                )
-    except Exception:
-        # Log a synthetic exception, never the original content-bearing diagnostic.
-        logger.debug(
-            "Telemetry preparation failed",
-            exc_info=(RuntimeError, RuntimeError("redacted telemetry failure"), None),
-        )
-        # Diagnostics must not change a product result/error/cancellation.
-        _telemetry_sender.count("dropped_internal")
-
-
-def _build_telemetry_payload(event_name, user, additional_properties, user_id, tenant_id, origin):
+    # Where this telemetry event originates. Defaults to "sdk"; deployments such
+    # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
+    # segmented by origin.
+    origin = telemetry_origin()
+    if origin == "cloud" and event_name not in CLOUD_TELEMETRY_EVENTS:
+        return
     additional_properties = _sanitize_nested_properties(
         obj=additional_properties, property_names=TELEMETRY_SANITIZED_PROPERTIES
     )
@@ -543,9 +552,6 @@ def _build_telemetry_payload(event_name, user, additional_properties, user_id, t
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
     api_key_tracking_id = _get_api_key_tracking_id()
-    # Where this telemetry event originates. Defaults to "sdk"; deployments such
-    # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
-    # segmented by origin.
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,
@@ -569,11 +575,17 @@ def _build_telemetry_payload(event_name, user, additional_properties, user_id, t
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
             **additional_properties,
+            # Last, so an event property cannot override the deployment's origin.
             "telemetry_origin": origin,
         },
     }
 
-    _telemetry_sender.enqueue(payload)
+    try:
+        _telemetry_sender.enqueue(payload)
+    except Exception:
+        # Starting the sender thread fails at interpreter shutdown — telemetry is
+        # best-effort; dropping the event is better than crashing the caller.
+        logger.debug("Ignoring exception in send_telemetry", exc_info=True)
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):

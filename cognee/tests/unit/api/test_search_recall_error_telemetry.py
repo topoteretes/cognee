@@ -63,21 +63,3 @@ async def test_recall_failure_ends_with_an_errored_event(events):
     _, sent_user, properties = events[0]
     assert sent_user == "sdk"
     assert properties["exception_type"] == "CogneeValidationError"
-
-
-@pytest.mark.asyncio
-async def test_recall_stringifies_dataset_uuids_for_telemetry(events, monkeypatch):
-    from cognee.api.v1.serve import state
-
-    dataset = uuid4()
-    stop = RuntimeError("stop before retrieval")
-
-    def stop_before_retrieval():
-        raise stop
-
-    monkeypatch.setattr(state, "get_remote_client", stop_before_retrieval)
-    with pytest.raises(RuntimeError) as raised:
-        await recall_module.recall("query", datasets=[dataset], scope="graph")
-    assert raised.value is stop
-    assert events[0][0] == "cognee.recall"
-    assert events[0][2]["datasets"] == [str(dataset)]
