@@ -873,6 +873,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         include_payload: bool = False,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
+        document_name: list[str] | None = None,
     ) -> list[ScoredResult]:
         """Run a cosine-distance similarity search, optionally filtered by NodeSet tag."""
         if query_text is None and query_vector is None:
@@ -917,6 +918,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             use_index = (
                 indexed_type is not None
                 and not node_name
+                and not document_name
                 and not exact_scan_required
                 and limit <= _HNSW_MAX_EF_SEARCH
             )
@@ -926,6 +928,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 # hnsw.ef_search rows, before any node-set filter is applied. Searches
                 # that must be exact keep the full scan.
                 await session.execute(text("SET LOCAL enable_indexscan = off"))
+            filters = []
             if node_name:
                 if node_name_filter_operator == "AND":
                     filter_operator = "?&"
@@ -936,42 +939,48 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TEXT
 
                 target = bindparam("target", value=node_name, type_=ARRAY(TEXT()))
-                query = (
-                    select(
-                        *select_columns,
-                        PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
-                            "similarity"
-                        ),
+                filters.append(
+                    cast(PGVectorDataPoint.c.payload, JSONB)
+                    .op("->")("belongs_to_set")
+                    .op(filter_operator)(target)
+                )
+            if document_name:
+                from sqlalchemy import cast
+                from sqlalchemy.dialects.postgresql import JSONB
+
+                name_column = cast(PGVectorDataPoint.c.payload, JSONB).op("->>")(
+                    "document_name"
+                )
+                if node_name_filter_operator == "AND" and len(document_name) > 1:
+                    filters.append(text("false"))
+                elif node_name_filter_operator == "AND":
+                    filters.append(name_column == document_name[0])
+                else:
+                    filters.append(name_column.in_(document_name))
+
+            query = select(
+                *select_columns,
+                PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
+            )
+            if filters:
+                query = query.where(*filters)
+            if use_index:
+                # Order by the indexed expression so the HNSW index serves the scan.
+                # The planner underestimates a full scan of TOASTed vectors and picks
+                # it even when the index exists, so it is steered off it here; the
+                # returned similarity stays the exact cosine distance, and the rows are
+                # re-sorted by it below.
+                query = query.order_by(
+                    _indexed_distance(
+                        PGVectorDataPoint.c.vector, query_vector, indexed_type, dimensions
                     )
-                    .where(
-                        cast(PGVectorDataPoint.c.payload, JSONB)
-                        .op("->")("belongs_to_set")
-                        .op(filter_operator)(target)
-                    )
-                    .order_by("similarity")
+                )
+                await session.execute(text("SET LOCAL enable_seqscan = off"))
+                await session.execute(
+                    text(f"SET LOCAL hnsw.ef_search = {max(limit, _HNSW_DEFAULT_EF_SEARCH)}")
                 )
             else:
-                query = select(
-                    *select_columns,
-                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
-                )
-                if use_index:
-                    # Order by the indexed expression so the HNSW index serves the scan.
-                    # The planner underestimates a full scan of TOASTed vectors and picks
-                    # it even when the index exists, so it is steered off it here; the
-                    # returned similarity stays the exact cosine distance, and the rows are
-                    # re-sorted by it below.
-                    query = query.order_by(
-                        _indexed_distance(
-                            PGVectorDataPoint.c.vector, query_vector, indexed_type, dimensions
-                        )
-                    )
-                    await session.execute(text("SET LOCAL enable_seqscan = off"))
-                    await session.execute(
-                        text(f"SET LOCAL hnsw.ef_search = {max(limit, _HNSW_DEFAULT_EF_SEARCH)}")
-                    )
-                else:
-                    query = query.order_by("similarity")
+                query = query.order_by("similarity")
 
             if limit > 0:
                 query = query.limit(limit)

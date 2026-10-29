@@ -109,7 +109,9 @@ async def search(
         node_type: ``DataPoint`` subclass used to filter nodes (default ``NodeSet``).
             A custom type forces hybrid to defer to graph completion.
         node_name: Restrict retrieval to these node names (e.g. node-set tags),
-            combined with ``node_name_filter_operator`` (``"OR"``/``"AND"``).
+            combined with ``node_name_filter_operator`` (``"OR"``/``"AND"``). When
+            ``node_type=TextDocument``, these names scope CHUNKS/RAG results to chunks
+            whose source document has that name.
         only_context: Return what the LLM would have received instead of its answer.
             For completion types the result is the user prompt (conversation
             history, then question plus retrieval context through the retriever's

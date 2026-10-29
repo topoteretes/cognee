@@ -163,7 +163,10 @@ async def search(
 
         node_type: Filter results to specific entity types (for advanced filtering).
 
-        node_name: Filter results to specific named entities (for targeted search).
+        node_name: Filter results to specific named entities. For CHUNKS and
+            RAG_COMPLETION, ``node_type=TextDocument`` scopes results to chunks
+            whose source document has one of these names; other search types must
+            support the requested scope or search raises a validation error.
 
         node_name_filter_operator: Operator determining how to filter based on node names.
                                     Possible values: AND, OR (default is OR, i.e. disjunction)

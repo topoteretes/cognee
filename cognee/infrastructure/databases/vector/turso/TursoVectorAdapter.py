@@ -556,6 +556,7 @@ class TursoVectorAdapter(VectorDBInterface):
         include_payload: bool = False,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
+        document_name: list[str] | None = None,
     ) -> list[ScoredResult]:
         """Run a cosine-distance similarity search, optionally filtered by NodeSet tag."""
         if query_text is None and query_vector is None:
@@ -575,7 +576,7 @@ class TursoVectorAdapter(VectorDBInterface):
             return []
 
         params: list[Any] = [_vector_literal(query_vector)]
-        where_clause = ""
+        filters: list[str] = []
         if node_name:
             placeholders = ",".join("?" for _ in node_name)
             # The engine's json_each().value is the element's raw JSON text, with
@@ -583,20 +584,36 @@ class TursoVectorAdapter(VectorDBInterface):
             # are compared on the decoded element that ``->>`` returns.
             element = f'"{collection_name}".payload ->> je.fullkey'
             if node_name_filter_operator == "AND":
-                where_clause = (
-                    f" WHERE (SELECT count(DISTINCT {element}) FROM json_each("
+                filters.append(
+                    f"(SELECT count(DISTINCT {element}) FROM json_each("
                     f"\"{collection_name}\".payload, '$.belongs_to_set') je "
                     f"WHERE {element} IN ({placeholders})) = ?"
                 )
                 params.extend(node_name)
                 params.append(len(set(node_name)))
             else:
-                where_clause = (
-                    f" WHERE EXISTS (SELECT 1 FROM json_each("
+                filters.append(
+                    f"EXISTS (SELECT 1 FROM json_each("
                     f"\"{collection_name}\".payload, '$.belongs_to_set') je "
                     f"WHERE {element} IN ({placeholders}))"
                 )
                 params.extend(node_name)
+
+        if document_name:
+            if node_name_filter_operator == "AND" and len(document_name) > 1:
+                filters.append("0")
+            else:
+                placeholders = ",".join("?" for _ in document_name)
+                operator = "=" if node_name_filter_operator == "AND" else "IN"
+                if operator == "=":
+                    filters.append("json_extract(payload, '$.document_name') = ?")
+                else:
+                    filters.append(
+                        f"json_extract(payload, '$.document_name') IN ({placeholders})"
+                    )
+                params.extend(document_name)
+
+        where_clause = f" WHERE {' AND '.join(filters)}" if filters else ""
 
         params.append(limit)
         # Skip the payload column unless the caller needs it (mirrors PGVector):

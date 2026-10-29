@@ -1375,6 +1375,7 @@ class LanceDBAdapter(VectorDBInterface):
         include_payload: bool = False,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
+        document_name: list[str] | None = None,
     ):
         with new_span("cognee.db.vector.search") as otel_span:
             otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
@@ -1403,6 +1404,7 @@ class LanceDBAdapter(VectorDBInterface):
                 ["id", "payload", "_distance"] if include_payload else ["id", "_distance"]
             )
 
+            filters = []
             if node_name:
                 # Escape quotes to make this input safer, since it's coming from the user
                 # At the time of writing this, no specific binding instructions found on LanceDB docs
@@ -1420,22 +1422,24 @@ class LanceDBAdapter(VectorDBInterface):
                         f"array_has_any(payload.belongs_to_set, {literal_node_names})"
                     )
 
-                result_values = (
-                    await collection.vector_search(query_vector)
-                    .distance_type("cosine")
-                    .where(node_name_filter_string)
-                    .select(select_columns)
-                    .limit(limit)
-                    .to_list()
-                )
-            else:
-                result_values = (
-                    await collection.vector_search(query_vector)
-                    .distance_type("cosine")
-                    .select(select_columns)
-                    .limit(limit)
-                    .to_list()
-                )
+                filters.append(node_name_filter_string)
+
+            if document_name:
+                escaped_document_names = [name.replace("'", "''") for name in document_name]
+                if node_name_filter_operator == "AND" and len(escaped_document_names) > 1:
+                    filters.append("false")
+                elif node_name_filter_operator == "AND":
+                    filters.append(f"payload.document_name = '{escaped_document_names[0]}'")
+                else:
+                    literals = ", ".join(f"'{name}'" for name in escaped_document_names)
+                    filters.append(f"payload.document_name IN ({literals})")
+
+            search = collection.vector_search(query_vector).distance_type("cosine")
+            if filters:
+                search = search.where(" AND ".join(filters))
+            result_values = (
+                await search.select(select_columns).limit(limit).to_list()
+            )
 
             if not result_values:
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)

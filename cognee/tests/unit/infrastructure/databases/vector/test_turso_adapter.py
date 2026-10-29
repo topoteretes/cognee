@@ -55,6 +55,7 @@ if HAS_TURSO:
 
     class _Doc(DataPoint):
         text: str
+        document_name: str | None = None
         metadata: dict = {"index_fields": ["text"]}
 
 
@@ -156,6 +157,26 @@ async def test_nodeset_and_filtering(adapter):
     )
     assert len(results) == 1
     assert "quantum computers" in results[0].payload["text"]
+
+
+@pytest.mark.asyncio
+async def test_document_name_filtering(adapter):
+    docs = [
+        _Doc(text="apples grow on trees", document_name="doc_a"),
+        _Doc(text="bananas grow in bunches", document_name="doc_b"),
+    ]
+    await adapter.create_data_points("DocumentChunk_text", docs)
+
+    results = await adapter.search(
+        "DocumentChunk_text",
+        query_text="grow",
+        limit=None,
+        include_payload=True,
+        document_name=["doc_a"],
+    )
+
+    assert len(results) == 1
+    assert results[0].payload["document_name"] == "doc_a"
 
 
 @pytest.mark.asyncio
