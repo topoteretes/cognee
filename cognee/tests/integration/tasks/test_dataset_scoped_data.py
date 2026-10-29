@@ -344,7 +344,7 @@ async def _scenario():
 
     dlt_row = DltRowData(
         table_name="users",
-        primary_key_column="id",
+        primary_key_columns=["id"],
         primary_key_value="1",
         row_data={"id": 1, "name": "Ada"},
         content_hash="hash-dlt-1",

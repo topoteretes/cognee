@@ -81,7 +81,7 @@ def test_a_row_without_an_id_cannot_carry_a_structure():
 
     row = DltRowData(
         table_name="t",
-        primary_key_column="id",
+        primary_key_columns=["id"],
         primary_key_value="0",
         row_data={"id": 0, "title": "T", "content": "C", STRUCTURE_COLUMN: {"ancestors": []}},
         content_hash="h",
