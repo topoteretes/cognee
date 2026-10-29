@@ -32,7 +32,9 @@ def format_case(request, monkeypatch):
         ),
         "xlsx": (
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ("| a", "2. e"),
+            # Cell text only: docling renders a markdown table, unstructured plain cells,
+            # and the Documents & Tasks job (docs extra) reads .xlsx with unstructured.
+            ("2. e",),
         ),
         "pptx": (
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
