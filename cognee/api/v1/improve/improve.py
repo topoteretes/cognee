@@ -464,8 +464,7 @@ async def _resolve_inputs(
         user = await get_default_user()
     operation.set_user(user)
     operation.set_background(run_in_background)
-    if len(session_ids) == 1:
-        operation.set_session_id(session_ids[0])
+    operation.set_session_ids(session_ids)
 
     # The run-log writers INSERT the operation-record columns, so the database
     # must be at the current Alembic head before the first write — same gate
