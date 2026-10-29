@@ -1184,11 +1184,13 @@ def get_datasets_router() -> APIRouter:
         raw_location = data.raw_data_location
         parsed_uri = urlparse(raw_location)
 
-        if parsed_uri.scheme == "s3":
+        def stream_through_storage(download_name: str) -> StreamingResponse:
+            # open_data_file goes through the storage layer, so an S3 object is
+            # fetched and a sealed object (FILE_ENCRYPTION_ENABLED) is unsealed;
+            # FileResponse would serve the ciphertext bytes as they lie on disk.
             from cognee.infrastructure.files.utils.open_data_file import open_data_file
             from cognee.infrastructure.utils.run_async import run_async
 
-            download_name = Path(parsed_uri.path).name or data.name
             media_type = data.mime_type or "application/octet-stream"
 
             async def file_iterator(chunk_size: int = 1024 * 1024):
@@ -1205,9 +1207,13 @@ def get_datasets_router() -> APIRouter:
                 headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
             )
 
+        if parsed_uri.scheme == "s3":
+            return stream_through_storage(Path(parsed_uri.path).name or data.name)
+
         if parsed_uri.scheme in ("file", "") or (
             len(parsed_uri.scheme) == 1 and parsed_uri.scheme.isalpha()
         ):
+            from cognee.infrastructure.files.encryption import is_encrypted_local_file
             from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 
             file_path = get_data_file_path(raw_location)
@@ -1215,6 +1221,9 @@ def get_datasets_router() -> APIRouter:
 
             if not path.is_file():
                 raise DataNotFoundError(message=f"Raw file not found on disk for data ({data_id}).")
+
+            if is_encrypted_local_file(file_path):
+                return stream_through_storage(path.name or data.name)
 
             return FileResponse(path=path)
 
