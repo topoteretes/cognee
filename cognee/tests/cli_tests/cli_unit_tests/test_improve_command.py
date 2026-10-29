@@ -39,7 +39,8 @@ class TestParser:
         args = _parse()
         assert args.build_global_context_index is False
         assert args.build_truth_subspace is False
-        assert args.review_conflicts is False
+        # Unset defers to IMPROVE_REVIEW_CONFLICTS.
+        assert args.review_conflicts is None
         assert args.feedback_alpha is None
         assert args.background is False
         assert args.dataset_name == "main_dataset"
@@ -67,6 +68,9 @@ class TestParser:
         assert args.build_truth_subspace is True
         assert args.review_conflicts is True
         assert args.background is True
+
+    def test_no_review_conflicts_turns_the_stage_off(self):
+        assert _parse("--no-review-conflicts").review_conflicts is False
 
 
 class TestExecute:

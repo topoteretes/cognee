@@ -568,7 +568,7 @@ async def recall(
         (answer written by an LLM): HYBRID_COMPLETION (the default when
         routing is off), GRAPH_COMPLETION, GRAPH_COMPLETION_COT,
         GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_COMPLETION_DECOMPOSITION,
-        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TEMPORAL,
+        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TEMPORAL, BROAD,
         AGENTIC_COMPLETION. Retrieval-only types (no LLM):
         CHUNKS, CHUNKS_LEXICAL, SUMMARIES, SKILLS, CODE. Other: CYPHER,
         NATURAL_LANGUAGE, CODING_RULES, GRAPH_REPORT, FEELING_LUCKY.
@@ -874,7 +874,7 @@ async def improve(
     5. distill_sessions        - gated guidance becomes entity-anchored lessons
     6. update_user_preferences - ratings fold into preference weights
     7. build_truth_subspace    - opt-in (build_truth_subspace=True)
-    8. review_conflicts        - opt-in (IMPROVE_REVIEW_CONFLICTS=true)
+    8. review_conflicts        - on unless IMPROVE_REVIEW_CONFLICTS=false; needs an LLM
     9. global_context_index    - opt-in (build_global_context_index=True)
 
     Stages 1-7 need session_ids and are skipped with `no_session_ids`

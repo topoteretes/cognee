@@ -320,13 +320,13 @@ def test_a_pypdf_value_error_is_unreadable(monkeypatch):
 
 
 @pytest.mark.parametrize("name", list(drive_pdfs.CORRUPT_PDFS))
-def test_corrupt_pdf_on_which_pypdf_raises_its_own_kind_of_error_is_unreadable(name):
-    from pypdf.errors import PyPdfError
-
+def test_corrupt_pdf_is_unreadable_and_names_what_pypdf_raised(name):
     data = drive_pdfs.CORRUPT_PDFS[name]
-    with pytest.raises(Exception) as raised:  # what pypdf itself raises, to keep the case honest
+    # What pypdf itself raises, to keep the case honest. The kind depends on the pypdf
+    # release (6.21 turned the KeyError and AttributeError of two cases into a
+    # UnicodeDecodeError and a PdfReadError); the connector names whichever it was.
+    with pytest.raises(Exception) as raised:
         drive_pdfs.extract(data)
-    assert not isinstance(raised.value, (PyPdfError, ValueError))
     service = _FakeService(_FakeFiles(media_result=data))
     with pytest.raises(UnreadableFileError, match=type(raised.value).__name__):
         extract_file_content(service, "p", PDF_MIME_TYPE, "broken.pdf")

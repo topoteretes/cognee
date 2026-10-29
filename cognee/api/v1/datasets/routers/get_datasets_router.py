@@ -522,7 +522,9 @@ def get_datasets_router() -> APIRouter:
 
         ## Request Body
         - **query** (str): SELECT, ASK, CONSTRUCT or DESCRIBE. SPARQL Update
-          (INSERT, DELETE, LOAD, CLEAR, DROP, CREATE, ADD, MOVE, COPY) is refused.
+          (INSERT, DELETE, LOAD, CLEAR, DROP, CREATE, ADD, MOVE, COPY) is refused, and
+          so are `SERVICE`, `FROM` and `FROM NAMED`: the query reads this dataset's
+          graph only.
         - **base_iri** (str, optional): prefix for minted IRIs
         - **limit** (int, 1-10000, default 1000): cap on SELECT rows
 
@@ -540,7 +542,8 @@ def get_datasets_router() -> APIRouter:
           finishes on its own.
 
         ## Error Codes
-        - **400 Bad Request**: SPARQL Update keywords, or the query does not parse
+        - **400 Bad Request**: SPARQL Update keywords, `SERVICE` / `FROM` / `FROM NAMED`,
+          or the query does not parse
         - **404 Not Found**: Dataset doesn't exist or user doesn't have access
         - **413 Content Too Large**: Dataset graph exceeds the node ceiling
         - **504 Gateway Timeout**: Query exceeded the wall-clock budget
@@ -586,7 +589,7 @@ def get_datasets_router() -> APIRouter:
                 content=ErrorResponseDTO(message=str(error)).model_dump(),
             )
         except SparqlQueryError as error:
-            # Update keywords or a query rdflib cannot parse: the client's input.
+            # Update keywords, external access or a query rdflib cannot parse: the client's input.
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 content=ErrorResponseDTO(message=str(error)).model_dump(),

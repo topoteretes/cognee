@@ -31,6 +31,10 @@ prebuilt `cognee/cognee:main` image or `docker compose up` from the repo).
 `REQUIRE_AUTHENTICATION=false` is ignored while access control is on; to turn
 auth off you must set `ENABLE_BACKEND_ACCESS_CONTROL=false`.
 
+Behind a TLS-terminating proxy set `AUTH_TOKEN_COOKIE_SECURE=true` so the auth cookie
+gets the `Secure` attribute; leave it off for plain `http://localhost`, where a browser
+refuses to store a Secure cookie.
+
 ## Connecting clients to the running server
 
 - **SDK / CLI against the server** (instead of embedded local mode):

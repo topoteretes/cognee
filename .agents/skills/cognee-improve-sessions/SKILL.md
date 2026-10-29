@@ -46,7 +46,7 @@ await cognee.wait_for_background_tasks()  # before a script exits
 | Read a session | `cognee.session.get_session(session_id, last_n=...)` |
 
 Requirements: `CACHING=true` (default). The cache backend is
-`CACHE_BACKEND`, one of `sqlite` (default), `postgres`, `redis`, `fs`,
+`CACHE_BACKEND`, one of `sqlite` (default), `postgres`, `redis`,
 `tapes`. Sessions expire after `SESSION_TTL_SECONDS` (default 7 days).
 
 ### What improve() does: nine stages, in order
@@ -64,7 +64,7 @@ spends any LLM or embedding cost, and reports one `StageResult`.
 | 5 | `distill_sessions` | Distills session learnings into the graph | `session_ids`, an LLM |
 | 6 | `update_user_preferences` | Folds rated turns into per-user preferences | `session_ids`, `PERSONALIZATION_ENABLED=true` (default false) |
 | 7 | `build_truth_subspace` | Builds the truth subspace from distilled learnings | `session_ids`, `build_truth_subspace=True`, a Ladybug graph |
-| 8 | `review_conflicts` | Reviews dated source facts, stores conflicts and rewrites Entity descriptions | `review_conflicts=True` or `IMPROVE_REVIEW_CONFLICTS=true`, an LLM, edge evidence |
+| 8 | `review_conflicts` | Reviews dated source facts and stores conflicts | on by default (`review_conflicts=False` or `IMPROVE_REVIEW_CONFLICTS=false` turns it off), an LLM, edge evidence |
 | 9 | `global_context_index` | Bucket and root summaries for global questions | `build_global_context_index=True` |
 
 Stages 1–7 need `session_ids`; 8–9 work on the graph alone. The order
@@ -95,7 +95,8 @@ CLI, and `RememberResult.improve`.
 |---|---|
 | `no_session_ids` | Session stage, no `session_ids` passed |
 | `disabled_by_config` | Listed in `IMPROVE_STAGES_DISABLED` |
-| `opt_in_disabled` | Pass `build_truth_subspace=True` / `review_conflicts=True` / `build_global_context_index=True` |
+| `opt_in_disabled` | Pass `build_truth_subspace=True` / `build_global_context_index=True` |
+| `turned_off` | Conflict review (on by default) was switched off by `review_conflicts=False` or `IMPROVE_REVIEW_CONFLICTS=false` |
 | `personalization_disabled` | Set `PERSONALIZATION_ENABLED=true` |
 | `auto_feedback_disabled` | Stage 4 needs `CACHING=true` and `AUTO_FEEDBACK=true` |
 | `no_llm_configured` | Stages 4, 5, 8 draft text with an LLM; none configured |
@@ -133,7 +134,7 @@ CLI, and `RememberResult.improve`.
 | `IMPROVE_DEBOUNCE_SECONDS` | `0` | ...or this many seconds since the last one. Seconds alone (entries left at 1) means time-only |
 | `IMPROVE_STAGES_DISABLED` | empty | CSV of stage names to skip |
 | `IMPROVE_FEEDBACK_ALPHA` | `0.1` | Feedback learning rate, in (0, 1] |
-| `IMPROVE_REVIEW_CONFLICTS` | `false` | Review fact conflicts, including automatic improve |
+| `IMPROVE_REVIEW_CONFLICTS` | `true` | Review fact conflicts, including automatic improve; an explicit `review_conflicts` argument overrides it |
 | `IMPROVE_EFFECTIVE_DATE_KEY` | `effective_date` | Document metadata key holding the source date |
 
 There is no debounce timer: held-back entries wait for the next
@@ -204,7 +205,7 @@ stage errored (a retry is never gated off), `noop` if nothing ran.
   `routers/get_improve_router.py`; CLI: `cognee/cli/commands/improve_command.py`)
 - Stages, registry, results: `cognee/modules/improve/` (`stages.py`,
   `registry.py`, `stage.py`, `result.py`, `inputs.py`, `capabilities.py`,
-  `config.py`, `graph_changes.py`, `constants.py`)
+  `config.py`, `watermarks.py`, `constants.py`)
 - Lock: `cognee/infrastructure/locks/session_lock.py`
 - Session store and watermarks: `cognee/infrastructure/session/`
   (`session_manager.py`, `session_persist_watermark.py`,
@@ -234,6 +235,6 @@ Adding a stage:
    update it deliberately.
 3. If it can re-run cheaply, give it a watermark so a repeat run reports
    `already_completed` (graph-wide stages can stamp the improve row with the
-   helpers in `graph_changes.py`, as conflict review does).
+   helpers in `watermarks.py`, as conflict review does).
 4. Tests: `cognee/tests/unit/modules/improve/` (gates, results, config) and
    `cognee/tests/unit/api/v1/improve/` (orchestration, queue, router).

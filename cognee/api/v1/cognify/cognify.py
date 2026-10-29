@@ -274,7 +274,7 @@ async def cognify(
                  makes one LLM call per chunk; "from_extraction" joins the chunk's
                  extracted types and relation texts with no LLM call, and a chunk
                  with no relations gets no summary. The explicit argument wins over
-                 the SUMMARY_METHOD setting ("llm" by default). Raises while
+                 the SUMMARY_METHOD setting ("from_extraction" by default). Raises while
                  connected to a remote instance.
         early_chunk_indexing: Whether to run the indexing pipeline before the cognify
                  pipeline: a separate ``indexing_pipeline`` run per dataset that
@@ -373,7 +373,7 @@ async def cognify(
     if "functional_relationships" in kwargs:
         raise TypeError(
             "cognify() no longer accepts functional_relationships; "
-            "use improve(review_conflicts=True)"
+            "improve() reviews conflicts by default"
         )
     drop_deprecated_temporal_cognify(kwargs)
 
