@@ -917,7 +917,7 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "1.6.6rc1"
+version = "1.6.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -926,7 +926,6 @@ dependencies = [
     { name = "aiosqlite" },
     { name = "alembic" },
     { name = "cbor2" },
-    { name = "certifi" },
     { name = "cryptography" },
     { name = "datamodel-code-generator" },
     { name = "dateparser" },
@@ -977,9 +976,9 @@ dependencies = [
     { name = "uvicorn" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/67/3f/ebad108c633388d0e299d84feacc5f0dbf40c52e2cd6f1c48284f3af93b9/cognee-1.6.6rc1.tar.gz", hash = "sha256:8ad4366f46af3e50e27eb58346db14365a598e8777e350ec7cb5ed24b21005f6", size = 41280192, upload-time = "2026-10-23T01:52:05.863Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/47/1393ac0bad12a6ad87c3c8f59045ad25bcdbab7e7a25884ba217f46ac940/cognee-1.6.5.tar.gz", hash = "sha256:41dc80d860dd95aeb983a1a386df49d3019e18ed9700c0508c278086110361b1", size = 40864032, upload-time = "2026-10-16T20:15:50.298Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a1/77/404422d02321a3ff0ebeee8f1e5ed3a4bb293d4a4b4d1c00de87f9ce107e/cognee-1.6.6rc1-py3-none-any.whl", hash = "sha256:d076e7c40d1058c03eabda52d2088e6e52945a30e3708109333aef03d2cdae99", size = 22711071, upload-time = "2026-10-23T01:52:01.741Z" },
+    { url = "https://files.pythonhosted.org/packages/38/23/8e9e986a5b8be1399d427aa0a18a7661edba2c8ac066ee74b956a9fc2bd8/cognee-1.6.5-py3-none-any.whl", hash = "sha256:aaef9fdc02f542b1d125cde21759dde2fac56355d8928e39c734e7b5c6705eca", size = 22235030, upload-time = "2026-10-16T20:15:46.74Z" },
 ]
 
 [package.optional-dependencies]
