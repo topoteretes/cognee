@@ -1,8 +1,8 @@
 # Google Drive SDK connector
 
 A Google Drive data-source connector for [cognee](https://github.com/topoteretes/cognee):
-sync a Drive folder (Docs, Sheets, PDFs, plain text) into memory — incrementally, with
-forget-on-delete.
+sync a Drive folder (Docs, Sheets, Slides, `.docx`/`.xlsx`/`.pptx`, PDFs and plain text)
+into memory — incrementally, with forget-on-delete.
 
 It exposes a `dlt` source you hand to `cognee.remember(...)`, reusing cognee's existing DLT
 ingestion path. Files are ingested as **documents** (routed through normal chunking + LLM graph
@@ -43,6 +43,30 @@ answer = await cognee.search(
 ```
 
 See `examples/guides/google_drive.py` for the full flow.
+
+## Upgrading format support
+
+Each folder records a `format_version` alongside its Changes cursor in DLT state. On the
+first sync after upgrading from an older connector, it scans the selected folder again to
+discover unchanged files that the old connector skipped, including Slides and Office files.
+The resource name, document IDs and staging table stay the same. No reset or reconnect is
+needed. A later expansion of supported formats increments `FORMAT_SUPPORT_VERSION`.
+
+The scan reuses recorded successful `modifiedTime` values, downloading only files without
+a matching successful version. SDK 1.6.5 did not record those versions, so its first upgrade
+scan downloads existing supported files too; unchanged rows retain their content-based IDs.
+The new format version and cursor are recorded only when the scan completes without a
+transient failure or a missing loader. A rate limit or auth interruption retains partial
+progress and does not delete files absent from the incomplete listing. An extraction or
+load failure uses DLT's existing rollback/retry mechanism.
+
+If a loader is missing, install the `docling` extra and run sync again. The connector keeps
+requesting a full scan until the required loader is available, reusing successful versions
+between attempts. Until then every sync lists the whole folder again, including a folder that
+was never synced, and does not advance the Changes cursor. A file whose format has no
+registered loader is not downloaded again; it only costs the listing. A missing loader encountered during an incremental sync also schedules
+this scan, so an unchanged file is retried after installation. Unsupported formats and
+permanently unreadable files do not prevent the format upgrade from completing.
 
 ## How sync + forget-on-delete work
 
@@ -118,10 +142,10 @@ the run produced anything raises a `DriveAuthError`, which the sync reports as `
 the connection can be reconnected.
 
 A transient failure (`failed_content_extraction`: a download or loader failure that may pass) keeps the Changes cursor where it was; the next
-run fetches only the failed and the changed files. `failed_loader_unavailable`,
-`failed_export_too_large` and `failed_unreadable` are reported on the run that meets the file but
-do not hold the cursor, because a rerun cannot cure them: after installing the extra, edit the
-file or clear the source's state to read it. Fetching is bounded: at most `max_workers` files are in flight, and together at
+run fetches only the failed and the changed files. `failed_export_too_large` and
+`failed_unreadable` are reported but do not hold the cursor, because a rerun cannot cure
+them. `failed_loader_unavailable` schedules the full scan described above and preserves
+previously ingested content. Fetching is bounded: at most `max_workers` files are in flight, and together at
 most 256 MB of reported file size (a larger file runs alone).
 
 When syncing multiple folders into one dataset, assign each a stable, distinct
@@ -145,3 +169,15 @@ uv run --extra google-drive pytest cognee/tests/unit/tasks/connectors/ cognee/te
 
 The unit tests mock the Drive API (no live credentials). They require a cognee build that
 includes document-mode (see **Requirements**).
+
+Real Office parsing and upgrade recovery are tested with the slim Docling extra:
+
+```bash
+uv run --extra docling pytest cognee/tests/integration/tasks/connectors/test_google_drive_formats.py -v
+```
+
+This test downloads fixture bytes through the connector into its temporary files, parses
+them with the actual loaders, and merges the rows into a real DLT database seeded with an
+older sync checkpoint. It also verifies rollback on an interrupted listing and a no-change
+sync after reopening the pipeline. Google Slides exports are mocked; a live Google API
+smoke test is still required when validating a Cloud deployment.

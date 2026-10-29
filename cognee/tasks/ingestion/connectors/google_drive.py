@@ -94,6 +94,10 @@ _EXPORT_MIME_MAP = {
     GOOGLE_SLIDES_MIME_TYPE: "text/plain",
 }
 
+# Increment when supported formats expand. A completed scan records this in the
+# folder's DLT state so unchanged files skipped by an older connector are discovered.
+FORMAT_SUPPORT_VERSION = 1
+
 # googleapiclient retries 429, 5xx and rate-limit 403 answers up to five times, sleeping a random
 # time of up to 2**n seconds before retry n: about 31 s in expectation and 62 s at most before
 # a rate limit cuts the run short.
@@ -369,8 +373,8 @@ class UnreadableFileError(Exception):
 
 
 # Failures a rerun in the same environment cannot cure, so they must not hold the Changes
-# cursor back. (A missing package is cured by installing it, and the file is then read when
-# it next changes or when the source's state is cleared.)
+# cursor back. A missing loader also schedules a full scan, so installing it is enough
+# to pick up unchanged files on the next sync.
 _PERMANENT_REASONS = {
     ExportTooLargeError: "failed_export_too_large",
     LoaderUnavailableError: "failed_loader_unavailable",
@@ -407,16 +411,32 @@ def _download_file(service: Any, file_id: str, suffix: str):
         yield path
 
 
+def _no_loader_error(extension: str) -> LoaderUnavailableError:
+    return LoaderUnavailableError(
+        f"No cognee loader for '{extension}' files; they need the docling "
+        'or unstructured extra (pip install "cognee[docling]").'
+    )
+
+
+def _loader_registered(extension: str) -> bool:
+    """Whether a registered loader lists ``extension``, known before downloading the file."""
+    from cognee.infrastructure.loaders.get_loader_engine import get_loader_engine
+
+    engine = get_loader_engine()
+    wanted = extension.lstrip(".").lower()
+    return any(
+        wanted in (ext.lstrip(".").lower() for ext in engine.get_loader_info(name)["extensions"])
+        for name in engine.get_available_loaders()
+    )
+
+
 def _load_with_loader_engine(path: str) -> str:
     """Convert a downloaded file to text with the loader ``add()`` would use."""
     from cognee.infrastructure.loaders.get_loader_engine import get_loader_engine
 
     engine = get_loader_engine()
     if engine.get_loader(path, None) is None:
-        raise LoaderUnavailableError(
-            f"No cognee loader for '{os.path.splitext(path)[1]}' files; they need the docling "
-            'or unstructured extra (pip install "cognee[docling]").'
-        )
+        raise _no_loader_error(os.path.splitext(path)[1])
     # dlt extracts on a worker thread, which has no event loop; a loop already running here
     # (the inline path called from async code) fails the file as a transient error.
     coroutine = engine.load_file(path, persist=False)
@@ -449,7 +469,11 @@ def extract_file_content(service: Any, file_id: str, mime_type: str, name: str) 
                 return _read_pdf(media)
 
         if mime_type in _LOADER_EXTENSIONS:
-            with _download_file(service, file_id, _LOADER_EXTENSIONS[mime_type]) as path:
+            extension = _LOADER_EXTENSIONS[mime_type]
+            # A missing loader repeats on every full scan, so it must cost no download.
+            if not _loader_registered(extension):
+                raise _no_loader_error(extension)
+            with _download_file(service, file_id, extension) as path:
                 return _load_with_loader_engine(path)
 
         if _is_plain_text(mime_type):
@@ -602,6 +626,11 @@ def _iter_rows(
         stats = {}
     stats.clear()
     stats.update(scanned=0, skipped=0, failed=0, deleted=0, unchanged=0)
+    format_version = state.get("format_version", 0)
+    if type(format_version) is not int or not 0 <= format_version <= FORMAT_SUPPORT_VERSION:
+        raise ValueError(
+            "Unsupported Google Drive format_version in sync state; check SDK version."
+        )
     page_token = state.get("page_token")
     known_ids = set(state.get("known_ids", []))
     versions = dict(state.get("versions", {}))
@@ -610,7 +639,7 @@ def _iter_rows(
         local: dict[str, int] = {}
         return _file_to_row(client, file_meta, config, local), local
 
-    if page_token is None:
+    if page_token is None or format_version < FORMAT_SUPPORT_VERSION:
         yielded = 0
         present_ids = set()
         fetched_versions = {}
@@ -668,9 +697,10 @@ def _iter_rows(
             yield {"id": file_id, "_deleted": True}
         state["known_ids"] = sorted(present_ids)
         state["versions"] = fetched_versions
-        if not _blocks_cursor(stats):
+        if not _blocks_cursor(stats) and not stats.get("failed_loader_unavailable"):
             state["page_token"] = start_token
-        logger.info("Google Drive: initial sync yielded %d file(s).", yielded)
+            state["format_version"] = FORMAT_SUPPORT_VERSION
+        logger.info("Google Drive: full scan yielded %d file(s).", yielded)
         return
 
     try:
@@ -769,6 +799,10 @@ def _iter_rows(
     # them behind a successfully advanced changes cursor.
     state["known_ids"] = sorted(known_ids)
     state["versions"] = versions
+    if stats.get("failed_loader_unavailable"):
+        # Installation can change without a Drive edit. Re-scan next time to
+        # retry these files, retaining successful versions to avoid re-downloading them.
+        state.pop("format_version", None)
     if not _blocks_cursor(stats):
         state["page_token"] = new_page_token
     logger.info(
