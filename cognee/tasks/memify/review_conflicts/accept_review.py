@@ -42,6 +42,7 @@ def accept_review_response(
     drops = _accept_drops(
         response.drop, scope, prompt, reviewed, accepted_conflicts, shown_fact_ids
     )
+    drops += _retire_orphaned_user_decisions(scope, prompt, reviewed, accepted_conflicts, drops)
     return ConflictsToWrite(
         scope=scope,
         accepted_conflicts=accepted_conflicts,
@@ -247,6 +248,31 @@ def _is_ordering_reversed_by_dates(facts: list[dict], statuses: dict[str, str]) 
 
 
 # --- drops -------------------------------------------------------------------
+
+
+def _retire_orphaned_user_decisions(
+    scope: ReviewScope,
+    prompt: ReviewPrompt,
+    reviewed: set[str],
+    accepted: list[AcceptedConflict],
+    drops: list[str],
+) -> list[str]:
+    """User decisions whose selected fact is gone, which the response neither replaced nor dropped.
+
+    A decision protects only a live fact. Once that fact's document is forgotten, the
+    review of its subject retires the decision whatever the response said about it, so
+    a response that leaves it out cannot keep the forgotten text in retrieval.
+    """
+    replaced = {str(item.conflict.id) for item in accepted}
+    return [
+        conflict_id
+        for conflict_id in prompt.conflict_labels.values()
+        if conflict_id not in replaced
+        and conflict_id not in drops
+        and str(scope.conflicts[conflict_id]["about_id"]) in reviewed
+        and scope.conflicts[conflict_id].get("resolution_source") == "user"
+        and scope.conflicts[conflict_id].get("selected_fact_id") not in scope.facts
+    ]
 
 
 def _accept_drops(
