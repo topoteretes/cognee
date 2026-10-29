@@ -1434,6 +1434,9 @@ def test_zero_workers_from_the_environment_is_an_error_not_the_default(monkeypat
         DOCX_MIME,
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/msword",
+        "application/vnd.ms-excel",
+        "application/vnd.ms-powerpoint",
         gd_source.GOOGLE_SLIDES_MIME_TYPE,
     ],
 )
@@ -1464,6 +1467,27 @@ def test_format_upgrade_backfills_unchanged_files_once(
     fake_content_extraction.clear()
     assert list(gd_source._iter_rows(service, _config(), state)) == []
     assert service.list_calls == fake_content_extraction == []
+    assert state["page_token"] == "t2"
+
+
+def test_a_folder_already_scanned_for_version_one_backfills_the_legacy_formats(
+    fake_content_extraction,
+):
+    existing = _file_meta("existing", mime_type=DOCX_MIME)
+    legacy = _file_meta("legacy", mime_type="application/msword")
+    service = FakeDriveService(
+        {"root": [existing, legacy]}, {"existing": existing, "legacy": legacy}, start_token="t2"
+    )
+    state = {
+        "page_token": "t1",
+        "format_version": 1,
+        "known_ids": ["existing"],
+        "versions": {"existing": existing["modifiedTime"]},
+    }
+    rows = list(gd_source._iter_rows(service, _config(), state))
+    assert [row["id"] for row in rows] == ["legacy"]
+    assert fake_content_extraction == ["legacy"]
+    assert state["format_version"] == gd_source.FORMAT_SUPPORT_VERSION == 2
     assert state["page_token"] == "t2"
 
 
