@@ -1,6 +1,7 @@
 from typing import Any, BinaryIO
 from uuid import UUID
 
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
@@ -25,6 +26,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.config import CodeGraphConfig, validate_codegraph_config
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.dlt_config import resolve_dlt_options, with_csv_loader_options
@@ -55,6 +57,7 @@ async def add(
     embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = True,
     skip_connection_test: bool = False,
+    codegraph_config: CodeGraphConfig | None = None,
     branch: str | None = None,
     **kwargs,
 ):
@@ -139,6 +142,16 @@ async def add(
                            DLT orphan cleanup is skipped; propagating upstream deletions
                            requires a successful foreground sync.
                            If False (default), waits for completion before returning.
+        codegraph_config: Options for code repositories (``CodeGraphConfig``).
+                 ``repo_credentials``: a token used to clone private GitHub/GitLab
+                 repository URLs in ``data``. It reaches git only through environment
+                 config, never the URL or the stored rows. ``include_documents``
+                 (default True): set it False to index a repository's code graph
+                 only, leaving its README and docs un-ingested. ``repo_credentials``
+                 or ``include_documents=False`` requires ``data`` to hold a
+                 repository, and the repository is then
+                 cloned before add() returns, also with ``run_in_background=True``.
+                 Neither is supported while connected to a remote instance.
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
@@ -243,8 +256,24 @@ async def add(
     # Route to remote instance if connected via serve()
     from cognee.api.v1.serve.state import get_remote_client
 
+    codegraph_config = validate_codegraph_config(codegraph_config)
+
     client = get_remote_client()
     if client is not None:
+        if codegraph_config.get("repo_credentials"):
+            # client.add() has no credentials field; the remote would try an
+            # unauthenticated clone, so an explicit token has to raise.
+            raise CogneeValidationError(
+                "repo_credentials is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to clone the repository locally."
+            )
+        if codegraph_config.get("include_documents", True) is False:
+            # client.add() sends only the data and the dataset name, so the remote
+            # would ingest the repository's documents.
+            raise CogneeValidationError(
+                "include_documents=False is not supported while connected to a remote "
+                "Cognee instance. Call cognee.disconnect() to ingest locally."
+            )
         if branch is not None:
             # client.add() sends only the data and the dataset name, so the remote would
             # clone the default branch instead.
@@ -336,6 +365,40 @@ async def add(
             needs_llm=False,
         ),
     ]
+
+    # The pipeline runner resolves directories and repository URLs itself, but with
+    # the defaults: no credentials, documents included. A call that sets a
+    # codegraph_config option runs the same resolver here first, with the options; the
+    # runner and the task above then see already-resolved items and pass them through.
+    include_documents = codegraph_config.get("include_documents", True)
+    if codegraph_config.get("repo_credentials") or not include_documents:
+        data = await resolve_data_directories(
+            data,
+            include_subdirectories=True,
+            user=user,
+            dataset_id=authorized_dataset.id,
+            credentials=codegraph_config.get("repo_credentials"),
+            include_documents=include_documents,
+            branch=branch,
+        )
+        repositories = [
+            item
+            for item in data
+            if isinstance(item, DataItem)
+            and (item.system_metadata or {}).get("source") == "code_repo"
+        ]
+        if not repositories:
+            raise CogneeValidationError(
+                "codegraph_config applies to repositories, but nothing in data is one: pass a "
+                "GitHub/GitLab repository URL or a local code project directory."
+            )
+        if codegraph_config.get("repo_credentials") and any(
+            "repo_url" not in item.system_metadata for item in repositories
+        ):
+            raise CogneeValidationError(
+                "repo_credentials applies to repository URLs, not to a local directory, "
+                "which is read in place."
+            )
 
     # Expand DLT resources (and auto-detected CSV/connection strings) into
     # standard DataItems before the pipeline sees them. orphan_cleanup (when

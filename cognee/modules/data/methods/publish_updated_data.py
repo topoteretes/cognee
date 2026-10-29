@@ -181,7 +181,8 @@ async def is_data_processed(data_id: UUID, dataset_id: UUID) -> bool:
         if data_point is None:
             return False
         # Same deferred import as _completed_status, same cycle reason.
-        from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
+        from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed_in
 
-        status = (data_point.pipeline_status or {}).get(COGNIFY_PIPELINE_NAME) or {}
-        return is_data_item_completed(status.get(str(dataset_id)))
+        return is_data_item_completed_in(
+            data_point.pipeline_status, COGNIFY_PIPELINE_NAME, dataset_id
+        )

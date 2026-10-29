@@ -26,6 +26,8 @@ async def resolve_data_directories(
     include_subdirectories: bool = True,
     user=None,
     dataset_id=None,
+    credentials: str | None = None,
+    include_documents: bool = True,
     branch: str | None = None,
 ):
     """
@@ -51,6 +53,8 @@ async def resolve_data_directories(
         include_subdirectories: Whether to include files in subdirectories recursively.
         user: Owner used to pin repo-manifest data ids (optional).
         dataset_id: Dataset used to pin repo-manifest data ids (optional).
+        credentials: Token for cloning private repository URLs (optional).
+        include_documents: Also emit a repository's document files (default True).
         branch: Branch to clone for each repository URL in ``data`` (optional).
 
     Returns:
@@ -110,7 +114,12 @@ async def resolve_data_directories(
                 from cognee.tasks.code_graph.code_repo import resolve_code_repository_url
 
                 manifest_item, document_paths, _skipped = await resolve_code_repository_url(
-                    item, user=user, dataset_id=dataset_id, branch=branch
+                    item,
+                    user=user,
+                    dataset_id=dataset_id,
+                    credentials=credentials,
+                    include_documents=include_documents,
+                    branch=branch,
                 )
                 resolved_data.append(manifest_item)
                 resolved_data.extend(str(path) for path in document_paths)
@@ -130,7 +139,10 @@ async def resolve_data_directories(
 
                     if detect_code_project(local_path):
                         manifest_item, document_paths, _skipped = await resolve_code_repository(
-                            local_path, user=user, dataset_id=dataset_id
+                            local_path,
+                            user=user,
+                            dataset_id=dataset_id,
+                            include_documents=include_documents,
                         )
                         resolved_data.append(manifest_item)
                         resolved_data.extend(str(path) for path in document_paths)

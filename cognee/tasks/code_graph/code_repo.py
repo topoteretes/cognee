@@ -303,6 +303,7 @@ async def resolve_code_repository(
         data_id = await get_unique_data_id(f"code_repo:{identity or directory}", user, dataset_id)
 
     if data_id is not None and dataset_id is not None:
+        from cognee.infrastructure.locks import dataset_lock
         from cognee.modules.data.methods import reset_data_pipeline_status
 
         # The id is pinned, so add()'s incremental check would find the stored
@@ -313,7 +314,11 @@ async def resolve_code_repository(
         # an unchanged repo whose later run fails is still marked as built.
         # The clear is unconditional: an unchanged repo's manifest is stored
         # again on every add, which costs one small write, not a rebuild.
-        await reset_data_pipeline_status(data_id, dataset_id, pipeline_names=("add_pipeline",))
+        # The reset is a read-modify-write of the row's pipeline_status, so it takes the
+        # dataset lock (a no-op when the pipeline runner already holds it). The clone
+        # before it does not: a clone must not block the dataset's other runs.
+        async with dataset_lock(dataset_id):
+            await reset_data_pipeline_status(data_id, dataset_id, pipeline_names=("add_pipeline",))
 
     system_metadata = {
         "source": "code_repo",
@@ -340,7 +345,12 @@ async def resolve_code_repository(
 
 
 async def resolve_code_repository_url(
-    spec: str, user=None, dataset_id=None, branch: str | None = None
+    spec: str,
+    user=None,
+    dataset_id=None,
+    credentials: str | None = None,
+    include_documents: bool = True,
+    branch: str | None = None,
 ):
     """Clone a hosted repository URL and build its repo-level DataItem.
 
@@ -350,7 +360,9 @@ async def resolve_code_repository_url(
     exactly like a local code project -- one ``code_repo`` manifest for the
     CODE_REPO cognify route plus the repository's documents as individual
     items. Returns ``(manifest_item, document_paths, skip_count)``; the
-    manifest carries the credential-free URL as ``repo_url``. ``branch`` clones
+    manifest carries the credential-free URL as ``repo_url``. ``credentials`` authenticates
+    the clone of a private repository (see ``resolve_repo_source``); ``include_documents=False``
+    returns the manifest alone. ``branch`` clones
     that branch instead of the remote's default; a dataset still holds one data
     row per URL, so adding it on another branch replaces that row's code graph.
     """
@@ -360,13 +372,14 @@ async def resolve_code_repository_url(
             f"'{redact_repo_spec(spec)}' is not a repository URL add() can clone; "
             "expected https://github.com/<owner>/<repo>, a gitlab.com project, or a .git URL."
         )
-    repo_path = await resolve_repo_source(clone_url, branch=branch)
+    repo_path = await resolve_repo_source(clone_url, credentials=credentials, branch=branch)
     source_url = redact_repo_spec(clone_url)
     return await resolve_code_repository(
         repo_path,
         user=user,
         dataset_id=dataset_id,
         source_url=source_url,
+        include_documents=include_documents,
         # Keyed on the default branch's clone, as every URL row was before branches:
         # existing rows keep their ids, and branches of one URL share the row, since
         # their code graphs share the repository's node ids.
