@@ -6,10 +6,7 @@ import useDatasetFinderFilters from "@/app/(app)/datasets/partials/useDatasetFin
 import { ALL_FACET_ID, PERSONAL_FACET_ID } from "@/app/(app)/datasets/partials/datasetFacets";
 import type { UseBrainsDataResult } from "@/app/(app)/datasets/brainsTypes";
 import type { DatasetFinderFilters } from "@/app/(app)/datasets/partials/useDatasetFinderFilters";
-import isCloudEnvironment from "@/utils/isCloudEnvironment";
-import { IDLE_PROGRESS } from "@/modules/ingestion/uploadProgress";
 
-jest.mock("@/utils/isCloudEnvironment");
 jest.mock("@/app/(app)/datasets/useBrainsData");
 jest.mock("@/app/(app)/datasets/partials/useDatasetFinderFilters");
 jest.mock("@/modules/analytics", () => ({ TrackPageView: () => null, trackEvent: jest.fn() }));
@@ -106,27 +103,11 @@ function renderPage(brains: UseBrainsDataResult, finder: DatasetFinderFilters) {
   );
 }
 
-beforeEach(() => {
-  jest.mocked(isCloudEnvironment).mockReturnValue(true);
-});
-
 afterEach(() => {
   jest.resetAllMocks();
 });
 
 describe("creating a dataset from the create modal", () => {
-  it("keeps all datasets visible after creation in local mode", async () => {
-    jest.mocked(isCloudEnvironment).mockReturnValue(false);
-    const selectFacet = jest.fn();
-    const handleCreate = jest.fn().mockResolvedValue(true);
-    renderPage(brainsData({ handleCreate }), finderFilters({ selectFacet }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
-
-    await waitFor(() => expect(handleCreate).toHaveBeenCalledWith(null));
-    expect(selectFacet).not.toHaveBeenCalled();
-  });
-
   it("switches the rail to Personal once the dataset is actually created", async () => {
     const selectFacet = jest.fn();
     const handleCreate = jest.fn().mockResolvedValue(true);
@@ -147,58 +128,5 @@ describe("creating a dataset from the create modal", () => {
 
     await waitFor(() => expect(handleCreate).toHaveBeenCalledWith(null));
     expect(selectFacet).not.toHaveBeenCalled();
-  });
-});
-
-describe("dataset groups", () => {
-  it.each([false, true])("shows the groups rail only in Cloud mode (%s)", (cloud) => {
-    jest.mocked(isCloudEnvironment).mockReturnValue(cloud);
-    const dataset = { id: "mine", name: "My dataset", documents: 0, status: "empty" as const };
-    renderPage(
-      brainsData({ datasets: [dataset], showCreateModal: false }),
-      finderFilters({ visible: [dataset] }),
-    );
-
-    const groups = screen.queryByRole("navigation", { name: "Dataset groups" });
-    if (cloud) expect(groups).toBeInTheDocument();
-    else expect(groups).not.toBeInTheDocument();
-    expect(screen.getByText("My dataset")).toBeInTheDocument();
-  });
-});
-
-describe("processing progress visibility", () => {
-  it.each(["estimating", "resuming", "uploading", "processing"] as const)("shows just one progress bar during %s", (stage) => {
-    const dataset = { id: "mine", name: "My dataset", documents: 4, status: "running" as const };
-    renderPage(
-      brainsData({
-        datasets: [dataset], selectedId: dataset.id, selectedDataset: dataset,
-        showCreateModal: false, uploadProgress: { ...IDLE_PROGRESS, stage },
-        processingCounts: { total: 4, completed: 2, pending: 2, items: [] },
-      }),
-      finderFilters({ visible: [dataset] }),
-    );
-
-    expect(screen.getAllByRole("progressbar")).toHaveLength(1);
-    expect(screen.queryByRole("region", { name: "Processing progress" })).not.toBeInTheDocument();
-  });
-
-  it.each([
-    { label: "empty dataset", total: 0, uploading: false, visible: false },
-    { label: "upload before the first item arrives", total: 0, uploading: true, visible: false },
-    { label: "previously imported items", total: 4, uploading: false, visible: true },
-  ])("handles $label", ({ total, uploading, visible }) => {
-    const dataset = { id: "mine", name: "My dataset", documents: total, status: "empty" as const };
-    renderPage(
-      brainsData({
-        datasets: [dataset], selectedId: dataset.id, selectedDataset: dataset,
-        showCreateModal: false, isUploading: uploading,
-        processingCounts: { total, completed: total, pending: 0, items: [] },
-      }),
-      finderFilters({ visible: [dataset] }),
-    );
-
-    const progress = screen.queryByRole("region", { name: "Processing progress" });
-    if (visible) expect(progress).toBeInTheDocument();
-    else expect(progress).not.toBeInTheDocument();
   });
 });

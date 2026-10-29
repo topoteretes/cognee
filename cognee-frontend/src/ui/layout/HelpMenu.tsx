@@ -4,7 +4,6 @@ import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import useBoolean from "@/utils/useBoolean";
-import isCloudEnvironment from "@/utils/isCloudEnvironment";
 import useOutsideClick from "@/utils/useOutsideClick";
 import ExtractionSettingsModal from "./ExtractionSettingsModal";
 import { useReleases } from "@/modules/releases/useReleases";
@@ -133,7 +132,6 @@ export default function HelpMenu() {
           }}
         >
           {/* Onboarding */}
-          {isCloudEnvironment() && (
           <button
             onClick={startOnboarding}
             className="flex items-center gap-[10px] rounded-none px-3 py-[10px] w-full cursor-pointer"
@@ -144,7 +142,6 @@ export default function HelpMenu() {
             <OnboardingIcon />
             Onboarding
           </button>
-          )}
 
           {/* Extraction Settings */}
           <button

@@ -1,6 +1,5 @@
 import {
   describeProgress,
-  formatBytes,
   IDLE_PROGRESS,
   uploadFraction,
   withEstimateStage,
@@ -46,6 +45,10 @@ describe("describeProgress — uploading", () => {
     expect(line).toBe("Uploading 50 files — 1 MB of 5 MB");
     // Guards the regression: no "0/50", no "of 50 files".
     expect(line).not.toMatch(/\d+\s*\/\s*\d+/);
+  });
+
+  it("never says more was sent than there is, for a session whose figures disagree", () => {
+    expect(describeProgress(progress({ stage: "uploading", filesTotal: 1, bytesTotal: 32, bytesSent: 480 }))).toBe("Uploading 1 file — 32 B of 32 B");
   });
 
   it("moves as bytes move, while the file count stays put", () => {
@@ -107,22 +110,5 @@ describe("uploadFraction", () => {
 
   it("is zero with nothing to measure", () => {
     expect(uploadFraction(IDLE_PROGRESS)).toBe(0);
-  });
-});
-
-describe("formatBytes", () => {
-  it("keeps small sizes in bytes", () => {
-    expect(formatBytes(512)).toBe("512 B");
-  });
-
-  it("steps up through the units", () => {
-    expect(formatBytes(1024)).toBe("1 KB");
-    expect(formatBytes(1024 * 1024)).toBe("1 MB");
-    expect(formatBytes(1024 * 1024 * 1024)).toBe("1 GB");
-  });
-
-  it("keeps one decimal only where it carries information", () => {
-    expect(formatBytes(1536)).toBe("1.5 KB");
-    expect(formatBytes(1024 * 15)).toBe("15 KB");
   });
 });

@@ -12,7 +12,7 @@ jest.mock("@/modules/tenant/TenantProvider", () => ({
 }));
 
 jest.mock("@/modules/analytics", () => ({ trackEvent: jest.fn() }));
-jest.mock("../../useOnboardingTrackEvent", () => ({ useOnboardingTrackEvent: () => jest.fn() }));
+jest.mock("@/utils/useOnboardingTrackEvent", () => ({ useOnboardingTrackEvent: () => jest.fn() }));
 jest.mock("@/ui/elements/Auth/TetrisBackground", () => ({ __esModule: true, default: () => null }));
 jest.mock("../GraphBuildingAnimation", () => ({ GraphBuildingAnimation: () => null }));
 

@@ -54,6 +54,9 @@ export interface BrainUploadParams {
   onUploadError?: (error: unknown, ctx: BrainUploadContext) => void;
   // The add succeeded but the knowledge-graph build failed or timed out.
   onProcessingError?: (error: unknown, ctx: BrainUploadContext) => void;
+  // How often the build is asked about. The dashboard's builds are long and take the default;
+  // a caller whose user is waiting on a short one asks sooner.
+  poll?: { intervalMs?: number; initialDelayMs?: number };
 }
 
 // Kept as the historical alias so existing call sites and their prop types
@@ -136,7 +139,7 @@ export function useBrainUpload(instance: CogneeInstance | null): UseBrainUploadR
     async (
       session: UploadSession,
       inst: CogneeInstance,
-      hooks: Pick<BrainUploadParams, "onProcessed" | "onProcessingError">,
+      hooks: Pick<BrainUploadParams, "onProcessed" | "onProcessingError" | "poll">,
       context: () => BrainUploadContext,
     ): Promise<void> => {
       publish({ stage: "processing" });
@@ -170,7 +173,8 @@ export function useBrainUpload(instance: CogneeInstance | null): UseBrainUploadR
           session.options,
         );
         await pollDatasetStatus(session.datasetId, inst, {
-          intervalMs: 5000,
+          intervalMs: hooks.poll?.intervalMs ?? 5000,
+          ...(hooks.poll?.initialDelayMs !== undefined ? { initialDelayMs: hooks.poll.initialDelayMs } : {}),
           onStatus: (status) => publish({ processingStatus: status }),
         });
         invalidateStatuses();
@@ -256,8 +260,12 @@ export function useBrainUpload(instance: CogneeInstance | null): UseBrainUploadR
               {
                 timeoutMs: BATCH_TIMEOUT_MS,
                 signal,
-                onProgress: (bytesSent) => {
-                  inFlightBytes.current.set(batch.index, bytesSent);
+                onProgress: (bytesSent, bytesTotal) => {
+                  // The request counts its own framing too (the form fields, each file's headers), which
+                  // for a small file is more than the file: 480 B of 32 B. What is shown is the files', so
+                  // the request's progress is taken as the share of the files' bytes it stands for.
+                  const share = bytesTotal > 0 ? Math.min(1, bytesSent / bytesTotal) : 0;
+                  inFlightBytes.current.set(batch.index, Math.round(batch.bytes * share));
                   recomputeBytes();
                 },
               },

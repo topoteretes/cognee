@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { StepDots, OnboardingFooter } from "./Shared";
-import { useOnboardingTrackEvent } from "../useOnboardingTrackEvent";
+import { useOnboardingTrackEvent } from "@/utils/useOnboardingTrackEvent";
 import { MAX_FILES_PER_UPLOAD } from "@/modules/ingestion/uploadLimits";
 
 export function Step1({ onNext, onBack, files, setFiles }: {

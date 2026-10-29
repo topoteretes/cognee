@@ -167,8 +167,6 @@ export function useDashboardTelemetry(): DashboardTelemetry {
         ),
       ]);
 
-      signal.throwIfAborted();
-
       // Read rather than discarded. normalizeActivityRows throws a named
       // diagnostic for a 200 carrying an error envelope, and react-query holds
       // that rejection in state nothing reads — so the one failure the shared
