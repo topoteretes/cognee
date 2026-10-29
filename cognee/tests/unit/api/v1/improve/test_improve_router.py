@@ -131,7 +131,7 @@ def test_defaults_leave_feedback_alpha_to_the_server_config(client, improve_stub
     assert not {"data", "node_name", "extraction_tasks", "enrichment_tasks"} & set(kwargs)
     assert kwargs["build_global_context_index"] is False
     assert kwargs["build_truth_subspace"] is False
-    assert kwargs["review_conflicts"] is False
+    assert kwargs["review_conflicts"] is None
     assert kwargs["run_in_background"] is False
     assert kwargs["session_ids"] is None
 

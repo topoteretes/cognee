@@ -70,9 +70,10 @@ Enrich and improve the knowledge graph.
 Runs the self-improvement loop over a dataset: nine stages in a fixed order,
 each of which first declines work it cannot do (no LLM calls) and then runs.
 Stages 1-7 (feedback weights, session Q&A / trace persistence, agent context,
-distillation, user preferences, truth subspace) need --session-ids. Conflict
-review, the truth subspace and the global context index are opt-in flags. The
-result prints one line per stage.
+distillation, user preferences, truth subspace) need --session-ids. The truth
+subspace and the global context index are opt-in flags; conflict review runs
+by default (--no-review-conflicts turns it off) and is skipped without an LLM.
+The result prints one line per stage.
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -121,8 +122,12 @@ result prints one line per stage.
         )
         parser.add_argument(
             "--review-conflicts",
-            action="store_true",
-            help="Review conflicts using source documents and dates (opt-in stage)",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help=(
+                "Review conflicts using source documents and dates "
+                "(default: IMPROVE_REVIEW_CONFLICTS, true; skipped without an LLM)"
+            ),
         )
         parser.add_argument(
             "--background",
@@ -146,7 +151,7 @@ result prints one line per stage.
             feedback_alpha: float | None = getattr(args, "feedback_alpha", None)
             build_global_context_index = bool(getattr(args, "build_global_context_index", False))
             build_truth_subspace = bool(getattr(args, "build_truth_subspace", False))
-            review_conflicts = bool(getattr(args, "review_conflicts", False))
+            review_conflicts = getattr(args, "review_conflicts", None)
             if getattr(args, "node_name", None) is not None:
                 fmt.warning("--node-name is deprecated and ignored.")
 

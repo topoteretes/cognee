@@ -59,14 +59,14 @@ def review(monkeypatch):
 
 @pytest.mark.parametrize(
     "reason",
-    ["opt_in_disabled", "no_llm_configured", "edge_evidence_disabled", "disabled_by_config"],
+    ["turned_off", "no_llm_configured", "edge_evidence_disabled", "disabled_by_config"],
 )
 @pytest.mark.asyncio
 async def test_gates_do_no_pipeline_work(review, monkeypatch, reason):
     from dataclasses import replace
 
     inputs = review.inputs
-    if reason == "opt_in_disabled":
+    if reason == "turned_off":
         inputs = replace(inputs, review_conflicts=False)
     elif reason == "no_llm_configured":
         monkeypatch.setattr(stages, "llm_available", lambda: False)
