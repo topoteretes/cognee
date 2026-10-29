@@ -70,8 +70,10 @@ Enrich and improve the knowledge graph.
 Runs the self-improvement loop over a dataset: nine stages in a fixed order,
 each of which first declines work it cannot do (no LLM calls) and then runs.
 Stages 1-7 (feedback weights, session Q&A / trace persistence, agent context,
-distillation, user preferences, truth subspace) need --session-ids. Conflict
-review, the truth subspace and the global context index are opt-in flags. The
+distillation, user preferences, truth subspace) need --session-ids. The truth
+subspace is an opt-in flag; conflict review runs by default
+(--no-review-conflicts turns it off) and is skipped without an LLM, and the
+global context index runs by default (IMPROVE_GLOBAL_CONTEXT_INDEX). The
 result prints one line per stage.
     """
 
@@ -109,7 +111,10 @@ result prints one line per stage.
         parser.add_argument(
             "--build-global-context-index",
             action="store_true",
-            help="Build the global context index (opt-in stage)",
+            help=(
+                "Build the global context index for this run even if "
+                "IMPROVE_GLOBAL_CONTEXT_INDEX is false (default: follow that setting)"
+            ),
         )
         parser.add_argument(
             "--build-truth-subspace",
@@ -121,8 +126,12 @@ result prints one line per stage.
         )
         parser.add_argument(
             "--review-conflicts",
-            action="store_true",
-            help="Review conflicts using source documents and dates (opt-in stage)",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help=(
+                "Review conflicts using source documents and dates "
+                "(default: IMPROVE_REVIEW_CONFLICTS, true; skipped without an LLM)"
+            ),
         )
         parser.add_argument(
             "--background",
@@ -144,9 +153,12 @@ result prints one line per stage.
             fmt.echo(f"Improving knowledge graph for dataset '{dataset}'...")
 
             feedback_alpha: float | None = getattr(args, "feedback_alpha", None)
-            build_global_context_index = bool(getattr(args, "build_global_context_index", False))
+            # The flag only forces the stage on; absent, improve() follows its config.
+            build_global_context_index = (
+                True if getattr(args, "build_global_context_index", False) else None
+            )
             build_truth_subspace = bool(getattr(args, "build_truth_subspace", False))
-            review_conflicts = bool(getattr(args, "review_conflicts", False))
+            review_conflicts = getattr(args, "review_conflicts", None)
             if getattr(args, "node_name", None) is not None:
                 fmt.warning("--node-name is deprecated and ignored.")
 

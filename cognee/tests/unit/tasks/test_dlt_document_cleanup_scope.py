@@ -103,4 +103,4 @@ async def test_empty_table_cleanup_retains_other_tables_and_unscoped_legacy_rows
             sources=("google_drive",),
             document_scopes={("google_drive", "drive_a")},
         )
-    delete.assert_awaited_once_with(owned, dataset.id)
+    delete.assert_awaited_once_with([owned], dataset.id)

@@ -183,9 +183,9 @@ results = await cognee.recall(
 ### Enrich an existing graph
 
 Use `improve()` when the user wants to improve or extend an already-built graph without
-re-ingesting. Without `session_ids` it runs only the graph-wide stages (opt-in conflict review
-and global context indexing); with them it also applies feedback weights, persists session Q&A,
-and distills session lessons into the graph.
+re-ingesting. Without `session_ids` it runs only the graph-wide stages (conflict review, on by
+default and skipped without an LLM, and global context indexing, on by default); with them it also
+applies feedback weights, persists session Q&A, and distills session lessons into the graph.
 
 ```python
 await cognee.improve(dataset="research")

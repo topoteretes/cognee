@@ -38,6 +38,7 @@
   "GET /api/v1/datasets/graph-summary",
   "GET /api/v1/datasets/status",
   "GET /api/v1/datasets/status/progress",
+  "GET /api/v1/datasets/status/memory",
   "GET /api/v1/datasets/{dataset_id}/data",
   "GET /api/v1/datasets/{dataset_id}/data/count",
   "GET /api/v1/datasets/{dataset_id}/data/{data_id}/raw",

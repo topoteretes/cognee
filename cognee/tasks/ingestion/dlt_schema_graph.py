@@ -23,9 +23,13 @@ if TYPE_CHECKING:
 logger = get_logger("dlt_schema_graph")
 
 
-def _table_node_id(table_name: str):
-    """Deterministic node id for a DLT SchemaTable, shared by nodes and edges."""
-    return uuid5(NAMESPACE_OID, name=f"dlt:{table_name}")
+def _table_node_id(table_name: str, scope: str = ""):
+    """Deterministic node id for a DLT SchemaTable, shared by nodes and edges.
+
+    ``scope`` is the source document the table came from, so two sources with a
+    table of one name get a table node each instead of overwriting one.
+    """
+    return uuid5(NAMESPACE_OID, name=f"dlt:{scope}:{table_name}" if scope else f"dlt:{table_name}")
 
 
 async def emit_dlt_schema_graph(
@@ -37,16 +41,22 @@ async def emit_dlt_schema_graph(
     """Build and persist the DLT schema graph for the given tables and rows.
 
     Args:
-        tables: {table_name: {"schema_info", "foreign_keys", "dlt_db_name"}}
-        row_records: [{"source_id": str, "table_name": str, "fk_references": [...],
+        tables: {key: {"schema_info", "foreign_keys", "primary_key", "row_count"}}, each
+            optionally with "name" (the table name, else the key), "scope" (its
+            source document id, see ``_table_node_id``; the table gets an
+            ``is_table_of`` edge to that document) and "source_label" (the database
+            it was read from, named in its description)
+        row_records: [{"source_id": str, "table_name": str, "scope": str, "fk_references": [...],
             "column_values": {column: value}, "timestamps": {column: str}}] —
-            column_values is optional and produces one shared ColumnValue node
+            column_values produces one shared ColumnValue node
             per unique (table, column, value) with a column-named edge from the
             row, so rows sharing a value connect through the same node.
             timestamps is optional too: each normalized time string (see
             ``dlt_temporal``) becomes a column-named edge from the row to the
             ``Timestamp`` node for that instant — the same node LLM-extracted
             dates resolve to — which is what temporal search anchors on.
+            ``fk_only`` marks a row an earlier batch wrote: only its FK edges
+            are emitted.
         ctx: optional pipeline context for provenance/ledger registration.
         emitted_value_node_ids: set shared across batches of one pipeline run
             (mirrors ``emitted_schema_docs``). Value nodes already in the set
@@ -75,13 +85,16 @@ async def emit_dlt_schema_graph(
     schema_edges = []
     fk_row_edges = []
     seen_row_edges = set()
-    fk_defs_seen = set()  # (table, column, ref_table, ref_column) for dedup
+    fk_defs_seen = set()  # (scope, table, column, ref_table, ref_column) for dedup
     column_value_nodes = {}  # node id -> ColumnValue, deduped across rows
     timestamp_nodes = {}  # node id -> Timestamp, deduped across rows and columns
 
     # SchemaTable nodes for each source table
     table_node_ids = {}
-    for table_name, table_meta in tables.items():
+    for table_key, table_meta in tables.items():
+        table_name = table_meta.get("name", table_key)
+        scope = table_meta.get("scope", "")
+        source_label = table_meta.get("source_label")
         schema_info = table_meta["schema_info"]
         columns_str = (
             json.dumps(schema_info, default=str) if isinstance(schema_info, (list, dict)) else "[]"
@@ -89,24 +102,41 @@ async def emit_dlt_schema_graph(
         fk_str = json.dumps(table_meta["foreign_keys"], default=str)
 
         table_node = SchemaTable(
-            id=_table_node_id(table_name),
+            id=_table_node_id(table_name, scope),
             name=table_name,
             columns=columns_str,
-            primary_key=None,
+            primary_key=table_meta["primary_key"],
             foreign_keys=fk_str,
             sample_rows="[]",
-            row_count_estimate=None,
+            row_count_estimate=table_meta["row_count"],
             description=(
-                f"DLT-ingested relational table '{table_name}' "
-                f"from database '{table_meta['dlt_db_name']}'."
+                f"Relational table '{table_name}'"
+                + (f" from {source_label}" if source_label else "")
+                + f" with {table_meta['row_count']} rows, loaded through dlt."
             ),
         )
         schema_nodes.append(table_node)
-        table_node_ids[table_name] = table_node.id
+        table_node_ids[(scope, table_name)] = table_node.id
+        # The table belongs to the source document (the database) it was read from.
+        if scope:
+            schema_edges.append(
+                (
+                    table_node.id,
+                    UUID(scope),
+                    "is_table_of",
+                    {
+                        "source_node_id": str(table_node.id),
+                        "target_node_id": scope,
+                        "relationship_name": "is_table_of",
+                    },
+                )
+            )
 
     # SchemaRelationship nodes for each FK definition
     relationship_count = 0
-    for table_name, table_meta in tables.items():
+    for table_key, table_meta in tables.items():
+        table_name = table_meta.get("name", table_key)
+        scope = table_meta.get("scope", "")
         for fk in table_meta["foreign_keys"]:
             fk_col = fk.get("column", "")
             ref_table = fk.get("ref_table", "")
@@ -115,14 +145,16 @@ async def emit_dlt_schema_graph(
             if not fk_col or not ref_table:
                 continue
 
-            fk_key = (table_name, fk_col, ref_table, ref_col)
+            fk_key = (scope, table_name, fk_col, ref_table, ref_col)
             if fk_key in fk_defs_seen:
                 continue
             fk_defs_seen.add(fk_key)
 
             rel_name = f"{table_name}:{fk_col}->{ref_table}:{ref_col}"
             relationship = SchemaRelationship(
-                id=uuid5(NAMESPACE_OID, name=f"dlt:{rel_name}"),
+                id=uuid5(
+                    NAMESPACE_OID, name=f"dlt:{scope}:{rel_name}" if scope else f"dlt:{rel_name}"
+                ),
                 name=rel_name,
                 source_table=table_name,
                 target_table=ref_table,
@@ -134,8 +166,8 @@ async def emit_dlt_schema_graph(
             schema_nodes.append(relationship)
             relationship_count += 1
 
-            source_table_id = table_node_ids.get(table_name)
-            target_table_id = table_node_ids.get(ref_table)
+            source_table_id = table_node_ids.get((scope, table_name))
+            target_table_id = table_node_ids.get((scope, ref_table))
 
             # Edge tuples carry UUID node ids (slots 0/1), matching the
             # get_graph_from_model contract that upsert_edges relies on;
@@ -177,15 +209,16 @@ async def emit_dlt_schema_graph(
 
         # Table node ids are deterministic, so the edge target is valid even
         # when the table node was emitted by an earlier batch (tables omitted).
-        if table_name:
+        if table_name and not record.get("fk_only"):
+            table_node_id = _table_node_id(table_name, record.get("scope", ""))
             schema_edges.append(
                 (
                     source_uuid,
-                    _table_node_id(table_name),
+                    table_node_id,
                     "is_row_of",
                     {
                         "source_node_id": source_id,
-                        "target_node_id": str(_table_node_id(table_name)),
+                        "target_node_id": str(table_node_id),
                         "relationship_name": "is_row_of",
                     },
                 )
@@ -221,7 +254,7 @@ async def emit_dlt_schema_graph(
                 )
             )
 
-        # Optional cell-level nodes: one shared ColumnValue node per unique
+        # Cell-level nodes: one shared ColumnValue node per unique
         # (table, column, value), edge named after the column. Deterministic
         # ids make rows sharing a value connect through the same node. A node
         # already persisted by an earlier batch of this run (tracked in

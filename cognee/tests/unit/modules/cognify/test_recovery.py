@@ -6,7 +6,7 @@ import inspect
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -48,6 +48,7 @@ async def _no_op_context(*_args, **_kwargs):
 
 def _run(pipeline_name, status=PipelineRunStatus.DATASET_PROCESSING_STARTED, **overrides):
     fields = {
+        "id": uuid4(),  # the STARTED row's own id, whose sessions recovery copies
         "pipeline_name": pipeline_name,
         "pipeline_id": uuid4(),
         "dataset_id": uuid4(),
@@ -92,11 +93,15 @@ def _wire(monkeypatch, runs, datasets, *, rollback_fails=False, users=None):
     async def _latest_runs():
         return runs
 
+    async def _no_sessions(row_ids):
+        return {}
+
     monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: _FakeEngine(datasets))
     monkeypatch.setattr(recovery_module, "get_unterminated_pipeline_runs", _latest_runs)
     monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
     monkeypatch.setattr(recovery_module, "ROLLBACK_HANDLERS", {"cognify_pipeline": _rollback})
     monkeypatch.setattr(recovery_module, "log_pipeline_run_error", _log_error)
+    monkeypatch.setattr(recovery_module, "get_run_session_ids", _no_sessions)
     monkeypatch.setattr(recovery_module, "get_user", _get_user)
     monkeypatch.setattr(recovery_module, "STALE_RUN_MIN_AGE_SECONDS", 3600)
 
@@ -169,6 +174,31 @@ async def test_every_pipeline_with_a_stale_started_run_is_closed(monkeypatch):
     closed = sorted(kw["pipeline_name"] for name, kw in calls if name == "error")
     assert closed == ["add_pipeline", "cognify_pipeline", "memify_pipeline"]
     assert sum(1 for name, _ in calls if name == "rollback") == 1
+
+
+@pytest.mark.asyncio
+async def test_sessions_are_read_once_per_pass_and_each_closed_run_gets_its_own(monkeypatch):
+    """One pipeline_run_sessions lookup for every candidate, not one per closed run."""
+    runs = [_run("memify_pipeline"), _run("add_pipeline"), _run("cognify_pipeline")]
+    calls = _wire(monkeypatch, runs, {r.dataset_id: _dataset_for(r) for r in runs})
+    lookups = []
+    sessions = {runs[0].id: ["chat_1", "chat_2"], runs[1].id: ["chat_1"]}
+
+    async def _sessions(row_ids):
+        lookups.append(sorted(row_ids, key=str))
+        return sessions
+
+    monkeypatch.setattr(recovery_module, "get_run_session_ids", _sessions)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert lookups == [sorted((r.id for r in runs), key=str)]
+    by_name = {kw["pipeline_name"]: kw["session_ids"] for name, kw in calls if name == "error"}
+    assert by_name == {
+        "memify_pipeline": ("chat_1", "chat_2"),
+        "add_pipeline": ("chat_1",),
+        "cognify_pipeline": (),
+    }
 
 
 @pytest.mark.asyncio
@@ -311,15 +341,13 @@ async def test_recovery_emits_stored_identity_through_the_real_payload_builder(
     monkeypatch.setattr(utils, "get_anonymous_id", lambda: "test-anonymous")
     monkeypatch.setattr(utils, "get_persistent_id", lambda: "test-persistent")
     monkeypatch.setattr(utils, "_get_api_key_tracking_id", lambda: "")
-    request = AsyncMock()
-    monkeypatch.setattr(utils, "_send_telemetry_request", request)
-    pending_before = set(utils._TELEMETRY_TASKS)
+    enqueue = Mock()
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", enqueue)
 
     await recovery_module.recover_stale_pipeline_runs_on_startup()
-    await asyncio.gather(*(utils._TELEMETRY_TASKS - pending_before))
 
-    request.assert_awaited_once()
-    payload = request.await_args.args[0]
+    enqueue.assert_called_once()
+    payload = enqueue.call_args.args[0]
     assert payload["event_name"] == "Pipeline Run Errored"
     for properties in (payload["properties"], payload["user_properties"]):
         assert properties["user_id"] == str(run.user_id)
@@ -433,14 +461,12 @@ async def test_recovering_an_agents_run_attributes_the_agent(monkeypatch):
     monkeypatch.setattr(utils, "get_anonymous_id", lambda: "test-anonymous")
     monkeypatch.setattr(utils, "get_persistent_id", lambda: "test-persistent")
     monkeypatch.setattr(utils, "_get_api_key_tracking_id", lambda: "")
-    request = AsyncMock()
-    monkeypatch.setattr(utils, "_send_telemetry_request", request)
-    pending_before = set(utils._TELEMETRY_TASKS)
+    enqueue = Mock()
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", enqueue)
 
     await recovery_module.recover_stale_pipeline_runs_on_startup()
-    await asyncio.gather(*(utils._TELEMETRY_TASKS - pending_before))
 
-    properties = request.await_args.args[0]["properties"]
+    properties = enqueue.call_args.args[0]["properties"]
     assert properties["user_id"] == str(run.user_id)
     assert properties["is_agent"] is True
     assert properties["agent_owner_id"] == str(parent_id)

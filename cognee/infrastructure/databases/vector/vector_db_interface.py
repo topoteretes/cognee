@@ -8,6 +8,44 @@ from cognee.modules.users.models import User
 from .models.PayloadSchema import PayloadSchema
 
 
+def validate_raw_vector_points(points: list[dict], vector_size: int) -> dict[str, dict]:
+    """Check ``upsert_raw_vectors`` points before anything is written; collapse them by id.
+
+    Every point needs an ``id``, a ``vector`` list of ``vector_size`` floats and a dict
+    ``payload``; the first bad point raises ``ValueError``, so an adapter that calls this
+    before creating the collection leaves nothing behind on a rejected call. The same id
+    twice is written once: the last point wins and the two ``belongs_to_set`` lists are
+    unioned, as ``create_data_points`` does with duplicate ids in one batch.
+    """
+    rows: dict[str, dict] = {}
+    for point in points:
+        point_id = point.get("id")
+        vector = point.get("vector")
+        payload = point.get("payload")
+        if point_id is None:
+            raise ValueError("Raw vector point is missing id")
+        if not isinstance(vector, list):
+            raise ValueError("Raw vector point vector must be a list")
+        if len(vector) != vector_size:
+            raise ValueError(
+                f"Raw vector size {len(vector)} does not match expected size {vector_size}"
+            )
+        if not isinstance(payload, dict):
+            raise ValueError("Raw vector point payload must be a dict")
+        previous = rows.get(str(point_id))
+        if previous is not None:
+            tags = list(
+                dict.fromkeys(
+                    list(previous["payload"].get("belongs_to_set") or [])
+                    + list(payload.get("belongs_to_set") or [])
+                )
+            )
+            if tags:
+                payload = {**payload, "belongs_to_set": tags}
+        rows[str(point_id)] = {"id": point_id, "vector": vector, "payload": payload}
+    return rows
+
+
 class VectorDBInterface(Protocol):
     """
     Interface every vector backend implements (LanceDB, PGVector, Neptune Analytics, Turso).
@@ -69,6 +107,19 @@ class VectorDBInterface(Protocol):
         """
         raise NotImplementedError
 
+    async def delete_collection(self, collection_name: str) -> None:
+        """Drop a collection and every row in it; a collection that does not exist is not an error.
+
+        Unlike ``prune`` this leaves the rest of the store alone. The in-tree adapters
+        implement it; an adapter that does not raises ``NotImplementedError``.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to drop.
+        """
+        raise NotImplementedError
+
     """ Data points """
 
     @abstractmethod
@@ -99,14 +150,30 @@ class VectorDBInterface(Protocol):
         """
         Upsert already-computed vectors into the specified collection.
 
-        This is for small system-owned vector state where re-embedding from text would be
-        incorrect. Adapters that do not support raw vector writes should raise
+        Each point is ``{"id", "vector", "payload"}``. The embedding engine is never
+        called, and a point whose id exists replaces the stored payload and vector (unlike
+        ``create_data_points``, which keeps the stored vector on conflict), except
+        ``belongs_to_set``: as on every write, the stored row's tags are unioned with the
+        incoming ones, so a copy into a dataset that already holds the row (ids are
+        content-derived) never drops the tags that dataset gave it. With
+        ``retrieve(..., include_vector=True)`` this moves a row between stores without
+        re-embedding its text: pass the payload that call returned, minus ``"vector"``.
+        The points are checked (``validate_raw_vector_points``) before the collection is
+        created or anything is written: a missing id, a vector that is not a list of the
+        destination engine's width, or a payload that is not a dict raises ``ValueError``
+        and leaves the store untouched; the same id twice in one call is written once,
+        last point wins, with the two ``belongs_to_set`` lists unioned.
+        The payload is stored in the shape an ingested row of ``payload_schema`` has
+        (for a DataPoint that includes its ``id``); LanceDB requires the schema to shape
+        the table. Adapters that do not support raw vector writes should raise
         NotImplementedError.
         """
         raise NotImplementedError("upsert_raw_vectors is not implemented for this adapter")
 
     @abstractmethod
-    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
+    async def retrieve(
+        self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False
+    ):
         """
         Retrieve data points from a collection using their IDs.
 
@@ -116,6 +183,9 @@ class VectorDBInterface(Protocol):
             - collection_name (str): The name of the collection from which to retrieve data
               points.
             - data_point_ids (Union[List[str], list[str]]): A list of IDs of the data points to retrieve.
+            - include_vector (bool): When True, each result carries its stored embedding as
+              ``payload["vector"]`` (a list of floats), so it can be written elsewhere with
+              ``upsert_raw_vectors``. The default result is the payload alone.
         """
         raise NotImplementedError
 

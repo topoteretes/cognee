@@ -74,13 +74,38 @@ StatusPipelineNamesQuery = Annotated[
     Query(
         alias="pipeline",
         description=(
-            "Pipeline names to check: 'add_pipeline', 'cognify_pipeline', or"
-            " 'code_graph_pipeline' (code ingestion via remember"
-            " content_type='code'). Omit to default to cognify_pipeline."
+            "Pipeline names to check: 'add_pipeline', 'indexing_pipeline',"
+            " 'cognify_pipeline' (the two runs cognify makes, in that order), or"
+            " 'code_graph_pipeline' (code ingestion via remember content_type='code')."
+            " Omit to default to cognify_pipeline. For the folded memory state see"
+            " GET /v1/datasets/status/memory."
         ),
         examples=[["cognify_pipeline"]],
     ),
 ]
+
+
+class MemoryStatusDTO(BaseModel):
+    """A dataset's memory state, folded from its indexing and cognify runs."""
+
+    state: str = Field(
+        examples=["extracting"],
+        description=(
+            "empty, staged, indexing, indexed, indexing_failed, extracting, ready or "
+            "extraction_failed"
+        ),
+    )
+    search_level: str = Field(
+        examples=["chunks"],
+        description="The best search the dataset answers: none, chunks or graph",
+    )
+    searchable: bool
+    graph_ready: bool
+    message: str
+    indexing_status: PipelineRunStatus | None = None
+    cognify_status: PipelineRunStatus | None = None
+    error_class: str | None = None
+    error_message: str | None = None
 
 
 class PipelineRunStatusWithProgress(BaseModel):
@@ -799,7 +824,8 @@ def get_datasets_router() -> APIRouter:
           - If omitted, defaults to **cognify_pipeline** (backward-compatible behavior)
           - If one pipeline is provided, response is a flat map
           - If multiple pipelines are provided, response is nested per dataset and pipeline
-          - **Available options: add_pipeline, cognify_pipeline, code_graph_pipeline**
+          - **Available options: add_pipeline, indexing_pipeline, cognify_pipeline,
+            code_graph_pipeline**
           - Note: a background code ingest creates its pipeline run only once the
             repository is cloned — a dataset missing from the response means the run
             has not started yet, not that it failed
@@ -877,9 +903,9 @@ def get_datasets_router() -> APIRouter:
         ## Query Parameters
         - **dataset** (List[UUID]): Dataset UUIDs to check (from GET /api/v1/datasets). Omit to get
           status for all datasets you can read.
-        - **pipeline** (List[str]): Pipeline names to check: 'add_pipeline', 'cognify_pipeline', or
-          'code_graph_pipeline' (code ingestion via remember content_type='code'). Omit to default
-          to cognify_pipeline.
+        - **pipeline** (List[str]): Pipeline names to check: 'add_pipeline', 'indexing_pipeline',
+          'cognify_pipeline', or 'code_graph_pipeline' (code ingestion via remember
+          content_type='code'). Omit to default to cognify_pipeline.
 
         ## Response
         - Single pipeline (default): {dataset_id: {status, progress}}
@@ -924,6 +950,67 @@ def get_datasets_router() -> APIRouter:
             return JSONResponse(
                 status_code=409,
                 content={"error": "Unable to retrieve dataset progress."},
+            )
+
+    @router.get("/status/memory", response_model=dict[str, MemoryStatusDTO])
+    async def get_dataset_memory_status(
+        datasets: StatusDatasetIdsQuery = [],
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Get the memory state of datasets: what each one can answer right now.
+
+        cognify() (and remember()) build memory in two runs per dataset: indexing
+        (chunk search) and cognify (the knowledge graph). This endpoint folds their
+        latest runs into one state per dataset, so a client can tell whether a search
+        will answer and how good the answers are, instead of reading two pipeline
+        statuses.
+
+        ## Query Parameters
+        - **dataset** (List[UUID]): Dataset UUIDs to check (from GET /api/v1/datasets). Omit
+          to get the state of all datasets you can read.
+
+        ## Response
+        `{dataset_id: {state, search_level, searchable, graph_ready, message,
+        indexing_status, cognify_status, error_class, error_message}}`. Every requested
+        dataset is present; `state` is `empty` when nothing ran on it.
+
+        - **state**: `empty`, `staged`, `indexing`, `indexed`, `indexing_failed`,
+          `extracting`, `ready` or `extraction_failed`. During a cognify() build it goes
+          `indexing`, `extracting`, then `ready`.
+        - **search_level**: `none`, `chunks` (CHUNKS, CHUNKS_LEXICAL, RAG_COMPLETION,
+          HYBRID_COMPLETION answer) or `graph` (everything answers)
+        - **message**: one sentence saying what answers now and what improves next
+
+        ## Error Codes
+        - **403 Forbidden**: The request owner cannot read every requested dataset
+        - **409 Conflict**: An unexpected error occurred while deriving the state
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user,
+            additional_properties={
+                "endpoint": "GET /v1/datasets/status/memory",
+                "datasets": [str(dataset_id) for dataset_id in datasets],
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
+
+        try:
+            authorized_datasets = await get_authorized_existing_datasets(datasets, "read", user)
+            statuses = await cognee_datasets.get_memory_status(
+                [dataset.id for dataset in authorized_datasets]
+            )
+            return {dataset_id: status.to_dict() for dataset_id, status in statuses.items()}
+        except CogneeApiError:
+            raise
+        except Exception:
+            logger.exception("Error deriving dataset memory status")
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Unable to derive dataset memory status."},
             )
 
     @router.get("/graph-summary", response_model=list[DatasetGraphSummaryDTO])
@@ -1097,11 +1184,13 @@ def get_datasets_router() -> APIRouter:
         raw_location = data.raw_data_location
         parsed_uri = urlparse(raw_location)
 
-        if parsed_uri.scheme == "s3":
+        def stream_through_storage(download_name: str) -> StreamingResponse:
+            # open_data_file goes through the storage layer, so an S3 object is
+            # fetched and a sealed object (FILE_ENCRYPTION_ENABLED) is unsealed;
+            # FileResponse would serve the ciphertext bytes as they lie on disk.
             from cognee.infrastructure.files.utils.open_data_file import open_data_file
             from cognee.infrastructure.utils.run_async import run_async
 
-            download_name = Path(parsed_uri.path).name or data.name
             media_type = data.mime_type or "application/octet-stream"
 
             async def file_iterator(chunk_size: int = 1024 * 1024):
@@ -1118,9 +1207,13 @@ def get_datasets_router() -> APIRouter:
                 headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
             )
 
+        if parsed_uri.scheme == "s3":
+            return stream_through_storage(Path(parsed_uri.path).name or data.name)
+
         if parsed_uri.scheme in ("file", "") or (
             len(parsed_uri.scheme) == 1 and parsed_uri.scheme.isalpha()
         ):
+            from cognee.infrastructure.files.encryption import is_encrypted_local_file
             from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 
             file_path = get_data_file_path(raw_location)
@@ -1128,6 +1221,9 @@ def get_datasets_router() -> APIRouter:
 
             if not path.is_file():
                 raise DataNotFoundError(message=f"Raw file not found on disk for data ({data_id}).")
+
+            if is_encrypted_local_file(file_path):
+                return stream_through_storage(path.name or data.name)
 
             return FileResponse(path=path)
 
@@ -1222,7 +1318,7 @@ def get_datasets_router() -> APIRouter:
             "cognify_pipeline",
             description=(
                 "Pipeline whose per-item completion to count: 'cognify_pipeline'"
-                " (default), 'add_pipeline', or 'code_graph_pipeline'."
+                " (default), 'add_pipeline', 'indexing_pipeline', or 'code_graph_pipeline'."
             ),
             examples=["cognify_pipeline"],
         ),

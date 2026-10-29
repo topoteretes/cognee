@@ -15,6 +15,7 @@ A query runs read-only in SQLite, and the model phrases its result. Code appends
 answer was reached, and the full result when it has more than one row.
 """
 
+import json
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -252,6 +253,7 @@ class BroadRetriever(CompletionRetriever):
         engine = await get_unified_engine()
         store = RecordStore()
         try:
+            store.add_dlt_tables(await self.dlt_foreign_keys(engine.graph))
             total = await self.dataset_size()
             corpus = None
             if total is None:
@@ -300,6 +302,24 @@ class BroadRetriever(CompletionRetriever):
         return int(total or 0)
 
     # --- loading ----------------------------------------------------------------------
+
+    async def dlt_foreign_keys(self, graph_engine) -> dict[str, list[str]]:
+        """Each DLT table's foreign keys, read from its SchemaTable nodes.
+
+        Rows are shown as one table per table name, so the keys of every source's
+        table of that name are listed together. The keys are JSON cognee wrote
+        itself, so a node whose keys do not parse is a bug and raises.
+        """
+        nodes, _ = await graph_engine.get_filtered_graph_data([{"type": ["SchemaTable"]}])
+        foreign_keys: dict[str, list[str]] = {}
+        for _, props in nodes:
+            lines = [
+                f"{fk['column']} references {fk['ref_table']}.{fk['ref_column']}"
+                for fk in json.loads(props["foreign_keys"])
+            ]
+            listed = foreign_keys.setdefault(str(props["name"]), [])
+            listed.extend(line for line in lines if line not in listed)
+        return foreign_keys
 
     async def open_corpus(self, graph_engine) -> Corpus:
         """The dataset's documents, their names and stored sizes; text is fetched later."""

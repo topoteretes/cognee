@@ -874,8 +874,8 @@ async def improve(
     5. distill_sessions        - gated guidance becomes entity-anchored lessons
     6. update_user_preferences - ratings fold into preference weights
     7. build_truth_subspace    - opt-in (build_truth_subspace=True)
-    8. review_conflicts        - opt-in (IMPROVE_REVIEW_CONFLICTS=true)
-    9. global_context_index    - opt-in (build_global_context_index=True)
+    8. review_conflicts        - on unless IMPROVE_REVIEW_CONFLICTS=false; needs an LLM
+    9. global_context_index    - on unless IMPROVE_GLOBAL_CONTEXT_INDEX=false
 
     Stages 1-7 need session_ids and are skipped with `no_session_ids`
     otherwise. The reply lists every stage with its status (completed,

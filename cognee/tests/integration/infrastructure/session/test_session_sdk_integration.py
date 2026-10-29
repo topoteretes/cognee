@@ -66,35 +66,14 @@ class _InMemoryRedisList:
         self.data.clear()
 
 
-@pytest.fixture(params=["fs", "redis", "sqlite"])
+@pytest.fixture(params=["redis", "sqlite"])
 def sdk_uses_session_manager(request):
     """
-    SessionManager backed by FsCache, in-memory Redis, or SQL (aiosqlite); SDK is
+    SessionManager backed by in-memory Redis or SQL (aiosqlite); SDK is
     patched to use it. Tests run once per backend.
     """
     backend = request.param
-    if backend == "fs":
-        with (
-            tempfile.TemporaryDirectory() as tmpdir,
-            patch(
-                "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-                return_value={"data_root_directory": tmpdir},
-            ),
-        ):
-            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                FSCacheAdapter,
-            )
-
-            adapter = FSCacheAdapter()
-            session_manager = SessionManager(cache_engine=adapter)
-            with patch.object(
-                _session_module(),
-                "get_session_manager",
-                return_value=session_manager,
-            ):
-                yield session_manager
-            adapter.cache.close()
-    elif backend == "redis":
+    if backend == "redis":
         store = _InMemoryRedisList()
         patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
         with (

@@ -23,7 +23,7 @@ import cognee.modules.improve.stages as stages_module
 from cognee import __file__ as cognee_package_file
 from cognee.modules.improve.stages import (
     REASON_NO_LLM_CONFIGURED,
-    REASON_OPT_IN_DISABLED,
+    REASON_TURNED_OFF,
     DistillSessionsStage,
     ExtractAgentContextStage,
     ReviewConflictsStage,
@@ -111,9 +111,7 @@ def test_llm_stages_run_when_an_llm_is_configured(stage):
 
 def test_earlier_gates_keep_precedence_over_the_llm_check():
     with patch.object(stages_module, "llm_available", return_value=False):
-        assert (
-            ReviewConflictsStage().gate(_inputs(review_conflicts=False)) == REASON_OPT_IN_DISABLED
-        )
+        assert ReviewConflictsStage().gate(_inputs(review_conflicts=False)) == REASON_TURNED_OFF
 
 
 @pytest.mark.asyncio

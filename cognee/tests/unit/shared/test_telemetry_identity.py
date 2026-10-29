@@ -7,7 +7,6 @@ model — which defines no ``__str__`` — so those events recorded
 """
 
 import uuid
-from collections.abc import Coroutine
 from typing import Any
 
 import pytest
@@ -62,31 +61,11 @@ def _capture_telemetry(monkeypatch) -> list[dict[str, Any]]:
     """Capture emitted payloads without touching the network."""
     payloads: list[dict[str, Any]] = []
 
-    def capture(payload: dict[str, Any]) -> Coroutine[Any, Any, None]:
-        payloads.append(payload)
-
-        async def noop() -> None:
-            return None
-
-        return noop()
-
-    class StubTask:
-        """send_telemetry tracks tasks in _TELEMETRY_TASKS via add_done_callback."""
-
-        def add_done_callback(self, callback) -> None:
-            callback(self)
-
-    class CapturingLoop:
-        def create_task(self, coroutine: Coroutine[Any, Any, None]) -> StubTask:
-            coroutine.close()
-            return StubTask()
-
     monkeypatch.setenv("ENV", "prod")
     monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
     monkeypatch.setattr(utils, "get_anonymous_id", lambda: "anonymous-test-id")
     monkeypatch.setattr(utils, "get_persistent_id", lambda: "persistent-test-id")
-    monkeypatch.setattr(utils, "_send_telemetry_request", capture)
-    monkeypatch.setattr(utils.asyncio, "get_running_loop", lambda: CapturingLoop())
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", payloads.append)
     return payloads
 
 

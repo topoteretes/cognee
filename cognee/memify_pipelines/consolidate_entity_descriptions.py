@@ -54,7 +54,7 @@ async def consolidate_entity_descriptions_pipeline(
     """Rewrite Entity descriptions from their graph neighborhood, then summarize
     each EntityType from its member Entities and write is_a edge text.
 
-    Deprecated: ``improve(review_conflicts=True)`` reviews facts instead and leaves
+    Deprecated: ``improve()`` reviews facts instead (on by default) and leaves
     descriptions as extracted.
 
     Every size/budget cap below is a defensive backstop against pathological
@@ -104,7 +104,7 @@ async def consolidate_entity_descriptions_pipeline(
     """
     warnings.warn(
         "consolidate_entity_descriptions_pipeline is deprecated; "
-        "use improve(review_conflicts=True)",
+        "improve() reviews conflicts by default",
         DeprecationWarning,
         stacklevel=2,
     )

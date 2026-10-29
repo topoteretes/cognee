@@ -94,26 +94,10 @@ class InMemoryGraphWithWeights:
         return result
 
 
-@pytest.fixture(params=["fs", "redis", "sqlite"])
+@pytest.fixture(params=["redis", "sqlite"])
 def session_manager_with_backend(request):
     backend = request.param
-    if backend == "fs":
-        with (
-            tempfile.TemporaryDirectory() as tmpdir,
-            patch(
-                "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-                return_value={"data_root_directory": tmpdir},
-            ),
-        ):
-            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                FSCacheAdapter,
-            )
-
-            adapter = FSCacheAdapter()
-            sm = SessionManager(cache_engine=adapter)
-            yield sm
-            adapter.cache.close()
-    elif backend == "redis":
+    if backend == "redis":
         store = _InMemoryRedisList()
         patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
         with (

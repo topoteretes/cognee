@@ -42,7 +42,6 @@ os.environ["LOG_LEVEL"] = "ERROR"
 os.environ["COGNEE_LOG_FILE"] = "false"
 os.environ["COGNEE_CLI_MODE"] = "true"
 os.environ.setdefault("CACHING", "true")
-os.environ.setdefault("CACHE_BACKEND", "fs")
 os.environ.setdefault("AUTO_FEEDBACK", "true")
 
 

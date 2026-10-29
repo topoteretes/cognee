@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 from unittest.mock import patch
 
@@ -7,28 +8,20 @@ from cognee.infrastructure.session.session_manager import SessionManager
 
 
 @pytest.fixture
-def fs_adapter():
-    """FsCacheAdapter with temp directory."""
-    with (
-        tempfile.TemporaryDirectory() as tmpdir,
-        patch(
-            "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-            return_value={"data_root_directory": tmpdir},
-        ),
-    ):
-        from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-            FSCacheAdapter,
-        )
+def sql_adapter():
+    """SqlCacheAdapter backed by a temporary aiosqlite database."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 
-        inst = FSCacheAdapter()
+        inst = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmpdir}/cache.db")
         yield inst
-        inst.cache.close()
+        asyncio.run(inst.close())
 
 
 @pytest.fixture
-def session_manager(fs_adapter) -> SessionManager:
-    """SessionManager wired to FsCacheAdapter."""
-    return SessionManager(cache_engine=fs_adapter)
+def session_manager(sql_adapter) -> SessionManager:
+    """SessionManager wired to SqlCacheAdapter."""
+    return SessionManager(cache_engine=sql_adapter)
 
 
 @pytest.mark.asyncio

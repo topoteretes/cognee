@@ -4,6 +4,7 @@ Exercises the real SessionManager over a filesystem cache adapter; only the
 vector-index hooks and the relational session registry are patched out.
 """
 
+import asyncio
 import tempfile
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -26,19 +27,11 @@ SESSION_ID = "test_session"
 
 @pytest.fixture
 def session_manager():
-    with (
-        tempfile.TemporaryDirectory() as tmpdir,
-        patch(
-            "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-            return_value={"data_root_directory": tmpdir},
-        ),
-    ):
-        from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-            FSCacheAdapter,
-        )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
         from cognee.infrastructure.session.session_manager import SessionManager
 
-        adapter = FSCacheAdapter()
+        adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmpdir}/cache.db")
         with (
             patch(
                 "cognee.infrastructure.session.session_manager.delete_session_qa_vector",
@@ -50,7 +43,7 @@ def session_manager():
             ),
         ):
             yield SessionManager(adapter)
-        adapter.cache.close()
+        asyncio.run(adapter.close())
 
 
 async def _seed_qa(session_manager, qa_id, used_node_ids=None, used_context_ids=None):

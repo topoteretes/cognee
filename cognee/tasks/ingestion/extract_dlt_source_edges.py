@@ -34,10 +34,12 @@ async def extract_dlt_source_edges(
     emit_dlt_schema_graph.
 
     Row-level edges are only emitted for rows present in the current batch,
-    so batching does not duplicate work. Cross-batch dedup state lives in
-    ``ctx.extras``: a doc's schema nodes are emitted (and vector-embedded)
-    only for the first batch that carries its rows, and each unique
-    ColumnValue node is persisted and embedded once. ``ctx`` is per data
+    so batching does not duplicate work. An FK edge waits for the batch that
+    writes the later of its two rows, since the graph drops an edge whose
+    target row is not written yet. Cross-batch state lives in
+    ``ctx.extras``: the rows written so far, a doc's schema nodes are emitted
+    (and vector-embedded) only for the first batch that carries its rows, and
+    each unique ColumnValue node is persisted and embedded once. ``ctx`` is per data
     item, and one manifest data item IS one source — that equality is what
     makes ctx.extras the correct scope. If manifests ever stop being
     one-item-per-source, this state needs a new home.
@@ -45,11 +47,13 @@ async def extract_dlt_source_edges(
     if ctx is not None:
         emitted_schema_docs = ctx.extras.setdefault("dlt_emitted_schema_docs", set())
         emitted_value_node_ids = ctx.extras.setdefault("dlt_emitted_value_node_ids", set())
+        written_row_ids = ctx.extras.setdefault("dlt_written_row_ids", set())
     else:
         # Direct invocation (unit tests, custom pipelines) without a pipeline
         # context: fresh per-call sets — batching dedup only.
         emitted_schema_docs = set()
         emitted_value_node_ids = set()
+        written_row_ids = set()
     # Group row chunks in this batch by their source document.
     source_docs = {}  # doc_id -> document
     batch_rows_by_doc: dict[str, set] = {}  # doc_id -> {row node id (str), ...}
@@ -70,34 +74,62 @@ async def extract_dlt_source_edges(
 
     for doc_id, doc in source_docs.items():
         manifest = await load_dlt_manifest(doc.raw_data_location)
-        rows_by_node_id = {row["node_id"]: row for row in manifest.get("rows", [])}
 
-        # Emit a doc's schema nodes only once per data item's run.
+        # Emit a doc's schema nodes only once per data item's run. A table's key
+        # and size come from its rows, which every manifest carries. Table nodes
+        # are scoped to their source document: another source's table of the same
+        # name is a different table.
         if doc_id not in emitted_schema_docs:
+            rows_of: dict[str, list[dict]] = {}
+            for row in manifest.get("rows", []):
+                rows_of.setdefault(row["table_name"], []).append(row)
             for table_name, table_meta in manifest.get("tables", {}).items():
-                if table_name in tables:
-                    continue
-                tables[table_name] = {
+                tables[f"{doc_id}:{table_name}"] = {
+                    "name": table_name,
+                    "scope": doc_id,
+                    "source_label": manifest.get("source_label"),
                     "schema_info": table_meta.get("schema_info"),
                     "foreign_keys": table_meta.get("foreign_keys", []),
-                    "dlt_db_name": table_meta.get("dlt_db_name", ""),
+                    "primary_key": rows_of[table_name][0]["primary_key_column"],
+                    "row_count": len(rows_of[table_name]),
                 }
             newly_emitted_doc_ids.append(doc_id)
 
-        # Row-level records, limited to rows in the current batch.
-        for row_node_id in batch_rows_by_doc.get(doc_id, set()):
-            row = rows_by_node_id.get(row_node_id)
-            if row is None:
-                continue
-            row_records.append(
-                {
-                    "source_id": row_node_id,
-                    "table_name": row.get("table_name", ""),
-                    "fk_references": row.get("fk_references", []),
-                    "column_values": row.get("column_values") or {},
-                    "timestamps": row.get("timestamps") or {},
-                }
-            )
+        # Row-level records for the rows in the current batch, plus the FK edges
+        # of rows written by earlier batches whose target rows are in this one.
+        # add_data_points has already written this batch's rows.
+        batch_row_ids = batch_rows_by_doc[doc_id]
+        rows_in_graph = written_row_ids | batch_row_ids
+        for row in manifest.get("rows", []):
+            row_node_id = row["node_id"]
+            fk_references = row.get("fk_references", [])
+            if row_node_id in batch_row_ids:
+                row_records.append(
+                    {
+                        "source_id": row_node_id,
+                        "table_name": row.get("table_name", ""),
+                        "scope": doc_id,
+                        "fk_references": [
+                            ref for ref in fk_references if ref["target_node_id"] in rows_in_graph
+                        ],
+                        "column_values": row.get("column_values") or {},
+                        "timestamps": row.get("timestamps") or {},
+                    }
+                )
+            elif row_node_id in written_row_ids:
+                arrived_targets = [
+                    ref for ref in fk_references if ref["target_node_id"] in batch_row_ids
+                ]
+                if arrived_targets:
+                    row_records.append(
+                        {
+                            "source_id": row_node_id,
+                            "table_name": row.get("table_name", ""),
+                            "scope": doc_id,
+                            "fk_references": arrived_targets,
+                            "fk_only": True,
+                        }
+                    )
 
     await emit_dlt_schema_graph(
         tables,
@@ -107,5 +139,7 @@ async def extract_dlt_source_edges(
     )
 
     emitted_schema_docs.update(newly_emitted_doc_ids)
+    for batch_row_ids in batch_rows_by_doc.values():
+        written_row_ids.update(batch_row_ids)
 
     return data_points

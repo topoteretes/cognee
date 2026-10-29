@@ -155,7 +155,14 @@ _ADD_ONLY = frozenset(
     }
 )
 _COGNIFY_ONLY = frozenset(
-    {"graph_model", "extractor", "summary_method", "chunks_per_batch", "config"}
+    {
+        "graph_model",
+        "extractor",
+        "summary_method",
+        "early_chunk_indexing",
+        "chunks_per_batch",
+        "config",
+    }
 )
 _SHARED = frozenset(
     {
@@ -1534,6 +1541,13 @@ async def _remember_inner(
                 "branch is not supported while connected to a remote Cognee instance. "
                 "Call cognee.disconnect() to clone the branch locally."
             )
+        if kwargs.get("early_chunk_indexing") is not None:
+            # Same as extractor: the remote runs its own setting, and
+            # client.remember() would drop this one, as cognify() refuses it.
+            raise ValueError(
+                "early_chunk_indexing is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to choose it locally."
+            )
         if session_ids:
             # Same discipline as extractor: POST /remember carries no
             # session_ids field, so forwarding would silently drop them.
@@ -2133,7 +2147,7 @@ async def _remember_inner(
 
         # Session memory: store in session cache, then optionally bridge to graph
         if session_id:
-            operation_context.set_session_id(session_id)
+            operation_context.set_session_ids([session_id])
             await _add_to_session(session_id, data, user, node_set=add_kwargs.get("node_set"))
             result = RememberResult(
                 status="session_stored",
@@ -2268,7 +2282,7 @@ async def _remember_inner(
                 raise after_run_hook_error
 
         if session_ids:
-            operation_context.set_session_id(session_ids[0] if len(session_ids) == 1 else None)
+            operation_context.set_session_ids(session_ids)
 
         if run_in_background:
             # outcome="succeeded" on this row means "accepted and started"
