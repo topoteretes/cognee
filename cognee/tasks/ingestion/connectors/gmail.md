@@ -44,7 +44,48 @@ answer = await cognee.search(
 ```
 
 Re-running `remember(...)` with the same dataset syncs only the delta and forgets any
-mail removed from Gmail. See `examples/guides/gmail.py` for the full two-sync demo.
+mail removed from Gmail. See `examples/guides/gmail.py` for a runnable demo.
+
+## Message bodies
+
+The connector prefers a nonempty inline `text/plain` body. If none is available, it
+extracts readable text from inline `text/html`, preserving text boundaries and decoding
+HTML entities. Attachments and their subtrees, scripts, styles, head/template content,
+and comments are excluded. Conversion never fetches images, stylesheets, or other URLs
+referenced by the HTML.
+
+This is conservative text extraction, not browser rendering or OCR. Existing UTF-8
+decoding behavior is unchanged. Empty or unusable bodies, including bodies supplied
+only through Gmail's `attachmentId` instead of inline data, still use the message's
+short snippet.
+
+## Refresh previously synced mail
+
+Upgrading the parser does not automatically refetch unchanged messages already stored
+as snippets. To enrich those messages, explicitly request a full backfill:
+
+```python
+await cognee.remember(
+    gmail_source(label_ids=["INBOX"], full_refresh=True),
+    dataset_name="gmail_inbox",
+    primary_key="id",
+    write_disposition="merge",
+    max_rows_per_table=0,
+)
+```
+
+Use the **same dataset, resource name, credentials, and label selection** as the original
+sync. If you supplied an account-specific `resource_name`, pass that same name here.
+Keep `max_results` unset to refresh all selected mail, and keep
+`max_rows_per_table=0` so reconciliation reads the full staged corpus.
+
+`full_refresh` defaults to `False`; it does not trigger an automatic upgrade scan.
+An explicit refresh reuses the existing backfill and quota pacing, so it can fetch all
+selected messages and take time for a large mailbox. Later calls with the default
+`full_refresh=False` resume incremental history sync after a successful uncapped scan.
+A capped backfill does not save a history cursor or treat missing messages as deletions.
+Refreshing does not require deleting token files, resetting dlt state, or clearing the
+dataset.
 
 Deletion propagation requires a successful foreground sync (the default).
 `cognee.add(..., run_in_background=True)` skips orphan cleanup to preserve existing

@@ -288,7 +288,9 @@ def test_parse_message_html_preserves_blocks_and_excludes_non_body_content():
         },
     }
     content = parse_message(message)["content"]
-    assert content == "Review plan\nFirst task\nSecond task\nDate Nov 12\nTime 14:30 UTC\nOpen review"
+    assert (
+        content == "Review plan\nFirst task\nSecond task\nDate Nov 12\nTime 14:30 UTC\nOpen review"
+    )
     assert parse_message(message)["content"] == content
 
 
@@ -301,6 +303,24 @@ def test_parse_message_tolerates_unclosed_html_tags():
         },
     }
     assert parse_message(message)["content"] == "Review\nThursday 14:30 UTC"
+
+
+@pytest.mark.parametrize("body_tag", ["<body>", ""])
+def test_parse_message_preserves_body_when_head_end_tag_is_omitted(body_tag):
+    message = {
+        "id": "omitted_head_end",
+        "snippet": "Preview",
+        "payload": {
+            "mimeType": "text/html",
+            "body": {
+                "data": _b64(
+                    "<html><head><title>Metadata</title><meta charset=utf-8>"
+                    f"{body_tag}<p>Review Thursday at 14:30 UTC</p></html>"
+                )
+            },
+        },
+    }
+    assert parse_message(message)["content"] == "Review Thursday at 14:30 UTC"
 
 
 @pytest.mark.parametrize(

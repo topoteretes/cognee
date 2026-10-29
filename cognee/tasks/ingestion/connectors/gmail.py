@@ -65,10 +65,12 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import threading
 import time
 from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from typing import Any
 
 from limits import RateLimitItemPerMinute
@@ -284,28 +286,114 @@ def _decode_body(data: str | None) -> str:
         return ""
 
 
-def _extract_plaintext(payload: dict | None) -> str:
-    """Walk a Gmail message payload and return its ``text/plain`` body.
+class _HTMLBodyText(HTMLParser):
+    """Extract inline HTML text without rendering it or fetching referenced assets."""
 
-    Depth-first search for the first ``text/plain`` part anywhere in the MIME
-    tree.  HTML-only messages return "" (the snippet still carries a preview),
-    which keeps ingested text clean for entity extraction rather than feeding
-    raw HTML markup into the graph.
-    """
+    _BLOCK_TAGS = frozenset(
+        [
+            "address",
+            "article",
+            "aside",
+            "blockquote",
+            "br",
+            "dd",
+            "div",
+            "dl",
+            "dt",
+            "fieldset",
+            "figcaption",
+            "figure",
+            "footer",
+            "form",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "header",
+            "hr",
+            "li",
+            "main",
+            "nav",
+            "ol",
+            "p",
+            "pre",
+            "section",
+            "table",
+            "tr",
+            "ul",
+        ]
+    )
+    _IGNORED_TAGS = frozenset({"head", "script", "style", "template"})
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._ignored: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag in self._IGNORED_TAGS:
+            self._ignored.append(tag)
+        if self._ignored:
+            return
+        if tag in self._BLOCK_TAGS:
+            self._parts.append("\n")
+        elif tag in {"td", "th"}:
+            self._parts.append(" ")
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._ignored:
+            if tag == self._ignored[-1]:
+                self._ignored.pop()
+            return
+        if tag in self._BLOCK_TAGS:
+            self._parts.append("\n")
+        elif tag in {"td", "th"}:
+            self._parts.append(" ")
+
+    def handle_data(self, data: str) -> None:
+        if not self._ignored:
+            self._parts.append(re.sub(r"\s+", " ", data))
+
+    def text(self) -> str:
+        return "\n".join(
+            " ".join(line.split()) for line in "".join(self._parts).splitlines() if line.strip()
+        )
+
+
+def _inline_body_parts(payload: dict | None) -> Iterator[dict]:
+    """Walk inline MIME parts, excluding attachments and encapsulated messages."""
     if not payload:
-        return ""
+        return
 
-    mime_type = payload.get("mimeType", "")
-    body = payload.get("body", {}) or {}
+    disposition = _headers_to_dict(payload).get("content-disposition", "")
+    if (
+        payload.get("filename")
+        or payload.get("mimeType", "").lower().startswith("message/")
+        or disposition.split(";", 1)[0].strip().lower() == "attachment"
+    ):
+        return
 
-    if mime_type == "text/plain" and body.get("data"):
-        return _decode_body(body.get("data"))
-
+    yield payload
     for part in payload.get("parts") or []:
-        text = _extract_plaintext(part)
-        if text:
-            return text
+        yield from _inline_body_parts(part)
 
+
+def _extract_body(payload: dict | None) -> str:
+    """Prefer inline plain text, then readable inline HTML, across MIME alternatives."""
+    for mime_type in ("text/plain", "text/html"):
+        for part in _inline_body_parts(payload):
+            if part.get("mimeType", "").lower() != mime_type:
+                continue
+            text = _decode_body((part.get("body") or {}).get("data"))
+            if mime_type == "text/html":
+                parser = _HTMLBodyText()
+                parser.feed(text)
+                parser.close()
+                text = parser.text()
+            if text.strip():
+                return text
     return ""
 
 
@@ -334,8 +422,8 @@ def _document_content(message: dict, headers: dict[str, str]) -> str:
     Document-source rows are turned into text from their ``title``/``content``
     columns only (see ``resolve_dlt_sources._build_document_data_item``), so
     every field worth knowing must be folded into ``content`` to reach the
-    graph. The subject is the ``title``. HTML-only messages have no plain-text
-    body and fall back to the snippet (Gmail's short preview of the body).
+    graph. The subject is the ``title``. Inline HTML supplies readable text when
+    plain text is absent; messages without a usable body use the short snippet.
     """
     fields = (
         ("From", headers.get("from")),
@@ -347,9 +435,7 @@ def _document_content(message: dict, headers: dict[str, str]) -> str:
         ("Thread", message.get("threadId")),
     )
     lines = [f"{label}: {value}" for label, value in fields if value]
-    text = (
-        _extract_plaintext(message.get("payload")).strip() or (message.get("snippet") or "").strip()
-    )
+    text = _extract_body(message.get("payload")).strip() or (message.get("snippet") or "").strip()
     if text:
         lines.extend(["", text])
     return "\n".join(lines).strip()
@@ -656,6 +742,7 @@ def gmail_source(
     token_path: str = "token.json",
     label_ids: list[str] | None = None,
     max_results: int | None = None,
+    full_refresh: bool = False,
     service: Any = None,
     quota_units_per_minute: int = DEFAULT_QUOTA_UNITS_PER_MINUTE,
 ):
@@ -669,6 +756,10 @@ def gmail_source(
         label_ids: Restrict to these Gmail label ids (e.g. ``["INBOX"]``).
         max_results: Cap the number of messages pulled in a full backfill
             (handy for demos/tests). ``None`` = no cap.
+        full_refresh: Re-fetch the selected mail through the same resource's
+            full-backfill path, even when its history cursor is current. Use
+            once to enrich older snippet-only messages, then omit it on later
+            syncs. Existing quota and capped-scan deletion protections apply.
         service: Pre-built Gmail API client. Mainly an injection point for
             tests; when omitted an OAuth client is built from the paths above.
         quota_units_per_minute: Gmail API quota budget for this mailbox.
@@ -725,7 +816,7 @@ def gmail_source(
         scope = sorted(set(label_ids or []))
         same_scope = resource_state.get("label_scope") == scope
 
-        if same_scope and resource_state.get("last_history_id"):
+        if not full_refresh and same_scope and resource_state.get("last_history_id"):
             rows = incremental_fetch(
                 client, resource_state, label_ids=label_ids, stats=stats, quota=quota
             )
