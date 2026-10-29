@@ -108,7 +108,7 @@ class OperationContext:
         self.outcome = None
         self.close_deferred = False
         # Optional JSON payload for the row's run_info column (improve stamps
-        # its enrichment watermark here — see improve/graph_changes.py).
+        # its stage watermarks here — see improve/watermarks.py).
         self.run_info = None
 
     def set_user(self, user) -> None:

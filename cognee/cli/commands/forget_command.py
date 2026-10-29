@@ -49,6 +49,15 @@ records, so the dataset (or item) can be re-cognified later.
                 "re-cognified with different settings"
             ),
         )
+        parser.add_argument(
+            "--clean-history",
+            action="store_true",
+            default=False,
+            help=(
+                "Also delete your own search and recall history, in every dataset, "
+                "before the data is deleted; alone, delete only the history"
+            ),
+        )
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -62,9 +71,16 @@ records, so the dataset (or item) can be re-cognified later.
                 fmt.error("Provide either --dataset or --dataset-id, not both.")
                 return
 
-            if not args.everything and not dataset and not dataset_id and not data_id:
+            if (
+                not args.everything
+                and not dataset
+                and not dataset_id
+                and not data_id
+                and not args.clean_history
+            ):
                 fmt.error(
-                    "Specify --dataset or --dataset-id, --data-id with dataset, or --everything/--all."
+                    "Specify --dataset or --dataset-id, --data-id with dataset, "
+                    "--everything/--all, or --clean-history."
                 )
                 return
 
@@ -88,11 +104,20 @@ records, so the dataset (or item) can be re-cognified later.
                         dataset_id=dataset_id,
                         everything=args.everything,
                         memory_only=args.memory_only,
+                        clean_history=args.clean_history,
                     )
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to forget: {e!s}") from e
 
             result = asyncio.run(run_forget())
+            if isinstance(result, dict) and result.get("status") == "not_found":
+                # A single-item forget whose id owned nothing: wrong id, or already
+                # deleted. Not a success line — nothing was removed.
+                fmt.warning(
+                    f"Nothing to delete: data item {data_id} was not found in the dataset "
+                    f"(wrong id, or already deleted). {result}"
+                )
+                return
             fmt.success(f"Done: {result}")
 
             # After a successful forget the natural next step is to seed the

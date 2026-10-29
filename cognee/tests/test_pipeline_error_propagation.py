@@ -72,8 +72,8 @@ async def main():
     raised = None
     try:
         await run_memify_tasks(
-            extraction_tasks=[Task(passthrough_extraction)],
-            enrichment_tasks=[Task(exploding_enrichment)],
+            extraction_tasks=[Task(passthrough_extraction, needs_llm=False)],
+            enrichment_tasks=[Task(exploding_enrichment, needs_llm=False)],
             data=["payload for the failing pipeline"],
             dataset=DATASET_NAME,
         )
@@ -102,8 +102,8 @@ async def main():
 
     # 3. One failed run must not wedge the system: a healthy run now succeeds.
     result = await run_memify_tasks(
-        extraction_tasks=[Task(passthrough_extraction)],
-        enrichment_tasks=[Task(healthy_enrichment)],
+        extraction_tasks=[Task(passthrough_extraction, needs_llm=False)],
+        enrichment_tasks=[Task(healthy_enrichment, needs_llm=False)],
         data=["payload for the healthy pipeline"],
         dataset=DATASET_NAME,
     )

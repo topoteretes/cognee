@@ -5,6 +5,7 @@ import type { BusinessCanvasHandle } from "./canvas/BusinessCanvas";
 import type { Spotlight } from "./canvas/businessDraw";
 import type { BrainState } from "./sceneTypes";
 import { truncate } from "./textUtils";
+import { structuredTypeName } from "./structuredGraph";
 
 const IDLE_THRESHOLD_MS = 25000;
 const CHECK_INTERVAL_MS = 5000;
@@ -49,7 +50,7 @@ function pickInsight(brainState: BrainState, seen: Set<string>): Insight | null 
     }
   }
   const ranked = [...brainState.entities]
-    .filter((e) => e.name && !e.is_unnamed)
+    .filter((e) => e.name && !e.is_unnamed && !structuredTypeName(e))
     .sort((x, y) => (y.importance || 0) - (x.importance || 0));
   const entity = ranked.find((e) => !seen.has(e.id)) || ranked[0];
   if (!entity?.name) return null;

@@ -1,7 +1,7 @@
 """Move pipeline_runs.session_id into pipeline_run_sessions (CLO-1105)
 
 Revision ID: dd760c09e075
-Revises: d4a8e2f6b1c9
+Revises: b7e4c2a9d6f1
 Create Date: 2026-10-21 15:54:34.739646
 
 A run launched by an operation bound to several sessions (an improve over two
@@ -22,7 +22,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "dd760c09e075"
-down_revision: str | None = "d4a8e2f6b1c9"
+down_revision: str | None = "b7e4c2a9d6f1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

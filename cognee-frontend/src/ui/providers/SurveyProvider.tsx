@@ -26,6 +26,9 @@ function qualifyingTrigger(userMe: UserMe | null): string | null {
   // null is "/me hasn't resolved", not an answer — qualifying on it would ask
   // a brand-new signup during the fetch window.
   if (!userMe) return null;
+  // Not through welcome yet means a brand-new account on its way to /welcome;
+  // the check below would misread it as pre-existing and record an attempt.
+  if (!userMe.isSeenWelcome) return null;
   // Accounts that predate the onboarding flow have no completion date and are
   // long-established by definition, so no waiting period applies to them.
   if (userMe.onboardingCompletedAt === null) return TRIGGER_PRE_EXISTING_ACCOUNT;

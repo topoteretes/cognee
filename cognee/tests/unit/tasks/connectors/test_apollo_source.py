@@ -3,23 +3,28 @@
 """A record is re-extracted only when its rendered text changes, and an error never forgets one.
 
 Nothing the text leaves out (custom fields nobody listed, step positions, activity dates) may
-move a fingerprint, or every sequence step would re-extract its contact. A run reads only the
-endpoints its included kinds need. A deletion check that fails keeps the record, backs off if
-it keeps failing, and says why in the counts. The walk is driven with a plain dict as dlt
-resource state: no network, no LLM.
+move a fingerprint, or every sequence step would re-extract its contact. What the text does
+say is frozen once released, because it is part of a document's identity: each text opens with
+its kind, a contact names its account by the account's own title, and each row carries the node
+set ``apollo:<team id>:<kind>``. A run reads only the endpoints its included kinds need, and
+stops on the quota of the endpoint it is about to call. A deletion check that fails keeps the
+record, backs off if it keeps failing, and says why in the counts. The walk is driven with a
+plain dict as dlt resource state: no network, no LLM.
 """
 
 import random
 import re
 
 import pytest
-from fake_apollo import FakeApollo
+from fake_apollo import FakeApollo, serve_over_http
 
+from cognee.tasks.ingestion.connectors import apollo as apollo_module
 from cognee.tasks.ingestion.connectors.apollo import (
     PAGE_SIZE,
     ApolloAccessError,
     ApolloAPIError,
     ApolloAuthError,
+    ApolloClient,
     ApolloRateLimitedError,
     ApolloSourceError,
     Lookups,
@@ -27,8 +32,14 @@ from cognee.tasks.ingestion.connectors.apollo import (
     apollo_team_id,
     render_contact,
 )
+from cognee.tasks.ingestion.dlt_utils import NODE_SET_COLUMN
 
-ROW_COLUMNS = {"id", "title", "content", "url", "_deleted"}
+ROW_COLUMNS = {"id", "title", "content", "url", "_deleted", NODE_SET_COLUMN}
+# A live record read costs one request, so a run that checks this many deleted contacts is the
+# one that used to spend the whole reserve.
+DELETED_CONTACTS = 30
+# What a window must still hold before the run calls that endpoint (the reserve in apollo.md).
+REQUESTS_RESERVE = 10
 # What apollo.md says about a record whose deletion check keeps failing.
 FAILURES_BEFORE_BACKOFF = 5
 BACKOFF_CYCLES = 10
@@ -50,7 +61,7 @@ FILTERS = [
 ]
 
 
-def _sync(fake: FakeApollo, state: dict, **kwargs) -> tuple[list[dict], dict]:
+def _sync(fake: FakeApollo | ApolloClient, state: dict, **kwargs) -> tuple[list[dict], dict]:
     stats: dict[str, int] = {}
     rows = list(_iter_rows(fake, state, stats, **kwargs))
     return rows, stats
@@ -96,22 +107,212 @@ def test_enrichment_channels_and_volatile_stats_are_never_rendered():
     assert "0.4" not in text  # sequence open rate
 
 
+# --- what the text says and what the row carries are frozen once released ---
+# Both are hashed into a document's identity, so a change after the first release gives every
+# record of the kind a new data_id and one more extraction on the tenant's own LLM key.
+
+
+@pytest.mark.parametrize("team_id", ["team1", "team2"])
+def test_every_row_carries_the_node_set_of_its_team_and_kind(team_id):
+    fake = FakeApollo(team_id=team_id)
+    fake.add_sequence("s1", "Q4 Outreach")
+    fake.add_account("a1", "Acme")
+    fake.add_contact("c1", "Ada Lovelace", account_id="a1")
+
+    rows, _ = _sync(fake, {})
+
+    assert {row["id"]: row[NODE_SET_COLUMN] for row in rows} == {
+        "sequence:s1": [f"apollo:{team_id}:sequences"],
+        "account:a1": [f"apollo:{team_id}:accounts"],
+        "contact:c1": [f"apollo:{team_id}:contacts"],
+    }
+
+
+def test_each_text_opens_with_a_sentence_that_names_its_kind():
+    rows, _ = _sync(_workspace(), {})
+
+    assert {row["id"]: row["content"].splitlines()[0] for row in rows} == {
+        "sequence:s1": "Apollo sequence Q4 Outreach is active.",
+        "account:a1": "Apollo account Acme has the domain a1.example.com.",
+        "account:a2": "Apollo account Globex has the domain a2.example.com.",
+        "contact:c1": "Apollo contact Ada Lovelace works at Acme as Engineer.",
+        "contact:c2": "Apollo contact Ben Turing works at Globex as Engineer.",
+    }
+
+
+def test_a_contact_names_its_account_by_the_accounts_own_title_and_domain():
+    """organization_name is free text on the contact ("Globex Incorporated"), and the graph
+    joins a contact to its account only when both texts use the account's own name."""
+    fake = _workspace()
+    fake.contacts["c2"]["organization_name"] = "Globex Incorporated"
+
+    rows, _ = _sync(fake, {})
+    content = {row["id"]: row["content"] for row in rows}
+
+    assert content["contact:c2"].splitlines() == [
+        "Apollo contact Ben Turing works at Globex as Engineer.",
+        "Account: Globex (a2.example.com)",
+        "Contact stage: Cold",
+    ]
+
+
+# A contact whose account the run did not read names its organization_name instead: no
+# account_id, an id the accounts listing never returned, or a run that does not sync accounts.
+@pytest.mark.parametrize(
+    ("account_id", "include"),
+    [
+        (None, ("accounts", "contacts")),
+        ("a9", ("accounts", "contacts")),
+        ("a1", ("contacts",)),
+    ],
+)
+def test_a_contact_with_an_unknown_account_names_its_organization(account_id, include):
+    fake = FakeApollo()
+    fake.add_account("a1", "Acme Holdings")
+    fake.add_contact("c1", "Ada Lovelace", account_id=account_id, organization_name="Acme")
+
+    rows, _ = _sync(fake, {}, include=include)
+    content = {row["id"]: row["content"] for row in rows}
+
+    assert content["contact:c1"].splitlines()[:2] == [
+        "Apollo contact Ada Lovelace works at Acme as Engineer.",
+        "Account: Acme",
+    ]
+
+
+def test_a_run_resumed_after_the_accounts_listing_renders_the_same_text():
+    """A cut run resumes without reading the finished accounts listing again, so the titles
+    contacts name their accounts by must come from the state, or the same contact would render
+    its organization_name here and its account's title in an uncut run."""
+    fake = _workspace()
+    uncut, _ = _sync(fake, {})
+    state = {}
+
+    # the lookups and the accounts page, then the contacts search is over budget
+    _, cut = _sync(fake, state, max_requests=LOOKUPS + 1)
+    assert cut["failed_budget"] == 1
+    assert state["walks"]["accounts"]["done"]
+    account_pages = fake.count("/accounts/search")
+    resumed, _ = _sync(fake, state)
+
+    assert fake.count("/accounts/search") == account_pages, "the accounts are not read again"
+    assert {row["id"]: row for row in resumed} == {
+        row["id"]: row for row in uncut if row["id"].startswith("contact:")
+    }
+
+
+def test_a_renamed_account_re_emits_its_contacts_and_no_others():
+    """The fingerprint hashes the rendered row, so the new title in the contacts' text moves
+    it. The cost of a rename is one extraction for the account and one for each of its contacts."""
+    fake, state = _workspace(), {}
+    _sync(fake, state)
+
+    fake.accounts["a1"]["name"] = "Acme Corporation"
+    rows, _ = _sync(fake, state)
+
+    assert _ids(rows) == {"account:a1", "contact:c1"}
+    contact = next(row for row in rows if row["id"] == "contact:c1")
+    assert (
+        contact["content"]
+        .splitlines()[0]
+        .startswith("Apollo contact Ada Lovelace works at Acme Corporation")
+    )
+
+
+def test_a_forgotten_account_stops_naming_its_contacts():
+    fake, state = _workspace(), {}
+    # Different from the account's title, so each line can only come from one of the two.
+    fake.contacts["c1"]["organization_name"] = "Acme Inc"
+    rows, _ = _sync(fake, state)
+    first = next(row for row in rows if row["id"] == "contact:c1")
+    assert first["content"].splitlines()[1] == "Account: Acme (a1.example.com)"
+
+    # The run that forgets the account still renders c1 with the title the state holds: the
+    # forgetting comes after the contacts listing. The next run falls back to organization_name.
+    del fake.accounts["a1"]
+    rows, _ = _sync(fake, state)
+    assert _tombstones(rows) == {"account:a1"}
+    assert "a1" not in state["account_names"]
+
+    rows, _ = _sync(fake, state)
+
+    assert _ids(rows) == {"contact:c1"}
+    assert rows[0]["content"].splitlines()[1] == "Account: Acme Inc"
+
+
+# An account that Apollo lists with no name is not a name to join on. A contact that points at
+# one keeps its own organization_name, and the account is titled by its domain or, with neither,
+# by a placeholder that never reaches a contact (every such account would merge into one entity).
+def test_a_contact_of_an_account_with_no_name_and_no_domain_keeps_its_organization():
+    fake = FakeApollo()
+    fake.add_account("a1", "", domain="")
+    fake.add_contact("c1", "Ada Lovelace", account_id="a1", organization_name="Acme")
+
+    rows, _ = _sync(fake, {})
+    content = {row["id"]: row["content"] for row in rows}
+
+    assert content["account:a1"].splitlines() == [
+        "Apollo account Unnamed account.",
+        "Account stage: Prospect",
+    ]
+    assert content["contact:c1"].splitlines()[:2] == [
+        "Apollo contact Ada Lovelace works at Acme as Engineer.",
+        "Account: Acme",
+    ]
+
+
+def test_an_account_with_only_a_domain_says_it_once_and_so_does_its_contact():
+    fake = FakeApollo()
+    fake.add_account("a1", "", domain="acme.com")
+    fake.add_contact("c1", "Ada Lovelace", account_id="a1", organization_name="Acme Inc")
+
+    rows, _ = _sync(fake, {})
+    content = {row["id"]: row["content"] for row in rows}
+
+    assert content["account:a1"].splitlines()[0] == "Apollo account acme.com."
+    assert content["contact:c1"].splitlines()[:2] == [
+        "Apollo contact Ada Lovelace works at acme.com as Engineer.",
+        "Account: acme.com",
+    ]
+
+
+def test_a_changed_node_set_re_emits_every_row(monkeypatch):
+    """The node set is part of the fingerprint: a stored document has to be replaced by one that
+    carries the new set, not skipped because its text did not change."""
+    fake, state = _workspace(), {}
+    _sync(fake, state)
+
+    monkeypatch.setattr(apollo_module, "_node_set", lambda team_id, kind: [f"apollo:{kind}:v2"])
+    rows, _ = _sync(fake, state)
+
+    assert len(rows) == 5
+    assert {row[NODE_SET_COLUMN][0] for row in rows} == {
+        "apollo:sequences:v2",
+        "apollo:accounts:v2",
+        "apollo:contacts:v2",
+    }
+
+
 def test_stage_and_list_ids_are_rendered_as_names():
     fake = FakeApollo()
-    fake.add_contact("c1", "Ada Lovelace", title="CTO", contact_stage_id="cs2", label_ids=["l1"])
+    fake.add_contact(
+        "c1", "Ada Lovelace", title="CTO", contact_stage_id="cs2", label_ids=["l1"], account_id="a1"
+    )
     fake.add_account("a1", "Acme", account_stage_id="as2", label_ids=["l2"])
     rows, _ = _sync(fake, {}, include=("contacts", "accounts"))
     content = {row["id"]: row["content"] for row in rows}
 
+    # "Contact stage" and "Account stage": entities merge by name, so a stage called "Cold" on
+    # both would become one entity.
     assert content["contact:c1"].splitlines() == [
-        "Job title: CTO",
-        "Company: Acme",
-        "Stage: Interested",
+        "Apollo contact Ada Lovelace works at Acme as CTO.",
+        "Account: Acme (a1.example.com)",
+        "Contact stage: Interested",
         "Lists: Champions",
     ]
     assert content["account:a1"].splitlines() == [
-        "Domain: a1.example.com",
-        "Stage: Customer",
+        "Apollo account Acme has the domain a1.example.com.",
+        "Account stage: Customer",
         "Lists: Key Accounts",
     ]
 
@@ -204,7 +405,7 @@ def test_an_edit_re_emits_only_that_record():
     rows, _ = _sync(fake, state)
 
     assert _ids(rows) == {"contact:c2"}
-    assert "Job title: Head of Sales" in rows[0]["content"]
+    assert "works at Globex as Head of Sales." in rows[0]["content"]
 
 
 def test_an_enrollment_re_emits_the_contact_although_updated_at_did_not_move():
@@ -501,13 +702,50 @@ def test_a_run_counts_the_requests_it_made():
 @pytest.mark.parametrize("window", ["minute", "hourly", "daily"])
 def test_low_remaining_quota_stops_the_run_before_the_next_request(window):
     fake, state = _workspace(), {}
-    fake.rate_limit = {"minute": 40, "hourly": 400, "daily": 500, window: 3}
+    fake.rate_limit = {"/contact_stages": {"minute": 40, "hourly": 400, "daily": 500, window: 3}}
 
     rows, stats = _sync(fake, state)
 
     assert rows == []
     assert stats["failed_rate_limit"] == 1
     assert fake.calls == []
+
+
+def test_a_window_that_is_empty_on_one_endpoint_does_not_stop_calls_to_another():
+    """Apollo counts per endpoint: the record reads running out says nothing about the listings."""
+    fake = _workspace()
+    fake.rate_limit = {"/contacts/{id}": {"minute": 0, "hourly": 0, "daily": 0}}
+
+    rows, stats = _sync(fake, {})
+
+    assert len(rows) == 5
+    assert stats["failed"] == 0
+
+
+def test_the_record_reads_stop_on_their_own_window_and_the_listing_still_closes(monkeypatch):
+    """The record reads are their own endpoint, so when their window runs low the deletion checks
+    stop at the reserve (a 404 answer carries the windows), without a 429 and without stopping
+    the listing. Windows read off the listing's answers alone would not stop them."""
+    fake = FakeApollo()
+    for n in range(DELETED_CONTACTS):
+        fake.add_contact(f"c{n:02d}", f"Person {n}")
+    state = {}
+    monkeypatch.setattr("requests.request", serve_over_http(fake))
+    _sync(ApolloClient("key"), state, include=("contacts",))
+    fake.contacts.clear()
+    reads_before = len(fake.calls)
+
+    # the window holds the reserve plus four reads; the first read has no headers to go by
+    windows = {"/contacts/{id}": REQUESTS_RESERVE + 4}
+    monkeypatch.setattr("requests.request", serve_over_http(fake, windows=windows))
+    rows, stats = _sync(ApolloClient("key"), state, include=("contacts",))
+
+    reads = [path for _, path in fake.calls[reads_before:] if path.startswith("/contacts/c")]
+    assert len(reads) == 5, "a read that leaves fewer than the reserve is the last one"
+    assert len(_tombstones(rows)) == 5
+    assert stats["failed_rate_limit"] == stats["failed"] == 1
+    assert state["walks"] == {}, "the listing closed: only the record reads were stopped"
+    assert len(state["pending_deletes"]) == DELETED_CONTACTS - 5
 
 
 def test_an_auth_error_before_any_row_raises():
@@ -543,7 +781,7 @@ def _cut_by_budget():
 
 def _cut_by_quota():
     fake = _workspace()
-    fake.rate_limit = {"minute": 3}
+    fake.rate_limit = {"/contact_stages": {"minute": 3}}
     return fake, {}
 
 
@@ -639,6 +877,28 @@ def test_a_check_answered_without_a_record_keeps_it():
     assert {"contact:c1", "contact:c2"} <= set(state["fingerprints"])
 
 
+# --- a record id from an answer goes into the URL of its own read ---
+# An id like "../organizations/enrich?domain=x.com" would make that read another endpoint on
+# the same host, one that spends credits. quote() alone is not enough: ".." is left as it is.
+
+
+@pytest.mark.parametrize(
+    "record_id", ["../organizations/enrich?domain=x.com", "..", "a/b", "c1#fragment"]
+)
+def test_a_record_id_that_could_reach_another_endpoint_is_never_requested(monkeypatch, record_id):
+    fake, state = FakeApollo(), {}
+    fake.add_contact(record_id, "Mallory")
+    monkeypatch.setattr("requests.request", serve_over_http(fake))
+    _sync(ApolloClient("key"), state, include=("contacts",))
+
+    fake.hidden.add(record_id)  # missing from the listing, so the walker checks the record
+    _, stats = _sync(ApolloClient("key"), state, include=("contacts",))
+
+    assert {path for _, path in fake.calls} <= LOOKUP_PATHS | {"/contacts/search"}
+    assert stats["failed_deletion_check"] == 1
+    assert f"contact:{record_id}" in state["fingerprints"], "a check that did not run keeps it"
+
+
 # --- a record that keeps failing backs off ---
 # A record whose check always fails (a 422 Apollo words differently one day, a contact the
 # key cannot read) used to cost a request and a failed count on every run for ever.
@@ -726,6 +986,40 @@ def test_a_cut_or_capped_run_still_reports_the_records_in_back_off(options, tota
     assert stats[cut] == 1
     assert stats["held_back"] == 1
     assert stats["failed"] == 1, "only the cut fails the run, not the record held back"
+
+
+def test_a_cut_after_a_failed_check_counts_both_failures():
+    """Two ids are pending when the run closes its listing: the first check fails, the second is
+    over budget. Both are failures of this run, so ``failed`` says 2, not 1."""
+    fake, state = _workspace(), {}
+    _sync(fake, state)
+    fake.hidden.update({"c1", "c2"})
+    fake.fail_paths["/contacts/c1"] = ApolloAPIError("Apollo request failed: HTTP 500")
+    fake.fail_paths["/contacts/c2"] = ApolloAPIError("Apollo request failed: HTTP 500")
+
+    # three lookups and one search page, then one check; the second check is over budget
+    _, stats = _sync(fake, state, include=("contacts",), max_requests=CONTACT_LOOKUPS + 2)
+
+    assert stats["failed_deletion_check"] == stats["failed_budget"] == 1
+    assert stats["failed"] == 2
+
+
+def test_a_listing_over_the_cap_after_a_failed_check_counts_both_failures():
+    """A run that resumes with a pending check finishes that check first. It fails, then the
+    listing turns out to be over the cap: both are failures of this run, so ``failed`` says 2."""
+    fake, state = _workspace(), {}
+    _sync(fake, state)
+    del fake.contacts["c2"]
+    fake.fail_paths["/contacts/c2"] = ApolloRateLimitedError("Apollo rate limit exceeded")
+    _sync(fake, state)
+    assert state["pending_deletes"] == ["contact:c2"]
+    fake.fail_paths["/contacts/c2"] = ApolloAPIError("Apollo request failed: HTTP 500")
+    fake.total_override = 60_000
+
+    _, stats = _sync(fake, state)
+
+    assert stats["failed_deletion_check"] == stats["failed_cap"] == 1
+    assert stats["failed"] == 2
 
 
 def test_a_record_listed_again_drops_its_failure_streak():

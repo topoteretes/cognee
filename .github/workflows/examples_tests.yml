@@ -15,6 +15,13 @@ permissions:
 on:
   workflow_call:
     inputs:
+      has-secrets:
+        # False on fork PRs, where GitHub withholds repository secrets. Jobs
+        # that need a real LLM/embedding key skip instead of failing on an
+        # empty key. Other callers leave the default and run everything.
+        required: false
+        type: boolean
+        default: true
       ci-image:
         required: false
         type: string
@@ -115,7 +122,7 @@ jobs:
         env:
           ENV: 'dev'
           CACHING: 'true'
-          CACHE_BACKEND: 'fs'
+          CACHE_BACKEND: 'sqlite'
           OPENAI_API_KEY: "mock-not-used"
           LLM_API_KEY: "mock-not-used"
           EMBEDDING_DIMENSIONS: 300
@@ -190,6 +197,7 @@ jobs:
 
   test-s3-permissions-example: # Make sure permission and multi-user mode work with S3 file system
     name: Run Permissions Example
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -243,6 +251,8 @@ jobs:
           DB_PORT: 5432
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
+          # The default sqlite cache.db cannot live on the S3 system root.
+          CACHE_BACKEND: 'postgres'
         run: uv run python cognee/tests/utils/run_mocked.py ./examples/demos/permissions/user_permissions_and_access_control_example.py
 
   # Docling test - NO container (runs on macOS, container only works on Linux)
@@ -253,6 +263,7 @@ jobs:
   # tokens), so a generic mock's empty completion fails it by design.
   test_docling_add:
     name: Run Add with Docling Test
+    if: ${{ inputs.has-secrets }}
     runs-on: macos-15
     steps:
       - name: Check out repository

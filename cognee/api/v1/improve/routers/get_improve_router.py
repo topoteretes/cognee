@@ -34,7 +34,7 @@ class ImprovePayloadDTO(InDTO):
     run_in_background: bool | None = Field(default=False)
     build_global_context_index: bool | None = Field(default=False)
     build_truth_subspace: bool | None = Field(default=False)
-    review_conflicts: bool = False
+    review_conflicts: bool | None = None
     # Learning rate for the feedback-weight stage. Omitted (None) means the
     # server's IMPROVE_FEEDBACK_ALPHA applies; the stage's formula is fixed,
     # only the rate is tunable.
@@ -77,7 +77,9 @@ def get_improve_router() -> APIRouter:
           task and return immediately with `status == "running"` (default: False).
         - **build_global_context_index** (Optional[bool]): Build the global context index
           (default: False).
-        - **review_conflicts** (bool): Review conflicts using source documents and dates.
+        - **review_conflicts** (Optional[bool]): Review conflicts using source documents and
+          dates. Omitted or null follows `IMPROVE_REVIEW_CONFLICTS` (default true); skipped
+          without an LLM.
         - **build_truth_subspace** (Optional[bool]): Build the truth subspace from the
           sessions' distilled learnings (default: False; needs `sessionIds` and a
           backend with truth state).

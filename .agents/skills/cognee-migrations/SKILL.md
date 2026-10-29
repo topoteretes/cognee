@@ -87,6 +87,21 @@ kind (`documents`, `episodes`, `entities`, `facts`, `memories`,
 `memory_blocks`), plus `nodes.jsonl` with the raw graph nodes. The Mem0,
 Zep, Letta and LangMem importers also translate into COGX records first.
 
+Since COGX 0.2 every record also carries an optional OMP header, the fields
+proposed to the Open Memory Protocol exchange group: `origin` (first system
+and id, kept across copies), `content_hash` (sha256 of the body, for dedupe;
+distinct from an integrity checksum), `subject`, `semantic_kind` (fact,
+decision, commitment, procedure, preference, observation, other),
+`valid_from`/`valid_to` with `invalidated_by`, `evidence[]` (role, ref,
+confidence), `confidence` (outcome, verified_at, verified_by, score),
+`version`, `content_type` (the body's format), `tags`, a record `checksum`
+stamped by the writer, and provenance as `contributors[]` (role, actor,
+kind, at) with the `accountable` human and `ai_involvement`. The
+cognee exporter fills what it can read from the graph and declares the rest
+in the manifest's `coverage` map; the loader keeps the header in each
+record's external metadata and on fact edges, so a re-export preserves it.
+0.1 archives read unchanged.
+
 Use it to back up and restore a dataset, or to copy one to another cognee
 instance:
 

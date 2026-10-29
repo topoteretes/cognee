@@ -37,7 +37,7 @@ class _Req:
     def __init__(self, result):
         self._result = result
 
-    def execute(self):
+    def execute(self, num_retries=0):
         return self._result
 
 
@@ -54,6 +54,8 @@ class _Files:
         return _Req({"files": [m for m in self.svc.by_folder.get(folder, []) if not m["trashed"]]})
 
     def get(self, fileId, fields, supportsAllDrives):
+        if fields == "id":  # resolving the scope folder, as Drive does for the "root" alias
+            return _Req({"id": fileId})
         return _Req(self.svc.by_id[fileId])
 
     def export(self, fileId, mimeType):
@@ -89,6 +91,9 @@ class FakeDrive:
 
     def changes(self):
         return _Changes(self)
+
+    def close(self):
+        pass
 
     def put(self, fid, content):
         meta = {

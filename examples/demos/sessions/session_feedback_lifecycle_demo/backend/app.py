@@ -5,7 +5,7 @@ POST /demo/init remembers the bundled documents into isolated data/system direct
 cognee.session.add_feedback, and /demo/run_memify_pipeline applies apply_feedback_weights_pipeline.
 /demo/graph, /demo/session and /demo/state feed the frontend served at / on http://127.0.0.1:8765.
 
-Requires: LLM_API_KEY, plus CACHING=true, AUTO_FEEDBACK=true and CACHE_BACKEND=fs (defaulted by
+Requires: LLM_API_KEY, plus CACHING=true, AUTO_FEEDBACK=true and CACHE_BACKEND=sqlite (defaulted by
 the script and enforced by the /demo/config_gate check before every mutating call).
 Run: uv run python examples/demos/sessions/session_feedback_lifecycle_demo/backend/app.py
 """
@@ -20,7 +20,7 @@ from typing import Any
 # Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
 # assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
 os.environ.setdefault("CACHING", "true")
-os.environ.setdefault("CACHE_BACKEND", "fs")
+os.environ.setdefault("CACHE_BACKEND", "sqlite")
 os.environ.setdefault("AUTO_FEEDBACK", "true")
 os.environ.setdefault("ENV", "dev")
 
@@ -54,7 +54,7 @@ MEMIFY_ALPHA = 0.619
 REQUIRED_ENV_SETTINGS = {
     "CACHING": "true",
     "AUTO_FEEDBACK": "true",
-    "CACHE_BACKEND": "fs",
+    "CACHE_BACKEND": "sqlite",
 }
 
 

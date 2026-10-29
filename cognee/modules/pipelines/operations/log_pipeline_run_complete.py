@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -7,7 +6,6 @@ from cognee.modules.operations import get_current_session_ids, get_operation_ori
 from cognee.modules.operations.usage_accumulator import get_parent_run_id
 from cognee.modules.pipelines.models import OperationOutcome, PipelineRun, PipelineRunStatus
 from cognee.modules.pipelines.operations.run_sessions import add_run_sessions
-from cognee.modules.pipelines.utils import summarize_run_info_data
 from cognee.modules.users.models import User
 
 
@@ -16,7 +14,6 @@ async def log_pipeline_run_complete(
     pipeline_id: UUID,
     pipeline_name: str,
     dataset_id: UUID,
-    data: Any,
     *,
     user: User | None = None,
     started_at: datetime | None = None,
@@ -24,7 +21,6 @@ async def log_pipeline_run_complete(
     tokens_out: int | None = None,
     embedding_tokens: int | None = None,
 ):
-    data_info = summarize_run_info_data(data)
     session_ids = get_current_session_ids()
 
     pipeline_run = PipelineRun(
@@ -33,9 +29,7 @@ async def log_pipeline_run_complete(
         pipeline_id=pipeline_id,
         status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
         dataset_id=dataset_id,
-        run_info={
-            "data": data_info,
-        },
+        run_info={},
         user_id=user.id if user else None,
         tenant_id=getattr(user, "tenant_id", None) if user else None,
         operation_name=pipeline_name,

@@ -301,7 +301,8 @@ async def test_rollback_preserves_markers_of_previously_extracted_data(monkeypat
 
     reset_calls = []
 
-    async def _capture_reset(_session, target_data_ids, _dataset_id):
+    async def _capture_reset(_session, target_data_ids, _dataset_id, pipeline_name=None):
+        assert pipeline_name == "cognify_pipeline"
         reset_calls.append(set(target_data_ids))
 
     async def _get_unified_engine():
