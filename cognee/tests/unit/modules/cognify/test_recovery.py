@@ -48,6 +48,7 @@ async def _no_op_context(*_args, **_kwargs):
 
 def _run(pipeline_name, status=PipelineRunStatus.DATASET_PROCESSING_STARTED, **overrides):
     fields = {
+        "id": uuid4(),  # the STARTED row's own id, whose sessions recovery copies
         "pipeline_name": pipeline_name,
         "pipeline_id": uuid4(),
         "dataset_id": uuid4(),
@@ -92,11 +93,15 @@ def _wire(monkeypatch, runs, datasets, *, rollback_fails=False, users=None):
     async def _latest_runs():
         return runs
 
+    async def _no_sessions(row_ids):
+        return {}
+
     monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: _FakeEngine(datasets))
     monkeypatch.setattr(recovery_module, "get_unterminated_pipeline_runs", _latest_runs)
     monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
     monkeypatch.setattr(recovery_module, "ROLLBACK_HANDLERS", {"cognify_pipeline": _rollback})
     monkeypatch.setattr(recovery_module, "log_pipeline_run_error", _log_error)
+    monkeypatch.setattr(recovery_module, "get_run_session_ids", _no_sessions)
     monkeypatch.setattr(recovery_module, "get_user", _get_user)
     monkeypatch.setattr(recovery_module, "STALE_RUN_MIN_AGE_SECONDS", 3600)
 
@@ -169,6 +174,31 @@ async def test_every_pipeline_with_a_stale_started_run_is_closed(monkeypatch):
     closed = sorted(kw["pipeline_name"] for name, kw in calls if name == "error")
     assert closed == ["add_pipeline", "cognify_pipeline", "memify_pipeline"]
     assert sum(1 for name, _ in calls if name == "rollback") == 1
+
+
+@pytest.mark.asyncio
+async def test_sessions_are_read_once_per_pass_and_each_closed_run_gets_its_own(monkeypatch):
+    """One pipeline_run_sessions lookup for every candidate, not one per closed run."""
+    runs = [_run("memify_pipeline"), _run("add_pipeline"), _run("cognify_pipeline")]
+    calls = _wire(monkeypatch, runs, {r.dataset_id: _dataset_for(r) for r in runs})
+    lookups = []
+    sessions = {runs[0].id: ["chat_1", "chat_2"], runs[1].id: ["chat_1"]}
+
+    async def _sessions(row_ids):
+        lookups.append(sorted(row_ids, key=str))
+        return sessions
+
+    monkeypatch.setattr(recovery_module, "get_run_session_ids", _sessions)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert lookups == [sorted((r.id for r in runs), key=str)]
+    by_name = {kw["pipeline_name"]: kw["session_ids"] for name, kw in calls if name == "error"}
+    assert by_name == {
+        "memify_pipeline": ("chat_1", "chat_2"),
+        "add_pipeline": ("chat_1",),
+        "cognify_pipeline": (),
+    }
 
 
 @pytest.mark.asyncio
