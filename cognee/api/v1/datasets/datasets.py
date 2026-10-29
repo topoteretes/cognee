@@ -254,6 +254,8 @@ class datasets:
         ``SPARQL_MAX_GRAPH_NODES`` raise ``SparqlGraphTooLargeError`` and a
         query over ``SPARQL_QUERY_TIMEOUT_SECONDS`` raises
         ``SparqlQueryTimeoutError`` (all in ``cognee.modules.graph.rdf``).
+        ``SERVICE``, ``FROM`` and ``FROM NAMED`` raise
+        ``SparqlExternalAccessNotAllowedError``.
 
         Routes to the remote instance when connected via ``serve()``, like
         ``list_data``; there the server's limits apply and a refused query
@@ -377,6 +379,20 @@ class datasets:
         never depends on how it was called.
         """
         return await _fan_out_by_pipeline(dataset_ids, pipeline_names, get_pipeline_progress)
+
+    @staticmethod
+    async def get_memory_status(dataset_ids: list[UUID]) -> dict:
+        """The memory state of each dataset: ``{dataset_id: MemoryStatus}``.
+
+        Folds the latest indexing and cognify runs into one answer (``state``,
+        ``search_level``, ``searchable``, ``graph_ready``, ``message``, the
+        per-pipeline statuses and the failure cause); see
+        ``cognee.modules.cognify.memory_status``. Every requested dataset gets
+        an entry, ``empty`` when nothing ran on it.
+        """
+        from cognee.modules.cognify.memory_status import get_memory_status
+
+        return await get_memory_status(dataset_ids)
 
     @staticmethod
     async def empty_dataset(dataset_id: UUID, user: User | None = None):
@@ -522,6 +538,10 @@ class datasets:
                 if str(data.dataset_id) != str(dataset_id):
                     raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
 
+                from cognee.tasks.code_graph.code_repo import is_code_repo_sourced
+
+                was_code_repo = is_code_repo_sourced(data)
+
                 async with set_database_global_context_variables(dataset_id, dataset.owner_id):
                     # Delete mode is exclusive: ledger rows imply the relational-ledger
                     # path; only ledger-free data probes the graph marker to distinguish
@@ -561,6 +581,16 @@ class datasets:
                     dataset_deleted = await _delete_dataset_if_empty(
                         dataset, delete_dataset_if_empty
                     )
+
+                # A dataset's code repositories are extracted together, so the
+                # ones that remain still describe the deleted one: mark them
+                # for re-extraction by the next cognify() of the dataset.
+                if not dataset_deleted and was_code_repo:
+                    from cognee.tasks.code_graph.cluster import (
+                        mark_dataset_code_repos_for_rebuild,
+                    )
+
+                    await mark_dataset_code_repos_for_rebuild(dataset)
 
             return _delete_data_receipt(
                 dataset_id=dataset.id,

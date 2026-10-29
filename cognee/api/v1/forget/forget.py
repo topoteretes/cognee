@@ -15,6 +15,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.operations import record_operation
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME
 
 logger = get_logger("forget")
 
@@ -545,14 +546,14 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
             if data_record and data_record.pipeline_status:
                 dataset_id_str = str(dataset_id)
                 updated = False
-                # Memory-only forget removes cognify artifacts (graph/vector), so only
-                # cognify_pipeline status should be reset. Keep add status intact.
-                if (
-                    "cognify_pipeline" in data_record.pipeline_status
-                    and dataset_id_str in data_record.pipeline_status["cognify_pipeline"]
-                ):
-                    del data_record.pipeline_status["cognify_pipeline"][dataset_id_str]
-                    updated = True
+                # Memory-only forget removes the chunks, graph and vectors the
+                # indexing and cognify pipelines wrote, so both stamps are reset
+                # (a kept indexing stamp would skip the document's early
+                # indexing). Keep add status intact.
+                for pipeline_name in (INDEXING_PIPELINE_NAME, COGNIFY_PIPELINE_NAME):
+                    if dataset_id_str in data_record.pipeline_status.get(pipeline_name, {}):
+                        del data_record.pipeline_status[pipeline_name][dataset_id_str]
+                        updated = True
                 if updated:
                     orm_attributes.flag_modified(data_record, "pipeline_status")
                 await session.commit()

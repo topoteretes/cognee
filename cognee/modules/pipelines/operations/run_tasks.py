@@ -1,6 +1,7 @@
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack
+from contextvars import ContextVar
 from typing import Any
 from uuid import UUID
 
@@ -11,7 +12,7 @@ from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingCo
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.operations import scrub_error_message
 from cognee.modules.operations.usage_accumulator import operation_usage_scope, parent_run_scope
-from cognee.modules.pipelines.exceptions import PipelineRunFailedError
+from cognee.modules.pipelines.exceptions import AfterRunHookError, PipelineRunFailedError
 from cognee.modules.pipelines.layers.validate_pipeline_tasks import validate_pipeline_tasks
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.PipelineRunInfo import (
@@ -44,6 +45,23 @@ from .run_tasks_with_telemetry import (
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
 
+# Why a caller closed a run it holds paused (close_run_with_cause).
+_close_cause: ContextVar[Exception | None] = ContextVar("pipeline_run_close_cause", default=None)
+
+
+async def close_run_with_cause(run: AsyncGenerator, cause: Exception) -> None:
+    """Close a paused run and record ``cause`` as its failure.
+
+    Closing a run records it errored with ``GeneratorExit``; a caller that
+    stops a run because of a known failure passes it here, so the run's row
+    and its error class name the real cause.
+    """
+    token = _close_cause.set(cause)
+    try:
+        await run.aclose()
+    finally:
+        _close_cause.reset(token)
+
 
 async def run_tasks(
     tasks: list[Task] | Callable[[Any], list[Task]],
@@ -75,13 +93,14 @@ async def run_tasks(
     to compact the vector store, see ``compact_vector_store``). It sits
     outside the run's error handling: it cannot fail, roll back, or re-mark a
     run that already completed. An exception it raises propagates to the
-    caller; the run stays recorded as completed.
+    caller as ``AfterRunHookError``; the run stays recorded as completed.
 
     ``after_items_ran`` is awaited before it, and also when items of the run failed,
     whether they reported or raised it. Cognify reconciles the document structure
     with it, which one failing item must not freeze. On a completed run its error
-    propagates. On a failed run the run's own error wins: a raised one goes on with
-    the hook's error as its cause, a reported one is returned and the hook's is logged.
+    propagates as ``AfterRunHookError`` too. On a failed run the run's own error wins:
+    a raised one goes on with the hook's error as its cause, a reported one is returned
+    and the hook's is logged.
     """
     task_resolver = tasks if callable(tasks) else None
     if not user:
@@ -378,6 +397,8 @@ async def run_tasks(
                 # broke ("AuthenticationError: invalid api key"), not
                 # "Pipeline run failed".
                 root_error = getattr(error, "first_error", None) or error
+                if isinstance(error, GeneratorExit):
+                    root_error = _close_cause.get() or root_error
                 with telemetry_guard():
                     send_telemetry(
                         PIPELINE_RUN_ERRORED,
@@ -431,14 +452,20 @@ async def run_tasks(
             # Reached only once the completed run's event has been consumed: a
             # close at that yield re-raises above (``run_finished``), and the
             # swallowed per-item failure path leaves ``run_finished`` unset.
-            if (run_finished or items_failed) and after_items_ran is not None:
+            if run_finished:
+                try:
+                    if after_items_ran is not None:
+                        await after_items_ran()
+                    if after_run_completed is not None:
+                        await after_run_completed()
+                except Exception as hook_error:
+                    raise AfterRunHookError(
+                        [(dataset.id, dataset.name, hook_error)]
+                    ) from hook_error
+            elif items_failed and after_items_ran is not None:
                 try:
                     await after_items_ran()
                 except Exception:
-                    if run_finished:
-                        raise
                     # The reported failure was already yielded and is what callers act on
                     # (improve reads its budget error), so a broken hook must not replace it.
                     logger.exception("after_items_ran failed after a reported item failure")
-            if run_finished and after_run_completed is not None:
-                await after_run_completed()
