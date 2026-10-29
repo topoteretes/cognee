@@ -71,26 +71,44 @@ async def _read_user_resolutions(graph) -> list[dict]:
     return resolutions
 
 
-def apply_graph_resolutions(edges: list, resolutions: list[dict]) -> list:
-    """Replace only explicitly rejected edges, preserving all other retrieved content."""
-    if not resolutions:
-        return edges
-    rejected = {
-        fid: resolution for resolution in resolutions for fid in resolution["rejected_fact_ids"]
-    }
-    result = []
-    for edge in edges:
-        updated = copy(edge)
-        updated.attributes = dict(edge.attributes)
-        fact_id = edge.attributes.get("edge_object_id") or generate_edge_object_id(
+def _fact_id(edge) -> str:
+    return str(
+        edge.attributes.get("edge_object_id")
+        or generate_edge_object_id(
             edge.node1.id,
             edge.node2.id,
             edge.attributes.get("relationship_name")
             or edge.attributes.get("relationship_type")
             or "",
         )
-        resolution = rejected.get(str(fact_id))
+    )
+
+
+def apply_graph_resolutions(edges: list, resolutions: list[dict]) -> list:
+    """Replace only explicitly rejected edges, preserving all other retrieved content.
+
+    Each decision is stated once in these edges. A rejected edge is dropped when its
+    decision's selected edge was retrieved too, which is labelled as the user's choice.
+    Otherwise the decision's first rejected edge becomes one synthetic link carrying
+    the accepted fact, and its other rejected edges are dropped.
+    """
+    if not resolutions:
+        return edges
+    rejected = {
+        fid: resolution for resolution in resolutions for fid in resolution["rejected_fact_ids"]
+    }
+    fact_ids = [_fact_id(edge) for edge in edges]
+    retrieved = {fact_id for fact_id in fact_ids if fact_id not in rejected}
+    linked: set[str] = set()
+    result = []
+    for edge, fact_id in zip(edges, fact_ids):
+        updated = copy(edge)
+        updated.attributes = dict(edge.attributes)
+        resolution = rejected.get(fact_id)
         if resolution:
+            if str(resolution.get("selected_fact_id")) in retrieved or resolution["id"] in linked:
+                continue
+            linked.add(resolution["id"])
             # A context-only link from the real resolution node to its subject carries
             # the accepted assertion. Evidence identifies the selected fact, never the
             # rejected edge that happened to win vector retrieval.
@@ -168,10 +186,8 @@ def user_resolution_text(selected_fact: str) -> str:
     return f"Accepted by user: {selected_fact}; ignore competing claims."
 
 
-def accepted_facts_context(resolutions: list[dict], node_ids: list[str], limit: int) -> str:
-    """Bound the optional prelude to decisions about the retrieved nodes and sources."""
-    if limit <= 0:
-        return ""
+def accepted_facts_context(resolutions: list[dict], node_ids: list[str]) -> str:
+    """Every user decision about the retrieved nodes or their sources, for the prelude."""
     retrieved_ids = set(node_ids)
     accepted = sorted(
         {
@@ -183,7 +199,7 @@ def accepted_facts_context(resolutions: list[dict], node_ids: list[str], limit: 
                 if node_id is not None
             )
         }
-    )[:limit]
+    )
     if not accepted:
         return ""
     return "## Accepted facts (user resolved)\n" + "\n".join(accepted)

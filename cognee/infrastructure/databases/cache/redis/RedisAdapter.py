@@ -644,15 +644,21 @@ class RedisAdapter(CacheDBInterface):
     async def delete_session_context_entry(
         self, user_id: str, session_id: str, entry_id: str
     ) -> bool:
-        """Delete a single session-context entry by its "id" field."""
+        """Delete a single session-context entry by its "id" field.
+
+        LREM removes the stored element in one command, so a concurrent delete cannot
+        push it back and a reader never sees the list half rewritten.
+        """
         try:
             context_key = self._session_context_key(user_id, session_id)
-            entries = await self._load_entries(context_key)
-            surviving = [entry for entry in entries if entry.get("id") != entry_id]
-            if len(surviving) == len(entries):
+            stored = await self.async_redis.lrange(context_key, 0, -1)
+            removed = 0
+            for raw in stored:
+                if json.loads(raw).get("id") == entry_id:
+                    removed += await self.async_redis.lrem(context_key, 0, raw)
+            if not removed:
                 return False
-            await self._rewrite_entries(context_key, surviving)
-            if surviving:
+            if len(stored) > removed:
                 await self._apply_session_ttl(context_key)
             return True
         except (redis.ConnectionError, redis.TimeoutError) as e:

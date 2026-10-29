@@ -305,9 +305,7 @@ class HybridRetriever(BaseRetriever):
         )
         prelude = format_global_context_prelude(root_text, top_summaries)
         used_ids = extract_hybrid_object_ids(retrieved_objects) or {}
-        accepted = accepted_facts_context(
-            resolutions, used_ids.get("node_ids", []), self.global_context_index_top_k
-        )
+        accepted = accepted_facts_context(resolutions, used_ids.get("node_ids", []))
         global_context = f"## Global context\n{prelude}" if prelude else ""
         return "\n\n".join(section for section in (global_context, accepted) if section)
 

@@ -52,6 +52,9 @@ def _preserve_user_resolutions(to_write: ConflictsToWrite) -> None:
 
     Mutate the batch so its finalization receives the same protected nodes. Drops of
     deleted subjects still go through; LLM drops of a live user's decision do not.
+    The choice covers only the facts the user weighed. Evidence reported after it is
+    never marked rejected on the user's behalf: it follows each review exactly as
+    under a conflict the review owns.
     """
     accepted = {str(item.conflict.id): item for item in to_write.accepted_conflicts}
     for conflict_id, stored in to_write.scope.conflicts.items():
@@ -67,32 +70,40 @@ def _preserve_user_resolutions(to_write: ConflictsToWrite) -> None:
             continue  # Its evidence was forgotten; let the current review replace or drop it.
         if dropping and stored["about_id"] not in to_write.scope.entities:
             continue  # The subject itself was deleted.
-        statuses = {
-            fact_id: ("current" if fact_id == stored.get("selected_fact_id") else "superseded")
-            for fact_id, fact in to_write.scope.facts.items()
-            if any(
-                str(mark.get("conflict_id")) == conflict_id
-                for mark in read_conflict_marks(fact["properties"])
+        selected_fact_id = stored.get("selected_fact_id")
+        decided = {selected_fact_id, *stored.get("rejected_fact_ids", [])}
+        statuses: dict[str, str] = {}
+        for fact_id, fact in to_write.scope.facts.items():
+            held = next(
+                (
+                    mark.get("status")
+                    for mark in read_conflict_marks(fact["properties"])
+                    if str(mark.get("conflict_id")) == conflict_id
+                ),
+                None,
             )
-            or (incoming and fact_id in incoming.fact_statuses)
-        }
+            reported = incoming.fact_statuses.get(fact_id) if incoming else None
+            if held is None and reported is None:
+                continue
+            if fact_id == selected_fact_id:
+                statuses[fact_id] = "current"
+            elif fact_id in decided:
+                statuses[fact_id] = "superseded"
+            elif reported or fact_id not in to_write.shown_fact_ids:
+                # A shown fact the review no longer labels has left the conflict.
+                statuses[fact_id] = reported or held
+        rejected = sorted(fid for fid in statuses if fid in decided and fid != selected_fact_id)
         replacement = _rebuild_stored_conflict(
             stored,
-            rejected_fact_ids=sorted(
-                fid for fid in statuses if fid != stored.get("selected_fact_id")
-            ),
+            rejected_fact_ids=rejected,
             rejected_fact_texts=sorted(
                 set(stored.get("rejected_fact_texts", []))
-                | {
-                    to_write.scope.facts[fid]["properties"].get("edge_text", "")
-                    for fid in statuses
-                    if fid != stored.get("selected_fact_id")
-                }
+                | {to_write.scope.facts[fid]["properties"].get("edge_text", "") for fid in rejected}
                 - {""}
             ),
-            sources=sorted(
-                set(stored.get("sources", [])) | set(incoming.conflict.sources if incoming else [])
-            ),
+            # A chunk forgotten since must drop out: the reader sends a conflict citing
+            # a missing chunk back to review on every run.
+            sources=sorted(_collect_cited_sources(statuses, to_write.scope.facts)),
             values=sorted(
                 set(stored.get("values", [])) | set(incoming.conflict.values if incoming else [])
             ),
@@ -180,11 +191,17 @@ def _restate_marks(
         marks = [mark for mark in marks if str(mark["conflict_id"]) != change.conflict_id]
         if status:
             mark = {"conflict_id": change.conflict_id, "status": status}
-            if change.accepted.conflict.resolution_source == "user":
+            conflict = change.accepted.conflict
+            # Only the facts the user weighed carry the decision; evidence reported after
+            # it keeps a plain review mark (see _preserve_user_resolutions).
+            if conflict.resolution_source == "user" and fact_id in (
+                conflict.selected_fact_id,
+                *conflict.rejected_fact_ids,
+            ):
                 mark.update(
                     resolution_source="user",
-                    dataset_id=change.accepted.conflict.dataset_id,
-                    selected_fact=change.accepted.conflict.selected_fact,
+                    dataset_id=conflict.dataset_id,
+                    selected_fact=conflict.selected_fact,
                 )
             marks.append(mark)
     return marks
@@ -305,12 +322,10 @@ def _choose_value_statuses(accepted: AcceptedConflict, facts: dict[str, dict]) -
     return statuses
 
 
-def _collect_cited_sources(accepted: AcceptedConflict, facts: dict[str, dict]) -> dict[str, dict]:
-    """One source record per cited chunk, across every labelled fact."""
+def _collect_cited_sources(fact_ids, facts: dict[str, dict]) -> dict[str, dict]:
+    """One source record per chunk the given facts cite now."""
     return {
-        source["chunk_id"]: source
-        for fact_id in accepted.fact_statuses
-        for source in facts[fact_id]["sources"]
+        source["chunk_id"]: source for fact_id in fact_ids for source in facts[fact_id]["sources"]
     }
 
 
@@ -336,7 +351,9 @@ def _build_conflict_edges(accepted: AcceptedConflict, facts: dict[str, dict]) ->
                     "effective_date": source["effective_date"],
                 },
             )
-            for chunk_id, source in sorted(_collect_cited_sources(accepted, facts).items())
+            for chunk_id, source in sorted(
+                _collect_cited_sources(accepted.fact_statuses, facts).items()
+            )
         ),
     ]
 

@@ -35,11 +35,14 @@ def effective_date_display(value) -> str:
     return str(value)[:10] if value is not None else ""
 
 
-# A fact can hold marks from several conflicts; the most alarming status wins.
+# A fact can hold marks from several conflicts; the most alarming status wins, unless
+# the user selected the fact: their decision outranks every review.
 STATUS_PRECEDENCE = ("conflicting", "superseded", "current")
 
 
 def fact_status(properties: dict) -> str | None:
+    if is_user_selected_fact(properties):
+        return "accepted by user"
     statuses = {mark.get("status") for mark in read_conflict_marks(properties)}
     return next((status for status in STATUS_PRECEDENCE if status in statuses), None)
 
@@ -71,6 +74,13 @@ def user_selected_facts(properties: dict) -> list[str]:
 def is_rejected_fact(properties: dict) -> bool:
     return any(
         _is_user_resolution_in_scope(mark) and mark.get("status") == "superseded"
+        for mark in read_conflict_marks(properties)
+    )
+
+
+def is_user_selected_fact(properties: dict) -> bool:
+    return any(
+        _is_user_resolution_in_scope(mark) and mark.get("status") == "current"
         for mark in read_conflict_marks(properties)
     )
 

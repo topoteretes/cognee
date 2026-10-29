@@ -1,4 +1,10 @@
-"""Dataset-authorized conflict decisions, serialized with ingestion and improve."""
+"""Dataset-authorized conflict decisions, serialized with ingestion and improve.
+
+Like the memory API and the other remote-aware entry points, both functions go to
+the remote instance once ``cognee.serve()`` is connected: the dataset and its
+conflicts live there. On that path the API key identifies the caller, so ``user``
+is ignored, and HTTP errors surface as RuntimeError carrying the status.
+"""
 
 from datetime import datetime, timezone
 from typing import Literal
@@ -25,6 +31,7 @@ from cognee.tasks.memify.review_conflicts.models import (
 )
 from cognee.tasks.memify.review_conflicts.read_facts import _to_conflict_record, read_entity_facts
 from cognee.tasks.memify.review_conflicts.write_conflicts import (
+    _collect_cited_sources,
     _rebuild_stored_conflict,
     write_conflicts,
 )
@@ -86,6 +93,11 @@ async def list_conflicts(
         raise CogneeValidationError(
             message="status must be resolved or unresolved", status_code=422
         )
+    from cognee.api.v1.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        return await client.list_conflicts(dataset_id, status=status)
     user, dataset = await _authorized_dataset(dataset_id, user, "read")
     async with set_database_global_context_variables(dataset.id, dataset.owner_id):
         graph = await get_graph_engine()
@@ -120,9 +132,21 @@ async def resolve_conflict(
 ) -> ConflictDetail:
     """Choose an existing competing fact; keep rejected facts as historical evidence.
 
-    Repeating a choice is idempotent. A new choice explicitly revises the prior
-    decision. Automatic improve preserves the choice while its selected fact exists.
+    Repeating a choice over the same facts is idempotent; repeated after a review
+    listed new evidence, it also rejects that evidence. A new choice explicitly
+    revises the prior decision. Automatic improve preserves the choice while its
+    selected fact exists, and never rejects evidence the user did not see.
     """
+    from cognee.api.v1.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        return await client.resolve_conflict(
+            conflict_id,
+            dataset_id=dataset_id,
+            selected_fact_id=selected_fact_id,
+            reason=reason,
+        )
     user, dataset = await _authorized_dataset(dataset_id, user, "write")
     conflict_id, selected_fact_id = str(conflict_id), str(selected_fact_id)
     async with record_operation("resolve_conflict") as operation:
@@ -156,10 +180,14 @@ async def resolve_conflict(
                     message="selected_fact_id must be an existing fact belonging to this conflict",
                     status_code=422,
                 )
+            rejected_fact_ids = sorted(fid for fid in statuses if fid != selected_fact_id)
+            # The same choice over the same competing facts changes nothing. A fact a review
+            # listed since makes it a new decision, one that rejects that fact as well.
             same_choice = (
                 stored.get("resolution_source") == "user"
                 and stored.get("selected_fact_id") == selected_fact_id
                 and stored.get("resolution_reason") == reason
+                and sorted(stored.get("rejected_fact_ids", [])) == rejected_fact_ids
             )
             selected_text = _fact_text(scope.facts[selected_fact_id], scope.nodes)
             resolved = _rebuild_stored_conflict(
@@ -169,14 +197,12 @@ async def resolve_conflict(
                 cache_cleanup_pending=True,
                 selected_fact_id=selected_fact_id,
                 selected_fact=selected_text,
-                rejected_fact_ids=sorted(fid for fid in statuses if fid != selected_fact_id),
+                rejected_fact_ids=rejected_fact_ids,
                 rejected_fact_texts=sorted(
-                    {
-                        _fact_text(scope.facts[fid], scope.nodes)
-                        for fid in statuses
-                        if fid != selected_fact_id
-                    }
+                    {_fact_text(scope.facts[fid], scope.nodes) for fid in rejected_fact_ids}
                 ),
+                # Its citation links are rebuilt from the facts, so the node must agree.
+                sources=sorted(_collect_cited_sources(statuses, scope.facts)),
                 resolved_by=stored.get("resolved_by") if same_choice else str(user.id),
                 resolved_at=stored.get("resolved_at")
                 if same_choice
@@ -198,9 +224,11 @@ async def resolve_conflict(
 
         # Session storage is independent of the dataset lock and database queue slot.
         # The pending marker survives a cleanup failure, so an identical request retries it.
+        # Only answers that used a competing fact, the conflict, or a passage cited for
+        # it are stale; the subject entity is a hub every unrelated answer about it cites.
         await invalidate_sessions_for_deleted_data(
             dataset.id,
-            deleted_node_ids={conflict_id, stored["about_id"], *stored.get("sources", [])},
+            deleted_node_ids={conflict_id, *stored.get("sources", []), *resolved.sources},
             deleted_edge_ids=set(statuses),
             user_id=user.id,
             strict=True,
