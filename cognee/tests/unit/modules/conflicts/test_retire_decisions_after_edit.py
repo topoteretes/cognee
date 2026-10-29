@@ -1,4 +1,4 @@
-"""Sessions that cited a retired decision are invalidated, best-effort (SDK-1328)."""
+"""Sessions that cited a retired decision are invalidated with it (SDK-1328)."""
 
 import importlib
 from types import SimpleNamespace
@@ -11,10 +11,9 @@ methods = importlib.import_module("cognee.modules.conflicts.methods")
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("invalidation_fails", [False, True])
-async def test_retired_decisions_reach_session_invalidation(invalidation_fails):
+async def test_retired_decisions_reach_session_invalidation():
     dataset, user = SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
-    invalidate = AsyncMock(side_effect=RuntimeError("cache down") if invalidation_fails else None)
+    invalidate = AsyncMock()
     with (
         patch.object(methods, "retire_forgotten_decisions", AsyncMock(return_value={"c1"})),
         patch.object(methods, "invalidate_sessions_for_deleted_data", invalidate),
@@ -22,6 +21,23 @@ async def test_retired_decisions_reach_session_invalidation(invalidation_fails):
         assert await methods.retire_decisions_after_edit(dataset, user) == {"c1"}
 
     invalidate.assert_awaited_once_with(dataset.id, {"c1"}, set(), user_id=user.id)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_session_invalidation_fails_the_retirement():
+    """Cached answers that cite a retired decision must not survive it silently."""
+    with (
+        patch.object(methods, "retire_forgotten_decisions", AsyncMock(return_value={"c1"})),
+        patch.object(
+            methods,
+            "invalidate_sessions_for_deleted_data",
+            AsyncMock(side_effect=RuntimeError("cache down")),
+        ),
+        pytest.raises(RuntimeError, match="cache down"),
+    ):
+        await methods.retire_decisions_after_edit(
+            SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
+        )
 
 
 @pytest.mark.asyncio

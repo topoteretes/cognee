@@ -25,7 +25,6 @@ from cognee.modules.session_lifecycle.invalidate_sessions import (
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
-from cognee.shared.logging_utils import get_logger
 from cognee.tasks.memify.review_conflicts.accept_review import _collect_conflict_values
 from cognee.tasks.memify.review_conflicts.models import (
     AcceptedConflict,
@@ -40,8 +39,6 @@ from cognee.tasks.memify.review_conflicts.write_conflicts import (
 )
 
 from .models import ConflictDetail, ConflictFact
-
-logger = get_logger("conflicts")
 
 
 def _fact_text(fact: dict, nodes: dict) -> str:
@@ -308,22 +305,16 @@ async def retire_forgotten_decisions(dataset, user: User) -> set[str]:
 
 
 async def retire_decisions_after_edit(dataset, user: User) -> set[str]:
-    """Retire the decisions a rebuild left without their chosen fact, and invalidate sessions.
+    """Retire the decisions an edit left without their chosen fact, and invalidate sessions.
 
     ``update()``'s chunk-level path drops the facts of the chunks an edit touched and
     extracts the new chunks. A decision whose fact the new extraction does not restore,
     because the text changed or the fact came back under another relationship, would go
     on presenting it as accepted and hiding its competitors. Run inside the dataset's
     lock and database context, after the edit was written: a failed write may only not
-    have restored the fact yet. Session invalidation is best-effort, as on delete.
+    have restored the fact yet. A failed session invalidation fails the update.
     """
     retired = await retire_forgotten_decisions(dataset, user)
     if retired:
-        try:
-            await invalidate_sessions_for_deleted_data(dataset.id, retired, set(), user_id=user.id)
-        except Exception:
-            logger.warning(
-                "Session invalidation after retiring decisions failed (non-fatal).",
-                exc_info=True,
-            )
+        await invalidate_sessions_for_deleted_data(dataset.id, retired, set(), user_id=user.id)
     return retired
