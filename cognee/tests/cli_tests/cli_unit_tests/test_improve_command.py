@@ -39,7 +39,8 @@ class TestParser:
         args = _parse()
         assert args.build_global_context_index is False
         assert args.build_truth_subspace is False
-        assert args.review_conflicts is False
+        # Unset defers to IMPROVE_REVIEW_CONFLICTS.
+        assert args.review_conflicts is None
         assert args.feedback_alpha is None
         assert args.background is False
         assert args.dataset_name == "main_dataset"
@@ -67,6 +68,9 @@ class TestParser:
         assert args.build_truth_subspace is True
         assert args.review_conflicts is True
         assert args.background is True
+
+    def test_no_review_conflicts_turns_the_stage_off(self):
+        assert _parse("--no-review-conflicts").review_conflicts is False
 
 
 class TestExecute:
@@ -169,13 +173,17 @@ class TestExecute:
         assert echoed[-1] == "Improvement started in background!"
         assert len(echoed) == 2
 
-    def test_lost_lock_is_explained(self):
-        result = ImproveResult.all_skipped(
-            ["feedback_weights", "global_context_index"], "lock_held"
+    def test_an_all_skipped_run_is_explained(self):
+        result = ImproveResult(
+            stages=[
+                StageResult.skipped("feedback_weights", "no_session_ids"),
+                StageResult.skipped("global_context_index", "no_session_ids"),
+            ]
         )
         _, echoed = self._execute(_parse(), result)
 
-        assert any("lock_held" in line for line in echoed)
+        assert any("Nothing to improve" in line for line in echoed)
+        assert any("no_session_ids" in line for line in echoed)
         assert not any("successfully" in line for line in echoed)
 
     def test_failure_becomes_a_cli_error(self):

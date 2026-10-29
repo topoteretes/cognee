@@ -4,7 +4,7 @@ from cognee.infrastructure.engine import DataPoint
 
 
 class FactConflict(DataPoint):
-    """A dataset's review of competing values for one Entity attribute."""
+    """A conflict in one dataset: competing values for one Entity attribute."""
 
     dataset_id: str
     about_id: str
@@ -14,8 +14,9 @@ class FactConflict(DataPoint):
     text: str
     values: list[str] = []
     sources: list[str] = []
-    # Remains true until links, marks, vectors and affected Entities are saved.
-    review_pending: bool = False
+    # True from before a review run's first write of this conflict until that run's last write
+    # has landed, so a run that stopped midway leaves it true for the next run to repair.
+    write_pending: bool = False
     metadata: dict = {
         "index_fields": [],
         "identity_fields": ["dataset_id", "about_id", "attribute"],

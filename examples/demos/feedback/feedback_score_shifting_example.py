@@ -5,7 +5,7 @@ apply_feedback_weights_pipeline folds them into feedback_weight values on the gr
 query is re-run for beta from 0.0 to 1.0. Watch the answers shift toward the positively rated
 (car manufacturer) context as beta grows.
 
-Requires: LLM_API_KEY, CACHING=true and CACHE_BACKEND=fs (checked at import).
+Requires: LLM_API_KEY and CACHING=true (checked at import).
 Run: uv run python examples/demos/feedback/feedback_score_shifting_example.py
 """
 
@@ -21,10 +21,8 @@ from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import ERROR, setup_logging
 
 cache_config = get_cache_config()
-if not cache_config.caching or cache_config.cache_backend != "fs":
-    raise CogneeConfigurationError(
-        "feedback_score_shifting_example requires caching=True and CACHE_BACKEND=fs."
-    )
+if not cache_config.caching:
+    raise CogneeConfigurationError("feedback_score_shifting_example requires caching=True.")
 
 DATA_DIR = Path(__file__).parent / "feedback_score_shifting_example_data"
 TEXT_1 = (DATA_DIR / "german_car_manufacturers.txt").read_text()

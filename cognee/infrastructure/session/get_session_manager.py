@@ -8,7 +8,7 @@ def get_session_manager(dataset_id: UUID | None = None) -> SessionManager:
     """
     Return a SessionManager instance.
 
-    Uses the cache engine from get_cache_engine() (Redis or FsCache when
+    Uses the cache engine from get_cache_engine() (Redis or SQL when
     caching/usage_logging is enabled). If caching is disabled, returns
     a SessionManager with cache_engine=None; all operations will no-op
     and return empty/False as appropriate.

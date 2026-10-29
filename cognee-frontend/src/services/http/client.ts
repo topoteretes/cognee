@@ -50,6 +50,18 @@ const DEFAULT_TIMEOUTS: Record<string, number> = {
   DELETE: 15_000,
 };
 
+// The GET budget above is sized for ordinary API reads. A few endpoints build
+// their response instead of looking it up, and one of them is read at the
+// worst possible moment: the Mindmap refetches the focused dataset's graph the
+// instant a cognify run finishes (the graph_grew push), while the pod is still
+// busy with that run. Measured on a ~3.5k-node dataset: 359 ms against an idle
+// pod, but over 10 s under cognify load, so two of every three refetches were
+// aborted by the budget and the graph only caught up on the third try.
+// Exported so the value stays defined here with the others (see the
+// "timeouts are central" rule in .claude/rules/api.md) rather than becoming a
+// magic number at a call site.
+export const SLOW_READ_TIMEOUT_MS = 45_000;
+
 // Native browser types carry their own Content-Type (multipart boundary for
 // FormData, octet-stream for Blob/ArrayBuffer, etc.) — let the browser set it.
 // Strings are already valid BodyInit and must not be re-serialized.

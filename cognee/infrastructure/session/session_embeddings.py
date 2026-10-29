@@ -159,13 +159,15 @@ async def delete_session_qa_vector(*, qa_id: str) -> None:
 
 
 async def delete_session_qa_vectors(*, user_id: str, session_id: str) -> None:
-    """Remove all QA vector rows for a session by stripping its scope tag. Fail-open."""
-    try:
-        from cognee.infrastructure.databases.vector import get_vector_engine_async
+    """Remove all QA vector rows for a session by stripping its scope tag.
 
-        vector_engine = await get_vector_engine_async()
-        await vector_engine.remove_belongs_to_set_tags(
-            [session_scope_tag(user_id, session_id)],
-        )
-    except Exception as error:
-        logger.warning("Session QA vector session cleanup failed open: %s", error, exc_info=True)
+    Raises on failure: a deleted session whose Q&A vectors stayed would keep
+    answering session recall. Backends without tag support inherit the
+    interface's no-op, so only a real failure surfaces here.
+    """
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+
+    vector_engine = await get_vector_engine_async()
+    await vector_engine.remove_belongs_to_set_tags(
+        [session_scope_tag(user_id, session_id)],
+    )

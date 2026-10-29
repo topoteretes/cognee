@@ -1,19 +1,21 @@
 "use client";
 
-import ConnectorLogo from "./ConnectorLogo";
-
 import { useState, type ReactElement } from "react";
 import { trackEvent } from "@/modules/analytics";
 
-// Mirrors the native integrations offered in Claude Desktop's connector
+// Started from the native integrations offered in Claude Desktop's connector
 // directory, so the false-door list measures demand against a set users already
-// recognize from Claude. Ordered by expected demand for a team knowledge base:
-// shared comms and docs first, niche/vertical tools last.
+// recognize from Claude, then widened to the rest of the Atlassian suite, the
+// Microsoft 365 apps, Salesforce and Obsidian, which that directory
+// under-serves. Ordered by expected demand for a team knowledge base: the
+// cards that already draw the most false-door clicks (the Atlassian wikis
+// and trackers), then CRM and the dev/billing tools, then the Microsoft 365
+// hubs; single-file Office apps and niche tools last.
 // `logo` is a vendored Simple Icons (CC0) glyph rendered white on the brand
 // tile; entries without one fall back to their initials.
 //
-// Slack is deliberately absent — it's real (see DataSourceSection, rendered
-// above this section) — so it isn't shown twice.
+// Slack, GitHub, Linear and Notion are deliberately absent — they're real (see
+// DataSourceSection, rendered above this section) — so they aren't shown twice.
 interface DataSource {
   name: string;
   description: string;
@@ -23,23 +25,34 @@ interface DataSource {
 }
 
 const INTEGRATIONS: DataSource[] = [
-  { name: "Notion",       description: "Pages and databases",         initials: "No", color: "#000000", logo: "notion" },
   { name: "Confluence",   description: "Spaces and wikis",            initials: "Cf", color: "#172B4D", logo: "confluence" },
-  { name: "GitHub",       description: "Issues, PRs, and docs",       initials: "GH", color: "#181717", logo: "github" },
   { name: "Jira",         description: "Tickets and epics",           initials: "Jr", color: "#0052CC", logo: "jira" },
-  { name: "Linear",       description: "Issues and project context",  initials: "Li", color: "#5E6AD2", logo: "linear" },
+  { name: "HubSpot",      description: "Contacts, deals, and notes",  initials: "Hs", color: "#FF7A59", logo: "hubspot" },
+  { name: "Salesforce",   description: "Accounts, opportunities, and cases",initials: "Sf", color: "#00A1E0", logo: "salesforce" },
+  { name: "Vercel",       description: "Projects and deployments",    initials: "Ve", color: "#000000", logo: "vercel" },
+  { name: "Stripe",       description: "Customers and invoices",      initials: "St", color: "#635BFF", logo: "stripe" },
+  { name: "SharePoint",   description: "Sites, pages, and documents", initials: "Sp", color: "#036C70", logo: "sharepoint" },
+  { name: "OneDrive",     description: "Files and shared folders",    initials: "Od", color: "#0078D4", logo: "onedrive" },
+  { name: "Microsoft Teams",description: "Chats, channels, and meetings",initials: "Mt", color: "#5059C9", logo: "teams" },
+  { name: "Outlook",      description: "Email and calendar",          initials: "Ol", color: "#0078D4", logo: "outlook" },
   { name: "Granola",      description: "Meeting notes and transcripts",initials: "Gr", color: "#C2410C", logo: "granola" },
+  { name: "Intercom",     description: "Conversations and articles",  initials: "In", color: "#1F8DED", logo: "intercom" },
+  { name: "PostHog",      description: "Product analytics",           initials: "Ph", color: "#F54E00", logo: "posthog" },
+  { name: "Obsidian",     description: "Vaults and linked notes",     initials: "Ob", color: "#6C31E3", logo: "obsidian" },
   { name: "Asana",        description: "Tasks and projects",          initials: "As", color: "#F06A6A", logo: "asana" },
   { name: "monday.com",   description: "Boards, items, and updates",  initials: "Mo", color: "#FF3D57", logo: "monday" },
   { name: "Figma",        description: "Design files and comments",   initials: "Fg", color: "#F24E1E", logo: "figma" },
-  { name: "HubSpot",      description: "Contacts, deals, and notes",  initials: "Hs", color: "#FF7A59", logo: "hubspot" },
-  { name: "Intercom",     description: "Conversations and articles",  initials: "In", color: "#1F8DED", logo: "intercom" },
+  { name: "Jira Service Management",description: "Service requests and knowledge base",initials: "JS", color: "#0052CC" },
+  { name: "Bitbucket",    description: "Repositories and pull requests",initials: "Bb", color: "#0052CC", logo: "bitbucket" },
   { name: "Box",          description: "Documents and files",         initials: "Bx", color: "#0061D5", logo: "box" },
   { name: "Canva",        description: "Designs and brand assets",    initials: "Cv", color: "#00C4CC", logo: "canva" },
-  { name: "PostHog",      description: "Product analytics",           initials: "Ph", color: "#F54E00", logo: "posthog" },
-  { name: "Stripe",       description: "Customers and invoices",      initials: "St", color: "#635BFF", logo: "stripe" },
-  { name: "Vercel",       description: "Projects and deployments",    initials: "Ve", color: "#000000", logo: "vercel" },
   { name: "MotherDuck",   description: "Your data warehouse",         initials: "Md", color: "#F9A825", logo: "motherduck" },
+  { name: "Word",         description: "Documents and comments",      initials: "Wd", color: "#2B579A", logo: "word" },
+  { name: "Excel",        description: "Workbooks and sheets",        initials: "Xl", color: "#217346", logo: "excel" },
+  { name: "PowerPoint",   description: "Decks and speaker notes",     initials: "Pp", color: "#B7472A", logo: "powerpoint" },
+  { name: "OneNote",      description: "Notebooks and pages",         initials: "On", color: "#7719AA", logo: "onenote" },
+  { name: "Trello",       description: "Boards and cards",            initials: "Tr", color: "#0052CC", logo: "trello" },
+  { name: "Loom",         description: "Video messages and transcripts",initials: "Lo", color: "#625DF5", logo: "loom" },
   { name: "Xero",         description: "Accounting and invoices",     initials: "Xe", color: "#13B5EA", logo: "xero" },
   { name: "lemlist",      description: "Outreach campaigns",          initials: "Ll", color: "#4F46E5", logo: "lemlist" },
   { name: "Workable",     description: "Candidates and pipelines",    initials: "Wk", color: "#16A34A", logo: "workable" },
@@ -94,7 +107,7 @@ function ComingSoonModal({
           ) : (
             <>
               <p style={{ margin: "0 0 16px", fontSize: 14, color: "rgba(237,236,234,0.6)", lineHeight: 1.6 }}>
-                We can let you know once the <strong style={{ color: "#EDECEA" }}>{source.name}</strong> integration is live to upgrade your Company Brain.
+                We can let you know once the <strong style={{ color: "#EDECEA" }}>{source.name}</strong> integration is live to upgrade your Company Dataset.
               </p>
               <button onClick={requestNotify} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#6510F4", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13.5, fontWeight: 600, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
                 Get notified once live
@@ -169,7 +182,13 @@ export default function MoreDataSourcesSection(): ReactElement {
         <div className="ds-grid">
           {filtered.map((it) => (
             <button key={it.name} className="ds-card" onClick={() => openSource(it)} style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "13px 15px", textAlign: "left", cursor: "pointer", fontFamily: "inherit", width: "100%" }}>
-              <ConnectorLogo logo={it.logo} initials={it.initials} color={it.color} size={36} />
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: it.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)" }}>
+                {it.logo ? (
+                  <span aria-hidden style={{ width: 19, height: 19, background: "#fff", WebkitMaskImage: `url(/visuals/logos/datasources/${it.logo}.svg)`, maskImage: `url(/visuals/logos/datasources/${it.logo}.svg)`, WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat", WebkitMaskPosition: "center", maskPosition: "center", WebkitMaskSize: "contain", maskSize: "contain" }} />
+                ) : (
+                  <span style={{ color: "#fff", fontSize: 13, fontWeight: 700, letterSpacing: "-0.02em" }}>{it.initials}</span>
+                )}
+              </div>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 14, fontWeight: 500, color: "#EDECEA", fontFamily: '"TWKLausanne", sans-serif', overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.3 }}>{it.name}</div>
                 <div style={{ fontSize: 12, color: "rgba(237,236,234,0.45)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.4 }}>{it.description}</div>
@@ -184,13 +203,13 @@ export default function MoreDataSourcesSection(): ReactElement {
       ) : (
         <div style={{ textAlign: "center", padding: "28px 16px", fontSize: 13.5, color: "rgba(237,236,234,0.5)", lineHeight: 1.6 }}>
           No data sources match “{query.trim()}”.{" "}
-          <a href={`mailto:support@cognee.ai?subject=${encodeURIComponent(`Integration request: ${query.trim()}`)}`} style={{ color: "#6510F4", textDecoration: "underline" }}>Request it</a> and we’ll consider it next.
+          <a href={`mailto:social@cognee.ai?subject=${encodeURIComponent(`Integration request: ${query.trim()}`)}`} style={{ color: "#6510F4", textDecoration: "underline" }}>Request it</a> and we’ll consider it next.
         </div>
       )}
 
       <p style={{ fontSize: 13, color: "rgba(237,236,234,0.35)", textAlign: "center", margin: 0 }}>
         More integrations on the way.{" "}
-        <a href="mailto:support@cognee.ai?subject=Integration%20request" style={{ color: "#6510F4", textDecoration: "underline" }}>Let us know</a> what to prioritize.
+        <a href="mailto:social@cognee.ai?subject=Integration%20request" style={{ color: "#6510F4", textDecoration: "underline" }}>Let us know</a> what to prioritize.
       </p>
 
       {activeSource && <ComingSoonModal source={activeSource} onClose={() => setActiveName(null)} />}

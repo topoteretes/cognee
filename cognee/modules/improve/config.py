@@ -13,7 +13,7 @@ Environment variables (prefix ``IMPROVE_``)::
     IMPROVE_DEBOUNCE_SECONDS=0         # ... or after T seconds
     IMPROVE_STAGES_DISABLED=a,b        # csv of stage names to skip
     IMPROVE_FEEDBACK_ALPHA=0.1         # learning rate for feedback weights, (0, 1]
-    IMPROVE_REVIEW_CONFLICTS=false     # review source facts and dated conflicts
+    IMPROVE_REVIEW_CONFLICTS=true      # review source facts and dated conflicts
     IMPROVE_EFFECTIVE_DATE_KEY=effective_date  # document metadata source-date key
     IMPROVE_TRACE_WINDOW_STEPS=0       # agent trace steps per persisted document; 0 = all pending
     IMPROVE_TRACE_WINDOWS_PER_RUN=0    # max agent trace documents per run; 0 = drain
@@ -37,7 +37,7 @@ class ImproveConfig(BaseSettings):
     """Settings for the self-improvement loop (env prefix ``IMPROVE_``)."""
 
     auto_enabled: bool = True
-    review_conflicts: bool = False
+    review_conflicts: bool = True
     effective_date_key: str = "effective_date"
     # Debounce for automatic improves (plan item B6). The defaults mean "no
     # debounce": every trigger runs, exactly as today. With debounce_seconds
