@@ -259,7 +259,7 @@ async def cognify(
                  makes one LLM call per chunk; "from_extraction" joins the chunk's
                  extracted types and relation texts with no LLM call, and a chunk
                  with no relations gets no summary. The explicit argument wins over
-                 the SUMMARY_METHOD setting ("llm" by default). Raises while
+                 the SUMMARY_METHOD setting ("from_extraction" by default). Raises while
                  connected to a remote instance.
 
     Returns:
