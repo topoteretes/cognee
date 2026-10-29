@@ -50,7 +50,7 @@ from cognee_db_workers.lancedb_compaction import (
 from ..embeddings.EmbeddingGateway import EmbeddingGateway
 from ..models.ScoredResult import ScoredResult
 from ..stored_vector_size import choose_stored_vector_size
-from ..vector_db_interface import VectorDBInterface
+from ..vector_db_interface import VectorDBInterface, validate_raw_vector_points
 
 logger = get_logger("LanceDBAdapter")
 _NO_DEFAULT = object()
@@ -468,6 +468,44 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
         return await connection.open_table(collection_name)
 
+    async def _stored_belongs_to_set(
+        self, collection, collection_name: str, ids: list[str]
+    ) -> dict[str, list]:
+        """The non-empty ``belongs_to_set`` of each stored row among ``ids``.
+
+        Call it under ``VECTOR_DB_LOCK`` and write under the same lock section, or a
+        writer in between would leave tags the merge never saw to be overwritten.
+        """
+        existing_belongs_to_set: dict[str, list] = {}
+        if not ids:
+            return existing_belongs_to_set
+        # Build the WHERE predicate explicitly with escaped string literals rather
+        # than relying on Python's tuple repr — mirrors how search() escapes `name`
+        # values to keep single-quotes from breaking the LanceDB SQL grammar.
+        escaped_ids = [id_.replace("'", "''") for id_ in ids]
+        if len(escaped_ids) == 1:
+            where_clause = f"id = '{escaped_ids[0]}'"
+        else:
+            id_list = ", ".join(f"'{id_}'" for id_ in escaped_ids)
+            where_clause = f"id IN ({id_list})"
+        try:
+            existing_rows = await collection.query().where(where_clause).to_list()
+            for row in existing_rows:
+                row_payload = row.get("payload") or {}
+                prior = row_payload.get("belongs_to_set") or []
+                if prior:
+                    existing_belongs_to_set[row["id"]] = list(prior)
+        except Exception as e:
+            # Best-effort: if the lookup fails (e.g. empty table, schema mismatch
+            # the migration path will handle), fall through to the standard upsert.
+            logger.debug(
+                "belongs_to_set merge lookup failed for '%s': %s",
+                collection_name,
+                e,
+                exc_info=True,
+            )
+        return existing_belongs_to_set
+
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""
         payload_schema = type(data_points[0])
@@ -505,36 +543,9 @@ class LanceDBAdapter(VectorDBInterface):
         lance_data_points: list = []
         try:
             async with self.VECTOR_DB_LOCK:
-                existing_belongs_to_set: dict[str, list] = {}
-                incoming_ids = [str(dp.id) for dp in data_points]
-                if incoming_ids:
-                    # Build the WHERE predicate explicitly with escaped string
-                    # literals rather than relying on Python's tuple repr —
-                    # mirrors how search() escapes `name` values to keep
-                    # single-quotes from breaking the LanceDB SQL grammar.
-                    escaped_ids = [id_.replace("'", "''") for id_ in incoming_ids]
-                    if len(escaped_ids) == 1:
-                        where_clause = f"id = '{escaped_ids[0]}'"
-                    else:
-                        id_list = ", ".join(f"'{id_}'" for id_ in escaped_ids)
-                        where_clause = f"id IN ({id_list})"
-                    try:
-                        existing_rows = await collection.query().where(where_clause).to_list()
-                        for row in existing_rows:
-                            row_payload = row.get("payload") or {}
-                            prior = row_payload.get("belongs_to_set") or []
-                            if prior:
-                                existing_belongs_to_set[row["id"]] = list(prior)
-                    except Exception as e:
-                        # Best-effort: if the lookup fails (e.g. empty table,
-                        # schema mismatch the migration path will handle),
-                        # fall through to the standard upsert.
-                        logger.debug(
-                            "belongs_to_set merge lookup failed for '%s': %s",
-                            collection_name,
-                            e,
-                            exc_info=True,
-                        )
+                existing_belongs_to_set = await self._stored_belongs_to_set(
+                    collection, collection_name, [str(dp.id) for dp in data_points]
+                )
 
                 def create_lance_data_point(data_point: DataPoint, vector: list[float]):
                     lance_cls, payload_model = _lance_cls_for(data_point)
@@ -624,7 +635,8 @@ class LanceDBAdapter(VectorDBInterface):
         and ``metadata`` dropped), so a row copied from another store is indistinguishable
         from one ingested here; a plain BaseModel payload (system-owned state such as
         truth centroids) is stored as declared. A conflicting id takes the new payload
-        and the new vector.
+        and the new vector, except ``belongs_to_set``, which is unioned with the stored
+        row's as in ``create_data_points``.
         """
         if not points:
             return
@@ -639,6 +651,13 @@ class LanceDBAdapter(VectorDBInterface):
         )
         LanceDataPoint = self._make_lance_datapoint_cls(payload_model, vector_size)
 
+        # Every check runs before the table exists, so a rejected call creates nothing.
+        rows = validate_raw_vector_points(points, vector_size)
+        properties_by_id = {
+            row_id: payload_model.model_validate(serialize_data(row["payload"])).model_dump()
+            for row_id, row in rows.items()
+        }
+
         if not await self.has_collection(collection_name):
             async with self.VECTOR_DB_LOCK:
                 if not await self.has_collection(collection_name):
@@ -651,31 +670,23 @@ class LanceDBAdapter(VectorDBInterface):
 
         collection = await self.get_collection(collection_name)
 
-        raw_points = []
-        for point in points:
-            point_id = point.get("id")
-            vector = point.get("vector")
-            payload_value = point.get("payload")
-            if point_id is None:
-                raise ValueError("Raw vector point is missing id")
-            if not isinstance(vector, list):
-                raise ValueError("Raw vector point vector must be a list")
-            if len(vector) != vector_size:
-                raise ValueError(
-                    f"Raw vector size {len(vector)} does not match expected size {vector_size}"
-                )
-            raw_points.append(
-                LanceDataPoint(
-                    id=str(point_id),
-                    vector=vector,
-                    payload=payload_model.model_validate(
-                        serialize_data(payload_value)
-                    ).model_dump(),
-                )
-            )
-
         self._mark_written(collection_name)
+        # Read the stored tags, build and write under one lock section, as
+        # create_data_points does: when_matched_update_all replaces the whole
+        # payload, so a stored row's own belongs_to_set survives only if it is
+        # unioned into the incoming payload here.
         async with self.VECTOR_DB_LOCK:
+            stored_tags = await self._stored_belongs_to_set(collection, collection_name, list(rows))
+            raw_points = []
+            for row_id, properties in properties_by_id.items():
+                prior = stored_tags.get(row_id)
+                if prior:
+                    incoming = properties.get("belongs_to_set") or []
+                    properties["belongs_to_set"] = list(dict.fromkeys(list(prior) + list(incoming)))
+                raw_points.append(
+                    LanceDataPoint(id=row_id, vector=rows[row_id]["vector"], payload=properties)
+                )
+
             await (
                 collection.merge_insert("id")
                 .when_matched_update_all()

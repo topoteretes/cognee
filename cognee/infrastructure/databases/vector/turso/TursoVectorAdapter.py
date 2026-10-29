@@ -42,7 +42,7 @@ from ..embeddings.EmbeddingGateway import EmbeddingGateway
 from ..exceptions import CollectionNotFoundError
 from ..models.ScoredResult import ScoredResult
 from ..pgvector.serialize_data import serialize_data
-from ..vector_db_interface import VectorDBInterface
+from ..vector_db_interface import VectorDBInterface, validate_raw_vector_points
 
 logger = get_logger("TursoVectorAdapter")
 
@@ -332,14 +332,21 @@ class TursoVectorAdapter(VectorDBInterface):
 
         await retry_on_conflict(lambda: asyncio.to_thread(self._upsert_rows, collection_name, rows))
 
-    def _upsert_rows(self, collection_name: str, rows: dict[str, dict[str, Any]]) -> None:
+    def _upsert_rows(
+        self,
+        collection_name: str,
+        rows: dict[str, dict[str, Any]],
+        *,
+        replace_vector: bool = False,
+    ) -> None:
         """Upsert ``rows`` in one transaction, merging ``belongs_to_set`` with stored rows.
 
         The engine rejects a scalar subquery inside ``ON CONFLICT DO UPDATE SET``, so
         the stored tag arrays are read first and unioned here; the upsert itself
         then only assigns ``excluded.payload``. As in PGVector, a conflicting row
-        keeps its stored vector. Read and write share one transaction (see
-        ``_transaction``), so a concurrent writer cannot make the merge stale.
+        keeps its stored vector, unless ``replace_vector`` is set (a vector copy).
+        Read and write share one transaction (see ``_transaction``), so a
+        concurrent writer cannot make the merge stale.
         """
 
         def work(connection):
@@ -364,6 +371,7 @@ class TursoVectorAdapter(VectorDBInterface):
                 f'INSERT INTO "{collection_name}" (id, payload, vector) '
                 f"VALUES (?, ?, vector32(?)) "
                 f"ON CONFLICT(id) DO UPDATE SET payload = excluded.payload"
+                + (", vector = excluded.vector" if replace_vector else "")
             )
             for row_id, row in rows.items():
                 connection.execute(
@@ -455,43 +463,31 @@ class TursoVectorAdapter(VectorDBInterface):
         Payloads are stored as given (the payload column is schemaless JSON text;
         ``payload_schema`` only names the collection's type for ``create_collection``),
         so a row read with ``retrieve(..., include_vector=True)`` lands here unchanged.
-        A conflicting id takes the new payload and the new vector (``_upsert_rows``
+        A conflicting id takes the new payload and the new vector (``create_data_points``
         keeps the stored vector, which is right for re-ingested text but not for a
-        vector copy). The same id twice in one call is written once, last point wins.
+        vector copy), except ``belongs_to_set``, which ``_upsert_rows`` unions with the
+        stored row's. The same id twice in one call is written once, see
+        ``validate_raw_vector_points``.
         """
         if not points:
             return
 
+        vector_size = self.embedding_engine.get_vector_size()
+        # Every check runs before the table exists, so a rejected call creates nothing.
+        rows: dict[str, dict[str, Any]] = {
+            row_id: {
+                "payload": serialize_data(row["payload"]),
+                "vector": _vector_literal(row["vector"]),
+            }
+            for row_id, row in validate_raw_vector_points(points, vector_size).items()
+        }
+
         if not await self.has_collection(collection_name):
             await self.create_collection(collection_name, payload_schema=payload_schema)
 
-        vector_size = self.embedding_engine.get_vector_size()
-        rows: dict[str, tuple[str, str]] = {}
-        for point in points:
-            point_id = point.get("id")
-            vector = point.get("vector")
-            payload = point.get("payload")
-            if point_id is None:
-                raise ValueError("Raw vector point is missing id")
-            if not isinstance(vector, list):
-                raise ValueError("Raw vector point vector must be a list")
-            if len(vector) != vector_size:
-                raise ValueError(
-                    f"Raw vector size {len(vector)} does not match expected size {vector_size}"
-                )
-            rows[str(point_id)] = (json.dumps(serialize_data(payload)), _vector_literal(vector))
-
-        insert_sql = (
-            f'INSERT INTO "{collection_name}" (id, payload, vector) '
-            f"VALUES (?, ?, vector32(?)) "
-            f"ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, vector = excluded.vector"
+        await retry_on_conflict(
+            lambda: asyncio.to_thread(self._upsert_rows, collection_name, rows, replace_vector=True)
         )
-
-        def work(connection):
-            for row_id, (payload_json, vector_json) in rows.items():
-                connection.execute(insert_sql, (row_id, payload_json, vector_json))
-
-        await retry_on_conflict(lambda: asyncio.to_thread(self._transaction, work))
 
     async def retrieve(
         self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False

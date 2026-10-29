@@ -73,9 +73,16 @@ async def _exercise_promotion(source, target, embedder: CountingEmbedder):
     """
     collection = f"DocumentChunk_text_{uuid4().hex[:8]}"
     source_collection = target_collection = collection
-    apple, pear = CopyPoint(text="apple", rank=1), CopyPoint(text="pear", rank=2)
+    apple = CopyPoint(text="apple", rank=1, belongs_to_set=["proj_a"])
+    pear = CopyPoint(text="pear", rank=2)
     await source.create_collection(source_collection, payload_schema=CopyPoint)
     await source.create_data_points(source_collection, [apple, pear])
+    # The target already holds the apple row under its own tag (ids are
+    # content-derived, so a promoted entity often exists in the target already).
+    await target.create_collection(target_collection, payload_schema=CopyPoint)
+    await target.create_data_points(
+        target_collection, [CopyPoint(id=apple.id, text="apple", rank=1, belongs_to_set=["proj_b"])]
+    )
     ingest_calls = embedder.calls
     assert ingest_calls >= 1
 
@@ -107,6 +114,8 @@ async def _exercise_promotion(source, target, embedder: CountingEmbedder):
     copied = await target.retrieve(target_collection, [str(apple.id)], include_vector=True)
     assert copied[0].payload["text"] == "apple"
     assert [round(v, 3) for v in copied[0].payload["vector"]] == [1.0, 0.0, 0.0, 0.1]
+    # The copy brings the source's tag and keeps the target's own.
+    assert set(copied[0].payload["belongs_to_set"]) == {"proj_a", "proj_b"}
     nearest = await target.search(
         target_collection, query_vector=[0.0, 1.0, 0.0, 0.0], limit=1, include_payload=True
     )
@@ -128,12 +137,39 @@ async def _exercise_promotion(source, target, embedder: CountingEmbedder):
     replaced = await target.retrieve(target_collection, [str(apple.id)], include_vector=True)
     assert replaced[0].payload["rank"] == 9
     assert [round(v, 3) for v in replaced[0].payload["vector"]] == [0.0, 0.0, 1.0, 0.0]
+    # ... but never the stored tags, even when the point carries none.
+    assert set(replaced[0].payload["belongs_to_set"]) == {"proj_a", "proj_b"}
     assert embedder.calls == ingest_calls
 
-    # A vector of the wrong width is refused before anything is written.
+    # The same id twice in one call: the last point wins, their tags are unioned.
+    await target.upsert_raw_vectors(
+        target_collection,
+        [
+            {
+                "id": pear.id,
+                "vector": [0.0, 1.0, 0.0, 0.0],
+                "payload": {"id": str(pear.id), "text": "pear", "rank": 5, "belongs_to_set": ["x"]},
+            },
+            {
+                "id": pear.id,
+                "vector": [0.0, 1.0, 0.0, 0.1],
+                "payload": {"id": str(pear.id), "text": "pear", "rank": 6, "belongs_to_set": ["y"]},
+            },
+        ],
+        payload_schema=CopyPoint,
+    )
+    twice = await target.retrieve(target_collection, [str(pear.id)], include_vector=True)
+    assert len(twice) == 1
+    assert twice[0].payload["rank"] == 6
+    assert set(twice[0].payload["belongs_to_set"]) == {"x", "y"}
+    assert [round(v, 3) for v in twice[0].payload["vector"]] == [0.0, 1.0, 0.0, 0.1]
+
+    # A bad point is refused before anything is written: a vector of the wrong
+    # width or a payload that is not a dict, and the collection is not created.
+    untouched = f"{collection}_untouched"
     with pytest.raises(ValueError):
         await target.upsert_raw_vectors(
-            target_collection,
+            untouched,
             [
                 {
                     "id": uuid4(),
@@ -143,6 +179,14 @@ async def _exercise_promotion(source, target, embedder: CountingEmbedder):
             ],
             payload_schema=CopyPoint,
         )
+    with pytest.raises(ValueError):
+        await target.upsert_raw_vectors(
+            untouched,
+            [{"id": uuid4(), "vector": [1.0, 0.0, 0.0, 0.0]}],
+            payload_schema=CopyPoint,
+        )
+    assert not await target.has_collection(untouched)
+    assert embedder.calls == ingest_calls
 
 
 @pytest.mark.asyncio
