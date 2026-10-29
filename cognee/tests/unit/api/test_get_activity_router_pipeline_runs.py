@@ -467,7 +467,46 @@ def test_rows_list_every_session_they_belong_to(monkeypatch):
     rows = _client(user_id).get("/activity/pipeline-runs").json()
 
     assert [r["session_ids"] for r in rows] == [["chat_1", "chat_2"], ["chat_1"], []]
-    assert all("session_id" not in r for r in rows)
+
+
+@pytest.mark.parametrize("pipeline_name", [None, "memify_pipeline"], ids=["operation", "pipeline"])
+@pytest.mark.parametrize(
+    ("session_ids", "legacy_session_id"),
+    [
+        pytest.param([], None, id="no-session"),
+        pytest.param(["search-ui-1"], "search-ui-1", id="single-session"),
+        pytest.param(["chat_1", "chat_2"], None, id="multiple-sessions"),
+    ],
+)
+def test_session_response_preserves_legacy_dashboard_contract(
+    monkeypatch, pipeline_name, session_ids, legacy_session_id
+):
+    """R1 in #6191: a pod upgrade must not erase existing clients' session identity.
+
+    The dashboard uses the singular field for channel attribution and to
+    suppress a session already counted by an operation. Keep it as a derived
+    compatibility field until those consumers migrate; the full list remains
+    authoritative, and a multi-session run must not claim just its first id.
+    """
+    user_id = uuid4()
+    run = _run(
+        user_id=user_id,
+        pipeline_name=pipeline_name,
+        operation_name="improve" if pipeline_name else "recall",
+        origin="sdk",
+        tokens_in=100,
+        tokens_out=20,
+    )
+    _stub_engine(monkeypatch, [_joined(run)], sessions={run.id: session_ids})
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    response = _client(user_id).get("/activity/pipeline-runs")
+
+    assert response.status_code == 200
+    row = response.json()[0]
+    assert row["session_ids"] == session_ids
+    assert "session_id" in row, "Keep the legacy response key during the dashboard rollout"
+    assert row["session_id"] == legacy_session_id
 
 
 def test_no_session_id_leaves_the_filter_out(monkeypatch):

@@ -21,7 +21,7 @@ from sqlalchemy import select
 import cognee
 from cognee.infrastructure.databases.relational import create_db_and_tables, get_relational_engine
 from cognee.modules.operations import record_operation
-from cognee.modules.pipelines.models import PipelineRun
+from cognee.modules.pipelines.models import PipelineRun, PipelineRunSession
 from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
 from cognee.modules.recall.methods.graph_warmup import (
     STATE_BUILD_FAILED,
@@ -118,16 +118,23 @@ async def test_errored_staging_run_keeps_failsafe_warm(clean_test_environment, m
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "session_ids",
+    [
+        pytest.param(["session-1"], id="single-session"),
+        pytest.param(["session-1", "session-2"], id="multiple-sessions"),
+    ],
+)
 async def test_operation_record_does_not_make_unbuilt_dataset_warm(
-    clean_test_environment, monkeypatch
+    clean_test_environment, monkeypatch, session_ids
 ):
-    """A session-only remember record is not evidence of a built graph."""
+    """A remember record bound to one or more sessions is not a built graph."""
     dataset_id = uuid4()
     _permit(monkeypatch, [dataset_id])
 
     # This is the row produced by remember(..., session_id=...): it carries
     # the dataset for attribution, but has no pipeline_name or status.
-    async with record_operation("remember", dataset_id=dataset_id, session_id="session-1"):
+    async with record_operation("remember", dataset_id=dataset_id, session_ids=session_ids):
         pass
 
     async with get_relational_engine().get_async_session() as session:
@@ -136,8 +143,20 @@ async def test_operation_record_does_not_make_unbuilt_dataset_warm(
             .scalars()
             .all()
         )
+        bound_sessions = (
+            (
+                await session.execute(
+                    select(PipelineRunSession.session_id)
+                    .join(PipelineRun, PipelineRun.id == PipelineRunSession.pipeline_run_row_id)
+                    .where(PipelineRun.dataset_id == dataset_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
 
     assert len(rows) == 1
+    assert sorted(bound_sessions) == sorted(session_ids)
     operation_row = rows[0]
     assert operation_row.dataset_id == dataset_id
     assert operation_row.operation_name == "remember"
