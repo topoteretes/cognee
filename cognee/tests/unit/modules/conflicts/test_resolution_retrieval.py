@@ -435,3 +435,32 @@ async def test_the_decision_node_labels_the_selected_edge_next_to_later_evidence
     assert alice.attributes["conflict_marks"] == [
         {"conflict_id": "employer", "status": "conflicting"}
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("subject_first", [True, False])
+async def test_a_synthetic_link_keeps_the_subjects_name_on_its_other_edges(subject_first):
+    company = Node("company", {"name": "Company", "description": "Company makes widgets."})
+    bob = Node("bob", {"name": "Bob"})
+    decision = {
+        "id": "conflict",
+        "about_id": "company",
+        "selected_fact": "Company has CEO Alice",
+        "selected_fact_id": "alice-fact",
+        "rejected_fact_ids": ["bob-fact"],
+        "sources": [],
+        "values": [],
+    }
+    rejected = Edge(
+        *((company, bob) if subject_first else (bob, company)),
+        attributes={"edge_object_id": "bob-fact", "edge_text": "Company has CEO Bob"},
+    )
+    office = Edge(
+        company,
+        Node("paris", {"name": "Paris"}),
+        attributes={"edge_object_id": "office", "relationship_name": "headquartered_in"},
+    )
+    text = await resolve_edges_to_text(apply_graph_resolutions([rejected, office], [decision]))
+    assert "--[accepted_fact]--> Company  (Company has CEO Alice)" in text
+    assert "Company --[headquartered_in]--> Paris" in text
+    assert "Company makes widgets." in text and "Bob" not in text

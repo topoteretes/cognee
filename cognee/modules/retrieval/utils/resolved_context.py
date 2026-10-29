@@ -128,10 +128,10 @@ def apply_graph_resolutions(edges: list, resolutions: list[dict]) -> list:
             source = copy(edge.node1)
             source.id = resolution["id"]
             source.attributes = {"name": "Accepted fact", "text": resolution["selected_fact"]}
-            target = copy(edge.node2)
-            target.id = resolution["about_id"]
-            target.attributes = {"name": "Subject of the user resolution"}
-            updated.node1, updated.node2 = source, target
+            # Every fact of a conflict touches its subject. Linking to that node as
+            # retrieved keeps its name and description on the subject's other edges.
+            subject_first = str(edge.node1.id) == str(resolution["about_id"])
+            updated.node1, updated.node2 = source, edge.node1 if subject_first else edge.node2
         elif fact_id in selected:
             decision = selected[fact_id]
             updated.attributes["conflict_marks"] = [
