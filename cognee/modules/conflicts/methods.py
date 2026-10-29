@@ -25,6 +25,7 @@ from cognee.modules.session_lifecycle.invalidate_sessions import (
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.memify.review_conflicts.accept_review import _collect_conflict_values
 from cognee.tasks.memify.review_conflicts.models import (
     AcceptedConflict,
@@ -39,6 +40,8 @@ from cognee.tasks.memify.review_conflicts.write_conflicts import (
 )
 
 from .models import ConflictDetail, ConflictFact
+
+logger = get_logger("conflicts")
 
 
 def _fact_text(fact: dict, nodes: dict) -> str:
@@ -269,7 +272,8 @@ async def retire_forgotten_decisions(dataset, user: User) -> set[str]:
     """Delete the user decisions whose chosen fact no longer exists, and return their ids.
 
     Run after a document is deleted, inside the dataset's lock and database context.
-    A fact supported by several documents stays in the graph until the last of them
+    A rebuild runs it once the rebuilt graph is in place instead (see
+    ``retire_decisions_after_rebuild``). A fact supported by several documents stays in the graph until the last of them
     is deleted, so its decision stays until then too. The check reads what the graph
     holds now rather than what one delete removed, so a retried delete still finds it.
     """
@@ -300,3 +304,26 @@ async def retire_forgotten_decisions(dataset, user: User) -> set[str]:
         await write_conflicts([ConflictsToWrite(scope, dropped_conflict_ids=list(forgotten))], ctx)
         await write_conflicts([ConflictsToFinalize(dropped_conflict_ids=list(forgotten))], ctx)
     return set(forgotten)
+
+
+async def retire_decisions_after_rebuild(dataset, user: User) -> set[str]:
+    """Retire the decisions a rebuild left without their chosen fact, and invalidate sessions.
+
+    A rebuild (an incremental ``update()``, or a cognify after ``forget(memory_only=True)``
+    or a connector re-sync) drops a document's facts and extracts them again. A decision
+    whose fact the new extraction does not restore, because the text changed or the fact
+    came back under another relationship, would go on presenting it as accepted and hiding
+    its competitors. Run inside the dataset's lock and database context, after the rebuild
+    succeeded: a failed one may only not have restored the fact yet. Session invalidation
+    is best-effort, as on delete.
+    """
+    retired = await retire_forgotten_decisions(dataset, user)
+    if retired:
+        try:
+            await invalidate_sessions_for_deleted_data(dataset.id, retired, set(), user_id=user.id)
+        except Exception:
+            logger.warning(
+                "Session invalidation after retiring decisions failed (non-fatal).",
+                exc_info=True,
+            )
+    return retired

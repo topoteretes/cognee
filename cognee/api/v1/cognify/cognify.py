@@ -1,10 +1,12 @@
 import asyncio
 import warnings
+from functools import partial
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel
 
+from cognee.context_global_variables import current_dataset_id
 from cognee.infrastructure.databases.vector.compact_vector_store import compact_vector_store
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.engine import DataPoint
@@ -130,6 +132,24 @@ def raise_if_cognify_errored(result) -> None:
             error_message=getattr(run_info, "error_message", None)
             or str(getattr(run_info, "payload", "") or ""),
         )
+
+
+async def finish_cognify_run(user: User | None) -> None:
+    """The ``after_run_completed`` step of cognify, inside the dataset's lock and context.
+
+    A run that rebuilt a document (after ``forget(memory_only=True)``, in ``update()``'s
+    full rebuild, or a connector re-sync) may not restore a fact a user chose; its
+    decision is retired here, once the run completed. Then the vector fragments the run
+    wrote are folded; bounded per run, so a bloated store drains over several runs.
+    """
+    from cognee.modules.conflicts.methods import retire_decisions_after_rebuild
+    from cognee.modules.data.methods import get_authorized_dataset
+    from cognee.modules.users.methods import get_default_user
+
+    user = user or await get_default_user()
+    dataset = await get_authorized_dataset(user, current_dataset_id.get(), "write")
+    await retire_decisions_after_rebuild(dataset, user)
+    await compact_vector_store()
 
 
 async def cognify(
@@ -550,10 +570,10 @@ async def cognify(
                 # Reconcile the structure document sources describe, also when an
                 # item failed: one bad page must not freeze the tree of the rest.
                 after_items_ran=reconcile_document_structure,
-                # Fold the vector fragments this run wrote, once per dataset,
-                # after the run is recorded complete; bounded per run, so a
-                # bloated store drains over several cognify runs.
-                after_run_completed=compact_vector_store,
+                # Retire the conflict decisions the run left without their chosen
+                # fact, then fold the vector fragments it wrote; both once per
+                # dataset, after the run is recorded complete.
+                after_run_completed=partial(finish_cognify_run, user),
             )
         except AfterRunHookError as error:
             # Every run completed and its data is stored; only the step after it
