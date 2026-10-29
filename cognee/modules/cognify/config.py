@@ -66,8 +66,8 @@ def _warn_if_contradiction_detection_is_set() -> None:
     """
     if os.getenv("CONTRADICTION_DETECTION") is not None:
         logger.warning(
-            "CONTRADICTION_DETECTION is ignored; use improve(review_conflicts=True) "
-            "or IMPROVE_REVIEW_CONFLICTS instead."
+            "CONTRADICTION_DETECTION is ignored; improve() reviews conflicts by default "
+            "(IMPROVE_REVIEW_CONFLICTS turns it off)."
         )
 
 

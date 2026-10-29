@@ -347,7 +347,7 @@ async def cognify(
     if "functional_relationships" in kwargs:
         raise TypeError(
             "cognify() no longer accepts functional_relationships; "
-            "use improve(review_conflicts=True)"
+            "improve() reviews conflicts by default"
         )
     drop_deprecated_temporal_cognify(kwargs)
 

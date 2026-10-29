@@ -1093,3 +1093,30 @@ async def test_review_conflicts_env_applies_without_sdk_flag(harness, monkeypatc
     else:
         assert result.stage(stage.name).status == "completed"
         assert run.await_args.args[0].review_conflicts is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("env", "argument", "expected"),
+    [("true", None, True), ("false", None, False), ("true", False, False), ("false", True, True)],
+)
+async def test_review_conflicts_argument_overrides_env(
+    harness, monkeypatch, env, argument, expected
+):
+    """An explicit argument wins in both directions; None follows IMPROVE_REVIEW_CONFLICTS."""
+    from unittest.mock import AsyncMock
+
+    from cognee.modules.improve.stages import ReviewConflictsStage
+
+    monkeypatch.setenv("IMPROVE_REVIEW_CONFLICTS", env)
+    harness.set_config()
+    stage = ReviewConflictsStage()
+    run = AsyncMock(return_value=StageResult.completed(stage.name))
+    monkeypatch.setattr(stage, "run", run)
+    harness.use_stages([stage])
+    result = await harness.improve(review_conflicts=argument)
+    if expected:
+        assert run.await_args.args[0].review_conflicts is True
+    else:
+        assert result.stage(stage.name).reason == "turned_off"
+        run.assert_not_awaited()
