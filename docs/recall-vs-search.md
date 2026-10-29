@@ -31,6 +31,29 @@ Source of truth: `cognee/api/v1/recall/recall.py` and `cognee/api/v1/search/sear
 5. **Structured output shorthand.** `response_model=` validates the LLM answer against a
    Pydantic model and returns it in the result's `structured` field.
 
+Dataset routing is not on this list because it lives one level down, in the authorized
+search both functions share: with no `datasets`/`dataset_ids` and more than one readable
+dataset, every readable dataset is scored against the query on the routing collection (each
+dataset's global context index root and document buckets, mirrored into the deployment's
+default vector store by the `global_context_index` improve stage) and only the best
+`DATASET_ROUTING_TOP_K` (default 1) are searched. A dataset's score is its best row, so a
+specific question is carried by the one document that matches and a broad one by the root.
+Scores are cosine distances (0 is identical text): a dataset farther than
+`DATASET_ROUTING_DISTANCE_CUTOFF` (default 0.8) is not searched, and when no dataset is within
+it every readable dataset is, so a question no dataset knows about is not answered from
+whichever is nearest; datasets within `DATASET_ROUTING_TIE_MARGIN` (default 0.001) of the
+last routed one are tied and all searched. Every unscoped search logs each dataset's distance
+at info, which is what the cutoff is tuned against (it depends on the embedding model). A
+dataset with no index rows is always searched, a routed search that retrieves nothing (judged
+on the retrieval context, not on the completion, which is written even over an empty
+context; or only datasets without searchable memory) is widened to every readable dataset, and an explicit
+dataset scope is never routed. Needs backend access control (one store per dataset) and one
+embedding model across the deployment: the rows reuse the vectors the index build stored
+(nothing is embedded twice), the query is embedded with the `.env` model, and when
+the routing collection was built with another width (`EMBEDDING_MODEL` changed without a
+prune) routing logs a warning and steps aside, so the search covers every readable dataset.
+There is no off switch: an unscoped search is always routed.
+
 ## When to call search() directly
 
 - You need the agentic extras as first-class parameters: `skills`, `tools`, `max_iter`,
