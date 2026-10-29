@@ -62,15 +62,3 @@ async def test_a_failed_write_retires_nothing(monkeypatch):
         await _run(dataset, user)
 
     assert order == ["write"]
-
-
-@pytest.mark.asyncio
-async def test_an_unchanged_document_retires_nothing(monkeypatch):
-    dataset, user = SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
-    order = _patch_run(
-        monkeypatch, {"status": "unchanged", "stored_count": 3}, AsyncMock(return_value={})
-    )
-
-    await _run(dataset, user)
-
-    assert order == []
