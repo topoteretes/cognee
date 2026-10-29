@@ -112,7 +112,7 @@ uv pip install cognee
 ```python
 import os
 
-os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
+os.environ["LLM_API_KEY"] = "YOUR_OPENAI_API_KEY"
 ```
 또는 [템플릿](https://github.com/topoteretes/cognee/blob/main/.env.template)을 사용하여 `.env` 파일을 생성하세요.
 

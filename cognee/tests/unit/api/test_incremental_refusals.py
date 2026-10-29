@@ -359,7 +359,8 @@ async def test_a_document_built_by_another_chunker_is_refused_by_name(monkeypatc
     monkeypatch.setattr(incremental, "get_data", _get_data)
     monkeypatch.setattr(incremental, "_read_processed_text", _read)
     monkeypatch.setattr(incremental, "_get_stored_chunks", _stored_chunks)
-    monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock())
+    monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock(return_value={}))
+    monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=True))
     monkeypatch.setattr(incremental, "_stage_new_content", _stage)
     monkeypatch.setattr(incremental, "_build_document", lambda *a, **k: SimpleNamespace(id=uuid4()))
 
@@ -416,7 +417,8 @@ async def test_changed_content_with_changed_metadata_refuses_before_planning(mon
         "_get_stored_chunks",
         AsyncMock(return_value=[{"id": str(uuid4()), "text": "old content"}]),
     )
-    monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock())
+    monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock(return_value={}))
+    monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=True))
     monkeypatch.setattr(incremental, "_stage_new_content", AsyncMock(return_value=staged))
 
     with pytest.raises(IncrementalUpdateNotPossible) as raised:
@@ -741,3 +743,110 @@ async def test_chunkless_routes_refuse_before_reading_the_graph(
     assert "rebuilt" in str(raised.value)
     stored_chunks.assert_not_awaited()
     run_incremental.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_chunks_from_an_unfinished_cognify_are_no_baseline(monkeypatch):
+    """A cognify killed after the early chunk write (SDK-397) leaves entity-less
+    chunks that tile and are v2-owned; they must not seed an incremental update."""
+    from cognee.api.v1.update import incremental
+    from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
+
+    run_id = uuid4()
+    snapshot = SimpleNamespace(source_run_ids=[str(run_id)])
+    monkeypatch.setattr(
+        incremental,
+        "get_latest_pipeline_run",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+                pipeline_name="indexing_pipeline",
+            )
+        ),
+    )
+    monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=False))
+
+    with pytest.raises(IncrementalUpdateNotPossible) as raised:
+        await incremental._require_chunk_writers_completed({"chunk": snapshot}, uuid4(), uuid4())
+
+    assert raised.value.reason is RefusalReason.NO_BASELINE
+    assert str(run_id) in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_chunks_from_completed_or_unstamped_runs_are_a_baseline(monkeypatch):
+    from cognee.api.v1.update import incremental
+    from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
+
+    completed = AsyncMock(
+        return_value=SimpleNamespace(status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED)
+    )
+    monkeypatch.setattr(incremental, "get_latest_pipeline_run", completed)
+
+    await incremental._require_chunk_writers_completed(
+        {"a": SimpleNamespace(source_run_ids=[str(uuid4())]), "b": SimpleNamespace()},
+        uuid4(),
+        uuid4(),
+    )
+    # Chunks without run ids (older graphs, adapters without run stamping) and
+    # unknown run records keep the previous behaviour: no lookup, no refusal.
+    await incremental._require_chunk_writers_completed(
+        {"c": SimpleNamespace(source_run_ids=[])}, uuid4(), uuid4()
+    )
+    completed.return_value = None
+    await incremental._require_chunk_writers_completed(
+        {"d": SimpleNamespace(source_run_ids=[str(uuid4())])}, uuid4(), uuid4()
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_failed_run_that_completed_this_document_is_a_baseline(monkeypatch):
+    """The indexing run rolls back per item (SDK-397): when another document failed,
+    the run is errored, yet this document's chunks were kept and stamped complete."""
+    from cognee.api.v1.update import incremental
+    from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
+
+    data_id, dataset_id, run_id = uuid4(), uuid4(), uuid4()
+    monkeypatch.setattr(
+        incremental,
+        "get_latest_pipeline_run",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                status=PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+                pipeline_name="indexing_pipeline",
+            )
+        ),
+    )
+    stamped = AsyncMock(return_value=True)
+    monkeypatch.setattr(incremental, "is_data_processed", stamped)
+    snapshot = {"chunk": SimpleNamespace(source_run_ids=[str(run_id)])}
+
+    await incremental._require_chunk_writers_completed(snapshot, data_id, dataset_id)
+    stamped.assert_awaited_once_with(data_id, dataset_id, "indexing_pipeline")
+
+    # The same run, but this document was one it did not finish: refused.
+    stamped.return_value = False
+    with pytest.raises(IncrementalUpdateNotPossible) as raised:
+        await incremental._require_chunk_writers_completed(snapshot, data_id, dataset_id)
+    assert raised.value.reason is RefusalReason.NO_BASELINE
+
+
+@pytest.mark.asyncio
+async def test_a_document_without_the_cognify_stamp_is_refused(monkeypatch):
+    """Indexed but not extracted (SDK-397): the chunks tile the text and carry v2
+    ownership, yet no entity exists. Only the cognify stamp proves extraction ran,
+    so without it the incremental path refuses and the full flow rebuilds."""
+    from cognee.api.v1.update import incremental
+
+    data_id, dataset_id = uuid4(), uuid4()
+    monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=False))
+
+    with pytest.raises(IncrementalUpdateNotPossible) as raised:
+        await incremental._require_extraction_completed(data_id, dataset_id)
+
+    assert raised.value.reason is RefusalReason.NO_BASELINE
+    assert "not been extracted" in str(raised.value)
+    incremental.is_data_processed.assert_awaited_once_with(data_id, dataset_id)
+
+    monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=True))
+    await incremental._require_extraction_completed(data_id, dataset_id)

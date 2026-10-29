@@ -21,6 +21,7 @@ from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine im
     LiteLLMEmbeddingEngine,
 )
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.llm.config import get_llm_config
 from cognee.tasks.ingestion.connectors import google_drive as gd_source
 
 add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
@@ -40,7 +41,7 @@ class _Req:
     def __init__(self, result):
         self._result = result
 
-    def execute(self):
+    def execute(self, num_retries=0):
         return self._result
 
 
@@ -58,6 +59,8 @@ class _FakeFiles:
         return _Req({"files": files})
 
     def get(self, fileId, fields, supportsAllDrives):
+        if fields == "id":  # resolving the scope folder, as Drive does for the "root" alias
+            return _Req({"id": fileId})
         return _Req(self._service.file_by_id[fileId])
 
 
@@ -88,6 +91,9 @@ class _FakeDriveService:
 
     def changes(self):
         return _FakeChanges(self)
+
+    def close(self):
+        pass
 
 
 def _file_meta(file_id):
@@ -126,6 +132,10 @@ async def clean_environment(tmp_path, monkeypatch):
     pytest.importorskip("dlt")
 
     monkeypatch.setenv("COGNEE_SKIP_CONNECTION_TEST", "true")
+    # The LLM and embedder are mocked below; a placeholder key keeps cognee on
+    # that mocked path when CI has no real key (fork PRs).
+    monkeypatch.setenv("LLM_API_KEY", "sk-mocked")
+    get_llm_config.cache_clear()  # a config read before this would have no key
     monkeypatch.setenv("GOOGLE_DRIVE_FOLDER_ID", "root")
     monkeypatch.setenv("GOOGLE_DRIVE_AUTH_MODE", "service_account")
     monkeypatch.setenv("GOOGLE_DRIVE_CREDENTIALS_PATH", "unused.json")
@@ -162,6 +172,7 @@ async def clean_environment(tmp_path, monkeypatch):
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
+    get_llm_config.cache_clear()  # do not hand the placeholder key to later tests
 
 
 @pytest.mark.asyncio

@@ -45,3 +45,23 @@ def test_completed_representations(value):
 )
 def test_not_completed_representations(value):
     assert is_data_item_completed(value) is False
+
+
+def test_is_item_stamped_reads_the_pipeline_and_dataset_slot():
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from cognee.modules.pipelines.models.DataItemStatus import is_item_stamped
+
+    dataset_id, other = uuid4(), uuid4()
+    item = SimpleNamespace(
+        pipeline_status={
+            "indexing_pipeline": {str(dataset_id): {"status": COMPLETED}},
+            "cognify_pipeline": {str(other): COMPLETED},
+        }
+    )
+    assert is_item_stamped(item, "indexing_pipeline", dataset_id)
+    assert not is_item_stamped(item, "cognify_pipeline", dataset_id)
+    assert not is_item_stamped(item, "add_pipeline", dataset_id)
+    assert not is_item_stamped(SimpleNamespace(pipeline_status=None), "indexing_pipeline", other)
+    assert not is_item_stamped(object(), "indexing_pipeline", other)

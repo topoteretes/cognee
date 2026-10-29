@@ -194,6 +194,8 @@ async def test_review_sources_and_touched_entities_use_complete_active_evidence(
     assert len(records) == 61
     original = next(record for record in records if record.chunk_id == chunk_id)
     assert original.observed_at.replace(tzinfo=timezone.utc) == after
+    # Rows written before the watermark are observed when their run completes.
+    assert {record.observed_at.replace(tzinfo=timezone.utc) for record in records} == {after}
     assert original.external_metadata == {"effective_date": "2024-03-02"}
     assert original.document_name == "report"
     assert await lookup.get_touched_entity_ids(dataset_id, since) == {

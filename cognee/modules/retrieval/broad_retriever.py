@@ -70,6 +70,11 @@ class BroadLimitError(ValueError):
     """The dataset exceeds a BROAD limit; the message names the setting to raise."""
 
 
+class BroadNoTextError(NoDataError):
+    """The dataset holds no document text for BROAD to read. Narrower than an empty
+    graph: code or custom DataPoints may still be there for other search types."""
+
+
 class DecisionSmall(BaseModel):
     """The whole dataset is shown: answer from it, or compute the answer with SQL."""
 
@@ -255,7 +260,7 @@ class BroadRetriever(CompletionRetriever):
             if total > self.store_chars:
                 chars, parts = await self.build_most_similar(store, engine.vector, query)
                 if not chars:
-                    raise NoDataError("No data found in the system, please add data first.")
+                    raise BroadNoTextError("BROAD found no document text in this dataset.")
                 coverage = (
                     f"the {parts:,} parts of the dataset most similar to the question "
                     f"({chars / 1e6:.1f} MB of {total / 1e6:,.0f} MB; the rest was not searched)"
@@ -275,7 +280,7 @@ class BroadRetriever(CompletionRetriever):
             corpus = corpus or await self.open_corpus(engine.graph)
             whole, chars = await self.build(store, corpus)
             if not chars:
-                raise NoDataError("No data found in the system, please add data first.")
+                raise BroadNoTextError("BROAD found no document text in this dataset.")
             fits = bool(whole) and len(self.tokenizer.extract_tokens(whole)) <= self.context_tokens
             logger.info("BROAD dataset: %d characters, shown whole: %s", chars, fits)
             return await self.decide(query, store, whole if fits else None)
@@ -398,7 +403,7 @@ class BroadRetriever(CompletionRetriever):
             decision = await self._ask(prompt, "broad_decide_small.txt", DecisionSmall)
             if decision.sql is None:
                 if not decision.answer:
-                    raise ValueError("BROAD decision returned neither an answer nor a query")
+                    raise BroadQueryError("BROAD decision returned neither an answer nor a query")
                 return BroadContext(
                     "answer", "", "(Answered from the whole dataset.)", answer=decision.answer
                 )
@@ -541,7 +546,7 @@ class BroadRetriever(CompletionRetriever):
         return None
 
     def get_context_evidence(self, retrieved_objects: Any, dataset_id: Any = None):
-        return None
+        return []
 
     async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
         return completions

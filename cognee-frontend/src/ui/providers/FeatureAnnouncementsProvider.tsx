@@ -13,9 +13,11 @@ import FeatureAnnouncementModal from "@/ui/elements/FeatureAnnouncementModal";
 export default function FeatureAnnouncementsProvider({ children }: { children: ReactNode }): React.ReactElement {
   const { userMe, dismissFeatureAnnouncement } = useUser();
 
-  const featureKey = userMe?.pendingFeatureAnnouncements.find(
-    (key) => key in FEATURE_ANNOUNCEMENT_CONTENT,
-  );
+  // Not through welcome yet means a brand-new account on its way to /welcome,
+  // which is no moment for an announcement modal.
+  const featureKey = userMe?.isSeenWelcome
+    ? userMe.pendingFeatureAnnouncements.find((key) => key in FEATURE_ANNOUNCEMENT_CONTENT)
+    : undefined;
 
   const handleDismiss = useCallback((): void => {
     if (featureKey) void dismissFeatureAnnouncement(featureKey);

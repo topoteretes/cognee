@@ -29,6 +29,7 @@ from cognee.modules.integrations.github.app_auth import (
     mint_installation_token,
 )
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
+from cognee.modules.integrations.sync_progress import report_sync_progress, track_sync
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,12 @@ async def list_installation_repositories(token: str) -> list[str]:
                 full_names.extend(
                     repo["full_name"] for repo in payload.get("repositories", []) if repo
                 )
+                await report_sync_progress(
+                    phase="discovering",
+                    completed=len(full_names),
+                    unit="repositories",
+                    counts={"scanned": len(full_names)},
+                )
                 next_link = response.links.get("next", {}).get("url")
                 url = str(next_link) if next_link else None
     return full_names
@@ -95,40 +102,62 @@ async def sync_repositories(
     from cognee.api.v1.remember.remember import remember as cognee_remember
     from cognee.modules.users.methods import get_user
 
-    token, _expires_at = await mint_installation_token(int(credential.provider_account_id))
+    async with track_sync("github", credential) as reporter:
+        token, _expires_at = await mint_installation_token(int(credential.provider_account_id))
 
-    if repo_full_names is None:
-        repo_full_names = await list_installation_repositories(token)
-    if not repo_full_names:
+        if repo_full_names is None:
+            await report_sync_progress(phase="discovering", unit="repositories")
+            repo_full_names = await list_installation_repositories(token)
+        await report_sync_progress(
+            phase="processing", completed=0, total=len(repo_full_names), unit="repositories"
+        )
+        if not repo_full_names:
+            logger.info(
+                "GitHub installation %s has no repositories to sync", credential.provider_account_id
+            )
+            return
+
+        account_login = (credential.provider_metadata or {}).get("account_login") or str(
+            credential.provider_account_id
+        )
+        owner = await get_user(credential.user_id)
+
         logger.info(
-            "GitHub installation %s has no repositories to sync", credential.provider_account_id
-        )
-        return
-
-    account_login = (credential.provider_metadata or {}).get("account_login") or str(
-        credential.provider_account_id
-    )
-    owner = await get_user(credential.user_id)
-
-    logger.info(
-        "Syncing %d GitHub repositories for %s into dataset %s",
-        len(repo_full_names),
-        account_login,
-        dataset_name_for_account(account_login),
-    )
-    result = await cognee_remember(
-        [clone_url(full_name) for full_name in repo_full_names],
-        dataset_name=dataset_name_for_account(account_login),
-        user=owner,
-        content_type="code",
-        repo_credentials=token,
-        # Report a repo that fails (clone, auth, pipeline) as an errored item
-        # and keep syncing the rest, instead of aborting the whole batch.
-        raise_on_error=False,
-    )
-    if getattr(result, "status", None) == "errored":
-        logger.warning(
-            "GitHub sync for %s finished with errors: %s",
+            "Syncing %d GitHub repositories for %s into dataset %s",
+            len(repo_full_names),
             account_login,
-            getattr(result, "error", None),
+            dataset_name_for_account(account_login),
         )
+        result = await cognee_remember(
+            [clone_url(full_name) for full_name in repo_full_names],
+            dataset_name=dataset_name_for_account(account_login),
+            user=owner,
+            content_type="code",
+            repo_credentials=token,
+            # Report a repo that fails (clone, auth, pipeline) as an errored item
+            # and keep syncing the rest, instead of aborting the whole batch.
+            raise_on_error=False,
+        )
+        if getattr(result, "status", None) == "errored":
+            logger.warning(
+                "GitHub sync for %s finished with errors: %s",
+                account_login,
+                getattr(result, "error", None),
+            )
+        items = getattr(result, "items", None) or []
+        failed = sum(item.get("status") == "errored" for item in items)
+        processed = sum(item.get("status") != "errored" for item in items)
+        if getattr(result, "status", None) == "errored":
+            await reporter.finish(
+                "partial" if processed else "failed",
+                counts={"processed": processed, "failed": failed},
+                reason="processing_error",
+            )
+        else:
+            await report_sync_progress(
+                phase="finalizing",
+                completed=len(items),
+                total=len(repo_full_names),
+                unit="repositories",
+                counts={"processed": processed, "failed": failed},
+            )

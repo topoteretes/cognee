@@ -803,3 +803,39 @@ async def test_capped_run_curates_the_most_relevant_and_seals_the_rest(monkeypat
     _forbid_llm(monkeypatch)
     second = await distill_module.distill_session("s-1", dataset=DATASET_A.name, user=USER)
     assert second.status == "no_new_entries"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_step_after_the_lessons_cognify_is_raised_after_the_watermark(
+    monkeypatch, datasets
+):
+    """The lessons landed; only the step after their cognify failed. The watermark
+    still moves, so the curator and writer calls are not repeated on the next
+    improve, and then the error is raised."""
+    from cognee.modules.pipelines.exceptions import AfterRunHookError
+
+    rows = [_context_row("Lesson one.")]
+    manager = FakeSessionManager(rows)
+    _install_manager(monkeypatch, manager)
+    failure = AfterRunHookError([(DATASET_A.id, DATASET_A.name, RuntimeError("compaction"))])
+
+    async def fake_propose(qa_rows, context_entries):
+        return _curator_run(context_entries, [ProposedLesson(working_statement="Something.")])
+
+    async def fake_accept(scope, proposed, context_entries):
+        return [WrittenLesson(accept=True, statement="Keep reports concise.")], 0
+
+    async def failing_step_publish(scope, accepted):
+        raise failure
+
+    monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
+    monkeypatch.setattr(distill_module, "accept_proposed_lessons", fake_accept)
+    monkeypatch.setattr(distill_module, "publish_distilled_lessons", failing_step_publish)
+
+    with pytest.raises(AfterRunHookError) as raised:
+        await distill_module.distill_session("s-1", dataset=DATASET_A.name, user=USER)
+
+    assert raised.value is failure
+    assert await get_distilled_entry_ids(manager, str(USER.id), "s-1", str(DATASET_A.id)) == {
+        rows[0]["id"]
+    }

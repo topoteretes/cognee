@@ -1,9 +1,9 @@
 """serve() must fail loudly at connect time instead of lying.
 
 Covers the two failure modes: nothing to connect with (no url, no env
-config, no usable saved credentials, no device client ID), and a reachable
-instance that rejects the API key — which previously printed "Connected"
-and failed on the first operation."""
+config, no usable saved connection), and a reachable instance that rejects
+the API key — which previously printed "Connected" and failed on the first
+operation."""
 
 import json
 from unittest.mock import MagicMock
@@ -19,7 +19,7 @@ from cognee.exceptions import CogneeConfigurationError
 
 @pytest.fixture(autouse=True)
 def no_serve_env(monkeypatch):
-    for var in ("COGNEE_AUTH0_DEVICE_CLIENT_ID", "COGNEE_SERVICE_URL", "COGNEE_API_KEY"):
+    for var in ("COGNEE_SERVICE_URL", "COGNEE_API_KEY"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -39,15 +39,7 @@ async def test_serve_no_config_fails_with_guidance(monkeypatch, tmp_path):
 async def test_serve_stale_credentials_fail_with_guidance(monkeypatch, tmp_path):
     creds_file = tmp_path / "cloud_credentials.json"
     creds_file.write_text(
-        json.dumps(
-            {
-                "access_token": "stale",
-                "service_url": "http://stale.invalid",
-                "api_key": "dead-key",
-                "email": "user@example.com",
-                "expires_at": 1.0,
-            }
-        )
+        json.dumps({"service_url": "http://stale.invalid", "api_key": "dead-key"})
     )
     monkeypatch.setattr(creds_mod, "_CREDENTIALS_FILE", creds_file)
 
@@ -60,7 +52,7 @@ async def test_serve_stale_credentials_fail_with_guidance(monkeypatch, tmp_path)
         await serve()
 
     message = exc_info.value.message
-    assert "user@example.com" in message
+    assert str(creds_file) in message
     assert "http://stale.invalid" in message
     assert "COGNEE_SERVICE_URL" in message
 
@@ -72,8 +64,12 @@ def _patch_probes(monkeypatch, health: bool, auth_status):
     async def auth_check(self):
         return auth_status
 
+    async def get_tenant_id(self):
+        return ""
+
     monkeypatch.setattr(CloudClient, "_health_check", health_check)
     monkeypatch.setattr(CloudClient, "_auth_check", auth_check)
+    monkeypatch.setattr(CloudClient, "_get_tenant_id", get_tenant_id)
 
 
 @pytest.mark.asyncio
@@ -114,62 +110,53 @@ async def test_serve_direct_accepted_key_connects_and_saves(monkeypatch, tmp_pat
     client = await serve(url="http://some-instance:8000", api_key="good-key")
     try:
         assert client.service_url == "http://some-instance:8000"
-        assert creds_file.exists()
+        assert json.loads(creds_file.read_text()) == {
+            "service_url": "http://some-instance:8000",
+            "api_key": "good-key",
+            "tenant_id": "",
+        }
     finally:
         await cognee.disconnect()
 
 
 @pytest.mark.asyncio
-async def test_serve_cloud_rejected_provisioned_key_saves_nothing(monkeypatch, tmp_path):
-    """The cloud flow must validate the provisioned key before persisting
-    credentials — a tenant rejection may not poison the cache (same
-    validate-then-save order as the direct flow)."""
-    from cognee.api.v1.serve import device_auth, management_api
+async def test_serve_reconnects_to_saved_instance(monkeypatch, tmp_path):
+    """A bare serve() after a successful connection reuses the saved instance."""
+    import cognee
 
     creds_file = tmp_path / "cloud_credentials.json"
+    _write_saved_creds(creds_file)
     monkeypatch.setattr(creds_mod, "_CREDENTIALS_FILE", creds_file)
-    monkeypatch.setenv("COGNEE_AUTH0_DEVICE_CLIENT_ID", "test-client-id")
+    _patch_probes(monkeypatch, health=True, auth_status=200)
 
-    async def fake_login(**kwargs):
-        return device_auth.TokenResponse(access_token="at", refresh_token="rt")
+    client = await serve()
+    try:
+        assert client.service_url == "http://saved-instance.invalid"
+    finally:
+        await cognee.disconnect()
 
-    async def fake_tenant(mgmt_url, token):
-        return management_api.Tenant(id="t1", name="tenant-1")
 
-    async def fake_service_url(mgmt_url, token):
-        return "http://tenant-instance.invalid"
-
-    async def fake_api_key(mgmt_url, token):
-        return "provisioned-but-rejected"
-
-    monkeypatch.setattr(device_auth, "device_code_login", fake_login)
-    monkeypatch.setattr(management_api, "get_current_tenant", fake_tenant)
-    monkeypatch.setattr(management_api, "get_service_url", fake_service_url)
-    monkeypatch.setattr(management_api, "get_or_create_api_key", fake_api_key)
-    _patch_probes(monkeypatch, health=True, auth_status=401)
+@pytest.mark.asyncio
+async def test_serve_does_not_reuse_a_saved_keyless_connection(monkeypatch, tmp_path):
+    """Without a key nothing proves the saved URL still serves the same
+    instance, so a bare serve() asks for the URL instead of reconnecting."""
+    creds_file = tmp_path / "cloud_credentials.json"
+    creds_file.write_text(json.dumps({"service_url": "http://localhost:8000", "api_key": ""}))
+    monkeypatch.setattr(creds_mod, "_CREDENTIALS_FILE", creds_file)
+    _patch_probes(monkeypatch, health=True, auth_status=200)
 
     with pytest.raises(CogneeConfigurationError) as exc_info:
         await serve()
 
-    assert "rejected the provisioned API key" in exc_info.value.message
-    assert not creds_file.exists()
+    assert "cognee.serve(url=" in exc_info.value.message
 
 
 @pytest.mark.asyncio
-async def test_serve_cached_cloud_creds_with_rejected_key_fall_through(monkeypatch, tmp_path):
-    """A reachable instance whose saved key no longer works must not 'connect';
-    without a device client ID it lands in the stale-credentials guidance."""
+async def test_serve_saved_creds_with_rejected_key_fail_with_guidance(monkeypatch, tmp_path):
+    """A reachable instance whose saved key no longer works must not 'connect'."""
     creds_file = tmp_path / "cloud_credentials.json"
     creds_file.write_text(
-        json.dumps(
-            {
-                "access_token": "stale",
-                "service_url": "http://alive-but-rejects.invalid",
-                "api_key": "revoked-key",
-                "email": "user@example.com",
-                "expires_at": 1.0,
-            }
-        )
+        json.dumps({"service_url": "http://alive-but-rejects.invalid", "api_key": "revoked"})
     )
     monkeypatch.setattr(creds_mod, "_CREDENTIALS_FILE", creds_file)
     _patch_probes(monkeypatch, health=True, auth_status=401)
@@ -177,19 +164,40 @@ async def test_serve_cached_cloud_creds_with_rejected_key_fall_through(monkeypat
     with pytest.raises(CogneeConfigurationError) as exc_info:
         await serve()
 
-    assert "user@example.com" in exc_info.value.message
+    assert "http://alive-but-rejects.invalid" in exc_info.value.message
+
+
+def test_saved_creds_from_an_older_release_still_load(monkeypatch, tmp_path):
+    """Files written by the removed Auth0 login carry extra fields; they must
+    load as the connection they also hold, not be rejected."""
+    creds_file = tmp_path / "cloud_credentials.json"
+    creds_file.write_text(
+        json.dumps(
+            {
+                "access_token": "at",
+                "refresh_token": "rt",
+                "expires_at": 1.0,
+                "service_url": "http://saved-instance.invalid",
+                "api_key": "saved-key",
+                "management_url": "https://api.example",
+                "tenant_id": "t1",
+                "tenant_name": "tenant",
+                "email": "user@example.com",
+            }
+        )
+    )
+    monkeypatch.setattr(creds_mod, "_CREDENTIALS_FILE", creds_file)
+
+    creds = creds_mod.load_credentials()
+
+    assert creds == creds_mod.CloudCredentials(
+        service_url="http://saved-instance.invalid", api_key="saved-key", tenant_id="t1"
+    )
 
 
 def _write_saved_creds(path):
     path.write_text(
-        json.dumps(
-            {
-                "access_token": "at",
-                "service_url": "http://saved-instance.invalid",
-                "api_key": "saved-key",
-                "email": "user@example.com",
-            }
-        )
+        json.dumps({"service_url": "http://saved-instance.invalid", "api_key": "saved-key"})
     )
 
 
