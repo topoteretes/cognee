@@ -66,6 +66,45 @@ async def test_global_context_keeps_summaries_and_states_every_relevant_decision
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("retriever_type", [HybridRetriever, GraphCompletionRetriever])
+async def test_a_decision_whose_selected_fact_is_in_context_is_not_restated(
+    monkeypatch, retriever_type
+):
+    """The selected edge, or the link standing in for it, already states the decision."""
+
+    def decision(fact, fact_id):
+        return {
+            "resolution_source": "user",
+            "selected_fact": fact,
+            "selected_fact_id": fact_id,
+            "about_id": "retrieved",
+        }
+
+    resolutions = [
+        ("a", decision("Accepted fact A", "a-fact")),
+        ("b", decision("Accepted fact B", "b-fact")),
+    ]
+    retriever, _ = _retriever(monkeypatch, retriever_type, resolutions, top_k=2)
+    edge = {"edge_object_id": "a-fact", "edge_text": "Accepted fact A"}
+    if retriever_type is HybridRetriever:
+        objects = {
+            "chunks": [],
+            "entities": [
+                {
+                    "id": "retrieved",
+                    "name": "Retrieved",
+                    "edges": [{**edge, "text": edge["edge_text"], "source_id": "retrieved"}],
+                }
+            ],
+        }
+    else:
+        objects = [Edge(Node("retrieved", {"name": "Retrieved"}), Node("a"), attributes=edge)]
+    context = await retriever.get_context_from_objects(query="q", retrieved_objects=objects)
+    assert "Accepted by user: Accepted fact B" in context
+    assert "Accepted by user: Accepted fact A" not in context
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retriever_type", [HybridRetriever, GraphCompletionRetriever])
 async def test_unrelated_decision_does_not_replace_global_index(monkeypatch, retriever_type):
     retriever, _ = _retriever(
         monkeypatch,

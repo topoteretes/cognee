@@ -69,7 +69,8 @@ are kept.
 
 The optional global-context prelude keeps its root and top-k summaries. It appends
 every user decision whose subject, values, or sources intersect the retrieved
-nodes, and no other. Reading decisions is required for normal retrieval; a graph
+nodes, and no other, leaving out a decision whose selected fact is already in the
+context. Reading decisions is required for normal retrieval; a graph
 failure surfaces an error rather than returning an unchecked old hit.
 Custom retrievers and raw graph queries must apply the same resolution policy
 if they are used to generate answers. Cache cleanup relies on recorded fact

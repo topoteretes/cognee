@@ -208,14 +208,22 @@ def user_resolution_text(selected_fact: str) -> str:
     return f"Accepted by user: {selected_fact}; ignore competing claims."
 
 
-def accepted_facts_context(resolutions: list[dict], node_ids: list[str]) -> str:
-    """Every user decision about the retrieved nodes or their sources, for the prelude."""
+def accepted_facts_context(
+    resolutions: list[dict], node_ids: list[str], edge_ids: list[str]
+) -> str:
+    """Every user decision about the retrieved nodes or their sources, for the prelude.
+
+    A decision whose selected fact is in the context is left out: that edge, or the
+    synthetic link standing in for it, already states the decision.
+    """
     retrieved_ids = set(node_ids)
+    stated = set(edge_ids)
     accepted = sorted(
         {
             user_resolution_text(item["selected_fact"])
             for item in resolutions
-            if retrieved_ids.intersection(
+            if str(item.get("selected_fact_id")) not in stated
+            and retrieved_ids.intersection(
                 str(node_id)
                 for node_id in (item.get("about_id"), *item["values"], *item["sources"])
                 if node_id is not None
