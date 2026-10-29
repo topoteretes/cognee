@@ -73,7 +73,9 @@ class _Stack:
         self.add = AsyncMock()
         self.cognify = AsyncMock(return_value={dataset_id: cognify_run})
         self.recorded_budget = AsyncMock(return_value=None)
+        self.authorize = AsyncMock(return_value=SimpleNamespace(id=dataset_id, name="ds"))
         self.patches = (
+            patch.object(data_methods_module, "get_authorized_dataset", self.authorize),
             patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=data_id)),
             patch.object(
                 relational_module,
@@ -293,3 +295,29 @@ async def test_dlt_replacement_under_another_name_is_refused_before_the_delete()
 
     stack.forget.assert_not_awaited()
     stack.add.assert_not_awaited()
+
+
+async def test_an_unauthorized_caller_is_refused_before_the_data_id_is_resolved():
+    """SDK-1237: resolving the id first told a caller with no access whether a
+    (dataset, data) pair exists, through 404 against anything else."""
+    from cognee.modules.users.exceptions import PermissionDeniedError
+
+    data_id, dataset_id = uuid4(), uuid4()
+    stack = _Stack(data_id, dataset_id, AsyncMock(), _run(dataset_id))
+    resolve = AsyncMock(return_value=data_id)
+
+    with (
+        stack,
+        patch.object(data_methods_module, "get_authorized_dataset", AsyncMock(return_value=None)),
+        patch.object(data_methods_module, "resolve_data_id", resolve),
+        pytest.raises(PermissionDeniedError),
+    ):
+        await update_module.update(
+            data_id=data_id,
+            data="new text",
+            dataset_id=dataset_id,
+            user=SimpleNamespace(id=uuid4()),
+        )
+
+    resolve.assert_not_awaited()
+    stack.forget.assert_not_awaited()

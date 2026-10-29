@@ -193,8 +193,13 @@ async def update(
     if not user:
         user = await get_default_user()
 
-    from cognee.modules.data.methods import reset_data_pipeline_status, resolve_data_id
+    from cognee.modules.data.methods import (
+        get_authorized_dataset,
+        reset_data_pipeline_status,
+        resolve_data_id,
+    )
     from cognee.modules.ingestion.exceptions import IngestionError
+    from cognee.modules.users.exceptions import PermissionDeniedError
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.ingestion.resolve_dlt_sources import check_dlt_replacement, is_dlt_input
 
@@ -204,6 +209,11 @@ async def update(
                 f"update() replaces exactly one document; got a list of {len(data)} items."
             )
         data = data[0]
+
+    # Authorize before the id is resolved: a caller without write access must
+    # not learn from 404-versus-further whether a (dataset, data) pair exists.
+    if await get_authorized_dataset(user, dataset_id, "write") is None:
+        raise PermissionDeniedError(message="Not authorized to update this dataset")
 
     # The document KEEPS its data_id through updates. Resolve the incoming id
     # (exact, then pre-fork legacy_id) once, up front: the incremental path

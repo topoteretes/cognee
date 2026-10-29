@@ -239,6 +239,9 @@ def get_agents_router() -> APIRouter:
         ## Request Parameters
         - **agent_session_name** (str): The name used when registering the connection. Combined with
           the authenticated user's ID to identify which connection to deactivate.
+
+        ## Response
+        - **activeAgents** (int): The caller's own connections still active in this process.
         """
         count = await unregister_agent(user, request)
         return AgentModeDTO(active_agents=count)

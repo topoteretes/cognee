@@ -561,6 +561,25 @@ async def list_sessions_for_dataset(dataset_id: UUIDType) -> list[tuple[UUIDType
     return [(row.user_id, row.session_id) for row in rows]
 
 
+async def list_sessions_for_user(user_id: UUIDType) -> list[tuple[UUIDType, str]]:
+    """Return (user_id, session_id) pairs for every session the user owns.
+
+    Ownership is the ``user_id`` on the session row, nothing wider: a child
+    agent's sessions are the agent's own, and a dataset grant reaches a
+    session only through ``list_sessions_for_dataset``.
+    """
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        rows = (
+            await session.execute(
+                select(SessionRecord.user_id, SessionRecord.session_id).where(
+                    SessionRecord.user_id == user_id
+                )
+            )
+        ).all()
+    return [(row.user_id, row.session_id) for row in rows]
+
+
 async def list_unattributed_sessions() -> list[tuple[UUIDType, str]]:
     """Return (user_id, session_id) pairs for sessions with no dataset attribution.
 

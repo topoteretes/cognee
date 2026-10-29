@@ -88,6 +88,30 @@ async def _provenance_scope(user: User) -> tuple[list | None, list | None, list 
     return tenant_scope, None, [dataset.id for dataset in readable]
 
 
+async def _provenance_actor_scope(
+    user: User, scope_dataset_ids: list | None
+) -> tuple[list | None, list | None]:
+    """Whose activity and whose grants a non-administrator sees.
+
+    Returns ``(visible_user_ids, grant_dataset_ids)``: ``(None, None)`` for a
+    tenant administrator, who keeps the whole workspace. Everyone else sees
+    the agent connections and sessions of themselves and their child agents
+    only — the rule the agents and sessions routers apply, where a dataset
+    grant never exposes another user's name, user id or session id — and the
+    ACL grants and role membership of the datasets they may ``share``, since
+    listing who else holds access is what sharing is for; a read grant alone
+    shows none.
+    """
+    from cognee.modules.users.methods import get_visible_user_ids
+    from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
+
+    if scope_dataset_ids is None:
+        return None, None
+    visible_user_ids = await get_visible_user_ids(user.id)
+    shareable = await get_all_user_permission_datasets(user, "share")
+    return visible_user_ids, [dataset.id for dataset in shareable]
+
+
 async def _administers_tenant(user: User, tenant_id) -> bool:
     """Whether this caller administers the tenant they belong to.
 
@@ -213,8 +237,11 @@ def get_schema_router() -> APIRouter:
         """Return a caller-scoped HTML memory-provenance visualization.
 
         A tenant administrator sees the whole workspace; any other member sees
-        only the datasets they hold a read grant on, and the files, grants,
-        agents and sessions hanging off them (see ``_provenance_scope``).
+        only the datasets they hold a read grant on and the files hanging off
+        them (see ``_provenance_scope``), the agent connections and sessions
+        of themselves and their child agents, and the grants and role
+        membership of the datasets they may share (see
+        ``_provenance_actor_scope``).
 
         Query parameters:
             include_memory: when true, also folds the extracted memory
@@ -234,11 +261,16 @@ def get_schema_router() -> APIRouter:
 
         try:
             scope_tenant_ids, scope_user_ids, scope_dataset_ids = await _provenance_scope(user)
+            visible_user_ids, grant_dataset_ids = await _provenance_actor_scope(
+                user, scope_dataset_ids
+            )
             html = await visualize_memory_provenance(
                 include_memory=include_memory,
                 scope_tenant_ids=scope_tenant_ids,
                 scope_user_ids=scope_user_ids,
                 scope_dataset_ids=scope_dataset_ids,
+                visible_user_ids=visible_user_ids,
+                grant_dataset_ids=grant_dataset_ids,
             )
             return HTMLResponse(html)
         except CogneeApiError:
@@ -268,8 +300,9 @@ def get_schema_router() -> APIRouter:
         """Return a caller-scoped memory-provenance graph as a JSON-safe dict.
 
         Same scoping as `GET /schema/provenance` (the whole tenant for its
-        administrators, the caller's readable datasets for anyone else,
-        tenant or not) and the same underlying graph —
+        administrators; for anyone else, tenant or not, the caller's readable
+        datasets, their own agents and sessions, and the grants of the
+        datasets they may share) and the same underlying graph —
         packaged as a dict instead of an HTML page.
 
         Query parameters:
@@ -290,11 +323,16 @@ def get_schema_router() -> APIRouter:
 
         try:
             scope_tenant_ids, scope_user_ids, scope_dataset_ids = await _provenance_scope(user)
+            visible_user_ids, grant_dataset_ids = await _provenance_actor_scope(
+                user, scope_dataset_ids
+            )
             payload = await get_memory_provenance_payload(
                 include_memory=include_memory,
                 scope_tenant_ids=scope_tenant_ids,
                 scope_user_ids=scope_user_ids,
                 scope_dataset_ids=scope_dataset_ids,
+                visible_user_ids=visible_user_ids,
+                grant_dataset_ids=grant_dataset_ids,
             )
             return JSONResponse(status_code=200, content=payload)
         except CogneeApiError:

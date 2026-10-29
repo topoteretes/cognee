@@ -647,6 +647,8 @@ async def get_memory_provenance_graph(
     scope_tenant_ids: list[Any] | None = None,
     scope_user_ids: list[Any] | None = None,
     scope_dataset_ids: list[Any] | None = None,
+    visible_user_ids: list[Any] | None = None,
+    grant_dataset_ids: list[Any] | None = None,
 ) -> tuple[list[Node], list[EdgeData]]:
     """Read live relational data and project it into a provenance ``(nodes, edges)``.
 
@@ -670,6 +672,18 @@ async def get_memory_provenance_graph(
             not administer the tenant. Given alone (a caller with no tenant),
             it is the whole scope: users, roles and tenants are narrowed to
             the ones tied to these datasets.
+        visible_user_ids: when set, agent connections and sessions are read
+            for these users only (the caller and their child agents, see
+            ``get_visible_user_ids``), on top of the dataset scope. A dataset
+            scope alone still named the agents and sessions — agent name,
+            user id, session id — of everyone who holds a grant on a readable
+            dataset, which the agents and sessions routers withhold: a grant
+            on a dataset does not make another user's activity the caller's
+            to read.
+        grant_dataset_ids: when set, ACL grants and role membership are
+            projected only for these datasets (the ones the caller may
+            ``share``), so a read grant alone does not list who else holds
+            access or who is in a role. An empty list projects none.
         When neither scope is given the read is global — the OSS local default,
         where the single user owns everything.
     """
@@ -789,14 +803,19 @@ async def get_memory_provenance_graph(
 
     user_ids = [u["id"] for u in users]
     dataset_ids = [d["id"] for d in datasets]
-    agents = await _read_agents(user_ids)
+    # Whose agents and sessions the graph shows: every in-scope user, or only
+    # the caller's own when the router says so.
+    actor_user_ids = (
+        user_ids if visible_user_ids is None else [str(uid) for uid in visible_user_ids]
+    )
+    agents = await _read_agents(actor_user_ids)
     if scoped:
         # _read_agents also folds in globally-registered (in-process) agent
-        # connections; drop any that don't belong to an in-scope user so the
-        # scoped graph can't surface another user's agent.
-        allowed_user_ids = set(user_ids)
+        # connections; drop any that don't belong to an actor so the scoped
+        # graph can't surface another user's agent.
+        allowed_user_ids = set(actor_user_ids)
         agents = [a for a in agents if a.get("user_id") in allowed_user_ids]
-    sessions = await _read_sessions(user_ids, agents)
+    sessions = await _read_sessions(actor_user_ids, agents)
     if scope_dataset_ids is not None:
         # A dataset scope is a caller who may read only some of the workspace,
         # while user_ids above is still every user in it. Agents and sessions
@@ -827,16 +846,25 @@ async def get_memory_provenance_graph(
             if any(ref.get("dataset_id") in in_scope for ref in agent.get("datasets") or [])
         ]
         sessions = [session for session in sessions if session.get("dataset_id") in in_scope]
+    # Which datasets' grants and role membership the graph shows: every
+    # in-scope dataset, or only the ones the caller may share.
+    if grant_dataset_ids is None:
+        grant_scope_ids = dataset_ids
+        role_scope_ids = scope_dataset_ids
+    else:
+        shareable = {str(did) for did in grant_dataset_ids}
+        grant_scope_ids = [did for did in dataset_ids if did in shareable]
+        role_scope_ids = grant_scope_ids
     roles, acl_grants = await _read_roles_and_grants(
         tenant_ids=scope_tenant_ids,
-        dataset_ids=dataset_ids,
+        dataset_ids=grant_scope_ids,
         # user_ids is already resolved to this call's in-scope users (strings);
         # only meaningful without a tenant scope, where roles carry no other
         # link back to "in scope" at all.
         scope_user_ids=user_ids
         if scope_tenant_ids is None and scope_user_ids is not None
         else None,
-        scope_dataset_ids=scope_dataset_ids,
+        scope_dataset_ids=role_scope_ids,
     )
     # Scope memory to the in-scope datasets so it never leaks across tenants.
     memory = None
@@ -864,6 +892,8 @@ async def visualize_memory_provenance(
     scope_tenant_ids: list[Any] | None = None,
     scope_user_ids: list[Any] | None = None,
     scope_dataset_ids: list[Any] | None = None,
+    visible_user_ids: list[Any] | None = None,
+    grant_dataset_ids: list[Any] | None = None,
 ) -> str:
     """Render the live memory-provenance graph to a self-contained HTML file.
 
@@ -871,7 +901,9 @@ async def visualize_memory_provenance(
     user, and ``scope_dataset_ids`` narrows it further to the caller's readable
     datasets and the files, grants, memory, agents and sessions hanging off them
     (see ``get_memory_provenance_graph``); pass them in multi-tenant deployments
-    to avoid leaking other tenants' and other members' data.
+    to avoid leaking other tenants' and other members' data. ``visible_user_ids``
+    and ``grant_dataset_ids`` narrow the agents, sessions, grants and role
+    membership to the caller's own (see ``get_memory_provenance_graph``).
     """
     from cognee.modules.visualization.cognee_network_visualization import (
         cognee_network_visualization,
@@ -882,6 +914,8 @@ async def visualize_memory_provenance(
         scope_tenant_ids=scope_tenant_ids,
         scope_user_ids=scope_user_ids,
         scope_dataset_ids=scope_dataset_ids,
+        visible_user_ids=visible_user_ids,
+        grant_dataset_ids=grant_dataset_ids,
     )
     html = await cognee_network_visualization(graph_data, destination_file_path)
     if destination_file_path:
@@ -894,6 +928,8 @@ async def get_memory_provenance_payload(
     scope_tenant_ids: list[Any] | None = None,
     scope_user_ids: list[Any] | None = None,
     scope_dataset_ids: list[Any] | None = None,
+    visible_user_ids: list[Any] | None = None,
+    grant_dataset_ids: list[Any] | None = None,
 ) -> dict:
     """The live memory-provenance graph as a JSON-safe dict, for a client
     that renders it itself instead of an embedded HTML page.
@@ -906,7 +942,8 @@ async def get_memory_provenance_payload(
     data for the same reason CLO-401's dataset visualization JSON and HTML
     paths cannot: both come from one ``preprocess()`` call.
 
-    ``scope_tenant_ids`` / ``scope_user_ids`` / ``scope_dataset_ids``: see
+    ``scope_tenant_ids`` / ``scope_user_ids`` / ``scope_dataset_ids`` /
+    ``visible_user_ids`` / ``grant_dataset_ids``: see
     ``get_memory_provenance_graph``.
     """
     from cognee.modules.visualization.cognee_network_visualization import (
@@ -918,5 +955,7 @@ async def get_memory_provenance_payload(
         scope_tenant_ids=scope_tenant_ids,
         scope_user_ids=scope_user_ids,
         scope_dataset_ids=scope_dataset_ids,
+        visible_user_ids=visible_user_ids,
+        grant_dataset_ids=grant_dataset_ids,
     )
     return build_visualization_payload(graph_data)

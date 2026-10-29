@@ -18,10 +18,15 @@ def get_user_id_by_email_router() -> APIRouter:
     async def get_user_id(body: UserEmailRequest, user: User = Depends(get_authenticated_user)):
         """Get user id — POST /api/v1/users/get-user-id.
 
+        Resolves an email to a user id for sharing. Only users the caller may
+        see resolve: the caller themselves, the members of the caller's
+        tenants, or, for a caller in no tenant, users in no tenant. Any other
+        address is 404 whether or not it exists.
+
         ## Request Parameters
         - **email** (EmailStr): Email address of the user.
         """
-        user_id = await get_user_id_by_email(str(body.email))
+        user_id = await get_user_id_by_email(str(body.email), user)
 
         if user_id is None:
             raise HTTPException(status_code=404, detail="User not found")
