@@ -662,7 +662,10 @@ async def test_a_graph_search_on_indexed_chunks_becomes_a_chunk_completion(
         router,
         "route_query",
         lambda query, constraints=None: types.SimpleNamespace(
-            search_type=SearchType.GRAPH_COMPLETION, rule="relational", only_context=False
+            search_type=SearchType.GRAPH_COMPLETION,
+            rule="relational",
+            only_context=False,
+            retriever_config=None,
         ),
     )
 
@@ -701,7 +704,10 @@ async def test_without_an_llm_the_chunk_completion_returns_its_context(
         router,
         "route_query",
         lambda query, constraints=None: types.SimpleNamespace(
-            search_type=SearchType.GRAPH_COMPLETION, rule="relational", only_context=False
+            search_type=SearchType.GRAPH_COMPLETION,
+            rule="relational",
+            only_context=False,
+            retriever_config=None,
         ),
     )
 
