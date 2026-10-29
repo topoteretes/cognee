@@ -102,3 +102,36 @@ async def test_a_named_item_whose_text_is_not_literal_keeps_the_name(stored_as_t
     await storage.save_data_item_to_storage_detailed(DataItem(data="plain words", name="Note"))
 
     stored_as_text.assert_awaited_once_with("plain words", filename="Note")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content", ["https://example.com/x", "s3://bucket/key", "file:///etc/passwd"]
+)
+async def test_a_name_for_a_url_or_path_raises_instead_of_being_dropped(stored_as_text, content):
+    from cognee.modules.ingestion.exceptions import IngestionError
+
+    with pytest.raises(IngestionError, match="A name applies to text only"):
+        await storage.save_data_item_to_storage_detailed(DataItem(data=content, name="Q3 plan"))
+
+    stored_as_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_name_for_an_existing_local_file_raises(stored_as_text, tmp_path):
+    from cognee.modules.ingestion.exceptions import IngestionError
+
+    existing = tmp_path / "notes.md"
+    existing.write_text("content", encoding="utf-8")
+
+    with pytest.raises(IngestionError, match="A name applies to text only"):
+        await storage.save_data_item_to_storage_detailed(
+            DataItem(data=str(existing), name="Q3 plan")
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_named_plain_text_is_stored_under_its_name(stored_as_text):
+    await storage.save_data_item_to_storage_detailed(DataItem(data="plain words", name="Q3 plan"))
+
+    stored_as_text.assert_awaited_once_with("plain words", filename="Q3 plan")

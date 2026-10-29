@@ -21,6 +21,7 @@ from cognee.tasks.ingestion.data_item import (
     pair_labels_with_data,
     parse_external_metadata,
     parse_labels,
+    parse_names,
 )
 
 logger = get_logger()
@@ -73,6 +74,18 @@ def get_add_router() -> APIRouter:
                 "when you type a JSON array here), so labels cannot contain commas unless "
                 "the client sends real JSON. Stored on each item's data record and "
                 "returned when listing dataset data."
+            ),
+        ),
+        names: str | None = Form(
+            default=None,
+            examples=[""],
+            description=(
+                'Per-item document names, e.g. ["", "Q3 plan"] — the Nth name applies to '
+                "the Nth data item (uploads first, then raw_data entries), one entry per "
+                "item, an empty entry skips that item. Names raw_data text, which is "
+                "otherwise stored as text_<md5>; an uploaded file keeps its filename, so "
+                "its entry must be empty, and a URL or path entry cannot take one. Same "
+                "format as labels: a name with a comma needs the JSON form."
             ),
         ),
         external_metadata: str | None = Form(
@@ -128,6 +141,9 @@ def get_add_router() -> APIRouter:
                  ["finance", "people", ""], paired positionally with the data items
                  (one entry per item; an empty entry skips that item). Stored on each
                  item's data record.
+        - **names** (Optional[str]): JSON array of per-item document names, e.g.
+                 ["", "Q3 plan"], paired positionally like labels. Names raw_data text
+                 (otherwise stored as text_<md5>); entries for uploads must be empty.
         - **external_metadata** (Optional[str]): JSON array of per-item metadata objects,
                  e.g. [{"source": "crm"}, null], paired positionally with the data items
                  (one entry per item; null or {} skips that item). Merged into each
@@ -188,11 +204,14 @@ def get_add_router() -> APIRouter:
         raw_items = [item.strip() for item in (raw_data or []) if item and item.strip()]
         data = [*(data or []), *raw_items]
 
-        # Labels and metadata ride on DataItems, which ingestion unwraps to
+        # Labels, metadata and names ride on DataItems, which ingestion unwraps to
         # store them on each item's Data record. Invalid JSON or a count
         # mismatch raises a CogneeApiError (400), returned by the global handler.
         data = pair_labels_with_data(
-            data, parse_labels(labels), parse_external_metadata(external_metadata)
+            data,
+            parse_labels(labels),
+            parse_external_metadata(external_metadata),
+            parse_names(names),
         )
 
         if not data:

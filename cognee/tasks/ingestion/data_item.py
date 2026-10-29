@@ -7,7 +7,9 @@ from cognee.tasks.ingestion.exceptions import (
     ExternalMetadataCountMismatchError,
     InvalidExternalMetadataError,
     InvalidLabelsError,
+    InvalidNamesError,
     LabelCountMismatchError,
+    NameCountMismatchError,
 )
 
 
@@ -43,33 +45,51 @@ class DataItem:
     name: str | None = None
 
 
-def parse_labels(labels: str | None) -> list[str | None] | None:
-    """Parse the ``labels`` form field into per-file label entries.
+def _parse_string_array(value: str | None, invalid_error: type[Exception]) -> list | None:
+    """Parse a per-item string field: a JSON array of strings, or comma-separated.
 
     The canonical format is a JSON array of strings ('["finance", "people", ""]'),
     sent as one part because multipart clients cannot reliably repeat array
     form fields (swagger-api/swagger-ui#10221). The comma-separated form
     ("finance,people,") is accepted equivalently because Swagger UI rewrites a
     typed JSON array of strings into exactly that before sending. Any value
-    that does not parse as a JSON array is read as comma-separated, so a label
-    cannot contain a comma unless the client sends real JSON.
+    that does not parse as a JSON array is read as comma-separated, so an
+    entry cannot contain a comma unless the client sends real JSON.
 
-    Returns None when the field is absent or blank.
-
-    Raises:
-        InvalidLabelsError: If a JSON array contains non-string entries.
+    Returns None when the field is absent or blank; raises ``invalid_error``
+    when a JSON array contains non-string entries.
     """
-    if labels is None or not labels.strip():
+    if value is None or not value.strip():
         return None
     try:
-        parsed = json.loads(labels)
+        parsed = json.loads(value)
     except json.JSONDecodeError:
         parsed = None
     if isinstance(parsed, list):
         if not all(entry is None or isinstance(entry, str) for entry in parsed):
-            raise InvalidLabelsError()
+            raise invalid_error()
         return parsed
-    return [segment.strip() for segment in labels.split(",")]
+    return [segment.strip() for segment in value.split(",")]
+
+
+def parse_labels(labels: str | None) -> list[str | None] | None:
+    """Parse the ``labels`` form field into per-item label entries.
+
+    Raises:
+        InvalidLabelsError: If a JSON array contains non-string entries.
+    """
+    return _parse_string_array(labels, InvalidLabelsError)
+
+
+def parse_names(names: str | None) -> list[str | None] | None:
+    """Parse the ``names`` form field into per-item document names.
+
+    Same wire format as ``labels``. A name with a comma needs the JSON form.
+
+    Raises:
+        InvalidNamesError: If a JSON array contains non-string entries.
+    """
+    return _parse_string_array(names, InvalidNamesError)
 
 
 def parse_external_metadata(
@@ -112,26 +132,33 @@ def pair_labels_with_data(
     data: list | None,
     labels: list[str | None] | None,
     external_metadata: list[dict | None] | None = None,
+    names: list[str | None] | None = None,
 ) -> list | None:
-    """Pair per-item labels and external metadata with data items as DataItems.
+    """Pair per-item labels, external metadata and names with data items as DataItems.
 
-    Both attribute lists pair positionally: the Nth entry applies to the Nth
-    data item. An empty label (``""``/``None``) or empty metadata entry
-    (``{}``/``None``) leaves that item's attribute unset, and either list may
-    be omitted entirely. With no non-empty entry in either list the data is
-    returned unchanged; otherwise each provided list's length must match the
-    item count — a partial list is ambiguous.
+    Every attribute list pairs positionally: the Nth entry applies to the Nth
+    data item. An empty entry (``""``/``None``/``{}``) leaves that item's
+    attribute unset, and any list may be omitted entirely. With no non-empty
+    entry in any list the data is returned unchanged; otherwise each provided
+    list's length must match the item count — a partial list is ambiguous.
+
+    A name names a text document (``DataItem.name``), so it applies to string
+    items only: an uploaded file is named by its own filename.
 
     Raises:
         LabelCountMismatchError: If any label is provided and the counts differ.
         ExternalMetadataCountMismatchError: If any metadata entry is provided
             and the counts differ.
+        NameCountMismatchError: If any name is provided and the counts differ.
+        InvalidNamesError: If a name is given for an item that is not a string.
     """
     normalized_labels = [(entry or None) for entry in (labels or [])]
     normalized_metadata = [(entry or None) for entry in (external_metadata or [])]
+    normalized_names = [(entry.strip() if entry else None) or None for entry in (names or [])]
     has_labels = any(normalized_labels)
     has_metadata = any(normalized_metadata)
-    if not has_labels and not has_metadata:
+    has_names = any(normalized_names)
+    if not has_labels and not has_metadata and not has_names:
         return data
 
     item_count = len(data or [])
@@ -145,12 +172,27 @@ def pair_labels_with_data(
             f"Provide one external_metadata entry per data item (uploads first, then "
             f"raw_data entries): got {len(normalized_metadata)} entries for {item_count} items."
         )
+    if has_names and len(normalized_names) != item_count:
+        raise NameCountMismatchError(
+            f"Provide one name per data item (uploads first, then raw_data entries): "
+            f"got {len(normalized_names)} names for {item_count} items."
+        )
 
     if not has_labels:
         normalized_labels = [None] * item_count
     if not has_metadata:
         normalized_metadata = [None] * item_count
+    if not has_names:
+        normalized_names = [None] * item_count
+    for item, name in zip(data, normalized_names):
+        if name and not isinstance(item, str):
+            raise InvalidNamesError(
+                "names apply to raw_data text only; an uploaded file is named by its "
+                "filename. Leave that file's entry empty."
+            )
     return [
-        DataItem(data=item, label=label, external_metadata=metadata)
-        for item, label, metadata in zip(data, normalized_labels, normalized_metadata)
+        DataItem(data=item, label=label, external_metadata=metadata, name=name)
+        for item, label, metadata, name in zip(
+            data, normalized_labels, normalized_metadata, normalized_names
+        )
     ]

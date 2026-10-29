@@ -60,7 +60,8 @@ async def save_data_item_to_storage_detailed(
     local path) are handed through untouched and carry no metadata.
 
     ``text_name`` names the document when a string ends up stored as text
-    (see ``DataItem.name``); it is ignored for anything that is not text.
+    (see ``DataItem.name``). A string resolved as a URL, an s3 path or a local
+    file is not stored as text, so a name for it raises instead of being lost.
     """
     if "llama_index" in str(type(data_item)):
         # Dynamic import is used because the llama_index module is optional.
@@ -81,10 +82,20 @@ async def save_data_item_to_storage_detailed(
     if isinstance(data_item, str):
         parsed_url = urlparse(data_item)
 
+        def refuse_text_name(kind: str) -> None:
+            if text_name:
+                raise IngestionError(
+                    message=(
+                        f"A name applies to text only, but this item is {kind}; remove its name."
+                    )
+                )
+
         # data is s3 file path
         if parsed_url.scheme == "s3":
+            refuse_text_name("an s3 path")
             return StoredFile(file_path=data_item)
         elif parsed_url.scheme == "http" or parsed_url.scheme == "https":
+            refuse_text_name("a web URL")
             # Guard against SSRF: reject disabled outbound HTTP, non-http(s) schemes,
             # and hosts that resolve to internal/reserved addresses before fetching.
             await validate_outbound_url(data_item)
@@ -94,6 +105,7 @@ async def save_data_item_to_storage_detailed(
             )
         # data is local file path
         elif parsed_url.scheme == "file":
+            refuse_text_name("a local file")
             if settings.accept_local_file_path:
                 local_uri = _resolve_local_file_uri(url2pathname(parsed_url.path), strict=True)
                 if local_uri:
@@ -121,12 +133,14 @@ async def save_data_item_to_storage_detailed(
             # of becoming a broken file:// URI.
             local_uri = _resolve_local_file_uri(data_item)
             if local_uri:
+                refuse_text_name("a local file")
                 if settings.accept_local_file_path:
                     return StoredFile(file_path=local_uri)
                 raise IngestionError(message="Local files are not accepted.")
         # Data is a relative file path
         local_uri = _resolve_local_file_uri(data_item)
         if local_uri:
+            refuse_text_name("a local file")
             if settings.accept_local_file_path:
                 return StoredFile(file_path=local_uri)
             raise IngestionError(message="Local files are not accepted.")
