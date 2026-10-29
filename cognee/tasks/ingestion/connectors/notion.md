@@ -164,3 +164,27 @@ uv run pytest cognee/tests/integration/tasks/connectors/test_notion_ingestion.py
 Both mock the Notion API over `httpx.MockTransport` (no live credentials, no network). The
 integration test runs the real source through `cognee.add()`, dlt staging on sqlite and orphan
 cleanup; it needs no LLM because it does not cognify.
+
+## API-unsupported blocks
+
+If Notion rejects a block's children with `400 validation_error` and `Block type <type> is
+not supported via the API.` (or the `for your bot type` variant), the connector skips those
+children, keeps the block's own text and the rest of the page, and logs a warning with the
+block ID and type, never document content. This applies to discovery and rendering,
+including synced copies. These two messages are the ones the production sync logged
+(CLO-1400): another wording, any other error, a failed page or table listing, and an error
+after the first page of a listing still abort the sync.
+
+A page stored without such children is marked in its sync state, not in the stored row or
+its content hash, counted in `pages_incomplete` of `cognee_sync_stats` and logged by ID.
+Every sync lists its blocks again, so a page is rendered again when it turns incomplete or
+complete, not on every sync. Nested text that was ingested before a block turned
+unsupported is dropped in that run: the document holds what the API returns.
+
+A page that disappears from below an incompletely read page is not proof of a deletion,
+because the stored ancestry names pages and databases, not container blocks. Such a page,
+and everything below it, is kept as stored and counted in `deletions_withheld`, with a
+warning naming the IDs. The rest of the sync goes on and its state advances. When the tree
+reads completely, the pages that are really gone are forgotten. State stored before
+ancestors were recorded withholds by root instead. Child pages inside synced copies are
+never discovered, so an unreadable block inside a copy withholds nothing.
