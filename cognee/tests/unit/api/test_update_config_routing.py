@@ -95,6 +95,7 @@ def _patches(
         patch.object(update_module, "recorded_chunk_budget", AsyncMock(return_value=None)),
         patch.object(update_module, "resolve_extractor", lambda value, config: extractor),
         patch.object(update_module, "ensure_extractor_runtime", runtime),
+        patch.object(update_module, "_retire_decisions_after_full_rebuild", AsyncMock()),
     ):
         stack.enter_context(patched)
     return stack

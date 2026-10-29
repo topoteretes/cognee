@@ -73,6 +73,7 @@ class _Stack:
         self.add = AsyncMock()
         self.cognify = AsyncMock(return_value={dataset_id: cognify_run})
         self.recorded_budget = AsyncMock(return_value=None)
+        self.retire = AsyncMock()
         self.patches = (
             patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=data_id)),
             patch.object(
@@ -88,6 +89,7 @@ class _Stack:
             patch.object(update_module, "recorded_chunk_budget", self.recorded_budget),
             patch.object(update_module, "resolve_extractor", lambda value, config: "llm"),
             patch.object(update_module, "ensure_extractor_runtime", AsyncMock()),
+            patch.object(update_module, "_retire_decisions_after_full_rebuild", self.retire),
         )
 
     def __enter__(self):
@@ -136,6 +138,22 @@ async def test_engine_refusal_becomes_a_full_rebuild_with_its_reason():
     stack.forget.assert_awaited_once()
     stack.reset_status.assert_awaited_once()
     stack.add.assert_awaited_once()
+
+
+@pytest.mark.parametrize("errored", [False, True])
+async def test_only_a_completed_rebuild_retires_decisions_it_did_not_restore(errored):
+    """A failed rebuild may only not have restored a chosen fact yet (SDK-1328)."""
+    data_id, dataset_id = uuid4(), uuid4()
+    stack = _Stack(data_id, dataset_id, AsyncMock(), _run(dataset_id, errored=errored))
+
+    result = await _update(stack, data_id, dataset_id, chunk_level_diff=False)
+
+    assert result["status"] == ("failed" if errored else "full_rebuild")
+    if errored:
+        stack.retire.assert_not_awaited()
+    else:
+        stack.retire.assert_awaited_once()
+        assert stack.retire.await_args.args[0] == dataset_id
 
 
 @pytest.mark.parametrize(
@@ -194,6 +212,7 @@ async def test_incremental_result_keeps_the_old_summary_keys_and_adds_the_new_on
     assert (result["data_id"], result["dataset_id"]) == (data_id, dataset_id)
     stack.forget.assert_not_awaited()
     stack.cognify.assert_not_awaited()
+    stack.retire.assert_not_awaited()
 
 
 async def test_unchanged_content_is_reported_as_unchanged():

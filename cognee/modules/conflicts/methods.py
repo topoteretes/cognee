@@ -271,11 +271,12 @@ async def resolve_conflict(
 async def retire_forgotten_decisions(dataset, user: User) -> set[str]:
     """Delete the user decisions whose chosen fact no longer exists, and return their ids.
 
-    Run after a document is deleted, inside the dataset's lock and database context.
-    A rebuild runs it once the rebuilt graph is in place instead (see
-    ``retire_decisions_after_rebuild``). A fact supported by several documents stays in the graph until the last of them
-    is deleted, so its decision stays until then too. The check reads what the graph
-    holds now rather than what one delete removed, so a retried delete still finds it.
+    Run after a document is deleted, inside the dataset's lock and database context;
+    ``update()`` runs it once the rebuilt graph is in place instead (see
+    ``retire_decisions_after_rebuild``). A fact supported by several documents stays in
+    the graph until the last of them is deleted, so its decision stays until then too.
+    The check reads what the graph holds now rather than what one delete removed, so a
+    retried delete still finds it.
     """
     graph = await get_graph_engine()
     rows, _ = await graph.get_filtered_graph_data([{"type": ["FactConflict"]}], include_edges=False)
@@ -309,13 +310,12 @@ async def retire_forgotten_decisions(dataset, user: User) -> set[str]:
 async def retire_decisions_after_rebuild(dataset, user: User) -> set[str]:
     """Retire the decisions a rebuild left without their chosen fact, and invalidate sessions.
 
-    A rebuild (an incremental ``update()``, or a cognify after ``forget(memory_only=True)``
-    or a connector re-sync) drops a document's facts and extracts them again. A decision
-    whose fact the new extraction does not restore, because the text changed or the fact
-    came back under another relationship, would go on presenting it as accepted and hiding
-    its competitors. Run inside the dataset's lock and database context, after the rebuild
-    succeeded: a failed one may only not have restored the fact yet. Session invalidation
-    is best-effort, as on delete.
+    ``update()`` drops a document's facts and extracts them again, on its incremental
+    path and on its full rebuild. A decision whose fact the new extraction does not
+    restore, because the text changed or the fact came back under another relationship,
+    would go on presenting it as accepted and hiding its competitors. Run inside the
+    dataset's lock and database context, after the rebuild succeeded: a failed one may
+    only not have restored the fact yet. Session invalidation is best-effort, as on delete.
     """
     retired = await retire_forgotten_decisions(dataset, user)
     if retired:

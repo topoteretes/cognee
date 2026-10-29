@@ -1,8 +1,7 @@
 """``run_tasks(after_run_completed=..., after_items_ran=...)``: hooks for work after a run is done.
 
-Cognify uses ``after_run_completed`` to retire the conflict decisions a rebuild left
-without their chosen fact and to compact the vector store (``finish_cognify_run``).
-That hook must run only for a completed run, only
+Cognify uses ``after_run_completed`` to compact the vector store
+(``compact_vector_store``). That hook must run only for a completed run, only
 once the run is recorded and reported complete, and it must never be able to
 turn a completed run into a failed or rolled-back one. ``after_items_ran`` (cognify
 reconciles the document structure with it) also runs when items in the run
@@ -23,7 +22,7 @@ import cognee
 import cognee.api.v1.cognify.cognify  # registers the module in sys.modules
 import cognee.modules.pipelines.operations.pipeline as pipeline_module
 import cognee.modules.pipelines.operations.run_tasks as run_tasks_module
-from cognee.context_global_variables import current_dataset_id
+from cognee.infrastructure.databases.vector.compact_vector_store import compact_vector_store
 from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.layers import pipeline_execution_mode
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
@@ -143,36 +142,8 @@ async def test_cognify_reconciles_structure_and_compacts_after_its_run():
         )
 
     (call,) = calls
-    assert call["after_run_completed"].func is cognify_module.finish_cognify_run
+    assert call["after_run_completed"] is compact_vector_store
     assert call["after_items_ran"] is cognify_module.reconcile_document_structure
-
-
-@pytest.mark.asyncio
-async def test_a_completed_cognify_run_retires_decisions_before_it_compacts():
-    """A rebuilt document may not restore a fact a user chose; its decision goes first."""
-    order = []
-    dataset, user = SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
-    authorize = AsyncMock(return_value=dataset)
-
-    async def retire(retire_dataset, retire_user):
-        order.append(("retire", retire_dataset, retire_user))
-
-    async def compact():
-        order.append(("compact",))
-
-    token = current_dataset_id.set(dataset.id)
-    try:
-        with (
-            patch("cognee.modules.data.methods.get_authorized_dataset", new=authorize),
-            patch("cognee.modules.conflicts.methods.retire_decisions_after_rebuild", new=retire),
-            patch.object(cognify_module, "compact_vector_store", new=compact),
-        ):
-            await cognify_module.finish_cognify_run(user)
-    finally:
-        current_dataset_id.reset(token)
-
-    authorize.assert_awaited_once_with(user, dataset.id, "write")
-    assert order == [("retire", dataset, user), ("compact",)]
 
 
 async def _reported_failure_item(*args, **kwargs):
