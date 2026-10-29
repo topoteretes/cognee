@@ -44,6 +44,7 @@ from .persist import (
     delete_context_index_nodes,
     persist_context_index_edges,
     persist_context_summaries,
+    safe_delete_context_vectors,
 )
 
 _RankedEntities = list[tuple[str, float]]
@@ -80,10 +81,19 @@ async def build_document_index(
         for node_id, summary in desired.items()
         if data.existing_summary_texts.get(node_id) != summary.text
     ]
+    # A changed summary keeps its id (derived from the dataset and document, not
+    # the text), and the vector stores keep a conflicting row's stored vector
+    # (their ids normally derive from content). Its old vector goes first, so
+    # the write below embeds the new text instead of leaving a stale vector.
+    await safe_delete_context_vectors(
+        unified_engine.vector,
+        [str(summary.id) for summary in changed if str(summary.id) in data.existing_summary_texts],
+    )
     await persist_context_summaries(changed, ctx)
     # The routing collection mirrors this index and reconciles against the full
-    # desired set, not the diff, so a row it is missing is written too.
-    await sync_dataset_routes(data.dataset_id, list(desired.values()))
+    # desired set, not the diff, so a row it is missing is written too. Its rows
+    # copy the vectors just written to this dataset's store.
+    await sync_dataset_routes(data.dataset_id, list(desired.values()), unified_engine.vector)
     changed_buckets = [summary for summary in changed if not summary.is_root]
     # A root the graph lacked took every surviving bucket's summarized_in edge
     # with it (a document deletion drops the root), so its rebuild links every

@@ -18,7 +18,7 @@ for r in results:
 ```
 
 Without `datasets` it covers every dataset the user can read, but dataset
-routing (on by default, `DATASET_ROUTING_ENABLED`) scores those datasets
+routing (always on, no off switch) scores those datasets
 against the query on their global context index and searches only the best
 `DATASET_ROUTING_TOP_K` (default 1), plus any dataset that has no index yet.
 A dataset farther than `DATASET_ROUTING_DISTANCE_CUTOFF` (cosine distance,

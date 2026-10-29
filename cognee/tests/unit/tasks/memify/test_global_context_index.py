@@ -46,7 +46,7 @@ def routed(monkeypatch):
     """Record what the run mirrors into the dataset routing collection (a real store otherwise)."""
     calls = []
 
-    async def fake_sync_dataset_routes(dataset_id, desired):
+    async def fake_sync_dataset_routes(dataset_id, desired, index_engine):
         calls.append((dataset_id, desired))
 
     monkeypatch.setattr(

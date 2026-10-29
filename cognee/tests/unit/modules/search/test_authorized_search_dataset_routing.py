@@ -140,16 +140,6 @@ async def test_an_explicit_dataset_scope_is_never_routed(lane):
 
 
 @pytest.mark.asyncio
-async def test_routing_off_covers_every_readable_dataset(lane):
-    lane.config = DatasetRoutingConfig(_env_file=None, enabled=False)
-
-    await _search(lane)
-
-    assert lane.route_calls == []
-    assert lane.fan_out_calls == [[dataset.id for dataset in lane.readable]]
-
-
-@pytest.mark.asyncio
 async def test_no_routing_without_backend_access_control(lane):
     lane.access_control = False
 
@@ -357,9 +347,9 @@ async def test_no_data_anywhere_still_raises(lane):
     assert len(lane.fan_out_calls) == 2
 
 
-def test_routing_is_on_by_default():
+def test_routing_defaults():
     config = DatasetRoutingConfig(_env_file=None)
-    assert config.enabled is True
+    assert not hasattr(config, "enabled"), "routing has no off switch: it is always on"
     assert config.top_k == 1
     assert config.distance_cutoff == 0.8
     assert config.tie_margin == 0.001

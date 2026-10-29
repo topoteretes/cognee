@@ -48,7 +48,7 @@ async def test_unscoped_recall_is_routed_to_the_dataset_holding_the_answer(
 
     # The improve after each remember mirrored every dataset's index into the
     # routing collection: its root plus one bucket per document, by derived id.
-    engine = get_dataset_route_engine()
+    engine = await get_dataset_route_engine()
     documents = await get_data_ids_by_dataset([dataset_a, dataset_b])
     for dataset_id, slice_ in ((dataset_a, first), (dataset_b, second)):
         assert len(documents[dataset_id]) == len(slice_)

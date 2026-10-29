@@ -197,7 +197,9 @@ def _create_vector_engine(
                 # The dataset handlers name every dataset's database. With no
                 # name this is the deployment's default store (dataset routing
                 # keeps its collection there): the relational database, as in
-                # the branch below, which is the one database that exists.
+                # the branch below. It exists when the relational database is
+                # Postgres on this server; otherwise the routing store creates
+                # it on first use (``ensure_default_store``).
                 from cognee.infrastructure.databases.relational import get_relational_config
 
                 vector_db_name = get_relational_config().db_name

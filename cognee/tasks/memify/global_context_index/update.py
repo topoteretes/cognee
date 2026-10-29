@@ -304,7 +304,8 @@ async def update_global_context_index(
     # are clustering results, not derivable from the dataset's documents.
     root = _current_root(scope, context_datapoints)
     if scope.dataset_id:
-        await sync_dataset_routes(scope.dataset_id, [root] if root else [])
+        unified_engine = await get_unified_engine()
+        await sync_dataset_routes(scope.dataset_id, [root] if root else [], unified_engine.vector)
     return context_datapoints
 
 

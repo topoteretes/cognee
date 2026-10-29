@@ -1,6 +1,5 @@
 """Settings for dataset routing (env prefix ``DATASET_ROUTING_``)::
 
-DATASET_ROUTING_ENABLED=true          # route an unscoped search to the best-matching datasets
 DATASET_ROUTING_TOP_K=1               # how many best-scoring datasets a routed search covers
 DATASET_ROUTING_DISTANCE_CUTOFF=0.8   # a dataset farther than this from the query is not searched
 DATASET_ROUTING_TIE_MARGIN=0.001      # datasets this close to the last routed one are routed too
@@ -14,11 +13,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class DatasetRoutingConfig(BaseSettings):
     # A search that names no dataset scores every readable dataset against the
-    # query on the routing collection and searches only the best ones. Needs
-    # backend access control (one store per dataset) and the global context
-    # index built for the datasets; a dataset with no index rows is always
-    # searched. Off, an unscoped search covers every readable dataset.
-    enabled: bool = True
+    # query on the routing collection and searches only the best ones. Always
+    # on under backend access control (one store per dataset); a dataset with
+    # no index rows is always searched.
     top_k: int = 1
     # Scores are cosine distances: 0 is identical text, unrelated text sits
     # near 1. A dataset whose best row is farther than the cutoff is not a

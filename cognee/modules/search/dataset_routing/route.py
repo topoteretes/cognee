@@ -102,7 +102,7 @@ async def _score_candidates(
     distance_cutoff: float,
     tie_margin: float,
 ) -> DatasetRoutingDecision:
-    engine = get_dataset_route_engine()
+    engine = await get_dataset_route_engine()
     if not await engine.has_collection(DATASET_ROUTE_COLLECTION):
         return DatasetRoutingDecision(candidates=candidates, routed=(), unindexed=candidates)
     if not await routing_width_matches(engine):

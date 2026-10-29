@@ -250,13 +250,17 @@ async def test_only_changed_nodes_are_written_and_everything_else_is_deleted(mon
             "bucket-of-a-deleted-document": "orphan",
         }
     )
-    deleted, persisted, edges, routed = [], [], [], []
+    deleted, persisted, edges, routed, dropped_vectors = [], [], [], [], []
 
     async def fake_engine():
-        return SimpleNamespace(graph="graph")
+        return SimpleNamespace(graph="graph", vector="vector")
 
     async def fake_delete(engine, node_ids):
         deleted.extend(node_ids)
+
+    async def fake_drop_vectors(vector_engine, ids):
+        assert vector_engine == "vector"
+        dropped_vectors.extend(ids)
 
     async def fake_persist(summaries, ctx):
         persisted.extend(summaries)
@@ -264,11 +268,14 @@ async def test_only_changed_nodes_are_written_and_everything_else_is_deleted(mon
     async def fake_edges(edges_by_relationship, engine, ctx=None):
         edges.append(edges_by_relationship)
 
-    async def fake_sync_routes(dataset_id, desired):
+    async def fake_sync_routes(dataset_id, desired, index_engine):
         routed.append((dataset_id, [summary.id for summary in desired]))
 
     monkeypatch.setattr(build_document_index_module, "get_unified_engine", fake_engine)
     monkeypatch.setattr(build_document_index_module, "delete_context_index_nodes", fake_delete)
+    monkeypatch.setattr(
+        build_document_index_module, "safe_delete_context_vectors", fake_drop_vectors
+    )
     monkeypatch.setattr(build_document_index_module, "persist_context_summaries", fake_persist)
     monkeypatch.setattr(build_document_index_module, "persist_context_index_edges", fake_edges)
     monkeypatch.setattr(build_document_index_module, "sync_dataset_routes", fake_sync_routes)
@@ -278,6 +285,8 @@ async def test_only_changed_nodes_are_written_and_everything_else_is_deleted(mon
     assert [summary.id for summary in changed] == [beta.id]
     assert [summary.id for summary in persisted] == [beta.id]
     assert deleted == ["bucket-of-a-deleted-document"]
+    # The changed bucket keeps its id, so its stale vector is dropped before the rewrite.
+    assert dropped_vectors == [str(beta.id)]
     # The routing collection reconciles against the whole desired index, not the diff.
     assert routed == [("ds", [alpha.id, beta.id, root.id])]
     # One write carrying both edge sets, for the changed bucket only; the
@@ -306,7 +315,7 @@ async def test_a_rebuilt_root_relinks_every_surviving_bucket(monkeypatch):
     edges = []
 
     async def fake_engine():
-        return SimpleNamespace(graph="graph")
+        return SimpleNamespace(graph="graph", vector="vector")
 
     async def noop(*args, **kwargs):
         return None
@@ -316,6 +325,7 @@ async def test_a_rebuilt_root_relinks_every_surviving_bucket(monkeypatch):
 
     monkeypatch.setattr(build_document_index_module, "get_unified_engine", fake_engine)
     monkeypatch.setattr(build_document_index_module, "delete_context_index_nodes", noop)
+    monkeypatch.setattr(build_document_index_module, "safe_delete_context_vectors", noop)
     monkeypatch.setattr(build_document_index_module, "persist_context_summaries", noop)
     monkeypatch.setattr(build_document_index_module, "sync_dataset_routes", noop)
     monkeypatch.setattr(build_document_index_module, "persist_context_index_edges", fake_edges)

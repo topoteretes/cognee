@@ -48,10 +48,11 @@ dataset with no index rows is always searched, a routed search that retrieves no
 on the retrieval context, not on the completion, which is written even over an empty
 context; or only datasets without searchable memory) is widened to every readable dataset, and an explicit
 dataset scope is never routed. Needs backend access control (one store per dataset) and one
-embedding model across the deployment: the query is embedded with the `.env` model, and when
+embedding model across the deployment: the rows reuse the vectors the index build stored
+(nothing is embedded twice), the query is embedded with the `.env` model, and when
 the routing collection was built with another width (`EMBEDDING_MODEL` changed without a
 prune) routing logs a warning and steps aside, so the search covers every readable dataset.
-Off with `DATASET_ROUTING_ENABLED=false`.
+There is no off switch: an unscoped search is always routed.
 
 ## When to call search() directly
 

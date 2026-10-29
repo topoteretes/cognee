@@ -322,18 +322,12 @@ async def _route_datasets(
     """The datasets an unscoped search covers after routing, or None to cover them all.
 
     Routing applies only when the caller named no dataset, more than one is
-    readable, backend access control gives each its own store, and routing is
-    on. The decision keeps every dataset with no routing rows, so a dataset
+    readable, and backend access control gives each its own store. The decision keeps every dataset with no routing rows, so a dataset
     never searched by the global context index is never dropped.
     """
     from cognee.modules.search.dataset_routing import get_dataset_routing_config, route_datasets
 
-    if (
-        dataset_ids is not None
-        or len(search_datasets) < 2
-        or not backend_access_control_enabled()
-        or not get_dataset_routing_config().enabled
-    ):
+    if dataset_ids is not None or len(search_datasets) < 2 or not backend_access_control_enabled():
         return None
 
     config = get_dataset_routing_config()

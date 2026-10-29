@@ -17,6 +17,7 @@ from .route import DatasetRoutingDecision, route_datasets
 from .store import (
     DATASET_ROUTE_COLLECTION,
     DatasetRoute,
+    ensure_default_store,
     get_dataset_route_engine,
     routing_width_matches,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "DatasetRoutingConfig",
     "DatasetRoutingDecision",
     "dataset_route_ids",
+    "ensure_default_store",
     "get_dataset_route_engine",
     "get_dataset_routing_config",
     "prune_dataset_routes",
