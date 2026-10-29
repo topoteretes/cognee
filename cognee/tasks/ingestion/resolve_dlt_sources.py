@@ -991,15 +991,26 @@ async def _delete_dlt_orphans(
     from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
         delete_data_nodes_and_edges,
     )
+    from cognee.modules.users.exceptions import PermissionDeniedError
 
     # Find the dataset — if it doesn't exist yet this is a first ingestion,
     # so there can be no orphans. Prefer the id: add() already resolved and
     # authorized it, and a name only matches datasets the caller owns.
-    existing_datasets = await get_authorized_existing_datasets(
-        user=user,
-        permission_type="write",
-        datasets=[dataset_id] if dataset_id is not None else [dataset_name],
-    )
+    # Cleanup deletes, so it needs delete permission; a write-only grantee's
+    # rows are committed by now, so skip the sweep instead of failing add().
+    try:
+        existing_datasets = await get_authorized_existing_datasets(
+            user=user,
+            permission_type="delete",
+            datasets=[dataset_id] if dataset_id is not None else [dataset_name],
+        )
+    except PermissionDeniedError:
+        logger.warning(
+            "Skipping dlt orphan cleanup for dataset '%s': no delete permission, "
+            "so rows deleted upstream stay in the dataset.",
+            dataset_name,
+        )
+        return
     if not existing_datasets:
         return
 

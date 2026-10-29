@@ -33,7 +33,7 @@ async def test_orphan_cleanup_resolves_dataset_by_id_when_given():
         )
 
     lookup.assert_awaited_once_with(
-        user=user, permission_type="write", datasets=[shared_dataset_id]
+        user=user, permission_type="delete", datasets=[shared_dataset_id]
     )
 
 
@@ -47,7 +47,29 @@ async def test_orphan_cleanup_falls_back_to_name_without_id():
     ) as lookup:
         await resolve._delete_dlt_orphans("notes", user, set())
 
-    lookup.assert_awaited_once_with(user=user, permission_type="write", datasets=["notes"])
+    lookup.assert_awaited_once_with(user=user, permission_type="delete", datasets=["notes"])
+
+
+@pytest.mark.asyncio
+async def test_orphan_cleanup_skips_without_delete_permission():
+    """A write-only grantee's ingest succeeds; the sweep is skipped, nothing is deleted."""
+    from cognee.modules.users.exceptions import PermissionDeniedError
+
+    user = SimpleNamespace(id=uuid4())
+
+    with (
+        patch(
+            "cognee.modules.data.methods.get_authorized_existing_datasets",
+            new=AsyncMock(side_effect=PermissionDeniedError("no delete")),
+        ),
+        patch(
+            "cognee.modules.data.methods.get_dataset_data.get_dataset_data",
+            new=AsyncMock(),
+        ) as dataset_data,
+    ):
+        await resolve._delete_dlt_orphans("notes", user, set(), dataset_id=uuid4())
+
+    dataset_data.assert_not_awaited()
 
 
 @pytest.mark.asyncio
