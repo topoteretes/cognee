@@ -14,6 +14,10 @@ DOCUMENT_SOURCE_ATTR = "cognee_document_source"
 # alternating destination datasets. Unrelated DLT sources keep their contract.
 PIPELINE_SCOPE_ATTR = "cognee_pipeline_scope"
 
+# The database a connection-string source reads (a SQLite file's name, a server
+# database's name), so its table nodes can say which database they belong to.
+SOURCE_LABEL_ATTR = "cognee_source_label"
+
 
 def pipeline_name_for_source(source, dataset_name: str) -> str:
     from hashlib import sha256
