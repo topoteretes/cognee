@@ -1,4 +1,5 @@
 import os
+import types
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -36,6 +37,36 @@ def _reset_agent_mode():
     agent_mode._active_connection_ids.clear()
     agent_mode._watchdog_started = False
     clear_registered_agent_connections()
+
+
+class _InertTimer:
+    """A ``threading.Timer`` stand-in that never starts a thread."""
+
+    def __init__(self, interval, function, *args, **kwargs):
+        self.interval = interval
+        self.function = function
+        self.daemon = False
+
+    def start(self):
+        pass
+
+    def cancel(self):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _disarm_watchdog_timers(monkeypatch):
+    """Keep the watchdog from arming real timers in the test process.
+
+    ``register_agent`` (with COGNEE_AGENT_MODE on) and ``_watchdog`` each schedule
+    ``threading.Timer(60, _watchdog)``. A timer that fires after the tests runs the
+    real ``_shutdown_server`` (the ``patch.object`` in the watchdog tests is gone by
+    then) and, with the count reset to 0, SIGTERMs the pytest process: exit 143
+    whenever the interpreter is still alive 60 seconds after the last test. The
+    tests assert on counts and the started flag, never on a timer firing, so the
+    stand-in never starts a thread. Only the module's own ``threading`` is replaced.
+    """
+    monkeypatch.setattr(agent_mode, "threading", types.SimpleNamespace(Timer=_InertTimer))
 
 
 @pytest.fixture(autouse=True)
