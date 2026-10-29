@@ -46,6 +46,7 @@ class _FakeLanceQuery:
         self.distance_type_value = None
         self.where_value = None
         self.select_value = None
+        self.bypassed_vector_index = False
 
     def distance_type(self, value):
         self.distance_type_value = value
@@ -60,6 +61,10 @@ class _FakeLanceQuery:
         return self
 
     def limit(self, _limit):
+        return self
+
+    def bypass_vector_index(self):
+        self.bypassed_vector_index = True
         return self
 
     async def to_list(self):
@@ -125,6 +130,30 @@ async def test_lancedb_search_returns_raw_distance_and_uses_cosine():
     assert [result.score for result in results] == [1.42, 0.21]
     assert any(result.score > 1.0 for result in results)
     assert collection.queries[0].distance_type_value == "cosine"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb extra is not installed")
+async def test_lancedb_search_filters_by_ids_without_vector_index():
+    adapter = LanceDBAdapter(
+        url="memory://", api_key=None, embedding_engine=_DummyEmbeddingEngine()
+    )
+    chunk_a = str(uuid4())
+    chunk_b = str(uuid4())
+    collection = _FakeLanceCollection([{"id": chunk_a, "payload": {"text": "x"}, "_distance": 0.2}])
+    adapter.get_collection = AsyncMock(return_value=collection)
+
+    results = await adapter.search(
+        collection_name="DocumentChunk_text",
+        query_vector=[0.1, 0.2, 0.3],
+        node_ids=[chunk_a, chunk_b],
+        limit=10,
+        include_payload=True,
+    )
+
+    assert [str(result.id) for result in results] == [chunk_a]
+    assert f"id IN ('{chunk_a}', '{chunk_b}')" in collection.queries[0].where_value
+    assert collection.queries[0].bypassed_vector_index is True
 
 
 @pytest.mark.asyncio

@@ -505,8 +505,9 @@ class TursoVectorAdapter(VectorDBInterface):
         include_payload: bool = False,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
+        node_ids: list[str] | None = None,
     ) -> list[ScoredResult]:
-        """Run a cosine-distance similarity search, optionally filtered by NodeSet tag."""
+        """Run a cosine-distance similarity search with optional node-set and ID filters."""
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
 
@@ -520,11 +521,14 @@ class TursoVectorAdapter(VectorDBInterface):
             rows = await self._execute(f'SELECT count(*) FROM "{collection_name}"', fetch=True)
             limit = rows[0][0] if rows else 0
 
-        if limit <= 0:
+        if limit <= 0 or node_ids == []:
             return []
 
         params: list[Any] = [_vector_literal(query_vector)]
-        where_clause = ""
+        where_conditions = []
+        if node_ids is not None:
+            where_conditions.append("id IN (SELECT value FROM json_each(?))")
+            params.append(json.dumps(list(dict.fromkeys(str(node_id) for node_id in node_ids))))
         if node_name:
             placeholders = ",".join("?" for _ in node_name)
             # The engine's json_each().value is the element's raw JSON text, with
@@ -532,21 +536,22 @@ class TursoVectorAdapter(VectorDBInterface):
             # are compared on the decoded element that ``->>`` returns.
             element = f'"{collection_name}".payload ->> je.fullkey'
             if node_name_filter_operator == "AND":
-                where_clause = (
-                    f" WHERE (SELECT count(DISTINCT {element}) FROM json_each("
+                where_conditions.append(
+                    f"(SELECT count(DISTINCT {element}) FROM json_each("
                     f"\"{collection_name}\".payload, '$.belongs_to_set') je "
                     f"WHERE {element} IN ({placeholders})) = ?"
                 )
                 params.extend(node_name)
                 params.append(len(set(node_name)))
             else:
-                where_clause = (
-                    f" WHERE EXISTS (SELECT 1 FROM json_each("
+                where_conditions.append(
+                    f"EXISTS (SELECT 1 FROM json_each("
                     f"\"{collection_name}\".payload, '$.belongs_to_set') je "
                     f"WHERE {element} IN ({placeholders}))"
                 )
                 params.extend(node_name)
 
+        where_clause = f" WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
         params.append(limit)
         # Skip the payload column unless the caller needs it (mirrors PGVector):
         # the graph/RAG hot path wants only id + distance, and payloads are large

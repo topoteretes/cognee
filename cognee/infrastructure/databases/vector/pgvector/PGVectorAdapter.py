@@ -645,8 +645,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         include_payload: bool = False,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
+        node_ids: list[str] | None = None,
     ) -> list[ScoredResult]:
-        """Run a cosine-distance similarity search, optionally filtered by NodeSet tag."""
+        """Run a cosine-distance similarity search with optional node-set and ID filters."""
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
 
@@ -663,7 +664,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 limit = result.scalar_one()
 
         # If limit is still 0, no need to do the search, just return empty results
-        if limit <= 0:
+        if limit <= 0 or node_ids == []:
             return []
 
         # NOTE: This needs to be initialized in case search doesn't return a value
@@ -680,35 +681,27 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
         # Use async session to connect to the database
         async with self.get_async_session() as session:
-            if node_name:
-                if node_name_filter_operator == "AND":
-                    filter_operator = "?&"
-                else:
-                    filter_operator = "?|"
+            query = select(
+                *select_columns,
+                PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
+            ).order_by("similarity")
 
+            if node_ids is not None:
+                query = query.where(
+                    PGVectorDataPoint.c.id.in_([parse_id(str(node_id)) for node_id in node_ids])
+                )
+
+            if node_name:
                 from sqlalchemy import bindparam, cast
                 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TEXT
 
+                filter_operator = "?&" if node_name_filter_operator == "AND" else "?|"
                 target = bindparam("target", value=node_name, type_=ARRAY(TEXT()))
-                query = (
-                    select(
-                        *select_columns,
-                        PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
-                            "similarity"
-                        ),
-                    )
-                    .where(
-                        cast(PGVectorDataPoint.c.payload, JSONB)
-                        .op("->")("belongs_to_set")
-                        .op(filter_operator)(target)
-                    )
-                    .order_by("similarity")
+                query = query.where(
+                    cast(PGVectorDataPoint.c.payload, JSONB)
+                    .op("->")("belongs_to_set")
+                    .op(filter_operator)(target)
                 )
-            else:
-                query = select(
-                    *select_columns,
-                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
-                ).order_by("similarity")
 
             if limit > 0:
                 query = query.limit(limit)

@@ -1,4 +1,5 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.only_context_prompt import build_only_context_prompt
 from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
 from cognee.modules.retrieval.utils.evidence import (
@@ -13,7 +14,10 @@ from cognee.modules.search.methods.hybrid_deferral import (
     reject_hybrid_graph_only_knobs,
 )
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.operations.select_search_type import select_search_type
+from cognee.modules.search.operations.select_search_type import (
+    select_search_type,
+    supported_search_types_for_node_name,
+)
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
 
@@ -25,7 +29,14 @@ async def _effective_search_type(
 ) -> SearchType:
     """Resolve FEELING_LUCKY and hybrid deferral to the retriever type that will actually run."""
     if query_type is SearchType.FEELING_LUCKY:
-        if graph_is_empty:
+        if kwargs.get("node_name"):
+            resolved = await select_search_type(
+                query_text,
+                allowed_search_types=supported_search_types_for_node_name(
+                    kwargs.get("node_type", NodeSet)
+                ),
+            )
+        elif graph_is_empty:
             resolved = SearchType.HYBRID_COMPLETION
         else:
             resolved = await select_search_type(query_text)

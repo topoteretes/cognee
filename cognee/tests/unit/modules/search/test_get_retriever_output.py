@@ -565,6 +565,28 @@ async def test_feeling_lucky_hybrid_deferral_reports_graph_completion():
 
 
 @pytest.mark.asyncio
+async def test_feeling_lucky_with_document_scope_uses_scoped_selector_on_empty_graph():
+    from cognee.modules.data.processing.document_types import TextDocument
+
+    selector = AsyncMock(return_value=SearchType.RAG_COMPLETION)
+    with patch.object(get_retriever_output_module, "select_search_type", selector):
+        result = await get_retriever_output_module._effective_search_type(
+            SearchType.FEELING_LUCKY,
+            "fruit",
+            {"node_type": TextDocument, "node_name": ["doc_a"]},
+            graph_is_empty=True,
+        )
+
+    assert result is SearchType.RAG_COMPLETION
+    selector.assert_awaited_once()
+    allowed_search_types = selector.await_args.kwargs["allowed_search_types"]
+    assert SearchType.CHUNKS in allowed_search_types
+    assert SearchType.RAG_COMPLETION in allowed_search_types
+    assert SearchType.HYBRID_COMPLETION not in allowed_search_types
+    assert SearchType.SUMMARIES not in allowed_search_types
+
+
+@pytest.mark.asyncio
 async def test_feeling_lucky_on_empty_graph_skips_selector_and_keeps_hybrid():
     class _EmptyGraph:
         async def is_empty(self):

@@ -1325,6 +1325,7 @@ class LanceDBAdapter(VectorDBInterface):
         include_payload: bool = False,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
+        node_ids: list[str] | None = None,
     ):
         with new_span("cognee.db.vector.search") as otel_span:
             otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
@@ -1353,39 +1354,47 @@ class LanceDBAdapter(VectorDBInterface):
                 ["id", "payload", "_distance"] if include_payload else ["id", "_distance"]
             )
 
+            if node_ids is not None and not node_ids:
+                otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
+                return []
+
+            where_conditions = []
             if node_name:
-                # Escape quotes to make this input safer, since it's coming from the user
-                # At the time of writing this, no specific binding instructions found on LanceDB docs
                 escaped_node_names = [name.replace("'", "''") for name in node_name]
                 literal_node_names = (
                     "[" + ", ".join(f"'{name}'" for name in escaped_node_names) + "]"
                 )
 
                 if node_name_filter_operator == "AND":
-                    node_name_filter_string = (
+                    where_conditions.append(
                         f"array_has_all(payload.belongs_to_set, {literal_node_names})"
                     )
                 else:
-                    node_name_filter_string = (
+                    where_conditions.append(
                         f"array_has_any(payload.belongs_to_set, {literal_node_names})"
                     )
 
-                result_values = (
-                    await collection.vector_search(query_vector)
-                    .distance_type("cosine")
-                    .where(node_name_filter_string)
-                    .select(select_columns)
-                    .limit(limit)
-                    .to_list()
+            if node_ids is not None:
+                escaped_ids = list(
+                    dict.fromkeys(str(node_id).replace("'", "''") for node_id in node_ids)
+                )
+                literal_ids = ", ".join(f"'{node_id}'" for node_id in escaped_ids)
+                where_conditions.append(f"id IN ({literal_ids})")
+
+            result_query = collection.vector_search(query_vector).distance_type("cosine")
+            if where_conditions:
+                result_query = result_query.where(
+                    " AND ".join(f"({condition})" for condition in where_conditions)
+                )
+
+            if node_ids is not None:
+                result_query = result_query.bypass_vector_index().limit(
+                    min(limit, len(escaped_ids))
                 )
             else:
-                result_values = (
-                    await collection.vector_search(query_vector)
-                    .distance_type("cosine")
-                    .select(select_columns)
-                    .limit(limit)
-                    .to_list()
-                )
+                result_query = result_query.limit(limit)
+
+            result_values = await result_query.select(select_columns).to_list()
 
             if not result_values:
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)

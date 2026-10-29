@@ -108,6 +108,28 @@ async def test_get_context_top_k_limit(mock_vector_engine):
 
 
 @pytest.mark.asyncio
+async def test_get_context_forwards_resolved_node_ids(mock_vector_engine):
+    mock_vector_engine.search.return_value = []
+    retriever = CompletionRetriever(top_k=4, node_ids=["chunk-1", "chunk-2"])
+
+    with patch(
+        "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
+        return_value=mock_vector_engine,
+    ):
+        await retriever.get_retrieved_objects("fruit")
+
+    mock_vector_engine.search.assert_awaited_once_with(
+        "DocumentChunk_text",
+        "fruit",
+        limit=4,
+        include_payload=True,
+        node_name=None,
+        node_name_filter_operator="OR",
+        node_ids=["chunk-1", "chunk-2"],
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_context_single_chunk(mock_vector_engine):
     """Test get_context with single chunk result."""
     mock_result = MagicMock()
