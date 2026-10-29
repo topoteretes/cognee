@@ -323,6 +323,18 @@ def test_parse_message_preserves_body_when_head_end_tag_is_omitted(body_tag):
     assert parse_message(message)["content"] == "Review Thursday at 14:30 UTC"
 
 
+@pytest.mark.parametrize("tag", ["script", "style", "template", "title"])
+def test_parse_message_excludes_self_closing_non_void_html_elements(tag):
+    message = {
+        "id": "self_closing_ignored",
+        "payload": {
+            "mimeType": "text/html",
+            "body": {"data": _b64(f"<{tag}/>excluded_text</{tag}><p>Visible body</p>")},
+        },
+    }
+    assert parse_message(message)["content"] == "Visible body"
+
+
 @pytest.mark.parametrize(
     "attachment",
     [
