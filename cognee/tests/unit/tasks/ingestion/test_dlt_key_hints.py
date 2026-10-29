@@ -153,3 +153,25 @@ def test_hints_come_from_the_schema_the_source_loaded_into():
 
     assert _loaded_schema(pipeline, sql_source) is sql_schema
     assert _loaded_schema(pipeline, SimpleNamespace(name="a bare resource")) is csv_schema
+
+
+def test_a_resource_naming_its_tables_per_item_is_skipped_with_a_warning(caplog):
+    """Such a resource has no static hints; any other failure to read hints raises."""
+    import logging
+
+    import dlt
+    from dlt.common.schema import Schema
+
+    @dlt.source(name="sql_database")
+    def shop():
+        yield dlt.resource([{"Id": 1}], name="Users", primary_key="Id")
+        yield dlt.resource([{"kind": "a", "Id": 1}], name="events", table_name=lambda i: i["kind"])
+
+    schema = Schema("sql_database")
+    pipeline = SimpleNamespace(default_schema=schema, schemas={"sql_database": schema})
+
+    with caplog.at_level(logging.WARNING):
+        tables = _source_tables(pipeline, shop())
+
+    assert [table["name"] for table in tables] == ["users"]
+    assert "events" in caplog.text and "no key hints" in caplog.text

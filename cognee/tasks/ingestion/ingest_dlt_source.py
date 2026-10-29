@@ -292,7 +292,8 @@ def _source_tables(pipeline, dlt_source) -> list:
 
     Resource hints carry the source's own spelling; the loaded schema's naming
     convention gives the names the staging tables and columns were created with.
-    A resource whose table name depends on its items has no static hints.
+    A resource whose table name depends on its items has no static hints, so its
+    tables get no keys; that is said once per resource.
     """
     from dlt.common.schema.utils import normalize_table_identifiers
     from dlt.extract.source import DltSource
@@ -305,13 +306,14 @@ def _source_tables(pipeline, dlt_source) -> list:
 
     tables = []
     for resource in resources:
-        try:
-            table = resource.compute_table_schema()
-        except Exception:
-            logger.debug("No static table hints for resource %r", resource.name, exc_info=True)
+        if resource.has_dynamic_table_name:
+            logger.warning(
+                "Resource %r names its tables per item, so dlt has no key hints for them: "
+                "its rows get no foreign key edges.",
+                resource.name,
+            )
             continue
-        if table.get("name"):
-            tables.append(normalize_table_identifiers(table, naming))
+        tables.append(normalize_table_identifiers(resource.compute_table_schema(), naming))
     return tables
 
 

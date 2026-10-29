@@ -193,3 +193,16 @@ def test_a_key_to_a_table_this_add_did_not_load_gets_its_own_warning(monkeypatch
     assert "only within one add()" in unloaded.args[0]
     assert unresolved.args[1:] == (1, "shipments.order_id, line_no -> order_lines:9:1")
     assert "max_rows_per_table" in unresolved.args[0]
+
+
+def test_a_hint_missing_a_field_raises():
+    """Hints are cognee's own output, so an incomplete one is a bug, not a key to skip."""
+    import pytest
+
+    row = _row("badges", [{"column": "owner_id", "ref_table": "people"}], {"owner_id": 1})
+    with pytest.raises(KeyError):
+        _resolve_fk_references(row, {}, [], {"people": ["id"]})
+
+    row = _row("badges", [_fk("owner_id", "people", "")], {"owner_id": 1})
+    with pytest.raises(ValueError):
+        _resolve_fk_references(row, {}, [], {"people": ["id", "org"]})

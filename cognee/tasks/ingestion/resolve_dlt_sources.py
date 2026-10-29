@@ -1040,16 +1040,15 @@ def _fk_keys(foreign_keys: list, key_columns: dict[str, list[str]]):
             yield ref_table, pairs, None
 
     for fk in foreign_keys:
-        column = fk.get("column", "")
-        ref_table = fk.get("ref_table", "")
-        if not column or not ref_table:
-            continue
+        # Hints are written by _dlt_key_hints with all three fields; one without
+        # them is a bug, not a key to skip.
+        column, ref_table, ref_column = fk["column"], fk["ref_table"], fk["ref_column"]
+        if not column or not ref_table or not ref_column:
+            raise ValueError(f"Foreign key hint {fk!r} does not name its column, table and target")
         key = key_columns.get(ref_table)
         if key is None:
-            yield ref_table, [(column, fk.get("ref_column", ""))], [fk.get("ref_column", "")]
+            yield ref_table, [(column, ref_column)], [ref_column]
             continue
-        # A reflected FK without a referenced column names its table's single key.
-        ref_column = fk.get("ref_column") or (key[0] if len(key) == 1 else "")
         if ref_column not in key:
             yield from close(open_keys, ref_table)
             if any(ref_column == taken for _, taken in open_columns.get(ref_table, [])):

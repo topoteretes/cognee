@@ -317,7 +317,7 @@ class BroadRetriever(CompletionRetriever):
                 f"{fk['column']} references {fk['ref_table']}.{fk['ref_column']}"
                 for fk in json.loads(props["foreign_keys"])
             ]
-            listed = foreign_keys.setdefault(str(props.get("name")), [])
+            listed = foreign_keys.setdefault(str(props["name"]), [])
             listed.extend(line for line in lines if line not in listed)
         return foreign_keys
 
