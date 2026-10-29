@@ -16,10 +16,15 @@ from cognee.modules.ingestion.data_types.TextData import (
         ("notes.txt", "notes.txt"),
         ("NOTES.TXT", "NOTES.txt"),
         ("roadmap.docx", "roadmap.docx.txt"),
-        ("Re: standup", "Re: standup.txt"),
-        ("dir/sub/file", "file.txt"),
-        ("C:\\dir\\file", "file.txt"),
-        ("../../etc/passwd", "passwd.txt"),
+        # Separators and Windows-reserved characters become "_": the title keeps
+        # its whole text and still names one object under its <hash>/ key.
+        ("Re: 10/29 sync", "Re_ 10_29 sync.txt"),
+        ("Q3/Q4 plan", "Q3_Q4 plan.txt"),
+        ("Can we meet?", "Can we meet_.txt"),
+        ('a*b"c<d>e|f', "a_b_c_d_e_f.txt"),
+        ("dir/sub/file", "dir_sub_file.txt"),
+        ("C:\\dir\\file", "C__dir_file.txt"),
+        ("../../etc/passwd", "_.._etc_passwd.txt"),
         ("  .hidden  ", "hidden.txt"),
         ("tab\there\x00", "tabhere.txt"),
         ("trailing dots...", "trailing dots.txt"),
@@ -29,7 +34,7 @@ def test_names_become_safe_txt_basenames(name, expected):
     assert text_file_name(name) == expected
 
 
-@pytest.mark.parametrize("name", [None, "", "   ", "...", "/", "a/b/"])
+@pytest.mark.parametrize("name", [None, "", "   ", "...", "\x00\x1f"])
 def test_unusable_names_are_none(name):
     assert text_file_name(name) is None
 

@@ -50,8 +50,8 @@ def test_a_url_or_directory_next_to_the_text_does_not_count(tmp_path):
         ("Q3 plan", "Q3 plan.txt"),
         ("notes.txt", "notes.txt"),
         ("roadmap.docx", "roadmap.docx.txt"),
-        ("../../etc/passwd", "passwd.txt"),
-        ("dir\\sub\\note", "note.txt"),
+        ("../../etc/passwd", "_.._etc_passwd.txt"),
+        ("dir\\sub\\note", "dir_sub_note.txt"),
         # The same sanitising as the in-process lane (text_file_name): control
         # characters and leading dots go, and the name fits a 255-byte basename.
         ("\x00.hidden\x1fname", "hiddenname.txt"),

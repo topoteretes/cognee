@@ -182,8 +182,8 @@ async def test_readding_the_same_named_text_is_idempotent(storage_root):
 async def test_a_name_cannot_pick_the_storage_directory(storage_root):
     stored = await save_data_to_file_detailed("x", filename="../../etc/passwd")
 
-    assert stored.file_path.endswith("/passwd.txt")
-    assert stored.metadata["name"] == "passwd"
+    assert stored.file_path.endswith("/_.._etc_passwd.txt")
+    assert stored.metadata["name"] == "_.._etc_passwd"
     assert all(path.is_relative_to(storage_root) for path in _stored_files(storage_root))
 
 

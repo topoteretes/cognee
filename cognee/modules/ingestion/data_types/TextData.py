@@ -12,25 +12,31 @@ from .IngestionData import IngestionData
 # budget, not a character count: a CJK or emoji title is 3-4 bytes per char.
 _MAX_TEXT_NAME_BYTES = 200
 _TEXT_SUFFIX = ".txt"
+# Path separators and the characters Windows refuses in a filename (``:`` would
+# also open an NTFS alternate data stream). Replaced, not dropped, so a title
+# such as "Re: 10/29 sync" keeps everything it says.
+_UNSAFE_NAME_CHARACTERS = re.compile(r'[/\\:*?"<>|]')
 
 
 def text_file_name(name: str | None) -> str | None:
     """The ``.txt`` basename a caller-named text payload is stored under.
 
     Takes a document title or filename as the caller knows it and returns a
-    safe object basename: directory components are dropped (a name never
-    chooses where in storage it lands), control characters and leading dots
-    are stripped, and ``.txt`` is appended when the name does not already end
-    in it. The suffix is appended rather than swapped in, so ``roadmap.docx``
-    (a Drive export whose *text* this is) becomes ``roadmap.docx.txt``: the
-    stored object is read back as text, while the document name a user sees,
-    the stem, stays ``roadmap.docx``. Returns ``None`` for an unusable name, so
-    the caller falls back to the content-hash name.
+    safe object basename: path separators and the characters Windows does not
+    allow in a filename become ``_`` (so a name never chooses where in storage
+    it lands, and a title with a slash keeps its whole text), control
+    characters and leading dots are stripped, and ``.txt`` is appended when the
+    name does not already end in it. The suffix is appended rather than swapped
+    in, so ``roadmap.docx`` (a Drive export whose *text* this is) becomes
+    ``roadmap.docx.txt``: the stored object is read back as text, while the
+    document name a user sees, the stem, stays ``roadmap.docx``. Returns
+    ``None`` for an unusable name, so the caller falls back to the content-hash
+    name.
     """
     if not name:
         return None
-    base = str(name).replace("\\", "/").rsplit("/", 1)[-1]
-    base = re.sub(r"[\x00-\x1f\x7f]", "", base).strip().lstrip(".").rstrip(". ")
+    base = re.sub(r"[\x00-\x1f\x7f]", "", str(name))
+    base = _UNSAFE_NAME_CHARACTERS.sub("_", base).strip().lstrip(".").rstrip(". ")
     if not base:
         return None
     if base.lower().endswith(_TEXT_SUFFIX):
