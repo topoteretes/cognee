@@ -100,6 +100,8 @@ async def invalidate_sessions_for_deleted_data(
     callers and does not filter the unattributed query.
     ``strict=True`` is used by conflict resolution: a failed cleanup must keep
     that decision pending, so a retry can finish invalidating obsolete answers.
+    An entry that is already gone when its delete runs counts as cleaned, and an
+    unreadable session context raises instead of reading as empty.
     """
     totals = {"sessions_considered": 0, "qa_entries_deleted": 0, "context_entries_deleted": 0}
     if not deleted_node_ids and not deleted_edge_ids:
@@ -163,6 +165,14 @@ async def invalidate_sessions_for_deleted_data(
     return totals
 
 
+async def _context_entry_exists(session_manager, *, user_id: str, session_id: str, entry_id: str):
+    """Whether a session-context entry is still stored, read fresh after a failed delete."""
+    entries = await session_manager.get_session_context_entries(
+        user_id=user_id, session_id=session_id, raise_on_error=True
+    )
+    return any(entry.get("id") == entry_id for entry in entries or [])
+
+
 async def _invalidate_session_entries(
     session_manager,
     *,
@@ -188,8 +198,10 @@ async def _invalidate_session_entries(
     if not contaminated_qa_ids:
         return (0, 0)
 
+    # Fail-open for best-effort deletes; strict cleanup must not mistake an unreadable
+    # session context for one without lessons.
     context_entries = await session_manager.get_session_context_entries(
-        user_id=user_id, session_id=session_id
+        user_id=user_id, session_id=session_id, raise_on_error=strict
     )
 
     # Propagate contamination along the intra-session provenance chain until
@@ -223,12 +235,14 @@ async def _invalidate_session_entries(
                 contaminated_qa_ids.add(entry.qa_id)
                 changed = True
 
+    # A delete that finds nothing is done, not failed: a concurrent cleanup, forget or
+    # TTL may have removed the entry first. delete_qa raises on a cache error, so its
+    # False only ever means "not found"; the context-entry delete is fail-open, so in
+    # strict mode a False there is believed only once a re-read shows the entry gone.
     qa_deleted = 0
     for qa_id in contaminated_qa_ids:
         if await session_manager.delete_qa(user_id=user_id, qa_id=qa_id, session_id=session_id):
             qa_deleted += 1
-        elif strict:
-            raise RuntimeError("Could not invalidate a cached answer for the resolved conflict")
 
     context_deleted = 0
     for entry_id in contaminated_feedback_ids | contaminated_context_ids:
@@ -236,7 +250,9 @@ async def _invalidate_session_entries(
             user_id=user_id, entry_id=entry_id, session_id=session_id
         ):
             context_deleted += 1
-        elif strict:
+        elif strict and await _context_entry_exists(
+            session_manager, user_id=user_id, session_id=session_id, entry_id=entry_id
+        ):
             raise RuntimeError("Could not invalidate a cached lesson for the resolved conflict")
 
     # Clamp the persist watermark to the surviving entry count. A watermark

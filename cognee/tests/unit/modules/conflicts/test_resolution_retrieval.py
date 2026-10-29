@@ -314,3 +314,116 @@ async def test_followup_retrieval_applies_saved_decision(retriever_type):
     batches = await retriever.get_triplets_batch(["Who is CEO?"])
     text = await resolve_edges_to_text(batches[0])
     assert "Alice is CEO" in text and "Bob is CEO" not in text
+
+
+@pytest.mark.asyncio
+async def test_a_retrieved_selected_edge_states_the_decision_once():
+    company = Node("company", {"name": "Company"})
+    decision = {
+        "id": "conflict",
+        "about_id": "company",
+        "selected_fact": "Company has CEO Alice",
+        "selected_fact_id": "alice-fact",
+        "rejected_fact_ids": ["bob-fact"],
+        "sources": [],
+        "values": [],
+    }
+    mark = {
+        "conflict_id": "conflict",
+        "resolution_source": "user",
+        "selected_fact": "Company has CEO Alice",
+    }
+    alice = Edge(
+        company,
+        Node("alice", {"name": "Alice"}),
+        attributes={
+            "edge_object_id": "alice-fact",
+            "edge_text": "Company has CEO Alice",
+            "conflict_marks": [{**mark, "status": "current"}],
+        },
+    )
+    bob = Edge(
+        company,
+        Node("bob", {"name": "Bob"}),
+        attributes={
+            "edge_object_id": "bob-fact",
+            "edge_text": "Company has CEO Bob",
+            "conflict_marks": [{**mark, "status": "superseded"}],
+        },
+    )
+    carol = Edge(
+        company,
+        Node("carol", {"name": "Carol"}),
+        attributes={
+            "edge_object_id": "carol-fact",
+            "edge_text": "Company has CEO Carol",
+            "conflict_marks": [{**mark, "status": "superseded"}],
+        },
+    )
+    decision["rejected_fact_ids"].append("carol-fact")
+    # The retrieved selected edge states the decision: the rejected edges are dropped
+    # instead of being restated as a synthetic link or an accepted-facts section.
+    result = apply_graph_resolutions([alice, bob, carol], [decision])
+    assert [edge.attributes["edge_object_id"] for edge in result] == ["alice-fact"]
+    text = await resolve_edges_to_text(result)
+    assert "Company has CEO Bob" not in text and "Company has CEO Carol" not in text
+    assert "accepted_fact" not in text and "## Accepted facts" not in text
+    assert text.count("Company has CEO Alice") == 1
+    assert "--> Alice [accepted by user]" in text
+    # Without it, one synthetic link states the decision, however many claims it rejected.
+    text = await resolve_edges_to_text(apply_graph_resolutions([bob, carol], [decision]))
+    assert "Company has CEO Bob" not in text and "Company has CEO Carol" not in text
+    assert text.count("--[accepted_fact]-->") == 1 and "## Accepted facts" not in text
+    # Edges rendered from their marks alone: the section restates only an absent choice.
+    text = await resolve_edges_to_text([alice, bob])
+    assert "Company has CEO Bob" not in text and "## Accepted facts" not in text
+    assert text.count("Company has CEO Alice") == 1
+    text = await resolve_edges_to_text([bob, carol])
+    assert text == "## Accepted facts (user resolved)\nCompany has CEO Alice"
+
+
+@pytest.mark.asyncio
+async def test_the_selected_edge_keeps_the_decision_visible_next_to_later_evidence():
+    """Evidence a review found after the decision and another conflict's review status
+    must not leave graph context without the user's choice."""
+    company = Node("company", {"name": "Company"})
+    decision = {
+        "id": "conflict",
+        "about_id": "company",
+        "selected_fact": "Company has CEO Alice",
+        "selected_fact_id": "alice-fact",
+        "rejected_fact_ids": ["bob-fact"],
+        "sources": [],
+        "values": [],
+    }
+    alice = Edge(
+        company,
+        Node("alice", {"name": "Alice"}),
+        attributes={
+            "edge_object_id": "alice-fact",
+            "edge_text": "Company has CEO Alice",
+            "effective_date": "2024-01-01",
+            "conflict_marks": [
+                {
+                    "conflict_id": "conflict",
+                    "resolution_source": "user",
+                    "selected_fact": "Company has CEO Alice",
+                    "status": "current",
+                },
+                {"conflict_id": "employer", "status": "conflicting"},
+            ],
+        },
+    )
+    carol = Edge(
+        company,
+        Node("carol", {"name": "Carol"}),
+        attributes={
+            "edge_object_id": "carol-fact",
+            "edge_text": "Company has CEO Carol",
+            "effective_date": "2026-06-01",
+            "conflict_marks": [{"conflict_id": "conflict", "status": "current"}],
+        },
+    )
+    text = await resolve_edges_to_text(apply_graph_resolutions([alice, carol], [decision]))
+    assert "--[Company has CEO Alice]--> Alice [accepted by user; as of 2024-01-01]" in text
+    assert "--[Company has CEO Carol]--> Carol [as of 2026-06-01]" in text

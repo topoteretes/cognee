@@ -17,8 +17,8 @@ def _objects(retriever_type, node_id):
     return [Edge(Node(node_id, {"name": "Retrieved node"}), Node("neighbor"))]
 
 
-def _retriever(monkeypatch, retriever_type, resolutions, limit):
-    retriever = retriever_type(include_global_context_index=True, global_context_index_top_k=limit)
+def _retriever(monkeypatch, retriever_type, resolutions, top_k):
+    retriever = retriever_type(include_global_context_index=True, global_context_index_top_k=top_k)
     retriever._unified_engine = SimpleNamespace(
         graph=SimpleNamespace(get_filtered_graph_data=AsyncMock(return_value=(resolutions, []))),
         vector=object(),
@@ -33,7 +33,7 @@ def _retriever(monkeypatch, retriever_type, resolutions, limit):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("retriever_type", [HybridRetriever, GraphCompletionRetriever])
 @pytest.mark.parametrize("link_field", ["about_id", "values", "sources"])
-async def test_global_context_keeps_summaries_and_bounds_relevant_decisions(
+async def test_global_context_keeps_summaries_and_states_every_relevant_decision(
     monkeypatch, retriever_type, link_field
 ):
     def decision(fact, node_id):
@@ -49,18 +49,18 @@ async def test_global_context_keeps_summaries_and_bounds_relevant_decisions(
         ("b", decision("Accepted fact B", "retrieved")),
         ("c", decision("Accepted fact C", "retrieved")),
     ]
-    retriever, search_summaries = _retriever(monkeypatch, retriever_type, resolutions, limit=2)
+    retriever, search_summaries = _retriever(monkeypatch, retriever_type, resolutions, top_k=2)
     context = await retriever.get_context_from_objects(
         query="q", retrieved_objects=_objects(retriever_type, "retrieved")
     )
     assert "Root summary" in context and "Area summary" in context
     if retriever_type is HybridRetriever:
         assert context.startswith("## Global context\n")
-    assert "Accepted by user: Accepted fact A" in context
-    assert "Accepted by user: Accepted fact B" in context
-    assert "Accepted fact C" not in context
+    # top_k sizes the summaries only: no decision about the retrieved set is cut.
+    for fact in ("A", "B", "C"):
+        assert f"Accepted by user: Accepted fact {fact}" in context
     assert "Unrelated decision" not in context
-    assert context.count("Accepted by user:") == 2
+    assert context.count("Accepted by user:") == 3
     search_summaries.assert_awaited_once_with("q", 2, retriever._unified_engine.vector)
 
 
@@ -80,7 +80,7 @@ async def test_unrelated_decision_does_not_replace_global_index(monkeypatch, ret
                 },
             )
         ],
-        limit=3,
+        top_k=3,
     )
     context = await retriever.get_context_from_objects(
         query="q", retrieved_objects=_objects(retriever_type, "unrelated")
@@ -113,7 +113,7 @@ async def test_batch_decisions_are_selected_for_each_queries_retrieved_objects(m
                 },
             ),
         ],
-        limit=1,
+        top_k=1,
     )
     contexts = await retriever.get_context_from_objects(
         query_batch=["first query", "second query"],

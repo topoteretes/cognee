@@ -41,7 +41,9 @@ def get_conflicts_router() -> APIRouter:
     ):
         """Accept one competing fact and mark the conflict resolved.
 
-        Repeating the same choice is idempotent; choosing another fact revises it.
+        Repeating a choice over the same facts is idempotent; repeated after a review
+        listed new evidence, it also rejects that evidence. Choosing another fact
+        revises the decision.
         Automatic conflict review preserves the user decision. Rejected source facts
         remain stored for inspection, but normal retrieval uses the selected information.
         """

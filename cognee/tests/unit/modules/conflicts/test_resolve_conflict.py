@@ -8,12 +8,20 @@ import pytest
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.locks.dataset_lock import dataset_lock, held_datasets
 from cognee.modules.conflicts import methods
+from cognee.modules.engine.models import FactConflict
 from cognee.modules.graph.utils.fact_conflicts import is_rejected_fact
 from cognee.modules.retrieval.utils.resolved_context import read_user_resolutions
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.tasks.memify.review_conflicts import write_conflicts
-from cognee.tasks.memify.review_conflicts.models import ConflictsToFinalize, ConflictsToWrite
-from cognee.tests.unit.tasks.memify.review_conflicts.test_write_conflicts import store
+from cognee.tasks.memify.review_conflicts.models import (
+    AcceptedConflict,
+    ConflictsToFinalize,
+    ConflictsToWrite,
+)
+from cognee.tests.unit.tasks.memify.review_conflicts.test_write_conflicts import (
+    find_fact_id,
+    store,
+)
 
 
 @pytest.fixture
@@ -287,3 +295,159 @@ async def test_automatic_review_cannot_finalize_incomplete_cache_cleanup(lane):
     await resolve(lane)
     assert not lane.store.nodes[lane.store.cid]["cache_cleanup_pending"]
     assert not lane.store.nodes[lane.store.cid]["write_pending"]
+
+
+@pytest.mark.asyncio
+async def test_review_keeps_the_choice_without_rejecting_evidence_the_user_never_saw(lane):
+    selected = await resolve(lane)
+    facts = lane.store.scope.facts
+    carol = str(uuid4())
+    facts[carol] = {
+        **next(iter(facts.values())),
+        "id": carol,
+        "target": str(uuid4()),
+        "properties": {"edge_text": "Company has CEO Carol", "weight": 1, "conflict_marks": []},
+    }
+    # A later automatic review reads Carol, whom the user never saw, as the current CEO.
+    batch = lane.store.batch
+    incoming = batch.accepted_conflicts[0]
+    incoming.fact_statuses = {fid: ("current" if fid == carol else "superseded") for fid in facts}
+    batch.shown_fact_ids = set(facts)
+    await write_conflicts.write_conflicts([batch], lane.store.ctx)
+    await write_conflicts.write_conflicts(
+        [ConflictsToFinalize(batch.accepted_conflicts, batch.dropped_conflict_ids)], lane.store.ctx
+    )
+    saved = lane.store.nodes[lane.store.cid]
+    assert saved["selected_fact_id"] == str(selected.selected_fact_id)
+    assert saved["rejected_fact_ids"] == [find_fact_id(lane.store, lane.store.bob)]
+    assert "Company has CEO Carol" not in saved["rejected_fact_texts"]
+    # Carol keeps the review's judgement, with no decision attached to her claim.
+    assert facts[carol]["properties"]["conflict_marks"] == [
+        {"conflict_id": lane.store.cid, "status": "current"}
+    ]
+    assert not is_rejected_fact(facts[carol]["properties"])
+    assert (await read_user_resolutions(lane.store.graph))[0]["rejected_fact_ids"] == saved[
+        "rejected_fact_ids"
+    ]
+    # The listing shows the new evidence next to the decision, so it can be revised.
+    statuses = {
+        str(fact.id): fact.status for fact in methods.conflict_detail(saved, lane.store.scope).facts
+    }
+    assert statuses[carol] == "current" and statuses[str(selected.selected_fact_id)] == "current"
+
+
+@pytest.mark.asyncio
+async def test_resolution_invalidates_answers_that_used_the_competing_facts_or_their_passages(
+    lane,
+):
+    await resolve(lane)
+    stored = lane.store.nodes[lane.store.cid]
+    kwargs = lane.invalidation.call_args.kwargs
+    assert kwargs["deleted_edge_ids"] == set(lane.store.scope.facts)
+    assert kwargs["deleted_node_ids"] == {lane.store.cid, *stored["sources"]}
+    # The subject is a hub: answers that only mention the company stay cached.
+    assert stored["about_id"] not in kwargs["deleted_node_ids"]
+
+
+@pytest.mark.asyncio
+async def test_sdk_calls_follow_serve_to_the_remote_instance(monkeypatch):
+    from cognee.api.v1.serve import state
+
+    client = SimpleNamespace(
+        list_conflicts=AsyncMock(return_value=[]), resolve_conflict=AsyncMock(return_value={})
+    )
+    monkeypatch.setattr(state, "get_remote_client", lambda: client)
+
+    async def local_path_reached(*args, **kwargs):
+        raise AssertionError("Conflict calls did local work while a remote client was connected")
+
+    monkeypatch.setattr(methods, "get_authorized_existing_datasets", local_path_reached)
+    dataset_id, conflict_id, fact_id = uuid4(), uuid4(), uuid4()
+    assert await methods.list_conflicts(dataset_id, status="unresolved") == []
+    client.list_conflicts.assert_awaited_once_with(dataset_id, status="unresolved")
+    await methods.resolve_conflict(
+        conflict_id, dataset_id=dataset_id, selected_fact_id=fact_id, reason="Verified"
+    )
+    client.resolve_conflict.assert_awaited_once_with(
+        conflict_id, dataset_id=dataset_id, selected_fact_id=fact_id, reason="Verified"
+    )
+
+
+def _add_fact(lane, ceo: str) -> str:
+    """A competing claim a later document adds, which the user has not seen."""
+    facts = lane.store.scope.facts
+    fact_id = str(uuid4())
+    facts[fact_id] = {
+        **next(iter(facts.values())),
+        "id": fact_id,
+        "target": str(uuid4()),
+        "properties": {"edge_text": f"Company has CEO {ceo}", "weight": 1, "conflict_marks": []},
+    }
+    return fact_id
+
+
+async def _review(lane, fact_statuses: dict[str, str], shown_fact_ids: set[str]) -> None:
+    """One automatic review run that reports the CEO conflict with these labels."""
+    scope, ctx = lane.store.scope, lane.store.ctx
+    stored = lane.store.nodes[lane.store.cid]
+    # A run reads the stored conflict as the last request or run left it.
+    scope.conflicts[lane.store.cid] = dict(stored)
+    report = FactConflict(
+        dataset_id=stored["dataset_id"],
+        about_id=stored["about_id"],
+        attribute=stored["attribute"],
+        kind="time_varying",
+        status="resolved",
+        text="The review's own explanation.",
+        values=stored["values"],
+        sources=stored["sources"],
+    )
+    batch = ConflictsToWrite(
+        scope, [AcceptedConflict(report, dict(fact_statuses))], shown_fact_ids=shown_fact_ids
+    )
+    await write_conflicts.write_conflicts([batch], ctx)
+    await write_conflicts.write_conflicts(
+        [ConflictsToFinalize(batch.accepted_conflicts, batch.dropped_conflict_ids)], ctx
+    )
+
+
+@pytest.mark.asyncio
+async def test_repeating_the_choice_after_new_evidence_extends_it_to_that_evidence(lane):
+    selected = await resolve(lane)
+    alice, bob = str(selected.selected_fact_id), find_fact_id(lane.store, lane.store.bob)
+    carol = _add_fact(lane, "Carol")
+    facts = lane.store.scope.facts
+    await _review(lane, {alice: "superseded", bob: "superseded", carol: "current"}, set(facts))
+    assert lane.store.nodes[lane.store.cid]["rejected_fact_ids"] == [bob]
+    writes = len(lane.store.calls)
+    repeated = await resolve(lane)
+    # Carol is listed now, so the same choice is a new decision that rejects her too,
+    # on her mark as well as on the conflict, instead of the idempotent shortcut.
+    assert len(lane.store.calls) > writes
+    saved = lane.store.nodes[lane.store.cid]
+    assert saved["selected_fact_id"] == alice
+    assert saved["rejected_fact_ids"] == sorted([bob, carol])
+    assert is_rejected_fact(facts[carol]["properties"])
+    assert {str(fact.id): fact.status for fact in repeated.facts}[carol] == "superseded"
+
+
+@pytest.mark.asyncio
+async def test_later_evidence_follows_each_review_while_the_decision_holds(lane):
+    selected = await resolve(lane)
+    alice, bob = str(selected.selected_fact_id), find_fact_id(lane.store, lane.store.bob)
+    carol = _add_fact(lane, "Carol")
+    facts = lane.store.scope.facts
+    await _review(lane, {alice: "superseded", bob: "superseded", carol: "current"}, set(facts))
+    # A run that does not show Carol leaves her mark as it is.
+    await _review(lane, {alice: "superseded", bob: "current"}, {alice, bob})
+    assert facts[carol]["properties"]["conflict_marks"] == [
+        {"conflict_id": lane.store.cid, "status": "current"}
+    ]
+    # A run that shows her and no longer labels her takes her out of the conflict, as
+    # for a conflict the review owns. The user's decision is untouched either way.
+    await _review(lane, {alice: "superseded", bob: "current"}, set(facts))
+    assert facts[carol]["properties"]["conflict_marks"] == []
+    saved = lane.store.nodes[lane.store.cid]
+    assert (saved["selected_fact_id"], saved["rejected_fact_ids"]) == (alice, [bob])
+    assert is_rejected_fact(facts[bob]["properties"])
+    assert not is_rejected_fact(facts[alice]["properties"])

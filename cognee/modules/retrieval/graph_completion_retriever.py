@@ -381,9 +381,7 @@ class GraphCompletionRetriever(BaseRetriever):
         )
         prelude = format_global_context_prelude(root_text, top_summaries)
         used_ids = self.extract_context_object_ids(retrieved_objects) or {}
-        accepted = accepted_facts_context(
-            resolutions, used_ids.get("node_ids", []), self.global_context_index_top_k
-        )
+        accepted = accepted_facts_context(resolutions, used_ids.get("node_ids", []))
         return "\n\n".join(section for section in (prelude, accepted) if section)
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:

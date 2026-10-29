@@ -76,10 +76,14 @@ async def resolve_edges_to_text(retrieved_edges: list[Edge]) -> str:
     if not retrieved_edges:
         return ""
 
-    accepted = sorted(
-        {text for edge in retrieved_edges for text in user_selected_facts(edge.attributes)}
-    )
+    # A rejected claim is dropped and its decision's accepted fact restated below, unless
+    # the selected edge is in the context, where its label states the user's choice.
+    rejected = [edge for edge in retrieved_edges if is_rejected_fact(edge.attributes)]
     retrieved_edges = [edge for edge in retrieved_edges if not is_rejected_fact(edge.attributes)]
+    stated = {text for edge in retrieved_edges for text in user_selected_facts(edge.attributes)}
+    accepted = sorted(
+        {text for edge in rejected for text in user_selected_facts(edge.attributes)} - stated
+    )
     nodes = _extract_nodes_from_edges(retrieved_edges)
 
     node_section = "\n".join(
