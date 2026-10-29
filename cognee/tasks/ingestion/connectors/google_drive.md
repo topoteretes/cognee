@@ -55,18 +55,22 @@ needed. A later expansion of supported formats increments `FORMAT_SUPPORT_VERSIO
 The scan reuses recorded successful `modifiedTime` values, downloading only files without
 a matching successful version. SDK 1.6.5 did not record those versions, so its first upgrade
 scan downloads existing supported files too; unchanged rows retain their content-based IDs.
-The new format version and cursor are recorded only when the scan completes without a
-transient failure or a missing loader. A rate limit or auth interruption retains partial
-progress and does not delete files absent from the incomplete listing. An extraction or
-load failure uses DLT's existing rollback/retry mechanism.
+The new format version, the cursor and the set of formats a loader was registered for are
+recorded only when the scan completes without a transient failure. A rate limit or auth
+interruption retains partial progress and does not delete files absent from the incomplete
+listing. An extraction or load failure uses DLT's existing rollback/retry mechanism.
 
-If a loader is missing, install the `docling` extra and run sync again. The connector keeps
-requesting a full scan until the required loader is available, reusing successful versions
-between attempts. Until then every sync lists the whole folder again, including a folder that
-was never synced, and does not advance the Changes cursor. A file whose format has no
-registered loader is not downloaded again; it only costs the listing. A missing loader encountered during an incremental sync also schedules
-this scan, so an unchanged file is retried after installation. Unsupported formats and
-permanently unreadable files do not prevent the format upgrade from completing.
+A file whose format has no registered loader is skipped without a download and counted as
+`failed_loader_unavailable`; it does not hold the cursor or the upgrade marker. The folder
+records which of the formats above had a loader when it was scanned. When a sync finds a
+loader for one that had none, for instance after `cognee[docling]` was installed, it scans
+the folder once more and reads the files it skipped, reusing successful versions. A format
+that no installed extra can load therefore never keeps the folder in full-scan mode.
+Unsupported formats and permanently unreadable files do not prevent the upgrade either.
+
+A file whose loader is registered but fails because one of its dependencies cannot be
+imported is reported the same way, but installing the dependency does not register anything
+new, so no scan is requested: edit the file in Drive or clear the source's state to read it.
 
 ## How sync + forget-on-delete work
 
@@ -144,8 +148,8 @@ the connection can be reconnected.
 A transient failure (`failed_content_extraction`: a download or loader failure that may pass) keeps the Changes cursor where it was; the next
 run fetches only the failed and the changed files. `failed_export_too_large` and
 `failed_unreadable` are reported but do not hold the cursor, because a rerun cannot cure
-them. `failed_loader_unavailable` schedules the full scan described above and preserves
-previously ingested content. Fetching is bounded: at most `max_workers` files are in flight, and together at
+them. `failed_loader_unavailable` does not hold the cursor either and preserves previously
+ingested content; installing a loader for the format schedules the scan described above. Fetching is bounded: at most `max_workers` files are in flight, and together at
 most 256 MB of reported file size (a larger file runs alone).
 
 When syncing multiple folders into one dataset, assign each a stable, distinct
