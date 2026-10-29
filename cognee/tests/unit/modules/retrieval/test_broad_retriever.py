@@ -299,23 +299,18 @@ class _SchemaGraph:
 
 @pytest.mark.asyncio
 async def test_dlt_foreign_keys_are_shown_with_their_table():
-    """Keys of every table of one name are listed together; unreadable ones are skipped."""
+    """Keys of every table of one name are listed together, once each."""
     from cognee.modules.retrieval.broad_store import RecordStore
 
     orders_fk = '[{"column": "customer_id", "ref_table": "customers", "ref_column": "id"}]'
     other_orders_fk = '[{"column": "shop_id", "ref_table": "shops", "ref_column": "id"}]'
     graph = _SchemaGraph(
-        [
-            ("orders", orders_fk),
-            ("orders", other_orders_fk),
-            ("orders", orders_fk),
-            ("broken", "not json"),
-            ("partial", '[{"column": "a"}]'),
-        ]
+        [("orders", orders_fk), ("orders", other_orders_fk), ("orders", orders_fk), ("notes", "[]")]
     )
     foreign_keys = await BroadRetriever().dlt_foreign_keys(graph)
     assert foreign_keys == {
-        "orders": ["customer_id references customers.id", "shop_id references shops.id"]
+        "orders": ["customer_id references customers.id", "shop_id references shops.id"],
+        "notes": [],
     }
 
     store = RecordStore()
@@ -327,3 +322,14 @@ async def test_dlt_foreign_keys_are_shown_with_their_table():
         )
     finally:
         store.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("foreign_keys", "error"),
+    [("not json", ValueError), ('[{"column": "a"}]', KeyError), (None, TypeError)],
+)
+async def test_a_table_node_with_unreadable_keys_raises(foreign_keys, error):
+    """cognee writes these keys itself, so one that does not parse is a bug, not data to skip."""
+    with pytest.raises(error):
+        await BroadRetriever().dlt_foreign_keys(_SchemaGraph([("broken", foreign_keys)]))

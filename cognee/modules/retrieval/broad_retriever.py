@@ -307,20 +307,16 @@ class BroadRetriever(CompletionRetriever):
         """Each DLT table's foreign keys, read from its SchemaTable nodes.
 
         Rows are shown as one table per table name, so the keys of every source's
-        table of that name are listed together. A node whose keys do not parse adds
-        none: its table is still shown, without them.
+        table of that name are listed together. The keys are JSON cognee wrote
+        itself, so a node whose keys do not parse is a bug and raises.
         """
         nodes, _ = await graph_engine.get_filtered_graph_data([{"type": ["SchemaTable"]}])
         foreign_keys: dict[str, list[str]] = {}
-        for node_id, props in nodes:
-            try:
-                lines = [
-                    f"{fk['column']} references {fk['ref_table']}.{fk['ref_column']}"
-                    for fk in json.loads(props.get("foreign_keys") or "[]")
-                ]
-            except (TypeError, KeyError, ValueError):
-                logger.warning("SchemaTable %s has unreadable foreign keys; skipped", node_id)
-                continue
+        for _, props in nodes:
+            lines = [
+                f"{fk['column']} references {fk['ref_table']}.{fk['ref_column']}"
+                for fk in json.loads(props["foreign_keys"])
+            ]
             listed = foreign_keys.setdefault(str(props.get("name")), [])
             listed.extend(line for line in lines if line not in listed)
         return foreign_keys
