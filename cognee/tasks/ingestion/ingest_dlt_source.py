@@ -655,7 +655,7 @@ def _resolve_primary_key(
 
 def _key_value(row, key_columns: list[str]) -> str:
     """A row's primary key value: its key columns' values, joined with ":"."""
-    return ":".join(str(row.get(column, "")) for column in key_columns)
+    return ":".join(str(row[column]) for column in key_columns)
 
 
 # Identity map over the identifier alphabet. Rebuilding the sanitized name from
