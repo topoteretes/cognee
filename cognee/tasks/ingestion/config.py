@@ -16,7 +16,8 @@ class IngestionConfig(BaseSettings):
     # a value (a country, a genre, a status) meet in one node and deterministic
     # traversal, degree-based aggregates and the visualization see every cell.
     # Key columns never become value nodes: a primary key is the row's identity
-    # and a foreign key is already an edge to the row it references. Each
+    # and a foreign key is already an edge to the row it references. A date cell
+    # that anchors to a Timestamp (dlt_temporal_columns) is that node. Each
     # unique value costs one embedding; narrow the selection, e.g.
     # {"orders": ["status"]}, to keep one-off values such as free text out.
     # {} turns value nodes off.

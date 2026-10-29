@@ -488,12 +488,18 @@ async def _build_source_manifest_item(
                 row, fk_lookup, missing_fk_targets, key_columns, column_lookup, ambiguous_fks
             ),
         }
-        column_values = _selected_column_values(row, column_value_columns)
-        if column_values:
-            manifest_row["column_values"] = column_values
         timestamps = temporal_cells(row, temporal_columns)
         if timestamps:
             manifest_row["timestamps"] = timestamps
+        # A date cell that anchors to a Timestamp is already a shared node for
+        # its value, so it is not a ColumnValue as well: one node per cell.
+        column_values = {
+            column: value
+            for column, value in _selected_column_values(row, column_value_columns).items()
+            if column not in timestamps
+        }
+        if column_values:
+            manifest_row["column_values"] = column_values
         manifest_rows.append(manifest_row)
 
     _report_missing_fk_targets(missing_fk_targets, set(key_columns))
