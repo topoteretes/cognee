@@ -340,11 +340,13 @@ async def test_review_keeps_the_choice_without_rejecting_evidence_the_user_never
 async def test_resolution_invalidates_answers_that_used_the_competing_facts_or_their_passages(
     lane,
 ):
+    cited_before = set(lane.store.nodes[lane.store.cid]["sources"])
     await resolve(lane)
     stored = lane.store.nodes[lane.store.cid]
     kwargs = lane.invalidation.call_args.kwargs
     assert kwargs["deleted_edge_ids"] == set(lane.store.scope.facts)
-    assert kwargs["deleted_node_ids"] == {lane.store.cid, *stored["sources"]}
+    # Passages cited before the choice and after it, which cites only live chunks.
+    assert kwargs["deleted_node_ids"] == {lane.store.cid, *cited_before, *stored["sources"]}
     # The subject is a hub: answers that only mention the company stay cached.
     assert stored["about_id"] not in kwargs["deleted_node_ids"]
 
@@ -451,3 +453,27 @@ async def test_later_evidence_follows_each_review_while_the_decision_holds(lane)
     assert (saved["selected_fact_id"], saved["rejected_fact_ids"]) == (alice, [bob])
     assert is_rejected_fact(facts[bob]["properties"])
     assert not is_rejected_fact(facts[alice]["properties"])
+
+
+@pytest.mark.asyncio
+async def test_a_decision_cites_only_the_chunks_its_facts_cite_now(lane):
+    """A conflict citing a missing chunk is sent back to review on every run, so both the
+    choice and a review that keeps it must cite only what the facts cite now."""
+    facts = lane.store.scope.facts
+    bob = find_fact_id(lane.store, lane.store.bob)
+    press = {**facts[bob]["sources"][0], "chunk_id": str(uuid4())}
+    facts[bob]["sources"].append(press)
+    live = {source["chunk_id"] for fact in facts.values() for source in fact["sources"]}
+    # The fixture's conflict still cites a chunk that no fact cites any more.
+    assert set(lane.store.nodes[lane.store.cid]["sources"]) - live
+    selected = await resolve(lane)
+    alice = str(selected.selected_fact_id)
+    assert lane.store.nodes[lane.store.cid]["sources"] == sorted(live)
+    # Answers built on the press release used a rejected claim the conflict did not cite.
+    assert press["chunk_id"] in lane.invalidation.call_args.kwargs["deleted_node_ids"]
+    # The press release is forgotten after the choice; the next review keeps the choice.
+    facts[bob]["sources"].remove(press)
+    await _review(lane, {alice: "superseded", bob: "current"}, set(facts))
+    saved = lane.store.nodes[lane.store.cid]
+    assert saved["sources"] == sorted(live - {press["chunk_id"]})
+    assert (saved["selected_fact_id"], saved["rejected_fact_ids"]) == (alice, [bob])

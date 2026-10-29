@@ -101,9 +101,9 @@ def _preserve_user_resolutions(to_write: ConflictsToWrite) -> None:
                 | {to_write.scope.facts[fid]["properties"].get("edge_text", "") for fid in rejected}
                 - {""}
             ),
-            sources=sorted(
-                set(stored.get("sources", [])) | set(incoming.conflict.sources if incoming else [])
-            ),
+            # A chunk forgotten since must drop out: the reader sends a conflict citing
+            # a missing chunk back to review on every run.
+            sources=sorted(_collect_cited_sources(statuses, to_write.scope.facts)),
             values=sorted(
                 set(stored.get("values", [])) | set(incoming.conflict.values if incoming else [])
             ),
@@ -322,12 +322,10 @@ def _choose_value_statuses(accepted: AcceptedConflict, facts: dict[str, dict]) -
     return statuses
 
 
-def _collect_cited_sources(accepted: AcceptedConflict, facts: dict[str, dict]) -> dict[str, dict]:
-    """One source record per cited chunk, across every labelled fact."""
+def _collect_cited_sources(fact_ids, facts: dict[str, dict]) -> dict[str, dict]:
+    """One source record per chunk the given facts cite now."""
     return {
-        source["chunk_id"]: source
-        for fact_id in accepted.fact_statuses
-        for source in facts[fact_id]["sources"]
+        source["chunk_id"]: source for fact_id in fact_ids for source in facts[fact_id]["sources"]
     }
 
 
@@ -353,7 +351,9 @@ def _build_conflict_edges(accepted: AcceptedConflict, facts: dict[str, dict]) ->
                     "effective_date": source["effective_date"],
                 },
             )
-            for chunk_id, source in sorted(_collect_cited_sources(accepted, facts).items())
+            for chunk_id, source in sorted(
+                _collect_cited_sources(accepted.fact_statuses, facts).items()
+            )
         ),
     ]
 

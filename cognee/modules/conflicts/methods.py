@@ -31,6 +31,7 @@ from cognee.tasks.memify.review_conflicts.models import (
 )
 from cognee.tasks.memify.review_conflicts.read_facts import _to_conflict_record, read_entity_facts
 from cognee.tasks.memify.review_conflicts.write_conflicts import (
+    _collect_cited_sources,
     _rebuild_stored_conflict,
     write_conflicts,
 )
@@ -200,6 +201,8 @@ async def resolve_conflict(
                 rejected_fact_texts=sorted(
                     {_fact_text(scope.facts[fid], scope.nodes) for fid in rejected_fact_ids}
                 ),
+                # Its citation links are rebuilt from the facts, so the node must agree.
+                sources=sorted(_collect_cited_sources(statuses, scope.facts)),
                 resolved_by=stored.get("resolved_by") if same_choice else str(user.id),
                 resolved_at=stored.get("resolved_at")
                 if same_choice
@@ -225,7 +228,7 @@ async def resolve_conflict(
         # it are stale; the subject entity is a hub every unrelated answer about it cites.
         await invalidate_sessions_for_deleted_data(
             dataset.id,
-            deleted_node_ids={conflict_id, *stored.get("sources", [])},
+            deleted_node_ids={conflict_id, *stored.get("sources", []), *resolved.sources},
             deleted_edge_ids=set(statuses),
             user_id=user.id,
             strict=True,
