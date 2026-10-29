@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.modules.improve import GraphCapabilities, ImproveResult
-from cognee.modules.improve.stages import REASON_OPT_IN_DISABLED
+from cognee.modules.improve.stages import REASON_TURNED_OFF
 
 
 class DummySpan:
@@ -138,7 +138,7 @@ async def test_improve_global_context_index_opt_in(monkeypatch, build_global_con
     else:
         global_context_mock.assert_not_awaited()
         assert stage.status == "skipped"
-        assert stage.reason == REASON_OPT_IN_DISABLED
+        assert stage.reason == REASON_TURNED_OFF
 
 
 @pytest.mark.asyncio
@@ -156,6 +156,7 @@ async def test_improve_background_runs_global_context_index_in_the_chain(monkeyp
         user=SimpleNamespace(id="user-id"),
         run_in_background=True,
         build_global_context_index=True,
+        review_conflicts=False,
     )
 
     assert result.status == "running"
@@ -208,7 +209,7 @@ async def test_improve_global_context_index_follows_the_config_when_not_given(
         assert stage.status == "completed"
     else:
         global_context_mock.assert_not_awaited()
-        assert stage.reason == REASON_OPT_IN_DISABLED
+        assert stage.reason == REASON_TURNED_OFF
 
 
 def test_global_context_index_is_on_by_default():

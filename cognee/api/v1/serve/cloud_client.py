@@ -342,8 +342,8 @@ class CloudClient:
             payload["build_global_context_index"] = True
         if kwargs.get("build_truth_subspace"):
             payload["build_truth_subspace"] = True
-        if kwargs.get("review_conflicts"):
-            payload["review_conflicts"] = True
+        if kwargs.get("review_conflicts") is not None:
+            payload["review_conflicts"] = kwargs["review_conflicts"]
         if kwargs.get("feedback_alpha") is not None:
             payload["feedback_alpha"] = kwargs["feedback_alpha"]
         # Deprecated custom tasks (SDK-1115): the /improve DTO takes registry task

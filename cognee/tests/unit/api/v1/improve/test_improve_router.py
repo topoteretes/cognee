@@ -132,7 +132,7 @@ def test_defaults_leave_feedback_alpha_to_the_server_config(client, improve_stub
     # None, not False: the server's IMPROVE_GLOBAL_CONTEXT_INDEX decides.
     assert kwargs["build_global_context_index"] is None
     assert kwargs["build_truth_subspace"] is False
-    assert kwargs["review_conflicts"] is False
+    assert kwargs["review_conflicts"] is None
     assert kwargs["run_in_background"] is False
     assert kwargs["session_ids"] is None
 

@@ -35,7 +35,7 @@ class ImprovePayloadDTO(InDTO):
     # None follows the server's IMPROVE_GLOBAL_CONTEXT_INDEX (default true).
     build_global_context_index: bool | None = Field(default=None)
     build_truth_subspace: bool | None = Field(default=False)
-    review_conflicts: bool = False
+    review_conflicts: bool | None = None
     # Learning rate for the feedback-weight stage. Omitted (None) means the
     # server's IMPROVE_FEEDBACK_ALPHA applies; the stage's formula is fixed,
     # only the rate is tunable.
@@ -65,7 +65,8 @@ def get_improve_router() -> APIRouter:
         `feedback_weights`, `persist_session_qa`, `persist_agent_traces`,
         `extract_agent_context`, `distill_sessions`, `update_user_preferences`,
         `build_truth_subspace`, `review_conflicts`, `global_context_index`.
-        Stages 1-7 need `sessionIds`; stages 7 and 9 are opt-in via the `build*` flags.
+        Stages 1-7 need `sessionIds`; stage 7 is opt-in via `build_truth_subspace`; stages 8
+        and 9 run by default and can be switched off per call.
 
         ## Request Parameters
         - **dataset_name** (Optional[str]): Dataset name.
@@ -79,7 +80,9 @@ def get_improve_router() -> APIRouter:
         - **build_global_context_index** (Optional[bool]): Build the global context index.
           Omitted or null follows the server's `IMPROVE_GLOBAL_CONTEXT_INDEX` (default: true);
           false skips the stage for this call.
-        - **review_conflicts** (bool): Review conflicts using source documents and dates.
+        - **review_conflicts** (Optional[bool]): Review conflicts using source documents and
+          dates. Omitted or null follows `IMPROVE_REVIEW_CONFLICTS` (default true); skipped
+          without an LLM.
         - **build_truth_subspace** (Optional[bool]): Build the truth subspace from the
           sessions' distilled learnings (default: False; needs `sessionIds` and a
           backend with truth state).

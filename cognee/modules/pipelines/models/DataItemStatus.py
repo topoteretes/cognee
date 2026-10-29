@@ -19,3 +19,9 @@ def is_data_item_completed(status_value: Any) -> bool:
     if isinstance(status_value, dict):
         status_value = status_value.get("status")
     return status_value == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+
+
+def is_item_stamped(item: Any, pipeline_name: str, dataset_id: Any) -> bool:
+    """Whether ``item`` (a ``Data`` row) records ``pipeline_name`` completed in ``dataset_id``."""
+    slots = (getattr(item, "pipeline_status", None) or {}).get(pipeline_name) or {}
+    return is_data_item_completed(slots.get(str(dataset_id)))
