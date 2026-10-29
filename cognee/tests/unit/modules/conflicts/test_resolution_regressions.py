@@ -142,14 +142,14 @@ async def test_chunk_search_survives_an_unreadable_graph(monkeypatch, engine_giv
 
 
 def test_every_relevant_user_decision_reaches_the_prelude():
-    """Six decisions about retrieved nodes with global_context_index_top_k=5: a decision
-    the user made about the retrieved subject is never dropped by a cutoff.
+    """Six decisions about the retrieved subject: a decision the user made about it is
+    never dropped by a cutoff (the cap was global_context_index_top_k, default 5).
     """
     resolutions = [
         {"about_id": "retrieved", "values": [], "sources": [], "selected_fact": f"Fact {i}"}
         for i in range(6)
     ]
-    context = accepted_facts_context(resolutions, ["retrieved"], limit=5)
+    context = accepted_facts_context(resolutions, ["retrieved"])
     missing = [f"Fact {i}" for i in range(6) if user_resolution_text(f"Fact {i}") not in context]
     assert missing == []
 
@@ -246,3 +246,53 @@ async def test_a_user_decision_is_stated_once_in_graph_context():
     synthetic = "Accepted fact" in text
     section = "## Accepted facts (user resolved)" in text
     assert not (synthetic and section), text
+
+
+@pytest.mark.asyncio
+async def test_a_user_decision_is_stated_once_with_the_global_context_prelude():
+    """Same retrieval with the global-context prelude on: the retrieved Alice edge is
+    labelled "accepted by user", so the prelude must not restate the same decision.
+    The prelude's node filter sees the subject node of the labelled edge and restates it.
+    """
+    company = Node("company", {"name": "Company"})
+    decision = {
+        "id": "conflict",
+        "about_id": "company",
+        "selected_fact": "Company has CEO Alice",
+        "selected_fact_id": "alice-fact",
+        "rejected_fact_ids": ["bob-fact"],
+        "sources": [],
+        "values": [],
+    }
+    mark = {
+        "conflict_id": "conflict",
+        "resolution_source": "user",
+        "selected_fact": "Company has CEO Alice",
+    }
+    alice = Edge(
+        company,
+        Node("alice", {"name": "Alice"}),
+        attributes={
+            "edge_object_id": "alice-fact",
+            "edge_text": "Company has CEO Alice",
+            "conflict_marks": [{**mark, "status": "current"}],
+        },
+    )
+    bob = Edge(
+        company,
+        Node("bob", {"name": "Bob"}),
+        attributes={
+            "edge_object_id": "bob-fact",
+            "edge_text": "Company has CEO Bob",
+            "conflict_marks": [{**mark, "status": "superseded"}],
+        },
+    )
+    edges = apply_graph_resolutions([alice, bob], [decision])
+    graph_context = await resolve_edges_to_text(edges)
+    # What the retrievers hand accepted_facts_context: the ids of the nodes in context.
+    node_ids = [node.id for edge in edges for node in (edge.node1, edge.node2)]
+    prelude = accepted_facts_context([decision], node_ids)
+    context = "\n\n".join(section for section in (prelude, graph_context) if section)
+    labelled = "[accepted by user]" in context
+    restated = user_resolution_text("Company has CEO Alice") in context
+    assert not (labelled and restated), context
