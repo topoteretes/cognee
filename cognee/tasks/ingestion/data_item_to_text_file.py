@@ -3,9 +3,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from urllib.request import url2pathname
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
+from cognee.infrastructure.files.utils.local_path_safety import is_cognee_storage_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.loaders import get_loader_engine
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
@@ -13,16 +13,9 @@ from cognee.infrastructure.utils.run_async import run_async
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.shared.logging_utils import get_logger
 
+from .save_data_item_to_storage import local_file_paths_accepted
+
 logger = get_logger(__name__)
-
-
-class SaveDataSettings(BaseSettings):
-    accept_local_file_path: bool = True
-
-    model_config = SettingsConfigDict(extra="allow")
-
-
-settings = SaveDataSettings()
 
 
 # Bytes copied per iteration when pulling a stored object down to a temp file.
@@ -88,9 +81,11 @@ async def data_item_to_text_file(
                 except OSError:
                     pass
 
-        # data is local file path
+        # data is local file path. Cognee's own storage is always loadable: an
+        # upload or text was written there by save_data_item_to_storage, and
+        # the flag only governs paths the caller named on the server.
         elif parsed_url.scheme == "file":
-            if settings.accept_local_file_path:
+            if local_file_paths_accepted() or is_cognee_storage_path(url2pathname(parsed_url.path)):
                 loader = get_loader_engine()
                 return await loader.load_file(
                     data_item_path, preferred_loaders, **loader_kwargs
@@ -103,7 +98,7 @@ async def data_item_to_text_file(
             os.name == "nt" and len(data_item_path) > 1 and data_item_path[1] == ":"
         ):
             # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
-            if settings.accept_local_file_path:
+            if local_file_paths_accepted() or is_cognee_storage_path(data_item_path):
                 loader = get_loader_engine()
                 return await loader.load_file(
                     data_item_path, preferred_loaders, **loader_kwargs
