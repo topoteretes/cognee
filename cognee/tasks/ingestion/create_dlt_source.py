@@ -2,6 +2,8 @@ import csv
 import os
 import re
 
+from .dlt_utils import SOURCE_LABEL_ATTR
+
 DB_CONNECTION_PATTERNS = [
     "postgresql://",
     "postgres://",
@@ -84,7 +86,18 @@ def create_dlt_source_from_connection_string(
     else:
         source = sql_database(credentials=connection_string, resolve_foreign_keys=True)
 
+    setattr(source, SOURCE_LABEL_ATTR, _database_label(connection_string))
     return source
+
+
+def _database_label(connection_string: str) -> str:
+    """The database a connection string names, without host or credentials: a
+    SQLite file's name, or the server database's name."""
+    from sqlalchemy.engine import make_url
+
+    url = make_url(connection_string)
+    database = url.database or ""
+    return os.path.basename(database) if url.get_backend_name() == "sqlite" else database
 
 
 CSV_DELIMITER_CANDIDATES = (",", ";", "\t", "|")
