@@ -308,10 +308,9 @@ def _dlt_key_hints(schema) -> dict[str, dict]:
 def _apply_key_hints(schema: dict, key_hints: dict[str, dict]) -> None:
     """Set each reflected table's keys from dlt's hints.
 
-    A composite primary key is left to ``_resolve_primary_key``'s detection, which
-    keys a row on a single column. Postgres names tables "<dataset>.<table>", so a
-    foreign key's target gets the same prefix to match the row lookup. A table
-    without a hint keeps its reflected keys: a missing hint must never fail the add.
+    Postgres names tables "<dataset>.<table>", so a foreign key's target gets the
+    same prefix to match the row lookup. A table without a hint keeps its reflected
+    keys: a missing hint must never fail the add.
     """
     for qualified_name, table_info in schema.items():
         table_name = qualified_name.split(".")[-1]
@@ -319,11 +318,16 @@ def _apply_key_hints(schema: dict, key_hints: dict[str, dict]) -> None:
         hints = key_hints.get(table_name)
         if hints is None:
             continue
-        if len(hints["primary_key"]) == 1:
-            table_info["primary_key"] = hints["primary_key"][0]
+        if hints["primary_key"]:
+            table_info["primary_key"] = hints["primary_key"]
         table_info["foreign_keys"] = [
             {**fk, "ref_table": prefix + fk["ref_table"]} for fk in hints["foreign_keys"]
         ]
+
+
+def _is_dlt_column(name: str) -> bool:
+    """dlt's bookkeeping columns, ``_dlt_id`` and ``_dlt_load_id``."""
+    return "_dlt_" in name
 
 
 def _is_dlt_internal_table(qualified_name: str) -> bool:
@@ -464,18 +468,21 @@ async def _read_single_table(
     At most ``max_rows`` rows are read.  Pass 0 or a negative value to
     read all rows (no limit).
     """
-    raw_columns = table_info.get("columns", [])
     foreign_keys = table_info.get("foreign_keys", [])
 
     # extract_schema() returns columns as a list of dicts for SQLite
-    # (e.g. [{"name": "col", "type": "TEXT"}, ...]) or a dict for Postgres
+    # (e.g. [{"name": "col", "type": "TEXT"}, ...]) or a dict for Postgres.
+    # dlt's bookkeeping columns are left out, as they are from the row data.
+    raw_columns = table_info.get("columns", [])
     if isinstance(raw_columns, list):
+        raw_columns = [c for c in raw_columns if not _is_dlt_column(c["name"])]
         column_names = [c["name"] for c in raw_columns]
     else:
+        raw_columns = {k: v for k, v in raw_columns.items() if not _is_dlt_column(k)}
         column_names = list(raw_columns.keys())
 
     # Auto-detect primary key with validation
-    pk_col = _resolve_primary_key(primary_key, table_info, column_names, table_name)
+    pk_columns = _resolve_primary_key(primary_key, table_info, column_names, table_name)
 
     # Compute schema hash for evolution detection
     schema_hash = _compute_schema_hash(raw_columns)
@@ -499,37 +506,32 @@ async def _read_single_table(
 
     # Validate PK uniqueness
     if rows:
-        pk_values = [str(row.get(pk_col, "")) for row in rows]
+        pk_values = [_key_value(row, pk_columns) for row in rows]
         pk_counts = Counter(pk_values)
         duplicates = {v: c for v, c in pk_counts.items() if c > 1}
         if duplicates:
             dup_sample = dict(list(duplicates.items())[:5])
             logger.warning(
-                "Table '%s': primary key column '%s' has %d duplicate values "
+                "Table '%s': primary key '%s' has %d duplicate values "
                 "(sample: %s). Rows with duplicate PKs will overwrite each other "
                 "during upsert. Consider specifying a unique primary_key.",
                 table_name,
-                pk_col,
+                ", ".join(pk_columns),
                 len(duplicates),
                 dup_sample,
             )
 
     row_data_list = []
     for row in rows:
-        row_dict = {k: v for k, v in row.items()}
-        pk_value = str(row_dict.get(pk_col, ""))
-
-        row_keys = list(row_dict.keys())
-        for k in row_keys:
-            if "_dlt_" in k:
-                row_dict.pop(k)
+        row_dict = {k: v for k, v in row.items() if not _is_dlt_column(k)}
+        pk_value = _key_value(row_dict, pk_columns)
 
         content_hash = _row_content_hash(row_dict)
 
         row_data_list.append(
             DltRowData(
                 table_name=table_name,
-                primary_key_column=pk_col,
+                primary_key_columns=pk_columns,
                 primary_key_value=pk_value,
                 row_data=row_dict,
                 content_hash=content_hash,
@@ -549,10 +551,13 @@ def _resolve_primary_key(
     table_info: dict,
     column_names: list,
     table_name: str = "",
-) -> str:
-    """Resolve the primary key column for a table with validation and logging."""
+) -> list[str]:
+    """Resolve a table's primary key columns with validation and logging.
+
+    A composite key is every one of its columns; the fallbacks are one column.
+    """
     if provided_pk and provided_pk in column_names:
-        return provided_pk
+        return [provided_pk]
 
     if provided_pk and provided_pk not in column_names:
         logger.warning(
@@ -566,15 +571,12 @@ def _resolve_primary_key(
     # Check schema-level primary_key
     schema_pk = table_info.get("primary_key")
     if schema_pk:
-        if isinstance(schema_pk, list) and len(schema_pk) > 0:
-            return schema_pk[0]
-        if isinstance(schema_pk, str):
-            return schema_pk
+        return list(schema_pk) if isinstance(schema_pk, list) else [schema_pk]
 
     # Fallback to 'id' column
     if "id" in column_names:
         logger.info("Table '%s': no explicit primary key found, using 'id' column.", table_name)
-        return "id"
+        return ["id"]
 
     # Last resort: first column (with warning)
     if column_names:
@@ -585,9 +587,14 @@ def _resolve_primary_key(
             table_name,
             column_names[0],
         )
-        return column_names[0]
+        return [column_names[0]]
 
-    return "id"
+    return ["id"]
+
+
+def _key_value(row, key_columns: list[str]) -> str:
+    """A row's primary key value: its key columns' values, joined with ":"."""
+    return ":".join(str(row[column]) for column in key_columns)
 
 
 # Identity map over the identifier alphabet. Rebuilding the sanitized name from

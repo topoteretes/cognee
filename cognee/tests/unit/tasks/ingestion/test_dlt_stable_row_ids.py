@@ -49,7 +49,7 @@ ROW_1_ID = UUID("e8388851-8635-5106-9741-7a8cc972a2bf")
 def _row(index: int) -> DltRowData:
     return DltRowData(
         table_name="contacts",
-        primary_key_column="id",
+        primary_key_columns=["id"],
         primary_key_value=str(index),
         row_data={"id": index},
         content_hash=f"hash{index}",

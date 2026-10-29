@@ -2,8 +2,8 @@
 
 dlt stages a database source in tables without key constraints, so the keys come
 from dlt's schema hints. Covers the shapes that hints merge or rename: two foreign
-keys to one table, a self reference, and a primary key that is neither ``id`` nor
-the first column. Rows reach cognify in table order, two per batch, so one edge
+keys to one table, a self reference, a primary key that is neither ``id`` nor the
+first column, and a composite key. Rows reach cognify in table order, two per batch, so one edge
 has both rows in one batch, and the others have the target row written after or
 before its source.
 
@@ -38,10 +38,24 @@ CREATE TABLE orders (
     parent_id INTEGER REFERENCES orders (id)
 );
 CREATE TABLE visits (id INTEGER PRIMARY KEY, user_code TEXT REFERENCES users (user_code));
+CREATE TABLE order_lines (
+    order_id INTEGER REFERENCES orders (id),
+    n INTEGER,
+    PRIMARY KEY (order_id, n)
+);
 INSERT INTO users VALUES ('Ann', 'u1'), ('Bob', 'u2');
 INSERT INTO orders VALUES (1, 'u1', 'u2', NULL), (2, 'u2', 'u1', 1);
 INSERT INTO visits VALUES (1, 'u2');
+INSERT INTO order_lines VALUES (1, 1), (1, 2), (2, 1);
 """
+
+# Each table's primary key as its SchemaTable node records it.
+EXPECTED_TABLE_KEYS = {
+    "users": "user_code",
+    "orders": "id",
+    "visits": "id",
+    "order_lines": "order_id, n",
+}
 
 
 async def _mock_embed_text(self, texts):
@@ -97,17 +111,14 @@ EXPECTED_ROW_EDGES = {
     ("orders:2", "seller_code_references_users", "users:u1"),
     ("orders:2", "parent_id_references_orders", "orders:1"),
     ("visits:1", "user_code_references_users", "users:u2"),
+    # A composite key names the row by all its columns.
+    ("order_lines:1:1", "order_id_references_orders", "orders:1"),
+    ("order_lines:1:2", "order_id_references_orders", "orders:1"),
+    ("order_lines:2:1", "order_id_references_orders", "orders:2"),
 }
 
 
-def _row_fields(text: str) -> dict[str, str]:
-    return dict(line.strip().split(": ", 1) for line in text.splitlines() if ": " in line)
-
-
-def _row_label(fields: dict[str, str]) -> str:
-    """'users:u1' or 'orders:1' from a row's fields, keyed on its primary key."""
-    table = fields["Table"]
-    return f"{table}:{fields['user_code' if table == 'users' else 'id']}"
+SOURCE_TABLES = set(EXPECTED_TABLE_KEYS)
 
 
 def _write_source_db(path: pathlib.Path) -> pathlib.Path:
@@ -118,22 +129,32 @@ def _write_source_db(path: pathlib.Path) -> pathlib.Path:
 
 
 async def _row_edges() -> set[tuple[str, str, str]]:
-    """Edges between the SQL source's rows, labelled by table and primary key.
+    """Edges between the SQL source's rows, by the rows' names (``table:pk``).
     Rows of other sources in the dataset (a CSV's) are left out."""
     from cognee.infrastructure.databases.graph import get_graph_engine
 
     nodes, edges = await (await get_graph_engine()).get_graph_data()
-    rows = {}
-    for node_id, props in nodes:
-        if props.get("type") != "DltRow":
-            continue
-        fields = _row_fields(props["text"])
-        if fields.get("Table") in {"users", "orders", "visits"}:
-            rows[str(node_id)] = _row_label(fields)
+    rows = {
+        str(node_id): props["name"]
+        for node_id, props in nodes
+        if props.get("type") == "DltRow" and props["name"].split(":")[0] in SOURCE_TABLES
+    }
     return {
         (rows[str(source)], relation, rows[str(target)])
         for source, target, relation, _ in edges
         if str(source) in rows and str(target) in rows
+    }
+
+
+async def _table_keys() -> dict[str, str]:
+    """Each SQL source table's primary key, as its SchemaTable node records it."""
+    from cognee.infrastructure.databases.graph import get_graph_engine
+
+    nodes, _ = await (await get_graph_engine()).get_graph_data()
+    return {
+        props["name"]: props["primary_key"]
+        for _, props in nodes
+        if props.get("type") == "SchemaTable" and props["name"] in SOURCE_TABLES
     }
 
 
@@ -145,6 +166,7 @@ async def test_source_foreign_keys_become_edges_between_rows(clean_env):
     await cognee.cognify(datasets=["shop"], chunks_per_batch=2)
 
     assert await _row_edges() == EXPECTED_ROW_EDGES
+    assert await _table_keys() == EXPECTED_TABLE_KEYS
 
 
 @pytest.mark.asyncio

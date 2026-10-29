@@ -35,7 +35,8 @@ def _tables():
             "foreign_keys": [
                 {"column": "customer_id", "ref_table": "customers", "ref_column": "id"}
             ],
-            "dlt_db_name": "shop",
+            "primary_key": "id",
+            "row_count": 1,
         }
     }
 

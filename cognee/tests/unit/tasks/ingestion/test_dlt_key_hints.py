@@ -60,11 +60,24 @@ def test_keys_follow_the_reflected_table_names():
     _apply_key_hints(schema, hints)
 
     assert schema["shop.orders"] == {
-        "primary_key": "id",
+        "primary_key": ["id"],
         "foreign_keys": [{"column": "buyer", "ref_table": "shop.users", "ref_column": "code"}],
     }
-    # A composite key stays unset: rows are keyed on a single column.
-    assert schema["shop.line"] == {"primary_key": None, "foreign_keys": []}
+    # A composite key keeps every column.
+    assert schema["shop.line"] == {"primary_key": ["order_id", "n"], "foreign_keys": []}
+
+
+def test_a_composite_key_resolves_to_all_its_columns():
+    from cognee.tasks.ingestion.ingest_dlt_source import _key_value, _resolve_primary_key
+
+    columns = ["order_id", "n", "qty"]
+    assert _resolve_primary_key(None, {"primary_key": ["order_id", "n"]}, columns) == [
+        "order_id",
+        "n",
+    ]
+    assert _resolve_primary_key(None, {"primary_key": "order_id"}, columns) == ["order_id"]
+    assert _resolve_primary_key(None, {"primary_key": None}, columns) == ["order_id"]
+    assert _key_value({"order_id": 7, "n": 2, "qty": 5}, ["order_id", "n"]) == "7:2"
 
 
 def test_a_table_without_a_hint_keeps_its_reflected_keys():
