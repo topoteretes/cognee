@@ -403,6 +403,25 @@ async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
         dataset_lock(dataset_id),
         set_database_global_context_variables(dataset_id, user.id),
     ):
+        # 0. The routing rows mirrored the index this dataset is about to lose.
+        # They live in the default store, which can be unreachable, so they go
+        # before the irreversible step: a failure here leaves the memory in
+        # place and the forget can be retried, instead of deleted memory whose
+        # summary text survives in the routing collection.
+        from cognee.modules.search.dataset_routing import remove_dataset_routes
+
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            data_ids = [
+                record.id
+                for record in (
+                    await session.execute(select(Data).where(Data.dataset_id == dataset_id))
+                )
+                .scalars()
+                .all()
+            ]
+        await remove_dataset_routes(dataset_id, data_ids)
+
         # 1. Delete graph nodes/edges and vector embeddings
         deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
@@ -436,7 +455,6 @@ async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
         await delete_edge_evidence(dataset_id)
 
         # 2. Reset pipeline_status on all data records in this dataset
-        db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
             data_records = (
                 (await session.execute(select(Data).where(Data.dataset_id == dataset_id)))
@@ -457,11 +475,6 @@ async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
                     orm_attributes.flag_modified(data_record, "pipeline_status")
 
             await session.commit()
-
-        # 3. The routing rows mirrored the index this dataset no longer has.
-        from cognee.modules.search.dataset_routing import remove_dataset_routes
-
-        await remove_dataset_routes(dataset_id, [record.id for record in data_records])
 
     logger.info(
         "forget: cleared memory for dataset=%s, user=%s (%d data records reset)",
@@ -511,6 +524,14 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
         dataset_lock(dataset_id),
         set_database_global_context_variables(dataset_id, user.id),
     ):
+        # 0. The routing rows that mirrored the item's bucket and the dataset's
+        # root (its text names the item) go first: they live in the default
+        # store, which can be unreachable, and a failure there must leave the
+        # memory in place for a retry.
+        from cognee.modules.search.dataset_routing import remove_dataset_routes
+
+        await remove_dataset_routes(dataset_id, [data_id])
+
         # 1. Delete graph nodes/edges and vector embeddings for this data item
         deleted_elements = await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
@@ -543,11 +564,9 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
 
         # 1d. The index: the item's bucket and the dataset's root, which names
         # the item, go by their derived ids (the memory delete above does not
-        # reach them), with the routing rows that mirrored both.
-        from cognee.modules.search.dataset_routing import remove_dataset_routes
+        # reach them). Same stores as that delete, so it belongs with it.
         from cognee.tasks.memify.global_context_index import remove_document_index
 
-        await remove_dataset_routes(dataset_id, [data_id])
         await remove_document_index(dataset_id, [data_id])
 
         # 2. Reset pipeline_status for this data record
