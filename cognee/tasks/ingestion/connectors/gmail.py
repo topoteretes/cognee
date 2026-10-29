@@ -325,7 +325,9 @@ class _HTMLBodyText(HTMLParser):
             "ul",
         ]
     )
-    _IGNORED_TAGS = frozenset({"head", "script", "style", "template"})
+    # Suppress head metadata itself, rather than the head container: HTML may
+    # omit </head> (and <body>) before the message's visible content starts.
+    _IGNORED_TAGS = frozenset({"title", "script", "style", "template"})
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -335,6 +337,10 @@ class _HTMLBodyText(HTMLParser):
     def handle_starttag(self, tag: str, attrs) -> None:
         if tag in self._IGNORED_TAGS:
             self._ignored.append(tag)
+            if tag != "template":
+                # Preserve raw-text semantics even for <script/> and <title/>:
+                # markup-looking content must not open nested ignored tags.
+                self.set_cdata_mode(tag)
         if self._ignored:
             return
         if tag in self._BLOCK_TAGS:
@@ -351,6 +357,11 @@ class _HTMLBodyText(HTMLParser):
             self._parts.append("\n")
         elif tag in {"td", "th"}:
             self._parts.append(" ")
+
+    def handle_startendtag(self, tag: str, attrs) -> None:
+        # A trailing slash does not close non-void HTML elements such as
+        # <script/>. Keep their contents suppressed until the real end tag.
+        self.handle_starttag(tag, attrs)
 
     def handle_data(self, data: str) -> None:
         if not self._ignored:

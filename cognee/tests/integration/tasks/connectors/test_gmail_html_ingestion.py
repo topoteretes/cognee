@@ -10,7 +10,11 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.users.methods import get_default_user
 from cognee.tasks.ingestion.connectors import gmail as gmail_module
 from cognee.tasks.ingestion.connectors import gmail_source
-from cognee.tests.unit.tasks.connectors.test_gmail_source import FakeGmailService, _b64, _make_message
+from cognee.tests.unit.tasks.connectors.test_gmail_source import (
+    FakeGmailService,
+    _b64,
+    _make_message,
+)
 
 
 @pytest.mark.asyncio

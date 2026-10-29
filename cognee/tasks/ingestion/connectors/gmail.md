@@ -50,7 +50,7 @@ mail removed from Gmail. See `examples/guides/gmail.py` for a runnable demo.
 
 The connector prefers a nonempty inline `text/plain` body. If none is available, it
 extracts readable text from inline `text/html`, preserving text boundaries and decoding
-HTML entities. Attachments and their subtrees, scripts, styles, head/template content,
+HTML entities. Attachments and their subtrees, scripts, styles, title metadata, template content,
 and comments are excluded. Conversion never fetches images, stylesheets, or other URLs
 referenced by the HTML.
 
