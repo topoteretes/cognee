@@ -606,7 +606,7 @@ class GlobalContextIndexStage(BaseStage):
 
     def gate(self, inputs: ImproveRunInputs) -> str | None:
         if not inputs.build_global_context_index:
-            return REASON_OPT_IN_DISABLED
+            return REASON_TURNED_OFF
         return None
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:

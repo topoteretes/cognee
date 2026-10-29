@@ -158,6 +158,10 @@ class DatasetQueue:
         self._registered_tasks: set[int] = set()
 
     # ------------------------------------------------------ active datasets
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
     def active_dataset_ids(self) -> set:
         """Dataset ids (as strings) currently holding at least one slot.
 

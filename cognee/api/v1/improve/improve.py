@@ -144,7 +144,7 @@ async def improve(
     run_in_background: bool = False,
     node_name: list[str] | None = None,
     session_ids: list[str] | None = None,
-    build_global_context_index: bool = False,
+    build_global_context_index: bool | None = None,
     build_truth_subspace: bool = False,
     review_conflicts: bool | None = None,
     **kwargs: Unpack[ImproveKwargs],
@@ -196,7 +196,10 @@ async def improve(
             ``dataset_name`` — is not re-bridged into this call's dataset;
             those stages then report nothing new. (Distillation is
             per-dataset and unaffected.)
-        build_global_context_index: Opt in to ``global_context_index``.
+        build_global_context_index: Run ``global_context_index``. ``None`` (the
+            default) follows ``IMPROVE_GLOBAL_CONTEXT_INDEX`` (default true: the
+            index is LLM-free and dataset routing reads it); ``False``
+            skips the stage for this call.
         build_truth_subspace: Opt in to ``build_truth_subspace``.
         review_conflicts: Review dated source facts and store their conflicts.
             ``True``/``False`` override ``IMPROVE_REVIEW_CONFLICTS``; ``None``
@@ -282,14 +285,15 @@ async def improve(
 
     kwargs, legacy_memify = _split_legacy_options(node_name, kwargs)
     session_ids = [session_id for session_id in (session_ids or []) if session_id]
-    # The remote path forwards the raw value: a server applies its own env.
+    # The remote path forwards the raw values: a server applies its own env.
+    resolved_global_context_index = _resolve_global_context_index(build_global_context_index)
     resolved_review_conflicts = _resolve_review_conflicts(review_conflicts)
     _send_improve_telemetry(
         dataset,
         session_ids,
         user=kwargs.get("user", "sdk"),
         run_in_background=run_in_background,
-        build_global_context_index=build_global_context_index,
+        build_global_context_index=resolved_global_context_index,
         build_truth_subspace=build_truth_subspace,
         review_conflicts=resolved_review_conflicts,
     )
@@ -318,7 +322,7 @@ async def improve(
                 dataset=dataset,
                 session_ids=session_ids,
                 run_in_background=run_in_background,
-                build_global_context_index=build_global_context_index,
+                build_global_context_index=resolved_global_context_index,
                 build_truth_subspace=build_truth_subspace,
                 review_conflicts=resolved_review_conflicts,
                 overrides=kwargs,
@@ -426,6 +430,13 @@ def _resolve_review_conflicts(review_conflicts: bool | None) -> bool:
     if review_conflicts is None:
         return get_improve_config().review_conflicts
     return review_conflicts
+
+
+def _resolve_global_context_index(build_global_context_index: bool | None) -> bool:
+    """An explicit argument wins; None follows IMPROVE_GLOBAL_CONTEXT_INDEX."""
+    if build_global_context_index is None:
+        return get_improve_config().global_context_index
+    return build_global_context_index
 
 
 async def _resolve_inputs(
@@ -640,7 +651,7 @@ async def _improve_remotely(
     dataset: str | UUID,
     *,
     session_ids: list[str],
-    build_global_context_index: bool,
+    build_global_context_index: bool | None,
     build_truth_subspace: bool,
     review_conflicts: bool | None,
     run_in_background: bool,
