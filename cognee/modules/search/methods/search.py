@@ -247,32 +247,136 @@ async def authorized_search(
         datasets=dataset_ids, permission_type="read", user=user
     )
 
-    # Searches all provided datasets and handles setting up of appropriate database context based on permissions
-    search_results = await search_in_datasets_context(
-        search_datasets=search_datasets,
-        query_type=query_type,
-        query_text=query_text,
-        user=user,
-        system_prompt_path=system_prompt_path,
-        system_prompt=system_prompt,
-        top_k=top_k,
-        node_type=node_type,
-        node_name=node_name,
-        node_name_filter_operator=node_name_filter_operator,
-        only_context=only_context,
-        session_id=session_id,
-        wide_search_top_k=wide_search_top_k,
-        triplet_distance_penalty=triplet_distance_penalty,
-        feedback_influence=feedback_influence,
-        retriever_specific_config=retriever_specific_config,
-        neighborhood_depth=neighborhood_depth,
-        neighborhood_seed_top_k=neighborhood_seed_top_k,
-        include_references=include_references,
-        llm_config=llm_config,
-        embedding_config=embedding_config,
-    )
+    async def _search(datasets: list[Dataset], widening: bool = False) -> list[SearchResultPayload]:
+        # Searches all provided datasets and handles setting up of appropriate database context based on permissions
+        return await search_in_datasets_context(
+            search_datasets=datasets,
+            widening=widening,
+            query_type=query_type,
+            query_text=query_text,
+            user=user,
+            system_prompt_path=system_prompt_path,
+            system_prompt=system_prompt,
+            top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
+            only_context=only_context,
+            session_id=session_id,
+            wide_search_top_k=wide_search_top_k,
+            triplet_distance_penalty=triplet_distance_penalty,
+            feedback_influence=feedback_influence,
+            retriever_specific_config=retriever_specific_config,
+            neighborhood_depth=neighborhood_depth,
+            neighborhood_seed_top_k=neighborhood_seed_top_k,
+            include_references=include_references,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
+        )
 
+    routed_datasets = await _route_datasets(query_text, dataset_ids, search_datasets)
+    if routed_datasets is None:
+        return await _search(search_datasets)
+
+    # Routed: the best-scoring datasets plus every unindexed one. Retrieving
+    # nothing there (judged on the retrieval context, since a completion is
+    # written even over an empty one) widens the search to the datasets
+    # routing skipped, searched as the rest of this one search, so the routed
+    # datasets are not searched twice (a retriever that calls an LLM while
+    # retrieving would repeat those calls) and the merged list reads as one
+    # fan-out over every readable dataset. Only datasets without searchable
+    # memory (an unscoped search raises that only when every dataset lacks
+    # it), or a CODE seed the routed dataset alone cannot resolve (the fan-out
+    # softens a seed miss per dataset only when it searches several), fail
+    # before any retrieval, so there the whole set is searched as one.
+    from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
+
+    try:
+        search_results = await _search(routed_datasets)
+    except (NoDataError, CodeSeedNotFoundError) as error:
+        logger.info(
+            "Dataset routing picked datasets that cannot answer (%s); "
+            "searching every readable dataset.",
+            type(error).__name__,
+        )
+        return await _search(search_datasets)
+    if all(payload.retrieved_nothing() for payload in search_results):
+        routed_ids = {dataset.id for dataset in routed_datasets}
+        remaining = [dataset for dataset in search_datasets if dataset.id not in routed_ids]
+        logger.info(
+            "Dataset routing searched %d of %d datasets and retrieved nothing; "
+            "searching the remaining %d.",
+            len(routed_datasets),
+            len(search_datasets),
+            len(remaining),
+        )
+        search_results += await _search(remaining, widening=True)
+        order = {dataset.id: position for position, dataset in enumerate(search_datasets)}
+        search_results.sort(key=lambda payload: order[payload.dataset_id])
     return search_results
+
+
+async def _route_datasets(
+    query_text: str, dataset_ids: list[UUID] | None, search_datasets: list[Dataset]
+) -> list[Dataset] | None:
+    """The datasets an unscoped search covers after routing, or None to cover them all.
+
+    Routing applies only when the caller named no dataset, more than one is
+    readable, and backend access control gives each its own store. The decision keeps every dataset with no routing rows, so a dataset
+    never searched by the global context index is never dropped.
+    """
+    from cognee.modules.search.dataset_routing import get_dataset_routing_config, route_datasets
+
+    if dataset_ids is not None or len(search_datasets) < 2 or not backend_access_control_enabled():
+        return None
+
+    config = get_dataset_routing_config()
+    decision = await route_datasets(
+        query_text,
+        [dataset.id for dataset in search_datasets],
+        config.top_k,
+        config.distance_cutoff,
+        config.tie_margin,
+    )
+    by_id = {dataset.id: dataset for dataset in search_datasets}
+    # Every dataset's distance to the query, nearest first: what the cutoff is tuned against.
+    distances = ", ".join(
+        f"'{by_id[dataset_id].name}'={distance:.3f}"
+        for dataset_id, distance in sorted(decision.scores.items(), key=lambda item: item[1])
+    )
+    if decision.fanned_out:
+        logger.info(
+            "Dataset routing: no dataset was given and none of the %d readable datasets is "
+            "within the distance cutoff %.3f (%s); searching all of them. "
+            "Pass datasets=[...] to search a specific one.",
+            len(search_datasets),
+            config.distance_cutoff,
+            distances,
+        )
+        return None
+    if not decision.narrowed:
+        logger.info(
+            "Dataset routing: no dataset was given; searching all %d readable datasets "
+            "(%d without a routing index yet%s).",
+            len(search_datasets),
+            len(decision.unindexed),
+            f"; {distances}" if distances else "",
+        )
+        return None
+
+    routed = [by_id[dataset_id] for dataset_id in decision.dataset_ids]
+    logger.info(
+        "Dataset routing: no dataset was given; searching %s, the best %s of the %d "
+        "readable datasets for this query (%s)%s. Pass datasets=[...] to search a specific one.",
+        ", ".join(f"'{by_id[dataset_id].name}'" for dataset_id in decision.routed),
+        "match"
+        if len(decision.routed) == 1
+        else ("matches, tied" if len(decision.routed) > config.top_k else "matches"),
+        len(search_datasets),
+        distances,
+        f", plus {len(decision.unindexed)} without a routing index" if decision.unindexed else "",
+    )
+    return routed
 
 
 async def search_in_datasets_context(
@@ -297,10 +401,17 @@ async def search_in_datasets_context(
     include_references: bool = False,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
+    widening: bool = False,
 ) -> list[tuple[Any, str | list[Edge], list[Dataset]]]:
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
     Not to be used outside of active access control mode.
+
+    ``widening``: these datasets complete a routed search whose first pass
+    retrieved nothing, so they are searched as part of that larger set: a
+    CODE seed miss is reported per dataset and a dataset without searchable
+    memory never fails the search, exactly as when every dataset is searched
+    at once.
     """
 
     async def _search_in_dataset_context(
@@ -429,7 +540,9 @@ async def search_in_datasets_context(
 
     # Search every dataset async based on query and appropriate database configuration
     tasks = []
-    soften_code_seed_misses = query_type is SearchType.CODE and len(search_datasets) > 1
+    soften_code_seed_misses = query_type is SearchType.CODE and (
+        widening or len(search_datasets) > 1
+    )
     if backend_access_control_enabled():
         for dataset in search_datasets:
             tasks.append(
@@ -509,6 +622,7 @@ async def search_in_datasets_context(
         query_type=query_type,
         query_text=query_text,
         only_context=only_context,
+        widening=widening,
     )
 
 
@@ -555,6 +669,7 @@ def _collect_dataset_results(
     query_type: SearchType,
     query_text: str,
     only_context: bool,
+    widening: bool = False,
 ) -> list[SearchResultPayload]:
     """Turn the fan-out's per-dataset outcomes into one entry per dataset, or one error.
 
@@ -564,15 +679,16 @@ def _collect_dataset_results(
     a dataset that could not be searched comes back with empty results and its reason
     on ``error``, so the caller is told what happened without losing the siblings'
     answers (``datasets=None`` means "every dataset the user can read", so a single
-    freshly created dataset must not take down unscoped search). Any other exception
-    propagates unchanged and fails the whole search.
+    freshly created dataset must not take down unscoped search). A ``widening`` pass
+    is the rest of a search whose routed datasets had memory, so it never raises for
+    lack of it. Any other exception propagates unchanged and fails the whole search.
     """
     for outcome in outcomes:
         if isinstance(outcome, BaseException) and not isinstance(outcome, DatasetNoDataError):
             raise outcome
 
     no_data = [outcome for outcome in outcomes if isinstance(outcome, DatasetNoDataError)]
-    if no_data and len(no_data) == len(outcomes):
+    if no_data and len(no_data) == len(outcomes) and not widening:
         if len(no_data) == 1:
             only = no_data[0]
             raise NoDataError(

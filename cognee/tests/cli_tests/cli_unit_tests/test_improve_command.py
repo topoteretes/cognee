@@ -212,7 +212,7 @@ class TestFormatting:
     def test_print_accepts_the_serialized_api_payload(self):
         payload = _result(
             StageResult.completed("global_context_index"),
-            StageResult.skipped("global_context_index", "opt_in_disabled"),
+            StageResult.skipped("global_context_index", "turned_off"),
         ).model_dump(mode="json")
         echoed = []
         with (
@@ -223,4 +223,4 @@ class TestFormatting:
 
         assert echoed[0] == "Knowledge graph improved successfully!"
         assert len(echoed) == 3
-        assert "opt_in_disabled" in echoed[2]
+        assert "turned_off" in echoed[2]

@@ -1055,6 +1055,7 @@ async def _delete_dlt_orphans(
     # targets the wrong DB and leaves the forgotten row's chunks/entities
     # searchable under ENABLE_BACKEND_ACCESS_CONTROL.
     async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+        purged: list = []  # (orphan, its deleted graph elements)
         for orphan in orphans:
             try:
                 # Called unconditionally: gating on has_data_related_nodes would
@@ -1062,30 +1063,49 @@ async def _delete_dlt_orphans(
                 # relational ledger (the function handles both paths and no-ops
                 # when nothing is related).
                 deleted_elements = await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
-                await delete_data(orphan, dataset.id)
-                # Invalidate session answers that used the orphan's graph
-                # elements (best-effort; must not fail the cleanup).
-                try:
-                    from cognee.modules.session_lifecycle.invalidate_sessions import (
-                        invalidate_sessions_for_deleted_data,
-                    )
-
-                    await invalidate_sessions_for_deleted_data(
-                        dataset.id,
-                        deleted_elements.node_ids,
-                        deleted_elements.edge_ids,
-                        user_id=user.id,
-                    )
-                except Exception:
-                    logger.warning(
-                        "Session invalidation after orphan cleanup failed (non-fatal).",
-                        exc_info=True,
-                    )
+                purged.append((orphan, deleted_elements))
             except Exception:
                 failed.append(orphan.id)
                 logger.warning(
                     "Failed to delete orphaned dlt row data_id=%s, skipping.",
                     orphan.id,
+                    exc_info=True,
+                )
+
+        # One call for every purged row: their index nodes and routing rows go
+        # in one round of store writes (per row, a sweep of thousands would
+        # serialize thousands of commits under the dataset lock), then the
+        # rows. A row whose delete fails keeps its Data row, so the next index
+        # build rewrites what was removed for it.
+        if purged:
+            try:
+                await delete_data([orphan for orphan, _ in purged], dataset.id)
+            except Exception:
+                failed.extend(orphan.id for orphan, _ in purged)
+                logger.warning(
+                    "Failed to delete %d orphaned dlt row(s), skipping.",
+                    len(purged),
+                    exc_info=True,
+                )
+
+        # Invalidate session answers that used the orphans' graph elements
+        # (best-effort; must not fail the cleanup). The graph purge above is
+        # what they depend on, not the row delete.
+        for _orphan, deleted_elements in purged:
+            try:
+                from cognee.modules.session_lifecycle.invalidate_sessions import (
+                    invalidate_sessions_for_deleted_data,
+                )
+
+                await invalidate_sessions_for_deleted_data(
+                    dataset.id,
+                    deleted_elements.node_ids,
+                    deleted_elements.edge_ids,
+                    user_id=user.id,
+                )
+            except Exception:
+                logger.warning(
+                    "Session invalidation after orphan cleanup failed (non-fatal).",
                     exc_info=True,
                 )
 

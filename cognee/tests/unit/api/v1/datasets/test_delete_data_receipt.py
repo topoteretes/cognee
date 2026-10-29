@@ -311,7 +311,7 @@ async def test_receipt_uses_resolved_legacy_id():
         result = await datasets_module.datasets.delete_data(dataset_id, legacy_id, user)
 
     get_data.assert_awaited_once_with(user.id, legacy_id, dataset_id, verify_owner=False)
-    delete_row.assert_awaited_once_with(resolved, dataset_id)
+    delete_row.assert_awaited_once_with([resolved], dataset_id)
     assert result["data_id"] == str(resolved.id)
     assert result["data_record_found"] is True
     assert result["data_remaining"] is False
