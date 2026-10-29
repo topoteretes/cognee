@@ -8,9 +8,12 @@ within pipeline operations, supporting both incremental and regular processing m
 import os
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
+from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
+from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
@@ -162,11 +165,12 @@ async def run_tasks_data_item_incremental(
         from cognee.tasks.ingestion.data_item import DataItem as DataItemType
 
         if isinstance(data_item, DataItemType) and data_item.data_id is not None:
-            data_id = data_item.data_id
+            # Resolve the pin as ingest_data does: a legacy id names the data
+            # item it was forked into, which is where the content is stored.
+            pin = data_item.data_id
             async with db_engine.get_async_session() as session:
-                data_point = (
-                    await session.execute(select(Data).filter(Data.id == data_id))
-                ).scalar_one_or_none()
+                data_point = await _find_pinned_data_item(session, dataset.id, pin)
+            data_id = data_point.id if data_point is not None else pin
         else:
             stored = await save_data_item_to_storage_detailed(data_item)
 
@@ -211,6 +215,7 @@ async def run_tasks_data_item_incremental(
                     dataset_name=dataset.name,
                 ),
                 "data_id": data_id,
+                **_source_fields(data_point, data_item),
             }
             return
 
@@ -262,6 +267,7 @@ async def run_tasks_data_item_incremental(
                 dataset_name=dataset.name,
             ),
             "data_id": data_id,
+            **_source_fields(data_point, data_item),
         }
 
     except Exception as error:
@@ -286,10 +292,94 @@ async def run_tasks_data_item_incremental(
             # be processed." with a NULL error column.
             "error": error,
             "data_id": data_id,
+            **_source_fields(data_point, data_item),
         }
 
         if os.getenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true").lower() == "true":
             raise
+
+
+async def _find_pinned_data_item(session, dataset_id, pin) -> Data | None:
+    """The data item a pinned id names, resolved as ``resolve_data_id`` does.
+
+    Runs in the caller's session, so a pinned item still costs one session.
+    """
+    statement = select(Data).filter(
+        Data.dataset_id == dataset_id, or_(Data.id == pin, Data.legacy_id == pin)
+    )
+    matches = (await session.execute(statement)).scalars().all()
+    if matches:
+        # The exact id wins over a data item forked from a legacy id.
+        return next((match for match in matches if match.id == pin), matches[0])
+
+    # Unknown in this dataset: look the id up alone, as before pins were resolved.
+    return (await session.execute(select(Data).filter(Data.id == pin))).scalar_one_or_none()
+
+
+def _source_fields(data_point: Data | None, data_item: Any) -> dict[str, Any]:
+    """Name, location and label for an item's per-item result entry.
+
+    They let a caller tell which input an id belongs to (a folder yields one
+    entry per file). Read from the stored data item when there is one, else
+    from the input itself, as for an item that failed before it was stored.
+    """
+    if data_point is not None:
+        return {
+            "data_name": data_point.name,
+            "data_location": _stored_source_uri(data_point),
+            "data_label": data_point.label,
+        }
+    return _input_source_fields(data_item)
+
+
+def _stored_source_uri(data_point: Data) -> str | None:
+    """Where the caller's content came from, as ingest_data recorded it.
+
+    Raw text has no source of its own, so it has none; cognee's stored copy is
+    deliberately not reported as one.
+    """
+    # Data items stored by older versions can hold any JSON here, e.g. a string.
+    external_metadata = data_point.external_metadata
+    if not isinstance(external_metadata, dict):
+        return None
+    cognee_metadata = external_metadata.get("_cognee")
+    if not isinstance(cognee_metadata, dict):
+        return None
+    source_uri = cognee_metadata.get("source_uri")
+    return source_uri if isinstance(source_uri, str) else None
+
+
+def _input_source_fields(data_item: Any) -> dict[str, Any]:
+    """Name, location and label read from the input, for an item not stored yet."""
+    from cognee.tasks.ingestion.data_item import DataItem as DataItemType
+    from cognee.tasks.ingestion.ingest_data import _source_uri_from_input
+
+    location = _source_uri_from_input(data_item)
+    name = Path(unquote(urlparse(location).path)).stem if location else _upload_name(data_item)
+    return {
+        "data_name": name or None,
+        "data_location": location,
+        "data_label": data_item.label if isinstance(data_item, DataItemType) else None,
+    }
+
+
+def _upload_name(data_item: Any) -> str | None:
+    """An upload's name as the client gave it, without its extension."""
+    from cognee.tasks.ingestion.data_item import DataItem as DataItemType
+
+    if isinstance(data_item, DataItemType):
+        data_item = data_item.data
+    filename = getattr(data_item, "filename", None)
+    return Path(filename).stem if isinstance(filename, str) and filename else None
+
+
+def _collect_data_row_ids(result: Any, data_ids: list[UUID], seen: set[UUID]) -> None:
+    """Append the ids of the ``Data`` rows in one task result, in order, once each."""
+    rows = result if isinstance(result, list) else [result]
+    for row in rows:
+        if isinstance(row, Data) and row.id not in seen:
+            seen.add(row.id)
+            data_ids.append(row.id)
 
 
 async def run_tasks_data_item_regular(
@@ -317,8 +407,16 @@ async def run_tasks_data_item_regular(
         user: User performing the operation
 
     Yields:
-        Dict containing run_info for each processing step
+        A ``PipelineRunYield`` per intermediate result, then the item's final
+        ``{"run_info": PipelineRunCompleted, "data_id": ...}`` entry. ``data_id``
+        is the item's own id when it is a ``Data`` row, else the ``Data`` row
+        its tasks returned (``add``'s ``ingest_data``); None when they returned
+        none. An item stored as several rows lists them all under ``data_ids``.
     """
+    item_is_data_row = isinstance(data_item, Data)
+    data_ids: list[UUID] = []
+    seen: set[UUID] = set()
+
     # Process data based on data_item and list of tasks. aclosing closes the
     # telemetry generator as soon as this one is closed early.
     async with aclosing(
@@ -331,6 +429,8 @@ async def run_tasks_data_item_regular(
         )
     ) as results:
         async for result in results:
+            if not item_is_data_row:
+                _collect_data_row_ids(result, data_ids, seen)
             yield PipelineRunYield(
                 pipeline_run_id=pipeline_run_id,
                 dataset_id=dataset.id,
@@ -338,13 +438,19 @@ async def run_tasks_data_item_regular(
                 payload=result,
             )
 
-    yield {
+    if item_is_data_row:
+        data_ids = [data_item.id]
+    item_result: dict[str, Any] = {
         "run_info": PipelineRunCompleted(
             pipeline_run_id=pipeline_run_id,
             dataset_id=dataset.id,
             dataset_name=dataset.name,
-        )
+        ),
+        "data_id": data_ids[0] if data_ids else None,
     }
+    if len(data_ids) > 1:
+        item_result["data_ids"] = data_ids
+    yield item_result
 
 
 async def run_tasks_data_item(

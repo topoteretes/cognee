@@ -13,7 +13,8 @@ Environment variables (prefix ``IMPROVE_``)::
     IMPROVE_DEBOUNCE_SECONDS=0         # ... or after T seconds
     IMPROVE_STAGES_DISABLED=a,b        # csv of stage names to skip
     IMPROVE_FEEDBACK_ALPHA=0.1         # learning rate for feedback weights, (0, 1]
-    IMPROVE_REVIEW_CONFLICTS=false     # review source facts and dated conflicts
+    IMPROVE_REVIEW_CONFLICTS=true      # review source facts and dated conflicts
+    IMPROVE_GLOBAL_CONTEXT_INDEX=true  # build the global context index (dataset routing reads it)
     IMPROVE_EFFECTIVE_DATE_KEY=effective_date  # document metadata source-date key
     IMPROVE_TRACE_WINDOW_STEPS=0       # agent trace steps per persisted document; 0 = all pending
     IMPROVE_TRACE_WINDOWS_PER_RUN=0    # max agent trace documents per run; 0 = drain
@@ -37,7 +38,13 @@ class ImproveConfig(BaseSettings):
     """Settings for the self-improvement loop (env prefix ``IMPROVE_``)."""
 
     auto_enabled: bool = True
-    review_conflicts: bool = False
+    # The defaults for improve(review_conflicts=None) and
+    # improve(build_global_context_index=None); an explicit argument wins.
+    review_conflicts: bool = True
+    # On: the stage is LLM-free and watermark-gated, and dataset routing is
+    # only as complete as this index. Off, routing still runs but every
+    # unindexed dataset is searched.
+    global_context_index: bool = True
     effective_date_key: str = "effective_date"
     # Debounce for automatic improves (plan item B6). The defaults mean "no
     # debounce": every trigger runs, exactly as today. With debounce_seconds

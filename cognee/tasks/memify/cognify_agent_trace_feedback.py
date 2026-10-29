@@ -10,6 +10,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
     TracePersistWindow,
 )
 from cognee.modules.improve.constants import AGENT_TRACE_FEEDBACKS_NODE_SET
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
@@ -65,6 +66,8 @@ async def cognify_agent_trace_feedback(
         CogneeValidationError: If no non-empty window or text was provided.
         LLMPaymentRequiredError: If the build hit an exhausted LLM budget.
         CognifyFailedError: If the build failed, with the root cause.
+        AfterRunHookError: If the step after the completed build failed, once the
+            watermarks moved.
         CogneeSystemError: If another cognee operation fails.
     """
     items = _coerce_trace_items(data)
@@ -96,8 +99,14 @@ async def cognify_agent_trace_feedback(
         # fails the memify run; the run was rolled back, so no watermark moves.
         # A budget rejection is raised as LLMPaymentRequiredError: every later
         # window would fail the same way, so improve stops the run.
+        hook_error: AfterRunHookError | None = None
         try:
             await cognee.cognify(datasets=[dataset_id], user=user)
+        except AfterRunHookError as error:
+            # The traces are cognified; only the step after the run failed. The
+            # watermarks still move, so the windows are not rebuilt, and the error
+            # is raised after them.
+            hook_error = error
         except Exception as error:
             raise_if_budget_exhausted(error)
             raise
@@ -115,6 +124,8 @@ async def cognify_agent_trace_feedback(
                 window.session_id,
                 window.persisted_trace_count,
             )
+        if hook_error is not None:
+            raise hook_error
 
     except (CogneeValidationError, CogneeSystemError):
         # cognee's own typed errors (a 402, a CognifyFailedError with its cause)

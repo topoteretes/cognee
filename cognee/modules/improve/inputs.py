@@ -31,7 +31,7 @@ class ImproveRunInputs:
     feedback_alpha: float = DEFAULT_FEEDBACK_ALPHA
     build_global_context_index: bool = False
     build_truth_subspace: bool = False
-    review_conflicts: bool = False
+    review_conflicts: bool = True
     # Deprecated (SDK-1115): the caller's improve(extraction_tasks=...,
     # enrichment_tasks=...) and the options that scope them (data, node_type,
     # node_name, vector_db_config, graph_db_config). None unless custom tasks

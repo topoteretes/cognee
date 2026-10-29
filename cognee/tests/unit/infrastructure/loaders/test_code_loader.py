@@ -108,7 +108,7 @@ async def test_s3_code_file_selects_code_loader(monkeypatch):
     import cognee.infrastructure.loaders.core.code_loader as code_loader_module
     import cognee.tasks.ingestion.data_item_to_text_file as ditf
 
-    async def fake_pull_from_s3(file_path, destination_file):
+    async def fake_pull_to_local_copy(file_path, destination_file):
         destination_file.write(b"def hello():\n    pass\n")
 
     stored = {}
@@ -118,7 +118,7 @@ async def test_s3_code_file_selects_code_loader(monkeypatch):
             stored["name"] = name
             return f"/storage/{name}"
 
-    monkeypatch.setattr(ditf, "pull_from_s3", fake_pull_from_s3)
+    monkeypatch.setattr(ditf, "pull_to_local_copy", fake_pull_to_local_copy)
     monkeypatch.setattr(code_loader_module, "get_file_storage", lambda root: _FakeStorage())
     monkeypatch.setattr(
         code_loader_module, "get_storage_config", lambda: {"data_root_directory": "/storage"}
