@@ -7,10 +7,16 @@ carried by the document that matches and a broad one by the root. The rows
 are addressed by id, derived from the caller's datasets and their documents,
 and scored with ``score_by_ids``, so no other tenant's row is ever read and
 nothing is cut off by a result limit.
+
+The score is a cosine distance (0 is identical text). A dataset farther than
+the cutoff is not a candidate, and when none is within it the search covers
+every readable dataset: a question about something no dataset knows must not
+be answered from whichever dataset happens to be nearest.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from uuid import UUID
 
@@ -29,12 +35,19 @@ class DatasetRoutingDecision:
     """Which of the candidate datasets a recall searches, and why."""
 
     candidates: tuple[UUID, ...]  # every dataset that was scored or could have been
-    routed: tuple[UUID, ...]  # the best-scoring datasets, best first
+    routed: tuple[UUID, ...]  # the best datasets within the cutoff, best first
     unindexed: tuple[UUID, ...]  # datasets with no routing row: always searched
     scores: dict[UUID, float] = field(default_factory=dict)  # best cosine distance per dataset
 
     @property
+    def fanned_out(self) -> bool:
+        """Datasets were scored and none is within the cutoff: nothing to narrow to."""
+        return bool(self.scores) and not self.routed
+
+    @property
     def dataset_ids(self) -> list[UUID]:
+        if self.fanned_out:
+            return list(self.candidates)
         return [*self.routed, *self.unindexed]
 
     @property
@@ -43,9 +56,17 @@ class DatasetRoutingDecision:
 
 
 async def route_datasets(
-    query_text: str, dataset_ids: list[UUID], top_k: int
+    query_text: str,
+    dataset_ids: list[UUID],
+    top_k: int,
+    distance_cutoff: float,
+    tie_margin: float,
 ) -> DatasetRoutingDecision:
-    """Keep the ``top_k`` best-scoring datasets, plus every dataset that has no routing row.
+    """Keep the ``top_k`` best datasets within the cutoff, plus every dataset with no routing row.
+
+    A tie at the boundary is never split: every dataset within ``tie_margin``
+    of the ``top_k``-th one is routed too. When no dataset is within
+    ``distance_cutoff`` the decision covers every candidate.
 
     A dataset without a row has never been through the global context index
     (or lost it), so routing knows nothing about it and never drops it. An
@@ -64,7 +85,7 @@ async def route_datasets(
         raise ValueError("Dataset routing needs top_k >= 1.")
     candidates = tuple(dataset_ids)
     try:
-        return await _score_candidates(query_text, candidates, top_k)
+        return await _score_candidates(query_text, candidates, top_k, distance_cutoff, tie_margin)
     except Exception:
         logger.warning(
             "Dataset routing is off for this search: the query could not be scored against "
@@ -75,7 +96,11 @@ async def route_datasets(
 
 
 async def _score_candidates(
-    query_text: str, candidates: tuple[UUID, ...], top_k: int
+    query_text: str,
+    candidates: tuple[UUID, ...],
+    top_k: int,
+    distance_cutoff: float,
+    tie_margin: float,
 ) -> DatasetRoutingDecision:
     engine = get_dataset_route_engine()
     if not await engine.has_collection(DATASET_ROUTE_COLLECTION):
@@ -108,10 +133,34 @@ async def _score_candidates(
         if dataset_id not in best or result.score < best[dataset_id]:
             best[dataset_id] = result.score
 
-    ranked = sorted(best, key=lambda dataset_id: (best[dataset_id], str(dataset_id)))
     return DatasetRoutingDecision(
         candidates=candidates,
-        routed=tuple(ranked[:top_k]),
+        routed=tuple(_pick_routed(best, top_k, distance_cutoff, tie_margin)),
         unindexed=tuple(dataset_id for dataset_id in candidates if dataset_id not in best),
         scores=best,
     )
+
+
+def _pick_routed(
+    best: dict[UUID, float], top_k: int, distance_cutoff: float, tie_margin: float
+) -> list[UUID]:
+    """The ``top_k`` nearest datasets within the cutoff, with the tie at the boundary kept whole.
+
+    Ties are measured against the ``top_k``-th dataset only, so they never
+    chain: with a margin of 0.001, 0.413 is tied with 0.412 but 0.414 is not.
+    The id orders datasets of equal distance, so the search order is stable.
+    """
+    within = sorted(
+        (dataset_id for dataset_id, distance in best.items() if distance <= distance_cutoff),
+        key=lambda dataset_id: (best[dataset_id], str(dataset_id)),
+    )
+    routed = within[:top_k]
+    if len(within) > top_k:
+        boundary = best[routed[-1]]
+        routed += [
+            dataset_id
+            for dataset_id in within[top_k:]
+            if best[dataset_id] - boundary <= tie_margin
+            or math.isclose(best[dataset_id] - boundary, tie_margin)
+        ]
+    return routed

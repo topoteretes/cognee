@@ -21,6 +21,7 @@ from cognee.modules.search.dataset_routing import (
     DATASET_ROUTE_COLLECTION,
     dataset_route_ids,
     get_dataset_route_engine,
+    get_dataset_routing_config,
     route_datasets,
 )
 from cognee.tests.journeys import _support
@@ -62,7 +63,14 @@ async def test_unscoped_recall_is_routed_to_the_dataset_holding_the_answer(
 
     # A query quoting one of B's documents routes to B alone.
     target = second[0]
-    decision = await route_datasets(target.text, [dataset_a, dataset_b], top_k=1)
+    config = get_dataset_routing_config()
+    decision = await route_datasets(
+        target.text,
+        [dataset_a, dataset_b],
+        config.top_k,
+        config.distance_cutoff,
+        config.tie_margin,
+    )
     assert decision.routed == (dataset_b,)
     assert decision.unindexed == ()
     assert decision.scores[dataset_b] < decision.scores[dataset_a]

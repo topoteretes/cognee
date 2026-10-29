@@ -37,7 +37,13 @@ dataset, every readable dataset is scored against the query on the routing colle
 dataset's global context index root and document buckets, mirrored into the deployment's
 default vector store by the `global_context_index` improve stage) and only the best
 `DATASET_ROUTING_TOP_K` (default 1) are searched. A dataset's score is its best row, so a
-specific question is carried by the one document that matches and a broad one by the root. A
+specific question is carried by the one document that matches and a broad one by the root.
+Scores are cosine distances (0 is identical text): a dataset farther than
+`DATASET_ROUTING_DISTANCE_CUTOFF` (default 0.8) is not searched, and when no dataset is within
+it every readable dataset is, so a question no dataset knows about is not answered from
+whichever is nearest; datasets within `DATASET_ROUTING_TIE_MARGIN` (default 0.001) of the
+last routed one are tied and all searched. Every unscoped search logs each dataset's distance
+at info, which is what the cutoff is tuned against (it depends on the embedding model). A
 dataset with no index rows is always searched, a routed search that retrieves nothing (judged
 on the retrieval context, not on the completion, which is written even over an empty
 context; or only datasets without searchable memory) is widened to every readable dataset, and an explicit

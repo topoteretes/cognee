@@ -60,8 +60,10 @@ def lane(monkeypatch):
             raise response
         return response
 
-    async def fake_route(query_text, dataset_ids, top_k):
-        state.route_calls.append((query_text, list(dataset_ids), top_k))
+    async def fake_route(query_text, dataset_ids, top_k, distance_cutoff, tie_margin):
+        state.route_calls.append(
+            (query_text, list(dataset_ids), top_k, distance_cutoff, tie_margin)
+        )
         return state.decision
 
     monkeypatch.setattr(search_mod, "get_authorized_existing_datasets", fake_readable)
@@ -95,19 +97,36 @@ async def test_unscoped_search_covers_only_the_routed_dataset(lane):
 
     out = await _search(lane)
 
-    assert lane.route_calls == [("q", [a.id, b.id], 1)]
+    assert lane.route_calls == [("q", [a.id, b.id], 1, 0.8, 0.001)]
     assert lane.fan_out_calls == [[b.id]]
     assert [payload.dataset_id for payload in out] == [b.id]
 
 
 @pytest.mark.asyncio
-async def test_top_k_comes_from_config(lane):
+async def test_top_k_cutoff_and_margin_come_from_config(lane):
     lane.decision = _narrowed(lane)
-    lane.config = DatasetRoutingConfig(_env_file=None, top_k=2)
+    lane.config = DatasetRoutingConfig(
+        _env_file=None, top_k=2, distance_cutoff=0.6, tie_margin=0.01
+    )
 
     await _search(lane)
 
-    assert lane.route_calls[0][2] == 2
+    assert lane.route_calls[0][2:] == (2, 0.6, 0.01)
+
+
+@pytest.mark.asyncio
+async def test_a_query_beyond_the_cutoff_everywhere_searches_every_dataset_once(lane):
+    """Routing scored both datasets too far away: one fan-out over all, no widening pass."""
+    a, b = lane.readable
+    lane.decision = DatasetRoutingDecision(
+        candidates=(a.id, b.id), routed=(), unindexed=(), scores={a.id: 0.9, b.id: 0.95}
+    )
+    lane.responses = [[]]
+
+    await _search(lane)
+
+    assert lane.fan_out_calls == [[a.id, b.id]]
+    assert lane.widening_flags == [False]
 
 
 @pytest.mark.asyncio
@@ -342,8 +361,14 @@ def test_routing_is_on_by_default():
     config = DatasetRoutingConfig(_env_file=None)
     assert config.enabled is True
     assert config.top_k == 1
+    assert config.distance_cutoff == 0.8
+    assert config.tie_margin == 0.001
     with pytest.raises(ValueError):
         DatasetRoutingConfig(_env_file=None, top_k=0)
+    with pytest.raises(ValueError):
+        DatasetRoutingConfig(_env_file=None, distance_cutoff=2.5)
+    with pytest.raises(ValueError):
+        DatasetRoutingConfig(_env_file=None, tie_margin=-0.1)
 
 
 def test_payload_entries_follow_the_normalization_rule():

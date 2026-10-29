@@ -336,27 +336,50 @@ async def _route_datasets(
     ):
         return None
 
+    config = get_dataset_routing_config()
     decision = await route_datasets(
         query_text,
         [dataset.id for dataset in search_datasets],
-        get_dataset_routing_config().top_k,
+        config.top_k,
+        config.distance_cutoff,
+        config.tie_margin,
     )
+    by_id = {dataset.id: dataset for dataset in search_datasets}
+    # Every dataset's distance to the query, nearest first: what the cutoff is tuned against.
+    distances = ", ".join(
+        f"'{by_id[dataset_id].name}'={distance:.3f}"
+        for dataset_id, distance in sorted(decision.scores.items(), key=lambda item: item[1])
+    )
+    if decision.fanned_out:
+        logger.info(
+            "Dataset routing: no dataset was given and none of the %d readable datasets is "
+            "within the distance cutoff %.3f (%s); searching all of them. "
+            "Pass datasets=[...] to search a specific one.",
+            len(search_datasets),
+            config.distance_cutoff,
+            distances,
+        )
+        return None
     if not decision.narrowed:
         logger.info(
             "Dataset routing: no dataset was given; searching all %d readable datasets "
-            "(%d without a routing index yet).",
+            "(%d without a routing index yet%s).",
             len(search_datasets),
             len(decision.unindexed),
+            f"; {distances}" if distances else "",
         )
         return None
 
-    by_id = {dataset.id: dataset for dataset in search_datasets}
     routed = [by_id[dataset_id] for dataset_id in decision.dataset_ids]
     logger.info(
-        "Dataset routing: no dataset was given; searching %s, the best match of the %d "
-        "readable datasets for this query%s. Pass datasets=[...] to search a specific one.",
+        "Dataset routing: no dataset was given; searching %s, the best %s of the %d "
+        "readable datasets for this query (%s)%s. Pass datasets=[...] to search a specific one.",
         ", ".join(f"'{by_id[dataset_id].name}'" for dataset_id in decision.routed),
+        "match"
+        if len(decision.routed) == 1
+        else ("matches, tied" if len(decision.routed) > config.top_k else "matches"),
         len(search_datasets),
+        distances,
         f", plus {len(decision.unindexed)} without a routing index" if decision.unindexed else "",
     )
     return routed

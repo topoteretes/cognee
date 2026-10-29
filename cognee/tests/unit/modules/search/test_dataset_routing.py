@@ -27,6 +27,11 @@ index_module = import_module("cognee.modules.search.dataset_routing.index")
 route_module = import_module("cognee.modules.search.dataset_routing.route")
 
 
+async def _route(query, dataset_ids, top_k=1, distance_cutoff=0.8, tie_margin=0.001):
+    """route_datasets with the config defaults; every existing score here is within the cutoff."""
+    return await route_datasets(query, dataset_ids, top_k, distance_cutoff, tie_margin)
+
+
 class FakeEngine:
     """Records every call; ``scores`` maps row id -> cosine distance for score_by_ids.
 
@@ -142,7 +147,7 @@ async def test_routes_to_the_dataset_whose_best_row_matches(monkeypatch):
     engine = FakeEngine(scores={root_a: 0.4, bucket_a: 0.5, root_b: 0.6, bucket_b: 0.1})
     _patch(monkeypatch, engine, {a: [doc_a], b: [doc_b]})
 
-    decision = await route_datasets("q", [a, b], top_k=1)
+    decision = await _route("q", [a, b], top_k=1)
 
     assert decision.routed == (b,)
     assert decision.unindexed == ()
@@ -160,7 +165,7 @@ async def test_a_dataset_with_no_routing_rows_is_always_searched(monkeypatch):
     engine = FakeEngine(scores={root_a: 0.2, root_b: 0.3})
     _patch(monkeypatch, engine, {a: [], b: [], c: []})
 
-    decision = await route_datasets("q", [a, b, c], top_k=1)
+    decision = await _route("q", [a, b, c], top_k=1)
 
     assert decision.routed == (a,)
     assert decision.unindexed == (c,)
@@ -175,11 +180,11 @@ async def test_top_k_widens_the_routed_set(monkeypatch):
     engine = FakeEngine(scores={root_a: 0.3, root_b: 0.1, root_c: 0.2})
     _patch(monkeypatch, engine, {a: [], b: [], c: []})
 
-    decision = await route_datasets("q", [a, b, c], top_k=2)
+    decision = await _route("q", [a, b, c], top_k=2)
 
     assert decision.routed == (b, c)
     assert decision.narrowed is True
-    assert (await route_datasets("q", [a, b, c], top_k=3)).narrowed is False
+    assert (await _route("q", [a, b, c], top_k=3)).narrowed is False
 
 
 @pytest.mark.asyncio
@@ -190,7 +195,7 @@ async def test_no_collection_or_no_scoring_support_leaves_every_dataset_searched
     a, b = uuid4(), uuid4()
     _patch(monkeypatch, FakeEngine(score_error=error), {a: [], b: []})
 
-    decision = await route_datasets("q", [a, b], top_k=1)
+    decision = await _route("q", [a, b], top_k=1)
 
     assert decision.routed == ()
     assert decision.unindexed == (a, b)
@@ -205,7 +210,7 @@ async def test_no_routing_collection_means_no_embedding_call(monkeypatch):
     engine = FakeEngine(collection_exists=False)
     _patch(monkeypatch, engine, {a: [], b: []})
 
-    decision = await route_datasets("q", [a, b], top_k=1)
+    decision = await _route("q", [a, b], top_k=1)
 
     assert decision.unindexed == (a, b) and decision.narrowed is False
     assert engine.embedded == [] and engine.scored_ids == []
@@ -218,7 +223,7 @@ async def test_an_embedding_failure_warns_and_leaves_every_dataset_searched(monk
     _patch(monkeypatch, engine, {a: [], b: []})
 
     with caplog.at_level("WARNING", logger="dataset_routing"):
-        decision = await route_datasets("q", [a, b], top_k=1)
+        decision = await _route("q", [a, b], top_k=1)
 
     assert decision.unindexed == (a, b) and decision.narrowed is False
     assert engine.scored_ids == []
@@ -242,7 +247,7 @@ async def test_an_unreachable_routing_store_warns_and_leaves_every_dataset_searc
     _patch(monkeypatch, engine, {a: [], b: []})
 
     with caplog.at_level("WARNING", logger="dataset_routing"):
-        decision = await route_datasets("q", [a, b], top_k=1)
+        decision = await _route("q", [a, b], top_k=1)
 
     assert decision.unindexed == (a, b) and decision.narrowed is False
     assert engine.embedded == []
@@ -258,7 +263,7 @@ async def test_a_routing_collection_of_another_width_turns_routing_off(monkeypat
     _patch(monkeypatch, engine, {a: [], b: []})
 
     with caplog.at_level("WARNING", logger="dataset_routing"):
-        decision = await route_datasets("q", [a, b], top_k=1)
+        decision = await _route("q", [a, b], top_k=1)
 
     assert decision.routed == ()
     assert decision.unindexed == (a, b)
@@ -276,7 +281,7 @@ async def test_an_adapter_without_a_width_probe_is_not_checked(monkeypatch):
     engine = EngineWithoutProbe(scores={})
     _patch(monkeypatch, engine, {a: [], b: []})
 
-    decision = await route_datasets("q", [a, b], top_k=1)
+    decision = await _route("q", [a, b], top_k=1)
 
     assert decision.unindexed == (a, b)
     assert engine.embedded == ["q"]
@@ -286,10 +291,72 @@ async def test_an_adapter_without_a_width_probe_is_not_checked(monkeypatch):
 async def test_top_k_below_one_is_refused(monkeypatch):
     _patch(monkeypatch, FakeEngine(), {})
     with pytest.raises(ValueError):
-        await route_datasets("q", [uuid4()], top_k=0)
+        await _route("q", [uuid4()], top_k=0)
 
 
 # --- write path ---------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_query_no_dataset_is_close_to_is_searched_everywhere(monkeypatch):
+    """Nothing within the cutoff: the decision covers every candidate, unindexed ones included."""
+    a, b, c = uuid4(), uuid4(), uuid4()
+    (root_a,), (root_b,) = dataset_route_ids(a, []), dataset_route_ids(b, [])
+    engine = FakeEngine(scores={root_a: 0.87, root_b: 0.96})
+    _patch(monkeypatch, engine, {a: [], b: [], c: []})
+
+    decision = await _route("q", [a, b, c], distance_cutoff=0.8)
+
+    assert decision.routed == ()
+    assert decision.unindexed == (c,)
+    assert decision.fanned_out is True
+    assert decision.dataset_ids == [a, b, c]
+    assert decision.narrowed is False
+    assert decision.scores == {a: 0.87, b: 0.96}
+
+
+@pytest.mark.asyncio
+async def test_the_cutoff_drops_a_far_dataset_even_within_top_k(monkeypatch):
+    a, b = uuid4(), uuid4()
+    (root_a,), (root_b,) = dataset_route_ids(a, []), dataset_route_ids(b, [])
+    engine = FakeEngine(scores={root_a: 0.5, root_b: 0.9})
+    _patch(monkeypatch, engine, {a: [], b: []})
+
+    decision = await _route("q", [a, b], top_k=2, distance_cutoff=0.8)
+
+    assert decision.routed == (a,)
+    assert decision.fanned_out is False
+    assert decision.narrowed is True
+
+
+@pytest.mark.asyncio
+async def test_a_tie_for_the_top_spot_routes_every_tied_dataset(monkeypatch):
+    """0.413 ties with 0.412 under a 0.001 margin (float noise included); 0.42 and 0.41 differ."""
+    a, b, c = uuid4(), uuid4(), uuid4()
+    roots = {dataset_id: dataset_route_ids(dataset_id, [])[0] for dataset_id in (a, b, c)}
+    engine = FakeEngine(scores={roots[a]: 0.412, roots[b]: 0.413, roots[c]: 0.5})
+    _patch(monkeypatch, engine, {a: [], b: [], c: []})
+
+    decision = await _route("q", [a, b, c], top_k=1, tie_margin=0.001)
+
+    assert decision.routed == (a, b)
+    assert decision.narrowed is True
+
+    engine.scores = {roots[a]: 0.41, roots[b]: 0.42, roots[c]: 0.5}
+    assert (await _route("q", [a, b, c], top_k=1, tie_margin=0.001)).routed == (a,)
+
+
+@pytest.mark.asyncio
+async def test_ties_are_measured_against_the_boundary_and_never_chain(monkeypatch):
+    a, b, c, d = (uuid4() for _ in range(4))
+    roots = {dataset_id: dataset_route_ids(dataset_id, [])[0] for dataset_id in (a, b, c, d)}
+    engine = FakeEngine(scores={roots[a]: 0.1, roots[b]: 0.2, roots[c]: 0.2009, roots[d]: 0.2018})
+    _patch(monkeypatch, engine, {a: [], b: [], c: [], d: []})
+
+    decision = await _route("q", [a, b, c, d], top_k=2, tie_margin=0.001)
+
+    # c is within the margin of b, the boundary; d is within the margin of c but not of b.
+    assert decision.routed == (a, b, c)
 
 
 @pytest.mark.asyncio
