@@ -6,6 +6,7 @@ from cognee.api.v1.exceptions import DataDeletionIncompleteError
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.locks import dataset_lock
+from cognee.modules.conflicts.methods import retire_forgotten_decisions
 from cognee.modules.data.content_hash import compute_content_hash, normalize_content_hash
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
@@ -104,6 +105,24 @@ async def _invalidate_sessions_for_deleted_data_nonfatal(
         logger.warning(
             "Session invalidation after data delete failed (non-fatal): %s", error, exc_info=True
         )
+
+
+async def _retire_forgotten_decisions(
+    dataset, user, deleted_elements: DeletedGraphElements
+) -> DeletedGraphElements:
+    """Delete conflict decisions whose chosen fact went with the deleted data.
+
+    Returns ``deleted_elements`` plus the retired decision nodes, for session
+    invalidation; the receipt keeps counting only the data's own elements. Not
+    best-effort: a kept decision would go on presenting the deleted fact as the
+    accepted one, so a failure fails the delete before the Data row is removed.
+    """
+    retired = await retire_forgotten_decisions(dataset, user)
+    return DeletedGraphElements(
+        node_ids=deleted_elements.node_ids | retired,
+        edge_ids=deleted_elements.edge_ids,
+        owned=deleted_elements.owned,
+    )
 
 
 async def _delete_dataset_if_empty(dataset, requested: bool) -> bool:
@@ -517,9 +536,12 @@ class datasets:
                         deleted_elements = await delete_data_nodes_and_edges(
                             dataset_id, data_id, user.id
                         )
-                        if deleted_elements.node_ids or deleted_elements.edge_ids:
+                        invalidated = await _retire_forgotten_decisions(
+                            dataset, user, deleted_elements
+                        )
+                        if invalidated.node_ids or invalidated.edge_ids:
                             await _invalidate_sessions_for_deleted_data_nonfatal(
-                                dataset.id, deleted_elements, user.id
+                                dataset.id, invalidated, user.id
                             )
                         dataset_deleted = await _delete_dataset_if_empty(
                             dataset, delete_dataset_if_empty
@@ -568,7 +590,9 @@ class datasets:
                             deleted_elements = DeletedGraphElements()
 
                     await _invalidate_sessions_for_deleted_data_nonfatal(
-                        dataset.id, deleted_elements, user.id
+                        dataset.id,
+                        await _retire_forgotten_decisions(dataset, user, deleted_elements),
+                        user.id,
                     )
 
                     await delete_data([data], dataset_id)

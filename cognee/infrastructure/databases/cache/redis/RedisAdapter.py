@@ -167,11 +167,23 @@ class RedisAdapter(CacheDBInterface):
         """Overwrite a single serialized entry in-place within a Redis list."""
         await self.async_redis.lset(session_key, index, json.dumps(entry_dump))
 
-    async def _rewrite_entries(self, session_key: str, entries: list) -> None:
-        """Replace the full Redis list contents for a session key."""
-        await self.async_redis.delete(session_key)
-        for entry in entries:
-            await self.async_redis.rpush(session_key, json.dumps(entry))
+    async def _delete_entries(self, key: str, field: str, value: str) -> bool:
+        """Remove every entry whose ``field`` is ``value``; False when none is stored.
+
+        Each LREM removes one stored element in place, so a reader never sees the list
+        half rewritten. An entry an update rewrote after the read is read again.
+        """
+        removed = False
+        while True:
+            stored = await self.async_redis.lrange(key, 0, -1)
+            matching = [raw for raw in stored if json.loads(raw).get(field) == value]
+            if not matching:
+                break
+            for raw in matching:
+                removed = bool(await self.async_redis.lrem(key, 0, raw)) or removed
+        if removed and stored:
+            await self._apply_session_ttl(key)
+        return removed
 
     async def _apply_session_ttl(self, session_key: str) -> None:
         """Refresh the configured TTL for a session-scoped Redis key."""
@@ -447,16 +459,9 @@ class RedisAdapter(CacheDBInterface):
         Returns True if deleted, False if qa_id not found.
         """
         try:
-            session_key = self._session_key(user_id, session_id)
-            entries = await self._load_entries(session_key)
-            idx = self._find_index_by_qa_id(entries, qa_id)
-            if idx is None:
-                return False
-            entries.pop(idx)
-            await self._rewrite_entries(session_key, entries)
-            if entries:
-                await self._apply_session_ttl(session_key)
-            return True
+            return await self._delete_entries(
+                self._session_key(user_id, session_id), "qa_id", qa_id
+            )
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while deleting Q&A: {e!s}"
             logger.error(error_msg)
@@ -646,15 +651,9 @@ class RedisAdapter(CacheDBInterface):
     ) -> bool:
         """Delete a single session-context entry by its "id" field."""
         try:
-            context_key = self._session_context_key(user_id, session_id)
-            entries = await self._load_entries(context_key)
-            surviving = [entry for entry in entries if entry.get("id") != entry_id]
-            if len(surviving) == len(entries):
-                return False
-            await self._rewrite_entries(context_key, surviving)
-            if surviving:
-                await self._apply_session_ttl(context_key)
-            return True
+            return await self._delete_entries(
+                self._session_context_key(user_id, session_id), "id", entry_id
+            )
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while deleting session context entry: {e!s}"
             logger.error(error_msg)

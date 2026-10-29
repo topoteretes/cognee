@@ -7,7 +7,9 @@ from cognee.modules.graph.utils.fact_conflicts import (
     CONFLICT_VALUE,
     fact_status,
     is_conflict_edge,
+    is_rejected_fact,
     status_label,
+    user_selected_facts,
 )
 from cognee.modules.retrieval.hybrid.chunks import search_collections
 from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
@@ -140,6 +142,11 @@ def _conflict_explanations(connections: list[tuple[dict, dict, dict]]) -> list[s
         if edge["relationship_name"] in {CONFLICT_ABOUT, CONFLICT_VALUE}
         and source.get("type") == "FactConflict"
     }
+    texts.update(
+        text
+        for _, edge, _ in connections
+        for text in user_selected_facts(edge.get("properties") or {})
+    )
     return sorted(text for text in texts if text)
 
 
@@ -353,6 +360,8 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> _EdgeBullet | None:
     if not text:
         return None
     properties = edge.get("properties") or {}
+    if is_rejected_fact(properties):
+        return None
     label = status_label(properties)
 
     return _EdgeBullet(
