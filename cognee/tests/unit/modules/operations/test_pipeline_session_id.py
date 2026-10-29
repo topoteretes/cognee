@@ -67,10 +67,10 @@ async def _rows(engine):
 
 async def _run_memify(dataset_id):
     """The started + completed rows run_tasks writes for one pipeline run."""
-    started = await start_mod.log_pipeline_run_start(uuid4(), "memify_pipeline", dataset_id, [])
+    started = await start_mod.log_pipeline_run_start(uuid4(), "memify_pipeline", dataset_id)
     with parent_run_scope(started.pipeline_run_id):
         await complete_mod.log_pipeline_run_complete(
-            started.pipeline_run_id, started.pipeline_id, "memify_pipeline", dataset_id, []
+            started.pipeline_run_id, started.pipeline_id, "memify_pipeline", dataset_id
         )
     return started.pipeline_run_id
 
@@ -99,7 +99,7 @@ async def test_errored_row_carries_the_session_id(ops_engine):
     async with record_operation("improve") as operation:
         operation.set_session_id("chat_1")
         await error_mod.log_pipeline_run_error(
-            run_id, uuid4(), "memify_pipeline", uuid4(), [], ValueError("boom")
+            run_id, uuid4(), "memify_pipeline", uuid4(), ValueError("boom")
         )
 
     rows = [row for row in await _rows(ops_engine) if row.pipeline_run_id == run_id]
@@ -112,7 +112,7 @@ async def test_explicit_session_id_wins_for_recovery(ops_engine):
     passes the STARTED row's session id, which must not be replaced."""
     run_id = uuid4()
     await error_mod.log_pipeline_run_error(
-        run_id, uuid4(), "memify_pipeline", uuid4(), None, ValueError("gone"), session_id="chat_1"
+        run_id, uuid4(), "memify_pipeline", uuid4(), ValueError("gone"), session_id="chat_1"
     )
 
     rows = await _rows(ops_engine)

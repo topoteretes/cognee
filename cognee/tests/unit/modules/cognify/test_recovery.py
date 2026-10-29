@@ -2,10 +2,11 @@
 rollback) and closed as ERRORED with the STARTED row's own metadata; nothing else is touched."""
 
 import asyncio
+import inspect
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -13,6 +14,7 @@ import pytest
 from cognee.modules.cognify import recovery as recovery_module
 from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
 from cognee.modules.pipelines.models import PipelineRunStatus
+from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
 
 TWO_HOURS_AGO = datetime.now(timezone.utc) - timedelta(hours=2)
 
@@ -55,7 +57,7 @@ def _run(pipeline_name, status=PipelineRunStatus.DATASET_PROCESSING_STARTED, **o
         "started_at": TWO_HOURS_AGO,
         "user_id": uuid4(),
         "tenant_id": uuid4(),
-        "run_info": {"data": ["doc-1", "doc-2"]},
+        "run_info": {},
         "origin": "api",
         "parent_operation_id": uuid4(),
     }
@@ -83,6 +85,8 @@ def _wire(monkeypatch, runs, datasets, *, rollback_fails=False, users=None):
         calls.append(("rollback", kwargs))
 
     async def _log_error(**kwargs):
+        # A stale kwarg would be swallowed by recovery's broad except and retried on every startup.
+        inspect.signature(log_pipeline_run_error).bind(**kwargs)
         calls.append(("error", kwargs))
 
     async def _latest_runs():
@@ -138,7 +142,6 @@ async def test_cognify_run_is_rolled_back_then_closed_with_its_own_metadata(monk
     assert error["tenant_id"] == run.tenant_id
     assert "user" not in error
     assert error["started_at"] == run.started_at
-    assert error["data_info"] == ["doc-1", "doc-2"]
     assert error["origin"] == "api"
     assert error["parent_operation_id"] == run.parent_operation_id
 
@@ -308,15 +311,13 @@ async def test_recovery_emits_stored_identity_through_the_real_payload_builder(
     monkeypatch.setattr(utils, "get_anonymous_id", lambda: "test-anonymous")
     monkeypatch.setattr(utils, "get_persistent_id", lambda: "test-persistent")
     monkeypatch.setattr(utils, "_get_api_key_tracking_id", lambda: "")
-    request = AsyncMock()
-    monkeypatch.setattr(utils, "_send_telemetry_request", request)
-    pending_before = set(utils._TELEMETRY_TASKS)
+    enqueue = Mock()
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", enqueue)
 
     await recovery_module.recover_stale_pipeline_runs_on_startup()
-    await asyncio.gather(*(utils._TELEMETRY_TASKS - pending_before))
 
-    request.assert_awaited_once()
-    payload = request.await_args.args[0]
+    enqueue.assert_called_once()
+    payload = enqueue.call_args.args[0]
     assert payload["event_name"] == "Pipeline Run Errored"
     for properties in (payload["properties"], payload["user_properties"]):
         assert properties["user_id"] == str(run.user_id)
@@ -430,14 +431,12 @@ async def test_recovering_an_agents_run_attributes_the_agent(monkeypatch):
     monkeypatch.setattr(utils, "get_anonymous_id", lambda: "test-anonymous")
     monkeypatch.setattr(utils, "get_persistent_id", lambda: "test-persistent")
     monkeypatch.setattr(utils, "_get_api_key_tracking_id", lambda: "")
-    request = AsyncMock()
-    monkeypatch.setattr(utils, "_send_telemetry_request", request)
-    pending_before = set(utils._TELEMETRY_TASKS)
+    enqueue = Mock()
+    monkeypatch.setattr(utils._telemetry_sender, "enqueue", enqueue)
 
     await recovery_module.recover_stale_pipeline_runs_on_startup()
-    await asyncio.gather(*(utils._TELEMETRY_TASKS - pending_before))
 
-    properties = request.await_args.args[0]["properties"]
+    properties = enqueue.call_args.args[0]["properties"]
     assert properties["user_id"] == str(run.user_id)
     assert properties["is_agent"] is True
     assert properties["agent_owner_id"] == str(parent_id)

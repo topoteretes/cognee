@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 os.environ["CACHING"] = "true"
-os.environ["CACHE_BACKEND"] = "fs"
+os.environ["CACHE_BACKEND"] = "sqlite"
 os.environ["AUTO_FEEDBACK"] = "true"
 os.environ.setdefault("LOG_LEVEL", "ERROR")
 
@@ -177,7 +177,7 @@ TURNS = [
 
 def force_demo_environment():
     os.environ["CACHING"] = "true"
-    os.environ["CACHE_BACKEND"] = "fs"
+    os.environ["CACHE_BACKEND"] = "sqlite"
     os.environ["AUTO_FEEDBACK"] = "true"
     os.environ["DATA_ROOT_DIRECTORY"] = str(DEMO_ROOT / "data")
     os.environ["SYSTEM_ROOT_DIRECTORY"] = str(DEMO_ROOT / "system")

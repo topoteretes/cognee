@@ -13,16 +13,26 @@ from fake_apollo import FakeApollo
 from cognee.modules.integrations import ingestion
 from cognee.tasks.ingestion.connectors import apollo as apollo_module
 from cognee.tasks.ingestion.connectors import apollo_source
-from cognee.tasks.ingestion.connectors.apollo import PAGE_SIZE, ApolloAccessError, ApolloAPIError
-from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, PIPELINE_SCOPE_ATTR
+from cognee.tasks.ingestion.connectors.apollo import (
+    PAGE_SIZE,
+    ApolloAccessError,
+    ApolloAPIError,
+    ApolloAuthError,
+    ApolloSourceError,
+)
+from cognee.tasks.ingestion.dlt_utils import (
+    DOCUMENT_COLUMN_HINTS,
+    DOCUMENT_SOURCE_ATTR,
+    PIPELINE_SCOPE_ATTR,
+)
 
 TABLE = "apollo_test"
 PHONE = "+1 555 0199"
 ALL_ROWS = ["account:a1", "contact:c1", "contact:c2", "sequence:s1"]
-# The wording the other connectors give this guard. The community text named a cognee release.
+# The wording Notion gives the same guard: the column is what the core version is needed for.
 VERSION_GUARD = (
-    "Apollo sync requires a Cognee build with table-scoped DLT document cleanup. "
-    "Upgrade Cognee before syncing to avoid deleting another source's data."
+    "Apollo sync requires a Cognee build that reads per-row node sets "
+    "(DOCUMENT_SYNC_VERSION >= 2). Upgrade Cognee before syncing."
 )
 # Lookups of a contacts-only run: contact stages, lists and the sequence list.
 CONTACT_LOOKUPS = 3
@@ -114,13 +124,22 @@ def test_resource_name_has_no_default():
         apollo_source(api_key="key")
 
 
-def test_refuses_core_without_table_scoped_cleanup(monkeypatch):
-    monkeypatch.setattr(apollo_module.dlt_utils, "DOCUMENT_SYNC_VERSION", 0)
+# Version 2 is the first that reads the cognee_node_set column. An older core would ingest
+# every row with no node set, and the next release would then change every document's id.
+@pytest.mark.parametrize("version", [0, 1])
+def test_refuses_core_that_does_not_read_node_sets(monkeypatch, version):
+    monkeypatch.setattr(apollo_module.dlt_utils, "DOCUMENT_SYNC_VERSION", version)
 
     with pytest.raises(RuntimeError) as raised:
         apollo_source(service=FakeApollo(), resource_name=TABLE)
 
     assert str(raised.value) == VERSION_GUARD
+
+
+def test_accepts_the_first_core_that_reads_node_sets(monkeypatch):
+    monkeypatch.setattr(apollo_module.dlt_utils, "DOCUMENT_SYNC_VERSION", 2)
+
+    apollo_source(service=FakeApollo(), resource_name=TABLE)
 
 
 def _pipeline(tmp_path):
@@ -134,9 +153,11 @@ def _pipeline(tmp_path):
     )
 
 
+# ingest_dlt_source runs every document source with these hints: without the json hint dlt would
+# turn the node set column into a child table, and a tombstone is tested against that.
 def _run(tmp_path, source, table: str = TABLE) -> list[str]:
     pipeline = _pipeline(tmp_path)
-    pipeline.run(source)
+    pipeline.run(source, columns=DOCUMENT_COLUMN_HINTS)
     query = f'SELECT id FROM "{table}" ORDER BY id'
     with pipeline.sql_client() as sql, sql.execute_query(query) as cursor:
         return [row[0] for row in cursor.fetchall()]
@@ -144,7 +165,7 @@ def _run(tmp_path, source, table: str = TABLE) -> list[str]:
 
 def _contents(tmp_path, source, table: str = TABLE) -> dict[str, str]:
     pipeline = _pipeline(tmp_path)
-    pipeline.run(source)
+    pipeline.run(source, columns=DOCUMENT_COLUMN_HINTS)
     query = f'SELECT id, content FROM "{table}" ORDER BY id'
     with pipeline.sql_client() as sql, sql.execute_query(query) as cursor:
         return {row[0]: row[1] for row in cursor.fetchall()}
@@ -194,7 +215,7 @@ def test_a_reused_source_forgets_the_quota_its_client_saw_last_run(tmp_path):
     source = apollo_source(service=fake, resource_name=TABLE)
     _run(tmp_path, source)
 
-    fake.rate_limit = {"minute": 0}  # stale: the window has reset since
+    fake.rate_limit = {"/contact_stages": {"minute": 0}}  # stale: the window has reset since
     fake.add_contact("c3", "Cara Hopper")
     assert "contact:c3" in _run(tmp_path, source)
     assert source.cognee_sync_stats["failed"] == 0
@@ -313,3 +334,63 @@ def test_a_host_reads_every_count_the_walk_reports(tmp_path):
     assert counts["requests"] == len(fake.calls) - calls_before
     assert counts["failed"] == counts["failed_access"] == 1
     assert counts["deleted"] == 0
+
+
+# What ends a run by raising, and the one count key a host should find for it. A 5xx or a
+# bad configuration has no key of its own among the ones a host knows, so it raises without one.
+@pytest.mark.parametrize(
+    ("path", "error", "reason"),
+    [
+        (
+            "/contacts/search",
+            ApolloAccessError("cannot call /contacts/search (HTTP 403)"),
+            "access",
+        ),
+        ("/contact_stages", ApolloAuthError("Apollo rejected the API key (HTTP 401)"), "auth"),
+        ("/contact_stages", ApolloAPIError("Apollo request failed: HTTP 500"), None),
+        ("/contact_stages", ApolloSourceError("a stage filter names an unknown id"), None),
+    ],
+)
+def test_a_run_that_raises_leaves_the_count_key_of_its_error_for_the_host(
+    tmp_path, path, error, reason
+):
+    """dlt drops the state of a run that raises, not the stats object, and a host adds its
+    counts in a ``finally`` (``sync_selected_resources``), so they must say why instead of
+    ``failed: 0``."""
+    from dlt.pipeline.exceptions import PipelineStepFailed
+
+    fake = _workspace()
+    fake.fail_paths[path] = error
+    source = apollo_source(service=fake, resource_name=TABLE)
+
+    with pytest.raises(PipelineStepFailed):
+        _run(tmp_path, source)
+
+    counts = ingestion.source_counts(source)
+    assert {key for key, count in counts.items() if key.startswith("failed_") and count} == (
+        {f"failed_{reason}"} if reason else set()
+    )
+    assert counts["failed"] == 1, "every raise is one failure, with or without a reason key"
+    if reason:
+        assert counts[f"failed_{reason}"] == 1
+
+
+def test_a_refused_listing_raises_because_a_cut_run_would_keep_its_state(tmp_path):
+    """A listing the key cannot call raises, and dlt drops the state of that run: the accounts
+    it had finished are listed again by the next run and nothing is forgotten. A cut run would
+    keep them finished, never close the cycle and so never see a later delete."""
+    from dlt.pipeline.exceptions import PipelineStepFailed
+
+    fake = _workspace()
+    assert _run(tmp_path, apollo_source(service=fake, resource_name=TABLE)) == ALL_ROWS
+    fake.fail_paths["/contacts/search"] = ApolloAccessError("cannot call /contacts/search")
+    with pytest.raises(PipelineStepFailed, match="/contacts/search"):
+        _run(tmp_path, apollo_source(service=fake, resource_name=TABLE))
+    account_listings = fake.count("/accounts/search")
+    del fake.fail_paths["/contacts/search"]
+
+    clean = apollo_source(service=fake, resource_name=TABLE)
+
+    assert _run(tmp_path, clean) == ALL_ROWS
+    assert fake.count("/accounts/search") == account_listings + 1, "listed again, not skipped"
+    assert clean.cognee_sync_stats["deleted"] == 0

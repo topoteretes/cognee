@@ -16,30 +16,26 @@ class ServeCommand(SupportsCliCommand):
     description = """
 Connect the local Cognee SDK to a Cognee instance.
 
-Cloud mode (default): authenticates via browser-based device code flow,
-discovers your tenant, and connects automatically.
-
-Local mode: connect directly to a running Cognee backend.
+Pass the instance URL and its API key (or set COGNEE_SERVICE_URL and
+COGNEE_API_KEY). A successful connection is saved, so a later bare
+`cognee serve` reconnects to the same instance when it was connected with
+an API key; a local instance without a key needs --url again.
 
 Examples:
-  cognee serve                              # Cloud (Auth0 device flow)
   cognee serve --url http://localhost:8000  # Local instance
   cognee serve --url https://my.cognee.ai --api-key ck_...
+  cognee serve                              # Reconnect to the saved keyed instance
   cognee serve --logout                     # Disconnect + clear credentials
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "--url",
-            help="Direct URL of a Cognee instance (skips Auth0 + tenant discovery)",
+            help="URL of a Cognee instance (or set COGNEE_SERVICE_URL)",
         )
         parser.add_argument(
             "--api-key",
             help="API key for the instance (optional for local, required for cloud instances)",
-        )
-        parser.add_argument(
-            "--management-url",
-            help="Override the Management API URL (cloud mode only)",
         )
         parser.add_argument(
             "--logout",
@@ -51,21 +47,18 @@ Examples:
         if args.logout:
             asyncio.run(_logout())
         else:
-            asyncio.run(
-                _serve(url=args.url, api_key=args.api_key, management_url=args.management_url)
-            )
+            asyncio.run(_serve(url=args.url, api_key=args.api_key))
 
 
-async def _serve(url=None, api_key=None, management_url=None):
+async def _serve(url=None, api_key=None):
     import cognee
 
-    mode = "local" if url else "cloud"
-    fmt.note(f"Connecting to Cognee ({mode})...")
+    fmt.note("Connecting to Cognee...")
     try:
-        client = await cognee.serve(url=url, api_key=api_key or "", management_url=management_url)
+        client = await cognee.serve(url=url, api_key=api_key or "")
         fmt.success(f"Connected to {client.service_url}")
     except KeyboardInterrupt:
-        fmt.warning("Authentication cancelled.")
+        fmt.warning("Connection cancelled.")
     except Exception as e:
         logger.debug("Ignoring exception in _serve", exc_info=True)
         fmt.error(f"Failed to connect: {e}")

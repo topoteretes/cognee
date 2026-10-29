@@ -5,7 +5,6 @@ from functools import lru_cache
 
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.cache.config import get_cache_config
-from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import FSCacheAdapter
 from cognee.infrastructure.databases.exceptions import CacheConnectionError
 from cognee.shared.logging_utils import get_logger
 
@@ -128,15 +127,21 @@ def create_cache_engine(
                 blocking_timeout=agentic_lock_timeout,
                 session_ttl_seconds=session_ttl_seconds,
             )
-        elif config.cache_backend == "fs":
-            return FSCacheAdapter(session_ttl_seconds=session_ttl_seconds)
         elif config.cache_backend == "tapes":
             from cognee.infrastructure.databases.cache.tapes.TapesCacheAdapter import (
                 TapesCacheAdapter,
             )
 
+            # Session state lives in the SQL cache (CACHE_DB_URL, else the sqlite
+            # default); tapes only receives a mirror of each new QA.
             return TapesCacheAdapter(
+                connection_string=_resolve_cache_db_url("sqlite", cache_db_url),
+                lock_key=lock_key,
+                log_key=log_key,
                 session_ttl_seconds=session_ttl_seconds,
+                agentic_lock_expire=agentic_lock_expire,
+                agentic_lock_timeout=agentic_lock_timeout,
+                purge_interval_seconds=cache_purge_interval_seconds,
                 tapes_ingest_url=tapes_ingest_url,
                 tapes_provider=tapes_provider,
                 tapes_agent_name=tapes_agent_name,
@@ -148,22 +153,7 @@ def create_cache_engine(
                 SqlCacheAdapter,
             )
 
-            try:
-                connection_string = _resolve_cache_db_url(config.cache_backend, cache_db_url)
-            except CacheConnectionError as error:
-                # An explicitly chosen backend must fail loudly. The implicit
-                # sqlite default, however, can land on deployments it cannot
-                # serve (e.g. system root on S3) - degrade to the filesystem
-                # cache there so sessions keep working out of the box.
-                explicitly_chosen = "cache_backend" in getattr(config, "model_fields_set", set())
-                if config.cache_backend != "sqlite" or explicitly_chosen:
-                    raise
-                logger.warning(
-                    f"Default sqlite cache backend is unavailable ({error}); "
-                    "falling back to the filesystem cache backend. "
-                    "Set CACHE_DB_URL or CACHE_BACKEND to override."
-                )
-                return FSCacheAdapter(session_ttl_seconds=session_ttl_seconds)
+            connection_string = _resolve_cache_db_url(config.cache_backend, cache_db_url)
 
             return SqlCacheAdapter(
                 connection_string=connection_string,
@@ -177,7 +167,7 @@ def create_cache_engine(
         else:
             raise ValueError(
                 f"Unsupported cache backend: '{config.cache_backend}'. "
-                f"Supported backends are: 'redis', 'fs', 'tapes', 'sqlite', 'turso', 'postgres'"
+                f"Supported backends are: 'redis', 'tapes', 'sqlite', 'turso', 'postgres'"
             )
     else:
         return None

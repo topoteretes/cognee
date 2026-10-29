@@ -14,8 +14,13 @@ readiness states:
   exactly the users whose first build broke. Errored ``add_pipeline`` rows
   never trigger it — staging failures don't say anything about the graph, and
   counting them would break the staging-only fail-safe above.
+* ``partial`` — no graph is built yet, but the indexing pipeline stored and
+  embedded the chunks of a target dataset (SDK-397), so chunk searches answer.
+  The probe carries that dataset's memory state and message (see
+  ``cognee.modules.cognify.memory_status``); recall searches at chunk level
+  and says the answers improve once extraction completes.
 * ``never_built`` — no pipeline has ever touched the datasets (or none has
-  finished or failed yet).
+  finished or failed yet, or a build is still indexing).
 
 Only ``warm`` is cached (see ``assess_memory_readiness``); every cold state is
 re-probed so the first recall after a fix sees the fresh truth.
@@ -30,6 +35,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.pipeline_names import ADD_PIPELINE_NAME, INDEXING_PIPELINE_NAME
 
 logger = get_logger("recall.graph_warmup")
 
@@ -39,8 +45,9 @@ logger = get_logger("recall.graph_warmup")
 # RECALL_WARMUP_THRESHOLD can never falsely read a populated graph as cold.
 _WARM_COUNT = 2**31
 
-# add() logs this pipeline; it stages data without writing graph datapoints.
-_STAGING_PIPELINE = "add_pipeline"
+# Pipelines that write no graph a graph search could answer from: add() stages
+# data, the indexing pipeline stores chunks before their entities exist.
+_NON_GRAPH_PIPELINES = (ADD_PIPELINE_NAME, INDEXING_PIPELINE_NAME)
 
 # Bound on cached verdicts; on overflow expired entries are evicted and, if
 # still full, the cache is dropped wholesale (it is only an optimization).
@@ -54,6 +61,7 @@ _warmup_cache: dict[tuple, tuple["WarmupProbe", float]] = {}
 STATE_WARM = "warm"
 STATE_NEVER_BUILT = "never_built"
 STATE_BUILD_FAILED = "build_failed"
+STATE_PARTIAL = "partial"
 
 
 @dataclass(frozen=True)
@@ -62,6 +70,10 @@ class WarmupProbe:
     datapoint_count: int
     error_class: str | None = None
     error_message: str | None = None
+    # Set for ``partial``: the memory state and message of the dataset whose
+    # chunks answer (cognee.modules.cognify.memory_status vocabulary).
+    memory_state: str | None = None
+    message: str | None = None
 
     @property
     def is_warm(self) -> bool:
@@ -112,7 +124,7 @@ async def get_graph_build_status(user, dataset_ids: list[UUID] | None) -> Warmup
                         and_(
                             PipelineRun.dataset_id.in_(ids),
                             PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
-                            PipelineRun.pipeline_name != _STAGING_PIPELINE,
+                            PipelineRun.pipeline_name.notin_(_NON_GRAPH_PIPELINES),
                         )
                     )
                 )
@@ -121,6 +133,30 @@ async def get_graph_build_status(user, dataset_ids: list[UUID] | None) -> Warmup
         if warm:
             return WarmupProbe(STATE_WARM, _WARM_COUNT)
 
+    # No graph yet. The memory state says whether the chunks answer already,
+    # or whether a build is still on its way to them.
+    from cognee.modules.cognify.memory_status import SEARCH_LEVEL_CHUNKS, get_memory_status
+
+    statuses = list((await get_memory_status(ids)).values())
+    indexed = [status for status in statuses if status.search_level == SEARCH_LEVEL_CHUNKS]
+    if indexed:
+        # A failure first (its cause is what the caller needs), then a build
+        # in progress, then the rest.
+        status = min(indexed, key=lambda s: (not s.is_failure, not s.is_active))
+        return WarmupProbe(
+            STATE_PARTIAL,
+            0,
+            error_class=status.error_class,
+            error_message=status.error_message,
+            memory_state=status.state,
+            message=status.message,
+        )
+    if any(status.is_active for status in statuses):
+        # A build is running and nothing answers yet: warming up, not the
+        # staged-only fail-safe below.
+        return WarmupProbe(STATE_NEVER_BUILT, 0)
+
+    async with get_relational_engine().get_async_session() as session:
         # Cold path: distinguish failed / staged-only / empty. Staging
         # (add_pipeline) failures are excluded: they say nothing about the
         # graph, and counting them would flip datasets that only ever staged
@@ -133,7 +169,7 @@ async def get_graph_build_status(user, dataset_ids: list[UUID] | None) -> Warmup
                     and_(
                         PipelineRun.dataset_id.in_(ids),
                         PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_ERRORED,
-                        PipelineRun.pipeline_name != _STAGING_PIPELINE,
+                        PipelineRun.pipeline_name != ADD_PIPELINE_NAME,
                     )
                 )
                 .order_by(PipelineRun.created_at.desc(), PipelineRun.id.desc())
