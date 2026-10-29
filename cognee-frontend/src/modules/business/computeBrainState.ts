@@ -1,14 +1,21 @@
 import { hsl } from "d3-color";
 import type { BusinessGraphNode, BusinessGraphLink } from "./types";
-import type { BusinessEntity, SemanticLink, TypeNode, TypeLink, Anchor, BrainState } from "./sceneTypes";
+import type { BusinessEntity, SemanticLink, TypeNode, TypeLink, BrainState } from "./sceneTypes";
 import { topImportanceCut } from "./canvas/businessEntityLayer";
 import { computeConnectedIds } from "./canvas/businessGraphFocus";
+import { isCodeNode, normalizeCodeNodes } from "./codeGraph";
+import { endId } from "./linkEndpoint";
+import { normalizeStructuredNodes, structuredTypeName } from "./structuredGraph";
+import { groupStructuredSources } from "./structuredSources";
+import { assignTypeColors, createSourceEncoding, createTypeEncoding } from "./colorEncoding";
+import { resolveLayoutGroups } from "./layoutGroups";
+import { buildLayoutAnchors } from "./layoutAnchors";
 
 // A synthetic source for content ingested with no node_set at all — the
 // product's own manual-upload path (rememberData.ts) never sends node_set,
 // so a directly-uploaded file's entities/documents used to have NO source
 // at all: no Sources tile, no hull, no anchor (they defaulted to world
-// origin, per anchorOf), invisible to a focus lens. Attributing them here
+// origin, per buildLayoutAnchors), invisible to a focus lens. Attributing them here
 // instead of returning [] means every downstream consumer of setsOf —
 // coloring, hulls, filaments, plumbing, the hub metric, the focus lens —
 // picks this up for free, without each needing its own "no source" branch
@@ -73,14 +80,6 @@ export function sourceTooltipLabel(name: string): string {
   return label === name ? name : `${label} · ${name}`;
 }
 
-// Session-memory sets wear the AGENT color family (amber): this memory
-// exists because agents talked. Shades keep the three layers apart.
-const AGENT_SET_SHADES: Record<string, string> = {
-  session_learnings: "#F5A83C",
-  user_sessions_from_cache: "#E08E1B",
-  agent_trace_feedbacks: "#FFC46B",
-};
-
 function hueDistance(a: number, b: number): number {
   const d = Math.abs(a - b) % 360;
   return d > 180 ? 360 - d : d;
@@ -133,10 +132,11 @@ function buildSourceColors(
   srcNames.forEach((s, i) => {
     colors[s] = colorForSet(s, i, colorsMap);
   });
-  sessionSetNodes.forEach((n) => {
+  // A session set no entity is tagged with yet still needs a color of its own.
+  // It gets one like any other source: amber is kept for what is live now.
+  sessionSetNodes.forEach((n, i) => {
     const name = n.name as string;
-    const base = Object.keys(AGENT_SET_SHADES).find((k) => name.indexOf(k) === 0);
-    colors[name] = (base && AGENT_SET_SHADES[base]) || "#F5A83C";
+    if (!colors[name]) colors[name] = colorForSet(name, srcNames.length + i, colorsMap);
   });
   return colors;
 }
@@ -147,25 +147,9 @@ function countBySet(nodes: BusinessGraphNode[]): Record<string, number> {
   return counts;
 }
 
-// Circular layout for sources; session-memory sets get their own arc BELOW
-// the sources — without an anchor those entities all pull to (0,0) and bury
-// the center.
-function buildAnchors(srcNames: string[], sessionNames: string[]): Record<string, Anchor> {
-  const anchors: Record<string, Anchor> = {};
-  srcNames.forEach((s, i) => {
-    const angle = (i / Math.max(srcNames.length, 1)) * Math.PI * 2 - Math.PI / 2;
-    const r = srcNames.length > 1 ? 300 : 0;
-    anchors[s] = { x: Math.cos(angle) * r * 1.25, y: Math.sin(angle) * r * 0.6 };
-  });
-  sessionNames.forEach((name, i) => {
-    const spread = (i - (sessionNames.length - 1) / 2) * 0.55;
-    anchors[name] = { x: Math.sin(spread) * 480, y: 430 + Math.abs(spread) * 60 };
-  });
-  return anchors;
-}
-
-function endId(v: unknown): string {
-  return typeof v === "object" && v !== null ? String((v as { id: string }).id) : String(v);
+// How many of `links` touch the entity, for the panel and tooltip counts.
+export function countLinksTouching(links: SemanticLink[], id: string): number {
+  return links.filter((l) => l._sid === id || l._tid === id).length;
 }
 
 function withEndpointIds<T extends BusinessGraphLink>(links: T[]): (T & { _sid: string; _tid: string })[] {
@@ -175,12 +159,15 @@ function withEndpointIds<T extends BusinessGraphLink>(links: T[]): (T & { _sid: 
 // The business-model (L0) layer: entity TYPES and how they relate —
 // "campaign generates customer", not individual campaigns. Types float at
 // the centroid of their members, computed each draw frame by the canvas.
+// `typeEdges` is the drawn graph (graphLinks), not insight links: for a
+// structured dataset the schema (rows belong to a table) is the model, so
+// those edges are kept here on purpose even though insights exclude them.
 function buildTypeLayer(
   entities: BusinessEntity[],
   links: (BusinessGraphLink & { _sid: string; _tid: string })[],
   byId: Record<string, BusinessGraphNode>,
-  semanticLinks: SemanticLink[],
-): { typeNodes: TypeNode[]; typeLinks: TypeLink[] } {
+  typeEdges: SemanticLink[],
+): { typeNodes: TypeNode[]; typeLinks: TypeLink[]; entityType: Record<string, string> } {
   const typeName: Record<string, string> = {};
   links.forEach((l) => {
     const s = byId[l._sid], t = byId[l._tid];
@@ -190,17 +177,34 @@ function buildTypeLayer(
     }
   });
 
+  // entity_type is present on EVERY node since cognee 1.6.1 (falling back to
+  // the node's own class name — "Entity" — when no is_a edge resolved a real
+  // type), not only on code nodes. Trusting it for an ordinary entity would
+  // surface that literal "Entity" as its own Types-rail tile on every graph;
+  // a code node has no such ambiguity, entity_type there always carries its
+  // actual class (CodeSymbol, CodeModule, …), so this only reads it there.
+  function typeOf(id: string): string {
+    if (typeName[id]) return typeName[id];
+    const node = byId[id];
+    const structuredType = node && structuredTypeName(node);
+    if (structuredType) return structuredType;
+    if (node && isCodeNode(node) && node.entity_type) return node.entity_type;
+    return "other";
+  }
+
   const buckets: Record<string, TypeNode> = {};
+  const entityType: Record<string, string> = {};
   entities.forEach((n) => {
-    const tn = typeName[n.id] || "other";
+    const tn = typeOf(n.id);
+    entityType[n.id] = tn;
     const bucket = (buckets[tn] = buckets[tn] || { name: tn, members: [], sets: {} });
     bucket.members.push(n);
     setsOf(n).forEach((s) => { bucket.sets[s] = (bucket.sets[s] || 0) + 1; });
   });
 
   const links2: Record<string, TypeLink> = {};
-  semanticLinks.forEach((l) => {
-    const a = typeName[l._sid] || "other", b = typeName[l._tid] || "other";
+  typeEdges.forEach((l) => {
+    const a = typeOf(l._sid), b = typeOf(l._tid);
     if (a === b) return;
     const relation = l.relation || "related";
     const key = `${a}→${b}|${relation}`;
@@ -208,7 +212,7 @@ function buildTypeLayer(
     slot.count += 1;
   });
 
-  return { typeNodes: Object.values(buckets), typeLinks: Object.values(links2) };
+  return { typeNodes: Object.values(buckets), typeLinks: Object.values(links2), entityType };
 }
 
 const HUB_MIN_DEGREE = 2;
@@ -258,24 +262,37 @@ export function computeBrainState(
   linksArr: BusinessGraphLink[],
   colorsMap?: Record<string, string>,
 ): BrainState {
+  // Code and structured data have no LLM entity stage. Normalize before
+  // deriving the scene so the canvas, filters and empty state agree.
+  const nodes = normalizeStructuredNodes(normalizeCodeNodes(groupStructuredSources(nodesArr, linksArr)));
   const byId: Record<string, BusinessGraphNode> = {};
-  nodesArr.forEach((n) => { byId[n.id] = n; });
+  nodes.forEach((n) => { byId[n.id] = n; });
   const links = withEndpointIds(linksArr);
 
-  const entities: BusinessEntity[] = nodesArr
+  const entities: BusinessEntity[] = nodes
     .filter((n) => n.stage === "entity")
     .map((n) => ({ ...n, x: undefined, y: undefined, fx: null, fy: null, vx: 0, vy: 0 }));
   const entityById: Record<string, BusinessEntity> = {};
   entities.forEach((n) => { entityById[n.id] = n; });
-  const docs = nodesArr.filter((n) => n.stage === "document");
+  const docs = nodes.filter((n) => n.stage === "document");
 
-  const { sessionSetNodes } = splitNodeSets(nodesArr);
-  const sourceNames = deriveSourceNames(nodesArr, entities);
+  const { sessionSetNodes } = splitNodeSets(nodes);
+  const sourceNames = deriveSourceNames(nodes, entities);
   const setColor = buildSourceColors(sourceNames, sessionSetNodes, colorsMap);
 
-  const semanticLinks = links.filter((l) =>
-    l.edge_class === "semantic" && byId[l._sid] && byId[l._tid] &&
-    byId[l._sid].stage === "entity" && byId[l._tid].stage === "entity") as SemanticLink[];
+  // graphLinks is what the canvas draws and navigates: semantic edges plus
+  // any edge touching a structured node, because their wiring is mostly
+  // structural (is_row_of, is_part_of) and would otherwise drop out, leaving
+  // a structured node's neighbours unreachable. semanticLinks, which feeds
+  // insights, drops every structured endpoint: a table is linked to each of
+  // its rows, and that is schema, not a business relationship.
+  const graphLinks = links.filter((l) =>
+    byId[l._sid]?.stage === "entity" && byId[l._tid]?.stage === "entity" &&
+    (l.edge_class === "semantic" ||
+      structuredTypeName(byId[l._sid]) || structuredTypeName(byId[l._tid]))) as SemanticLink[];
+  const semanticLinks = graphLinks.filter((l) =>
+    l.edge_class === "semantic" &&
+    !structuredTypeName(byId[l._sid]) && !structuredTypeName(byId[l._tid]));
   semanticLinks.forEach((l) => {
     const a = setsOf(byId[l._sid]), b = setsOf(byId[l._tid]);
     l._bridge = a.length > 0 && b.length > 0 && !a.some((s) => b.includes(s));
@@ -290,8 +307,15 @@ export function computeBrainState(
     );
   }) as SemanticLink[];
 
-  const anchors = buildAnchors(sourceNames, sessionSetNodes.map((n) => n.name as string));
-  const { typeNodes, typeLinks } = buildTypeLayer(entities, links, byId, semanticLinks);
+  const { typeNodes, typeLinks, entityType } = buildTypeLayer(entities, links, byId, graphLinks);
+  const { groupOf, groupOrder } = resolveLayoutGroups(entities, entityType);
+  const { anchors, entityAnchors } = buildLayoutAnchors(
+    entities.map((n) => ({ id: n.id, sets: setsOf(n), group: groupOf[n.id] })),
+    groupOrder,
+    sourceNames,
+    sessionSetNodes.map((n) => n.name as string),
+    isSessionSetName,
+  );
 
   // Records layer inputs: NodeSet and type-stage nodes are meta (the source
   // chips and the L0 schema respectively), not records — what's left is the
@@ -299,7 +323,7 @@ export function computeBrainState(
   // linked entity wins as each record's anchor; a record linking multiple
   // entities near-always links them from one extraction pass, so any of
   // them places it in the right neighborhood.
-  const plumbingNodes = nodesArr.filter(
+  const plumbingNodes = nodes.filter(
     (n) => n.stage !== "entity" && n.stage !== "type" && n.type !== "NodeSet",
   );
   const plumbingEntityId: Record<string, string> = {};
@@ -318,21 +342,30 @@ export function computeBrainState(
     entities,
     entityById,
     sourceNames,
-    setColor,
-    isSessionSet: isSessionSetName,
+    sessionSetNames: Object.keys(setColor).filter(isSessionSetName),
+    encodings: {
+      source: createSourceEncoding(setColor, isSessionSetName),
+      type: createTypeEncoding(
+        assignTypeColors(typeNodes.map((t) => ({ name: t.name, count: t.members.length }))),
+        isSessionSetName,
+      ),
+    },
     setEntityCount: countBySet(entities),
     setDocCount: countBySet(docs),
-    setMemberCount: countBySet(nodesArr.filter((n) => n.type !== "NodeSet")),
+    setMemberCount: countBySet(nodes.filter((n) => n.type !== "NodeSet")),
+    graphLinks,
     semanticLinks,
     docLinks,
     anchors,
+    entityAnchors,
     typeNodes,
     typeLinks,
+    entityType,
     importanceMax: entities.reduce((max, n) => Math.max(max, n.importance || 0), 1),
     plumbingNodes,
     plumbingEntityId,
     importanceCut: topImportanceCut(entities),
-    connectedIds: computeConnectedIds(semanticLinks),
+    connectedIds: computeConnectedIds(graphLinks),
     hub: computeHubInsight(semanticLinks, byId),
   };
 }

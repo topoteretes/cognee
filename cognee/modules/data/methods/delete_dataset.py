@@ -24,6 +24,26 @@ async def delete_dataset(dataset: Dataset):
             DatasetDatabase.dataset_id == dataset.id,
         )
         dataset_database: DatasetDatabase = await session.scalar(stmt)
+
+        # Rows are dataset-scoped: deleting the dataset deletes its documents.
+        # (Stale pipeline_status can't survive because the rows themselves go.)
+        data_ids = (
+            (await session.execute(select(Data.id).where(Data.dataset_id == dataset.id)))
+            .scalars()
+            .all()
+        )
+
+        # No index build follows a dataset delete, so its routing rows go here,
+        # while the data ids they derive from are still known, and before the
+        # dataset's own stores are dropped: a routing store that cannot be
+        # reached aborts the delete with everything still in place, so it can
+        # be retried, instead of leaving rows and files whose stores are gone.
+        # Imported here: the routing package reads this package, which imports
+        # this module.
+        from cognee.modules.search.dataset_routing import remove_dataset_routes
+
+        await remove_dataset_routes(dataset.id, data_ids)
+
         if dataset_database:
             graph_dataset_database_handler = get_graph_dataset_database_handler(dataset_database)
             vector_dataset_database_handler = get_vector_dataset_database_handler(dataset_database)
@@ -33,14 +53,6 @@ async def delete_dataset(dataset: Dataset):
             await vector_dataset_database_handler["handler_instance"].delete_dataset(
                 dataset_database
             )
-
-        # Rows are dataset-scoped: deleting the dataset deletes its documents.
-        # (Stale pipeline_status can't survive because the rows themselves go.)
-        data_ids = (
-            (await session.execute(select(Data.id).where(Data.dataset_id == dataset.id)))
-            .scalars()
-            .all()
-        )
         await session.commit()
 
     # Files are refcounted by raw_data_location inside delete_data_entity, so

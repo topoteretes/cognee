@@ -8,6 +8,9 @@ from .StorageManager import StorageManager
 def get_file_storage(storage_path: str) -> StorageManager:
     base_config = get_base_config()
 
+    # Imported here: the encryption package reads storage modules of this package.
+    from cognee.infrastructure.files.encryption import wrap_storage_if_encrypted
+
     # Use S3FileStorage if the storage_path is an S3 URL or if configured for S3
     if storage_path.startswith("s3://") or (
         os.getenv("STORAGE_BACKEND") == "s3"
@@ -16,8 +19,12 @@ def get_file_storage(storage_path: str) -> StorageManager:
     ):
         from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
-        return StorageManager(S3FileStorage(storage_path))
+        storage = S3FileStorage(storage_path)
     else:
         from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
 
-        return StorageManager(LocalFileStorage(storage_path))
+        storage = LocalFileStorage(storage_path)
+
+    # Roots under DATA_ROOT_DIRECTORY are sealed when FILE_ENCRYPTION_ENABLED
+    # is on; every other root (system, cache) is handed back as is.
+    return StorageManager(wrap_storage_if_encrypted(storage))

@@ -27,6 +27,8 @@ REASON_SESSION_MANAGER_UNAVAILABLE = "session_manager_unavailable"
 REASON_AUTO_FEEDBACK_DISABLED = "auto_feedback_disabled"
 REASON_PERSONALIZATION_DISABLED = "personalization_disabled"
 REASON_OPT_IN_DISABLED = "opt_in_disabled"
+REASON_TURNED_OFF = "turned_off"
+REASON_NO_WRITES_SINCE_LAST_IMPROVE = "no_writes_since_last_improve"
 REASON_NO_NEW_SESSION_ENTRIES = "no_new_entries"
 REASON_NO_NEW_TRACE_STEPS = "no_new_trace_steps"
 REASON_EDGE_EVIDENCE_DISABLED = "edge_evidence_disabled"
@@ -35,11 +37,6 @@ REASON_NO_NEW_FACTS = "no_new_facts"
 # installs run on GLiNER + fastembed); the stages that only cognify or embed
 # are not gated on this — cognify resolves its own extractor.
 REASON_NO_LLM_CONFIGURED = "no_llm_configured"
-
-# Entity ids a failed review carries on its watermark stamp for the next run.
-# Beyond this the stamp is withheld instead, so the next run redoes the whole
-# window rather than carry a large id list in the operation row.
-REVIEW_RETRY_ENTITY_LIMIT = 500
 
 
 def _already_completed(stage_name: str, reason: str) -> StageResult:
@@ -163,7 +160,9 @@ class PersistSessionQAStage(BaseStage):
     """Stage 2: cognify session Q&A into the graph (``user_sessions_from_cache``).
 
     The single fail-closed stage (decision D2): losing Q&A would be data loss,
-    so an error here stops the run instead of being swallowed.
+    so an error here stops the run instead of being swallowed. A failed step
+    after the completed cognify (``AfterRunHookError``) is recorded as errored
+    without stopping it: the Q&A is stored.
     """
 
     name = "persist_session_qa"
@@ -523,21 +522,13 @@ class BuildTruthSubspaceStage(BaseStage):
 
 
 class ReviewConflictsStage(BaseStage):
-    """Review changed facts and retry conflicts with missing citations or pending writes."""
+    """Review changed facts and repair conflicts with missing citations or pending writes."""
 
     name = "review_conflicts"
 
-    @staticmethod
-    def _stamped_retry_ids(watermark) -> list[str]:
-        """Entity ids a previous review stamped for retry; ignore a malformed value."""
-        ids = (watermark.stamp or {}).get("retry_entity_ids") if watermark else None
-        if not isinstance(ids, list):
-            return []
-        return [entity_id for entity_id in ids if isinstance(entity_id, str)]
-
     def gate(self, inputs: ImproveRunInputs) -> str | None:
         if not inputs.review_conflicts:
-            return REASON_OPT_IN_DISABLED
+            return REASON_TURNED_OFF
         if not llm_available():
             return REASON_NO_LLM_CONFIGURED
         from cognee.modules.provenance.edge_evidence.config import get_provenance_config
@@ -549,7 +540,8 @@ class ReviewConflictsStage(BaseStage):
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
         from datetime import datetime, timezone
 
-        from .graph_changes import REVIEW_WATERMARK_KEY, last_improve_watermark, watermark_stamp
+        from .review_conflicts import build_stamp_fields, review_conflicts
+        from .watermarks import REVIEW_WATERMARK_KEY, last_improve_watermark, watermark_stamp
 
         started_at = datetime.now(timezone.utc)
         watermark = await last_improve_watermark(
@@ -557,74 +549,23 @@ class ReviewConflictsStage(BaseStage):
             REVIEW_WATERMARK_KEY,
             exclude_operation_id=inputs.improve_operation_id,
         )
-        # Without a watermark nothing has been reviewed yet, so review every entity.
-        if watermark is None:
-            return await self._review(inputs, entity_ids=None, since=None, started_at=started_at)
-
-        entity_ids = await self._changed_entity_ids(inputs, watermark)
-        if not entity_ids and not await self._has_conflicts_to_repair(inputs):
+        review = await review_conflicts(watermark, dataset=inputs.dataset, user=inputs.user)
+        if review is None:
             result = _already_completed(self.name, REASON_NO_NEW_FACTS)
-            result._run_info_stamp = watermark_stamp(
-                REVIEW_WATERMARK_KEY, result.status, started_at
+        else:
+            result = StageResult.from_pipeline_run(
+                self.name,
+                review.run_result,
+                entities_failed=len(review.failed_entity_ids),
+                entities_skipped=len(review.skipped_entity_ids),
             )
-            return result
-        return await self._review(
-            inputs, entity_ids=entity_ids, since=watermark.started_at, started_at=started_at
-        )
-
-    async def _changed_entity_ids(self, inputs: ImproveRunInputs, watermark) -> list[str]:
-        """Entities a completed write touched since the watermark, plus the ones to retry.
-
-        Entities a previous run could not review are touched by no later write, so
-        without carrying them forward get_touched_entity_ids would never select
-        them again.
-        """
-        from cognee.modules.provenance.edge_evidence.lookup import get_touched_entity_ids
-
-        touched = await get_touched_entity_ids(inputs.dataset_id, watermark.started_at)
-        return sorted(touched | set(self._stamped_retry_ids(watermark)))
-
-    async def _has_conflicts_to_repair(self, inputs: ImproveRunInputs) -> bool:
-        """Is a stored conflict still waiting on a lost citation or an unfinished write?"""
-        from cognee.context_global_variables import set_database_global_context_variables
-        from cognee.infrastructure.databases.graph import get_graph_engine
-        from cognee.infrastructure.locks.dataset_lock import dataset_lock
-        from cognee.tasks.memify.review_conflicts.read_facts import (
-            find_conflicts_with_lost_citations,
-        )
-
-        # Match memify's lock/context order and release both before its wrapper
-        # runs, so the dataset queue slot is never held waiting.
-        async with (
-            dataset_lock(inputs.dataset_id),
-            set_database_global_context_variables(inputs.dataset_id, inputs.dataset.owner_id),
-        ):
-            graph = await get_graph_engine()
-            pending, drops = await find_conflicts_with_lost_citations(graph, inputs.dataset_id)
-        return bool(pending or drops)
-
-    async def _review(
-        self, inputs: ImproveRunInputs, *, entity_ids, since, started_at
-    ) -> StageResult:
-        """Run the review pipeline and stamp the watermark the next run reads."""
-        from cognee.memify_pipelines.review_conflicts import review_conflicts_pipeline
-
-        from .graph_changes import REVIEW_WATERMARK_KEY, watermark_stamp
-
-        run_result = await review_conflicts_pipeline(
-            dataset=inputs.dataset_id, user=inputs.user, entity_ids=entity_ids, since=since
-        )
-        result = StageResult.from_pipeline_run(self.name, run_result)
-        payload = result.run.payload if result.run is not None else None
-        failed = payload.get("unreviewed_entity_ids", []) if isinstance(payload, dict) else []
-        result.counts = {"entities_failed": len(failed)}
-        if failed:
-            logger.warning("improve: conflict review failed for entities: %s", failed)
-        # review_entities appends failures from three sites and dedups none of them.
-        retry_ids = sorted(set(failed))
-        if result.status == "completed" and len(retry_ids) <= REVIEW_RETRY_ENTITY_LIMIT:
+            # Only a completed review moves the watermark.
+            if result.status != "completed":
+                return result
+        stamp_fields = build_stamp_fields(review)
+        if stamp_fields is not None:
             result._run_info_stamp = watermark_stamp(
-                REVIEW_WATERMARK_KEY, result.status, started_at, retry_entity_ids=retry_ids
+                REVIEW_WATERMARK_KEY, result.status, started_at, **stamp_fields
             )
         return result
 
@@ -653,26 +594,55 @@ class LegacyCustomTasksStage(BaseStage):
 
 
 class GlobalContextIndexStage(BaseStage):
-    """Stage 9: build retrieval-ready bucket and root summaries (opt-in)."""
+    """Stage 9: build retrieval-ready bucket and root summaries (opt-in).
+
+    The pipeline's default method counts entities instead of prompting, so this
+    stage runs on the keyless path too. ``already_completed`` when only reads
+    ran on the dataset since its last build, read from ``pipeline_runs``: a
+    build reads the whole dataset.
+    """
 
     name = "global_context_index"
 
     def gate(self, inputs: ImproveRunInputs) -> str | None:
         if not inputs.build_global_context_index:
-            return REASON_OPT_IN_DISABLED
-        if not llm_available():
-            return REASON_NO_LLM_CONFIGURED
+            return REASON_TURNED_OFF
         return None
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
+        from datetime import datetime, timezone
+
+        from cognee.context_global_variables import backend_access_control_enabled
         from cognee.memify_pipelines.global_context_index import global_context_index_pipeline
 
-        result = await global_context_index_pipeline(
-            user=inputs.user,
-            dataset=inputs.dataset_id,
-            run_in_background=False,
-            bucketing_strategy="graph",
-            max_bucket_size=4,
+        from .watermarks import (
+            GLOBAL_CONTEXT_WATERMARK_KEY,
+            has_dataset_changed_since_last_improve,
+            watermark_stamp,
         )
-        logger.info("improve: global context index updated")
-        return StageResult.from_pipeline_run(self.name, result)
+
+        # Captured before the change check and the build, so a write racing
+        # this run stays visible to the next run's check.
+        started_at = datetime.now(timezone.utc)
+        if await has_dataset_changed_since_last_improve(
+            inputs.dataset_id,
+            GLOBAL_CONTEXT_WATERMARK_KEY,
+            exclude_operation_id=inputs.improve_operation_id,
+            # Without access control datasets share one graph, and relation and
+            # type lines read edges that any of them may write.
+            any_dataset=not backend_access_control_enabled(),
+        ):
+            run_result = await global_context_index_pipeline(
+                user=inputs.user,
+                dataset=inputs.dataset_id,
+                run_in_background=False,
+            )
+            logger.info("improve: global context index updated")
+            result = StageResult.from_pipeline_run(self.name, run_result)
+        else:
+            result = _already_completed(self.name, REASON_NO_WRITES_SINCE_LAST_IMPROVE)
+        if result.status in ("completed", "already_completed"):
+            result._run_info_stamp = watermark_stamp(
+                GLOBAL_CONTEXT_WATERMARK_KEY, result.status, started_at
+            )
+        return result

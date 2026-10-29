@@ -1,4 +1,4 @@
-from io import BufferedReader, BytesIO
+from io import BufferedIOBase
 from os import path
 from tempfile import SpooledTemporaryFile
 from typing import BinaryIO
@@ -14,7 +14,11 @@ def classify(
     if isinstance(data, str):
         return TextData(data)
 
-    if isinstance(data, (BufferedReader, SpooledTemporaryFile, BytesIO)):
+    # Any buffered binary reader: a file opened by the local backend
+    # (BufferedReader), an in-memory upload (BytesIO), the plaintext view of a
+    # sealed object (DecryptingReader) — all BufferedIOBase — plus the spooled
+    # temp file uploads arrive in, which predates that hierarchy.
+    if isinstance(data, (BufferedIOBase, SpooledTemporaryFile)):
         # In-memory uploads (BytesIO) carry no .name — the caller-supplied
         # filename is the only identity there, so its absence is an error,
         # never a made-up name.

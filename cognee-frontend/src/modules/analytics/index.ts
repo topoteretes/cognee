@@ -35,3 +35,7 @@ export function TrackPageView(_props: {
 }) { return null; }
 export function TrackPageEvent(_props: Record<string, unknown>) { return null; }
 export function IdentifyUser() { return null; }
+// Mounted by the synced (auth) and (setup) layouts. The public build has no
+// identity to wait for and no session replay to gate.
+export function IdentityNotExpected() { return null; }
+export function ConsentedSessionReplay() { return null; }

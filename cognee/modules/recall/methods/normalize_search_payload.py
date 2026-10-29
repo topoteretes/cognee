@@ -142,15 +142,6 @@ def _build_item(
     )
 
 
-def _flatten(value: Any) -> list[Any]:
-    """Return a flat list of entries from completion/context/result_object."""
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
-    return [value]
-
-
 def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultItem]:
     """Normalize one dataset's retriever payload into SearchResultItems."""
     kind = _KIND_BY_SEARCH_TYPE.get(payload.search_type, SearchResultKind.UNKNOWN)
@@ -165,15 +156,7 @@ def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultI
         item = _build_item(payload.user_prompt, payload, kind)
         return [item.model_copy(update={"system_prompt": payload.system_prompt})]
 
-    if payload.only_context:
-        # Retrievers report a miss as None, "" or []; a bare "" must not become an item,
-        # or "nothing found" reads as a hit to recall's on_empty tools fallback.
-        entries = [entry for entry in _flatten(payload.context) if entry]
-    elif payload.completion is not None:
-        entries = _flatten(payload.completion)
-    elif payload.context is not None:
-        entries = _flatten(payload.context)
-    else:
-        entries = _flatten(payload.result_object)
-
-    return [_build_item(entry, payload, kind) for entry in entries]
+    # The payload decides what counts as an entry (completion, else context, else
+    # the raw output; a bare "" context is a miss), so this and dataset routing's
+    # "found nothing" check cannot drift apart.
+    return [_build_item(entry, payload, kind) for entry in payload.entries()]
