@@ -568,7 +568,7 @@ async def recall(
         (answer written by an LLM): HYBRID_COMPLETION (the default when
         routing is off), GRAPH_COMPLETION, GRAPH_COMPLETION_COT,
         GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_COMPLETION_DECOMPOSITION,
-        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TEMPORAL,
+        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TEMPORAL, BROAD,
         AGENTIC_COMPLETION. Retrieval-only types (no LLM):
         CHUNKS, CHUNKS_LEXICAL, SUMMARIES, SKILLS, CODE. Other: CYPHER,
         NATURAL_LANGUAGE, CODING_RULES, GRAPH_REPORT, FEELING_LUCKY.
@@ -838,6 +838,13 @@ async def forget(
             elif clean_history and not dataset and not parsed_dataset_id:
                 # No target: the guards above let this through only for a history-only call.
                 text = f"Search history deleted (status={status})."
+            elif parsed_data_id and status == "not_found":
+                # The receipt says nothing existed for the id: a wrong id or an
+                # already-deleted item. Never word that as a deletion.
+                text = (
+                    f"Data item '{data_id}' was not found in dataset '{dataset or dataset_id}' "
+                    "(wrong id, or already deleted); nothing was deleted (status=not_found)."
+                )
             elif parsed_data_id:
                 text = f"Data item '{data_id}' deleted (status={status})."
             else:

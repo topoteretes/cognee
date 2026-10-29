@@ -1,7 +1,8 @@
 import asyncio
 import importlib
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -10,6 +11,10 @@ import pytest
 from cognee.api.v1.session import SessionQAEntry
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.recall.types.RecallResponse import ResponseQAEntry
+from cognee.modules.retrieval.broad_retriever import BroadLimitError, BroadNoTextError
+from cognee.modules.retrieval.broad_store import BroadQueryError
+from cognee.modules.retrieval.code_retriever import CodeGraphUnavailableError, CodeSeedNotFoundError
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
 
@@ -982,6 +987,212 @@ class TestRecallResponseModelParam:
             await recall_mod.recall("test", query_type=SearchType.GRAPH_COMPLETION)
 
         assert remote_client.recall.await_args.kwargs["response_schema"] is None
+
+
+class TestRecallRoutedConfig:
+    """A route's retriever config reaches the routed search."""
+
+    @staticmethod
+    async def _routed_recall(query: str, routed=(), **recall_kwargs) -> tuple[list, list[dict]]:
+        """recall()'s results and the kwargs of every search it ran.
+
+        The routed search returns ``routed``'s payloads, or raises ``routed`` when
+        it is an exception; the HYBRID retry answers with ``_hybrid_payload``.
+        """
+        recall_mod = _get_recall_module()
+        user = MagicMock()
+        user.id = uuid4()
+
+        async def search(**kwargs):
+            if kwargs["query_type"] is SearchType.HYBRID_COMPLETION:
+                return [TestRecallRoutedConfig._hybrid_payload()]
+            if isinstance(routed, Exception):
+                raise routed
+            return list(routed)
+
+        authorized_search = AsyncMock(side_effect=search)
+        with (
+            patch("cognee.shared.utils.send_telemetry", lambda *args, **kwargs: None),
+            patch.object(
+                _mod_query_router.RoutingConstraints,
+                "from_config",
+                return_value=_mod_query_router.RoutingConstraints(),
+            ),
+            patch.object(recall_mod, "get_default_user", AsyncMock(return_value=user)),
+            patch.object(recall_mod, "set_session_user_context_variable", AsyncMock()),
+            patch.object(_mod_search_methods, "authorized_search", authorized_search),
+        ):
+            results = await recall_mod.recall(query, **recall_kwargs)
+        return results, [call.kwargs for call in authorized_search.await_args_list]
+
+    @staticmethod
+    async def _recall_through_search(query: str, failures: dict, monkeypatch, datasets) -> list:
+        """recall()'s results over the real search fan-out, stubbed only at its boundaries.
+
+        A dataset's routed search raises its entry in ``failures`` or answers;
+        every HYBRID search answers with ``_hybrid_payload``.
+        """
+        search_datasets = [
+            SimpleNamespace(id=uuid4(), name=name, tenant_id=uuid4(), owner_id=uuid4())
+            for name in datasets
+        ]
+
+        async def get_retriever_output(query_type, dataset, **_kwargs):
+            if query_type is SearchType.HYBRID_COMPLETION:
+                return TestRecallRoutedConfig._hybrid_payload()
+            if dataset.name in failures:
+                raise failures[dataset.name]
+            return SearchResultPayload(
+                completion="routed answer", search_type=query_type, dataset_name=dataset.name
+            )
+
+        @asynccontextmanager
+        async def dataset_context(*_args, **_kwargs):
+            yield
+
+        graph_engine = MagicMock(is_empty=AsyncMock(return_value=False))
+        search = _mod_search_methods
+        monkeypatch.setattr(
+            search, "get_authorized_existing_datasets", AsyncMock(return_value=search_datasets)
+        )
+        monkeypatch.setattr(search, "set_database_global_context_variables", dataset_context)
+        monkeypatch.setattr(search, "get_graph_engine", AsyncMock(return_value=graph_engine))
+        monkeypatch.setattr(search, "get_retriever_output", get_retriever_output)
+        monkeypatch.setattr(search, "send_telemetry", lambda *args, **kwargs: None)
+        monkeypatch.setattr(search, "backend_access_control_enabled", lambda: True)
+        data_methods = importlib.import_module("cognee.modules.data.methods")
+        monkeypatch.setattr(data_methods, "get_dataset_data", AsyncMock(return_value=["doc"]))
+
+        recall_mod = _get_recall_module()
+        monkeypatch.setattr("cognee.shared.utils.send_telemetry", lambda *args, **kwargs: None)
+        constraints = _mod_query_router.RoutingConstraints
+        monkeypatch.setattr(constraints, "from_config", MagicMock(return_value=constraints()))
+        monkeypatch.setattr(
+            recall_mod, "get_default_user", AsyncMock(return_value=MagicMock(id=uuid4()))
+        )
+        monkeypatch.setattr(recall_mod, "set_session_user_context_variable", AsyncMock())
+        return await recall_mod.recall(query)
+
+    @staticmethod
+    def _ask_payload(dataset: str, seeds=()) -> SearchResultPayload:
+        result = {"operation": "ask", "seeds": list(seeds)}
+        return SearchResultPayload(
+            result_object=result,
+            completion=result,
+            search_type=SearchType.CODE,
+            dataset_name=dataset,
+        )
+
+    @staticmethod
+    def _no_code_graph_marker(dataset: str) -> SearchResultPayload:
+        """The payload search reports for a dataset without a code graph."""
+        error = "This dataset has no code graph."
+        return SearchResultPayload(
+            completion={"seed_not_found": True, "error": error, "code": "no_code_graph"},
+            error=error,
+            search_type=SearchType.CODE,
+            dataset_name=dataset,
+        )
+
+    @staticmethod
+    def _hybrid_payload() -> SearchResultPayload:
+        """The answer of the HYBRID retry."""
+        return SearchResultPayload(
+            completion="hybrid answer",
+            search_type=SearchType.HYBRID_COMPLETION,
+            dataset_name="docs",
+        )
+
+    @pytest.mark.asyncio
+    async def test_code_route_runs_ask(self):
+        _, searches = await self._routed_recall("What calls parse_config?")
+
+        assert searches[0]["query_type"] is SearchType.CODE
+        assert searches[0]["retriever_specific_config"] == {
+            "operation": "ask",
+            "question": "parse_config",
+        }
+
+    @pytest.mark.asyncio
+    async def test_caller_config_wins_over_the_route(self):
+        _, searches = await self._routed_recall(
+            "What calls parse_config?",
+            retriever_specific_config={"question": "where is config parsed"},
+        )
+
+        assert searches[0]["retriever_specific_config"] == {
+            "operation": "ask",
+            "question": "where is config parsed",
+        }
+
+    @pytest.mark.asyncio
+    async def test_code_route_returns_only_datasets_with_seeds(self):
+        results, searches = await self._routed_recall(
+            "What calls parse_config?",
+            [self._ask_payload("hit", seeds=[{"name": "parse_config"}]), self._ask_payload("miss")],
+        )
+
+        assert [result.dataset_name for result in results] == ["hit"]
+        assert len(searches) == 1
+
+    @pytest.mark.asyncio
+    async def test_code_route_retries_as_hybrid_when_no_dataset_has_a_code_graph(self):
+        markers = [self._no_code_graph_marker("docs"), self._no_code_graph_marker("notes")]
+        results, searches = await self._routed_recall("What calls parse_config?", markers)
+
+        assert [search["query_type"] for search in searches] == [
+            SearchType.CODE,
+            SearchType.HYBRID_COMPLETION,
+        ]
+        assert [result.text for result in results] == ["hybrid answer"]
+
+    @pytest.mark.asyncio
+    async def test_code_route_miss_beside_a_missing_graph_retries_as_hybrid(self):
+        results, _ = await self._routed_recall(
+            "What calls parse_config?",
+            [self._no_code_graph_marker("docs"), self._ask_payload("code")],
+        )
+
+        assert [result.text for result in results] == ["hybrid answer"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "query, error",
+        [
+            ("What calls parse_config?", CodeGraphUnavailableError("no code graph")),
+            ("What calls parse_config?", CodeSeedNotFoundError("no such symbol")),
+            ("How many invoices were paid?", BroadQueryError("no working query")),
+            ("How many invoices were paid?", BroadLimitError("document too large")),
+            ("How many invoices were paid?", BroadNoTextError("no document text")),
+        ],
+    )
+    async def test_routed_lane_failure_retries_as_hybrid(self, query, error):
+        results, _ = await self._routed_recall(query, error)
+
+        assert [result.text for result in results] == ["hybrid answer"]
+
+    @pytest.mark.asyncio
+    async def test_code_question_on_a_docs_only_dataset_answers_with_hybrid(self, monkeypatch):
+        failures = {"docs": CodeGraphUnavailableError("This dataset has no code graph.")}
+        results = await self._recall_through_search(
+            "What calls parse_config?", failures, monkeypatch, datasets=("docs",)
+        )
+
+        assert [result.text for result in results] == ["hybrid answer"]
+
+    @pytest.mark.asyncio
+    async def test_broad_failure_in_one_of_several_datasets_answers_with_hybrid(self, monkeypatch):
+        failures = {"sales": BroadQueryError("BROAD could not write a working query.")}
+        results = await self._recall_through_search(
+            "How many invoices were paid?", failures, monkeypatch, datasets=("sales", "support")
+        )
+
+        assert [result.text for result in results] == ["hybrid answer", "hybrid answer"]
+
+    @pytest.mark.asyncio
+    async def test_routed_no_data_is_not_retried(self):
+        with pytest.raises(NoDataError):
+            await self._routed_recall("How many invoices were paid?", NoDataError("empty graph"))
 
 
 @pytest.mark.asyncio

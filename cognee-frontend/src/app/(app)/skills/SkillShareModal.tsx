@@ -53,7 +53,7 @@ export default function SkillShareModal({ isOpen, onClose, skill, sourceDatasetI
 
   if (!skill) return null;
 
-  // Brains the skill is NOT already scoped to (can't re-add where it exists).
+  // Datasets the skill is NOT already scoped to (can't re-add where it exists).
   const alreadyIn = new Set(skill.datasetScope);
   if (sourceDatasetId) alreadyIn.add(sourceDatasetId);
   const targets = datasets.filter((d) => !alreadyIn.has(d.id));
@@ -74,7 +74,7 @@ export default function SkillShareModal({ isOpen, onClose, skill, sourceDatasetI
 
   async function handleSubmit() {
     if (!instance || !full || !skill) return;
-    if (selected.size === 0) { setError("Select at least one brain."); return; }
+    if (selected.size === 0) { setError("Select at least one dataset."); return; }
 
     setSubmitting(true);
     setError(null);
@@ -108,8 +108,8 @@ export default function SkillShareModal({ isOpen, onClose, skill, sourceDatasetI
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 20px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <span style={{ fontSize: 16, fontWeight: 600, color: TEXT }}>Add “{skill.name}” to more brains</span>
-            <span style={{ fontSize: 12, color: "rgba(237,236,234,0.5)" }}>Copies this skill into the selected brains.</span>
+            <span style={{ fontSize: 16, fontWeight: 600, color: TEXT }}>Add “{skill.name}” to more datasets</span>
+            <span style={{ fontSize: 12, color: "rgba(237,236,234,0.5)" }}>Copies this skill into the selected datasets.</span>
           </div>
           <button onClick={handleClose} aria-label="Close" disabled={submitting}
             style={{ background: "none", border: "none", color: "rgba(237,236,234,0.6)", cursor: submitting ? "not-allowed" : "pointer", padding: 4 }}>
@@ -120,10 +120,10 @@ export default function SkillShareModal({ isOpen, onClose, skill, sourceDatasetI
         {/* Body */}
         <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14, overflowY: "auto" }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.5)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-            Brains{selected.size > 0 ? ` · ${selected.size} selected` : ""}
+            Datasets{selected.size > 0 ? ` · ${selected.size} selected` : ""}
           </span>
           {targets.length === 0 ? (
-            <span style={{ fontSize: 13, color: "rgba(237,236,234,0.4)" }}>This skill is already in every available brain.</span>
+            <span style={{ fontSize: 13, color: "rgba(237,236,234,0.4)" }}>This skill is already in every available dataset.</span>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", maxHeight: 260, overflowY: "auto", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10 }}>
               {targets.map((d, i) => {
@@ -166,7 +166,7 @@ export default function SkillShareModal({ isOpen, onClose, skill, sourceDatasetI
           <button onClick={handleSubmit} disabled={!canSubmit}
             style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, fontFamily: "inherit", border: "none", background: canSubmit ? PRIMARY : "rgba(255,255,255,0.08)", color: canSubmit ? "#fff" : "rgba(237,236,234,0.4)", cursor: canSubmit ? "pointer" : "not-allowed" }}>
             {submitting && <span style={{ width: 12, height: 12, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.35)", borderTopColor: "#fff", animation: "spin 0.7s linear infinite" }} />}
-            {submitting ? "Adding…" : selected.size > 1 ? `Add to ${selected.size} brains` : "Add to brain"}
+            {submitting ? "Adding…" : selected.size > 1 ? `Add to ${selected.size} datasets` : "Add to dataset"}
           </button>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import type { CogneeInstance } from "@/modules/instances/types";
-import { loadGraphModelsConfig, saveCustomPrompt, assignPromptToDataset, clearDatasetOutdated } from "@/modules/configuration/userConfiguration";
+import { fetchGraphModelsConfig, saveCustomPrompt, assignPromptToDataset, clearDatasetOutdated } from "@/modules/configuration/userConfiguration";
 
 export type CreateBrainTemplateKey = "documents" | "support-tickets" | "legal";
 
@@ -49,7 +49,7 @@ export async function applyCreateBrainTemplate(
   const template = CREATE_BRAIN_TEMPLATES.find((t) => t.key === templateKey);
   if (!template) return;
 
-  const cfg = await loadGraphModelsConfig(instance);
+  const cfg = await fetchGraphModelsConfig(instance);
   if (!cfg.customPrompts?.[template.promptName]) {
     await saveCustomPrompt(instance, template.promptName, template.promptText);
   }

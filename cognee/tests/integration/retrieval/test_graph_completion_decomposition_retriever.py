@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import pathlib
 from types import SimpleNamespace
@@ -149,15 +150,11 @@ async def setup_test_environment_empty():
 
 @pytest.fixture
 def session_manager(tmp_path):
-    with patch(
-        "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-        return_value={"data_root_directory": str(tmp_path)},
-    ):
-        from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import FSCacheAdapter
+    from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 
-        adapter = FSCacheAdapter()
-        yield SessionManager(cache_engine=adapter)
-        adapter.cache.close()
+    adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmp_path}/cache.db")
+    yield SessionManager(cache_engine=adapter)
+    asyncio.run(adapter.close())
 
 
 @pytest.mark.asyncio

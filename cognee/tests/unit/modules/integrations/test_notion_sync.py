@@ -5,6 +5,7 @@ from contextlib import ExitStack
 from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, Mock, patch
+from uuid import UUID
 
 import httpx
 import pytest
@@ -31,8 +32,11 @@ def source(number: int) -> str:
 
 def make_credential(*roots):
     return SimpleNamespace(
+        id=UUID("11111111-1111-1111-1111-111111111111"),
+        provider="notion",
+        workspace_id=None,
         provider_account_id=WORKSPACE,
-        user_id="user-1",
+        user_id=UUID("22222222-2222-2222-2222-222222222222"),
         account_label="Topoteretes",
         provider_metadata={"selected_roots": list(roots)},
     )
