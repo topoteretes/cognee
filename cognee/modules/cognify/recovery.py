@@ -27,6 +27,7 @@ from cognee.modules.pipelines.operations.run_tasks_with_telemetry import (
 from cognee.modules.pipelines.run_ownership import claim_run_ownership
 from cognee.modules.users.methods import get_user
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME
 from cognee.shared.utils import send_telemetry
 
 logger = get_logger("cognify.recovery")
@@ -40,7 +41,10 @@ RECOVERY_POLL_SECONDS = 60
 # run_tasks applies when a run errors inline). A pipeline without an entry has
 # nothing to roll back at error time either, so at startup it is only closed.
 ROLLBACK_HANDLERS = {
-    "cognify_pipeline": cognify_rollback_handler,
+    COGNIFY_PIPELINE_NAME: cognify_rollback_handler,
+    # The indexing run stores its chunks under its own run id; the same handler
+    # undoes them and clears its stamps (pipeline_name selects the stamp slot).
+    INDEXING_PIPELINE_NAME: cognify_rollback_handler,
 }
 
 
@@ -115,6 +119,7 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
                                 pipeline_run_id=current.pipeline_run_id,
                                 dataset=dataset,
                                 keep_completed_data=True,
+                                pipeline_name=current.pipeline_name,
                             )
                         await _close_as_abandoned(current, dataset)
                     ownership.closed = True
