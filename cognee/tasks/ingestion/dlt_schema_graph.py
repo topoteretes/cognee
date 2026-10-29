@@ -48,7 +48,7 @@ async def emit_dlt_schema_graph(
             it was read from, named in its description)
         row_records: [{"source_id": str, "table_name": str, "scope": str, "fk_references": [...],
             "column_values": {column: value}, "timestamps": {column: str}}] —
-            column_values is optional and produces one shared ColumnValue node
+            column_values produces one shared ColumnValue node
             per unique (table, column, value) with a column-named edge from the
             row, so rows sharing a value connect through the same node.
             timestamps is optional too: each normalized time string (see
@@ -254,7 +254,7 @@ async def emit_dlt_schema_graph(
                 )
             )
 
-        # Optional cell-level nodes: one shared ColumnValue node per unique
+        # Cell-level nodes: one shared ColumnValue node per unique
         # (table, column, value), edge named after the column. Deterministic
         # ids make rows sharing a value connect through the same node. A node
         # already persisted by an earlier batch of this run (tracked in
