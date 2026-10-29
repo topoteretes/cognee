@@ -7,11 +7,11 @@ from pydantic import BaseModel, Field
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.llm import LLMGateway
-from cognee.shared.logging_utils import get_logger
-from cognee.tasks.memify.global_context_index.bucketing.graph.scoring import (
+from cognee.modules.graph.utils.entity_scoring import (
     compute_idf_from_counts,
     weighted_jaccard,
 )
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage import index_graph_edges
 
 logger = get_logger("cross_connect_entities")

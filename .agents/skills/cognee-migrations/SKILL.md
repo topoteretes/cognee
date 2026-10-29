@@ -21,7 +21,7 @@ It runs:
 
 - at API server startup (and in the Docker `entrypoint.sh` before gunicorn);
 - on the first write in an SDK or CLI process (`remember`, `add`, `cognify`,
-  `improve`, `memify`, memory imports), once per process;
+  `improve`, memory imports), once per process;
 - when you call `await cognee.run_migrations()`.
 
 A fresh database is built by running the whole chain (no stamping). At

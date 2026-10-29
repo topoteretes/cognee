@@ -1,89 +1,83 @@
-"""Top-level serve() orchestrator — connects the SDK to Cognee Cloud or a local instance."""
+"""Top-level serve() orchestrator — connects the SDK to a remote or local Cognee instance."""
 
 from __future__ import annotations
 
 import os
-import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from cognee.api.v1.serve.cloud_client import CloudClient
+    from cognee.api.v1.serve.credentials import CloudCredentials
 
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("serve")
 
 
-async def serve(
-    url: str | None = None,
-    api_key: str | None = None,
-    *,
-    management_url: str | None = None,
-    auth0_domain: str | None = None,
-    auth0_client_id: str | None = None,
-    auth0_audience: str | None = None,
-) -> CloudClient:
+async def serve(url: str | None = None, api_key: str | None = None) -> CloudClient:
     """Connect the local Cognee SDK to a remote or local Cognee instance.
 
-    Two modes:
-
-    **Local / direct mode** — when ``url`` is provided (with optional
-    ``api_key``), connects directly to that instance. No Auth0, no
-    Management API. Use this to connect to a local Cognee backend or
-    any instance where you already have the URL and credentials::
+    Connects to the instance at ``url`` with ``api_key``::
 
         await cognee.serve(url="http://localhost:8000")
         await cognee.serve(url="https://my-instance.cognee.ai", api_key="ck_...")
 
-    **Cloud mode** — when ``url`` is not provided, runs the full Auth0
-    Device Code Flow, discovers the tenant via the Management API, and
-    connects to the cloud instance automatically::
+    Both can also come from ``COGNEE_SERVICE_URL`` / ``COGNEE_API_KEY``. A
+    successful connection is saved, and a later bare ``serve()`` reconnects to
+    the same instance without arguments when that connection used an API key.
+    A connection without a key (a local instance with auth off) is not reused:
+    pass its ``url`` again.
 
-        await cognee.serve()
-
-    In both modes, all operations (remember, recall, improve, forget,
-    visualize) route to the connected instance instead of running locally.
+    Once connected, all operations (remember, recall, improve, forget,
+    visualize) route to the instance instead of running locally.
 
     Args:
-        url: Direct URL of a Cognee instance. Skips Auth0 and tenant
-            discovery. Can also be set via ``COGNEE_SERVICE_URL`` env var.
-        api_key: API key for authentication. Used with ``url`` for direct
-            connections, or via ``COGNEE_API_KEY`` env var.
-        management_url: Override the Management API URL (cloud mode only).
-        auth0_domain: Override the Auth0 domain (cloud mode only).
-        auth0_client_id: Override the Auth0 Device Code client ID.
-        auth0_audience: Override the Auth0 API audience.
+        url: URL of the Cognee instance. Falls back to ``COGNEE_SERVICE_URL``,
+            then to the saved connection.
+        api_key: API key for the instance. Falls back to ``COGNEE_API_KEY``,
+            then to the saved connection.
 
     Returns:
         CloudClient connected to the instance.
 
     Raises:
-        CogneeConfigurationError: When called with no ``url``, no usable saved
-            credentials, and no device-login client ID configured — i.e. there
-            is nothing to connect with. The error explains the available
-            options (pass ``url``/``api_key`` or set ``COGNEE_SERVICE_URL`` /
-            ``COGNEE_API_KEY``). Also raised when the instance is reachable
-            but rejects the API key (401/403 on an authenticated probe) —
-            connecting would otherwise appear to succeed and fail on the
-            first operation.
+        CogneeConfigurationError: When called with no ``url``, no environment
+            variables and no usable saved connection — there is nothing to
+            connect with, and the error explains the options. Also raised when
+            the instance is reachable but rejects the API key (401/403 on an
+            authenticated probe) — connecting would otherwise appear to succeed
+            and fail on the first operation.
     """
-    # Resolve URL from arg or env
     service_url = url or os.getenv("COGNEE_SERVICE_URL")
     resolved_api_key = api_key or os.getenv("COGNEE_API_KEY", "")
 
     if service_url:
         return await _serve_direct(service_url, resolved_api_key)
 
-    return await _serve_cloud(
-        management_url=management_url,
-        auth0_domain=auth0_domain,
-        auth0_client_id=auth0_client_id,
-        auth0_audience=auth0_audience,
+    from cognee.api.v1.serve.credentials import get_credentials_path, load_credentials
+    from cognee.exceptions import CogneeConfigurationError
+
+    creds = load_credentials()
+    # Only a keyed connection is reused: the key is what tells a later bare
+    # serve() that the instance at the saved URL is still the one it was.
+    if creds and creds.service_url and creds.api_key:
+        return await _serve_saved(creds)
+
+    raise CogneeConfigurationError(
+        message=(
+            "cognee.serve() was called without connection details and none were found "
+            f"(no saved connection at {get_credentials_path()}, no environment variables).\n\n"
+            "To connect to a Cognee instance, pass its URL and API key:\n"
+            '    await cognee.serve(url="http://localhost:8000")\n'
+            '    await cognee.serve(url="https://your-instance", api_key="...")\n'
+            "or set the COGNEE_SERVICE_URL and COGNEE_API_KEY environment variables."
+        ),
+        name="ServeConfigurationError",
     )
 
 
 async def _serve_direct(service_url: str, api_key: str = "") -> CloudClient:
-    """Connect directly to a Cognee instance — no Auth0, no Management API."""
+    """Connect to the instance at ``service_url`` and save the connection."""
     from cognee.api.v1.serve.cloud_client import CloudClient
     from cognee.api.v1.serve.credentials import CloudCredentials, save_credentials
     from cognee.api.v1.serve.state import set_remote_client
@@ -119,14 +113,12 @@ async def _serve_direct(service_url: str, api_key: str = "") -> CloudClient:
             name="ServeAuthenticationError",
         )
 
+    # The tenant id links this install's telemetry to the tenant it connected
+    # to (CLO-804); telemetry reads it from the client while connected.
+    client.tenant_id = await client._get_tenant_id()
     # Save so subsequent serve() calls reconnect without args
     save_credentials(
-        CloudCredentials(
-            access_token="",
-            service_url=service_url,
-            api_key=api_key,
-            email="local",
-        )
+        CloudCredentials(service_url=service_url, api_key=api_key, tenant_id=client.tenant_id)
     )
 
     set_remote_client(client)
@@ -135,197 +127,56 @@ async def _serve_direct(service_url: str, api_key: str = "") -> CloudClient:
     return client
 
 
-async def _serve_cloud(
-    management_url: str | None = None,
-    auth0_domain: str | None = None,
-    auth0_client_id: str | None = None,
-    auth0_audience: str | None = None,
-) -> CloudClient:
-    """Full cloud flow: Auth0 Device Code → tenant discovery → API key → connect."""
+def _save_tenant_id(creds: CloudCredentials, tenant_id: str) -> None:
+    """Record the tenant on a saved connection; optional, so never fails serve()."""
+    from cognee.api.v1.serve.credentials import CloudCredentials, save_credentials
+
+    try:
+        save_credentials(
+            CloudCredentials(
+                service_url=creds.service_url, api_key=creds.api_key, tenant_id=tenant_id
+            )
+        )
+    except Exception:
+        logger.debug("Could not save the tenant id with the saved connection", exc_info=True)
+
+
+async def _serve_saved(creds: CloudCredentials) -> CloudClient:
+    """Reconnect to the saved instance, or explain why that no longer works."""
     from cognee.api.v1.serve.cloud_client import CloudClient
-    from cognee.api.v1.serve.credentials import (
-        CloudCredentials,
-        is_token_expired,
-        load_credentials,
-        save_credentials,
-    )
-    from cognee.api.v1.serve.device_auth import (
-        device_code_login,
-        extract_email_from_id_token,
-        refresh_access_token,
-    )
-    from cognee.api.v1.serve.management_api import (
-        create_tenant,
-        get_current_tenant,
-        get_or_create_api_key,
-        get_service_url,
-    )
+    from cognee.api.v1.serve.credentials import get_credentials_path
     from cognee.api.v1.serve.state import set_remote_client
+    from cognee.exceptions import CogneeConfigurationError
 
-    mgmt_url = management_url or os.getenv(
-        "COGNEE_CLOUD_URL", "https://api.dev.cloud.topoteretes.com"
+    client = CloudClient(creds.service_url, creds.api_key)
+    try:
+        # The saved API key must actually authenticate, not just reach the
+        # instance — a stale key on a healthy instance would otherwise
+        # "connect" and fail on the first operation.
+        if await client._health_check() and await client._auth_check() not in (401, 403):
+            logger.info("Using saved connection to %s", creds.service_url)
+            client.tenant_id = creds.tenant_id
+            if not client.tenant_id:
+                # Connections saved before the tenant id was recorded.
+                client.tenant_id = await client._get_tenant_id()
+                if client.tenant_id:
+                    _save_tenant_id(creds, client.tenant_id)
+            set_remote_client(client)
+            print(f"  Connected to Cognee at {creds.service_url}")
+            return client
+    except Exception as e:
+        logger.warning("Saved instance check failed: %s", e, exc_info=True)
+    await client.close()
+
+    raise CogneeConfigurationError(
+        message=(
+            f"cognee.serve() found a saved connection ({get_credentials_path()}), but the "
+            f"saved instance at {creds.service_url} is unreachable or its API key no longer "
+            "works.\n\n"
+            "To connect to a Cognee instance, pass its URL and API key:\n"
+            '    await cognee.serve(url="https://your-instance", api_key="...")\n'
+            "or set the COGNEE_SERVICE_URL and COGNEE_API_KEY environment variables.\n\n"
+            "If the saved connection is stale, delete the file above and connect again."
+        ),
+        name="ServeConfigurationError",
     )
-    mgmt_url = mgmt_url.rstrip("/")
-
-    # Step 1: Check for saved credentials
-    creds = load_credentials()
-
-    if creds and creds.service_url and creds.api_key:
-        client = CloudClient(creds.service_url, creds.api_key)
-        try:
-            # The saved API key must actually authenticate, not just reach the
-            # instance — a stale key on a healthy instance would otherwise
-            # "connect" and fail on the first operation.
-            if await client._health_check() and await client._auth_check() not in (401, 403):
-                logger.info("Using cached credentials for %s (token status ignored)", creds.email)
-                set_remote_client(client)
-                print(f"  Connected to Cognee Cloud at {creds.service_url}")
-                return client
-        except Exception as e:
-            logger.warning("Immediate health check failed: %s", e, exc_info=True)
-        await client.close()
-
-        if not is_token_expired(creds):
-            logger.warning("Saved service URL unreachable, re-authenticating")
-        elif creds.refresh_token:
-            try:
-                logger.info("Refreshing expired token for %s", creds.email)
-                token = await refresh_access_token(
-                    creds.refresh_token,
-                    domain=auth0_domain,
-                    client_id=auth0_client_id,
-                )
-                creds.access_token = token.access_token
-                if token.refresh_token:
-                    creds.refresh_token = token.refresh_token
-                creds.expires_at = time.time() + token.expires_in
-                # Deliberately saved BEFORE the connect checks below — unlike
-                # the validate-then-save order used for new API keys. This
-                # persists issuer-validated token material only (the API key
-                # beside it is already on disk either way), and with rotating
-                # refresh tokens the old token was consumed by this refresh:
-                # deferring the save would strand a dead refresh token in the
-                # file whenever the connect check fails, breaking recovery.
-                save_credentials(creds)
-
-                client = CloudClient(creds.service_url, creds.api_key)
-                if await client._health_check() and await client._auth_check() not in (401, 403):
-                    set_remote_client(client)
-                    print(f"  Connected to Cognee Cloud at {creds.service_url}")
-                    return client
-                await client.close()
-            except Exception as e:
-                logger.warning("Token refresh failed, re-authenticating: %s", e, exc_info=True)
-
-    # Step 2: Device Code Flow — only possible with an Auth0 device client ID.
-    # Fail loudly here rather than mid-flow: a bare serve() with nothing saved
-    # and nothing configured should explain how to connect, not stack-trace
-    # out of the auth internals.
-    if not (auth0_client_id or os.getenv("COGNEE_AUTH0_DEVICE_CLIENT_ID")):
-        from cognee.api.v1.serve.credentials import get_credentials_path
-        from cognee.exceptions import CogneeConfigurationError
-
-        if creds and creds.service_url and creds.api_key:
-            raise CogneeConfigurationError(
-                message=(
-                    f"cognee.serve() found saved credentials ({get_credentials_path()}, "
-                    f"account: {creds.email or 'unknown'}), but the saved instance at "
-                    f"{creds.service_url} is unreachable or the credentials no longer work, "
-                    "and re-authentication is not configured.\n\n"
-                    "To connect to a Cognee instance directly, pass its URL and API key:\n"
-                    '    await cognee.serve(url="https://your-instance", api_key="...")\n'
-                    "or set the COGNEE_SERVICE_URL and COGNEE_API_KEY environment variables.\n\n"
-                    "If the saved credentials are stale, delete the file above and connect again."
-                ),
-                name="ServeConfigurationError",
-            )
-        raise CogneeConfigurationError(
-            message=(
-                "cognee.serve() was called without connection details and none were found "
-                f"(no saved credentials at {get_credentials_path()}, no environment variables).\n\n"
-                "To connect to a Cognee instance, pass its URL and API key:\n"
-                '    await cognee.serve(url="http://localhost:8000")\n'
-                '    await cognee.serve(url="https://your-instance", api_key="...")\n'
-                "or set the COGNEE_SERVICE_URL and COGNEE_API_KEY environment variables."
-            ),
-            name="ServeConfigurationError",
-        )
-
-    print("  Authenticating with Cognee Cloud...")
-    token = await device_code_login(
-        domain=auth0_domain,
-        client_id=auth0_client_id,
-        audience=auth0_audience,
-    )
-
-    access_token = token.access_token
-    email = extract_email_from_id_token(token.id_token) if token.id_token else None
-
-    # Step 3: Discover or create tenant
-    tenant = await get_current_tenant(mgmt_url, access_token)
-    if not tenant:
-        if not email:
-            raise RuntimeError(
-                "Could not extract email from token. "
-                "Ensure the Auth0 app includes 'email' in the scope."
-            )
-        tenant = await create_tenant(mgmt_url, access_token, email)
-
-    # Step 4: Get service URL
-    service_url = await get_service_url(mgmt_url, access_token)
-
-    # Step 5: Get or create API key
-    api_key = await get_or_create_api_key(mgmt_url, access_token)
-
-    # Step 6: Build credentials — saved in Step 7 only after the tenant
-    # instance accepts the key (validate-then-save, matching the direct flow)
-    creds = CloudCredentials(
-        access_token=access_token,
-        refresh_token=token.refresh_token,
-        expires_at=time.time() + token.expires_in,
-        service_url=service_url,
-        api_key=api_key,
-        management_url=mgmt_url,
-        tenant_id=tenant.id,
-        tenant_name=tenant.name,
-        email=email or "",
-    )
-    # Step 7: Connect
-    client = CloudClient(service_url, api_key)
-
-    health_ok = await client._health_check()
-    if not health_ok:
-        logger.warning(
-            "Service URL %s not responding to health check — may still be starting",
-            service_url,
-        )
-
-    # A freshly provisioned key that the tenant instance rejects (e.g. a
-    # masked value returned by the management API's key listing) must fail
-    # here, not on the user's first remember/recall.
-    auth_status = await client._auth_check()
-    if auth_status in (401, 403):
-        from cognee.exceptions import CogneeConfigurationError
-
-        await client.close()
-        raise CogneeConfigurationError(
-            message=(
-                f"Authenticated with Cognee Cloud, but the tenant instance at {service_url} "
-                "rejected the provisioned API key. This is a provisioning problem, not a "
-                "problem with your login — nothing was saved. Please try again; if it "
-                "persists, contact support."
-            ),
-            name="ServeAuthenticationError",
-        )
-
-    # Rejections above discard the fresh Auth0 login (refresh token included),
-    # so a retry repeats the browser flow — the cost of never caching a key
-    # the tenant rejected.
-    save_credentials(creds)
-
-    set_remote_client(client)
-    print(f"  Connected to Cognee Cloud at {service_url}")
-    if email:
-        print(f"  Tenant: {tenant.name} ({email})")
-
-    return client

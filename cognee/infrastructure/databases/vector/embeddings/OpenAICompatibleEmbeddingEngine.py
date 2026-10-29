@@ -31,11 +31,18 @@ from tenacity import (
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
     EmbeddingCredentialsError,
+    EmbeddingEncodingError,
     EmbeddingException,
 )
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
     EmbeddingResult,
+)
+from cognee.infrastructure.databases.vector.embeddings.encoding import (
+    EncodingFormat,
+    decode_embedding,
+    rejects_encoding_format,
+    validate_encoding_format,
 )
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
@@ -97,8 +104,9 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         max_completion_tokens: int | None = None,
         endpoint: str | None = "http://localhost:8080",
         api_key: str | None = "no-key-required",
-        batch_size: int = 36,
+        batch_size: int = 32,
         input_type: str | None = None,
+        encoding_format: EncodingFormat | None = None,
     ):
         self.model = model or "default"
         self.dimensions = dimensions
@@ -110,6 +118,8 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         # that isn't part of the OpenAI embeddings spec. Sent via extra_body
         # so it has no effect on servers that ignore unknown fields.
         self.input_type = input_type
+        # The servers behind this engine vary, so base64 is opt-in only.
+        self.encoding_format = validate_encoding_format(encoding_format) or "float"
         self.tokenizer = self.get_tokenizer()
         init_input_limit(self, max_completion_tokens)
 
@@ -135,6 +145,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         retry=embedding_retry_condition(
             EmbeddingContextWindowTooSmallError,
             EmbeddingCredentialsError,
+            EmbeddingEncodingError,
             ValueError,
             asyncio.CancelledError,
         ),
@@ -173,7 +184,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             create_kwargs = {
                 "model": self.model,
                 "input": sanitized_text,
-                "encoding_format": "float",
+                "encoding_format": self.encoding_format,
             }
             if self.input_type:
                 create_kwargs["extra_body"] = {"input_type": self.input_type}
@@ -183,7 +194,14 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                     self._client.embeddings.create(**create_kwargs),
                     timeout=300.0,
                 )
-            embeddings = [item.embedding for item in response.data]
+            embeddings = [
+                decode_embedding(item.embedding, self.encoding_format) for item in response.data
+            ]
+
+        except EmbeddingEncodingError:
+            # Terminal: the server answered in another format, so a retry gets the
+            # same answer. Reaches tenacity unwrapped, like EmbeddingCredentialsError.
+            raise
 
         except Exception as error:
             # A proxy spend cap is terminal, and none of the branches below can
@@ -285,6 +303,13 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                 str(error),
                 self.endpoint,
             )
+            if (
+                self.encoding_format == "base64"
+                and isinstance(error, (openai.BadRequestError, openai.UnprocessableEntityError))
+                and rejects_encoding_format(error)
+            ):
+                # Terminal, like a list reply: the server said it will not do base64.
+                raise EmbeddingEncodingError(f"the server rejected the request: {error}") from error
             raise EmbeddingException(
                 "Embedding failed. Verify EMBEDDING_ENDPOINT and server status."
             ) from error

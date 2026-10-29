@@ -1,6 +1,7 @@
 "use client";
 
 import type { DatasetProcessing } from "@/modules/datasets/useDatasetProcessing";
+import { fmtCount } from "@/utils/formatCount";
 
 export default function ProcessingSummary({ data, failed, running, error, onRefresh }: {
   data?: DatasetProcessing;
@@ -14,7 +15,7 @@ export default function ProcessingSummary({ data, failed, running, error, onRefr
     <section aria-label="Processing progress" style={{ padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.03)", flexShrink: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between" }}>
         <strong style={{ fontSize: 13, color: "#EDECEA" }}>
-          {data ? `${data.completed.toLocaleString()} of ${data.total.toLocaleString()} ready to search` : error ? "Processing progress unavailable" : "Loading processing progress…"}
+          {data ? `${fmtCount(data.completed)} of ${fmtCount(data.total)} ready to search` : error ? "Processing progress unavailable" : "Loading processing progress…"}
         </strong>
         <button type="button" onClick={onRefresh} title="Refresh processing progress" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, padding: "3px 10px", fontSize: 11, color: "#EDECEA", cursor: "pointer" }}>Refresh</button>
       </div>
@@ -23,7 +24,7 @@ export default function ProcessingSummary({ data, failed, running, error, onRefr
           <div style={{ height: "100%", width: `${percent}%`, background: "#BC9BFF", transition: "width 250ms" }} />
         </div>
         <div style={{ fontSize: 12, color: "rgba(237,236,234,0.7)" }}>
-          {data.pending.toLocaleString()} remaining
+          {fmtCount(data.pending)} remaining
           {running ? " · Processing in progress" : failed ? " · Last processing run failed" : data.pending > 0 ? " · Not yet ready to search" : data.total > 0 ? " · All imported items processed" : " · No items imported yet"}
         </div>
       </>}

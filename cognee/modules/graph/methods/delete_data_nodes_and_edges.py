@@ -15,6 +15,7 @@ from cognee.modules.graph.methods import (
     get_global_data_related_nodes,
     get_orphaned_nodeset_labels_for_dataset,
     get_shared_slugs_losing_dataset_anchor,
+    has_data_related_nodes,
 )
 from cognee.modules.graph.methods.delete_from_graph_and_vector import (
     delete_from_graph_and_vector,
@@ -44,6 +45,10 @@ async def delete_data_nodes_and_edges(
     provenance_result = await try_delete_data_by_graph_provenance(dataset_id, data_id)
     if provenance_result is not None:
         return DeletedGraphElements.from_source_ref_removal(provenance_result)
+
+    # Read before the ledger rows are removed: the id can own only nodes other
+    # data shares, which survive and are absent from ``affected_nodes``.
+    owned = await has_data_related_nodes(dataset_id, data_id)
 
     if backend_access_control_enabled():
         affected_nodes = await get_data_related_nodes(dataset_id, data_id)
@@ -125,4 +130,6 @@ async def delete_data_nodes_and_edges(
                 exc_info=True,
             )
 
-    return DeletedGraphElements.from_ledger_rows(affected_nodes or [], affected_edges or [])
+    return DeletedGraphElements.from_ledger_rows(
+        affected_nodes or [], affected_edges or [], owned=owned
+    )

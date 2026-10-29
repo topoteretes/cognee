@@ -27,7 +27,10 @@ PASSAGE_HEADER_KEY = "_passage_header"
 
 @dataclass
 class ChunkConflicts:
-    """What one chunk's citations say: its source document, and conflict id -> explanation."""
+    """The stored conflicts that cite one chunk, conflict id -> explanation.
+
+    ``document`` and ``effective_date`` name the chunk's source as its first citation records it.
+    """
 
     document: str | None = None
     effective_date: str | None = None
@@ -46,7 +49,7 @@ def _hit_payload(item) -> dict:
 # --- reading the stored conflicts -------------------------------------------
 
 
-def _citations_by_chunk(nodes, edges, *, requested_ids: set[str]) -> dict[str, ChunkConflicts]:
+def _conflicts_by_chunk(nodes, edges, *, requested_ids: set[str]) -> dict[str, ChunkConflicts]:
     """Group the conflicts citing each requested chunk; the first citation sets the header."""
     conflict_properties = {str(node_id): properties for node_id, properties in nodes}
     citations = sorted(
@@ -81,7 +84,7 @@ async def get_chunk_conflicts(graph_engine, chunk_ids: list[str]) -> dict[str, C
     failed mid-run, or ``review_conflicts_pipeline`` was driven directly, each of which
     leaves stored conflicts the guard would silently hide. Asking the graph for a
     ``FactConflict`` instead costs the unindexed type scan the write path pays. The id
-    check in ``_citations_by_chunk`` is the only guard that cannot go stale.
+    check in ``_conflicts_by_chunk`` is the only guard that cannot go stale.
     """
     if not chunk_ids:
         return {}
@@ -89,7 +92,7 @@ async def get_chunk_conflicts(graph_engine, chunk_ids: list[str]) -> dict[str, C
         nodes, edges = await graph_engine.get_neighborhood(
             chunk_ids, depth=1, edge_types=[CONFLICT_CITES]
         )
-        return _citations_by_chunk(nodes, edges, requested_ids=set(chunk_ids))
+        return _conflicts_by_chunk(nodes, edges, requested_ids=set(chunk_ids))
     except Exception as error:
         logger.warning("Unable to load chunk conflicts: %s", error, exc_info=True)
         return {}
@@ -126,13 +129,13 @@ async def attach_chunk_conflicts(hits, *, graph_engine=None, summaries: bool = F
         return
     try:
         engine = graph_engine or await get_graph_engine()
-        cited_by_chunk_id = await get_chunk_conflicts(engine, list(payloads_by_chunk_id))
+        conflicts_by_chunk_id = await get_chunk_conflicts(engine, list(payloads_by_chunk_id))
     except Exception:
         logger.warning("Could not read chunk conflicts", exc_info=True)
         return
-    for chunk_id, cited in cited_by_chunk_id.items():
-        explanations = [cited.conflicts[key] for key in sorted(cited.conflicts)]
-        header = passage_header(cited.document, cited.effective_date)
+    for chunk_id, chunk_conflicts in conflicts_by_chunk_id.items():
+        explanations = [chunk_conflicts.conflicts[key] for key in sorted(chunk_conflicts.conflicts)]
+        header = passage_header(chunk_conflicts.document, chunk_conflicts.effective_date)
         for hit_payload in payloads_by_chunk_id[chunk_id]:
             hit_payload["conflicts"] = list(explanations)
             hit_payload[PASSAGE_HEADER_KEY] = header

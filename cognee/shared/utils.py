@@ -429,6 +429,53 @@ def _get_api_key_fingerprint() -> str:
     return _get_api_key_tracking_id()
 
 
+# Only Cognee Cloud hosts are sent as-is; a self-hosted server's hostname can be
+# an internal name or IP, so it is reduced to a category.
+_CLOUD_HOST_SUFFIX = ".cognee.ai"
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _connected_host_label(service_url: str) -> str:
+    from urllib.parse import urlparse
+
+    host = urlparse(service_url).hostname or ""
+    if host.endswith(_CLOUD_HOST_SUFFIX):
+        return host
+    if host in _LOCAL_HOSTS:
+        return "localhost"
+    return "self_hosted"
+
+
+def _get_connected_tenant() -> dict[str, str]:
+    """Return the tenant of this process's active ``serve()`` connection, if any.
+
+    ``serve(url=..., api_key=...)`` keeps the ``tenant_id`` the instance's
+    ``/api/v1/users/me`` reports on the connected client. On a Cognee Cloud
+    instance that is the control-plane ``tenants.id``, so analytics can join an
+    install's ``persistent_id`` to its cloud tenant (CLO-804); self-hosted
+    servers report their own local tenant, told apart by ``connected_host``.
+
+    Read from memory, never from disk: events are tagged only while the
+    process is connected, not after ``disconnect()`` or in a process that never
+    called ``serve()``. Never sends the API key, and a self-hosted hostname is
+    reduced to ``self_hosted`` / ``localhost``.
+    """
+    try:
+        from cognee.api.v1.serve.state import peek_remote_client
+
+        client = peek_remote_client()
+        if client is None or not client.tenant_id:
+            return {}
+        # Parsed inside the guard: a malformed URL can raise.
+        return {
+            "connected_tenant_id": str(client.tenant_id),
+            "connected_host": _connected_host_label(client.service_url),
+        }
+    except Exception:
+        logger.debug("Ignoring exception in _get_connected_tenant", exc_info=True)
+        return {}
+
+
 def _resolve_identity(user) -> tuple[str, str | None]:
     """Resolve a telemetry caller into ``(user_id, tenant_id)`` strings.
 
@@ -496,6 +543,17 @@ def send_telemetry(
     - **api_key_tracking_id**: Stable pseudonymous ID derived from the full
       LLM API key when configured. Use this to group activity by key without
       sending the key or visible key fragments.
+    - **connected_tenant_id** / **connected_host**: Only when the install has
+      connected to an instance via ``serve()``: the tenant id it reported and
+      the instance host (a ``*.cognee.ai`` host for Cognee Cloud, otherwise
+      ``self_hosted`` or ``localhost``). Absent otherwise.
+    - **is_agent** / **agent_owner_id** / **agent_plugin**: Whether ``user``
+      is an agent (a child user with its own API key, such as a provisioned
+      plugin); ``user_id`` is then the agent itself. ``agent_owner_id`` is
+      the human user who owns it and ``agent_plugin`` a known plugin key or
+      ``"custom"``; both ``None`` otherwise. Read off the ``User`` model only:
+      a bare id cannot be told apart from a human's without a database
+      lookup, so pass the model when you hold it.
     """
     if additional_properties is None:
         additional_properties = {}
@@ -514,10 +572,14 @@ def send_telemetry(
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
     api_key_tracking_id = _get_api_key_tracking_id()
+    connected_tenant = _get_connected_tenant()
     # Where this telemetry event originates. Defaults to "sdk"; deployments such
     # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
     # segmented by origin.
     origin = telemetry_origin()
+    from cognee.modules.integrations.agent_identity import agent_telemetry_properties
+
+    agent_properties = agent_telemetry_properties(user if user is not None else user_id)
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,
@@ -531,6 +593,8 @@ def send_telemetry(
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
+            **connected_tenant,
+            "is_agent": agent_properties["is_agent"],
         },
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
@@ -541,6 +605,8 @@ def send_telemetry(
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
             "telemetry_origin": origin,
+            **connected_tenant,
+            **agent_properties,
             **additional_properties,
         },
     }

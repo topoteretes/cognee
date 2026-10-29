@@ -63,7 +63,8 @@ def _context_evidence(retriever_instance, retrieved_objects, kwargs: dict) -> li
         return []
     dataset = kwargs.get("dataset")
     try:
-        return evidence_method(retrieved_objects, dataset_id=getattr(dataset, "id", None))
+        # None from a retriever means "no evidence", like []; callers iterate the result.
+        return evidence_method(retrieved_objects, dataset_id=getattr(dataset, "id", None)) or []
     except Exception as error:
         logger.warning("Unable to build structured context evidence: %s", error, exc_info=True)
         return []
