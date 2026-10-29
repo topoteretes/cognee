@@ -224,16 +224,17 @@ class AwsKmsKeyProvider:
         )
 
     def unwrap_data_key(self, wrapped: bytes, key_id: str) -> bytes:
-        try:
-            response = self._kms().decrypt(
-                CiphertextBlob=wrapped,
-                KeyId=key_id,
-                EncryptionContext=KMS_ENCRYPTION_CONTEXT,
-            )
-        except Exception as error:  # botocore ClientError, credentials, network
-            raise FileDecryptionError(
-                f"AWS KMS could not unwrap the data key under '{key_id}': {error}"
-            ) from error
+        # Errors propagate as they are. A missing boto3 is a
+        # FileEncryptionConfigurationError from _kms() with its remediation; a
+        # refused Decrypt is botocore's ClientError carrying AWS's own code
+        # (AccessDeniedException, InvalidCiphertextException, ...). Wrapping
+        # either as a FileDecryptionError would blame the file for a problem
+        # with the host or the account.
+        response = self._kms().decrypt(
+            CiphertextBlob=wrapped,
+            KeyId=key_id,
+            EncryptionContext=KMS_ENCRYPTION_CONTEXT,
+        )
         return bytes(response["Plaintext"])
 
 
