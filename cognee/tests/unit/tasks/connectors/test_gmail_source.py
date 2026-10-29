@@ -229,7 +229,7 @@ def test_parse_message_emits_title_and_content_for_document_ingestion():
     ]
 
 
-def test_parse_message_content_falls_back_to_snippet_for_html_only_mail():
+def test_parse_message_preserves_html_body_facts_beyond_the_snippet():
     msg = {
         "id": "m5",
         "threadId": "t",
@@ -238,12 +238,132 @@ def test_parse_message_content_falls_back_to_snippet_for_html_only_mail():
         "payload": {
             "mimeType": "text/html",
             "headers": [{"name": "Subject", "value": "News"}],
-            "body": {"data": _b64("<p>html only</p>")},
+            "body": {
+                "data": _b64(
+                    "<p>Review plan</p><p>November 12, 2026 at 14:30 UTC.</p>"
+                    "<p>Owner: Mira Chen &amp; José.</p>"
+                )
+            },
         },
     }
     row = parse_message(msg)
 
-    assert row["content"].endswith("\n\nPreview of an HTML newsletter")
+    assert row["content"].endswith(
+        "\n\nReview plan\nNovember 12, 2026 at 14:30 UTC.\nOwner: Mira Chen & José."
+    )
+    assert "Preview of an HTML newsletter" not in row["content"]
+
+
+@pytest.mark.parametrize(
+    "html",
+    ["", " \n ", "<p>&nbsp;</p>", "<script>secret()</script><style>secret{}</style>"],
+)
+def test_parse_message_keeps_snippet_when_html_has_no_readable_text(html):
+    message = {
+        "id": "empty_html",
+        "snippet": "Useful preview",
+        "payload": {"mimeType": "text/html", "body": {"data": _b64(html)}},
+    }
+    assert parse_message(message)["content"] == "Useful preview"
+
+
+def test_parse_message_html_preserves_blocks_and_excludes_non_body_content():
+    message = {
+        "id": "html_layout",
+        "payload": {
+            "mimeType": "text/html",
+            "body": {
+                "data": _b64(
+                    "<head><title>not the body</title><style>hidden_style</style></head>"
+                    "<body><p>Review <strong>plan</strong></p>"
+                    "<ul><li>First task</li><li>Second task</li></ul>"
+                    "<table><tr><td>Date</td><td>Nov 12</td></tr>"
+                    "<tr><th>Time</th><td>14:30 UTC</td></tr></table>"
+                    "<script>hidden_script</script><!-- hidden_comment -->"
+                    "<template>hidden_template</template>"
+                    '<p><img src="https://example.invalid/pixel">'
+                    '<a href="https://example.invalid/tracker">Open review</a></p></body>'
+                )
+            },
+        },
+    }
+    content = parse_message(message)["content"]
+    assert content == "Review plan\nFirst task\nSecond task\nDate Nov 12\nTime 14:30 UTC\nOpen review"
+    assert parse_message(message)["content"] == content
+
+
+def test_parse_message_tolerates_unclosed_html_tags():
+    message = {
+        "id": "unclosed_html",
+        "payload": {
+            "mimeType": "text/html",
+            "body": {"data": _b64("<div>Review<br>Thursday <b>14:30 UTC")},
+        },
+    }
+    assert parse_message(message)["content"] == "Review\nThursday 14:30 UTC"
+
+
+@pytest.mark.parametrize(
+    "attachment",
+    [
+        {"mimeType": "text/plain", "filename": "notes.txt", "body": {"data": _b64("secret")}},
+        {
+            "mimeType": "text/html",
+            "filename": "notes.html",
+            "body": {"data": _b64("<p>secret</p>")},
+        },
+        {
+            "mimeType": "multipart/mixed",
+            "headers": [{"name": "Content-Disposition", "value": "ATTACHMENT; filename=x"}],
+            "parts": [{"mimeType": "text/plain", "body": {"data": _b64("secret")}}],
+        },
+        {
+            "mimeType": "message/rfc822",
+            "parts": [{"mimeType": "text/plain", "body": {"data": _b64("secret")}}],
+        },
+    ],
+)
+def test_parse_message_excludes_attachment_subtrees(attachment):
+    message = {
+        "id": "with_attachment",
+        "payload": {
+            "mimeType": "multipart/mixed",
+            "parts": [
+                attachment,
+                {
+                    "mimeType": "multipart/related",
+                    "parts": [
+                        {"mimeType": "text/html", "body": {"data": _b64("<p>Real body</p>")}}
+                    ],
+                },
+            ],
+        },
+    }
+    assert parse_message(message)["content"] == "Real body"
+
+
+def test_parse_message_ignores_blank_plaintext_alternative():
+    message = {
+        "id": "blank_plain",
+        "snippet": "Preview",
+        "payload": {
+            "mimeType": "multipart/alternative",
+            "parts": [
+                {"mimeType": "text/plain", "body": {"data": _b64("  \n ")}},
+                {"mimeType": "text/html", "body": {"data": _b64("<p>Full body</p>")}},
+            ],
+        },
+    }
+    assert parse_message(message)["content"] == "Full body"
+
+
+def test_parse_message_attachment_id_only_body_keeps_snippet():
+    message = {
+        "id": "external_body",
+        "snippet": "Preview",
+        "payload": {"mimeType": "text/html", "body": {"attachmentId": "body_part", "size": 100}},
+    }
+    assert parse_message(message)["content"] == "Preview"
 
 
 def test_parsed_message_becomes_a_non_empty_document():
@@ -675,6 +795,81 @@ def test_e2e_changing_labels_backfills_existing_messages(tmp_path):
     # Keeping the same selection takes the incremental path on the next run.
     service.get_errors = {"project": 503}
     pipeline.run(gmail_source(service=service, label_ids=["Label_project"]))
+
+
+def test_e2e_full_refresh_enriches_existing_mail_then_resumes_history(tmp_path, monkeypatch):
+    import cognee.tasks.ingestion.connectors.gmail as gmail_module
+
+    dlt = pytest.importorskip("dlt")
+    pipeline = dlt.pipeline(
+        pipeline_name="gmail_html_refresh",
+        destination=dlt.destinations.sqlalchemy(f"sqlite:///{tmp_path / 'gmail.db'}"),
+        dataset_name="gmail_html",
+        pipelines_dir=str(tmp_path / "pipelines"),
+    )
+    message = _make_message("html", subject="Review")
+    message["snippet"] = "Preview"
+    message["payload"].update(
+        mimeType="text/html", body={"data": _b64("<p>Owner: Mira Chen. Review: Nov 12.</p>")}
+    )
+    service = FakeGmailService(messages=[message], profile_history_id="500")
+    parse = gmail_module.parse_message
+    # Stage the old snippet-only representation with real cursor/inventory state.
+    with monkeypatch.context() as legacy:
+        legacy.setattr(
+            gmail_module,
+            "parse_message",
+            lambda item: {**parse(item), "content": item["snippet"]},
+        )
+        pipeline.run(gmail_source(service=service))
+
+    def contents():
+        with pipeline.sql_client() as sql:
+            return sql.execute_sql("SELECT id, content FROM gmail_messages")
+
+    assert contents() == [("html", "Preview")]
+    pipeline.run(gmail_source(service=service))
+    assert contents() == [("html", "Preview")]
+    assert len(service.history_calls) == 1
+
+    service.profile_history_id = "700"
+    pipeline.run(gmail_source(service=service, full_refresh=True))
+    rows = contents()
+    assert len(rows) == 1
+    assert rows[0][0] == "html"
+    assert "Owner: Mira Chen. Review: Nov 12." in rows[0][1]
+    assert len(service.history_calls) == 1
+
+    service.history_response = {"history": [], "historyId": "700"}
+    pipeline.run(gmail_source(service=service))
+    assert service.history_calls[-1]["startHistoryId"] == "700"
+    assert contents() == rows
+
+
+def test_e2e_failed_full_refresh_preserves_staged_mail_and_cursor(tmp_path):
+    dlt = pytest.importorskip("dlt")
+    from dlt.pipeline.exceptions import PipelineStepFailed
+
+    pipeline = dlt.pipeline(
+        pipeline_name="gmail_refresh_failure",
+        destination=dlt.destinations.sqlalchemy(f"sqlite:///{tmp_path / 'gmail.db'}"),
+        dataset_name="gmail_failure",
+        pipelines_dir=str(tmp_path / "pipelines"),
+    )
+    service = FakeGmailService(messages=[_make_message("a", body="Original")])
+    pipeline.run(gmail_source(service=service))
+
+    service.messages["a"] = _make_message("a", body="Changed")
+    service.profile_history_id = "900"
+    service.get_errors = {"a": 503}
+    with pytest.raises(PipelineStepFailed):
+        pipeline.run(gmail_source(service=service, full_refresh=True))
+    with pipeline.sql_client() as sql:
+        assert "Original" in sql.execute_sql("SELECT content FROM gmail_messages")[0][0]
+
+    service.get_errors.clear()
+    pipeline.run(gmail_source(service=service))
+    assert service.history_calls[-1]["startHistoryId"] == "500"
 
 
 # ---------------------------------------------------------------------------
