@@ -31,13 +31,18 @@ prebuilt `cognee/cognee:main` image or `docker compose up` from the repo).
 `REQUIRE_AUTHENTICATION=false` is ignored while access control is on; to turn
 auth off you must set `ENABLE_BACKEND_ACCESS_CONTROL=false`.
 
+Behind a TLS-terminating proxy set `AUTH_TOKEN_COOKIE_SECURE=true` so the auth cookie
+gets the `Secure` attribute; leave it off for plain `http://localhost`, where a browser
+refuses to store a Secure cookie.
+
 ## Connecting clients to the running server
 
 - **SDK / CLI against the server** (instead of embedded local mode):
 
   ```bash
   cognee-cli serve --url http://localhost:8000        # local instance
-  cognee-cli serve                                    # cognee cloud (device flow)
+  cognee-cli serve --url https://... --api-key ck_... # cognee cloud instance
+  cognee-cli serve                                    # reconnect to the saved keyed instance
   cognee-cli serve --logout                           # disconnect
   ```
 

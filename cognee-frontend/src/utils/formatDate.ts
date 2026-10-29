@@ -33,6 +33,25 @@ export function formatRelativeTime(iso?: string | null): string {
   return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+const CLOCK_TIME_FORMAT = new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit" });
+const CLOCK_DATE_TIME_FORMAT = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+/**
+ * "1:27 PM" for a timestamp from today, "Sep 30, 1:27 PM" otherwise — the one
+ * formatter for any clock time this feature shows next to a relative "ago"
+ * or duration figure (a session's start, a connection's first-seen date).
+ * Two ad-hoc formatters here used to disagree on both the day cutoff and the
+ * hour style (13:27 vs 1:27 PM) for what was the same instant. Null when
+ * `iso` is missing or fails to parse, same as `formatDate`.
+ */
+export function formatClockTime(iso: string | null, now: Date): string | null {
+  if (!iso) return null;
+  const d = parseServerIso(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  return (sameDay ? CLOCK_TIME_FORMAT : CLOCK_DATE_TIME_FORMAT).format(d);
+}
+
 export function durationSeconds(s: { started_at: string | null; ended_at: string | null; last_activity_at: string | null }): number {
   if (!s.started_at) return 0;
   const start = new Date(s.started_at).getTime();

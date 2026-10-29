@@ -25,9 +25,6 @@ const PIPELINE_SETTINGS_CONFIG_NAME = "pipeline-settings";
 const STORAGE_KEY = "cognee-pipeline-settings";
 
 export function getPipelineSettingsFromStorage(): PipelineSettings {
-  if (typeof window === "undefined") {
-    return { ...DEFAULT_PIPELINE_SETTINGS };
-  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -40,7 +37,6 @@ export function getPipelineSettingsFromStorage(): PipelineSettings {
 }
 
 export function storePipelineSettingsLocally(settings: PipelineSettings): void {
-  if (typeof window === "undefined") return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   } catch {

@@ -14,13 +14,22 @@ task's output, `enriches`, `ctx` injection, `Drop`) are documented in
 |---|---|---|
 | 1 | `documents.classify_documents` | `Data` rows → typed `Document`s (`TextDocument`, `PdfDocument`, …) |
 | 2 | `documents.extract_chunks_from_documents` | `Document` → `DocumentChunk`s (uses `cognee.modules.chunking`) |
-| 3 | `graph.extract_graph_from_data` | chunks → chunks with `Entity`/`EntityType` nodes and edges attached (LLM, or GLiNER with `extractor="gliner_demo"`) |
-| 4 | `summarization.summarize_text` | chunks → `TextSummary` nodes (LLM) |
-| 5 | `storage.add_data_points` | data points → written to graph + vector DB (+ edge evidence) |
-| 6 | `provenance.record_provenance` | audit-ledger rows, when `PROVENANCE_TRACKING=true` |
+| 3 | `storage.find_indexed_chunks` | chunks the indexing pipeline already stored and embedded → their ids go to `ctx.extras`, and step 6 upserts them without embedding them again. `EARLY_CHUNK_INDEXING=false` or `cognify(early_chunk_indexing=False)` drops the step |
+| 4 | `graph.extract_graph_from_data` | chunks → chunks with `Entity`/`EntityType` nodes and edges attached (LLM, or GLiNER with `extractor="gliner_demo"`) |
+| 5 | `summarization.summarize_text` | chunks → `TextSummary` nodes (LLM) |
+| 6 | `storage.add_data_points` | data points → written to graph + vector DB (+ edge evidence) |
+| 7 | `provenance.record_provenance` | audit-ledger rows, when `PROVENANCE_TRACKING=true` |
+
+Before that list runs, `cognify()` runs the `indexing_pipeline` over the same
+documents: steps 1 and 2, then `storage.index_chunks_for_search`, which writes
+the chunk and document nodes and embeds the chunk text, so chunk-based searches
+answer while extraction runs (`cognee/modules/cognify/memory_pipelines.py`).
 
 The dlt route adds
 `ingestion.purge_stale_dlt_source_artifacts` and `ingestion.extract_dlt_source_edges`.
+After each dataset's run, `cognify()` reconciles the structure document sources describe
+(`ingestion.reconcile_document_structure`: `child_of` edges between a row and its parent, from
+`system_metadata["structure"]`) and then compacts the vector store.
 `improve()` stages run the pre-assembled lists in `cognee/memify_pipelines/`.
 
 ## Subpackages
@@ -35,12 +44,12 @@ The dlt route adds
 | `documents/` | Classify `Data` rows into `Document` types and chunk them | `classify_documents`, `extract_chunks_from_documents` |
 | `entity_completion/` | Pluggable entity extractors (`entity_extractors/`: LLM-based and regex-based) | `LLMEntityExtractor`, `RegexEntityExtractor` |
 | `graph/` | Extract entities/relations into the graph; the GLiNER (`graph/gliner_demo/`) and code (`extract_graph_from_code`) variants | `extract_graph_from_data`, `extract_graph_from_code` |
-| `ingestion/` | Ingest and normalise inputs for `add()`: resolve paths/directories, save to storage, dedup, dlt sources, relational-DB migration | `ingest_data`, `resolve_data_directories`, `save_data_item_to_storage`, `resolve_dlt_sources`, `migrate_relational_database` |
+| `ingestion/` | Ingest and normalise inputs for `add()`: resolve paths/directories, save to storage, dedup, dlt sources, relational-DB migration | `ingest_data`, `resolve_data_directories`, `save_data_item_to_storage`, `resolve_dlt_sources`, `migrate_relational_database`, `reconcile_document_structure` |
 | `memify/` | Tasks behind the `improve()` stages: session and agent-trace persistence, feedback weights, entity dedup/consolidation, fact-conflict review, global context index | `cognify_session`, `apply_feedback_weights`, `extract_feedback_qas`, `detect_entity_duplicates`, `review_conflicts`, … |
 | `presort/` | Pre-organise a folder before ingestion (`remember(dry_run="presort")`): classify, hash, dedup, version and PII detection, proposed groupings | `build_report`, `classify_files`, `detect_duplicates`, `detect_pii`, `group_files`, `apply_presort_graph` |
 | `provenance/` | Write audit-ledger provenance entries for a pipeline run | `record_provenance` |
 | `schema/` | Ingest a relational database schema as graph nodes | `ingest_database_schema` |
-| `storage/` | Persist data points: graph + vector writes, index rebuilds | `add_data_points`, `index_data_points`, `index_graph_edges` |
+| `storage/` | Persist data points: graph + vector writes, index rebuilds, the indexing pipeline's chunk write | `add_data_points`, `find_indexed_chunks`, `index_chunks_for_search`, `index_data_points`, `index_graph_edges` |
 | `summarization/` | Chunk summaries (LLM, or relations plus entity types) and code summaries | `summarize_text`, `build_summary_from_extraction`, `summarize_code` |
 | `translation/` | Translate chunk content before extraction (provider-pluggable) | `TranslationConfig`, `TranslatedContent` |
 | `web_scraper/` | Fetch and crawl web pages for URL ingestion | `fetch_page_content`, `DefaultUrlCrawler` |
