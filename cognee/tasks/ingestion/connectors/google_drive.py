@@ -382,8 +382,9 @@ class UnreadableFileError(Exception):
 
 
 # Failures a rerun in the same environment cannot cure, so they must not hold the Changes
-# cursor back. A missing loader or LibreOffice also schedules a full scan, so installing it
-# is enough to pick up unchanged files on the next sync.
+# cursor back. A full scan retries the files of a format without a loader, or of a legacy
+# Office format without LibreOffice, once it can be read, so installing it is enough to
+# pick up unchanged files on the next sync.
 _PERMANENT_REASONS = {
     ExportTooLargeError: "failed_export_too_large",
     LoaderUnavailableError: "failed_loader_unavailable",
@@ -442,6 +443,20 @@ def _loader_registered(extension: str) -> bool:
 def _libreoffice_available() -> bool:
     """Whether ``soffice`` or ``libreoffice`` is on PATH, which both Office loaders need."""
     return shutil.which("soffice") is not None or shutil.which("libreoffice") is not None
+
+
+def _registered_loader_extensions() -> list[str]:
+    """The extensions of ``_LOADER_EXTENSIONS`` that can be read right now.
+
+    A registered loader lists the extension and, for the binary Office formats, LibreOffice
+    is on PATH, so installing LibreOffice is a change a later sync scans again for.
+    """
+    libreoffice = _libreoffice_available()
+    return sorted(
+        ext
+        for ext in set(_LOADER_EXTENSIONS.values())
+        if _loader_registered(ext) and (libreoffice or ext not in _LEGACY_OFFICE_EXTENSIONS)
+    )
 
 
 def _load_with_loader_engine(path: str) -> str:
@@ -654,12 +669,17 @@ def _iter_rows(
     page_token = state.get("page_token")
     known_ids = set(state.get("known_ids", []))
     versions = dict(state.get("versions", {}))
+    # Files in a format no loader handled were skipped, not read. A full scan retries them
+    # once a loader for that format gets registered (an extra was installed), and not before:
+    # a format no installed extra can load must not keep the folder in full-scan mode.
+    loadable = _registered_loader_extensions()
+    newly_loadable = not set(loadable) <= set(state.get("loader_extensions", []))
 
     def fetch_row(client, file_meta):
         local: dict[str, int] = {}
         return _file_to_row(client, file_meta, config, local), local
 
-    if page_token is None or format_version < FORMAT_SUPPORT_VERSION:
+    if page_token is None or format_version < FORMAT_SUPPORT_VERSION or newly_loadable:
         yielded = 0
         present_ids = set()
         fetched_versions = {}
@@ -717,9 +737,10 @@ def _iter_rows(
             yield {"id": file_id, "_deleted": True}
         state["known_ids"] = sorted(present_ids)
         state["versions"] = fetched_versions
-        if not _blocks_cursor(stats) and not stats.get("failed_loader_unavailable"):
+        if not _blocks_cursor(stats):
             state["page_token"] = start_token
             state["format_version"] = FORMAT_SUPPORT_VERSION
+            state["loader_extensions"] = loadable
         logger.info("Google Drive: full scan yielded %d file(s).", yielded)
         return
 
@@ -820,9 +841,9 @@ def _iter_rows(
     state["known_ids"] = sorted(known_ids)
     state["versions"] = versions
     if stats.get("failed_loader_unavailable"):
-        # Installation can change without a Drive edit. Re-scan next time to
-        # retry these files, retaining successful versions to avoid re-downloading them.
-        state.pop("format_version", None)
+        # These files were skipped with the loaders registered now, so a later install must
+        # scan again even if an earlier run had registered more.
+        state["loader_extensions"] = loadable
     if not _blocks_cursor(stats):
         state["page_token"] = new_page_token
     logger.info(

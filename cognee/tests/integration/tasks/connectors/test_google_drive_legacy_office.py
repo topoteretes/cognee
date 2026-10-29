@@ -194,15 +194,17 @@ def test_installing_libreoffice_retries_the_unchanged_file(tmp_path, legacy_case
         pipeline.run(source)
         assert source.cognee_sync_stats["failed_loader_unavailable"] == 1
     assert case.downloads == []  # the missing LibreOffice is found before the download
-    assert _state(pipeline)["page_token"] == "t0"
-    assert _state(pipeline)["format_version"] == 1
+    # The scan finished, so the cursor moves; the legacy formats are recorded as unreadable.
+    assert _state(pipeline)["page_token"] == "t1"
+    assert _state(pipeline)["format_version"] == drive.FORMAT_SUPPORT_VERSION
+    assert ".doc" not in _state(pipeline)["loader_extensions"]
     assert _state(pipeline)["versions"] == {"existing": "v1"}
     assert [row["id"] for row in _rows(pipeline)] == ["existing"]
     case.downloads.clear()
-    pipeline.run(case.source())
+    pipeline.run(case.source())  # LibreOffice is back: legacy formats are readable again
     assert case.downloads == ["legacy"]
     assert [row["id"] for row in _rows(pipeline)] == ["existing", "legacy"]
-    assert _state(pipeline)["format_version"] == drive.FORMAT_SUPPORT_VERSION
+    assert ".doc" in _state(pipeline)["loader_extensions"]
 
 
 def test_parallel_legacy_conversions_keep_separate_profiles(legacy_case):

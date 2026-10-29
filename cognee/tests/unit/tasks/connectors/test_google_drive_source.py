@@ -175,6 +175,12 @@ def _config(**overrides):
 
 
 @pytest.fixture(autouse=True)
+def no_registered_loaders(monkeypatch):
+    # The installed extras decide what registers; tests that care set their own.
+    monkeypatch.setattr(gd_source, "_registered_loader_extensions", list)
+
+
+@pytest.fixture(autouse=True)
 def fake_content_extraction(monkeypatch):
     calls = []
 
@@ -1529,8 +1535,7 @@ def test_format_upgrade_cut_keeps_old_cursor_and_resumes_without_repeating_succe
     assert state["page_token"] == "t1"
 
 
-@pytest.mark.parametrize("already_upgraded", [False, True])
-def test_installing_a_missing_loader_retries_unedited_files(monkeypatch, already_upgraded):
+def test_installing_a_loader_scans_again_and_picks_up_unedited_files(monkeypatch):
     existing, office = _file_meta("existing"), _file_meta("office", mime_type=DOCX_MIME)
     service = FakeDriveService(
         {"root": [existing, office]}, {"existing": existing, "office": office}, start_token="t2"
@@ -1540,12 +1545,12 @@ def test_installing_a_missing_loader_retries_unedited_files(monkeypatch, already
         "newStartPageToken": "t1",
     }
     state = {
+        "format_version": gd_source.FORMAT_SUPPORT_VERSION,
+        "loader_extensions": [],
         "page_token": "t0",
         "known_ids": ["existing", "office"],
         "versions": {"existing": existing["modifiedTime"]},
     }
-    if already_upgraded:
-        state["format_version"] = gd_source.FORMAT_SUPPORT_VERSION
 
     def missing(*args):
         raise gd_source.LoaderUnavailableError("install the docling extra")
@@ -1554,9 +1559,12 @@ def test_installing_a_missing_loader_retries_unedited_files(monkeypatch, already
     stats = {}
     assert list(gd_source._iter_rows(service, _config(), state, stats)) == []
     assert stats["failed_loader_unavailable"] == 1
-    assert "format_version" not in state
+    assert state["page_token"] == "t1"  # the failure does not hold the cursor
+    assert state["loader_extensions"] == []
     assert state["versions"] == {"existing": existing["modifiedTime"]}
 
+    # Installing the extra registers a loader for .docx, which the folder was not scanned with.
+    monkeypatch.setattr(gd_source, "_registered_loader_extensions", lambda: [".docx"])
     downloaded = []
     monkeypatch.setattr(
         gd_source,
@@ -1566,8 +1574,14 @@ def test_installing_a_missing_loader_retries_unedited_files(monkeypatch, already
     rows = list(gd_source._iter_rows(service, _config(), state))
     assert downloaded == ["office"]
     assert [row["id"] for row in rows] == ["office"]
-    assert state["format_version"] == gd_source.FORMAT_SUPPORT_VERSION
+    assert state["loader_extensions"] == [".docx"]
     assert state["page_token"] == "t2"
+
+    service.changes_by_token["t2"] = _feed()
+    service.list_calls.clear()
+    downloaded.clear()
+    assert list(gd_source._iter_rows(service, _config(), state)) == []
+    assert service.list_calls == downloaded == []  # incremental again
 
 
 def test_loader_registered_matches_the_extensions_the_loaders_list(monkeypatch):
@@ -1592,13 +1606,68 @@ def test_loader_registered_matches_the_extensions_the_loaders_list(monkeypatch):
     assert not gd_source._loader_registered(".xlsx")
 
 
-def test_a_missing_loader_on_the_first_sync_records_no_cursor(monkeypatch):
-    ok, office = _file_meta("ok"), _file_meta("office", mime_type=DOCX_MIME)
-    service = FakeDriveService({"root": [ok, office]}, {"ok": ok, "office": office})
+def test_registered_loader_extensions_lists_only_what_a_loader_handles(monkeypatch):
+    monkeypatch.undo()  # the autouse fixture replaces the function under test
+    import sys
+
+    import cognee.infrastructure.loaders.get_loader_engine
+
+    class _Engine:
+        def get_available_loaders(self):
+            return ["docx_only"]
+
+        def get_loader_info(self, _name):
+            return {"extensions": ["docx", "pdf"]}
+
+    monkeypatch.setattr(
+        sys.modules["cognee.infrastructure.loaders.get_loader_engine"],
+        "get_loader_engine",
+        lambda: _Engine(),
+    )
+    assert gd_source._registered_loader_extensions() == [".docx"]
+
+
+@pytest.mark.parametrize(
+    ("libreoffice", "expected"),
+    [(False, [".docx", ".pdf"]), (True, [".doc", ".docx", ".pdf"])],
+)
+def test_legacy_formats_count_as_readable_only_with_libreoffice(monkeypatch, libreoffice, expected):
+    monkeypatch.undo()  # the autouse fixture replaces the function under test
+    import sys
+
+    import cognee.infrastructure.loaders.get_loader_engine
+
+    class _Engine:
+        def get_available_loaders(self):
+            return ["office"]
+
+        def get_loader_info(self, _name):
+            return {"extensions": ["doc", "docx", "pdf"]}
+
+    monkeypatch.setattr(
+        sys.modules["cognee.infrastructure.loaders.get_loader_engine"],
+        "get_loader_engine",
+        lambda: _Engine(),
+    )
+    monkeypatch.setattr(gd_source, "_libreoffice_available", lambda: libreoffice)
+    monkeypatch.setattr(
+        gd_source,
+        "_LOADER_EXTENSIONS",
+        {"a": ".doc", "b": ".docx", "c": ".pdf"},
+    )
+    assert gd_source._registered_loader_extensions() == expected
+
+
+def test_a_format_no_loader_handles_does_not_keep_the_folder_in_full_scan_mode(monkeypatch):
+    ok = _file_meta("ok", mime_type=DOCX_MIME)
+    odt = _file_meta("odt", mime_type="application/vnd.oasis.opendocument.text")
+    service = FakeDriveService({"root": [ok, odt]}, {"ok": ok, "odt": odt})
+    # Only a .docx loader is registered, as with the docling extra on a docling without .odt.
+    monkeypatch.setattr(gd_source, "_registered_loader_extensions", lambda: [".docx"])
 
     def extract(_client, file_id, *_args):
-        if file_id == "office":
-            raise gd_source.LoaderUnavailableError("install the docling extra")
+        if file_id == "odt":
+            raise gd_source.LoaderUnavailableError("no loader for .odt")
         return "body"
 
     monkeypatch.setattr(gd_source, "extract_file_content", extract)
@@ -1606,12 +1675,19 @@ def test_a_missing_loader_on_the_first_sync_records_no_cursor(monkeypatch):
     rows = list(gd_source._iter_rows(service, _config(), state, stats))
     assert [row["id"] for row in rows] == ["ok"]
     assert stats["failed_loader_unavailable"] == 1
-    assert "page_token" not in state and "format_version" not in state
-    assert state["known_ids"] == ["office", "ok"]
-    assert sorted(state["versions"]) == ["ok"]  # the next full scan skips the file it read
+    assert state["page_token"] == "token-0"
+    assert state["format_version"] == gd_source.FORMAT_SUPPORT_VERSION
+    assert state["loader_extensions"] == [".docx"]
+    assert state["known_ids"] == ["odt", "ok"]
+    assert sorted(state["versions"]) == ["ok"]
+
+    service.changes_by_token["token-0"] = _feed()
+    service.list_calls.clear()
+    assert list(gd_source._iter_rows(service, _config(), state)) == []
+    assert service.list_calls == []  # the second sync takes the incremental path
 
 
-def test_a_missing_loader_beside_other_permanent_failures_records_no_cursor(monkeypatch):
+def test_a_missing_loader_beside_other_permanent_failures_still_moves_the_cursor(monkeypatch):
     files = [_file_meta("ok"), _file_meta("locked"), _file_meta("office", mime_type=DOCX_MIME)]
     service = FakeDriveService({"root": files}, {item["id"]: item for item in files})
 
@@ -1626,8 +1702,24 @@ def test_a_missing_loader_beside_other_permanent_failures_records_no_cursor(monk
     state, stats = {}, {}
     list(gd_source._iter_rows(service, _config(), state, stats))
     assert stats["failed_unreadable"] == stats["failed_loader_unavailable"] == 1
-    assert "page_token" not in state and "format_version" not in state
+    assert state["page_token"] == "token-0"
+    assert state["format_version"] == gd_source.FORMAT_SUPPORT_VERSION
     assert sorted(state["versions"]) == ["ok"]
+
+
+def test_a_transient_failure_still_holds_the_cursor_and_the_loader_set(monkeypatch):
+    files = [_file_meta("ok"), _file_meta("flaky", mime_type=DOCX_MIME)]
+    service = FakeDriveService({"root": files}, {item["id"]: item for item in files})
+    monkeypatch.setattr(gd_source, "_registered_loader_extensions", lambda: [".docx"])
+    monkeypatch.setattr(
+        gd_source,
+        "extract_file_content",
+        lambda _c, file_id, *_a: None if file_id == "flaky" else "x",
+    )
+    state = {}
+    list(gd_source._iter_rows(service, _config(), state))
+    assert "page_token" not in state
+    assert "format_version" not in state and "loader_extensions" not in state
 
 
 @pytest.mark.parametrize("version", [True, "1", -1, gd_source.FORMAT_SUPPORT_VERSION + 1])
