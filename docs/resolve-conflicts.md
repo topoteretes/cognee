@@ -5,7 +5,9 @@ A user with dataset write permission can choose one of a conflict's facts.
 The choice marks the conflict `resolved`, records who made it, when, and why,
 and survives subsequent automatic reviews while the selected fact still exists.
 If its supporting document is forgotten and the fact disappears, the next conflict
-review replaces or drops the decision and clears its obsolete rejection marks.
+review replaces or drops the decision and clears its obsolete rejection marks. A
+forgotten competing fact leaves no trace in the decision: its id, text, value and
+cited chunks drop out at the next review.
 A decision covers only the facts listed when it was made: a competing fact that
 a later review finds in new data is not marked rejected on the user's behalf. It
 keeps the review's status and is listed next to the decision, so the choice can

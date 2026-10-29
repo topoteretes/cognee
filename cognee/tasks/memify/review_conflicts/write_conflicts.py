@@ -26,6 +26,7 @@ from cognee.modules.graph.utils.fact_conflicts import (
 )
 from cognee.tasks.storage import add_data_points
 
+from .accept_review import _collect_conflict_values
 from .facts import get_endpoints
 from .models import AcceptedConflict, ConflictsToFinalize, ConflictsToWrite, ReviewScope
 
@@ -93,20 +94,18 @@ def _preserve_user_resolutions(to_write: ConflictsToWrite) -> None:
                 # A shown fact the review no longer labels has left the conflict.
                 statuses[fact_id] = reported or held
         rejected = sorted(fid for fid in statuses if fid in decided and fid != selected_fact_id)
+        # Every list describes the facts that exist now. A forgotten fact leaves no
+        # trace: a stale text would keep rewriting fact hits, a stale chunk sends the
+        # conflict back to review on every run, a stale value keeps a deleted node in scope.
         replacement = _rebuild_stored_conflict(
             stored,
             rejected_fact_ids=rejected,
             rejected_fact_texts=sorted(
-                set(stored.get("rejected_fact_texts", []))
-                | {to_write.scope.facts[fid]["properties"].get("edge_text", "") for fid in rejected}
+                {to_write.scope.facts[fid]["properties"].get("edge_text", "") for fid in rejected}
                 - {""}
             ),
-            # A chunk forgotten since must drop out: the reader sends a conflict citing
-            # a missing chunk back to review on every run.
             sources=sorted(_collect_cited_sources(statuses, to_write.scope.facts)),
-            values=sorted(
-                set(stored.get("values", [])) | set(incoming.conflict.values if incoming else [])
-            ),
+            values=sorted(_collect_conflict_values(stored["about_id"], statuses, to_write.scope)),
         )
         accepted[conflict_id] = AcceptedConflict(replacement, statuses)
         if dropping:

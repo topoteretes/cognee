@@ -25,6 +25,7 @@ from cognee.modules.session_lifecycle.invalidate_sessions import (
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
+from cognee.tasks.memify.review_conflicts.accept_review import _collect_conflict_values
 from cognee.tasks.memify.review_conflicts.models import (
     AcceptedConflict,
     ConflictsToWrite,
@@ -201,8 +202,9 @@ async def resolve_conflict(
                 rejected_fact_texts=sorted(
                     {_fact_text(scope.facts[fid], scope.nodes) for fid in rejected_fact_ids}
                 ),
-                # Its citation links are rebuilt from the facts, so the node must agree.
+                # Its links are rebuilt from the facts, so the node must agree with them.
                 sources=sorted(_collect_cited_sources(statuses, scope.facts)),
+                values=sorted(_collect_conflict_values(stored["about_id"], statuses, scope)),
                 resolved_by=stored.get("resolved_by") if same_choice else str(user.id),
                 resolved_at=stored.get("resolved_at")
                 if same_choice

@@ -477,3 +477,18 @@ async def test_a_decision_cites_only_the_chunks_its_facts_cite_now(lane):
     saved = lane.store.nodes[lane.store.cid]
     assert saved["sources"] == sorted(live - {press["chunk_id"]})
     assert (saved["selected_fact_id"], saved["rejected_fact_ids"]) == (alice, [bob])
+
+
+@pytest.mark.asyncio
+async def test_a_choice_made_after_a_competing_document_was_forgotten_lists_live_facts(lane):
+    """The stored conflict still names the forgotten value; the decision must not."""
+    alice, bob = (
+        find_fact_id(lane.store, lane.store.alice),
+        find_fact_id(lane.store, lane.store.bob),
+    )
+    del lane.store.scope.facts[bob]
+    assert lane.store.bob in lane.store.nodes[lane.store.cid]["values"]
+    await resolve(lane, fact=alice)
+    saved = lane.store.nodes[lane.store.cid]
+    assert saved["values"] == [lane.store.alice]
+    assert (saved["rejected_fact_ids"], saved["rejected_fact_texts"]) == ([], [])
