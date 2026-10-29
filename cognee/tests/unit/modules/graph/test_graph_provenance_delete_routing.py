@@ -202,6 +202,7 @@ async def test_api_delete_data_uses_graph_provenance_when_ledger_has_no_nodes():
         ) as graph_delete,
         patch.object(datasets_module, "delete_data_nodes_and_edges", AsyncMock()) as ledger_delete,
         patch.object(datasets_module, "legacy_delete", AsyncMock()) as legacy_delete,
+        patch.object(datasets_module, "retire_forgotten_decisions", AsyncMock(return_value=set())),
         patch.object(
             datasets_module, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()
         ) as session_invalidate,
@@ -241,6 +242,7 @@ async def test_api_delete_data_uses_legacy_when_no_ledger_nodes_and_unmarked_gra
         ) as graph_delete,
         patch.object(datasets_module, "delete_data_nodes_and_edges", AsyncMock()) as ledger_delete,
         patch.object(datasets_module, "legacy_delete", AsyncMock()) as legacy_delete,
+        patch.object(datasets_module, "retire_forgotten_decisions", AsyncMock(return_value=set())),
         patch.object(
             datasets_module, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()
         ),
@@ -283,6 +285,7 @@ async def test_api_delete_data_uses_ledger_delete_when_ledger_has_nodes():
             AsyncMock(),
         ) as ledger_delete,
         patch.object(datasets_module, "legacy_delete", AsyncMock()) as legacy_delete,
+        patch.object(datasets_module, "retire_forgotten_decisions", AsyncMock(return_value=set())),
         patch.object(
             datasets_module, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()
         ),

@@ -189,3 +189,91 @@ async def test_resolution_survives_real_graph_writes_and_overrides_old_vector_hi
 
     finally:
         await graph.close()
+
+
+@pytest.mark.asyncio
+async def test_deleting_every_document_behind_the_chosen_fact_retires_the_decision(
+    tmp_path, monkeypatch
+):
+    """The decision stays while any document still supports the chosen fact."""
+    graph = LadybugAdapter(str(tmp_path / "graph"), kuzu_buffer_pool_size=128 * 1024 * 1024)
+    unified = UnifiedStoreEngine(
+        graph_engine=graph,
+        vector_engine=RecordingVectors(),
+        capabilities=EngineCapability.GRAPH | EngineCapability.VECTOR,
+    )
+    storage = importlib.import_module("cognee.tasks.storage.add_data_points")
+    methods = importlib.import_module("cognee.modules.conflicts.methods")
+
+    async def engine():
+        return unified
+
+    monkeypatch.setattr(storage, "get_unified_engine", engine)
+    monkeypatch.setattr(write_conflicts, "get_unified_engine", engine)
+    monkeypatch.setattr(methods, "get_graph_engine", AsyncMock(return_value=graph))
+    monkeypatch.setattr(read_facts, "get_graph_engine", AsyncMock(return_value=graph))
+    monkeypatch.setattr(read_facts, "get_edge_sources", AsyncMock(return_value=[]))
+    monkeypatch.setattr(read_facts, "backend_access_control_enabled", lambda: True)
+    dataset = SimpleNamespace(id=uuid4())
+    user = SimpleNamespace(id=uuid4())
+    ctx = PipelineContext(dataset=dataset, data_item={})
+    try:
+        await mark_graph_provenance_if_empty(graph)
+        company, alice, bob = [Entity(name=n, description=n) for n in ["Company", "Alice", "Bob"]]
+        facts, documents = {}, {}
+        # Alice's fact is stated by two documents, Bob's by one.
+        for value, document_count in ((alice, 2), (bob, 1)):
+            fid = str(generate_edge_object_id(str(company.id), str(value.id), "has_ceo"))
+            properties = {"edge_object_id": fid, "edge_text": f"Company has CEO {value.name}"}
+            facts[fid] = {
+                "id": fid,
+                "source": str(company.id),
+                "target": str(value.id),
+                "relationship": "has_ceo",
+                "properties": properties,
+                "effective_date": None,
+                "sources": [],
+            }
+            documents[fid] = [uuid4() for _ in range(document_count)]
+            for data_id in documents[fid]:
+                owner = make_source_ref_key(dataset.id, data_id)
+                await graph.add_nodes([company, value], source_ref_key=owner)
+                await graph.add_edges(
+                    [(str(company.id), str(value.id), "has_ceo", properties)],
+                    source_ref_key=owner,
+                )
+        chosen, rejected = facts
+        conflict = FactConflict(
+            dataset_id=str(dataset.id),
+            about_id=str(company.id),
+            attribute="has_ceo",
+            kind="fixed",
+            status="resolved",
+            text="Resolved by user: Company has CEO Alice",
+            values=[str(alice.id), str(bob.id)],
+            resolution_source="user",
+            selected_fact_id=chosen,
+            selected_fact="Company has CEO Alice",
+            rejected_fact_ids=[rejected],
+            rejected_fact_texts=["Company has CEO Bob"],
+        )
+        accepted = AcceptedConflict(conflict, {chosen: "current", rejected: "superseded"})
+        scope = ReviewScope(str(dataset.id), {}, facts)
+        await write_conflicts.write_conflicts(
+            [ConflictsToWrite(scope, [accepted], shown_fact_ids=set(facts))], ctx
+        )
+        await write_conflicts.write_conflicts([ConflictsToFinalize([accepted])], ctx)
+
+        first, second = documents[chosen]
+        await unified.delete_by_document(str(dataset.id), str(first))
+        assert await methods.retire_forgotten_decisions(dataset, user) == set()
+        assert len(await read_user_resolutions(graph)) == 1
+
+        await unified.delete_by_document(str(dataset.id), str(second))
+        assert await methods.retire_forgotten_decisions(dataset, user) == {str(conflict.id)}
+        assert await read_user_resolutions(graph) == []
+        _, edges = await graph.get_neighborhood([str(company.id)], depth=1)
+        remaining = [e for e in edges if e[2] == "has_ceo"]
+        assert len(remaining) == 1 and not is_rejected_fact(remaining[0][3])
+    finally:
+        await graph.close()
