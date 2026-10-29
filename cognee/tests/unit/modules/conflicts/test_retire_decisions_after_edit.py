@@ -19,7 +19,7 @@ async def test_retired_decisions_reach_session_invalidation(invalidation_fails):
         patch.object(methods, "retire_forgotten_decisions", AsyncMock(return_value={"c1"})),
         patch.object(methods, "invalidate_sessions_for_deleted_data", invalidate),
     ):
-        assert await methods.retire_decisions_after_rebuild(dataset, user) == {"c1"}
+        assert await methods.retire_decisions_after_edit(dataset, user) == {"c1"}
 
     invalidate.assert_awaited_once_with(dataset.id, {"c1"}, set(), user_id=user.id)
 
@@ -31,7 +31,7 @@ async def test_nothing_retired_invalidates_nothing():
         patch.object(methods, "retire_forgotten_decisions", AsyncMock(return_value=set())),
         patch.object(methods, "invalidate_sessions_for_deleted_data", invalidate),
     ):
-        await methods.retire_decisions_after_rebuild(
+        await methods.retire_decisions_after_edit(
             SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
         )
 

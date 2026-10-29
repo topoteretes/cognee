@@ -31,7 +31,7 @@ def _patch_run(monkeypatch, bundle, write):
     monkeypatch.setattr(incremental, "log_pipeline_run_error", AsyncMock())
     monkeypatch.setattr(incremental, "send_telemetry", lambda *args, **kwargs: None)
     monkeypatch.setattr(incremental, "_write_and_publish", record_write)
-    monkeypatch.setattr(incremental, "retire_decisions_after_rebuild", retire)
+    monkeypatch.setattr(incremental, "retire_decisions_after_edit", retire)
     return order
 
 

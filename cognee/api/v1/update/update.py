@@ -354,8 +354,6 @@ async def update(
     )
 
     errored = get_errored_run_info(cognify_runs)
-    if not errored:
-        await _retire_decisions_after_full_rebuild(dataset_id, user)
     run = errored or next(iter(cognify_runs.values()))
     return UpdateResult(
         status="failed" if errored else "full_rebuild",
@@ -369,27 +367,6 @@ async def update(
         else None,
         after_run_error=getattr(run, "after_run_error", None),
     ).model_dump()
-
-
-async def _retire_decisions_after_full_rebuild(dataset_id: UUID, user: User) -> None:
-    """Retire the conflict decisions whose chosen fact the rebuild did not restore.
-
-    The new content may no longer state the fact, or the extraction may restate it
-    under another relationship, which gives it another id. Runs once the rebuild's
-    cognify run completed (a failed one may only not have restored the fact yet),
-    under the dataset lock and in the dataset owner's databases, like the delete paths.
-    """
-    from cognee.context_global_variables import set_database_global_context_variables
-    from cognee.infrastructure.locks import dataset_lock
-    from cognee.modules.conflicts.methods import retire_decisions_after_rebuild
-    from cognee.modules.data.methods import get_authorized_dataset
-
-    dataset = await get_authorized_dataset(user, dataset_id, "write")
-    async with (
-        dataset_lock(dataset.id),
-        set_database_global_context_variables(dataset.id, dataset.owner_id),
-    ):
-        await retire_decisions_after_rebuild(dataset, user)
 
 
 def _full_rebuild_reason(

@@ -308,11 +308,11 @@ async def test_deleting_every_document_behind_the_chosen_fact_retires_the_decisi
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "rebuilt_relationship, retired",
-    # The rebuild extracts the chosen fact again, or states it under another relationship,
-    # which gives it another id.
+    # The edited text states the chosen fact again, or the extraction states it under
+    # another relationship, which gives it another id.
     [("has_ceo", False), ("ceo_is", True)],
 )
-async def test_a_rebuild_retires_the_decision_only_when_the_chosen_fact_did_not_come_back(
+async def test_an_edit_retires_the_decision_only_when_the_chosen_fact_did_not_come_back(
     tmp_path, monkeypatch, rebuilt_relationship, retired
 ):
     world = await _decided_conflict(tmp_path, monkeypatch, document_counts=(1, 1))
@@ -321,7 +321,7 @@ async def test_a_rebuild_retires_the_decision_only_when_the_chosen_fact_did_not_
     try:
         (document,) = world.documents[world.chosen]
         owner = make_source_ref_key(world.dataset.id, document)
-        # The rebuild drops the document's memory, then extracts it again.
+        # The edit drops what the chosen fact's text produced, then extracts the new text.
         await world.unified.delete_by_document(str(world.dataset.id), str(document))
         fid = str(
             generate_edge_object_id(
@@ -341,7 +341,7 @@ async def test_a_rebuild_retires_the_decision_only_when_the_chosen_fact_did_not_
             source_ref_key=owner,
         )
 
-        result = await world.methods.retire_decisions_after_rebuild(world.dataset, world.user)
+        result = await world.methods.retire_decisions_after_edit(world.dataset, world.user)
 
         if retired:
             assert result == {str(world.conflict.id)}
