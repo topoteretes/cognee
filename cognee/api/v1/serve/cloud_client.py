@@ -387,29 +387,46 @@ class CloudClient:
 
         form = aiohttp.FormData()
         form.add_field("datasetName", dataset_name)
+        # Same as remember(): when the caller names a dataset by id, send it
+        # so the remote targets that UUID instead of creating/using the name.
+        if kwargs.get("dataset_id"):
+            form.add_field("datasetId", str(kwargs["dataset_id"]))
+        if kwargs.get("run_in_background"):
+            form.add_field("run_in_background", "true")
+        for tag in kwargs.get("node_set") or []:
+            if tag:
+                form.add_field("node_set", str(tag))
 
-        if isinstance(data, str):
-            form.add_field(
-                "data",
-                io.BytesIO(data.encode("utf-8")),
-                filename=_text_upload_filename(data),
-                content_type="text/plain",
-            )
-        elif isinstance(data, list):
+        def _unwrap_data_item(item: Any) -> Any:
+            # Match CloudClient.update: DataItem wrappers are not file-like,
+            # so unwrap to the payload the remote add endpoint understands.
+            if hasattr(item, "data") and hasattr(item, "data_id") and not hasattr(item, "read"):
+                return item.data
+            return item
+
+        def _add_content(item: Any) -> None:
+            item = _unwrap_data_item(item)
+            if isinstance(item, str):
+                form.add_field(
+                    "data",
+                    io.BytesIO(item.encode("utf-8")),
+                    filename=_text_upload_filename(item),
+                    content_type="text/plain",
+                )
+            elif hasattr(item, "read"):
+                name = getattr(item, "name", "upload")
+                form.add_field("data", item, filename=name)
+            else:
+                raise TypeError(
+                    "add() over serve() accepts text, a file object, or DataItem; "
+                    f"got {type(item)}"
+                )
+
+        if isinstance(data, list):
             for item in data:
-                if isinstance(item, str):
-                    form.add_field(
-                        "data",
-                        io.BytesIO(item.encode("utf-8")),
-                        filename=_text_upload_filename(item),
-                        content_type="text/plain",
-                    )
-                elif hasattr(item, "read"):
-                    name = getattr(item, "name", "upload")
-                    form.add_field("data", item, filename=name)
-        elif hasattr(data, "read"):
-            name = getattr(data, "name", "upload")
-            form.add_field("data", data, filename=name)
+                _add_content(item)
+        else:
+            _add_content(data)
 
         async with session.post(f"{self.service_url}/api/v1/add", data=form) as resp:
             if resp.status >= 400:

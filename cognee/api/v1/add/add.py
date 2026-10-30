@@ -252,7 +252,13 @@ async def add(
                 "branch is not supported while connected to a remote Cognee instance. "
                 "Call cognee.disconnect() to clone the branch locally."
             )
-        result = await client.add(data, dataset_name)
+        result = await client.add(
+            data,
+            dataset_name,
+            dataset_id=dataset_id,
+            node_set=node_set,
+            run_in_background=run_in_background,
+        )
         # Wrap in a simple namespace so callers expecting .model_dump() still work
         from types import SimpleNamespace
 
