@@ -231,7 +231,13 @@ def collect_param_docs(endpoint, route_path: str) -> dict[str, ParamDoc]:
         base = annotation
         if typing.get_origin(annotation) is typing.Annotated:
             base = typing.get_args(annotation)[0]
-        if inspect.isclass(base) and issubclass(base, framework_types):
+        # On Python 3.10, inspect.isclass(list[str]) is True but issubclass()
+        # rejects it, so generic aliases must be ruled out first.
+        if (
+            inspect.isclass(base)
+            and typing.get_origin(base) is None
+            and issubclass(base, framework_types)
+        ):
             continue
 
         models = _pydantic_models(annotation)
