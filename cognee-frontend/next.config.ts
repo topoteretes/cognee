@@ -15,14 +15,14 @@ const nextConfig: NextConfig = {
   // gitignores `.env*.local`, so a synced env file is copied onto the runner
   // and then silently dropped by `git add` (CLO-703). Next inlines these at
   // build time, so a prebuilt `cognee -ui` could not pick them up from the
-  // environment afterwards either. Reading process.env first keeps both
+  // environment afterwards either. Reading process.env first keeps it
   // overridable for anyone building the frontend themselves, including from
   // their own untracked .env.local, which Next loads before this file runs.
+  // Leave NEXT_PUBLIC_LOCAL_API_URL unset unless the builder explicitly sets it,
+  // so an unconfigured browser can derive the backend from its own host.
   env: {
     NEXT_PUBLIC_IS_CLOUD_ENVIRONMENT:
       process.env.NEXT_PUBLIC_IS_CLOUD_ENVIRONMENT ?? "false",
-    NEXT_PUBLIC_LOCAL_API_URL:
-      process.env.NEXT_PUBLIC_LOCAL_API_URL ?? "http://localhost:8000",
   },
 
   images: {
