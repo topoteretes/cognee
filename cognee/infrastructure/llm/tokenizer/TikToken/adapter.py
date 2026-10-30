@@ -27,7 +27,7 @@ class TikTokenTokenizer(TokenizerInterface):
 
     def extract_tokens(self, text: str) -> list[Any]:
         """
-        Extract tokens from the given text.
+        Extract tokens, treating special-token spellings as ordinary text.
 
         Parameters:
         -----------
@@ -40,7 +40,7 @@ class TikTokenTokenizer(TokenizerInterface):
             - List[Any]: A list of token IDs representing the encoded text.
         """
         # Using TikToken's method to tokenize text
-        token_ids = self.tokenizer.encode(text)
+        token_ids = self.tokenizer.encode(text, disallowed_special=())
         return token_ids
 
     def decode_token_list(self, tokens: list[Any]) -> list[Any]:
@@ -81,7 +81,7 @@ class TikTokenTokenizer(TokenizerInterface):
 
     def count_tokens(self, text: str) -> int:
         """
-        Count the number of tokens in the given text.
+        Count tokens, treating special-token spellings as ordinary text.
 
         Parameters:
         -----------
@@ -93,12 +93,13 @@ class TikTokenTokenizer(TokenizerInterface):
 
             - int: The number of tokens in the given text.
         """
-        num_tokens = len(self.tokenizer.encode(text))
+        num_tokens = len(self.tokenizer.encode(text, disallowed_special=()))
         return num_tokens
 
     def trim_text_to_max_completion_tokens(self, text: str) -> str:
         """
-        Trim the text so that the number of tokens does not exceed max_completion_tokens.
+        Trim the text so that the number of tokens does not exceed max_completion_tokens,
+        treating special-token spellings as ordinary text.
 
         Parameters:
         -----------
@@ -119,7 +120,7 @@ class TikTokenTokenizer(TokenizerInterface):
 
         # If the number exceeds the limit, trim the text
         # This is a simple trim, it may cut words in half; consider using word boundaries for a cleaner cut
-        encoded_text = self.tokenizer.encode(text)
+        encoded_text = self.tokenizer.encode(text, disallowed_special=())
         trimmed_encoded_text = encoded_text[: self.max_completion_tokens]
         # Decoding the trimmed text
         trimmed_text = self.tokenizer.decode(trimmed_encoded_text)
