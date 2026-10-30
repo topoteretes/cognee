@@ -30,7 +30,13 @@ def get_conflicts_router() -> APIRouter:
         status: Literal["resolved", "unresolved"] | None = Query(default=None),
         user: User = Depends(get_authenticated_user),
     ):
-        """List conflicts, candidate fact ids, source evidence and previous decisions."""
+        """List conflicts, candidate fact ids, source evidence and previous decisions.
+
+        ## Query Parameters
+        - **dataset_id** (UUID): Dataset to inspect. Requires read permission.
+        - **status** (Optional[Literal['resolved', 'unresolved']]): One of: 'resolved',
+          'unresolved'.
+        """
         return await list_conflicts(dataset_id, status=status, user=user)
 
     @router.post("/{conflict_id}/resolve", response_model=ConflictDetail)
@@ -46,6 +52,14 @@ def get_conflicts_router() -> APIRouter:
         revises the decision.
         Automatic conflict review preserves the user decision. Rejected source facts
         remain stored for inspection, but normal retrieval uses the selected information.
+
+        ## Path Parameters
+        - **conflict_id** (UUID): No description provided in code yet.
+
+        ## Request Parameters
+        - **datasetId** (UUID): Dataset containing the conflict. Requires write permission.
+        - **reason** (Optional[str]): Optional explanation of the decision.
+        - **selectedFactId** (UUID): Fact id from the conflict's facts list to accept.
         """
         return await resolve_conflict(
             conflict_id,
