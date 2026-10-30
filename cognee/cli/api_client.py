@@ -12,6 +12,7 @@ writes, which is the correct model for file-based backends.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import mimetypes
 import os
@@ -22,6 +23,18 @@ from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
+
+
+def _text_upload_filename(text: str) -> str:
+    """Content-hash filename for raw-text uploads.
+
+    Naming text uploads by content hash (``text_<md5>.txt``) mirrors local
+    ingestion (TextData) and cloud_client conventions. It prevents consecutive
+    text submissions from colliding on fixed positional names (like ``text_0.txt``),
+    which triggers DocumentUpdateRequiredError (409 Conflict) on the server.
+    """
+    digest = hashlib.md5(text.encode("utf-8")).hexdigest()
+    return f"text_{digest}.txt"
 
 
 def _import_httpx():
@@ -145,10 +158,11 @@ class CogneeApiClient:
                         ("data", (os.path.basename(item), fh, mime or "application/octet-stream"))
                     )
                 else:
+                    filename = _text_upload_filename(item)
                     files.append(
                         (
                             "data",
-                            (f"text_{len(files)}.txt", io.BytesIO(item.encode()), "text/plain"),
+                            (filename, io.BytesIO(item.encode()), "text/plain"),
                         )
                     )
             form_data = {"datasetName": dataset_name}
@@ -282,10 +296,11 @@ class CogneeApiClient:
                         ("data", (os.path.basename(item), fh, mime or "application/octet-stream"))
                     )
                 else:
+                    filename = _text_upload_filename(item)
                     files.append(
                         (
                             "data",
-                            (f"text_{len(files)}.txt", io.BytesIO(item.encode()), "text/plain"),
+                            (filename, io.BytesIO(item.encode()), "text/plain"),
                         )
                     )
             form_data: dict[str, Any] = {
