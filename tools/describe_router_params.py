@@ -43,8 +43,6 @@ STUB_SUMMARY_RE = re.compile(
 )
 # Names that resolve to cognee code but say nothing about a route's parameters.
 SKIP_CONTEXT = {"User", "get_authenticated_user", "log_usage", "new_span"}
-MAX_SYMBOL_CHARS = 5000
-MAX_CONTEXT_CHARS = 24000
 
 MODEL = "claude-opus-5"
 
@@ -244,7 +242,7 @@ def resolve_symbol(path: Path, name: str, depth: int = 0) -> tuple[Path, ast.AST
 def _node_source(path: Path, node: ast.AST) -> str:
     lines = path.read_text(encoding="utf-8").splitlines()
     start = min([node.lineno] + [d.lineno for d in getattr(node, "decorator_list", [])])
-    return "\n".join(lines[start - 1 : node.end_lineno])[:MAX_SYMBOL_CHARS]
+    return "\n".join(lines[start - 1 : node.end_lineno])
 
 
 def _used_names(node: ast.AST) -> list[str]:
@@ -280,7 +278,6 @@ def related_source(path: Path, line_index: int) -> str:
 
     seen: set[tuple[str, str]] = set()
     chunks: list[str] = []
-    total = 0
     while queue:
         name, origin, hop = queue.pop(0)
         if name in SKIP_CONTEXT or name == handler.name:
@@ -293,11 +290,7 @@ def related_source(path: Path, line_index: int) -> str:
         if marker in seen:
             continue
         seen.add(marker)
-        chunk = f"# {file}\n{_node_source(file, node)}"
-        if total + len(chunk) > MAX_CONTEXT_CHARS:
-            break
-        chunks.append(chunk)
-        total += len(chunk)
+        chunks.append(f"# {file}\n{_node_source(file, node)}")
         if isinstance(node, ast.ClassDef) and hop == 0:
             queue += [(child, file, 1) for child in _used_names(node)]
     return "\n\n".join(chunks)
