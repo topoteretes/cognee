@@ -1008,6 +1008,14 @@ def get_integrations_router():
         The returned selection is three-state: ``null`` means all resources,
         an empty list means none, and a non-empty list is an allowlist.
         ``account_id`` picks one of the user's connections (see GET /{provider}/connections).
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **account_id** (Optional[str]): Connection to use (from GET
+          /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
         """
         integration = _integration_or_404(provider)
         if integration.resource_selection_key is None:
@@ -1059,6 +1067,17 @@ def get_integrations_router():
         """Persist a full resource selection for a connected integration.
 
         ``account_id`` picks one of the user's connections (see GET /{provider}/connections).
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **account_id** (Optional[str]): Connection to use (from GET
+          /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
+
+        ## Request Parameters
+        - **resourceIds** (Optional[List[str]]): No description provided in code yet.
         """
         integration = _integration_or_404(provider)
         selection_key = integration.resource_selection_key
@@ -1099,6 +1118,14 @@ def get_integrations_router():
         """Start a provider sync without changing its stored selection.
 
         ``account_id`` picks one of the user's connections (see GET /{provider}/connections).
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **account_id** (Optional[str]): Connection to use (from GET
+          /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
         """
         integration = _integration_or_404(provider)
         credential = await _credential_or_404(user, integration, account_id)
@@ -1135,6 +1162,11 @@ def get_integrations_router():
         ## Path Parameters
         - **provider** (str): Key of a registered OAuth provider (see GET
           /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **account_id** (Optional[str]): Connection to use (from GET
+          /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
+        - **delete_data** (bool): No description provided in code yet. Defaults to False.
         """
         with new_span("cognee.integrations.disconnect") as span:
             span.set_attribute("cognee.integrations.provider", provider)
