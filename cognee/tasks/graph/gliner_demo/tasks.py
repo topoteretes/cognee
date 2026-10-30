@@ -186,6 +186,7 @@ async def extract_graph_and_summarize_with_gliner(
             batch_size=options.batch_size,
             window_words=options.window_words,
             window_overlap_words=options.window_overlap_words,
+            model_name=options.model_name,
         )
     if len(results) != len(data_chunks):
         raise RuntimeError(f"GLiNER returned {len(results)} results for {len(data_chunks)} chunks")
