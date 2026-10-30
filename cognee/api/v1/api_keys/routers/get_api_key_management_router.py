@@ -23,7 +23,11 @@ def get_api_key_management_router():
 
     @api_key_management_router.get("/api-keys")
     async def get_api_keys_for_user(user: User = Depends(get_authenticated_user)):
-        """Get api keys for user — GET /api/v1/auth/api-keys."""
+        """List the API keys of the authenticated user.
+
+        Each entry holds id, label and name. The key value itself is returned only when key
+        hashing is disabled; otherwise it is masked.
+        """
         send_telemetry(
             "Api Key Management API Endpoint Invoked",
             user,
@@ -61,7 +65,11 @@ def get_api_key_management_router():
         payload: ApiKeyCreationPayload,
         user: User = Depends(get_authenticated_user),
     ):
-        """Create api key for user — POST /api/v1/auth/api-keys.
+        """Create an API key for the authenticated user.
+
+        Returns 400 with an error message when the per-user key limit is reached or the key
+        cannot be stored. The raw key appears only in this response, alongside its id, label
+        and name.
 
         ## Request Parameters
         - **name** (Optional[str]): Human-readable label to store with the generated API
@@ -93,7 +101,10 @@ def get_api_key_management_router():
         api_key_id: UUID,
         user: User = Depends(get_authenticated_user),
     ):
-        """Delete api key for user — DELETE /api/v1/auth/api-keys/{api_key_id}.
+        """Delete one API key of the authenticated user.
+
+        Only keys belonging to the caller can be deleted; an unknown or foreign id raises a
+        not-found error.
 
         ## Path Parameters
         - **api_key_id** (UUID): UUID of the API key (from GET /api/v1/auth/api-keys).
