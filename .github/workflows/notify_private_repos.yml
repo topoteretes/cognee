@@ -1,0 +1,35 @@
+name: Notify private repos
+
+# Notifies the private repos that cognee `dev` was updated. The dispatch carries
+# no data and the App token has Actions: write on one repo only. Failure here
+# never fails cognee CI.
+
+on:
+  push:
+    branches: [dev]
+
+permissions: {}
+
+concurrency:
+  group: notify-private-repos
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    if: github.repository == 'topoteretes/cognee'
+    runs-on: ubuntu-latest
+    environment: private-dispatch
+    continue-on-error: true
+    steps:
+      - id: token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547  # v1.12.0
+        with:
+          app-id: ${{ vars.PRIVATE_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.PRIVATE_DISPATCH_APP_PRIVATE_KEY }}
+          owner: topoteretes
+          repositories: ${{ secrets.PRIVATE_DISPATCH_REPO }}
+
+      - env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPO: ${{ secrets.PRIVATE_DISPATCH_REPO }}
+        run: gh workflow run dev-tenant.yml --repo "topoteretes/${REPO}" --ref main
