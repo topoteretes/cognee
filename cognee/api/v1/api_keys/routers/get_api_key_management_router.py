@@ -67,8 +67,8 @@ def get_api_key_management_router():
     ):
         """Create an API key for the authenticated user.
 
-        Returns the key id, label, name and the raw key, which is shown only in this
-        response. Returns 400 with an error message when the key cannot be created.
+        Returns the key id, label, name and the raw key. Returns 400 with an error message
+        when the key cannot be created.
 
         ## Request Parameters
         - **name** (Optional[str]): Human-readable label to store with the generated API

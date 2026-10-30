@@ -80,8 +80,8 @@ def get_agents_router() -> APIRouter:
     ) -> AgentWithApiKeyDTO:
         """Create an agent user and issue its API key.
 
-        Returns the new agent's id, display email and API key. Returns 409 when an agent
-        with the same name already exists.
+        Returns the new agent's id, display email and API key. Returns 409 when the caller
+        already has an agent with that name.
 
         ## Query Parameters
         - **name** (str): Unique name for the new agent user; a conflict is returned if an
@@ -125,8 +125,9 @@ def get_agents_router() -> APIRouter:
     ):
         """List agent connections and their memory sources.
 
-        Returns a paginated list of connections visible to the caller, together with the
-        readable dataset memory sources and the total count.
+        Returns a paginated list of connections visible to the caller and the total count,
+        plus the caller's readable datasets as memory sources unless include_sources is
+        false.
 
         ## Query Parameters
         - **active_only** (bool): When true, restricts results to connections currently
@@ -254,7 +255,7 @@ def get_agents_router() -> APIRouter:
     ) -> AgentModeDTO:
         """Deactivate a registered agent connection.
 
-        Returns the number of connections still active.
+        Returns the number of connections still registered with this server process.
 
         ## Request Parameters
         - **agent_session_name** (str): The name used when registering the connection. Combined with

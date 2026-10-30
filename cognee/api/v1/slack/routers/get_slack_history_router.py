@@ -86,8 +86,8 @@ def get_slack_history_router():
         """Configure the recurring Slack history sync for a dataset.
 
         Returns the stored settings with the selection's date window resolved to a fixed
-        oldest date. Returns 400 for an invalid or missing selection, and 403 when read,
-        write and delete access to the target dataset is missing.
+        oldest date. Returns 400 for an invalid or missing selection, and 403 when enabling
+        without read, write and delete access to the target dataset.
 
         ## Path Parameters
         - **team_id** (str): Slack workspace (team) id whose sync configuration is being
@@ -95,10 +95,10 @@ def get_slack_history_router():
 
         ## Request Parameters
         - **enabled** (bool): Turns the recurring sync on for the selection's dataset.
-          Enabling requires a selection and write access to it; disabling is permitted for
-          the owner of the Slack connection. Defaults to False.
-        - **interval_seconds** (int): How often the sync runs for this dataset. Must be
-          between 600 and 604800. Defaults to 21600.
+          Enabling requires a selection and read, write and delete access to its dataset;
+          disabling is permitted for the owner of the Slack connection. Defaults to False.
+        - **interval_seconds** (int): Seconds to wait after a completed sync of this
+          dataset before the next one. Must be between 600 and 604800. Defaults to 21600.
         - **selection** (Optional[SlackHistoryRequest]): Import selection identifying the
           dataset to configure and what to sync; required, and 400 is returned without it.
           Its latest date must be unset, and a relative days window is resolved once into a
