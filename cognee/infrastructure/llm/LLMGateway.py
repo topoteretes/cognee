@@ -16,6 +16,21 @@ from cognee.shared.logging_utils import get_logger
 T = TypeVar("T", bound="BaseModel | str")
 
 
+def _strip_surrogates(s: str) -> str:
+    """
+    Normalize UTF-16 surrogate code units so the string is encodable as UTF-8.
+
+    A lone/unpaired surrogate is a valid Python `str` but is not valid UTF-8. Left
+    unstripped it crashes request serialization in every provider client (OpenAI,
+    Anthropic, Gemini, Ollama, ...) with a `UnicodeEncodeError`, since the request
+    body is eventually encoded to bytes. Applied once here, at the single call site
+    every structured-output/text call routes through, rather than per-adapter, so
+    no provider is left unprotected. Valid high/low surrogate pairs are decoded to
+    their Unicode scalar; lone surrogates are replaced. Other characters are unchanged.
+    """
+    return s.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "replace")
+
+
 def _inject_agent_memory(text_input: str) -> str:
     from cognee.modules.agent_memory import get_current_agent_memory_context
 
@@ -119,7 +134,8 @@ class LLMGateway:
         response_model: type[T],
         **kwargs: Any,
     ) -> Coroutine[Any, Any, T]:
-        text_input = _inject_agent_memory(text_input)
+        text_input = _strip_surrogates(_inject_agent_memory(text_input))
+        system_prompt = _strip_surrogates(system_prompt)
         llm_config = get_llm_config()
         framework = resolve_structured_output_framework(llm_config)
         if framework == "baml":
