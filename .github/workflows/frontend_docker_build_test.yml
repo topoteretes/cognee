@@ -90,6 +90,12 @@ jobs:
               exit 1
             fi
           done
+          # Sign-out goes through the server too: it must end up at the login page.
+          redirect=$(curl -s -o /dev/null -w '%{redirect_url}' http://localhost:3000/api/local-signout)
+          case "$redirect" in */local-login) ;; *)
+            echo "::error::/api/local-signout redirected to '$redirect', expected the login page"
+            exit 1 ;;
+          esac
 
       - name: Reject a misconfigured backend URL
         # The container must refuse to start and name the variable, instead of
