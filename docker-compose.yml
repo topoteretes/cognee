@@ -46,6 +46,7 @@ services:
       # Do NOT reuse this value on a server reachable from a network -- there,
       # leave it unset and no default-user login exists.
       - DEFAULT_USER_PASSWORD=${DEFAULT_USER_PASSWORD:-default_password}
+      - DEFAULT_USER_EMAIL=${DEFAULT_USER_EMAIL:-}
     extra_hosts:
       # Allows the container to reach your local machine using "host.docker.internal" instead of "localhost"
       - "host.docker.internal:host-gateway"
@@ -145,9 +146,6 @@ services:
       # backend directly, so when you do set this it must be the address as
       # seen from the browser, not the `cognee` service name.
       - COGNEE_BACKEND_URL=${COGNEE_BACKEND_URL:-}
-      # Same value as the backend's: the UI's server-side routes fall back to a
-      # default-user login when the browser sent no credentials.
-      - DEFAULT_USER_PASSWORD
     depends_on:
       cognee:
         condition: service_healthy
@@ -167,7 +165,6 @@ services:
       target: dev
     environment:
       - COGNEE_BACKEND_URL=${COGNEE_BACKEND_URL:-}
-      - DEFAULT_USER_PASSWORD
     volumes:
       - ./cognee-frontend/src:/app/src
       - ./cognee-frontend/public:/app/public

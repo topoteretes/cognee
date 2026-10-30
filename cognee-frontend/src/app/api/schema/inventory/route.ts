@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8000";
+import { getServerBackendUrl } from "@/modules/config/serverRuntimeConfig";
 
 export async function GET(request: NextRequest) {
+  const localApiUrl = getServerBackendUrl();
   const { searchParams } = request.nextUrl;
   const datasetId = searchParams.get("dataset_id");
   console.log("[api/schema/inventory] request received, dataset_id:", datasetId);
@@ -18,24 +19,6 @@ export async function GET(request: NextRequest) {
   if (authHeader) headers["authorization"] = authHeader;
   const apiKey = request.headers.get("x-api-key");
   if (apiKey) headers["x-api-key"] = apiKey;
-
-  if (!cookie && !authHeader && !apiKey) {
-    console.log("[api/schema/inventory] no auth headers, attempting default login");
-    try {
-      const loginResp = await fetch(`${localApiUrl}/api/v1/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "username=default_user@example.com&password=default_password",
-      });
-      console.log("[api/schema/inventory] login response status:", loginResp.status);
-      if (loginResp.ok) {
-        const data = await loginResp.json();
-        headers["authorization"] = `Bearer ${data.access_token}`;
-      }
-    } catch (err) {
-      console.warn("[api/schema/inventory] login attempt failed:", err);
-    }
-  }
 
   const samplesPerType = searchParams.get("samples_per_type") ?? "5";
   const sort = searchParams.get("sort") ?? "count";

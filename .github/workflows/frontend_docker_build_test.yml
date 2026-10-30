@@ -39,7 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run -d --name cognee-ui-ci -p 3000:3000 \
-            -e COGNEE_BACKEND_URL=http://backend.test:8000 cognee-ui:ci
+            -e COGNEE_BACKEND_URL=http://127.0.0.1:9100 cognee-ui:ci
 
           for attempt in $(seq 1 30); do
             if curl -fsS http://localhost:3000/local-login -o /tmp/page.html; then
@@ -56,13 +56,40 @@ jobs:
           # The JSON the layout renders into <head> is the contract the client
           # reads; assert on it rather than on the diagnostics route, which the
           # app itself does not use.
-          grep -q '"backendUrl":"http://backend.test:8000"' /tmp/page.html || {
+          grep -q '"backendUrl":"http://127.0.0.1:9100"' /tmp/page.html || {
             echo "::error::page did not carry COGNEE_BACKEND_URL to the browser"
             grep -o 'id="cognee-runtime-config"[^<]*' /tmp/page.html || echo "(no config element at all)"
             exit 1
           }
 
           curl -fsS http://localhost:3000/api/runtime-config
+
+      - name: Verify actual runtime backend requests
+        run: |
+          set -euo pipefail
+          docker cp cognee-frontend/scripts/runtime-backend-fixture.mjs cognee-ui-ci:/tmp/runtime-backend-fixture.mjs
+          docker exec -d cognee-ui-ci node /tmp/runtime-backend-fixture.mjs
+          for attempt in $(seq 1 30); do
+            if docker exec cognee-ui-ci node -e "fetch('http://127.0.0.1:9100/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "::error::Mock backend did not start"
+              exit 1
+            fi
+            sleep 2
+          done
+          # The proxies forward the caller's credentials and never log in on
+          # their own, so an anonymous request must stay unauthorized.
+          for route in 'visualize?dataset_id=demo' 'schema/inventory?dataset_id=demo' 'schema/provenance' 'schema-provenance'; do
+            curl -fsS -H 'Authorization: Bearer runtime-test-token' \
+              "http://localhost:3000/api/$route" | grep -q runtime_backend
+            status=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3000/api/$route")
+            if [ "$status" != "401" ]; then
+              echo "::error::anonymous /api/$route returned $status, expected 401"
+              exit 1
+            fi
+          done
 
       - name: Reject a misconfigured backend URL
         # The container must refuse to start and name the variable, instead of
