@@ -55,6 +55,51 @@ def test_openai_uses_tiktoken_with_bare_model():
     assert tok.kwargs["model"] == "text-embedding-3-large"
 
 
+@pytest.mark.parametrize(
+    "model",
+    ["openai/nebius/Qwen/Qwen3-Embedding-8B", "nebius/Qwen/Qwen3-Embedding-8B"],
+)
+def test_openai_prefers_explicit_huggingface_override(model):
+    tok = _resolve(
+        provider="openai",
+        model=model,
+        huggingface_tokenizer="Qwen/Qwen3-Embedding-8B",
+        max_completion_tokens=128,
+    )
+    assert tok.kind == "huggingface"
+    assert tok.kwargs["model"] == "Qwen/Qwen3-Embedding-8B"
+    assert tok.kwargs["max_completion_tokens"] == 128
+
+
+def test_openai_empty_override_keeps_tiktoken():
+    tok = _resolve(
+        provider="openai",
+        model="openai/text-embedding-3-large",
+        huggingface_tokenizer="",
+    )
+    assert tok.kind == "tiktoken"
+    assert tok.kwargs["model"] == "text-embedding-3-large"
+
+
+def test_openai_override_load_failure_falls_back_with_warning(caplog):
+    tik = patch(
+        f"{_MODULE}.TikTokenTokenizer",
+        side_effect=lambda **kw: _FakeTokenizer("tiktoken", **kw),
+    )
+    hf = patch(f"{_MODULE}.HuggingFaceTokenizer", side_effect=OSError("offline"))
+    with caplog.at_level(logging.WARNING), tik, hf:
+        tok = resolve_embedding_tokenizer(
+            provider="openai",
+            model="openai/nebius/Qwen/Qwen3-Embedding-8B",
+            huggingface_tokenizer="Qwen/Qwen3-Embedding-8B",
+            max_completion_tokens=128,
+        )
+    assert tok.kind == "tiktoken"
+    assert tok.kwargs["model"] is None
+    assert tok.kwargs["max_completion_tokens"] == 128
+    assert any("Falling back" in r.message for r in caplog.records)
+
+
 def test_gemini_uses_default_tiktoken():
     tok = _resolve(provider="gemini", model="gemini/text-embedding-004")
     assert tok.kind == "tiktoken"
