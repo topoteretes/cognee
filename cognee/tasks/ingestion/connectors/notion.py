@@ -92,7 +92,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, overload
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -122,9 +122,18 @@ _HEADING_PREFIX = {"heading_1": "# ", "heading_2": "## ", "heading_3": "### "}
 class NotionAPIError(Exception):
     """A Notion API response that isn't worth retrying (or ran out of retries)."""
 
-    def __init__(self, status_code: int, message: str):
+    def __init__(
+        self,
+        status_code: int,
+        message: str,
+        *,
+        code: str | None = None,
+        api_message: str | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
+        self.code = code
+        self.api_message = api_message
 
 
 # ---------------------------------------------------------------------------
@@ -179,9 +188,17 @@ class _NotionClient:
                 continue
 
             if response.status_code >= 400:
+                try:
+                    error = response.json()
+                except ValueError:
+                    error = {}
+                if not isinstance(error, dict):
+                    error = {}
                 raise NotionAPIError(
                     response.status_code,
                     f"Notion API error {response.status_code} on {path}: {response.text}",
+                    code=error.get("code"),
+                    api_message=error.get("message"),
                 )
 
             return response.json()
@@ -217,18 +234,60 @@ def _is_gone(exc: Exception) -> bool:
     return isinstance(exc, NotionAPIError) and exc.status_code in (403, 404)
 
 
-def _list_block_children(client: _NotionClient, block_id: str):
-    """Yield a block's direct children, across Notion's cursor pagination."""
+@overload
+def _list_block_children(
+    client: _NotionClient, block_id: str, *, block_type: None = None
+) -> list[dict]: ...
+
+
+@overload
+def _list_block_children(
+    client: _NotionClient, block_id: str, *, block_type: str
+) -> list[dict] | None: ...
+
+
+def _list_block_children(
+    client: _NotionClient, block_id: str, *, block_type: str | None = None
+) -> list[dict] | None:
+    """Read all children; None means the API explicitly cannot expose this block.
+
+    Only a rejection of the first request can establish unsupported children.
+    A later-page failure must abort rather than discard a partially read tree.
+    Page and table callers omit block_type and always require a complete listing.
+    """
     cursor = None
+    children = []
     while True:
         params = {"page_size": _PAGE_SIZE}
         if cursor:
             params["start_cursor"] = cursor
-        response = client.request("GET", f"blocks/{block_id}/children", params=params)
-        yield from response.get("results", [])
+        try:
+            response = client.request("GET", f"blocks/{block_id}/children", params=params)
+        except NotionAPIError as exc:
+            # The two messages are the ones the production sync logged (CLO-1400); any other
+            # 400 still fails the sync instead of being read as "unsupported".
+            if (
+                cursor is None
+                and block_type
+                and exc.status_code == 400
+                and exc.code == "validation_error"
+                and exc.api_message
+                in (
+                    f"Block type {block_type} is not supported via the API.",
+                    f"Block type {block_type} is not supported via the API for your bot type.",
+                )
+            ):
+                logger.warning(
+                    "Notion: skipping unavailable children of block %s (type %s).",
+                    block_id,
+                    block_type,
+                )
+                return None
+            raise
+        children.extend(response.get("results", []))
         cursor = response.get("next_cursor")
         if not response.get("has_more"):
-            return
+            return children
         if not cursor:
             raise NotionAPIError(0, "Notion reported more results without a next_cursor.")
 
@@ -374,6 +433,45 @@ def _resolve_roots(
     return roots
 
 
+def _has_unexposed_children(cache: dict[str, list[dict] | None]) -> bool:
+    """Whether the API refused to list the children of any block read into ``cache``."""
+    return any(children is None for children in cache.values())
+
+
+def _withheld_deletions(
+    previous_pages: dict[str, dict],
+    deleted_ids: list[str],
+    incomplete_pages: set[str],
+    present_pages: dict[str, dict],
+) -> set[str]:
+    """The absent pages whose deletion this run cannot prove.
+
+    An unexposed container may hide previously synced descendants. The stored ancestry holds
+    page and database ids, not container block ids, so a page below an incompletely read
+    page is withheld, and so is everything below a withheld page. State without ancestors
+    falls back to the root. A withheld page is kept as it was; it is forgotten once the
+    tree reads completely.
+    """
+    incomplete_roots = {present_pages[page_id]["root_id"] for page_id in incomplete_pages}
+    withheld: set[str] = set()
+    grew = True
+    while grew:
+        grew = False
+        for page_id in deleted_ids:
+            if page_id in withheld:
+                continue
+            previous = previous_pages[page_id]
+            ancestors = previous.get("ancestors")
+            if ancestors is None:
+                ambiguous = previous.get("root_id") in incomplete_roots
+            else:
+                ambiguous = any(a["id"] in incomplete_pages | withheld for a in ancestors)
+            if ambiguous:
+                withheld.add(page_id)
+                grew = True
+    return withheld
+
+
 def _iter_rows(
     client: _NotionClient,
     root_page_ids: list[str],
@@ -387,7 +485,8 @@ def _iter_rows(
     """Yield one document row per changed/new page, then deletion tombstones.
 
     ``previous_pages`` is ``{page_id: {"last_edited_time", "root_id", "ancestors"}}``
-    from the prior run. Any transient error (network, 429/5xx exhausted retries)
+    from the prior run, plus ``"incomplete_content"`` on a page stored without the children
+    Notion's API refuses to expose. Any transient error (network, 429/5xx exhausted retries)
     propagates un-caught, which aborts the whole dlt extraction before
     ``state`` is touched, a partial walk never produces tombstones. A 403/404
     on a page or database reached *through* the tree (not an explicit root)
@@ -396,12 +495,19 @@ def _iter_rows(
     """
     stats.clear()
     stats.update(
-        pages_scanned=0, pages_changed=0, pages_unchanged=0, deleted=0, containers_scanned=0
+        pages_scanned=0,
+        pages_changed=0,
+        pages_unchanged=0,
+        pages_incomplete=0,
+        deleted=0,
+        deletions_withheld=0,
+        containers_scanned=0,
     )
 
     queue: deque[_WalkItem] = deque(_resolve_roots(client, root_page_ids, root_data_source_ids))
     visited: set[str] = set()
     present_pages: dict[str, dict] = {}
+    incomplete_pages: set[str] = set()
 
     while queue:
         item = queue.popleft()
@@ -479,11 +585,18 @@ def _iter_rows(
 
         # A readable page whose children cannot be listed is not proof its subtree
         # is gone; abort rather than tombstone live descendants.
-        blocks = list(_list_block_children(client, item.id))
+        blocks = _list_block_children(client, item.id)
         # Sub-pages can sit inside columns, toggles or synced blocks, not only at
         # the top level, so every run expands container blocks to find them.
-        children_cache: dict[str, list[dict]] = {}
+        children_cache: dict[str, list[dict] | None] = {}
         discovered = _collect_nested_children(client, blocks, children_cache)
+        if _has_unexposed_children(children_cache):
+            # Part of what is compared below: a page that turns incomplete (or complete
+            # again) is rendered in this run even though Notion's timestamp did not move.
+            seen["incomplete_content"] = True
+            incomplete_pages.add(item.id)
+            stats["pages_incomplete"] += 1
+            logger.warning("Notion: page %s is stored without its API-unsupported blocks.", item.id)
 
         if previous_pages.get(item.id) != seen:
             stats["pages_changed"] += 1
@@ -498,6 +611,9 @@ def _iter_rows(
                 NODE_SET_COLUMN: [f"notion:{workspace_id}:{item.root_id}"],
                 STRUCTURE_COLUMN: {"ancestors": list(item.ancestors)},
             }
+            # Rendering lists synced copies too, which discovery does not expand.
+            if _has_unexposed_children(children_cache):
+                seen["incomplete_content"] = True
         else:
             stats["pages_unchanged"] += 1
 
@@ -516,17 +632,33 @@ def _iter_rows(
                 )
 
     deleted_ids = sorted(set(previous_pages) - set(present_pages))
+    withheld = _withheld_deletions(previous_pages, deleted_ids, incomplete_pages, present_pages)
+    for page_id in sorted(withheld):
+        present_pages[page_id] = previous_pages[page_id]
+    if withheld:
+        stats["deletions_withheld"] = len(withheld)
+        logger.warning(
+            "Notion: keeping %d page(s) whose deletion cannot be confirmed, an ancestor has "
+            "API-unsupported blocks: %s",
+            len(withheld),
+            ", ".join(sorted(withheld)),
+        )
     for page_id in deleted_ids:
+        if page_id in withheld:
+            continue
         stats["deleted"] += 1
         yield {"id": page_id, "_deleted": True}
 
     state["pages"] = present_pages
     logger.info(
-        "Notion: synced %d page(s) (%d changed, %d unchanged), %d deletion(s).",
+        "Notion: synced %d page(s) (%d changed, %d unchanged, %d incomplete), "
+        "%d deletion(s), %d withheld.",
         stats["pages_scanned"],
         stats["pages_changed"],
         stats["pages_unchanged"],
+        stats["pages_incomplete"],
         stats["deleted"],
+        stats["deletions_withheld"],
     )
 
 
@@ -610,7 +742,7 @@ def _table_cell(text: str) -> str:
 
 
 def _render_table(client: _NotionClient, block: dict) -> str:
-    rows = list(_list_block_children(client, block["id"]))
+    rows = _list_block_children(client, block["id"])
     lines = []
     for index, row in enumerate(rows):
         cells = (row.get("table_row") or {}).get("cells") or []
@@ -672,7 +804,7 @@ def _is_synced_copy(block: dict) -> bool:
 
 
 def _collect_nested_children(
-    client: _NotionClient, blocks: list[dict], cache: dict[str, list[dict]]
+    client: _NotionClient, blocks: list[dict], cache: dict[str, list[dict] | None]
 ) -> list[dict]:
     """Return every child_page/child_database block at any depth under ``blocks``.
 
@@ -695,9 +827,9 @@ def _collect_nested_children(
             continue
         if not block.get("has_children") or block_type == "table" or _is_synced_copy(block):
             continue
-        children = list(_list_block_children(client, block["id"]))
-        cache[block["id"]] = children
-        stack.append(iter(children))
+        children = _cached_block_children(client, block, cache)
+        if children:
+            stack.append(iter(children))
     return found
 
 
@@ -718,8 +850,21 @@ def _render_block(client: _NotionClient, block: dict) -> str:
     return _render_simple_block(block_type, payload, text)
 
 
+def _cached_block_children(
+    client: _NotionClient, block: dict, cache: dict[str, list[dict] | None] | None
+) -> list[dict]:
+    """Share successful and unsupported listings within one page's traversal."""
+    block_id = block["id"]
+    if cache is not None and block_id in cache:
+        return cache[block_id] or []
+    children = _list_block_children(client, block_id, block_type=block.get("type"))
+    if cache is not None:
+        cache[block_id] = children
+    return children or []
+
+
 def _children_to_render(
-    client: _NotionClient, block: dict, cache: dict[str, list[dict]] | None
+    client: _NotionClient, block: dict, cache: dict[str, list[dict] | None] | None
 ) -> list[dict] | str:
     """Return the blocks to render under ``block``, or already rendered text for a synced copy."""
     if not block.get("has_children") or block.get("type") in (
@@ -728,16 +873,14 @@ def _children_to_render(
         "table",
     ):
         return []
-    if cache is not None and block["id"] in cache:
-        return cache[block["id"]]
     if not _is_synced_copy(block):
-        return list(_list_block_children(client, block["id"]))
+        return _cached_block_children(client, block, cache)
     # The original may sit on a page this integration cannot read; the copy
     # (or any block inside it) then renders empty instead of failing the whole
     # page. A copy's own tree is rendered in a nested call so the guard covers it;
     # Notion does not nest synced blocks, so that recursion is one level deep.
     try:
-        return _render_blocks_list(client, list(_list_block_children(client, block["id"])), cache)
+        return _render_blocks_list(client, _cached_block_children(client, block, cache), cache)
     except NotionAPIError as exc:
         if not _is_gone(exc):
             raise
@@ -747,7 +890,7 @@ def _children_to_render(
 def _render_blocks_list(
     client: _NotionClient,
     blocks: list[dict],
-    cache: dict[str, list[dict]] | None = None,
+    cache: dict[str, list[dict] | None] | None = None,
 ) -> str:
     """Render ``blocks`` and everything nested under them, one line group per block.
 
@@ -778,7 +921,7 @@ def _render_page_content(
     page: dict,
     blocks: list[dict],
     is_database_row: bool,
-    cache: dict[str, list[dict]] | None = None,
+    cache: dict[str, list[dict] | None] | None = None,
 ) -> str:
     parts = []
     if is_database_row:
