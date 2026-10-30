@@ -40,8 +40,7 @@ def archive_dir(tmp_path):
         )
         writer.write(COGXMemory(external_id="memory-1", content="A useful memory"))
         writer.write(COGXMemoryBlock(external_id="block-1", label="persona", value="Helpful"))
-        # nodes.jsonl contains bare property dicts, not typed-record envelopes.
-        # A property named 'kind' is graph data rather than a discriminator.
+        # A raw node's 'kind' property is not a COGX discriminator.
         writer.write_raw_node({"id": "raw-1", "type": "NodeSet", "kind": "application-data"})
     return directory
 
@@ -82,7 +81,6 @@ def test_unserializable_checksum_reports_line_and_continues(tmp_path, malformed_
     diagnostic = _diagnostics(report, "checksum_error")[0]
     assert diagnostic.file == "documents.jsonl"
     assert diagnostic.line == 1
-    # The structured report never includes the malformed input value.
     assert json.loads(report.model_dump_json())["valid"] is False
 
 

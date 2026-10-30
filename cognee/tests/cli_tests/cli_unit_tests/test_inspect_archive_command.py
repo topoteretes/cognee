@@ -92,8 +92,7 @@ def test_real_cli_reports_integrity_locally_without_creating_a_database(archive,
         "COGNEE_CLI_MODE": "true",
         "LOG_LEVEL": "ERROR",
     }
-    # The real dispatcher must keep this filesystem operation local even
-    # when an API server is configured. Port 9 has no test service.
+    # Inspection stays local even with --api-url.
     completed = subprocess.run(
         [
             sys.executable,

@@ -64,6 +64,5 @@ when the global --api-url option is supplied.
             fmt.echo("Inspection passed." if report.valid else "Inspection failed.")
 
         if not report.valid:
-            # Avoid the generic command exception handler adding non-JSON help
-            # text to stdout after a structured report.
+            # Keep stdout valid JSON when returning a failing exit status.
             raise SystemExit(1)

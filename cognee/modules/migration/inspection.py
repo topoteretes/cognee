@@ -1,8 +1,4 @@
-"""Read-only preflight inspection of portable COGX memory archives.
-
-Inspection validates the archive's files and integrity without importing its
-records, initializing a database, or reading optional account credentials.
-"""
+"""Inspect portable COGX archives without importing their contents."""
 
 import json
 from pathlib import Path
@@ -35,11 +31,7 @@ class COGXInspectionDiagnostic(BaseModel):
 
 
 class COGXArchiveInspection(BaseModel):
-    """Archive metadata, record coverage, and validation findings.
-
-    Missing checksums describe coverage rather than corruption: legacy COGX
-    records and raw graph nodes do not necessarily carry integrity hashes.
-    """
+    """Archive metadata, checksum coverage, and validation findings."""
 
     directory: str
     cogx_version: str | None = None
@@ -66,18 +58,11 @@ class COGXArchiveInspection(BaseModel):
 
 
 def inspect_cogx_archive(directory: str | Path) -> COGXArchiveInspection:
-    """Inspect an archive directory without changing files or memory stores.
+    """Check schemas, inventory, and available checksums without modifying stores.
 
-    The report includes schema failures, misplaced record kinds, declared
-    count mismatches, and checksums when supplied. A missing manifest is a
-    warning, matching the existing reader's support for legacy directories.
-    Filesystem and validation failures are reported with safe messages that
-    never include record contents. ``permissions.json`` is detected but its
-    contents are never read.
-
-    This checks the archive format, not whether every record can be imported
-    into a particular database. Fact references may be plain entity names,
-    so inspection does not require them to refer to declared entity records.
+    Missing manifests warn for legacy compatibility. Diagnostics omit record
+    contents; permissions are detected but never read. Fact references and
+    database-specific import behavior are not validated.
     """
     report = COGXArchiveInspection(directory=str(directory))
 
@@ -211,8 +196,7 @@ def inspect_cogx_archive(directory: str | Path) -> COGXArchiveInspection:
                     try:
                         checksum = verify_checksum(record)
                     except ValueError:
-                        # A JSON escape can decode to an unpaired surrogate:
-                        # schema validation may pass but hashing cannot encode it.
+                        # JSON may contain surrogates that cannot be encoded for hashing.
                         report.checksum_counts["invalid"] += 1
                         diagnostic(
                             name,
