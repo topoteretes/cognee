@@ -262,22 +262,13 @@ def _delimited(name: str, text: str) -> Table | None:
     return Table(name, header, [r[:width] + [""] * (width - len(r)) for r in body])
 
 
-def parse_dlt_row(text: str) -> tuple[str, dict[str, str], list[str]] | None:
-    """A DLT row node's text as its table name, its fields and its foreign keys. The text
-    is "Table: x", optional "Columns:" and "Foreign Keys:" sections, then "Row Data:" with
-    one "key: value" line per field."""
+def parse_dlt_row(text: str) -> tuple[str, dict[str, str]] | None:
+    """A DLT row node's text as its table name and its fields. The text is "Table: x",
+    then "Row Data:" with one "key: value" line per field."""
     head = re.match(r"\s*Table:\s*(.+)", text)
     marker = text.find("Row Data:")
     if not head or marker < 0:
         return None
-    keys_at = text.find("Foreign Keys:")
-    foreign_keys = []
-    if 0 <= keys_at < marker:
-        foreign_keys = [
-            line.strip()[2:].strip()
-            for line in text[keys_at:marker].splitlines()[1:]
-            if line.strip().startswith("- ")
-        ]
     fields: dict[str, str] = {}
     for line in text[marker + len("Row Data:") :].splitlines():
         key, sep, value = line.strip().partition(": ")
@@ -285,7 +276,7 @@ def parse_dlt_row(text: str) -> tuple[str, dict[str, str], list[str]] | None:
             fields[key] = value
         elif line.strip().endswith(":"):
             fields[line.strip()[:-1]] = ""
-    return head.group(1).strip(), fields, foreign_keys
+    return head.group(1).strip(), fields
 
 
 def _is_heading(line: str) -> bool:
@@ -327,6 +318,7 @@ class RecordStore:
         self.by_columns: dict[tuple[str, ...], str] = {}
         self.names: set[str] = {"lines"}
         self.line_rows = 0
+        self.dlt_foreign_keys: dict[str, list[str]] = {}
         self.connection.execute(
             "CREATE TABLE lines (document TEXT, title TEXT, block TEXT, line_no INTEGER, "
             "text TEXT, shape TEXT, "
@@ -347,20 +339,23 @@ class RecordStore:
         else:
             self._add_table(table)
 
+    def add_dlt_tables(self, foreign_keys: dict[str, list[str]]) -> None:
+        """Each DLT table's foreign keys, from its SchemaTable node, as
+        "column references table.column" lines shown with the table."""
+        self.dlt_foreign_keys = foreign_keys
+
     def add_dlt_rows(self, texts: list[str]) -> None:
-        by_table: dict[str, tuple[list[dict[str, str]], set[str]]] = {}
+        by_table: dict[str, list[dict[str, str]]] = {}
         for text in texts:
             parsed = parse_dlt_row(text)
             if parsed:
-                rows, keys = by_table.setdefault(parsed[0], ([], set()))
-                rows.append(parsed[1])
-                keys.update(parsed[2])
-        for name, (records, keys) in by_table.items():
+                by_table.setdefault(parsed[0], []).append(parsed[1])
+        for name, records in by_table.items():
             columns = [
                 c for c in dict.fromkeys(k for r in records for k in r) if not c.startswith("_dlt")
             ]
             rows = [[r.get(c, "") for c in columns] for r in records]
-            self._add_table(Table(name, columns, rows, sorted(keys)))
+            self._add_table(Table(name, columns, rows, self.dlt_foreign_keys.get(name, [])))
 
     def _add_table(self, table: Table) -> None:
         key = tuple(table.columns)

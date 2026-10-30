@@ -33,6 +33,7 @@ from cognee.api.v1.agents.routers import get_agents_router
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
 from cognee.api.v1.cloud.routers import get_checks_router
 from cognee.api.v1.cognify.routers import get_cognify_router
+from cognee.api.v1.conflicts.routers import get_conflicts_router
 from cognee.api.v1.datasets.routers import get_datasets_router
 from cognee.api.v1.delete.routers import get_delete_router
 from cognee.api.v1.forget.routers import get_forget_router
@@ -179,11 +180,11 @@ async def lifespan(app: FastAPI):
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
 
-    # Flush in-flight telemetry and close its shared aiohttp session on the
-    # loop that owns them, instead of leaving it to the atexit fallback.
-    from cognee.shared.utils import close_telemetry_session
+    # Send queued telemetry before the server exits; on SIGTERM uvicorn runs
+    # this shutdown, while the sender's atexit hook may never run.
+    from cognee.shared.utils import flush_telemetry
 
-    await close_telemetry_session()
+    await flush_telemetry()
 
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
@@ -403,6 +404,8 @@ app.include_router(
     prefix="/api/v1/permissions",
     tags=["permissions"],
 )
+
+app.include_router(get_conflicts_router(), prefix="/api/v1/conflicts", tags=["conflicts"])
 
 app.include_router(get_datasets_router(), prefix="/api/v1/datasets", tags=["datasets"])
 

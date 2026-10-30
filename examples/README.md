@@ -44,6 +44,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | Script | Demonstrates |
 |---|---|
 | [`review_conflicts.py`](guides/review_conflicts.py) | Review dated source facts, print stored conflicts and fact status marks |
+| [`resolve_conflicts.py`](guides/resolve_conflicts.py) | Settle a conflict review cannot decide with `list_conflicts` / `resolve_conflict`, and compare recall before and after |
 | [`sessions.py`](guides/sessions.py) | Session-scoped memory via `session_id` |
 | [`session_node_sets.py`](guides/session_node_sets.py) | Per-project session memory: pin a `node_set` on a session, bridge it with `improve()`, recall with `node_name` |
 | [`session_distillation.py`](guides/session_distillation.py) | Distilling a session into durable preferences |
@@ -71,7 +72,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Authoring tasks and composing a pipeline |
 | [`ontology_quickstart.py`](guides/ontology_quickstart.py) | Grounding extraction in an OWL ontology |
 | [`entity_deduplication.py`](guides/entity_deduplication.py) | Merging duplicate entities (dry-run, then real) |
-| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Deprecated: use `review_conflicts.py` for Entity descriptions |
+| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Deprecated: `review_conflicts.py` reviews facts instead and leaves descriptions as extracted |
 | [`low_level_llm.py`](guides/low_level_llm.py) | Direct LLM-gateway structured output |
 
 ### Ingestion

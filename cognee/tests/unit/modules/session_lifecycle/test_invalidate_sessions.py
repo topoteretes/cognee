@@ -4,6 +4,7 @@ Exercises the real SessionManager over a filesystem cache adapter; only the
 vector-index hooks and the relational session registry are patched out.
 """
 
+import asyncio
 import tempfile
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -26,19 +27,11 @@ SESSION_ID = "test_session"
 
 @pytest.fixture
 def session_manager():
-    with (
-        tempfile.TemporaryDirectory() as tmpdir,
-        patch(
-            "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-            return_value={"data_root_directory": tmpdir},
-        ),
-    ):
-        from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-            FSCacheAdapter,
-        )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
         from cognee.infrastructure.session.session_manager import SessionManager
 
-        adapter = FSCacheAdapter()
+        adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmpdir}/cache.db")
         with (
             patch(
                 "cognee.infrastructure.session.session_manager.delete_session_qa_vector",
@@ -50,7 +43,7 @@ def session_manager():
             ),
         ):
             yield SessionManager(adapter)
-        adapter.cache.close()
+        asyncio.run(adapter.close())
 
 
 async def _seed_qa(session_manager, qa_id, used_node_ids=None, used_context_ids=None):
@@ -518,3 +511,129 @@ async def test_list_unattributed_sessions_returns_null_dataset_id_rows():
                 if row:
                     await session.delete(row)
             await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_bounds_parallel_sessions_and_finishes_them_before_strict_failure(
+    monkeypatch,
+):
+    import asyncio
+    import importlib
+
+    module = importlib.import_module("cognee.modules.session_lifecycle.invalidate_sessions")
+    sessions = [(uuid4(), f"session-{i}") for i in range(20)]
+    manager = type("Manager", (), {"is_available": True})()
+    monkeypatch.setattr(module, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(module, "list_sessions_for_dataset", AsyncMock(return_value=sessions))
+    monkeypatch.setattr(module, "list_unattributed_sessions", AsyncMock(return_value=[]))
+    active = peak = completed = 0
+
+    async def clean(*args, session_id, **kwargs):
+        nonlocal active, peak, completed
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0)
+            if session_id == "session-0":
+                raise RuntimeError("cache write failed")
+            return 1, 0
+        finally:
+            active -= 1
+            completed += 1
+
+    monkeypatch.setattr(module, "_invalidate_session_entries", clean)
+    with pytest.raises(RuntimeError, match="cache write failed"):
+        await module.invalidate_sessions_for_deleted_data(uuid4(), {"node"}, set(), strict=True)
+    assert 1 < peak <= 8
+    assert completed == len(sessions)
+    assert active == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lesson_still_stored", [False, True])
+async def test_strict_cleanup_counts_a_missing_entry_as_done_but_not_a_surviving_lesson(
+    monkeypatch, lesson_still_stored
+):
+    """An entry a concurrent cleanup already removed is done; a lesson whose fail-open
+    delete returned False but which a re-read still finds keeps the decision pending."""
+    import importlib
+    from types import SimpleNamespace
+
+    module = importlib.import_module("cognee.modules.session_lifecycle.invalidate_sessions")
+    turn = SimpleNamespace(
+        qa_id="stale",
+        used_graph_element_ids={"node_ids": ["conflict"], "edge_ids": []},
+        used_session_context_ids=[],
+    )
+    lesson = {"id": "feedback-1", "kind": "feedback", "referenced_qa_ids": ["stale"]}
+    manager = SimpleNamespace(
+        is_available=True,
+        get_session=AsyncMock(return_value=[turn]),
+        get_session_context_entries=AsyncMock(
+            side_effect=[[lesson], [lesson] if lesson_still_stored else []]
+        ),
+        delete_qa=AsyncMock(return_value=False),
+        delete_session_context_entry=AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(module, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(
+        module, "list_sessions_for_dataset", AsyncMock(return_value=[(uuid4(), "s1")])
+    )
+    monkeypatch.setattr(module, "list_unattributed_sessions", AsyncMock(return_value=[]))
+    if lesson_still_stored:
+        with pytest.raises(RuntimeError, match="cached lesson"):
+            await module.invalidate_sessions_for_deleted_data(
+                uuid4(), {"conflict"}, set(), strict=True
+            )
+    else:
+        totals = await module.invalidate_sessions_for_deleted_data(
+            uuid4(), {"conflict"}, set(), strict=True
+        )
+        assert totals == {
+            "sessions_considered": 1,
+            "qa_entries_deleted": 0,
+            "context_entries_deleted": 0,
+        }
+    manager.delete_qa.assert_awaited_once()
+    manager.delete_session_context_entry.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing_read", ["initial", "re-read"])
+async def test_strict_cleanup_fails_on_an_unreadable_session_context(
+    session_manager, monkeypatch, failing_read
+):
+    """The manager's context reads are fail-open. Strict cleanup must not read an outage
+    as a session without lessons, or as a lesson that is gone after a failed delete."""
+    await _seed_qa(session_manager, "qa_stale", used_node_ids=["conflict"])
+    await _seed_context(
+        session_manager,
+        {"id": "feedback_1", "kind": "feedback", "referenced_qa_ids": ["qa_stale"]},
+    )
+    cache = session_manager._cache
+    read = cache.get_session_context_entries
+    reads = 0
+
+    async def flaky_read(*args, **kwargs):
+        nonlocal reads
+        reads += 1
+        if failing_read == "initial" or reads > 1:
+            raise RuntimeError("cache down")
+        return await read(*args, **kwargs)
+
+    async def failing_delete(*args, **kwargs):
+        raise RuntimeError("cache down")
+
+    monkeypatch.setattr(cache, "get_session_context_entries", flaky_read)
+    monkeypatch.setattr(cache, "delete_session_context_entry", failing_delete)
+    cleanup = {
+        "user_id": USER_ID,
+        "session_id": SESSION_ID,
+        "deleted_node_ids": {"conflict"},
+        "deleted_edge_ids": set(),
+    }
+    with pytest.raises(RuntimeError, match="cache down"):
+        await _invalidate_session_entries(session_manager, **cleanup, strict=True)
+    if failing_read == "initial":
+        # forget() and dataset deletes stay best-effort: the same outage is not raised.
+        assert await _invalidate_session_entries(session_manager, **cleanup) == (1, 0)

@@ -93,8 +93,7 @@ def lance_core_mismatch() -> str | None:
 
 class PylanceIncompatibleError(RuntimeError):
     """pylance cannot open a table lancedb wrote: the two are built on
-    different Lance cores. Not specific to one table, so callers stop
-    compacting altogether instead of retrying every table."""
+    different Lance cores."""
 
 
 async def open_as_lance(table):
@@ -103,7 +102,11 @@ async def open_as_lance(table):
         dataset = await table.to_lance()
         dataset.versions()
     except Exception as exc:
-        raise PylanceIncompatibleError(f"{type(exc).__name__}: {exc}") from exc
+        raise PylanceIncompatibleError(
+            f"pylance cannot open a table lancedb wrote ({type(exc).__name__}: {exc}). "
+            "If the two are on different Lance cores, install the pylance release line "
+            "matching lancedb's bundled Lance core."
+        ) from exc
     return dataset
 
 

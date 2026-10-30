@@ -17,6 +17,7 @@ from cognee.modules.retrieval.utils.conflict_context import ChunkConflicts
 @pytest.fixture
 def graph():
     graph = AsyncMock()
+    graph.get_filtered_graph_data.return_value = ([], [])
     graph.get_neighborhood.return_value = (
         [
             (
@@ -24,7 +25,6 @@ def graph():
                 {
                     "name": "Acme",
                     "description": "Bob leads\n Acme now.",
-                    "conflicts_reviewed_at": "2026-01-10",
                     "belongs_to_set": ["team"],
                 },
             ),
@@ -69,13 +69,13 @@ def graph():
 
 
 @pytest.mark.asyncio
-async def test_hybrid_hydrates_reviewed_description_and_types_before_rendering(graph):
+async def test_hybrid_hydrates_type_and_conflicts_and_hides_a_disputed_entity_description(graph):
     entities, _ = await build_entities(
         graph, [{"id": "acme", "text": "Acme", "type": "IndexSchema"}], 3
     )
     entity = entities[0]
     assert entity["type"] == "company"
-    assert entity["description"] == "Bob leads Acme now."
+    assert "description" not in entity
     assert entity["conflicts"] == ["Bob succeeded Alice."]
     assert [edge["text"] for edge in entity["edges"]] == [
         "Acme -- is_a -- company",
@@ -83,7 +83,7 @@ async def test_hybrid_hydrates_reviewed_description_and_types_before_rendering(g
         "Alice leads Acme. [superseded; as of 2020-05-01]",
     ]
     context = format_hybrid_context("", {"entities": entities})
-    assert "### Acme (company)\nBob leads Acme now." in context
+    assert "### Acme (company)\n- Acme -- is_a -- company" in context
     assert context.endswith("## Fact conflicts\n- Bob succeeded Alice.")
 
 
@@ -106,18 +106,24 @@ async def test_nodeset_scope_hides_entity_description_and_entity_reached_conflic
     entities, _ = await build_entities(
         graph, [{"id": "acme", "name": "Acme"}], 5, node_name=["team"]
     )
-    assert entities[0]["description"] is None
+    assert "description" not in entities[0]
     assert not entities[0].get("conflicts")
     assert entities[0]["type"] == "company"
 
 
 @pytest.mark.asyncio
-async def test_unreviewed_description_is_not_presented(graph):
-    graph.get_neighborhood.return_value[0][0][1]["conflicts_reviewed_at"] = None
-    entities, _ = await build_entities(
-        graph, [{"id": "acme", "name": "Acme", "description": "old vector value"}], 0
+async def test_description_is_not_shown_with_or_without_a_stored_conflict(graph):
+    hits = [{"id": "acme", "name": "Acme", "description": "old vector value"}]
+    entities, _ = await build_entities(graph, hits, 0)
+    assert "description" not in entities[0]
+    nodes, edges = graph.get_neighborhood.return_value
+    graph.get_neighborhood.return_value = (
+        nodes,
+        [edge for edge in edges if edge[2] != "conflict_about"],
     )
-    assert entities[0]["description"] is None
+    entities, _ = await build_entities(graph, hits, 0)
+    context = format_hybrid_context("", {"entities": entities})
+    assert context == "## Relevant entities\n### Acme (company)"
 
 
 @pytest.mark.asyncio
@@ -129,11 +135,13 @@ async def test_scoped_fallback_cannot_expose_a_description_from_the_vector_paylo
         0,
         node_name=["team"],
     )
-    assert entities[0]["description"] is None
+    assert "description" not in entities[0]
 
 
 @pytest.mark.asyncio
-async def test_chunk_attachment_supports_results_dicts_tuples_and_summary_sources(monkeypatch):
+async def test_chunk_attachment_supports_results_dicts_tuples_and_summary_sources(
+    monkeypatch, graph
+):
     lookup = AsyncMock(
         return_value={
             "c1": ChunkConflicts("Report", "2026-01-10T09:00:00Z", {"f2": "Second", "f1": "First"})

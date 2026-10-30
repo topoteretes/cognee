@@ -2,9 +2,10 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.operations import get_operation_origin
+from cognee.modules.operations import get_current_session_ids, get_operation_origin
 from cognee.modules.operations.usage_accumulator import get_parent_run_id
 from cognee.modules.pipelines.models import OperationOutcome, PipelineRun, PipelineRunStatus
+from cognee.modules.pipelines.operations.run_sessions import add_run_sessions
 from cognee.modules.users.models import User
 
 
@@ -20,6 +21,8 @@ async def log_pipeline_run_complete(
     tokens_out: int | None = None,
     embedding_tokens: int | None = None,
 ):
+    session_ids = get_current_session_ids()
+
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,
         pipeline_name=pipeline_name,
@@ -45,7 +48,7 @@ async def log_pipeline_run_complete(
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
-        session.add(pipeline_run)
+        add_run_sessions(session, pipeline_run, session_ids)
         await session.commit()
 
     return pipeline_run

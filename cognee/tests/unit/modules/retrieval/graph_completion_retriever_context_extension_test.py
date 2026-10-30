@@ -70,6 +70,7 @@ async def test_init_custom_params():
 async def test_get_completion_without_context(mock_edge):
     """Test get_completion retrieves context when not provided."""
     mock_graph_engine = AsyncMock()
+    mock_graph_engine.get_filtered_graph_data.return_value = ([], [])
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
     unified_mock = AsyncMock()
@@ -158,6 +159,7 @@ async def test_get_completion_with_provided_context(mock_edge):
 async def test_get_completion_context_extension_rounds(mock_edge):
     """Test get_completion with multiple context extension rounds."""
     mock_graph_engine = AsyncMock()
+    mock_graph_engine.get_filtered_graph_data.return_value = ([], [])
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
     unified_mock = AsyncMock()
@@ -224,6 +226,7 @@ async def test_get_completion_context_extension_rounds(mock_edge):
 async def test_get_completion_context_extension_stops_early(mock_edge):
     """Test get_completion stops early when no new triplets found."""
     mock_graph_engine = AsyncMock()
+    mock_graph_engine.get_filtered_graph_data.return_value = ([], [])
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
     unified_mock = AsyncMock()
@@ -284,6 +287,7 @@ async def test_get_completion_context_extension_stops_early(mock_edge):
 async def test_get_completion_with_session(mock_edge):
     """Test get_completion with session caching enabled."""
     mock_graph_engine = AsyncMock()
+    mock_graph_engine.get_filtered_graph_data.return_value = ([], [])
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
     unified_mock = AsyncMock()
@@ -359,6 +363,7 @@ async def test_get_completion_with_response_model(mock_edge):
         answer: str
 
     mock_graph_engine = AsyncMock()
+    mock_graph_engine.get_filtered_graph_data.return_value = ([], [])
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
     unified_mock = AsyncMock()
@@ -417,6 +422,7 @@ async def test_get_completion_with_response_model(mock_edge):
 async def test_get_completion_with_session_no_user_id(mock_edge):
     """Test get_completion with session config but no user ID."""
     mock_graph_engine = AsyncMock()
+    mock_graph_engine.get_filtered_graph_data.return_value = ([], [])
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
     unified_mock = AsyncMock()
@@ -478,6 +484,7 @@ async def test_get_completion_with_session_no_user_id(mock_edge):
 async def test_get_completion_zero_extension_rounds(mock_edge):
     """Test get_completion with zero context extension rounds."""
     mock_graph_engine = AsyncMock()
+    mock_graph_engine.get_filtered_graph_data.return_value = ([], [])
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
     unified_mock = AsyncMock()
@@ -533,6 +540,7 @@ async def test_get_completion_zero_extension_rounds(mock_edge):
 async def test_get_completion_batch_queries_without_context(mock_edge):
     """Test get_completion batch queries retrieves context when not provided."""
     mock_graph_engine = AsyncMock()
+    mock_graph_engine.get_filtered_graph_data.return_value = ([], [])
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
     unified_mock = AsyncMock()
@@ -622,6 +630,7 @@ async def test_get_completion_batch_queries_with_provided_context(mock_edge):
 async def test_get_completion_batch_queries_context_extension_rounds(mock_edge):
     """Test get_completion batch queries with multiple context extension rounds."""
     mock_graph_engine = AsyncMock()
+    mock_graph_engine.get_filtered_graph_data.return_value = ([], [])
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
     unified_mock = AsyncMock()
@@ -692,6 +701,7 @@ async def test_get_completion_batch_queries_context_extension_rounds(mock_edge):
 async def test_get_completion_batch_queries_context_extension_stops_early(mock_edge):
     """Test get_completion batch queries stops early when no new triplets found."""
     mock_graph_engine = AsyncMock()
+    mock_graph_engine.get_filtered_graph_data.return_value = ([], [])
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
     unified_mock = AsyncMock()
@@ -753,6 +763,7 @@ async def test_get_completion_batch_queries_context_extension_stops_early(mock_e
 async def test_get_completion_batch_queries_zero_extension_rounds(mock_edge):
     """Test get_completion batch queries with zero context extension rounds."""
     mock_graph_engine = AsyncMock()
+    mock_graph_engine.get_filtered_graph_data.return_value = ([], [])
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
     unified_mock = AsyncMock()
@@ -810,6 +821,7 @@ async def test_get_completion_batch_queries_with_response_model(mock_edge):
         answer: str
 
     mock_graph_engine = AsyncMock()
+    mock_graph_engine.get_filtered_graph_data.return_value = ([], [])
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
     unified_mock = AsyncMock()
@@ -871,6 +883,7 @@ async def test_get_completion_batch_queries_with_response_model(mock_edge):
 async def test_get_completion_batch_queries_duplicate_queries(mock_edge):
     """Test get_completion batch queries with duplicate queries."""
     mock_graph_engine = AsyncMock()
+    mock_graph_engine.get_filtered_graph_data.return_value = ([], [])
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
     unified_mock = AsyncMock()

@@ -7,6 +7,7 @@ import type { EnrichmentRun } from "@/modules/sessions/getSessions";
 
 export function useGraphEnrichment(
   datasetId: string | null,
+  sessionId: string | null,
   refreshNonce: number,
 ): { runs: EnrichmentRun[]; loading: boolean } {
   const { cogniInstance } = useCogniInstance();
@@ -21,13 +22,13 @@ export function useGraphEnrichment(
     }
     let cancelled = false;
     setLoading(true);
-    getGraphEnrichmentRuns(cogniInstance, datasetId).then((res) => {
+    getGraphEnrichmentRuns(cogniInstance, datasetId, sessionId).then((res) => {
       if (cancelled) return;
       setRuns(res);
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [cogniInstance, datasetId, refreshNonce]);
+  }, [cogniInstance, datasetId, sessionId, refreshNonce]);
 
   return { runs, loading };
 }

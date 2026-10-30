@@ -6,6 +6,7 @@ from cognee.api.v1.exceptions import DataDeletionIncompleteError
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.locks import dataset_lock
+from cognee.modules.conflicts.methods import retire_forgotten_decisions
 from cognee.modules.data.content_hash import compute_content_hash, normalize_content_hash
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
@@ -104,6 +105,24 @@ async def _invalidate_sessions_for_deleted_data_nonfatal(
         logger.warning(
             "Session invalidation after data delete failed (non-fatal): %s", error, exc_info=True
         )
+
+
+async def _retire_forgotten_decisions(
+    dataset, user, deleted_elements: DeletedGraphElements
+) -> DeletedGraphElements:
+    """Delete conflict decisions whose chosen fact went with the deleted data.
+
+    Returns ``deleted_elements`` plus the retired decision nodes, for session
+    invalidation; the receipt keeps counting only the data's own elements. Not
+    best-effort: a kept decision would go on presenting the deleted fact as the
+    accepted one, so a failure fails the delete before the Data row is removed.
+    """
+    retired = await retire_forgotten_decisions(dataset, user)
+    return DeletedGraphElements(
+        node_ids=deleted_elements.node_ids | retired,
+        edge_ids=deleted_elements.edge_ids,
+        owned=deleted_elements.owned,
+    )
 
 
 async def _delete_dataset_if_empty(dataset, requested: bool) -> bool:
@@ -254,6 +273,8 @@ class datasets:
         ``SPARQL_MAX_GRAPH_NODES`` raise ``SparqlGraphTooLargeError`` and a
         query over ``SPARQL_QUERY_TIMEOUT_SECONDS`` raises
         ``SparqlQueryTimeoutError`` (all in ``cognee.modules.graph.rdf``).
+        ``SERVICE``, ``FROM`` and ``FROM NAMED`` raise
+        ``SparqlExternalAccessNotAllowedError``.
 
         Routes to the remote instance when connected via ``serve()``, like
         ``list_data``; there the server's limits apply and a refused query
@@ -379,6 +400,20 @@ class datasets:
         return await _fan_out_by_pipeline(dataset_ids, pipeline_names, get_pipeline_progress)
 
     @staticmethod
+    async def get_memory_status(dataset_ids: list[UUID]) -> dict:
+        """The memory state of each dataset: ``{dataset_id: MemoryStatus}``.
+
+        Folds the latest indexing and cognify runs into one answer (``state``,
+        ``search_level``, ``searchable``, ``graph_ready``, ``message``, the
+        per-pipeline statuses and the failure cause); see
+        ``cognee.modules.cognify.memory_status``. Every requested dataset gets
+        an entry, ``empty`` when nothing ran on it.
+        """
+        from cognee.modules.cognify.memory_status import get_memory_status
+
+        return await get_memory_status(dataset_ids)
+
+    @staticmethod
     async def empty_dataset(dataset_id: UUID, user: User | None = None):
         from cognee.modules.data.methods import delete_data, delete_dataset
         from cognee.modules.search.operations import delete_dataset_search_history
@@ -501,9 +536,12 @@ class datasets:
                         deleted_elements = await delete_data_nodes_and_edges(
                             dataset_id, data_id, user.id
                         )
-                        if deleted_elements.node_ids or deleted_elements.edge_ids:
+                        invalidated = await _retire_forgotten_decisions(
+                            dataset, user, deleted_elements
+                        )
+                        if invalidated.node_ids or invalidated.edge_ids:
                             await _invalidate_sessions_for_deleted_data_nonfatal(
-                                dataset.id, deleted_elements, user.id
+                                dataset.id, invalidated, user.id
                             )
                         dataset_deleted = await _delete_dataset_if_empty(
                             dataset, delete_dataset_if_empty
@@ -521,6 +559,10 @@ class datasets:
 
                 if str(data.dataset_id) != str(dataset_id):
                     raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
+
+                from cognee.tasks.code_graph.code_repo import is_code_repo_sourced
+
+                was_code_repo = is_code_repo_sourced(data)
 
                 async with set_database_global_context_variables(dataset_id, dataset.owner_id):
                     # Delete mode is exclusive: ledger rows imply the relational-ledger
@@ -548,10 +590,12 @@ class datasets:
                             deleted_elements = DeletedGraphElements()
 
                     await _invalidate_sessions_for_deleted_data_nonfatal(
-                        dataset.id, deleted_elements, user.id
+                        dataset.id,
+                        await _retire_forgotten_decisions(dataset, user, deleted_elements),
+                        user.id,
                     )
 
-                    await delete_data(data, dataset_id)
+                    await delete_data([data], dataset_id)
 
                     # Observe the outcome, don't assume it: a row that survived
                     # the delete must never come back as a success receipt.
@@ -561,6 +605,16 @@ class datasets:
                     dataset_deleted = await _delete_dataset_if_empty(
                         dataset, delete_dataset_if_empty
                     )
+
+                # A dataset's code repositories are extracted together, so the
+                # ones that remain still describe the deleted one: mark them
+                # for re-extraction by the next cognify() of the dataset.
+                if not dataset_deleted and was_code_repo:
+                    from cognee.tasks.code_graph.cluster import (
+                        mark_dataset_code_repos_for_rebuild,
+                    )
+
+                    await mark_dataset_code_repos_for_rebuild(dataset)
 
             return _delete_data_receipt(
                 dataset_id=dataset.id,

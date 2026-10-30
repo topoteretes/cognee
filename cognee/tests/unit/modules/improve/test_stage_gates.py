@@ -21,6 +21,7 @@ from cognee.modules.improve.stages import (
     REASON_NO_WRITES_SINCE_LAST_IMPROVE,
     REASON_OPT_IN_DISABLED,
     REASON_PERSONALIZATION_DISABLED,
+    REASON_TURNED_OFF,
     BuildTruthSubspaceStage,
     DistillSessionsStage,
     FeedbackWeightsStage,
@@ -272,14 +273,14 @@ async def test_truth_subspace_maps_a_skipped_build_onto_the_stage(monkeypatch):
 # --- stage 9 ---------------------------------------------------------------
 
 
-def test_global_context_index_skipped_unless_opted_in():
+def test_global_context_index_skipped_when_turned_off():
     stage = GlobalContextIndexStage()
-    assert stage.gate(_inputs()) == REASON_OPT_IN_DISABLED
+    assert stage.gate(_inputs()) == REASON_TURNED_OFF
     assert stage.gate(_inputs(build_global_context_index=True)) is None
 
 
 def _patch_global_context_deps(monkeypatch, *, changed, pipeline_returns, shared_graph=False):
-    changes_mod = importlib.import_module("cognee.modules.improve.graph_changes")
+    changes_mod = importlib.import_module("cognee.modules.improve.watermarks")
     check = AsyncMock(return_value=changed)
     monkeypatch.setattr(changes_mod, "has_dataset_changed_since_last_improve", check)
     access_mod = importlib.import_module("cognee.context_global_variables")
@@ -292,7 +293,7 @@ def _patch_global_context_deps(monkeypatch, *, changed, pipeline_returns, shared
 
 @pytest.mark.asyncio
 async def test_global_context_index_skips_the_build_when_only_reads_ran(monkeypatch):
-    from cognee.modules.improve.graph_changes import GLOBAL_CONTEXT_WATERMARK_KEY
+    from cognee.modules.improve.watermarks import GLOBAL_CONTEXT_WATERMARK_KEY
 
     check, pipeline = _patch_global_context_deps(monkeypatch, changed=False, pipeline_returns={})
     inputs = _inputs(build_global_context_index=True)
@@ -309,7 +310,7 @@ async def test_global_context_index_skips_the_build_when_only_reads_ran(monkeypa
 
 @pytest.mark.asyncio
 async def test_global_context_index_stamps_a_completed_build_but_not_an_errored_one(monkeypatch):
-    from cognee.modules.improve.graph_changes import GLOBAL_CONTEXT_WATERMARK_KEY
+    from cognee.modules.improve.watermarks import GLOBAL_CONTEXT_WATERMARK_KEY
     from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunErrored
 
     _, pipeline = _patch_global_context_deps(monkeypatch, changed=True, pipeline_returns={"ok": 1})
