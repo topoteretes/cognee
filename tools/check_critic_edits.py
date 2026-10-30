@@ -38,7 +38,10 @@ def show(ref: str, path: str) -> str:
 
 
 def _has_docstring(node: ast.AST) -> bool:
-    body = getattr(node, "body", None)
+    # Only these carry docstrings; a lambda's or an IfExp's body is an expression.
+    if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        return False
+    body = node.body
     return bool(
         body
         and isinstance(body[0], ast.Expr)
