@@ -270,10 +270,11 @@ ontology = ["owlrl>=7.1.4,<7.2"]
 # without torch or the ML layout models (~280MB installed vs multiple GB).
 # PDF/image conversion through docling needs the ML pipeline: install the
 # `docling-full` extra for that (cognee's default PDF path uses pypdf either way).
+# 2.116 converts legacy .doc/.xls/.ppt through LibreOffice in an isolated profile per conversion.
 docling = [
-    "docling-slim[convert-core,format-pdf,format-office,format-html,format-email,format-markdown,format-latex]>=2.115,<3",
+    "docling-slim[convert-core,format-pdf,format-office,format-html,format-email,format-markdown,format-latex]>=2.116,<3",
 ]
-docling-full = ["docling>=2.115,<3", "transformers>=4.55"]
+docling-full = ["docling>=2.116,<3", "transformers>=4.55"]
 # GLiNER demo: LLM-free graph extraction and summaries (cognee/tasks/graph/gliner_demo).
 # Recommended for GLiNER users (torch from PyPI: the CUDA build on Linux). Without it, the
 # first GLiNER cognify installs this same list itself (gliner_demo/install.py reads it from
