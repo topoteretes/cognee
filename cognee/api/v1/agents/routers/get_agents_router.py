@@ -58,7 +58,12 @@ def get_agents_router() -> APIRouter:
     async def list_agents_endpoint(
         user: User = Depends(get_authenticated_user),
     ) -> list[AgentDTO]:
-        """List agents endpoint — GET /api/v1/agents/list."""
+        """List the agents owned by the authenticated user.
+
+        Each entry carries the agent's user id, its display email and the label of its API
+        key, which is null when the agent has no key. Returns an empty list when the user
+        owns no agents.
+        """
         agents = await list_agents(user.id)
         return [
             AgentDTO(
@@ -74,7 +79,12 @@ def get_agents_router() -> APIRouter:
         name: str,
         user: User = Depends(get_authenticated_user),
     ) -> AgentWithApiKeyDTO:
-        """Create agent endpoint — POST /api/v1/agents/create.
+        """Create an agent sub-user and issue its API key.
+
+        Returns 409 when an agent with this name already exists for the caller. The agent
+        inherits the caller's tenant, and a caller that is itself an agent cannot create
+        agents. The response contains the agent id, its display email and the raw API key,
+        which is shown only here.
 
         ## Query Parameters
         - **name** (str): Unique name for the new agent user; a conflict is returned if an
@@ -116,7 +126,12 @@ def get_agents_router() -> APIRouter:
         offset: int = Query(0, ge=0),
         user: User = Depends(get_authenticated_user),
     ):
-        """List agents connections — GET /api/v1/agents/connections.
+        """List agent connections visible to the caller.
+
+        Only connections belonging to the caller or to the caller's own agents are returned;
+        sharing a dataset does not expose another user's connections. The body holds the
+        page of agents, the memory sources derived from readable datasets (empty when
+        include_sources is false), and total, limit, offset and has_more.
 
         ## Query Parameters
         - **active_only** (bool): When true, restricts results to connections currently
@@ -154,7 +169,12 @@ def get_agents_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ):
-        """Get my connection detail — GET /api/v1/agents/connections/me.
+        """Show the caller's own agent connection with its recent activity.
+
+        Returns 404 when no connection matches; without a name only active connections are
+        considered, while a named lookup also finds unregistered ones. The body has the
+        agent, the memory sources, and the last 20 recent sessions, traces and
+        question/answer entries, which stay empty when the session cache cannot be read.
 
         ## Query Parameters
         - **agent_session_name** (Optional[str]): Filter by connection name. A named lookup also
@@ -181,7 +201,12 @@ def get_agents_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ):
-        """Get connection detail — GET /api/v1/agents/connections/{agent_id}.
+        """Show one agent's connection with its recent activity.
+
+        Returns 404 when no connection matches the agent id, including when the agent is not
+        visible to the caller; without a name only active connections are considered, while
+        a named lookup also finds unregistered ones. The body has the agent, the memory
+        sources, and the last 20 recent sessions, traces and question/answer entries.
 
         ## Path Parameters
         - **agent_id** (UUID): The agent's user ID (from GET /api/v1/agents/list).
@@ -205,7 +230,12 @@ def get_agents_router() -> APIRouter:
         request: RegisterAgentRequest,
         user: User = Depends(get_authenticated_user),
     ):
-        """Register agent endpoint — POST /api/v1/agents/register.
+        """Register an agent connection for the authenticated user.
+
+        Responds 201 with the stored connection. The connection is identified by the session
+        name together with the caller's user id, so re-registering an already active one
+        returns it again without raising the active connection count; the first registration
+        in agent mode also starts the background watchdog.
 
         ## Request Parameters
         - **agent_session_name** (str): A unique name for this agent connection. Combined with the
@@ -234,7 +264,11 @@ def get_agents_router() -> APIRouter:
         request: UnregisterAgentRequest,
         user: User = Depends(get_authenticated_user),
     ) -> AgentModeDTO:
-        """Unregister agent endpoint — POST /api/v1/agents/unregister.
+        """Deactivate a registered agent connection.
+
+        The connection is identified by the session name together with the caller's user id
+        and is marked inactive. The response holds the number of connections still active;
+        unregistering one that is unknown or already inactive leaves that count unchanged.
 
         ## Request Parameters
         - **agent_session_name** (str): The name used when registering the connection. Combined with
@@ -252,7 +286,11 @@ def get_agents_router() -> APIRouter:
         agent_id: UUID,
         user: User = Depends(get_authenticated_user),
     ) -> AgentDTO:
-        """Get agent endpoint — GET /api/v1/agents/{agent_id}.
+        """Fetch one of your agents by id.
+
+        Returns 404 when no user with this id exists and 403 when the user is not an agent
+        owned by the caller. The body carries the agent id, its display email and the label
+        of its API key, which is null when the agent has no key.
 
         ## Path Parameters
         - **agent_id** (UUID): The agent's user ID (from GET /api/v1/agents/list).
@@ -273,7 +311,11 @@ def get_agents_router() -> APIRouter:
     async def delete_agent_endpoint(
         agent_id: UUID, user: User = Depends(get_authenticated_user)
     ) -> None:
-        """Delete agent endpoint — DELETE /api/v1/agents/{agent_id}.
+        """Delete an agent and its registered connections.
+
+        Returns 404 when no user with this id exists and 403 when the agent is not owned by
+        the caller. The agent's connection records are removed first, then the agent user
+        itself; on success the response body is JSON null.
 
         ## Path Parameters
         - **agent_id** (UUID): The agent's user ID (from GET /api/v1/agents/list).

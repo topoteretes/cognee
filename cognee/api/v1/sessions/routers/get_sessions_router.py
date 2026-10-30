@@ -459,7 +459,13 @@ def get_sessions_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ):
-        """Get session detail — GET /api/v1/sessions/{session_id}.
+        """Show one session with its recent questions, answers and trace steps.
+
+        Returns 404 when the session is neither owned by the caller or their agents nor
+        stored in a dataset the caller can read. The session record is returned with label
+        (the first question, else the first trace's origin function), msg_count, tool_calls,
+        and the last 20 qas and traces, which are read under the session owner's id and come
+        back empty when the session cache is unavailable.
 
         ## Path Parameters
         - **session_id** (str): Client-supplied session identifier; the same value passed as

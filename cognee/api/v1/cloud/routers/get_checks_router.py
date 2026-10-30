@@ -13,7 +13,12 @@ def get_checks_router():
     async def get_connection_check_endpoint(
         request: Request, user: User = Depends(get_authenticated_user)
     ):
-        """Get connection check endpoint — POST /api/v1/checks/connection."""
+        """Verify the cloud API key sent in the X-Api-Key header.
+
+        Returns 400 when the X-Api-Key header is absent. A key the cloud instance rejects,
+        or an instance that cannot be reached, raises a cloud connection error; when the key
+        checks out the response body is JSON null.
+        """
         api_token = request.headers.get("X-Api-Key")
 
         if api_token is None:

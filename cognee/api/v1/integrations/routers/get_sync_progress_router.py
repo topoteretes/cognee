@@ -24,7 +24,13 @@ def get_sync_progress_router() -> APIRouter:
         account_id: str | None = None,
         user: User = Depends(get_authenticated_user),
     ) -> SyncProgressResult:
-        """Sync progress — GET /api/v1/integrations/{provider}/sync/progress.
+        """Report the latest and currently active sync runs for a connection.
+
+        Returns 404 when the provider is not registered, when the caller has no active
+        connection for it, and when the connection stopped being active (disconnected or
+        replaced) for this owner. The body has latest (the most recent run snapshot, null
+        when none exists), activeRuns (runs this process confirms are executing) and
+        unknownActivityCount (unresolved runs owned by another process or an exited worker).
 
         ## Path Parameters
         - **provider** (str): Key of a registered OAuth provider (see GET

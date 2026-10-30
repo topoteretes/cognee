@@ -23,7 +23,12 @@ def get_api_key_management_router():
 
     @api_key_management_router.get("/api-keys")
     async def get_api_keys_for_user(user: User = Depends(get_authenticated_user)):
-        """Get api keys for user — GET /api/v1/auth/api-keys."""
+        """List the authenticated user's API keys.
+
+        Each entry has id, key, label and name; when key hashing is enabled the key is
+        replaced by ************ and the raw value is not recoverable. Returns an empty list
+        when the user has no keys.
+        """
         send_telemetry(
             "Api Key Management API Endpoint Invoked",
             user,
@@ -61,7 +66,11 @@ def get_api_key_management_router():
         payload: ApiKeyCreationPayload,
         user: User = Depends(get_authenticated_user),
     ):
-        """Create api key for user — POST /api/v1/auth/api-keys.
+        """Create an API key for the authenticated user.
+
+        Returns the raw key once, together with its id, label and name; it cannot be read
+        back afterwards when hashing is enabled. Returns 400 with an error message when the
+        user has reached the maximum number of API keys or the key could not be stored.
 
         ## Request Parameters
         - **name** (Optional[str]): Human-readable label to store with the generated API
@@ -93,7 +102,11 @@ def get_api_key_management_router():
         api_key_id: UUID,
         user: User = Depends(get_authenticated_user),
     ):
-        """Delete api key for user — DELETE /api/v1/auth/api-keys/{api_key_id}.
+        """Delete one of the authenticated user's API keys.
+
+        Only a key owned by the caller can be deleted; an id that belongs to someone else or
+        does not exist raises a not-found error, and a failed delete is rolled back. On
+        success the response body is JSON null.
 
         ## Path Parameters
         - **api_key_id** (UUID): UUID of the API key (from GET /api/v1/auth/api-keys).
