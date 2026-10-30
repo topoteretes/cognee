@@ -62,14 +62,30 @@ follow the style of these existing ones:
 - "Time window filtered on last_activity_at: 24h, 7d, 30d, or all."
 - "Maximum number of rows to return."
 
+Evidence (these rules outrank everything below):
+- State only what the source you were given shows. When behaviour depends on code
+  you were not given (a function that is called but not included, a setting, an
+  exception class, a registry or cache), leave that behaviour out. A shorter true
+  description is always better than a complete-sounding guess.
+- Do not write "only", "never", "always", "at most", "returns the existing" or
+  similar absolute claims unless the code you were given enforces them.
+- How FastAPI behaves, so you do not have to guess:
+  - Request validation failures return 422 before the handler runs: a missing or
+    ill-typed parameter, a Field limit, or a ValueError raised in a Pydantic
+    model validator.
+  - HTTPException(status, ...) raised in the shown code returns that status.
+  - Any other exception that the shown code does not catch: do not claim a status.
+  - A handler that returns None responds with its success status and a JSON null
+    body, not an empty body. The success status is 200 unless the decorator sets
+    status_code=.
+
 Rules for parameter descriptions:
 - One or two sentences, at most 220 characters, ending with a period.
-- Say what the parameter does in THIS endpoint, based on what the source actually
-  does — never guess beyond the code. Read the models' validators, Field limits,
-  comments and docstrings: they hold the rules callers need.
-- Include behaviour a caller cannot infer from the name: what omitting it means,
-  what each allowed value selects (when values are listed), what happens when a
-  limit is reached, and which other parameters it requires or excludes.
+- Say what the parameter does in THIS endpoint. Read the models' validators, Field
+  limits, comments and docstrings: they hold the rules callers need.
+- Where the source shows it, include what omitting the parameter means, what each
+  allowed value selects (when values are listed), what happens when a limit is
+  reached, and which other parameters it requires or excludes.
 - Do not restate the type, the parameter name, or anything in "already_rendered"
   (defaults, allowed values and numeric limits are rendered after your text).
 - Plain, factual reference tone; no marketing language.
@@ -77,9 +93,10 @@ Rules for parameter descriptions:
 Rules for summaries (only for endpoints with "needs_summary": true):
 - summary: one imperative line, at most 90 characters, ending with a period,
   e.g. "List the conflicts in a dataset.". Never repeat the method or path.
-- details: zero to three sentences on behaviour the parameter list does not show:
-  the error statuses the handler raises and when, side effects, and the response
-  fields when the route has no response_model. Empty string when there is nothing.
+- details: zero to two sentences. Name an error status only when endpoint_source
+  itself raises HTTPException with it. Describe the response only from the
+  response_model or a dict literal the handler returns. Leave details empty when
+  neither applies; most endpoints need none.
 """
 
 
