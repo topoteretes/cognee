@@ -27,6 +27,7 @@ import os
 import re
 import sys
 import textwrap
+import types
 import typing
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -133,7 +134,9 @@ def format_annotation(annotation) -> str:
     if origin is typing.Literal:
         rendered = ", ".join(repr(value) for value in typing.get_args(annotation))
         return f"Literal[{rendered}]"
-    if origin is typing.Union or str(origin) == "types.UnionType":
+    # `X | None` has origin types.UnionType, distinct from typing.Union
+    # before Python 3.14.
+    if origin is typing.Union or origin is types.UnionType:
         args = list(typing.get_args(annotation))
         if type(None) in args and len(args) == 2:
             other = args[0] if args[1] is type(None) else args[1]
