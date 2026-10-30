@@ -99,6 +99,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 ### Backends & deployment
 | Script | Prerequisite |
 |---|---|
+| [`inspect_cogx_archive.py`](guides/inspect_cogx_archive.py) | No service or API key; inspect portable memory and demonstrate detection of a changed record |
 | [`neptune_analytics_example.py`](guides/neptune_analytics_example.py) | AWS account + provisioned Neptune Analytics graph |
 | [`local_ollama_example.py`](guides/local_ollama_example.py) | `ollama serve` + two pulled models — fully local |
 | [`turso_local_example.py`](guides/turso_local_example.py) | Relational, graph, vector and session cache all on the Turso rewrite engine (`cognee[turso]`); `ingest` / `verify` / `cleanup` phases show persistence across a restart |

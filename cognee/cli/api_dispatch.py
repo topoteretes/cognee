@@ -32,6 +32,9 @@ SUPPORTED_COMMANDS = {
 
 def can_dispatch(args: argparse.Namespace) -> bool:
     """Return True if the command should be dispatched via HTTP."""
+    if getattr(args, "command", None) == "inspect-archive":
+        # The input is a local directory, not a remote dataset.
+        return False
     return bool(getattr(args, "api_url", None))
 
 

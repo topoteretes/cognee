@@ -48,6 +48,7 @@ def get_command_info() -> dict:
         "cognify": "Transform ingested data into a structured knowledge graph",
         "delete": "Delete data from cognee knowledge base",
         "config": "Manage cognee configuration settings",
+        "inspect-archive": "Inspect a local COGX archive without importing it",
     }
 
 
