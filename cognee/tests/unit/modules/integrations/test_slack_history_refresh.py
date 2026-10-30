@@ -85,6 +85,7 @@ async def test_token_rotation_preserves_sync_settings_and_cannot_revive_revocati
     response = AsyncMock()
     response.__aenter__.return_value = response
     # Refresh intentionally lacks team, user and enterprise metadata.
+    response.status = 200
     response.json.return_value = {
         "ok": True,
         "access_token": "new-access",

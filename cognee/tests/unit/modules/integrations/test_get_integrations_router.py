@@ -820,3 +820,24 @@ def test_a_connection_without_a_label_leaves_the_field_out(client):
         body = client.get("/api/v1/integrations/fake/connections").json()
 
     assert body == {"connections": [{"providerAccountId": "ACC1"}]}
+
+
+def test_connect_and_sync_are_refused_while_outbound_http_is_disabled(client, monkeypatch):
+    """SDK-832: the flag that disables cognee's outbound HTTP disables the connectors too."""
+    monkeypatch.setenv("ALLOW_HTTP_REQUESTS", "false")
+    credential = type("Cred", (), {"provider_account_id": "ACC1"})()
+
+    authorize = client.post("/api/v1/integrations/fake/authorize")
+    with patch.object(
+        _router_module, "get_active_credential_for_user", new=AsyncMock(return_value=credential)
+    ):
+        sync = client.post("/api/v1/integrations/fake/sync")
+
+        resources = client.get("/api/v1/integrations/fake/resources")
+
+    assert authorize.status_code == 503
+    assert "ALLOW_HTTP_REQUESTS" in authorize.json()["detail"]
+    assert sync.status_code == 503
+    assert resources.status_code == 503
+    # No install was started: nothing for a callback to match.
+    assert not any(name.startswith("cognee_oauth_nonce_") for name in authorize.cookies)

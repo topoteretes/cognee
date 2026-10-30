@@ -12,12 +12,15 @@ absorbed by ``exchange_callback``:
 
 * GitHub's redirect carries an ``installation_id`` alongside the ``code``.
 * That id arrives on an unauthenticated endpoint and is a small guessable
-  integer, so it is never trusted directly: the ``code`` is first exchanged
-  for a user token ("Request user authorization during installation" must
-  be enabled on the app) and the user's access to the installation is
-  confirmed, then the authoritative installation record is fetched with the
-  app JWT. Without that check, anyone could bind another org's installation
-  — and read access to its private repositories — to their own account.
+  integer, so it is never trusted directly: the authoritative installation
+  record is fetched with the app JWT, the ``code`` is exchanged for a user
+  token ("Request user authorization during installation" must be enabled
+  on the app), and that user must *administer* the installation's account
+  (an org admin, or the user account itself). Merely having access to one
+  of the installation's repositories is not enough: once bound, every sync
+  reads every repository the installation covers into the binder's own
+  dataset, so an org member with one readable repository could otherwise
+  index the whole org's private code for themselves.
 
 ``revoke_remote`` stays the default no-op on purpose: the GitHub-side
 equivalent would be deleting the installation, i.e. uninstalling the app
@@ -43,6 +46,7 @@ from cognee.modules.integrations.github.handle_github_event import handle_github
 from cognee.modules.integrations.github.sync import sync_repositories
 from cognee.modules.integrations.github.verify_github_signature import GithubWebhookVerifier
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
+from cognee.modules.integrations.outbound import client_session
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +70,13 @@ class GithubIntegration(OAuthIntegration):
         """Exchange the OAuth code for a *user* token.
 
         Only used to prove who completed the install flow — the user token
-        is checked against the installation and discarded, never stored.
+        is checked against the installation's account and discarded, never
+        stored.
         GitHub returns errors as HTTP 200 with an ``error`` field, so the
         body, not the status, is what's checked.
         """
         async with (
-            aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+            client_session("github", timeout=_TIMEOUT) as session,
             session.post(
                 _ACCESS_TOKEN_URL,
                 data={
@@ -80,8 +85,13 @@ class GithubIntegration(OAuthIntegration):
                     "code": code,
                 },
                 headers={"Accept": "application/json"},
+                # The body carries the client secret: never let a redirect
+                # replay it to the host a Location header names.
+                allow_redirects=False,
             ) as response,
         ):
+            if response.status != 200:
+                raise RuntimeError(f"GitHub code exchange failed: HTTP {response.status}")
             payload = await response.json()
 
         if payload.get("error") or not payload.get("access_token"):
@@ -96,17 +106,18 @@ class GithubIntegration(OAuthIntegration):
             raise ValueError("GitHub callback carried no installation_id")
 
         user_token_response = await self.exchange_code(code)
-        if not await app_auth.user_can_access_installation(
-            user_token_response["access_token"], int(installation_id)
+        # The authoritative record, fetched as the app — proves the id is an
+        # installation of *this* app; nothing from the unauthenticated query
+        # string beyond the id is used.
+        installation = await app_auth.get_installation(int(installation_id))
+        if not await app_auth.user_administers_installation(
+            user_token_response["access_token"], installation
         ):
             raise PermissionError(
-                f"GitHub user completing the install has no access to "
+                f"GitHub user completing the install does not administer "
                 f"installation {installation_id}"
             )
-
-        # The authoritative record, fetched as the app — nothing from the
-        # unauthenticated query string beyond the (now verified) id is used.
-        return await app_auth.get_installation(int(installation_id))
+        return installation
 
     def parse_installation(self, token_response: dict[str, Any]) -> OAuthInstallation:
         installation_id = token_response.get("id")

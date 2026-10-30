@@ -13,6 +13,7 @@ from cognee.modules.integrations.google.client import (
     GoogleAuthError,
     _authorized_get,
 )
+from cognee.modules.integrations.outbound import client_session
 
 logger = logging.getLogger(__name__)
 
@@ -93,9 +94,12 @@ async def _authorized_text(
     chunks: list[bytes] = []
     received = 0
     async with (
-        aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session,
+        client_session("google_drive", timeout=aiohttp.ClientTimeout(total=60)) as session,
         session.get(
-            url, params=params, headers={"Authorization": f"Bearer {access_token}"}
+            url,
+            params=params,
+            headers={"Authorization": f"Bearer {access_token}"},
+            allow_redirects=False,
         ) as response,
     ):
         if response.status != 200:

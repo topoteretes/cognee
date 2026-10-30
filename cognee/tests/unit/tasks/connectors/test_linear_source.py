@@ -372,8 +372,8 @@ class _Response:
 def _client_with(monkeypatch, responses):
     calls = []
 
-    def post(url, json=None, headers=None, timeout=None):
-        calls.append(headers)
+    def post(url, json=None, headers=None, timeout=None, **kwargs):
+        calls.append({**(headers or {}), "_kwargs": kwargs})
         item = responses.pop(0)
         if isinstance(item, Exception):
             raise item
@@ -752,3 +752,13 @@ def test_comment_queries_stay_scoped_to_the_team_whatever_the_filter_holds(team)
     walker._fetch_comments({"issue": {"team": {"id": {"eq": "someone-elses-team"}}}}, None)
 
     assert seen == [{"issue": {"team": {"id": {"eq": TEAM}}}}]
+
+
+def test_a_request_never_follows_a_redirect(monkeypatch):
+    """SDK-832: a 3xx from Linear is an error answer, never a new request target."""
+    client, calls = _client_with(monkeypatch, [_Response(307, None)])
+
+    with pytest.raises(LinearAPIError, match="HTTP 307"):
+        client.execute("query A { x }")
+
+    assert calls[0]["_kwargs"]["allow_redirects"] is False

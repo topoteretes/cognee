@@ -455,3 +455,19 @@ async def test_updates_within_a_phase_are_throttled_and_changes_publish_at_once(
         await reporter.report(phase="processing")
         await reporter.flush()
         assert sink.call_args.args[0].phase == "processing"
+
+
+@pytest.mark.asyncio
+async def test_a_sync_is_refused_while_outbound_http_is_disabled(storage, credential, monkeypatch):
+    """SDK-832: ALLOW_HTTP_REQUESTS=false stops every connector sync at its entry."""
+    from cognee.modules.integrations.outbound import OutboundHttpDisabledError
+
+    monkeypatch.setenv("ALLOW_HTTP_REQUESTS", "false")
+
+    with pytest.raises(OutboundHttpDisabledError):
+        async with progress.track_sync("github", credential):
+            raise AssertionError("the sync body must not run")
+
+    async with storage() as db:
+        rows = (await db.execute(select(PipelineRun))).scalars().all()
+    assert rows == []  # nothing published: the run never started

@@ -14,6 +14,7 @@ from typing import Any
 
 import aiohttp
 
+from cognee.modules.integrations.outbound import client_session
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("notion_integration")
@@ -128,7 +129,10 @@ async def _request(
     attempt = 0
     while True:
         try:
-            async with session.request(method, url, **kwargs) as response:
+            # Never follow a redirect: the token endpoints carry the app
+            # secret and a code or refresh token in the body, the others a
+            # bearer, and a 3xx is reported like any other status.
+            async with session.request(method, url, allow_redirects=False, **kwargs) as response:
                 status = response.status
                 if status == 429 and attempt < MAX_RATE_LIMIT_RETRIES:
                     delay = _retry_delay(response.headers.get("Retry-After"))
@@ -149,7 +153,7 @@ async def _grant(
     operation: str, payload: dict[str, str], *, client_id: str, client_secret: str
 ) -> dict[str, Any]:
     """A token response with the fields normalized, or an error."""
-    async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+    async with client_session("notion", timeout=TIMEOUT) as session:
         status, body = await _request(
             operation,
             "POST",
@@ -210,11 +214,12 @@ async def refresh_access_token(
 async def revoke_token(token: str, *, client_id: str, client_secret: str) -> None:
     """Revoke a token at Notion. Only the HTTP status is looked at."""
     async with (
-        aiohttp.ClientSession(timeout=TIMEOUT) as session,
+        client_session("notion", timeout=TIMEOUT) as session,
         session.post(
             REVOKE_URL,
             json={"token": token},
             headers=_app_headers(client_id, client_secret),
+            allow_redirects=False,
         ) as response,
     ):
         if response.status != 200:
@@ -275,7 +280,7 @@ async def search_shared(access_token: str) -> list[dict[str, Any]]:
 async def _walk_search(access_token: str) -> list[dict[str, Any]]:
     found: dict[str, dict[str, Any]] = {}
     cursor: str | None = None
-    async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+    async with client_session("notion", timeout=TIMEOUT) as session:
         for _page in range(MAX_SEARCH_PAGES):
             body: dict[str, Any] = {"page_size": SEARCH_PAGE_SIZE}
             if cursor:
@@ -323,7 +328,7 @@ async def verify_token(access_token: str) -> None:
     is otherwise handed to every sync until the end of time, so a workspace that removed
     the integration at Notion would stay connected here with every sync failing.
     """
-    async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+    async with client_session("notion", timeout=TIMEOUT) as session:
         status, data = await _request(
             "token check", "GET", USERS_ME_URL, session, headers=_bearer(access_token)
         )
@@ -341,7 +346,7 @@ async def get_parent(access_token: str, kind: str, object_id: str) -> tuple[str,
     object cannot be read, so the caller can tell "not shared" (``object_not_found``,
     ``http_403``) from a real failure.
     """
-    async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+    async with client_session("notion", timeout=TIMEOUT) as session:
         status, data = await _request(
             "parent lookup",
             "GET",

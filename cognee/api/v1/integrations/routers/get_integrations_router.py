@@ -79,6 +79,10 @@ from cognee.modules.integrations.oauth_flow import (
     make_state,
     validate_state,
 )
+from cognee.modules.integrations.outbound import (
+    OutboundHttpDisabledError,
+    require_outbound_http,
+)
 from cognee.modules.integrations.plugin_keys import (
     PluginAgentKeyLimitError,
     add_plugin_agent_key,
@@ -248,6 +252,20 @@ class PluginStatusItemDTO(OutDTO):
 class IntegrationsStatusDTO(OutDTO):
     integrations: list[IntegrationStatusItemDTO]
     plugins: list[PluginStatusItemDTO]
+
+
+def _outbound_http_or_503(provider: str) -> None:
+    """Refuse a connect or sync while ``ALLOW_HTTP_REQUESTS=false``.
+
+    Every provider call is already refused at its ``client_session``; here
+    the check answers the caller directly with a 503, instead of a sync
+    accepted into the background that fails where nobody sees it, or an
+    OAuth round trip whose callback cannot complete.
+    """
+    try:
+        require_outbound_http(provider)
+    except OutboundHttpDisabledError as error:
+        raise HTTPException(status_code=503, detail=error.message) from error
 
 
 def _integration_or_404(provider: str) -> OAuthIntegration:
@@ -764,6 +782,7 @@ def get_integrations_router():
         with new_span("cognee.integrations.authorize") as span:
             span.set_attribute("cognee.integrations.provider", provider)
             integration = _integration_or_404(provider)
+            _outbound_http_or_503(provider)
             try:
                 nonce = secrets.token_urlsafe(32)
                 state = make_state(
@@ -1010,6 +1029,7 @@ def get_integrations_router():
         ``account_id`` picks one of the user's connections (see GET /{provider}/connections).
         """
         integration = _integration_or_404(provider)
+        _outbound_http_or_503(provider)
         if integration.resource_selection_key is None:
             raise HTTPException(status_code=404, detail=f"{provider} has no selectable resources")
         credential = await _credential_or_404(user, integration, account_id)
@@ -1101,6 +1121,7 @@ def get_integrations_router():
         ``account_id`` picks one of the user's connections (see GET /{provider}/connections).
         """
         integration = _integration_or_404(provider)
+        _outbound_http_or_503(provider)
         credential = await _credential_or_404(user, integration, account_id)
         if credential is None:
             raise HTTPException(status_code=404, detail=f"{provider} is not connected")

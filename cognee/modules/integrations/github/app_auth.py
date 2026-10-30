@@ -17,6 +17,7 @@ import json
 import time
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 from cryptography.hazmat.primitives import hashes, serialization
@@ -24,6 +25,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 from cognee.modules.integrations.github.github_settings import private_key_pem, require
+from cognee.modules.integrations.outbound import client_session
 
 API_BASE_URL = "https://api.github.com"
 
@@ -82,10 +84,11 @@ async def get_installation(installation_id: int) -> dict[str, Any]:
     suspended installation, bad app credentials).
     """
     async with (
-        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        client_session("github", timeout=_TIMEOUT) as session,
         session.get(
             f"{API_BASE_URL}/app/installations/{installation_id}",
             headers=_api_headers(build_app_jwt()),
+            allow_redirects=False,
         ) as response,
     ):
         if response.status != 200:
@@ -102,10 +105,11 @@ async def mint_installation_token(installation_id: int) -> tuple[str, datetime |
     discard it — it is never written to the credential store.
     """
     async with (
-        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        client_session("github", timeout=_TIMEOUT) as session,
         session.post(
             f"{API_BASE_URL}/app/installations/{installation_id}/access_tokens",
             headers=_api_headers(build_app_jwt()),
+            allow_redirects=False,
         ) as response,
     ):
         if response.status != 201:
@@ -124,27 +128,58 @@ async def mint_installation_token(installation_id: int) -> tuple[str, datetime |
     return payload["token"], expires_at
 
 
-async def user_can_access_installation(user_token: str, installation_id: int) -> bool:
-    """Whether the GitHub user behind ``user_token`` can access the installation.
+async def user_administers_installation(user_token: str, installation: dict[str, Any]) -> bool:
+    """Whether the GitHub user behind ``user_token`` administers the installation's account.
 
     The install callback is unauthenticated and ``installation_id`` arrives
     in its query string, where anyone can put any (small, guessable) integer.
-    This check — GitHub's documented mitigation — confirms the person who
-    completed the OAuth leg actually has access to that installation, so a
-    user can't bind another org's installation to their own cognee account.
+    Once bound, the credential acts with the *installation's* reach: every
+    sync mints an installation token and indexes every repository the
+    installing admin granted, into a dataset owned by whoever completed the
+    callback. So the person completing the OAuth leg must be allowed to speak
+    for the whole installation, not merely see part of it. GitHub lists an
+    installation under ``GET /user/installations`` for any member who can
+    read one of its repositories, which is why that check (GitHub's
+    documented mitigation for a forged id) is not enough here.
+
+    * An organization installation: the user must be an active ``admin``
+      member of the organization (``GET /user/memberships/orgs/{org}``). The
+      app needs the *Organization permissions -> Members: Read-only*
+      permission for this call; without it GitHub answers 403 and the
+      install fails rather than binding.
+    * A user installation: the user must be that account (``GET /user``).
+
+    Raises ``RuntimeError`` when GitHub rejects a lookup; a user who is not a
+    member at all answers ``False``.
     """
-    url: str | None = f"{API_BASE_URL}/user/installations?per_page=100"
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-        while url:
-            async with session.get(url, headers=_api_headers(user_token)) as response:
+    account = installation.get("account") or {}
+    login = account.get("login")
+    account_id = account.get("id")
+    if not login or account_id is None:
+        raise RuntimeError("GitHub installation record carries no account")
+
+    async with client_session("github", timeout=_TIMEOUT) as session:
+        if account.get("type") == "Organization":
+            async with session.get(
+                f"{API_BASE_URL}/user/memberships/orgs/{quote(str(login), safe='')}",
+                headers=_api_headers(user_token),
+                allow_redirects=False,
+            ) as response:
+                if response.status == 404:
+                    return False  # not a member of the organization at all
                 if response.status != 200:
                     raise RuntimeError(
-                        f"GitHub user-installations lookup failed: HTTP {response.status}"
+                        f"GitHub org membership lookup failed: HTTP {response.status}"
                     )
-                payload = await response.json()
-                for installation in payload.get("installations", []):
-                    if installation.get("id") == installation_id:
-                        return True
-                next_link = response.links.get("next", {}).get("url")
-                url = str(next_link) if next_link else None
-    return False
+                membership = await response.json()
+            return membership.get("state") == "active" and membership.get("role") == "admin"
+
+        async with session.get(
+            f"{API_BASE_URL}/user",
+            headers=_api_headers(user_token),
+            allow_redirects=False,
+        ) as response:
+            if response.status != 200:
+                raise RuntimeError(f"GitHub user lookup failed: HTTP {response.status}")
+            user = await response.json()
+        return user.get("id") == account_id
