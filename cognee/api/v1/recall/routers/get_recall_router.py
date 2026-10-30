@@ -8,6 +8,7 @@ from pydantic import Field
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
+from cognee.api.exception_telemetry import send_api_exception_telemetry
 from cognee.api.sse import SSE_MEDIA_TYPE, sse_headers, wants_event_stream
 from cognee.api.v1.recall.recall import RecallResponse
 from cognee.api.v1.recall.recall_stream import begin_recall_stream
@@ -361,9 +362,12 @@ def get_recall_router() -> APIRouter:
                     f"{sorted(_VALID_SCOPES)}."
                 },
             )
-        except Exception:
+        except Exception as error:
             logger = get_logger()
             logger.exception("Recall endpoint error")
+            # Returning the 409 keeps the exception from the telemetry
+            # middleware, so this branch has to report it itself.
+            send_api_exception_telemetry(request, error, 409, error_name="UnhandledRecallError")
             return JSONResponse(
                 status_code=409,
                 content={"error": "An error occurred during recall."},
