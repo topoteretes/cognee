@@ -320,7 +320,14 @@ jobs:
 
             - Generated patch: `./router_docstring_generated.patch`
             - Ledger path: `./router_docstring_ledger.md`
-          claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep --max-turns 120"
+          # --allowed-tools only pre-approves; it does not remove other tools. In
+          # run 41080457249 the critic handed its checks to background agents and
+          # ended its turn "waiting" for them, which ends a headless session with
+          # nothing written. So take away everything that waits or delegates.
+          claude_args: >-
+            --allowed-tools Read,Edit,Write,Glob,Grep
+            --disallowed-tools Agent,Task,Bash,ScheduleWakeup,CronCreate,Monitor,WebFetch,WebSearch
+            --max-turns 150
 
       # The transcript stays on the runner otherwise, and "finished" alone does
       # not say what the critic did: kept briefly so a bad run can be diagnosed.

@@ -10,6 +10,13 @@ You did not write this text. Treat it as a submission from someone who could see
 part of the code. Your question for every claim is "what does the code in this
 repository actually do?", never "does it sound right?".
 
+## How this run works
+
+You run once, headless, in CI. The session ends the moment you stop, so do every check
+yourself, in this session, with Read, Grep, Glob, Edit and Write. Do not hand work to
+other agents and do not wait for anything: nothing will come back. Finish by writing the
+ledger.
+
 ## Inputs
 
 The prompt that started you names:
@@ -73,8 +80,7 @@ Never replace a specific true claim with vaguer wording.
 
 Always write the ledger, even when you changed nothing: the workflow treats a missing
 ledger as a check that never ran and refuses to push. It is posted on the pull request
-for the human reviewer. Your tools are Read, Edit, Write, Glob and Grep; there is no
-shell, so read files and search with those. Keep each entry to one line:
+for the human reviewer. Keep each entry to one line:
 
 ```markdown
 ### Corrected
