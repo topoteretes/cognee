@@ -5,7 +5,7 @@ import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useUser } from "@/modules/users/UserContext";
 import { AgentActivityTerminal, type OnboardingDemoEntry } from "@/ui/elements/AgentActivityTerminal";
 import { completeOnboardingAndNavigate } from "../completeOnboardingAndNavigate";
-import { useOnboardingTrackEvent } from "../useOnboardingTrackEvent";
+import { useOnboardingTrackEvent } from "@/utils/useOnboardingTrackEvent";
 import { StepBadge, StepDots, OnboardingFooter } from "./Shared";
 
 // Mirror of the "no answer" detection used in the terminal so the parent

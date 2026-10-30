@@ -1,3 +1,5 @@
+import { formatBytes } from "@/utils/formatBytes";
+
 // "estimating": the pre-upload cost estimate is analyzing the selection (it
 // reads/tokenizes PDF/DOCX text, so it can take real time). "uploading": bytes
 // are moving. "processing": every file landed and the knowledge-graph build is
@@ -53,17 +55,6 @@ export function uploadFraction(progress: UploadProgress): number {
   return 0;
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB"];
-  let value = bytes / 1024;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value >= 10 || Number.isInteger(value) ? Math.round(value) : value.toFixed(1)} ${units[unitIndex]}`;
-}
 
 /**
  * Fold the pre-upload cost estimate into the same progress stream the bar
@@ -91,7 +82,7 @@ export function describeProgress(progress: UploadProgress): string {
       // sat at 0/50 and then jumped to 10/50 — it looked stuck, and made a
       // working upload read as a broken one. The byte figures move continuously
       // and say the same thing without pretending to a precision we don't have.
-      return `Uploading ${progress.filesTotal} ${progress.filesTotal === 1 ? "file" : "files"} — ${formatBytes(progress.bytesSent)} of ${formatBytes(progress.bytesTotal)}`;
+      return `Uploading ${progress.filesTotal} ${progress.filesTotal === 1 ? "file" : "files"} — ${formatBytes(Math.min(progress.bytesSent, progress.bytesTotal))} of ${formatBytes(progress.bytesTotal)}`;
     case "processing":
       // Never claim "all N" when N didn't get there. A session whose blobs
       // failed to persist reaches this stage with files still unsent, and

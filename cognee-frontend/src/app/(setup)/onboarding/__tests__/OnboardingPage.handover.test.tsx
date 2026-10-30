@@ -14,7 +14,7 @@ jest.mock("@/modules/users/UserContext", () => ({
   useUser: () => ({ markWelcomeSeen: jest.fn(), markOnboardingComplete: jest.fn() }),
 }));
 jest.mock("@/modules/analytics", () => ({ TrackPageView: () => null, trackEvent: jest.fn() }));
-jest.mock("../useOnboardingTrackEvent", () => ({ useOnboardingTrackEvent: () => jest.fn() }));
+jest.mock("@/utils/useOnboardingTrackEvent", () => ({ useOnboardingTrackEvent: () => jest.fn() }));
 jest.mock("../ServeOnboarding", () => ({ __esModule: true, default: () => null }));
 jest.mock("../partials/Step1", () => ({ Step1: () => null }));
 jest.mock("../partials/Step2", () => ({ Step2: () => null }));
@@ -87,6 +87,17 @@ describe("OnboardingPage hand-over after preparing", () => {
     workspaceComesUp(view);
 
     expect(mockReplace).toHaveBeenCalledWith("/onboarding/window?replay=1");
+  });
+
+  it("stays on the current onboarding when the window sent the visit back, even on a host the browser thinks has the new one", () => {
+    mockIsNewOnboardingHost.mockReturnValue(true);
+    mockSearch = "handover=off";
+    const view = render(<OnboardingPage />);
+
+    workspaceComesUp(view);
+
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(screen.getByText("path selection")).toBeInTheDocument();
   });
 
   it("hands over once when the user continues without waiting and the workspace then comes up", () => {

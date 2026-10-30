@@ -160,6 +160,50 @@ describe("batched upload", () => {
     expect(ctx.filesUploaded).toBe(200);
   });
 
+  describe("the bytes shown while a request is sent", () => {
+    // The request counts its own framing too (form fields, each file's headers), so for a small file the
+    // bytes that left are more than the file: 480 B of a 32 B file was seen on screen.
+    async function sentWith(request: { sent: number; total: number }, fileBytes: number): Promise<number> {
+      let onProgress: ((sent: number, total: number) => void) | undefined;
+      let release: (value: unknown) => void = () => undefined;
+      mockAddFiles.mockImplementation((_dataset: unknown, _files: unknown, _instance: unknown, options: { onProgress?: (sent: number, total: number) => void }) => {
+        onProgress = options.onProgress;
+        return new Promise((resolve) => (release = resolve));
+      });
+      const { result } = renderHook(() => useBrainUpload(instance), { wrapper });
+      let finished!: Promise<void>;
+      await act(async () => {
+        finished = result.current.upload(uploadParams({ files: makeFiles(1, fileBytes) }));
+      });
+      await waitFor(() => expect(onProgress).toBeDefined());
+
+      act(() => onProgress?.(request.sent, request.total));
+      const shown = result.current.progress.bytesSent;
+      await act(async () => {
+        release({ status: "ok" });
+        await finished;
+      });
+      return shown;
+    }
+
+    it("is never more than the files' own size, however much the request carries besides", async () => {
+      expect(await sentWith({ sent: 480, total: 480 }, 32)).toBe(32);
+    });
+
+    it("is the share of the files' bytes that the share of the request stands for", async () => {
+      expect(await sentWith({ sent: 240, total: 480 }, 32)).toBe(16);
+    });
+
+    it("starts at nothing, and does not count what the request says it will send beyond its total", async () => {
+      expect(await sentWith({ sent: 0, total: 480 }, 32)).toBe(0);
+      expect(await sentWith({ sent: 900, total: 480 }, 32)).toBe(32);
+    });
+
+    it("is nothing, and not a division by nothing, when the request does not say how big it is", async () => {
+      expect(await sentWith({ sent: 100, total: 0 }, 32)).toBe(0);
+    });
+  });
+
   it("reports files-completed and bytes as batches land, not a static spinner", async () => {
     // Batches are held open and released one at a time. With an instantly
     // resolving mock React would batch every state update into a single commit

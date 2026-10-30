@@ -21,7 +21,7 @@ jest.mock("@/modules/tenant/TenantProvider", () => ({
   useTenant: () => ({ tenantReady: true }),
   useCogniInstance: () => ({ cogniInstance: { id: "inst" } }),
 }));
-jest.mock("../useOnboardingTrackEvent", () => ({
+jest.mock("@/utils/useOnboardingTrackEvent", () => ({
   useOnboardingTrackEvent: () => jest.fn(),
 }));
 jest.mock("next/navigation", () => ({

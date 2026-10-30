@@ -8,7 +8,7 @@ import pollDatasetStatus, { InsufficientCreditsProcessingError } from "@/modules
 import { INSUFFICIENT_CREDITS_PROCESSING_MESSAGE } from "@/app/(app)/datasets/processingErrorMessage";
 import { setAwaitingDataset, clearAwaitingDataset } from "@/utils/browserStorage";
 import { StepBadge, StepDots, OnboardingFooter } from "./Shared";
-import { useOnboardingTrackEvent } from "../useOnboardingTrackEvent";
+import { useOnboardingTrackEvent } from "@/utils/useOnboardingTrackEvent";
 
 interface ProcessingStep {
   label: string;

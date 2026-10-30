@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { SkipLink } from "./Shared";
-import { useOnboardingTrackEvent } from "../useOnboardingTrackEvent";
+import { useOnboardingTrackEvent } from "@/utils/useOnboardingTrackEvent";
 
 export type OnboardingPath = "claude-code" | "codex" | "company";
 

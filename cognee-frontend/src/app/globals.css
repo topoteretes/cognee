@@ -9,6 +9,16 @@
 }
 
 @theme {
+  /* The memory brain's lobes: seven shades of the lavender accent, light to
+     deep, so the lobes read apart once they fill. */
+  --color-brain-lavender-1: #ece3ff;
+  --color-brain-lavender-2: #d9c6ff;
+  --color-brain-lavender-3: #c6aaff;
+  --color-brain-lavender-4: #b38ef5;
+  --color-brain-lavender-5: #9f76e6;
+  --color-brain-lavender-6: #8a60cf;
+  --color-brain-lavender-7: #7650b5;
+
   /* ── Brand ── */
   --color-cognee-purple: #6510F4;
   --color-cognee-purple-hover: #5A0ED6;
@@ -112,4 +122,38 @@ body {
 @keyframes skpulse {
   0%, 100% { opacity: 0.35; }
   50% { opacity: 0.7; }
+}
+
+/* Every square of the memory brain breathes slowly, each on its own beat: one
+   of three speeds and one of ten delays, so the sequence never visibly
+   repeats. Squares sharing a beat are one animated group. */
+@keyframes brain-cell-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.brain-cell-pulse {
+  animation: brain-cell-pulse 5s ease-in-out infinite;
+}
+.pulse-t0 { animation-duration: 4.5s; }
+.pulse-t1 { animation-duration: 5.5s; }
+.pulse-t2 { animation-duration: 6.5s; }
+.pulse-d0 { animation-delay: 0s; }
+.pulse-d1 { animation-delay: -0.65s; }
+.pulse-d2 { animation-delay: -1.3s; }
+.pulse-d3 { animation-delay: -1.95s; }
+.pulse-d4 { animation-delay: -2.6s; }
+.pulse-d5 { animation-delay: -3.25s; }
+.pulse-d6 { animation-delay: -3.9s; }
+.pulse-d7 { animation-delay: -4.55s; }
+.pulse-d8 { animation-delay: -5.2s; }
+.pulse-d9 { animation-delay: -5.85s; }
+@media (prefers-reduced-motion: reduce) {
+  .brain-cell-pulse {
+    animation: none;
+  }
 }

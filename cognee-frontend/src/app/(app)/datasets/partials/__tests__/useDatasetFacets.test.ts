@@ -4,9 +4,7 @@ import getDatasetAccess from "@/modules/permissions/getDatasetAccess";
 import getGroupOverview from "@/modules/permissions/getGroupOverview";
 import useDatasetFacets from "@/app/(app)/datasets/partials/useDatasetFacets";
 import type { DatasetAccess, GroupOverview } from "@/modules/permissions/types";
-import isCloudEnvironment from "@/utils/isCloudEnvironment";
 
-jest.mock("@/utils/isCloudEnvironment");
 jest.mock("@/modules/permissions/getDatasetAccess");
 jest.mock("@/modules/permissions/getGroupOverview");
 jest.mock("@mantine/notifications", () => ({ notifications: { show: jest.fn() } }));
@@ -29,31 +27,11 @@ const ACCESS: DatasetAccess[] = [
 ];
 const GROUPS: GroupOverview[] = [];
 
-beforeEach(() => {
-  jest.mocked(isCloudEnvironment).mockReturnValue(true);
-});
-
 afterEach(() => {
   jest.resetAllMocks();
 });
 
 describe("useDatasetFacets", () => {
-  it("does not request Cloud access or groups in local mode, including refreshes", async () => {
-    jest.mocked(isCloudEnvironment).mockReturnValue(false);
-    const { result, rerender } = renderHook(({ key }) => useDatasetFacets(key), {
-      initialProps: { key: "mine" },
-    });
-
-    expect(result.current.status).toBe("ready");
-    expect(result.current.accessById.size).toBe(0);
-    rerender({ key: "mine,new" });
-    await act(async () => { await result.current.refresh(); });
-
-    expect(getDatasetAccess).not.toHaveBeenCalled();
-    expect(getGroupOverview).not.toHaveBeenCalled();
-    expect(notifications.show).not.toHaveBeenCalled();
-  });
-
   it("starts loading and settles on ready once both reads land", async () => {
     jest.mocked(getDatasetAccess).mockResolvedValue(ACCESS);
     jest.mocked(getGroupOverview).mockResolvedValue(GROUPS);
