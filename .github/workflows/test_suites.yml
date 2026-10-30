@@ -6,8 +6,15 @@ permissions:
 on:
   push:
     branches: [ main, dev ]
+    # Changes that only touch the connector packages run test_connectors.yml
+    # instead; that workflow also runs on every change under cognee/.
+    paths-ignore: &connectors-only
+      - "cognee-connectors/**"
+      - ".github/workflows/test_connectors.yml"
+      - ".github/workflows/release_connectors.yml"
   pull_request:
     branches: [ main, dev ]
+    paths-ignore: *connectors-only
     # No `labeled`: label-core-team.yml labels every core-team PR on open, and
     # a `labeled` trigger queued a second run that cancelled the first (both
     # runs on the same sha, seconds apart, on every PR).

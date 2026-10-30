@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/topoteretes/cognee/blob/main/cognee-connectors/scripts/inventory.schema.json",
+  "title": "cognee-connectors inventory",
+  "description": "The shape of inventory.yml: one entry per connector package under connectors/.",
+  "type": "object",
+  "required": ["connectors"],
+  "additionalProperties": false,
+  "properties": {
+    "connectors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/connector" }
+    }
+  },
+  "$defs": {
+    "connector": {
+      "type": "object",
+      "required": [
+        "slug",
+        "package",
+        "module",
+        "directory",
+        "display_name",
+        "auth",
+        "tier",
+        "sources",
+        "hosts",
+        "status",
+        "origin",
+        "env_vars"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "description": "The provider id: the directory name under connectors/ (dashes allowed, as in cognee's own directory names) and the entry-point name.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "package": {
+          "description": "The PyPI distribution name.",
+          "type": "string",
+          "pattern": "^cognee-connector-[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "module": {
+          "description": "The import name.",
+          "type": "string",
+          "pattern": "^cognee_connector_[a-z0-9_]+$"
+        },
+        "directory": {
+          "description": "The package directory, relative to the repository root.",
+          "type": "string",
+          "pattern": "^connectors/[a-z][a-z0-9_-]*$"
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "auth": {
+          "enum": ["oauth2", "api_key", "local"]
+        },
+        "tier": {
+          "description": "1: ConnectorDescriptor; 2: descriptor plus parse_installation; 3: Connector subclass; null for API-key and local providers.",
+          "enum": [1, 2, 3, null]
+        },
+        "sources": {
+          "description": "The DLT source factories the package exports, by entry-point name.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          }
+        },
+        "hosts": {
+          "type": "object",
+          "required": ["cognee", "cloud"],
+          "additionalProperties": false,
+          "properties": {
+            "cognee": { "type": "boolean" },
+            "cloud": { "type": "boolean" }
+          }
+        },
+        "status": {
+          "enum": ["ported", "planned", "archived"]
+        },
+        "origin": {
+          "type": "object",
+          "required": ["cognee", "cloud"],
+          "additionalProperties": false,
+          "properties": {
+            "cognee": { "type": ["string", "null"] },
+            "cloud": { "type": ["string", "null"] }
+          }
+        },
+        "env_vars": {
+          "description": "Every environment variable the package's settings read.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]*$"
+          }
+        }
+      }
+    }
+  }
+}

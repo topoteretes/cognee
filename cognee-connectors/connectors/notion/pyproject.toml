@@ -1,0 +1,65 @@
+[build-system]
+# Pinned together with cognee's: the build backend decides the wheel's
+# Metadata-Version, and the PyPI publish action validates it with a pinned
+# twine. Bump this together with the release workflow's publish-action pin.
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cognee-connector-notion"
+version = "0.1.0"
+description = "Notion connector for cognee: syncs Notion pages and database rows into cognee memory, incrementally and with forget-on-delete"
+readme = "README.md"
+requires-python = ">=3.10,<3.15"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Cognee team" }]
+keywords = ["cognee", "ai-memory", "connector", "notion"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "cognee-connectors-core[dlt]>=0.1,<1",
+    # The provider's own libraries, with the ranges cognee's pyproject.toml uses:
+    # aiohttp for the OAuth, search and parent-lookup client, httpx for the DLT
+    # source's walk, pydantic-settings for the NOTION_* settings class.
+    "aiohttp>=3.13.5,<4.0.0",
+    "httpx>=0.28.1",
+    "pydantic-settings>=2.7.0,!=2.12.*,!=2.13.*,!=2.14.0,!=2.14.1,<3",
+]
+
+[project.optional-dependencies]
+# The cognee_host/ adapter needs cognee; nothing else in the package does. A sync
+# needs a cognee whose ingestion reads per-row node sets and structure
+# (DOCUMENT_SYNC_VERSION 3, cognee 1.6.6rc1); an older host is refused with a
+# clear message when the source is built, not at install time.
+cognee = ["cognee>=1.6.5,<2"]
+
+[project.urls]
+Homepage = "https://github.com/topoteretes/cognee/tree/main/cognee-connectors/connectors/notion"
+Repository = "https://github.com/topoteretes/cognee"
+Issues = "https://github.com/topoteretes/cognee/issues"
+Documentation = "https://docs.cognee.ai"
+
+[project.entry-points."cognee.connectors"]
+notion = "cognee_connector_notion:CONNECTOR"
+
+[project.entry-points."cognee.sources"]
+notion = "cognee_connector_notion:notion_source"
+
+[project.entry-points."cognee.integrations"]
+notion = "cognee_connector_notion.cognee_host:register"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cognee_connector_notion"]
+
+[tool.hatch.build.targets.sdist]
+include = ["cognee_connector_notion", "tests", "README.md", "LICENSE", "pyproject.toml"]

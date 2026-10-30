@@ -1,0 +1,57 @@
+[build-system]
+# Pinned together with cognee's: the build backend decides the wheel's
+# Metadata-Version, and the PyPI publish action validates it with a pinned
+# twine. Bump this together with the release workflow's publish-action pin.
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "__DIST__"
+version = "0.1.0"
+description = "__DISPLAY_NAME__ connector for cognee: syncs __DISPLAY_NAME__ records into cognee memory"
+readme = "README.md"
+requires-python = ">=3.10,<3.15"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Cognee team" }]
+keywords = ["cognee", "ai-memory", "connector", "__PROVIDER__"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "cognee-connectors-core[dlt]>=0.1,<1",
+    # the provider's own libraries, with the ranges cognee's pyproject uses
+]
+
+[project.optional-dependencies]
+# The cognee_host/ adapter needs cognee; nothing else in the package does.
+cognee = ["cognee>=1.6.5,<2"]
+
+[project.urls]
+Homepage = "https://github.com/topoteretes/cognee/tree/main/cognee-connectors/connectors/__SLUG__"
+Repository = "https://github.com/topoteretes/cognee"
+Issues = "https://github.com/topoteretes/cognee/issues"
+Documentation = "https://docs.cognee.ai"
+
+[project.entry-points."cognee.connectors"]
+__PROVIDER__ = "__MODULE__:CONNECTOR"
+
+[project.entry-points."cognee.sources"]
+__PROVIDER__ = "__MODULE__:__PROVIDER___source"
+
+[project.entry-points."cognee.integrations"]
+__PROVIDER__ = "__MODULE__.cognee_host:register"
+
+[tool.hatch.build.targets.wheel]
+packages = ["__MODULE__"]
+
+[tool.hatch.build.targets.sdist]
+include = ["__MODULE__", "tests", "README.md", "LICENSE", "pyproject.toml"]
