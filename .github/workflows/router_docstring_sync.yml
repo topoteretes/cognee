@@ -83,7 +83,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
 
       # Pinned: a bare `uv python install` fetches the newest CPython, and
       # once that fell outside requires-python (3.15 vs <3.15) `uv sync`
@@ -251,7 +251,7 @@ jobs:
 
       - name: Install uv
         if: ${{ steps.branch.outputs.exists == 'true' }}
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
 
       # The script works on text and AST only — no cognee environment needed,
       # just the anthropic SDK in an ephemeral interpreter. Versions pinned:
@@ -311,7 +311,7 @@ jobs:
         id: critic
         if: ${{ steps.generated.outputs.changed == 'true' }}
         continue-on-error: true
-        uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790  # v1.0.235
+        uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6  # v1.0.264
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
