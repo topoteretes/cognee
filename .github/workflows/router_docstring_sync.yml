@@ -19,10 +19,6 @@ name: automation | Router Docstring Sync
 # generated descriptions.
 
 on:
-  # TEMPORARY (RES-93): exercise the fix from this branch. Remove before merging.
-  push:
-    branches:
-      - feature/res-93-fix-router_docstring_syncyml-automation-on-cognee
   workflow_dispatch:
   # Weekly, Wednesday 05:00 UTC — chosen to sit just ahead of a release with a
   # working day left to review and merge the PR. Of the last 50 stable
