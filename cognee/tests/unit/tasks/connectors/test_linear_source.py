@@ -50,6 +50,7 @@ class FakeLinear:
             "description": f"Body of {key}",
             "url": f"https://linear.app/x/issue/{key}",
             "trashed": False,
+            "archivedAt": None,
             "createdAt": _ts(0),
             "updatedAt": _ts(n),
             "state": {"name": "Todo"},
@@ -82,10 +83,19 @@ class FakeLinear:
             "url": f"https://linear.app/x/project/{key}",
             "startDate": None,
             "targetDate": None,
+            "trashed": False,
+            "archivedAt": None,
             "updatedAt": _ts(n),
             "status": {"name": "Planned"},
             "lead": None,
         }
+
+    def trash(self, items: dict, key: str, n: int):
+        # As Linear does: trashing archives the item and leaves updatedAt alone.
+        items[key].update(trashed=True, archivedAt=_ts(n))
+
+    def restore(self, items: dict, key: str):
+        items[key].update(trashed=None, archivedAt=None)
 
     # -- transport ---------------------------------------------------------
     def execute(self, query, variables=None):
@@ -101,12 +111,23 @@ class FakeLinear:
             return {"team": self._projects(variables)}
         if "LinearIssueComments" in query:
             return self._issue_comments(variables)
+        if "LinearTeamArchivedIssues" in query:
+            return {"team": self._archived_issues(variables)}
+        if "LinearTeamArchivedProjects" in query:
+            nodes, info = self._page(list(self.projects.values()), variables)
+            return {"team": {"projects": {"nodes": nodes, "pageInfo": info}}}
         raise AssertionError(query)
 
     @staticmethod
-    def _in_window(item, window):
-        stamp = item["updatedAt"]
-        return stamp >= window.get("gte", "") and stamp <= window.get("lte", "~")
+    def _in_window(item, window, field="updatedAt"):
+        stamp = item[field]
+        return stamp is not None and window.get("gte", "") <= stamp <= window.get("lte", "~")
+
+    @staticmethod
+    def _visible(items, variables):
+        if variables.get("archived", True):
+            return list(items)
+        return [i for i in items if not i["archivedAt"]]
 
     @staticmethod
     def _page(items, variables):
@@ -118,7 +139,7 @@ class FakeLinear:
 
     def _issues(self, variables):
         filter_ = variables.get("filter") or {}
-        items = list(self.issues.values())
+        items = self._visible(self.issues.values(), variables)
         if "id" in filter_:
             items = [i for i in items if i["id"] in filter_["id"]["in"]]
         if "updatedAt" in filter_:
@@ -147,9 +168,16 @@ class FakeLinear:
 
     def _projects(self, variables):
         window = (variables.get("filter") or {}).get("updatedAt", {})
-        items = [p for p in self.projects.values() if self._in_window(p, window)]
+        visible = self._visible(self.projects.values(), variables)
+        items = [p for p in visible if self._in_window(p, window)]
         nodes, info = self._page(items, variables)
         return {"projects": {"nodes": nodes, "pageInfo": info}}
+
+    def _archived_issues(self, variables):
+        window = (variables.get("filter") or {}).get("archivedAt", {})
+        items = [i for i in self.issues.values() if self._in_window(i, window, "archivedAt")]
+        nodes, info = self._page(items, variables)
+        return {"issues": {"nodes": nodes, "pageInfo": info}}
 
     def _issue_comments(self, variables):
         own = sorted(
@@ -323,11 +351,112 @@ def test_missing_team_raises_a_typed_error():
         _run(Gone(), {})
 
 
-def test_trashed_issues_are_skipped(team):
-    team.issues["i2"]["trashed"] = True
+# Live-checked against Linear: trashing (issueDelete, projectDelete) sets trashed
+# and archivedAt but leaves updatedAt alone, and so does restoring.
+def test_an_issue_trashed_after_it_was_ingested_becomes_a_tombstone(team):
+    state: dict = {}
+    _run(team, state)
+    team.trash(team.issues, "i2", 20)
+
+    rows, stats = _run(team, state)
+    assert rows == [{"id": "issue:i2", "_deleted": True}]
+    assert stats["deleted"] == 1
+    assert _run(team, state)[0] == []
+
+
+def test_a_trashed_project_becomes_a_tombstone(team):
+    # The fake answers with every field it holds, so also check the queries ask for it.
+    assert "trashed" in linear_module._PROJECTS_QUERY
+    assert "trashed archivedAt" in linear_module._ARCHIVED_PROJECTS_QUERY
+    assert "trashed archivedAt" in linear_module._ARCHIVED_ISSUES_QUERY
+    state: dict = {}
+    _run(team, state)
+    team.trash(team.projects, "p1", 20)
+
+    rows, stats = _run(team, state)
+    assert rows == [{"id": "project:p1", "_deleted": True}]
+    assert stats["deleted"] == 1
+    assert _run(team, state)[0] == []
+
+
+def test_trashed_issues_are_forgotten_even_without_include_archived(team):
+    state: dict = {}
+    _run(team, state, include_archived=False)
+    team.trash(team.issues, "i2", 20)
+
+    rows, _ = _run(team, state, include_archived=False)
+    assert rows == [{"id": "issue:i2", "_deleted": True}]
+
+
+def test_an_archived_issue_that_is_not_trashed_stays(team):
+    state: dict = {}
+    _run(team, state)
+    team.issues["i2"]["archivedAt"] = _ts(20)  # Linear archives closed issues itself
+
+    rows, stats = _run(team, state)
+    assert rows == [] and stats["deleted"] == 0
+
+
+def test_a_trashed_issue_is_tombstoned_once_and_its_comments_are_not_paged(team):
+    for n in range(60):
+        team.add_comment(f"x{n:02d}", "i2", 10 + (n % 40))
+    team.trash(team.issues, "i2", 20)
+
     rows, stats = _run(team, {})
-    assert "issue:i2" not in {row["id"] for row in rows}
-    assert stats["skipped"] >= 1
+    assert rows.count({"id": "issue:i2", "_deleted": True}) == 1
+    assert stats["deleted"] == 1
+    assert not any("LinearIssueComments" in query for query in team.calls)
+
+
+def test_a_trashed_issue_with_a_new_comment_is_tombstoned_once(team):
+    state: dict = {}
+    _run(team, state)
+    team.trash(team.issues, "i3", 20)
+    team.add_comment("c2", "i3", 21)
+
+    rows, _ = _run(team, state)
+    assert rows == [{"id": "issue:i3", "_deleted": True}]
+
+
+def test_a_restored_issue_comes_back_at_its_next_edit(team):
+    state: dict = {}
+    _run(team, state)
+    team.trash(team.issues, "i2", 20)
+    _run(team, state)
+    team.restore(team.issues, "i2")
+    assert _run(team, state)[0] == []  # restoring does not bump updatedAt either
+
+    team.issues["i2"]["updatedAt"] = _ts(30)
+    rows, _ = _run(team, state)
+    assert [row["id"] for row in rows] == ["issue:i2"] and rows[0]["_deleted"] is False
+
+
+def test_issues_trashed_across_runs_cut_short_are_all_forgotten(team):
+    state: dict = {}
+    _run(team, state)
+    for key, n in (("i1", 20), ("i2", 21), ("i3", 21)):
+        team.trash(team.issues, key, n)
+
+    forgotten: set[str] = set()
+    for _ in range(10):
+        rows, stats = _run(team, state, page_size=1, max_requests=5)
+        forgotten |= {row["id"] for row in rows if row["_deleted"]}
+        assert "ceiling" not in state["streams"]["archived_issues"]
+        if not stats["failed"]:
+            break
+    assert forgotten == {"issue:i1", "issue:i2", "issue:i3"}
+    assert _run(team, state)[0] == []
+
+
+def test_a_sync_from_before_trash_tracking_catches_up_on_its_first_run(team):
+    state: dict = {}
+    _run(team, state)
+    for name in ("archived_issues", "archived_projects"):
+        del state["streams"][name]  # state written by a version without these walks
+    team.trash(team.issues, "i1", 20)
+
+    rows, _ = _run(team, state)
+    assert rows == [{"id": "issue:i1", "_deleted": True}]
 
 
 def test_comments_beyond_the_first_page_are_all_rendered(team):
