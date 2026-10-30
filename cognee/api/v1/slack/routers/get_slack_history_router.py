@@ -37,22 +37,36 @@ def get_slack_history_router():
         dialog acknowledges immediately and reports its background result.
 
         ## Path Parameters
-        - **team_id** (str): No description provided in code yet.
+        - **team_id** (str): Slack workspace (team) id of the connection to import from.
 
         ## Request Parameters
-        - **channel_ids** (List[str]): No description provided in code yet. At most 50 items.
+        - **channel_ids** (List[str]): Slack channel IDs (C... or G...) to import, not
+          channel names or DMs; duplicates are dropped. Channel imports also require days or
+          an oldest date. At most 50 items.
         - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
-        - **days** (Optional[int]): No description provided in code yet. Must be between 1 and 3650.
-        - **latest** (Optional[datetime]): No description provided in code yet.
-        - **max_messages** (int): No description provided in code yet. Must be between 1 and 500000.
-          Defaults to 50000.
-        - **max_requests** (int): No description provided in code yet. Must be between 1 and 10000.
-          Defaults to 1000.
-        - **oldest** (Optional[datetime]): No description provided in code yet.
-        - **thread_links** (List[str]): No description provided in code yet. At most 50 items.
-        - **thread_mode** (Literal['started', 'active']): No description provided in code yet. One
-          of: 'started', 'active'. Defaults to 'started'.
-        - **threads** (List[SlackThread]): No description provided in code yet. At most 50 items.
+        - **days** (Optional[int]): Length of the import window ending now, in days. Cannot
+          be combined with oldest or latest; channel imports need either this or an oldest
+          date. Must be between 1 and 3650.
+        - **latest** (Optional[datetime]): End of the import window, timezone-aware and
+          later than oldest. Cannot be combined with days; defaults to the time of the
+          request.
+        - **max_messages** (int): Cap on messages fetched for this import. Reaching the cap
+          fails the import rather than returning a truncated snapshot. Must be between 1 and
+          500000. Defaults to 50000.
+        - **max_requests** (int): Cap on Slack API requests made for this import. Reaching
+          the cap fails the import rather than returning a truncated snapshot. Must be
+          between 1 and 10000. Defaults to 1000.
+        - **oldest** (Optional[datetime]): Start of the import window, timezone-aware and
+          earlier than latest. Cannot be combined with days.
+        - **thread_links** (List[str]): Slack message or thread permalinks
+          (https://<workspace>.slack.com/archives/...) selecting whole conversations
+          regardless of the date window; duplicates are dropped. At most 50 items.
+        - **thread_mode** (Literal['started', 'active']): How the date window selects
+          threads: 'started' takes thread roots inside the window, 'active' also scans older
+          roots and takes threads with a message in the window. One of: 'started', 'active'.
+          Defaults to 'started'.
+        - **threads** (List[SlackThread]): Threads named directly by channel id and root
+          timestamp, selected with all available replies. At most 50 items.
         """
         try:
             return await run_history_import(team_id, selection, user=user)
@@ -69,16 +83,26 @@ def get_slack_history_router():
         settings: SlackSyncSettings,
         user: Annotated[User, Depends(get_authenticated_user)],
     ):
-        """Set sync — PUT /api/v1/slack/history/{team_id}/sync.
+        """Configure the recurring Slack history sync for a dataset.
+
+        Returns the stored settings with the selection's date window resolved to a fixed
+        oldest date. Returns 400 for an invalid or missing selection, and 403 when read,
+        write and delete access to the target dataset is missing.
 
         ## Path Parameters
-        - **team_id** (str): No description provided in code yet.
+        - **team_id** (str): Slack workspace (team) id whose sync configuration is being
+          set.
 
         ## Request Parameters
-        - **enabled** (bool): No description provided in code yet. Defaults to False.
-        - **interval_seconds** (int): No description provided in code yet. Must be between 600 and
-          604800. Defaults to 21600.
-        - **selection** (Optional[SlackHistoryRequest]): No description provided in code yet.
+        - **enabled** (bool): Turns the recurring sync on for the selection's dataset.
+          Enabling requires a selection and write access to it; disabling is permitted for
+          the owner of the Slack connection. Defaults to False.
+        - **interval_seconds** (int): How often the sync runs for this dataset. Must be
+          between 600 and 604800. Defaults to 21600.
+        - **selection** (Optional[SlackHistoryRequest]): Import selection identifying the
+          dataset to configure and what to sync; required, and 400 is returned without it.
+          Its latest date must be unset, and a relative days window is resolved once into a
+          fixed oldest date when stored.
         """
         try:
             return await configure_slack_sync(team_id, settings, user=user)
@@ -91,10 +115,15 @@ def get_slack_history_router():
 
     @router.get("/history/{team_id}")
     async def history_status(team_id: str, user: Annotated[User, Depends(get_authenticated_user)]):
-        """History status — GET /api/v1/slack/history/{team_id}.
+        """Read sync settings and import reports for a Slack workspace.
+
+        Returns the stored sync configuration, per-dataset import reports, and whether the
+        history sync worker is enabled. Returns 404 when the caller has no active connection
+        for the workspace.
 
         ## Path Parameters
-        - **team_id** (str): No description provided in code yet.
+        - **team_id** (str): Slack workspace (team) id whose sync settings and import
+          reports are returned.
         """
         credential = await get_by_team(team_id)
         if not is_active(credential) or credential.user_id != user.id:

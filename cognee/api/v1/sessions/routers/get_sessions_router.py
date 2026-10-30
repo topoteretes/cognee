@@ -459,7 +459,11 @@ def get_sessions_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ):
-        """Get session detail — GET /api/v1/sessions/{session_id}.
+        """Get one session with its recent messages and traces.
+
+        Returns the session record plus a label, message and tool-call counts, and the last
+        20 question-answer entries and trace steps. Returns 404 when the session is not
+        visible to the caller.
 
         ## Path Parameters
         - **session_id** (str): Client-supplied session identifier; the same value passed as

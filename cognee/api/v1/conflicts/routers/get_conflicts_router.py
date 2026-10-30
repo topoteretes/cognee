@@ -34,8 +34,9 @@ def get_conflicts_router() -> APIRouter:
 
         ## Query Parameters
         - **dataset_id** (UUID): Dataset to inspect. Requires read permission.
-        - **status** (Optional[Literal['resolved', 'unresolved']]): No description provided in code
-          yet. One of: 'resolved', 'unresolved'.
+        - **status** (Optional[Literal['resolved', 'unresolved']]): Returns conflicts whose
+          status matches the given value; when omitted, conflicts of both statuses are
+          returned. One of: 'resolved', 'unresolved'.
         """
         return await list_conflicts(dataset_id, status=status, user=user)
 
@@ -54,7 +55,8 @@ def get_conflicts_router() -> APIRouter:
         remain stored for inspection, but normal retrieval uses the selected information.
 
         ## Path Parameters
-        - **conflict_id** (UUID): No description provided in code yet.
+        - **conflict_id** (UUID): Id of the conflict to resolve, as returned by GET
+          /api/v1/conflicts. It must belong to the dataset given in the body.
 
         ## Request Parameters
         - **datasetId** (UUID): Dataset containing the conflict. Requires write permission.

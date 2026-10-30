@@ -16,7 +16,9 @@ def get_user_id_by_email_router() -> APIRouter:
 
     @router.post("/get-user-id")
     async def get_user_id(body: UserEmailRequest, user: User = Depends(get_authenticated_user)):
-        """Get user id — POST /api/v1/users/get-user-id.
+        """Look up a user id by email address.
+
+        Returns an object with the user_id field. Returns 404 when no user has that email.
 
         ## Request Parameters
         - **email** (EmailStr): Email address of the user.

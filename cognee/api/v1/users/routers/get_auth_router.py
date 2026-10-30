@@ -16,7 +16,11 @@ def get_auth_router():
         response: Response,
         credentials: OAuth2PasswordRequestForm = Depends(),
     ):
-        """Login — POST /api/v1/auth/login."""
+        """Log in with email and password and set the auth cookie.
+
+        Returns the bearer access token and also sets it as a cookie. Returns 400 when the
+        credentials are not accepted.
+        """
         user = await authenticate_user(credentials.username, credentials.password)
 
         if user is None:
@@ -41,7 +45,10 @@ def get_auth_router():
 
     @router.post("/logout")
     async def logout(response: Response, user: User = Depends(get_authenticated_user)):
-        """Logout — POST /api/v1/auth/logout."""
+        """Clear the authentication cookie.
+
+        Returns an empty JSON object.
+        """
         # Same attributes as the login's set_cookie: a deletion is a Set-Cookie
         # with a past expiry, and a browser only drops the stored cookie when
         # its name, path and domain match.
@@ -58,7 +65,10 @@ def get_auth_router():
 
     @router.get("/me")
     async def get_me(user: User = Depends(get_authenticated_user)):
-        """Get me — GET /api/v1/auth/me."""
+        """Get the authenticated user's email.
+
+        Returns an object with the email field.
+        """
         return {
             "email": user.email,
         }
