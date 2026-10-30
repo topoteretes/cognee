@@ -178,7 +178,13 @@ def actual_params(endpoint) -> tuple[set[str], set[str]]:
         base_annotation = annotation
         if typing.get_origin(annotation) is typing.Annotated:
             base_annotation = typing.get_args(annotation)[0]
-        if inspect.isclass(base_annotation) and issubclass(base_annotation, framework_types):
+        # On Python 3.10, inspect.isclass(list[str]) is True but issubclass()
+        # rejects it, so generic aliases must be ruled out first.
+        if (
+            inspect.isclass(base_annotation)
+            and typing.get_origin(base_annotation) is None
+            and issubclass(base_annotation, framework_types)
+        ):
             continue
 
         # Body DTOs: docstrings document the model fields, not the argument —

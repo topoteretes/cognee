@@ -85,11 +85,14 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
 
+      # Pinned: a bare `uv python install` fetches the newest CPython, and
+      # once that fell outside requires-python (3.15 vs <3.15) `uv sync`
+      # silently fell back to the runner's system 3.10.
       - name: Install Python
-        run: uv python install
+        run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --locked --all-extras
+        run: uv sync --locked --all-extras --python 3.12
 
       # Imports the same FastAPI app the published OpenAPI spec is generated
       # from and compares each handler's documented parameters against the
