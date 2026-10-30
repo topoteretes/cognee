@@ -1015,7 +1015,7 @@ def get_integrations_router():
 
         ## Query Parameters
         - **account_id** (Optional[str]): Connection whose selectable resources are listed
-          (from GET /{provider}/connections).
+          (from GET /{provider}/connections); the newest one is used when omitted.
         """
         integration = _integration_or_404(provider)
         if integration.resource_selection_key is None:
@@ -1074,7 +1074,7 @@ def get_integrations_router():
 
         ## Query Parameters
         - **account_id** (Optional[str]): Connection whose resource selection is written
-          (from GET /{provider}/connections).
+          (from GET /{provider}/connections); the newest one is used when omitted.
 
         ## Request Parameters
         - **resourceIds** (Optional[List[str]]): Full allowlist of resource ids to store;
@@ -1126,7 +1126,7 @@ def get_integrations_router():
 
         ## Query Parameters
         - **account_id** (Optional[str]): Connection to sync (from GET
-          /{provider}/connections).
+          /{provider}/connections); the newest one is used when omitted.
         """
         integration = _integration_or_404(provider)
         credential = await _credential_or_404(user, integration, account_id)

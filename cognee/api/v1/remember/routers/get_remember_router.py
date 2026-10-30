@@ -705,13 +705,13 @@ def get_remember_router() -> APIRouter:
         - **dataset_name** (str): Name of the target dataset. Defaults to 'main_dataset'.
         - **entry** (Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry]): Typed memory
           entry (qa, trace, feedback, or skill_run) to store, dispatched by its type field.
+        - **self_improvement** (Optional[bool]): Forwarded to remember for compatibility. Typed
+          session entries do not run automatic graph improvement, regardless of this value. This
+          does not control explicit skill_improvement.
         - **session_id** (Optional[str]): Required for qa/trace/feedback entries; optional for
           skill_run entries.
         - **skill_improvement** (Optional[dict]): Skill improvement details forwarded to
           remember when recording a skill run.
-        - **self_improvement** (Optional[bool]): Forwarded to remember for compatibility. Typed
-          session entries do not run automatic graph improvement, regardless of this value. This
-          does not control explicit skill_improvement.
 
         ## Response
         The returned ``RememberResult`` includes ``entry_type`` and

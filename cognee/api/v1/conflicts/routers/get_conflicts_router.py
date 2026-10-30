@@ -34,8 +34,8 @@ def get_conflicts_router() -> APIRouter:
 
         ## Query Parameters
         - **dataset_id** (UUID): Dataset to inspect. Requires read permission.
-        - **status** (Optional[Literal['resolved', 'unresolved']]): One of: 'resolved',
-          'unresolved'.
+        - **status** (Optional[Literal['resolved', 'unresolved']]): Only conflicts with this
+          status, 'resolved' or 'unresolved'. Omit it to list all conflicts.
         """
         return await list_conflicts(dataset_id, status=status, user=user)
 
