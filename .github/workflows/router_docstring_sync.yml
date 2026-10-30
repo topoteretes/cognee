@@ -286,8 +286,10 @@ jobs:
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
       # The critic gets Edit/Write. Fingerprint everything it must not touch
-      # (the machinery that judges it, and git config/hooks, which the PAT
-      # reaches) and keep a copy of the edit check outside its reach.
+      # (the machinery that judges it, and git hooks, which the PAT reaches)
+      # and keep a copy of the edit check outside its reach. .git/config is
+      # saved rather than fingerprinted: claude-code-action writes its own git
+      # settings there, so it is restored wholesale before anything pushes.
       - name: Record protected files
         if: ${{ steps.generated.outputs.changed == 'true' }}
         run: |
@@ -296,9 +298,9 @@ jobs:
           set -euo pipefail
           find automation-src .git/hooks -type f -not -path 'automation-src/.git/objects/*' \
             -not -path '*/__pycache__/*' -print0 | sort -z | xargs -0 sha256sum
-          sha256sum .git/config
           EOF
           bash "${RUNNER_TEMP}/protected_manifest.sh" > "${RUNNER_TEMP}/protected.sha256"
+          cp .git/config "${RUNNER_TEMP}/git-config.orig"
           cp automation-src/tools/check_critic_edits.py "${RUNNER_TEMP}/"
 
       # Pass 2: checks every generated claim against the code, following calls
@@ -342,9 +344,10 @@ jobs:
         if: ${{ steps.generated.outputs.changed == 'true' }}
         run: |
           set -euo pipefail
+          cp "${RUNNER_TEMP}/git-config.orig" .git/config
           if ! bash "${RUNNER_TEMP}/protected_manifest.sh" \
                | diff "${RUNNER_TEMP}/protected.sha256" - >&2; then
-            echo "The critic changed automation-src/ or .git; stopping." >&2
+            echo "The critic changed automation-src/ or .git/hooks; stopping." >&2
             exit 1
           fi
           uv run --no-project python "${RUNNER_TEMP}/check_critic_edits.py"
