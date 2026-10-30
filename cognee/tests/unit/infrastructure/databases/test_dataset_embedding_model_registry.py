@@ -91,6 +91,30 @@ async def test_a_different_width_is_refused_with_both_models_named(store):
 
 
 @pytest.mark.asyncio
+async def test_a_different_model_of_the_same_width_is_refused(store):
+    """Equal widths do not make two models interchangeable: their vectors
+    live in different spaces, and the store would mix them without an error."""
+    row = _row(**{MODEL_KEY: "openai/text-embedding-3-large-other", DIMENSIONS_KEY: 3072})
+
+    with pytest.raises(EmbeddingDimensionMismatchError) as raised:
+        await ensure_embedding_model_matches(row)
+
+    error = raised.value
+    assert error.status_code == 409
+    assert "openai/text-embedding-3-large-other" in error.message
+    assert "'openai/text-embedding-3-large'" in error.message
+    assert "openai/text-embedding-3-large-other" in error.remediation
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_row_of_the_same_width_passes(store):
+    """The model that built a legacy row is unknown, so only its width can be checked."""
+    store["engine"] = SimpleNamespace(get_stored_vector_size=AsyncMock(return_value=3072))
+
+    await ensure_embedding_model_matches(_row())
+
+
+@pytest.mark.asyncio
 async def test_a_legacy_row_is_completed_from_the_store_once_then_checked(store):
     """A dev-era row has no keys: the width comes from the store, is recorded,
     and the configured model is checked against it in the same entry."""
