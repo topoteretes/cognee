@@ -91,6 +91,7 @@
   "GET /api/v1/visualize/semantic",
   "GET /health",
   "GET /health/detailed",
+  "PATCH /api/v1/datasets/{dataset_id}/schema",
   "PATCH /api/v1/update",
   "PATCH /api/v1/users/me",
   "PATCH /api/v1/users/{id}",
