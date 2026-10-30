@@ -5,6 +5,11 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+from cognee.modules.tools.resolve_skills import (
+    _coerce_skill,
+    _load_skill_nodes,
+    _skill_in_dataset_scope,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("SkillsRetriever")
@@ -43,13 +48,58 @@ def _project_skill_payload(payload: dict) -> dict:
     }
 
 
+def _payload_from_skill(skill) -> dict:
+    """Rebuild the metadata-only payload of a Skill from its graph node.
+
+    The vector lane stores only ``IndexSchema`` columns (id, text, …), so a hit
+    payload never carries ``dataset_scope`` or the display fields; the node is
+    the source of truth for both. The keys mirror ``_project_skill_payload``,
+    and the procedure body is deliberately not included.
+    """
+    return {
+        "id": str(skill.id),
+        "name": skill.name or "",
+        "description": skill.description or "",
+        "maintainer": skill.maintainer or "",
+        "maintainer_url": skill.maintainer_url or "",
+        "skill_version": skill.skill_version or "",
+        "tags": list(skill.tags or []),
+        "license": skill.license or "",
+        "declared_tools": list(skill.declared_tools or []),
+        "dataset_scope": [str(entry) for entry in (skill.dataset_scope or [])],
+        "is_active": bool(skill.is_active),
+        "source_repo_url": skill.source_repo_url or "",
+        "source_dir": skill.source_dir or "",
+    }
+
+
+async def _skill_nodes_by_id() -> dict:
+    """All Skill nodes by id — one graph pass per search.
+
+    Uses the same indexed lookup as the deterministic ``resolve_skills`` /
+    ``list_skills`` paths, so backends without ``get_nodes_by_type`` still work
+    through the existing cascade.
+    """
+    nodes: dict = {}
+    for raw in await _load_skill_nodes():
+        skill = _coerce_skill(raw)
+        if skill is None:
+            continue
+        nodes[str(skill.id)] = skill
+    return nodes
+
+
 class SkillsRetriever(BaseRetriever):
     """
     Retriever for semantic discovery of dataset-scoped Skill playbooks.
 
-    Searches the ``Skill_search_text`` vector collection (populated by skill
-    ingestion via the standard Embeddable indexing path) and returns
-    metadata-only skill payloads — never the procedure body.
+    Hit ids come from the ``Skill_search_text`` vector collection (populated by
+    skill ingestion via the standard Embeddable indexing path); the metadata
+    used for filtering and for the returned payload comes from the ``Skill``
+    graph nodes. The vector lane stores only ``IndexSchema`` columns, so a hit
+    payload never carries ``dataset_scope`` — reading scope from it made every
+    search return nothing. Returned payloads are metadata-only, never the
+    procedure body.
 
     Requires exactly one explicit dataset: only skills whose ``dataset_scope``
     contains that dataset (and that are ``is_active``) are returned. Skills
@@ -89,9 +139,10 @@ class SkillsRetriever(BaseRetriever):
         """
         Retrieves skill hits for the query, filtered to this dataset.
 
-        Over-fetches from the vector engine, then keeps only active skills
-        whose ``dataset_scope`` contains the retriever's dataset, deduplicated
-        by id and trimmed to ``top_k``.
+        Over-fetches from the vector engine, resolves each hit id to its
+        ``Skill`` graph node (the vector payload carries no skill metadata),
+        then keeps only active skills scoped to this dataset, deduplicated by
+        id and trimmed to ``top_k``.
         """
         logger.info(
             f"Starting skill retrieval for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
@@ -113,21 +164,34 @@ class SkillsRetriever(BaseRetriever):
             )
             return []
 
+        nodes_by_id = await _skill_nodes_by_id()
+
         filtered = []
         seen_ids: set = set()
         for result in results:
-            payload = getattr(result, "payload", None) or {}
+            payload = dict(getattr(result, "payload", None) or {})
+            hit_id = str(payload.get("id") or getattr(result, "id", "") or "")
+
+            skill = nodes_by_id.get(hit_id) if hit_id else None
+            if skill is not None:
+                if not _skill_in_dataset_scope(skill, self.dataset_id):
+                    continue
+                payload.update(_payload_from_skill(skill))
+            elif self.dataset_id not in [
+                str(entry) for entry in (payload.get("dataset_scope") or [])
+            ]:
+                # No node for this hit (stale index row or a backend without
+                # get_nodes_by_type): fall back to legacy payload metadata, and
+                # only when it claims this dataset.
+                continue
+
             if not payload.get("is_active", True):
                 continue
-            scope = [str(entry) for entry in (payload.get("dataset_scope") or [])]
-            if self.dataset_id not in scope:
-                continue
-            payload_id = str(payload.get("id") or getattr(result, "id", "") or "")
-            if payload_id:
-                if payload_id in seen_ids:
+            if hit_id:
+                if hit_id in seen_ids:
                     continue
-                seen_ids.add(payload_id)
-            filtered.append(result)
+                seen_ids.add(hit_id)
+            filtered.append(result.model_copy(update={"payload": payload}))
             if len(filtered) >= self.top_k:
                 break
 
