@@ -304,8 +304,9 @@ jobs:
           cp automation-src/tools/check_critic_edits.py "${RUNNER_TEMP}/"
 
       # Pass 2: checks every generated claim against the code, following calls
-      # as deep as a claim needs, and cuts what it cannot prove. The generator
-      # sees one hop of source; most of its wrong claims lived further down.
+      # as deep as a claim needs, and corrects it to what the code does. The
+      # generator sees one hop of source; most of its wrong claims lived further
+      # down. Correcting rather than deleting keeps the true, specific part.
       - name: Fact-check generated docstrings
         id: critic
         if: ${{ steps.generated.outputs.changed == 'true' }}
@@ -319,7 +320,7 @@ jobs:
 
             - Generated patch: `./router_docstring_generated.patch`
             - Ledger path: `./router_docstring_ledger.md`
-          claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep --max-turns 80"
+          claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep --max-turns 120"
 
       # continue-on-error keeps a clean finish that only tripped the turn count;
       # a critic that did not finish fails here, so unchecked text is never pushed.
@@ -366,7 +367,7 @@ jobs:
             "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             HEAD:automation/fix-router-docstrings
 
-      # The ledger lists what the critic cut and what it could not settle, so
+      # The ledger lists what the critic changed and what it could not settle, so
       # the reviewer starts from the open questions instead of re-checking all.
       - name: Post the critic's ledger
         if: ${{ steps.generated.outputs.changed == 'true' && hashFiles('router_docstring_ledger.md') != '' }}
@@ -383,8 +384,8 @@ jobs:
           {
             echo "## Docstring fact-check"
             echo
-            echo "Claude checked this run's generated text against the code. Removed claims"
-            echo "are in the last commit; open questions are below."
+            echo "Claude checked this run's generated text against the code. Its corrections"
+            echo "are in the last commit, with evidence below; open questions are at the end."
             echo
             cat router_docstring_ledger.md
           } > "${RUNNER_TEMP}/ledger_comment.md"

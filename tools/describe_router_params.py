@@ -53,7 +53,8 @@ You write the REST API reference for cognee, an open-source AI memory platform
 (knowledge graphs + vector search for AI agents): parameter descriptions and,
 where a handler has only a stub, its summary.
 
-For each endpoint you receive the handler source and the source of the request and
+You receive app_exception_handlers (how this app turns exceptions into responses)
+and, for each endpoint, the handler source plus the source of the request and
 response models and cognee helpers it uses (related_source). Parameter descriptions
 follow the style of these existing ones:
 
@@ -62,30 +63,30 @@ follow the style of these existing ones:
 - "Time window filtered on last_activity_at: 24h, 7d, 30d, or all."
 - "Maximum number of rows to return."
 
-Evidence (these rules outrank everything below):
-- State only what the source you were given shows. When behaviour depends on code
+The reader is a developer calling the API, and specific facts are what they need:
+error statuses and their causes, limits and what happens past them, what an empty
+or omitted value means, response fields, cases that return empty results. Write
+those whenever the source you were given shows them. A later pass checks every
+claim against the full codebase and corrects it, so do not trade a specific claim
+for a vague one — but never invent one either:
+
+- Every claim must come from the source you were given. Where it depends on code
   you were not given (a function that is called but not included, a setting, an
-  exception class, a registry or cache), leave that behaviour out. A shorter true
-  description is always better than a complete-sounding guess.
-- Do not write "only", "never", "always", "at most", "returns the existing" or
-  similar absolute claims unless the code you were given enforces them.
-- How FastAPI behaves, so you do not have to guess:
-  - Request validation failures return 422 before the handler runs: a missing or
-    ill-typed parameter, a Field limit, or a ValueError raised in a Pydantic
-    model validator.
-  - HTTPException(status, ...) raised in the shown code returns that status.
-  - Any other exception that the shown code does not catch: do not claim a status.
-  - A handler that returns None responds with its success status and a JSON null
-    body, not an empty body. The success status is 200 unless the decorator sets
-    status_code=.
+  exception class), leave that part out.
+- Statuses: take them from app_exception_handlers, not from FastAPI's defaults
+  (this app maps request validation errors differently). HTTPException(status, ...)
+  returns that status. For an exception you cannot follow to a handler or an
+  HTTPException, do not claim a status.
+- A handler that returns None responds with a JSON null body, not an empty body.
+- Get comparisons exactly right: a check like `count > limit` fails when the limit
+  is exceeded, not when it is reached.
 
 Rules for parameter descriptions:
 - One or two sentences, at most 220 characters, ending with a period.
-- Say what the parameter does in THIS endpoint. Read the models' validators, Field
-  limits, comments and docstrings: they hold the rules callers need.
-- Where the source shows it, include what omitting the parameter means, what each
-  allowed value selects (when values are listed), what happens when a limit is
-  reached, and which other parameters it requires or excludes.
+- Say what the parameter does in THIS endpoint: what omitting it means, what each
+  allowed value selects (when values are listed), what happens past a limit, and
+  which other parameters it requires or excludes. Validators, Field limits,
+  comments and model docstrings in related_source hold most of these rules.
 - Do not restate the type, the parameter name, or anything in "already_rendered"
   (defaults, allowed values and numeric limits are rendered after your text).
 - Plain, factual reference tone; no marketing language.
@@ -93,10 +94,12 @@ Rules for parameter descriptions:
 Rules for summaries (only for endpoints with "needs_summary": true):
 - summary: one imperative line, at most 90 characters, ending with a period,
   e.g. "List the conflicts in a dataset.". Never repeat the method or path.
-- details: zero to two sentences. Name an error status only when endpoint_source
-  itself raises HTTPException with it. Describe the response only from the
-  response_model or a dict literal the handler returns. Leave details empty when
-  neither applies; most endpoints need none.
+- details: up to three sentences on what the parameter list does not show: error
+  statuses and their causes, side effects, cases that return empty results, and the
+  response fields (from the response_model or the value the handler returns).
+  Empty string when the source shows none of these.
+- The summary must agree with the endpoint's existing docstring text (in
+  endpoint_source); where they differ, follow the code.
 """
 
 
@@ -300,6 +303,27 @@ def related_source(path: Path, line_index: int) -> str:
     return "\n\n".join(chunks)
 
 
+APP_MODULE = Path("cognee/api/client.py")
+
+
+def app_exception_handlers() -> str:
+    """Source of every @app.exception_handler in the API app: the statuses this app
+    really returns, which can differ from FastAPI's defaults."""
+    if not APP_MODULE.is_file():
+        return ""
+    tree = ast.parse(APP_MODULE.read_text(encoding="utf-8"))
+    chunks = []
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            func = decorator.func if isinstance(decorator, ast.Call) else decorator
+            if isinstance(func, ast.Attribute) and func.attr == "exception_handler":
+                chunks.append(_node_source(APP_MODULE, node))
+                break
+    return "\n\n".join(chunks)
+
+
 def _endpoint_key(path: Path, line_index: int) -> str:
     return f"{path}::{enclosing_line(path, line_index)}"
 
@@ -398,7 +422,14 @@ def generate_descriptions(
                 "content": (
                     "Write a description for each parameter (one entry per parameter "
                     "key) and a summary for each endpoint with needs_summary set (one "
-                    "entry per such endpoint).\n\n" + json.dumps(list(endpoints.values()), indent=2)
+                    "entry per such endpoint).\n\n"
+                    + json.dumps(
+                        {
+                            "app_exception_handlers": app_exception_handlers(),
+                            "endpoints": list(endpoints.values()),
+                        },
+                        indent=2,
+                    )
                 ),
             }
         ],
