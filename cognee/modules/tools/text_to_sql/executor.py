@@ -44,7 +44,10 @@ async def execute_readonly(
             # the connection's server settings.
             await connection.execute(text("SET TRANSACTION READ ONLY"))
 
-        result = await connection.execute(text(sql))
+        # exec_driver_sql, not text(): the guard already proved this is one
+        # self-contained statement, and text() would read a ':token' inside a
+        # string literal as a bind parameter and refuse to run without a value.
+        result = await connection.exec_driver_sql(sql)
         raw_rows = result.mappings().fetchmany(int(max_rows) + 1)
 
         truncated = len(raw_rows) > max_rows
