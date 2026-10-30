@@ -29,6 +29,8 @@ import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
+from fix_router_docstrings import escape_docstring
+
 logger = logging.getLogger(__name__)
 
 PLACEHOLDER = "No description provided in code yet."
@@ -454,10 +456,10 @@ def summary_edits(
             continue
         if not summary.endswith("."):
             summary += "."
-        new = [f'{stub.indent}"""{summary}']
+        new = [f'{stub.indent}"""{escape_docstring(summary)}']
         if details:
             new += [""] + textwrap.wrap(
-                details,
+                escape_docstring(details),
                 width=max(60, 100 - len(stub.indent)),
                 initial_indent=stub.indent,
                 subsequent_indent=stub.indent,
@@ -478,7 +480,7 @@ def description_edits(
             continue
         if not description.endswith("."):
             description += "."
-        body = f"- **{item.name}** ({item.type_text}): {description}"
+        body = f"- **{item.name}** ({item.type_text}): {escape_docstring(description)}"
         if item.suffix:
             body += f" {item.suffix}"
         wrapped = textwrap.wrap(

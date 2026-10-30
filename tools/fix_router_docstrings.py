@@ -512,9 +512,19 @@ def _merge_bullets(section: list[str], docs: list[ParamDoc]) -> list[str]:
     return out
 
 
+def escape_docstring(text: str) -> str:
+    """Docstring text as it must appear between triple quotes in source.
+
+    Backslashes are doubled so ``\\d`` or ``\\n`` in the text stays literal
+    instead of becoming an escape (or a SyntaxError, for ``\\N``), and
+    ``\"\"\"`` is escaped so it cannot close the docstring early.
+    """
+    return text.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+
+
 def _rebuild_docstring(text: str, indent: str, summary_on_first_line: bool) -> list[str]:
     """Render docstring text back into source lines (with quotes)."""
-    safe = text.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+    safe = escape_docstring(text)
     lines = safe.splitlines() or [""]
     out: list[str] = []
     if summary_on_first_line and lines[0].strip():
