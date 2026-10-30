@@ -170,6 +170,16 @@ async def test_node_edge_vector_search_extract_relevant_node_ids_batch():
     assert node_ids == []
 
 
+def test_ranked_node_ids_keep_result_order_for_equal_distances():
+    vector_search = NodeEdgeVectorSearch(vector_engine=AsyncMock())
+    vector_search.node_distances = {
+        "Entity_name": [MockScoredResult("first", 0.1), MockScoredResult("second", 0.1)],
+        "TextSummary_text": [MockScoredResult("first", 0.1), MockScoredResult("third", 0.1)],
+    }
+
+    assert vector_search.extract_relevant_node_ids() == ["first", "second", "third"]
+
+
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_has_results_single_query():
     """Test has_results returns True when results exist and False when only empties."""
