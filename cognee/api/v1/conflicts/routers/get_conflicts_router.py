@@ -32,12 +32,14 @@ def get_conflicts_router() -> APIRouter:
     ):
         """List conflicts, candidate fact ids, source evidence and previous decisions.
 
+        A dataset with no matching FactConflict nodes returns an empty list. A caller
+        without read permission on the dataset gets 403.
+
         ## Query Parameters
         - **dataset_id** (UUID): Dataset to inspect. Requires read permission.
         - **status** (Optional[Literal['resolved', 'unresolved']]): Restricts the listing to
-          conflicts in that state; omitted, conflicts in both states are returned. A dataset
-          with no matching FactConflict nodes returns an empty list. One of: 'resolved',
-          'unresolved'.
+          conflicts in that state; omitted, conflicts in both states are returned. One of:
+          'resolved', 'unresolved'.
         """
         return await list_conflicts(dataset_id, status=status, user=user)
 
@@ -54,6 +56,7 @@ def get_conflicts_router() -> APIRouter:
         revises the decision.
         Automatic conflict review preserves the user decision. Rejected source facts
         remain stored for inspection, but normal retrieval uses the selected information.
+        A caller without write permission on the dataset gets 403.
 
         ## Path Parameters
         - **conflict_id** (UUID): Id of the FactConflict to resolve (from GET
@@ -63,7 +66,8 @@ def get_conflicts_router() -> APIRouter:
         ## Request Parameters
         - **datasetId** (UUID): Dataset containing the conflict. Requires write permission.
         - **reason** (Optional[str]): Optional explanation of the decision.
-        - **selectedFactId** (UUID): Fact id from the conflict's facts list to accept.
+        - **selectedFactId** (UUID): Fact id from the conflict's facts list to accept; any
+          other id returns 422.
         """
         return await resolve_conflict(
             conflict_id,

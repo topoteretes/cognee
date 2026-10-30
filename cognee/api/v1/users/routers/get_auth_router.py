@@ -21,7 +21,8 @@ def get_auth_router():
         Takes username and password as form fields. Returns access_token and token_type, and
         sets the same token as the authentication cookie. Unknown credentials, a wrong
         password or an inactive user return 400 with detail LOGIN_BAD_CREDENTIALS, as does a
-        malformed form body.
+        malformed form body. An account without a password, such as an agent, returns 400
+        and must use API key authentication instead.
         """
         user = await authenticate_user(credentials.username, credentials.password)
 

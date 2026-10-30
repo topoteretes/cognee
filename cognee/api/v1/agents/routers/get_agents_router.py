@@ -60,9 +60,9 @@ def get_agents_router() -> APIRouter:
     ) -> list[AgentDTO]:
         """List the agents owned by the authenticated user.
 
-        Each entry carries agentId, agentEmail in its display form and apiKeyLabel, which is
-        null when the agent has no API key. Returns an empty list when the user owns no
-        agents.
+        Each entry carries agentId, agentEmail (in the form <name>@cognee.agent) and
+        apiKeyLabel, which is null when the agent has no API key. Returns an empty list when
+        the user owns no agents.
         """
         agents = await list_agents(user.id)
         return [
@@ -239,9 +239,10 @@ def get_agents_router() -> APIRouter:
         Responds 201 with the registered connection. The connection is identified by
         agent_session_name plus the authenticated user's id, so re-registering the same name
         replaces the stored connection with the new request's fields (metadata merged into
-        the old) without increasing the active count. A listed dataset id or name the
-        caller cannot read returns 403. With COGNEE_AGENT_MODE=true the first registration
-        starts a watchdog that shuts the server down once no connection is active.
+        the old); while that connection is still active in this process the active count
+        does not increase. A listed dataset id or name the caller cannot read returns 403.
+        With COGNEE_AGENT_MODE=true the first registration starts a watchdog that shuts the
+        server down once no connection is active.
 
         ## Request Parameters
         - **agent_session_name** (str): A unique name for this agent connection. Combined with the
@@ -296,9 +297,9 @@ def get_agents_router() -> APIRouter:
     ) -> AgentDTO:
         """Get one agent owned by the caller.
 
-        Returns agentId, agentEmail in its display form and apiKeyLabel, which is null when
-        the agent has no API key. An unknown agent id returns 404; an agent belonging to
-        another user returns 403.
+        Returns agentId, agentEmail (in the form <name>@cognee.agent) and apiKeyLabel, which
+        is null when the agent has no API key. An unknown agent id returns 404; an agent
+        belonging to another user returns 403.
 
         ## Path Parameters
         - **agent_id** (UUID): The agent's user ID (from GET /api/v1/agents/list).

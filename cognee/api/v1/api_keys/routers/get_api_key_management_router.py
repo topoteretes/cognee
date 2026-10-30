@@ -105,9 +105,7 @@ def get_api_key_management_router():
     ):
         """Delete one of the authenticated user's API keys.
 
-        Responds with a JSON null body on success. An id that does not exist or does not
-        belong to the caller, and a failed delete (rolled back), both reach no exception
-        handler and return 500.
+        Only the caller's own keys can be deleted. Responds with a JSON null body on success.
 
         ## Path Parameters
         - **api_key_id** (UUID): UUID of the API key (from GET /api/v1/auth/api-keys).

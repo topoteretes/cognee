@@ -462,11 +462,12 @@ def get_sessions_router() -> APIRouter:
         """Get one session with its recent Q&As and trace steps.
 
         Returns the session record plus label (first question cut to 120 characters, else the
-        first trace's origin function), msg_count and tool_calls (counts over all Q&As and
-        trace steps), and qas and traces trimmed to the last 20 entries.
+        first trace's origin function, else null), msg_count and tool_calls (counts over all
+        Q&As and trace steps), and qas and traces trimmed to the last 20 entries.
         A session is visible when the caller or one of their child agents owns it, or when
-        its dataset is readable by the caller; otherwise 404. qas and traces are empty when
-        the session cache is unavailable or cannot be read.
+        its dataset is readable by the caller; otherwise 404. When the session cache is
+        unavailable, qas and traces are empty, label is null and both counts are 0; when only
+        the trace read fails, qas are still returned.
 
         ## Path Parameters
         - **session_id** (str): Client-supplied session identifier; the same value passed as

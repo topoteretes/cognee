@@ -15,10 +15,9 @@ def get_checks_router():
     ):
         """Verify a cloud API key against the cloud service.
 
-        The key is read from the X-Api-Key request header; a missing header returns 400. The
-        key is checked against the cloud service at http://localhost:8001. On success the
-        response body is JSON null; a non-200 answer from the cloud service, or a transport
-        failure, returns 503.
+        The key is read from the X-Api-Key request header; a missing header returns 400. On
+        success the response body is JSON null; a non-200 answer from the cloud service, or a
+        transport failure, returns 503.
         """
         api_token = request.headers.get("X-Api-Key")
 

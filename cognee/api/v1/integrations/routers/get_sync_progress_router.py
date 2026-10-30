@@ -39,6 +39,8 @@ def get_sync_progress_router() -> APIRouter:
         ## Query Parameters
         - **account_id** (Optional[str]): Connection to use (from GET
           /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
+          An id that is not the caller's, or a blank one, returns 404 and never falls back to
+          another connection.
         """
         try:
             get_integration(provider)

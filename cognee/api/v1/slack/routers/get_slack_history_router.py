@@ -38,9 +38,9 @@ def get_slack_history_router():
 
         ## Path Parameters
         - **team_id** (str): Slack workspace (team) id of the connected installation to read
-          history from. Only the owner of an active connection for it may import; anyone
-          else gets 400. An import already running in this process for this workspace and
-          the same dataset is rejected with 400.
+          history from. Only the owner of an active connection for it may import. An import
+          already running in this process for this workspace and the same dataset is
+          rejected with 400.
 
         ## Request Parameters
         - **channel_ids** (List[str]): Slack channel ids (C… or G…) to import; names and DMs
@@ -49,8 +49,8 @@ def get_slack_history_router():
           items.
         - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
         - **days** (Optional[int]): Size of the window ending now, used instead of explicit
-          dates; passing it together with oldest or latest is rejected. With no channel and
-          no date given at all, the window falls back to 7 days. Must be between 1 and 3650.
+          dates; passing it together with oldest or latest is rejected. Must be between 1
+          and 3650.
         - **latest** (Optional[datetime]): End of the date window; must be timezone-aware,
           later than oldest and no later than now, and cannot be combined with days.
           Omitted, the window ends at the time of the request.
@@ -68,9 +68,11 @@ def get_slack_history_router():
           regardless of the date window; duplicates are dropped and links that cannot be
           parsed are rejected. At most 50 items.
         - **thread_mode** (Literal['started', 'active']): 'started' selects threads whose
-          root message falls in the window; 'active' also scans older roots and selects
-          threads with any message in the window. Neither acts as a retention policy. One
-          of: 'started', 'active'. Defaults to 'started'.
+          root message falls in the window; 'active' scans the channel's whole history up to
+          latest and selects threads with any message in the window. Every page scanned
+          counts toward max_messages and max_requests, so 'active' on a large channel can
+          exceed them. Neither acts as a retention policy. One of: 'started', 'active'.
+          Defaults to 'started'.
         - **threads** (List[SlackThread]): Threads named directly by channel id and root
           timestamp, as an alternative to thread_links; each selected thread is imported
           with all available replies. At most 50 items.
@@ -93,20 +95,21 @@ def get_slack_history_router():
         """Configure or disable recurring Slack history sync for a dataset.
 
         Returns the stored settings, with the selection's days window resolved into a fixed
-        oldest date so the boundary does not move between runs. An invalid selection, a
-        missing selection, or a caller who is not the owner of an active Slack connection
-        for team_id returns 400, whether enabling or disabling; enabling without read, write
+        oldest date so the boundary does not move between runs. An invalid or missing
+        selection returns 400, whether enabling or disabling; enabling without read, write
         and delete access to the target dataset returns 403.
 
         ## Path Parameters
         - **team_id** (str): Slack workspace (team) id whose sync settings are written.
           Configuring or disabling a sync is allowed only for the owner of the active Slack
-          connection; anyone else gets 400.
+          connection.
 
         ## Request Parameters
         - **enabled** (bool): When true the stored selection is refreshed on the interval
           and the caller is checked for access to its dataset; a selection is then required.
-          When false the sync is turned off. Defaults to False.
+          Refreshes run only while the sync worker is enabled (worker_enabled on GET
+          /api/v1/slack/history/{team_id}). When false the sync is turned off. Defaults to
+          False.
         - **interval_seconds** (int): How often the stored selection is refreshed once sync
           is enabled; after a run that did not complete, the next attempt comes after 600
           seconds instead. Must be between 600 and 604800. Defaults to 21600.
