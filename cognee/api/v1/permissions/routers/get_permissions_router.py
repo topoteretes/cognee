@@ -719,7 +719,9 @@ def get_permissions_router() -> APIRouter:
         idempotent.
 
         ## Path Parameters
-        - **principal_id** (UUID): No description provided in code yet.
+        - **principal_id** (UUID): Id of the principal receiving the capabilities: a user, a
+          role, or a tenant. An id that does not exist answers 403, the same as a caller
+          lacking grant_capabilities.
 
         ## Query Parameters
         - **capability** (List[str]): Capability to grant. Must be in the capability catalog. Repeat
@@ -779,7 +781,9 @@ def get_permissions_router() -> APIRouter:
         capability parameter, all or nothing like granting.
 
         ## Path Parameters
-        - **principal_id** (UUID): No description provided in code yet.
+        - **principal_id** (UUID): Id of the principal losing the capabilities: a user, a
+          role, or a tenant. An id that does not exist answers 403, the same as a caller
+          lacking revoke_capabilities.
 
         ## Query Parameters
         - **capability** (List[str]): Capability to take away. Repeat the parameter to revoke

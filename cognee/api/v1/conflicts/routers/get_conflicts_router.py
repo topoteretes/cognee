@@ -34,8 +34,10 @@ def get_conflicts_router() -> APIRouter:
 
         ## Query Parameters
         - **dataset_id** (UUID): Dataset to inspect. Requires read permission.
-        - **status** (Optional[Literal['resolved', 'unresolved']]): No description provided in code
-          yet. One of: 'resolved', 'unresolved'.
+        - **status** (Optional[Literal['resolved', 'unresolved']]): Restricts the listing to
+          conflicts in that state; omitted, conflicts in both states are returned. A dataset
+          with no matching FactConflict nodes returns an empty list. One of: 'resolved',
+          'unresolved'.
         """
         return await list_conflicts(dataset_id, status=status, user=user)
 
@@ -54,7 +56,9 @@ def get_conflicts_router() -> APIRouter:
         remain stored for inspection, but normal retrieval uses the selected information.
 
         ## Path Parameters
-        - **conflict_id** (UUID): No description provided in code yet.
+        - **conflict_id** (UUID): Id of the FactConflict to resolve (from GET
+          /api/v1/conflicts). It must exist in the dataset named by datasetId; otherwise the
+          request fails with a not-found error.
 
         ## Request Parameters
         - **datasetId** (UUID): Dataset containing the conflict. Requires write permission.

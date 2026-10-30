@@ -58,7 +58,12 @@ def get_agents_router() -> APIRouter:
     async def list_agents_endpoint(
         user: User = Depends(get_authenticated_user),
     ) -> list[AgentDTO]:
-        """List agents endpoint — GET /api/v1/agents/list."""
+        """List the agents owned by the authenticated user.
+
+        Each entry carries agentId, agentEmail in its display form and apiKeyLabel, which is
+        null when the agent has no API key. Returns an empty list when the user owns no
+        agents.
+        """
         agents = await list_agents(user.id)
         return [
             AgentDTO(
@@ -74,7 +79,11 @@ def get_agents_router() -> APIRouter:
         name: str,
         user: User = Depends(get_authenticated_user),
     ) -> AgentWithApiKeyDTO:
-        """Create agent endpoint — POST /api/v1/agents/create.
+        """Create an agent sub-user and issue its API key.
+
+        Returns agentId, agentEmail and agentApiKey; the raw key is shown only in this
+        response. An agent name that already exists returns 409, and a caller that is itself
+        an agent returns 403, since agents cannot create agents.
 
         ## Query Parameters
         - **name** (str): Unique name for the new agent user; a conflict is returned if an
@@ -116,7 +125,12 @@ def get_agents_router() -> APIRouter:
         offset: int = Query(0, ge=0),
         user: User = Depends(get_authenticated_user),
     ):
-        """List agents connections — GET /api/v1/agents/connections.
+        """List agent connections for the caller and their agents.
+
+        Returns agents (the requested page), memory_sources, total, limit, offset and
+        has_more. Only connections belonging to the caller or their child agents are
+        visible, so another user's connections never appear even when a dataset is shared.
+        memory_sources is empty when include_sources is false.
 
         ## Query Parameters
         - **active_only** (bool): When true, restricts results to connections currently
@@ -154,7 +168,12 @@ def get_agents_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ):
-        """Get my connection detail — GET /api/v1/agents/connections/me.
+        """Get detail for one of the authenticated user's own connections.
+
+        Returns agent, memory_sources, recent_sessions, recent_traces and recent_qas, the
+        last two capped at the 20 most recent entries. Session content is empty when the
+        connection has no session id or the session cache cannot be read. No matching
+        connection returns 404.
 
         ## Query Parameters
         - **agent_session_name** (Optional[str]): Filter by connection name. A named lookup also
@@ -181,7 +200,12 @@ def get_agents_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ):
-        """Get connection detail — GET /api/v1/agents/connections/{agent_id}.
+        """Get detail for one connection of a given agent.
+
+        Returns agent, memory_sources, recent_sessions, recent_traces and recent_qas, the
+        last two capped at the 20 most recent entries. Without agent_session_name only
+        active connections are considered; a named lookup also finds deactivated ones. No
+        matching connection returns 404.
 
         ## Path Parameters
         - **agent_id** (UUID): The agent's user ID (from GET /api/v1/agents/list).
@@ -205,7 +229,11 @@ def get_agents_router() -> APIRouter:
         request: RegisterAgentRequest,
         user: User = Depends(get_authenticated_user),
     ):
-        """Register agent endpoint — POST /api/v1/agents/register.
+        """Register an agent connection for the authenticated user.
+
+        Responds 201 with the registered connection. The connection is identified by
+        agent_session_name plus the authenticated user's id, so re-registering an already
+        active connection returns it unchanged without increasing the active count.
 
         ## Request Parameters
         - **agent_session_name** (str): A unique name for this agent connection. Combined with the
@@ -234,7 +262,11 @@ def get_agents_router() -> APIRouter:
         request: UnregisterAgentRequest,
         user: User = Depends(get_authenticated_user),
     ) -> AgentModeDTO:
-        """Unregister agent endpoint — POST /api/v1/agents/unregister.
+        """Deactivate an agent connection by name.
+
+        The connection is identified by agent_session_name plus the authenticated user's id.
+        Returns activeAgents, the number of connections still active in this process;
+        unregistering a name that is not active leaves that count unchanged.
 
         ## Request Parameters
         - **agent_session_name** (str): The name used when registering the connection. Combined with
@@ -252,7 +284,11 @@ def get_agents_router() -> APIRouter:
         agent_id: UUID,
         user: User = Depends(get_authenticated_user),
     ) -> AgentDTO:
-        """Get agent endpoint — GET /api/v1/agents/{agent_id}.
+        """Get one agent owned by the caller.
+
+        Returns agentId, agentEmail in its display form and apiKeyLabel, which is null when
+        the agent has no API key. An unknown agent id returns 404; an agent belonging to
+        another user returns 403.
 
         ## Path Parameters
         - **agent_id** (UUID): The agent's user ID (from GET /api/v1/agents/list).
@@ -273,7 +309,11 @@ def get_agents_router() -> APIRouter:
     async def delete_agent_endpoint(
         agent_id: UUID, user: User = Depends(get_authenticated_user)
     ) -> None:
-        """Delete agent endpoint — DELETE /api/v1/agents/{agent_id}.
+        """Delete an agent and its connections.
+
+        Removes the agent's connection records and then the agent user itself, and responds
+        with a JSON null body. An unknown agent id returns 404; an agent belonging to
+        another user returns 403.
 
         ## Path Parameters
         - **agent_id** (UUID): The agent's user ID (from GET /api/v1/agents/list).

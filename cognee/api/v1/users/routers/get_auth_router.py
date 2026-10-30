@@ -16,7 +16,13 @@ def get_auth_router():
         response: Response,
         credentials: OAuth2PasswordRequestForm = Depends(),
     ):
-        """Login — POST /api/v1/auth/login."""
+        """Exchange email and password for an access token.
+
+        Takes username and password as form fields. Returns access_token and token_type, and
+        sets the same token as the authentication cookie. Unknown credentials, a wrong
+        password or an inactive user return 400 with detail LOGIN_BAD_CREDENTIALS, as does a
+        malformed form body.
+        """
         user = await authenticate_user(credentials.username, credentials.password)
 
         if user is None:
@@ -41,7 +47,12 @@ def get_auth_router():
 
     @router.post("/logout")
     async def logout(response: Response, user: User = Depends(get_authenticated_user)):
-        """Logout — POST /api/v1/auth/logout."""
+        """Clear the authentication cookie for the current user.
+
+        Requires authentication and returns an empty JSON object. It deletes the cookie with
+        the same name, path and domain used at login; the token itself is not otherwise
+        invalidated.
+        """
         # Same attributes as the login's set_cookie: a deletion is a Set-Cookie
         # with a past expiry, and a browser only drops the stored cookie when
         # its name, path and domain match.
@@ -58,7 +69,10 @@ def get_auth_router():
 
     @router.get("/me")
     async def get_me(user: User = Depends(get_authenticated_user)):
-        """Get me — GET /api/v1/auth/me."""
+        """Return the authenticated user's email address.
+
+        The response body contains only the email field.
+        """
         return {
             "email": user.email,
         }

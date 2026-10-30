@@ -459,7 +459,13 @@ def get_sessions_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ):
-        """Get session detail — GET /api/v1/sessions/{session_id}.
+        """Get one session with its recent Q&As and trace steps.
+
+        Returns the session record plus label (first question, else the first trace's origin
+        function), msg_count, tool_calls, and qas and traces trimmed to the last 20 entries.
+        A session is visible when the caller or one of their child agents owns it, or when
+        its dataset is readable by the caller; otherwise 404. qas and traces are empty when
+        the session cache is unavailable or cannot be read.
 
         ## Path Parameters
         - **session_id** (str): Client-supplied session identifier; the same value passed as

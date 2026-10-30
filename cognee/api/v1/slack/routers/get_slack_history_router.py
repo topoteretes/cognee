@@ -37,22 +37,42 @@ def get_slack_history_router():
         dialog acknowledges immediately and reports its background result.
 
         ## Path Parameters
-        - **team_id** (str): No description provided in code yet.
+        - **team_id** (str): Slack workspace (team) id of the connected installation to read
+          history from. An import already running for this workspace and the same dataset is
+          rejected with 400.
 
         ## Request Parameters
-        - **channel_ids** (List[str]): No description provided in code yet. At most 50 items.
+        - **channel_ids** (List[str]): Slack channel ids (C… or G…) to import; names and DMs
+          are rejected and duplicates dropped. Channel imports also require days or an
+          oldest date, and at least one channel or thread must be selected. At most 50
+          items.
         - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
-        - **days** (Optional[int]): No description provided in code yet. Must be between 1 and 3650.
-        - **latest** (Optional[datetime]): No description provided in code yet.
-        - **max_messages** (int): No description provided in code yet. Must be between 1 and 500000.
-          Defaults to 50000.
-        - **max_requests** (int): No description provided in code yet. Must be between 1 and 10000.
-          Defaults to 1000.
-        - **oldest** (Optional[datetime]): No description provided in code yet.
-        - **thread_links** (List[str]): No description provided in code yet. At most 50 items.
-        - **thread_mode** (Literal['started', 'active']): No description provided in code yet. One
+        - **days** (Optional[int]): Size of the window ending now, used instead of explicit
+          dates; passing it together with oldest or latest is rejected. With no channel and
+          no date given at all, the window falls back to 7 days. Must be between 1 and 3650.
+        - **latest** (Optional[datetime]): End of the date window; must be timezone-aware,
+          later than oldest and no later than now, and cannot be combined with days.
+          Omitted, the window ends at the time of the request.
+        - **max_messages** (int): Cap on the messages fetched for this selection. Hitting
+          the cap fails the import rather than storing a truncated snapshot. Must be between
+          1 and 500000. Defaults to 50000.
+        - **max_requests** (int): Cap on the Slack API requests this import may issue.
+          Hitting the cap fails the import rather than storing a truncated snapshot. Must be
+          between 1 and 10000. Defaults to 1000.
+        - **oldest** (Optional[datetime]): Start of the date window; must be timezone-aware
+          and precede latest, and cannot be combined with days. Channel selections require
+          it when days is not given.
+        - **thread_links** (List[str]): Slack message permalinks
+          (https://<workspace>.slack.com/archives/…) selecting whole conversations
+          regardless of the date window; duplicates are dropped and links that cannot be
+          parsed are rejected. At most 50 items.
+        - **thread_mode** (Literal['started', 'active']): 'started' selects threads whose
+          root message falls in the window; 'active' also scans older roots and selects
+          threads with any message in the window. Neither acts as a retention policy. One
           of: 'started', 'active'. Defaults to 'started'.
-        - **threads** (List[SlackThread]): No description provided in code yet. At most 50 items.
+        - **threads** (List[SlackThread]): Threads named directly by channel id and root
+          timestamp, as an alternative to thread_links; each selected thread is imported
+          with all available replies. At most 50 items.
         """
         try:
             return await run_history_import(team_id, selection, user=user)
@@ -69,16 +89,28 @@ def get_slack_history_router():
         settings: SlackSyncSettings,
         user: Annotated[User, Depends(get_authenticated_user)],
     ):
-        """Set sync — PUT /api/v1/slack/history/{team_id}/sync.
+        """Configure or disable recurring Slack history sync for a dataset.
+
+        Returns the stored settings, with the selection's days window resolved into a fixed
+        oldest date so the boundary does not move between runs. An invalid selection, a
+        missing selection, or a disable attempt by someone other than the connection owner
+        returns 400; lacking read, write and delete access to the target dataset returns
+        403.
 
         ## Path Parameters
-        - **team_id** (str): No description provided in code yet.
+        - **team_id** (str): Slack workspace (team) id whose sync settings are written.
+          Disabling a sync is allowed only for the owner of the Slack connection; anyone
+          else gets 400.
 
         ## Request Parameters
-        - **enabled** (bool): No description provided in code yet. Defaults to False.
-        - **interval_seconds** (int): No description provided in code yet. Must be between 600 and
-          604800. Defaults to 21600.
-        - **selection** (Optional[SlackHistoryRequest]): No description provided in code yet.
+        - **enabled** (bool): When true the stored selection is refreshed on the interval
+          and the caller is checked for access to its dataset; a selection is then required.
+          When false the sync is turned off. Defaults to False.
+        - **interval_seconds** (int): How often the stored selection is refreshed once sync
+          is enabled. Must be between 600 and 604800. Defaults to 21600.
+        - **selection** (Optional[SlackHistoryRequest]): Import selection naming the dataset
+          to configure or disable; required in both cases, and its latest date must be
+          unset. Its days window is resolved once and stored as a fixed oldest date.
         """
         try:
             return await configure_slack_sync(team_id, settings, user=user)
@@ -91,10 +123,17 @@ def get_slack_history_router():
 
     @router.get("/history/{team_id}")
     async def history_status(team_id: str, user: Annotated[User, Depends(get_authenticated_user)]):
-        """History status — GET /api/v1/slack/history/{team_id}.
+        """Report stored sync settings and import reports for a Slack workspace.
+
+        Responds with sync and reports objects keyed by dataset id (empty objects when
+        nothing has been configured or run) and worker_enabled, which is true only when
+        history sync is enabled and a Slack client id is configured. Each report records
+        status running, completed or failed, timestamps and, on success, the import result.
+        A workspace with no active connection owned by the caller returns 404.
 
         ## Path Parameters
-        - **team_id** (str): No description provided in code yet.
+        - **team_id** (str): Slack workspace (team) id to report on. A workspace without an
+          active connection owned by the caller returns 404.
         """
         credential = await get_by_team(team_id)
         if not is_active(credential) or credential.user_id != user.id:
