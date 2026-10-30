@@ -25,9 +25,9 @@ def get_api_key_management_router():
     async def get_api_keys_for_user(user: User = Depends(get_authenticated_user)):
         """List the authenticated user's API keys.
 
-        Each entry carries key, label, name and id. When key hashing is enabled the key
-        field is masked as "************", since the raw key is only returned when it is
-        created. Returns an empty list when the user has no keys.
+        Each entry carries key, label, name and id. With HASH_API_KEY=true the key field is
+        masked as "************", since only the hash is stored; with the default (false) it
+        carries the raw key. Returns an empty list when the user has no keys.
         """
         send_telemetry(
             "Api Key Management API Endpoint Invoked",
@@ -68,9 +68,10 @@ def get_api_key_management_router():
     ):
         """Create an API key for the authenticated user.
 
-        Returns key, label, name and id; the raw key value is only available in this
-        response. Reaching the configured maximum number of keys per user, or a failed
-        write, returns 400 with an error.message body.
+        Returns key, label, name and id. With HASH_API_KEY=true the raw key value is only
+        available in this response; with the default (false) GET /api/v1/auth/api-keys
+        returns it too. A user who already holds MAX_USER_API_KEYS keys (default 10), or a
+        failed write, gets 400 with an error.message body.
 
         ## Request Parameters
         - **name** (Optional[str]): Human-readable label to store with the generated API
@@ -104,9 +105,9 @@ def get_api_key_management_router():
     ):
         """Delete one of the authenticated user's API keys.
 
-        Responds with a JSON null body on success. An id that does not belong to the caller
-        is treated as a missing key and raises an API key not-found error; a failed delete
-        is rolled back and raises a deletion error.
+        Responds with a JSON null body on success. An id that does not exist or does not
+        belong to the caller, and a failed delete (rolled back), both reach no exception
+        handler and return 500.
 
         ## Path Parameters
         - **api_key_id** (UUID): UUID of the API key (from GET /api/v1/auth/api-keys).

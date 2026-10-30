@@ -81,8 +81,10 @@ def get_agents_router() -> APIRouter:
     ) -> AgentWithApiKeyDTO:
         """Create an agent sub-user and issue its API key.
 
-        Returns agentId, agentEmail and agentApiKey; the raw key is shown only in this
-        response. An agent name that already exists returns 409, and a caller that is itself
+        Returns agentId, agentEmail and agentApiKey. With HASH_API_KEY=true the raw key is
+        shown only in this response; with the default (false) GET /api/v1/auth/api-keys
+        also returns it to the agent. A name that already exists for this caller (compared
+        lowercased, with spaces turned into hyphens) returns 409, and a caller that is itself
         an agent returns 403, since agents cannot create agents.
 
         ## Query Parameters
@@ -170,10 +172,11 @@ def get_agents_router() -> APIRouter:
     ):
         """Get detail for one of the authenticated user's own connections.
 
-        Returns agent, memory_sources, recent_sessions, recent_traces and recent_qas, the
-        last two capped at the 20 most recent entries. Session content is empty when the
-        connection has no session id or the session cache cannot be read. No matching
-        connection returns 404.
+        Returns agent, memory_sources, recent_sessions (at most the connection's one
+        session), recent_traces and recent_qas, the last two capped at the 20 most recent
+        entries. When several connections match, the most recently active one is returned.
+        Session content is empty when the connection has no session id or the session cache
+        cannot be read. No matching connection returns 404.
 
         ## Query Parameters
         - **agent_session_name** (Optional[str]): Filter by connection name. A named lookup also
@@ -202,10 +205,12 @@ def get_agents_router() -> APIRouter:
     ):
         """Get detail for one connection of a given agent.
 
-        Returns agent, memory_sources, recent_sessions, recent_traces and recent_qas, the
-        last two capped at the 20 most recent entries. Without agent_session_name only
-        active connections are considered; a named lookup also finds deactivated ones. No
-        matching connection returns 404.
+        Returns agent, memory_sources, recent_sessions (at most the connection's one
+        session), recent_traces and recent_qas, the last two capped at the 20 most recent
+        entries. Without agent_session_name only active connections are considered and the
+        most recently active one is returned; a named lookup also finds deactivated ones. An
+        agent_id that is neither the caller nor one of their agents, or no matching
+        connection, returns 404.
 
         ## Path Parameters
         - **agent_id** (UUID): The agent's user ID (from GET /api/v1/agents/list).
@@ -232,8 +237,11 @@ def get_agents_router() -> APIRouter:
         """Register an agent connection for the authenticated user.
 
         Responds 201 with the registered connection. The connection is identified by
-        agent_session_name plus the authenticated user's id, so re-registering an already
-        active connection returns it unchanged without increasing the active count.
+        agent_session_name plus the authenticated user's id, so re-registering the same name
+        replaces the stored connection with the new request's fields (metadata merged into
+        the old) without increasing the active count. A listed dataset id or name the
+        caller cannot read returns 403. With COGNEE_AGENT_MODE=true the first registration
+        starts a watchdog that shuts the server down once no connection is active.
 
         ## Request Parameters
         - **agent_session_name** (str): A unique name for this agent connection. Combined with the
@@ -266,7 +274,9 @@ def get_agents_router() -> APIRouter:
 
         The connection is identified by agent_session_name plus the authenticated user's id.
         Returns activeAgents, the number of connections still active in this process;
-        unregistering a name that is not active leaves that count unchanged.
+        unregistering a name that is not active leaves that count unchanged. With
+        COGNEE_AGENT_MODE=true the server shuts itself down within 60 seconds once the
+        count reaches zero.
 
         ## Request Parameters
         - **agent_session_name** (str): The name used when registering the connection. Combined with

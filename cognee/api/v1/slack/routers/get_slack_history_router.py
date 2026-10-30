@@ -38,8 +38,9 @@ def get_slack_history_router():
 
         ## Path Parameters
         - **team_id** (str): Slack workspace (team) id of the connected installation to read
-          history from. An import already running for this workspace and the same dataset is
-          rejected with 400.
+          history from. Only the owner of an active connection for it may import; anyone
+          else gets 400. An import already running in this process for this workspace and
+          the same dataset is rejected with 400.
 
         ## Request Parameters
         - **channel_ids** (List[str]): Slack channel ids (C… or G…) to import; names and DMs
@@ -53,12 +54,12 @@ def get_slack_history_router():
         - **latest** (Optional[datetime]): End of the date window; must be timezone-aware,
           later than oldest and no later than now, and cannot be combined with days.
           Omitted, the window ends at the time of the request.
-        - **max_messages** (int): Cap on the messages fetched for this selection. Hitting
-          the cap fails the import rather than storing a truncated snapshot. Must be between
-          1 and 500000. Defaults to 50000.
-        - **max_requests** (int): Cap on the Slack API requests this import may issue.
-          Hitting the cap fails the import rather than storing a truncated snapshot. Must be
-          between 1 and 10000. Defaults to 1000.
+        - **max_messages** (int): Cap on the messages fetched for this selection. Exceeding
+          the cap fails the import with 400 rather than storing a truncated snapshot. Must be
+          between 1 and 500000. Defaults to 50000.
+        - **max_requests** (int): Cap on the Slack API requests this import may issue,
+          retries included. Exceeding the cap fails the import with 400 rather than storing a
+          truncated snapshot. Must be between 1 and 10000. Defaults to 1000.
         - **oldest** (Optional[datetime]): Start of the date window; must be timezone-aware
           and precede latest, and cannot be combined with days. Channel selections require
           it when days is not given.
@@ -93,21 +94,22 @@ def get_slack_history_router():
 
         Returns the stored settings, with the selection's days window resolved into a fixed
         oldest date so the boundary does not move between runs. An invalid selection, a
-        missing selection, or a disable attempt by someone other than the connection owner
-        returns 400; lacking read, write and delete access to the target dataset returns
-        403.
+        missing selection, or a caller who is not the owner of an active Slack connection
+        for team_id returns 400, whether enabling or disabling; enabling without read, write
+        and delete access to the target dataset returns 403.
 
         ## Path Parameters
         - **team_id** (str): Slack workspace (team) id whose sync settings are written.
-          Disabling a sync is allowed only for the owner of the Slack connection; anyone
-          else gets 400.
+          Configuring or disabling a sync is allowed only for the owner of the active Slack
+          connection; anyone else gets 400.
 
         ## Request Parameters
         - **enabled** (bool): When true the stored selection is refreshed on the interval
           and the caller is checked for access to its dataset; a selection is then required.
           When false the sync is turned off. Defaults to False.
         - **interval_seconds** (int): How often the stored selection is refreshed once sync
-          is enabled. Must be between 600 and 604800. Defaults to 21600.
+          is enabled; after a run that did not complete, the next attempt comes after 600
+          seconds instead. Must be between 600 and 604800. Defaults to 21600.
         - **selection** (Optional[SlackHistoryRequest]): Import selection naming the dataset
           to configure or disable; required in both cases, and its latest date must be
           unset. Its days window is resolved once and stored as a fixed oldest date.

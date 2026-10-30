@@ -58,7 +58,7 @@ def get_conflicts_router() -> APIRouter:
         ## Path Parameters
         - **conflict_id** (UUID): Id of the FactConflict to resolve (from GET
           /api/v1/conflicts). It must exist in the dataset named by datasetId; otherwise the
-          request fails with a not-found error.
+          request returns 404.
 
         ## Request Parameters
         - **datasetId** (UUID): Dataset containing the conflict. Requires write permission.

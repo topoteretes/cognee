@@ -27,8 +27,8 @@ def get_sync_progress_router() -> APIRouter:
         """Report sync progress for a connected integration.
 
         Returns latest (the most recent run's progress snapshot, null when there is none),
-        active_runs (unfinished runs this process can confirm are executing) and
-        unknown_activity_count (unfinished runs owned by another process or an exited
+        activeRuns (unfinished runs this process can confirm are executing) and
+        unknownActivityCount (unfinished runs owned by another process or an exited
         worker). An unregistered provider, no active connection for the caller, and a
         connection revoked or re-owned since it was read all return 404.
 
