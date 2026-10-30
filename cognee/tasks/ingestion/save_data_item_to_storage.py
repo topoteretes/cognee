@@ -1,5 +1,7 @@
 import os
+from io import BufferedReader, BytesIO
 from pathlib import Path
+from tempfile import SpooledTemporaryFile
 from typing import Any, BinaryIO
 from urllib.parse import urlparse
 from urllib.request import url2pathname
@@ -72,6 +74,12 @@ async def save_data_item_to_storage_detailed(
     # data is a file object coming from upload.
     if hasattr(data_item, "file"):
         return await save_data_to_file_detailed(data_item.file, filename=data_item.filename)
+
+    # data is an open binary file object (``open(path, "rb")``) or an in-memory
+    # stream: the types classify() accepts. It names the file from the stream's
+    # ``.name`` and refuses a nameless stream with its own error.
+    if isinstance(data_item, (BufferedReader, BytesIO, SpooledTemporaryFile)):
+        return await save_data_to_file_detailed(data_item)
 
     if isinstance(data_item, str):
         parsed_url = urlparse(data_item)
