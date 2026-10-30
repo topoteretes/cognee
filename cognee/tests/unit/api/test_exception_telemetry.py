@@ -7,8 +7,9 @@ the response is unchanged, and — most importantly — that no user content rid
 along in the event.
 """
 
+import importlib
 import os
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -356,3 +357,27 @@ class TestRealRoutesOverHttp:
         events = _events(telemetry)
         assert len(events) == 1
         assert events[0].kwargs["additional_properties"]["endpoint"] == "POST /api/v1/search"
+
+    @pytest.mark.parametrize("stream", [False, True], ids=["json", "sse"])
+    def test_recall_catch_all_reports_the_error_it_answers_itself(
+        self, client, monkeypatch, stream
+    ):
+        """The catch-all returns its 409, so no exception reaches the middleware."""
+        recall_pkg = importlib.import_module("cognee.api.v1.recall")
+        monkeypatch.setattr(
+            recall_pkg, "recall", AsyncMock(side_effect=RuntimeError("q3-revenue-forecast"))
+        )
+
+        with patch(TELEMETRY_TARGET) as telemetry:
+            response = client.post("/api/v1/recall", json={"query": "q", "stream": stream})
+
+        assert response.status_code == 409
+        assert response.json() == {"error": "An error occurred during recall."}
+        events = _events(telemetry)
+        assert len(events) == 1
+        props = events[0].kwargs["additional_properties"]
+        assert props["endpoint"] == "POST /api/v1/recall"
+        assert props["exception_type"] == "RuntimeError"
+        assert props["status_code"] == 409
+        assert props["error_name"] == "UnhandledRecallError"
+        assert "q3-revenue-forecast" not in repr(props)
