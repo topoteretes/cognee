@@ -31,7 +31,8 @@ def get_sync_progress_router() -> APIRouter:
           /api/v1/integrations/status).
 
         ## Query Parameters
-        - **account_id** (Optional[str]): No description provided in code yet.
+        - **account_id** (Optional[str]): Connection whose sync progress is reported (from
+          GET /{provider}/connections).
         """
         try:
             get_integration(provider)

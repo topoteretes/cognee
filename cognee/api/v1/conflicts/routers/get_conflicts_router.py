@@ -54,7 +54,8 @@ def get_conflicts_router() -> APIRouter:
         remain stored for inspection, but normal retrieval uses the selected information.
 
         ## Path Parameters
-        - **conflict_id** (UUID): No description provided in code yet.
+        - **conflict_id** (UUID): Conflict to resolve by accepting one of its competing
+          facts.
 
         ## Request Parameters
         - **datasetId** (UUID): Dataset containing the conflict. Requires write permission.

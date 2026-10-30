@@ -1014,7 +1014,8 @@ def get_integrations_router():
           /api/v1/integrations/status).
 
         ## Query Parameters
-        - **account_id** (Optional[str]): No description provided in code yet.
+        - **account_id** (Optional[str]): Connection whose selectable resources are listed
+          (from GET /{provider}/connections).
         """
         integration = _integration_or_404(provider)
         if integration.resource_selection_key is None:
@@ -1072,10 +1073,12 @@ def get_integrations_router():
           /api/v1/integrations/status).
 
         ## Query Parameters
-        - **account_id** (Optional[str]): No description provided in code yet.
+        - **account_id** (Optional[str]): Connection whose resource selection is written
+          (from GET /{provider}/connections).
 
         ## Request Parameters
-        - **resourceIds** (Optional[List[str]]): No description provided in code yet.
+        - **resourceIds** (Optional[List[str]]): Full allowlist of resource ids to store;
+          empty selects none and null selects all where supported.
         """
         integration = _integration_or_404(provider)
         selection_key = integration.resource_selection_key
@@ -1122,7 +1125,8 @@ def get_integrations_router():
           /api/v1/integrations/status).
 
         ## Query Parameters
-        - **account_id** (Optional[str]): No description provided in code yet.
+        - **account_id** (Optional[str]): Connection to sync (from GET
+          /{provider}/connections).
         """
         integration = _integration_or_404(provider)
         credential = await _credential_or_404(user, integration, account_id)
@@ -1161,8 +1165,10 @@ def get_integrations_router():
           /api/v1/integrations/status).
 
         ## Query Parameters
-        - **account_id** (Optional[str]): No description provided in code yet.
-        - **delete_data** (bool): No description provided in code yet. Defaults to False.
+        - **account_id** (Optional[str]): Connection to disconnect (from GET
+          /{provider}/connections); the newest one is used when omitted.
+        - **delete_data** (bool): Also deletes the integration's dataset after the
+          connection is revoked. Defaults to False.
         """
         with new_span("cognee.integrations.disconnect") as span:
             span.set_attribute("cognee.integrations.provider", provider)

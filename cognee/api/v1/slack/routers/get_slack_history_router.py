@@ -37,20 +37,27 @@ def get_slack_history_router():
         dialog acknowledges immediately and reports its background result.
 
         ## Path Parameters
-        - **team_id** (str): No description provided in code yet.
+        - **team_id** (str): Slack workspace whose connected account is used to fetch the
+          selected history.
 
         ## Request Parameters
-        - **channel_ids** (List[str]): No description provided in code yet.
+        - **channel_ids** (List[str]): Slack channel ids whose messages are fetched and
+          indexed.
         - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
-        - **days** (Optional[int]): No description provided in code yet.
-        - **latest** (Optional[datetime]): No description provided in code yet.
-        - **max_messages** (int): No description provided in code yet. Defaults to 50000.
-        - **max_requests** (int): No description provided in code yet. Defaults to 1000.
-        - **oldest** (Optional[datetime]): No description provided in code yet.
-        - **thread_links** (List[str]): No description provided in code yet.
+        - **days** (Optional[int]): Relative time window, in days back from now, bounding
+          the messages fetched.
+        - **latest** (Optional[datetime]): Upper time bound of the messages fetched.
+        - **max_messages** (int): Upper limit on how many messages this import fetches.
+          Defaults to 50000.
+        - **max_requests** (int): Upper limit on how many Slack API requests this import
+          issues. Defaults to 1000.
+        - **oldest** (Optional[datetime]): Lower time bound of the messages fetched.
+        - **thread_links** (List[str]): Slack permalinks of individual threads to include in
+          the import.
         - **thread_mode** (Literal['started', 'active']): One of: 'started', 'active'. Defaults to
           'started'.
-        - **threads** (List[SlackThread]): No description provided in code yet.
+        - **threads** (List[SlackThread]): Channel and thread timestamp pairs identifying
+          individual threads to import.
         """
         try:
             return await run_history_import(team_id, selection, user=user)
@@ -70,12 +77,15 @@ def get_slack_history_router():
         """Set sync — PUT /api/v1/slack/history/{team_id}/sync.
 
         ## Path Parameters
-        - **team_id** (str): No description provided in code yet.
+        - **team_id** (str): Slack workspace whose recurring history sync is configured.
 
         ## Request Parameters
-        - **enabled** (bool): No description provided in code yet. Defaults to False.
-        - **interval_seconds** (int): No description provided in code yet. Defaults to 21600.
-        - **selection** (Optional[SlackHistoryRequest]): No description provided in code yet.
+        - **enabled** (bool): Turns the recurring history sync on or off for this workspace.
+          Defaults to False.
+        - **interval_seconds** (int): Seconds to wait between recurring sync runs. Defaults
+          to 21600.
+        - **selection** (Optional[SlackHistoryRequest]): Channel, thread, and time-window
+          selection that each recurring sync run re-imports.
         """
         try:
             return await configure_slack_sync(team_id, settings, user=user)
@@ -91,7 +101,8 @@ def get_slack_history_router():
         """History status — GET /api/v1/slack/history/{team_id}.
 
         ## Path Parameters
-        - **team_id** (str): No description provided in code yet.
+        - **team_id** (str): Slack workspace whose sync settings and last import reports are
+          returned.
         """
         credential = await get_by_team(team_id)
         if not is_active(credential) or credential.user_id != user.id:
