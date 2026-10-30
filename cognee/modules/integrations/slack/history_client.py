@@ -6,6 +6,7 @@ from typing import Any
 
 import aiohttp
 
+from cognee.modules.integrations.outbound import client_session
 from cognee.modules.integrations.slack.history_models import TIMESTAMP, SlackHistoryError
 from cognee.modules.integrations.sync_progress import (
     get_current_sync_progress,
@@ -30,7 +31,7 @@ class SlackHistoryClient:
         self.messages = 0
 
     async def __aenter__(self):
-        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
+        self.session = client_session("slack", timeout=aiohttp.ClientTimeout(total=30))
         return self
 
     async def __aexit__(self, *args):

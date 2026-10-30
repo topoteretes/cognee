@@ -20,6 +20,7 @@ access control.
 import logging
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 import aiohttp
 
@@ -29,6 +30,7 @@ from cognee.modules.integrations.github.app_auth import (
     mint_installation_token,
 )
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
+from cognee.modules.integrations.outbound import client_session
 from cognee.modules.integrations.sync_progress import report_sync_progress, track_sync
 
 logger = logging.getLogger(__name__)
@@ -55,13 +57,49 @@ def clone_url(full_name: str) -> str:
     return f"https://github.com/{full_name}.git"
 
 
+def _next_page_url(response: aiohttp.ClientResponse) -> str | None:
+    """The ``Link: rel="next"`` page, only when it stays on the GitHub API host.
+
+    The header is the one request target this module takes from a response,
+    and the installation token travels with every page, so a page is
+    followed only on the API origin; anything else fails the listing rather
+    than sending the token elsewhere or silently indexing a prefix.
+    """
+    next_link = response.links.get("next", {}).get("url")
+    if not next_link:
+        return None
+    if not _same_origin(str(next_link), API_BASE_URL):
+        raise RuntimeError("GitHub repository listing paged off the API origin; refusing")
+    return str(next_link)
+
+
+def _same_origin(url: str, origin: str) -> bool:
+    """Whether ``url`` has exactly ``origin``'s scheme, host and effective port, and no userinfo."""
+    try:
+        parts, expected = urlsplit(url), urlsplit(origin)
+        port, expected_port = parts.port, expected.port
+    except ValueError:  # an unparseable port is not the API origin
+        return False
+    default = {"https": 443, "http": 80}
+    return (
+        parts.scheme == expected.scheme
+        and parts.hostname is not None
+        and parts.hostname == expected.hostname
+        and parts.username is None
+        and parts.password is None
+        and (port or default.get(parts.scheme)) == (expected_port or default.get(expected.scheme))
+    )
+
+
 async def list_installation_repositories(token: str) -> list[str]:
     """Full names (``org/repo``) of every repository the installation covers."""
     full_names: list[str] = []
     url: str | None = f"{API_BASE_URL}/installation/repositories?per_page=100"
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
+    async with client_session("github", timeout=_TIMEOUT) as session:
         while url:
-            async with session.get(url, headers=_api_headers(token)) as response:
+            async with session.get(
+                url, headers=_api_headers(token), allow_redirects=False
+            ) as response:
                 if response.status != 200:
                     raise RuntimeError(
                         f"GitHub installation repository listing failed: HTTP {response.status}"
@@ -76,8 +114,7 @@ async def list_installation_repositories(token: str) -> list[str]:
                     unit="repositories",
                     counts={"scanned": len(full_names)},
                 )
-                next_link = response.links.get("next", {}).get("url")
-                url = str(next_link) if next_link else None
+                url = _next_page_url(response)
     return full_names
 
 

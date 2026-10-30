@@ -6,6 +6,8 @@ from typing import Any
 
 import aiohttp
 
+from cognee.modules.integrations.outbound import client_session
+
 logger = logging.getLogger(__name__)
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -24,8 +26,10 @@ class GoogleAuthError(RuntimeError):
 
 async def _token_request(operation: str, payload: dict[str, str]) -> dict[str, Any]:
     async with (
-        aiohttp.ClientSession(timeout=TIMEOUT) as session,
-        session.post(TOKEN_URL, data=payload) as response,
+        client_session("google", timeout=TIMEOUT) as session,
+        # The body carries the client secret and a code or refresh token: a
+        # redirect must never replay it to the host a Location header names.
+        session.post(TOKEN_URL, data=payload, allow_redirects=False) as response,
     ):
         status = response.status
         try:
@@ -76,8 +80,8 @@ async def refresh_access_token(
 async def revoke_token(token: str) -> None:
     """Best-effort revoke of the grant represented by ``token``."""
     async with (
-        aiohttp.ClientSession(timeout=TIMEOUT) as session,
-        session.post(REVOKE_URL, data={"token": token}) as response,
+        client_session("google", timeout=TIMEOUT) as session,
+        session.post(REVOKE_URL, data={"token": token}, allow_redirects=False) as response,
     ):
         if response.status != 200:
             logger.warning("Google token revoke returned HTTP %s", response.status)
@@ -90,9 +94,12 @@ async def _authorized_get(
     params: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     async with (
-        aiohttp.ClientSession(timeout=TIMEOUT) as session,
+        client_session("google", timeout=TIMEOUT) as session,
         session.get(
-            url, params=params, headers={"Authorization": f"Bearer {access_token}"}
+            url,
+            params=params,
+            headers={"Authorization": f"Bearer {access_token}"},
+            allow_redirects=False,
         ) as response,
     ):
         if response.status != 200:

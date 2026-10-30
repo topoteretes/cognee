@@ -20,6 +20,7 @@ from cognee.modules.integrations.base import OAuthInstallation, OAuthIntegration
 from cognee.modules.integrations.credentials import decrypt_token_payload
 from cognee.modules.integrations.crypto import encrypt_credentials
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
+from cognee.modules.integrations.outbound import client_session
 from cognee.modules.integrations.slack import oauth as _oauth
 from cognee.modules.integrations.slack.slack_settings import SlackSettings, require
 
@@ -108,10 +109,11 @@ class SlackIntegration(OAuthIntegration):
 
         try:
             async with (
-                aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+                client_session("slack", timeout=_TIMEOUT) as session,
                 session.post(
                     _REVOKE_URL,
                     headers={"Authorization": f"Bearer {access_token}"},
+                    allow_redirects=False,
                 ) as response,
             ):
                 payload = await response.json()
@@ -147,7 +149,7 @@ class SlackIntegration(OAuthIntegration):
             return
 
         async with (
-            aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+            client_session("slack", timeout=_TIMEOUT) as session,
             session.post(
                 _oauth._ACCESS_URL,
                 data={
@@ -156,8 +158,13 @@ class SlackIntegration(OAuthIntegration):
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,
                 },
+                # The body carries the client secret and the refresh token:
+                # never let a redirect replay it elsewhere.
+                allow_redirects=False,
             ) as response,
         ):
+            if response.status != 200:
+                raise RuntimeError(f"Slack token refresh failed: HTTP {response.status}")
             payload = await response.json()
 
         if not payload.get("ok"):

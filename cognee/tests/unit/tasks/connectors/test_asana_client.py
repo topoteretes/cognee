@@ -365,3 +365,14 @@ def test_the_fake_over_http_reaches_the_client_the_way_a_host_sees_it(monkeypatc
 
     assert [item["gid"] for item in body["data"]] == ["1"]
     assert sent == [f"Bearer {TOKEN}"]
+
+
+def test_a_request_never_follows_a_redirect(monkeypatch):
+    """SDK-832: a 3xx from Asana is an error answer, never a new request target."""
+    client, calls, _ = _client(monkeypatch, Resp(200, {"data": []}), Resp(307, {}))
+
+    client.request("GET", "/tasks")
+    assert calls[0][2]["allow_redirects"] is False
+
+    with pytest.raises(AsanaAPIError, match="HTTP 307"):
+        client.request("GET", "/tasks")

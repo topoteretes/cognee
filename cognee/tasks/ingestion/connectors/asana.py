@@ -261,7 +261,12 @@ class AsanaClient:
                 self._sleep(2 ** (attempt - 1))
             try:
                 response = requests.request(
-                    method, BASE_URL + path, params=params, headers=headers, timeout=_TIMEOUT
+                    method,
+                    BASE_URL + path,
+                    params=params,
+                    headers=headers,
+                    timeout=_TIMEOUT,
+                    allow_redirects=False,  # a 3xx is an error answer, never a new target
                 )
             except requests.RequestException:
                 # Only the fact: the message of some requests errors holds a header.

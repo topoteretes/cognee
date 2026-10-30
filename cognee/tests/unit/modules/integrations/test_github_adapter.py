@@ -54,42 +54,48 @@ async def test_exchange_callback_rejects_a_missing_installation_id():
 
 
 @pytest.mark.asyncio
-async def test_exchange_callback_verifies_user_access_before_trusting_the_id():
+async def test_exchange_callback_requires_the_user_to_administer_the_installation():
     integration = GithubIntegration()
     with (
         patch.object(
             integration, "exchange_code", new=AsyncMock(return_value={"access_token": "user-tok"})
         ),
         patch.object(
-            app_auth, "user_can_access_installation", new=AsyncMock(return_value=True)
-        ) as access_check,
-        patch.object(
             app_auth, "get_installation", new=AsyncMock(return_value=_INSTALLATION)
         ) as lookup,
+        patch.object(
+            app_auth, "user_administers_installation", new=AsyncMock(return_value=True)
+        ) as admin_check,
     ):
         result = await integration.exchange_callback("code", {"installation_id": "12345"})
 
     assert result == _INSTALLATION
-    access_check.assert_awaited_once_with("user-tok", 12345)
     # The credential comes from the app-authenticated lookup, never from the
-    # unauthenticated callback query string.
+    # unauthenticated callback query string, and the admin check runs
+    # against that record's account.
     lookup.assert_awaited_once_with(12345)
+    admin_check.assert_awaited_once_with("user-tok", _INSTALLATION)
 
 
 @pytest.mark.asyncio
-async def test_exchange_callback_refuses_an_installation_the_user_cannot_access():
+async def test_exchange_callback_refuses_a_member_who_does_not_administer_the_installation():
+    """SDK-832: an org member who can read one repository must not bind the org.
+
+    Once bound, every sync indexes every repository the installation covers
+    into the binder's dataset, so "can see the installation" (GitHub's
+    user-installations listing, true for any member with one readable repo)
+    is not the bar; administering the account is.
+    """
     integration = GithubIntegration()
     with (
         patch.object(
             integration, "exchange_code", new=AsyncMock(return_value={"access_token": "user-tok"})
         ),
-        patch.object(app_auth, "user_can_access_installation", new=AsyncMock(return_value=False)),
-        patch.object(app_auth, "get_installation", new=AsyncMock()) as lookup,
-        pytest.raises(PermissionError),
+        patch.object(app_auth, "get_installation", new=AsyncMock(return_value=_INSTALLATION)),
+        patch.object(app_auth, "user_administers_installation", new=AsyncMock(return_value=False)),
+        pytest.raises(PermissionError, match="administer"),
     ):
         await integration.exchange_callback("code", {"installation_id": "12345"})
-
-    lookup.assert_not_awaited()
 
 
 def test_parse_installation_stores_no_token_material():

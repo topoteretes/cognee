@@ -81,8 +81,6 @@ oauth_config:
   scopes:
     bot:
       - commands
-      - chat:write
-      - im:write
       - channels:read
 
 settings:
