@@ -70,17 +70,26 @@ def documented_params(docstring: str | None) -> tuple[set[str], set[str]]:
     bullets: set[str] = set()
     tokens: set[str] = set()
     in_param_section = False
+    # Indent of the last "- **name**" bullet. A deeper line is its wrapped
+    # continuation, never a parameter of its own, even if it starts "word:".
+    bullet_indent: int | None = None
     for line in docstring.splitlines():
         if PARAM_SECTION_RE.match(line):
             in_param_section = True
+            bullet_indent = None
             continue
         if ANY_SECTION_RE.match(line):
             in_param_section = False
             continue
         if in_param_section:
-            match = BULLET_RE.match(line)
+            indent = len(line) - len(line.lstrip())
+            continuation = bullet_indent is not None and indent > bullet_indent
+            match = None if continuation else BULLET_RE.match(line)
             if match:
                 bullets.add(match.group(1) or match.group(2))
+                bullet_indent = indent if match.group(1) else None
+            elif line.strip() and not continuation:
+                bullet_indent = None
             tokens.update(IDENTIFIER_RE.findall(line))
     return bullets, tokens
 
