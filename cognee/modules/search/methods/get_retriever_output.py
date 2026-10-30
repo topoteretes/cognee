@@ -5,6 +5,10 @@ from cognee.modules.retrieval.utils.evidence import (
     append_source_evidence_text,
     graph_source_evidence,
 )
+from cognee.modules.search.methods.document_name_scope import (
+    FEELING_LUCKY_DOCUMENT_NAME_SEARCH_TYPES,
+    is_document_name_scope,
+)
 from cognee.modules.search.methods.get_search_type_retriever_instance import (
     get_search_type_retriever_instance,
 )
@@ -29,6 +33,16 @@ async def _effective_search_type(
             resolved = SearchType.HYBRID_COMPLETION
         else:
             resolved = await select_search_type(query_text)
+        if (
+            is_document_name_scope(kwargs.get("node_type"), kwargs.get("node_name"))
+            and resolved not in FEELING_LUCKY_DOCUMENT_NAME_SEARCH_TYPES
+        ):
+            logger.warning(
+                "FEELING_LUCKY chose %s, which cannot honor a TextDocument name filter; "
+                "using GRAPH_COMPLETION instead.",
+                resolved.value,
+            )
+            resolved = SearchType.GRAPH_COMPLETION
     else:
         resolved = query_type
 

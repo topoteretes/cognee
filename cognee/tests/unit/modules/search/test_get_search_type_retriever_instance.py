@@ -184,6 +184,24 @@ async def test_chunks_retriever_receives_nodeset_filter_arguments():
 
 
 @pytest.mark.asyncio
+async def test_chunks_retriever_receives_document_filter_for_text_document():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.data.processing.document_types import TextDocument
+    from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
+
+    retriever = await mod.get_search_type_retriever_instance(
+        SearchType.CHUNKS,
+        query_text="fruit",
+        node_type=TextDocument,
+        node_name=["doc_a"],
+    )
+
+    assert isinstance(retriever, ChunksRetriever)
+    assert retriever.node_name is None
+    assert retriever.document_name == ["doc_a"]
+
+
+@pytest.mark.asyncio
 async def test_rag_completion_retriever_receives_nodeset_filter_arguments():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
     from cognee.modules.retrieval.completion_retriever import CompletionRetriever
@@ -200,6 +218,55 @@ async def test_rag_completion_retriever_receives_nodeset_filter_arguments():
     assert retriever_instance.top_k == 30
     assert retriever_instance.node_name == ["KEN", "src_type:figure"]
     assert retriever_instance.node_name_filter_operator == "AND"
+
+
+@pytest.mark.asyncio
+async def test_rag_completion_retriever_receives_document_filter_for_text_document():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.data.processing.document_types import TextDocument
+    from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+
+    retriever = await mod.get_search_type_retriever_instance(
+        SearchType.RAG_COMPLETION,
+        query_text="fruit",
+        node_type=TextDocument,
+        node_name=["doc_a"],
+    )
+
+    assert isinstance(retriever, CompletionRetriever)
+    assert retriever.node_name is None
+    assert retriever.document_name == ["doc_a"]
+
+
+@pytest.mark.asyncio
+async def test_text_document_scope_rejects_search_types_that_ignore_node_name():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.data.processing.document_types import TextDocument
+    from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+
+    with pytest.raises(QueryValidationError, match="cannot honor node_name"):
+        await mod.get_search_type_retriever_instance(
+            SearchType.SUMMARIES,
+            query_text="fruit",
+            node_type=TextDocument,
+            node_name=["doc_a"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_feeling_lucky_falls_back_when_selected_type_ignores_document_filter(monkeypatch):
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.data.processing.document_types import TextDocument
+    from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+
+    monkeypatch.setattr(mod, "select_search_type", AsyncMock(return_value=SearchType.SUMMARIES))
+    retriever = await mod.get_search_type_retriever_instance(
+        SearchType.FEELING_LUCKY,
+        query_text="fruit",
+        node_type=TextDocument,
+        node_name=["doc_a"],
+    )
+    assert isinstance(retriever, GraphCompletionRetriever)
 
 
 @pytest.mark.asyncio
