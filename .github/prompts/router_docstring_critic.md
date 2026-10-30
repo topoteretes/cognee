@@ -71,8 +71,10 @@ Never replace a specific true claim with vaguer wording.
 
 ## Ledger
 
-Write a Markdown ledger to the ledger path. It is posted on the pull request for the
-human reviewer. Keep each entry to one line:
+Always write the ledger, even when you changed nothing: the workflow treats a missing
+ledger as a check that never ran and refuses to push. It is posted on the pull request
+for the human reviewer. Your tools are Read, Edit, Write, Glob and Grep; there is no
+shell, so read files and search with those. Keep each entry to one line:
 
 ```markdown
 ### Corrected
