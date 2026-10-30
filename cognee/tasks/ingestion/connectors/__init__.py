@@ -11,6 +11,7 @@ from .asana import asana_source, build_asana_service
 from .gmail import build_gmail_service_from_access_token, gmail_source
 from .google_calendar import build_calendar_service_from_access_token, google_calendar_source
 from .google_drive import build_drive_service_from_access_token, google_drive_source
+from .fathom import fathom_source
 from .linear import build_linear_service, linear_source
 from .notion import notion_source
 from .obsidian import obsidian_source
@@ -25,6 +26,7 @@ __all__ = [
     "build_drive_service_from_access_token",
     "build_gmail_service_from_access_token",
     "build_linear_service",
+    "fathom_source",
     "gmail_source",
     "google_calendar_source",
     "google_drive_source",
