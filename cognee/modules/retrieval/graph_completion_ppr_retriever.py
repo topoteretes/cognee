@@ -1,5 +1,3 @@
-from typing import List, Optional, Type, Union
-
 from cognee.base_config import get_base_config
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -26,23 +24,23 @@ class GraphCompletionPPRRetriever(GraphCompletionRetriever):
         self,
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        system_prompt: Optional[str] = None,
-        top_k: Optional[int] = 5,
-        node_type: Optional[Type] = None,
-        node_name: Optional[List[str]] = None,
+        system_prompt: str | None = None,
+        top_k: int | None = 5,
+        node_type: type | None = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-        wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = 6.5,
+        wide_search_top_k: int | None = 100,
+        triplet_distance_penalty: float | None = 6.5,
         feedback_influence: float = get_base_config().default_feedback_influence,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
-        neighborhood_depth: Optional[int] = DEFAULT_NEIGHBORHOOD_DEPTH,
-        neighborhood_seed_top_k: Optional[int] = 10,
+        session_id: str | None = None,
+        response_model: type = str,
+        neighborhood_depth: int | None = DEFAULT_NEIGHBORHOOD_DEPTH,
+        neighborhood_seed_top_k: int | None = 10,
         include_global_context_index: bool = False,
         global_context_index_top_k: int = 3,
         include_references: bool = False,
-        ppr_alpha: Optional[float] = DEFAULT_PPR_ALPHA,
-        ppr_weight: Optional[float] = DEFAULT_PPR_WEIGHT,
+        ppr_alpha: float | None = DEFAULT_PPR_ALPHA,
+        ppr_weight: float | None = DEFAULT_PPR_WEIGHT,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -71,9 +69,9 @@ class GraphCompletionPPRRetriever(GraphCompletionRetriever):
 
     async def get_triplets(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
-    ) -> Union[List[Edge], List[List[Edge]]]:
+        query: str | None = None,
+        query_batch: list[str] | None = None,
+    ) -> list[Edge] | list[list[Edge]]:
         """Retrieve triplets via Personalized PageRank.
 
         Single query -> a flat list of edges. Batch -> one list of edges per query
@@ -82,7 +80,7 @@ class GraphCompletionPPRRetriever(GraphCompletionRetriever):
         collections = self._get_vector_index_collections()
         unified_engine = getattr(self, "_unified_engine", None)
 
-        async def _search(single_query: str) -> List[Edge]:
+        async def _search(single_query: str) -> list[Edge]:
             return await ppr_triplet_search(
                 single_query,
                 top_k=self.top_k,

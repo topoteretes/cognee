@@ -17,7 +17,6 @@ the brute-force path; only the final ranking differs.
 from __future__ import annotations
 
 import heapq
-from typing import List, Optional, Type
 
 import networkx as nx
 
@@ -70,7 +69,7 @@ def _similarity_of(element, penalty: float) -> float:
     if distance >= penalty:
         return 0.0
     similarity = 1.0 - (distance / 2.0)
-    return similarity if similarity > 0.0 else 0.0
+    return max(0.0, similarity)
 
 
 def _build_nx_graph(memory_fragment: CogneeGraph) -> nx.Graph:
@@ -103,20 +102,20 @@ def _personalized_pagerank(graph: nx.Graph, personalization: dict, alpha: float)
 async def ppr_triplet_search(
     query: str,
     top_k: int = 5,
-    collections: Optional[List[str]] = None,
-    properties_to_project: Optional[List[str]] = None,
-    node_type: Optional[Type] = None,
-    node_name: Optional[List[str]] = None,
+    collections: list[str] | None = None,
+    properties_to_project: list[str] | None = None,
+    node_type: type | None = None,
+    node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
-    wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = None,
+    wide_search_top_k: int | None = 100,
+    triplet_distance_penalty: float | None = 6.5,
+    feedback_influence: float | None = None,
     ppr_alpha: float = DEFAULT_PPR_ALPHA,
     ppr_weight: float = DEFAULT_PPR_WEIGHT,
-    neighborhood_depth: Optional[int] = DEFAULT_NEIGHBORHOOD_DEPTH,
+    neighborhood_depth: int | None = DEFAULT_NEIGHBORHOOD_DEPTH,
     neighborhood_seed_top_k: int = 10,
     unified_engine=None,
-) -> List[Edge]:
+) -> list[Edge]:
     """Retrieve the top_k triplets for a single query, ranked by a blend of
     Personalized PageRank (graph structure) and direct vector similarity.
 

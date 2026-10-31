@@ -10,8 +10,9 @@ the graph structure and the vector hits are fully controlled and no database or
 embedding model is touched.
 """
 
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
