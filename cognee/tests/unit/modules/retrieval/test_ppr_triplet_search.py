@@ -12,6 +12,7 @@ embedding model is touched.
 
 from unittest.mock import AsyncMock, patch
 
+import networkx as nx
 import pytest
 
 from cognee.exceptions import CogneeValidationError
@@ -157,8 +158,15 @@ async def test_respects_top_k():
 
 
 @pytest.mark.asyncio
-async def test_survives_pagerank_failure_and_falls_back_to_similarity():
-    """If PageRank raises, ranking degrades to similarity-only instead of erroring."""
+@pytest.mark.parametrize(
+    "failure",
+    [
+        nx.PowerIterationFailedConvergence(100),
+        ImportError("scipy is required for PageRank"),
+    ],
+)
+async def test_survives_pagerank_failure_and_falls_back_to_similarity(failure):
+    """If PageRank fails, ranking degrades to similarity-only instead of erroring."""
     graph = _bridge_graph()
     fake_vs = _FakeVectorSearch(
         node_distances={"Entity_name": [_MockScored("S1", 0.1), _MockScored("S2", 0.1)]},
@@ -167,11 +175,28 @@ async def test_survives_pagerank_failure_and_falls_back_to_similarity():
     with (
         patch(f"{PPR_MODULE}.NodeEdgeVectorSearch", return_value=fake_vs),
         patch(f"{PPR_MODULE}.get_memory_fragment", new=AsyncMock(return_value=graph)),
-        patch(f"{PPR_MODULE}.nx.pagerank", side_effect=RuntimeError("power iteration failed")),
+        patch(f"{PPR_MODULE}.nx.pagerank", side_effect=failure),
     ):
         results = await ppr_triplet_search("q", top_k=3, ppr_weight=1.0)
     # Still returns triplets (does not raise); with ppr unavailable, similarity ranks them.
     assert len(results) == 3
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_pagerank_error_is_not_swallowed():
+    """Only PageRank's own failures fall back; a bug elsewhere still surfaces."""
+    graph = _bridge_graph()
+    fake_vs = _FakeVectorSearch(
+        node_distances={"Entity_name": [_MockScored("S1", 0.1)]},
+        relevant_ids=["S1"],
+    )
+    with (
+        patch(f"{PPR_MODULE}.NodeEdgeVectorSearch", return_value=fake_vs),
+        patch(f"{PPR_MODULE}.get_memory_fragment", new=AsyncMock(return_value=graph)),
+        patch(f"{PPR_MODULE}.nx.pagerank", side_effect=RuntimeError("bug")),
+        pytest.raises(RuntimeError, match="bug"),
+    ):
+        await ppr_triplet_search("q", top_k=3, ppr_weight=1.0)
 
 
 @pytest.mark.asyncio

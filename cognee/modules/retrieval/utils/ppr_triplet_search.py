@@ -91,7 +91,10 @@ def _personalized_pagerank(graph: nx.Graph, personalization: dict, alpha: float)
         return {}
     try:
         return nx.pagerank(graph, alpha=alpha, personalization=personalization)
-    except Exception as exc:  # noqa: BLE001 - PageRank must never break retrieval
+    # NetworkXException covers a power iteration that does not converge and bad input;
+    # ImportError covers a missing scipy, which networkx needs for PageRank and which
+    # cognee only pulls in transitively.
+    except (nx.NetworkXException, ImportError) as exc:
         logger.warning(
             "Personalized PageRank unavailable, falling back to similarity-only ranking: %s",
             exc,
