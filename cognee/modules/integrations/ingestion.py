@@ -64,6 +64,12 @@ def _asana_service(access_token: str) -> Any:
     return build_asana_service(access_token)
 
 
+def _figma_service(access_token: str) -> Any:
+    from cognee.tasks.ingestion.connectors.figma import build_figma_service
+
+    return build_figma_service(access_token)
+
+
 _PROVIDERS: dict[str, _Provider] = {
     "google_drive": _Provider(
         prefix="google_drive_files",
@@ -113,6 +119,12 @@ _PROVIDERS: dict[str, _Provider] = {
         source_module="cognee.tasks.ingestion.connectors.asana",
         source_name="asana_source",
         service_builder=_asana_service,
+    ),
+    "figma": _Provider(
+        prefix="figma",
+        source_module="cognee.tasks.ingestion.connectors.figma",
+        source_name="figma_source",
+        service_builder=_figma_service,
     ),
 }
 
