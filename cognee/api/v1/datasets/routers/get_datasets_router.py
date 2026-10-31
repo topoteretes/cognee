@@ -189,6 +189,7 @@ class DatasetCreationPayload(InDTO):
 class DatasetSchemaPayloadDTO(InDTO):
     graph_schema: dict[str, Any] | None = None
     custom_prompt: str | None = None
+    system_prompt: str | None = None
 
 
 class SparqlQueryPayloadDTO(InDTO):
@@ -1234,7 +1235,7 @@ def get_datasets_router() -> APIRouter:
 
     @router.get("/{dataset_id}/schema", response_model=dict)
     async def get_dataset_schema(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
-        """Return the stored graph schema and custom prompt for a dataset.
+        """Return the stored graph schema, custom prompt and system prompt for a dataset.
 
         ## Path Parameters
         - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
@@ -1253,10 +1254,11 @@ def get_datasets_router() -> APIRouter:
                 select(DatasetConfiguration).where(DatasetConfiguration.dataset_id == dataset_id)
             )
         if not config:
-            return {"graph_schema": None, "custom_prompt": None}
+            return {"graph_schema": None, "custom_prompt": None, "system_prompt": None}
         return {
             "graph_schema": config.graph_schema,
             "custom_prompt": config.custom_prompt,
+            "system_prompt": config.system_prompt,
         }
 
     @router.put("/{dataset_id}/schema", response_model=dict)
@@ -1265,7 +1267,7 @@ def get_datasets_router() -> APIRouter:
         payload: DatasetSchemaPayloadDTO,
         user: User = Depends(get_authenticated_user),
     ):
-        """Store or update the graph schema and custom prompt for a dataset.
+        """Store or update the graph schema, custom prompt and system prompt for a dataset.
 
         ## Path Parameters
         - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
@@ -1273,6 +1275,9 @@ def get_datasets_router() -> APIRouter:
         ## Request Parameters
         - **customPrompt** (Optional[str]): Custom extraction prompt to store for the
           dataset; omitting it leaves any existing prompt unchanged.
+        - **systemPrompt** (Optional[str]): System prompt that search and recall answer
+          with when the call passes none; omitting it leaves any existing prompt
+          unchanged, and `""` clears it.
         - **graphSchema** (Optional[Dict[str, Any]]): JSON graph schema to store for the
           dataset; omitting it leaves any existing schema unchanged.
         """
@@ -1294,11 +1299,14 @@ def get_datasets_router() -> APIRouter:
                     config.graph_schema = payload.graph_schema
                 if payload.custom_prompt is not None:
                     config.custom_prompt = payload.custom_prompt
+                if payload.system_prompt is not None:
+                    config.system_prompt = payload.system_prompt
             else:
                 config = DatasetConfiguration(
                     dataset_id=dataset_id,
                     graph_schema=payload.graph_schema,
                     custom_prompt=payload.custom_prompt,
+                    system_prompt=payload.system_prompt,
                 )
                 session.add(config)
             await session.commit()

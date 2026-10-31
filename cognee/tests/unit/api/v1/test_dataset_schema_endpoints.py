@@ -13,11 +13,13 @@ def test_dataset_configuration_model_creation():
         dataset_id=uuid4(),
         graph_schema={"nodes": [{"name": "Person", "fields": ["name", "age"]}]},
         custom_prompt="Extract people and their relationships.",
+        system_prompt="Answer like a lawyer.",
     )
 
     assert config.dataset_id is not None
     assert config.graph_schema is not None
     assert config.custom_prompt == "Extract people and their relationships."
+    assert config.system_prompt == "Answer like a lawyer."
 
 
 def test_dataset_configuration_model_defaults_to_none():
@@ -28,6 +30,7 @@ def test_dataset_configuration_model_defaults_to_none():
 
     assert config.graph_schema is None
     assert config.custom_prompt is None
+    assert config.system_prompt is None
 
 
 def test_prompt_templates_exist_and_render():
@@ -100,6 +103,11 @@ def test_dataset_schema_payload_dto_validation():
     dto_empty = DatasetSchemaPayloadDTO()
     assert dto_empty.graph_schema is None
     assert dto_empty.custom_prompt is None
+    assert dto_empty.system_prompt is None
+
+    # camelCase from the HTTP body
+    dto_camel = DatasetSchemaPayloadDTO.model_validate({"systemPrompt": "Answer briefly."})
+    assert dto_camel.system_prompt == "Answer briefly."
 
 
 def test_inferred_graph_schema_dto_accepts_json_schema_shape():

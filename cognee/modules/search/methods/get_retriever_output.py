@@ -1,4 +1,5 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.data.methods import get_dataset_system_prompt
 from cognee.modules.retrieval.only_context_prompt import build_only_context_prompt
 from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
 from cognee.modules.retrieval.utils.evidence import (
@@ -16,6 +17,8 @@ from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations.select_search_type import select_search_type
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
+
+DEFAULT_SYSTEM_PROMPT_PATH = "answer_simple_question.txt"
 
 logger = get_logger()
 
@@ -81,6 +84,19 @@ async def get_retriever_output(
     effective_query_type = await _effective_search_type(
         query_type, query_text, kwargs, graph_is_empty
     )
+
+    # A search without its own system prompt answers with the one stored on the
+    # dataset it runs in; an explicit prompt file still wins over the stored prompt.
+    dataset = kwargs.get("dataset")
+    if (
+        dataset is not None
+        and not kwargs.get("system_prompt")
+        and kwargs.get("system_prompt_path", DEFAULT_SYSTEM_PROMPT_PATH)
+        == DEFAULT_SYSTEM_PROMPT_PATH
+    ):
+        stored_system_prompt = await get_dataset_system_prompt(dataset.id)
+        if stored_system_prompt:
+            kwargs["system_prompt"] = stored_system_prompt
 
     retriever_instance = await get_search_type_retriever_instance(
         query_type=effective_query_type, query_text=query_text, **kwargs
