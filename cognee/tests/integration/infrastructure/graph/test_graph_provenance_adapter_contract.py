@@ -12,97 +12,19 @@ import asyncio
 from uuid import UUID, uuid4
 
 import pytest
-import pytest_asyncio
 
 from cognee.infrastructure.databases.provenance import (
-    EdgeIdentity,
     GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
     GRAPH_DELETE_MODE_KEY,
     GRAPH_PROVENANCE_VERSION,
     GRAPH_PROVENANCE_VERSION_KEY,
+    EdgeIdentity,
     make_source_ref_key,
     make_source_run_ref,
 )
 from cognee.infrastructure.engine import DataPoint
 
-try:
-    from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
-
-    HAS_LADYBUG = True
-except ModuleNotFoundError:
-    HAS_LADYBUG = False
-
 pytestmark = pytest.mark.asyncio
-
-
-def _postgres_graph_url_from_env():
-    """Postgres graph connection URL when the configured backend is postgres, else None.
-
-    Driven entirely by ``.env`` (which CI sets): the postgres graph adapter talks
-    to the relational engine's database, so the postgres contract params run
-    exactly when ``GRAPH_DATABASE_PROVIDER=postgres`` and ``DB_PROVIDER=postgres``
-    are configured, and skip on any other stack (keeps kuzu/sqlite CI green).
-    """
-    from cognee.infrastructure.databases.graph.config import get_graph_config
-
-    if get_graph_config().graph_database_provider not in ("postgres", "postgres_demo"):
-        return None
-    from cognee.infrastructure.databases.relational import get_relational_engine
-
-    return get_relational_engine().db_uri
-
-
-async def _make_postgres_adapter():
-    """Fresh-schema Postgres graph adapter, or skip when ``.env`` isn't postgres."""
-    url = _postgres_graph_url_from_env()
-    if not url:
-        pytest.skip("postgres graph backend not configured (set GRAPH_DATABASE_PROVIDER=postgres)")
-
-    from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
-    from cognee.infrastructure.databases.graph.postgres_demo.tables import _meta
-
-    adapter = PostgresDemoAdapter(url)
-    try:
-        async with adapter.engine.begin() as conn:
-            await conn.run_sync(_meta.drop_all)
-        await adapter.initialize()
-    except Exception as exc:  # pragma: no cover - environment dependent
-        await adapter.close()
-        pytest.skip(f"postgres graph backend not reachable: {exc}")
-    return adapter
-
-
-async def _make_neo4j_adapter():
-    """Fresh (fully wiped) Neo4j graph adapter, or skip when ``.env`` isn't neo4j.
-
-    Driven entirely by ``.env`` (which CI sets): runs exactly when
-    ``GRAPH_DATABASE_PROVIDER=neo4j`` is configured and skips on any other stack.
-    Each case starts from an empty graph, so the target Neo4j must be a
-    disposable test instance — the fixture wipes every node before yielding.
-    """
-    from cognee.infrastructure.databases.graph.config import get_graph_config
-
-    config = get_graph_config()
-    if config.graph_database_provider.lower() != "neo4j":
-        pytest.skip("neo4j graph backend not configured (set GRAPH_DATABASE_PROVIDER=neo4j)")
-    if not config.graph_database_url:
-        pytest.skip("neo4j graph backend URL not configured")
-
-    from cognee.infrastructure.databases.graph.neo4j_driver.adapter import Neo4jAdapter
-
-    adapter = Neo4jAdapter(
-        graph_database_url=config.graph_database_url,
-        graph_database_username=config.graph_database_username or None,
-        graph_database_password=config.graph_database_password or None,
-        graph_database_name=config.graph_database_name or None,
-    )
-    try:
-        await adapter.initialize()
-        await adapter.query("MATCH (n) DETACH DELETE n")
-    except Exception as exc:  # pragma: no cover - environment dependent
-        await adapter.close()
-        pytest.skip(f"neo4j graph backend not reachable: {exc}")
-    return adapter
 
 
 class _Ent(DataPoint):
@@ -116,25 +38,6 @@ class _Structural(DataPoint):
     """Structural node that declares no index fields."""
 
     metadata: dict = {"index_fields": []}
-
-
-@pytest_asyncio.fixture(params=["ladybug", "postgres", "neo4j"])
-async def graph_provenance_adapter(request, tmp_path):
-    if request.param == "ladybug":
-        if not HAS_LADYBUG:
-            pytest.skip("ladybug not installed")
-        adapter = LadybugAdapter(str(tmp_path / "graph_db"))
-    elif request.param == "postgres":
-        adapter = await _make_postgres_adapter()
-    elif request.param == "neo4j":
-        adapter = await _make_neo4j_adapter()
-    else:
-        raise AssertionError(f"Unknown graph provenance provider: {request.param}")
-
-    try:
-        yield adapter
-    finally:
-        await adapter.close()
 
 
 async def _seed_two_entities(adapter):
@@ -587,4 +490,43 @@ async def test_concurrent_explicit_attach_keeps_all_keys(graph_provenance_adapte
     assert sorted(snap.source_ref_keys) == sorted([key1, key2])
     assert sorted(snap.source_run_refs) == sorted(
         [make_source_run_ref(UUID(run), key1), make_source_run_ref(UUID(run), key2)]
+    )
+
+
+async def test_concurrent_folded_writes_and_attaches_keep_every_owner(graph_provenance_adapter):
+    """A folded write (owner key stamped inside the MERGE) landing between an
+    attach's read and write must not be lost.
+
+    This is what two documents of one cognify run do to an entity they share:
+    each document's batch folds its first owner into the node and attaches the
+    rest afterwards, concurrently. Seen on CI as one owner missing from
+    ``alice`` and ``rabbit`` at baseline while every other check passed.
+    """
+    from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
+
+    adapter = graph_provenance_adapter
+    shared = _Ent(id=uuid4(), name="Alice")
+    node_id = str(shared.id)
+    dataset_id = uuid4()
+    rounds = 6
+
+    def chunk_keys(document_id):
+        return [make_chunk_source_ref_key(dataset_id, document_id, uuid4()) for _ in range(rounds)]
+
+    doc_a, doc_b = uuid4(), uuid4()
+    folded_a, attached_a = chunk_keys(doc_a), chunk_keys(doc_a)
+    folded_b, attached_b = chunk_keys(doc_b), chunk_keys(doc_b)
+
+    async def writer(folded, attached):
+        for fold_key, attach_key in zip(folded, attached):
+            await adapter.add_nodes([shared], source_ref_key=fold_key)  # one-statement fold
+            await adapter.attach_node_source_refs([node_id], [attach_key])  # read-then-write
+
+    await asyncio.gather(writer(folded_a, attached_a), writer(folded_b, attached_b))
+
+    snapshot = (await adapter.get_node_delete_data([node_id]))[node_id]
+    expected = set(folded_a + attached_a + folded_b + attached_b)
+    missing = expected - set(snapshot.source_ref_keys)
+    assert not missing, (
+        f"{len(missing)} owner key(s) lost to a concurrent write: {sorted(missing)[:4]}"
     )

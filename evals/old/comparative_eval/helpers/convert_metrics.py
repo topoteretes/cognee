@@ -1,11 +1,15 @@
 import json
+import logging
 import os
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any
+
 import pandas as pd
 
+logger = logging.getLogger(__name__)
 
-def convert_metrics_file(json_path: str, metrics: List[str] = None) -> Dict[str, Any]:
+
+def convert_metrics_file(json_path: str, metrics: list[str] | None = None) -> dict[str, Any]:
     """Convert a single metrics JSON file to the desired format."""
     if metrics is None:
         metrics = ["correctness", "f1", "EM"]
@@ -37,7 +41,7 @@ def convert_metrics_file(json_path: str, metrics: List[str] = None) -> Dict[str,
     return result
 
 
-def convert_to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
+def convert_to_dataframe(results: list[dict[str, Any]]) -> pd.DataFrame:
     """Convert results list to DataFrame with expanded error columns."""
     df_data = []
 
@@ -56,7 +60,7 @@ def convert_to_dataframe(results: List[Dict[str, Any]]) -> pd.DataFrame:
 
 
 def process_multiple_files(
-    json_paths: List[str], output_path: str, metrics: List[str] = None
+    json_paths: list[str], output_path: str, metrics: list[str] | None = None
 ) -> None:
     """Process multiple JSON files and save concatenated results."""
     if metrics is None:
@@ -70,6 +74,7 @@ def process_multiple_files(
             results.append(converted)
             print(f"Processed: {json_path}")
         except Exception as e:
+            logger.debug("Ignoring exception in process_multiple_files", exc_info=True)
             print(f"Error processing {json_path}: {e}")
 
     # Save JSON results

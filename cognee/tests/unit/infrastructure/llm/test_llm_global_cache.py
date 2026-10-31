@@ -12,6 +12,8 @@ import pytest
 
 from cognee.context_global_variables import (
     llm_config as llm_config_ctx,
+)
+from cognee.context_global_variables import (
     set_database_global_context_variables,
 )
 from cognee.infrastructure.llm.config import LLMConfig, get_llm_context_config
@@ -19,7 +21,6 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     _get_llm_client_cached,
     get_llm_client,
 )
-
 
 # Two plain OpenAI configs that differ only by model, so the test can assert the
 # active model changes when a context config is applied.

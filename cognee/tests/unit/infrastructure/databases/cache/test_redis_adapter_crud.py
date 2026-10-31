@@ -1,9 +1,11 @@
 """Unit tests for RedisAdapter CRUD operations."""
 
-from datetime import datetime
-from uuid import uuid4
-import pytest
+import asyncio
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
+
+import pytest
 
 from cognee.infrastructure.databases.exceptions import (
     CacheConnectionError,
@@ -40,6 +42,17 @@ class _InMemoryRedisList:
 
     async def lset(self, key: str, idx: int, val: str):
         self.data[key][idx] = val
+
+    async def lrem(self, key: str, count: int, val: str):
+        """Only count=0, every occurrence, is used; an emptied list disappears as in Redis."""
+        lst = self.data.get(key, [])
+        kept = [item for item in lst if item != val]
+        if kept:
+            self.data[key] = kept
+        else:
+            self.data.pop(key, None)
+            self.ttls.pop(key, None)
+        return len(lst) - len(kept)
 
     async def delete(self, key: str):
         self.ttls.pop(key, None)
@@ -210,6 +223,31 @@ async def test_create_qa_entry_does_not_set_session_ttl_when_disabled(redis_stor
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
     assert await redis_store.ttl("agent_sessions:u1:s1") == -1
     assert redis_store.expire_calls == []
+
+
+@pytest.mark.asyncio
+async def test_get_qa_entries_since_filters_on_entry_time(adapter):
+    """The interface default: read the session, keep the entries from the bound on."""
+    from datetime import datetime, timedelta, timezone
+
+    for index in range(4):
+        await adapter.create_qa_entry("u1", "s1", f"Q{index}", "C", "A", qa_id=f"id{index}")
+    stored = await adapter.get_all_qa_entries("u1", "s1")
+    since = datetime.fromisoformat(stored[2].time)
+
+    assert [e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", since)] == [
+        "id2",
+        "id3",
+    ]
+    assert [e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", since, lead_in=1)] == [
+        "id1",
+        "id2",
+        "id3",
+    ]
+    far_future = datetime.now(timezone.utc) + timedelta(days=1)
+    assert [
+        e.qa_id for e in await adapter.get_qa_entries_since("u1", "s1", far_future, lead_in=1)
+    ] == ["id3"]
 
 
 @pytest.mark.asyncio
@@ -388,7 +426,7 @@ async def test_append_agent_trace_step_sanitizes_non_json_safe_values(adapter):
         status="success",
         method_params={
             "trip_id": uuid4(),
-            "created_at": datetime(2026, 4, 14, 12, 0, 0),
+            "created_at": datetime(2026, 4, 14, 12, 0, 0, tzinfo=timezone.utc),
             "obj": _Obj(),
         },
         method_return_value={"result_id": uuid4(), "owner": _Obj()},
@@ -641,6 +679,90 @@ async def test_delete_session_context_entry_removes_only_target(adapter):
 
     assert [e["id"] for e in await adapter.get_session_context_entries("u1", "s1")] == ["c2"]
     assert [e["id"] for e in await adapter.get_session_context_entries("u1", "s2")] == ["c1"]
+
+
+def _interleave(redis_store):
+    """Yield before every Redis command so concurrent callers interleave between them."""
+
+    def interleaved(command):
+        async def run(*args):
+            await asyncio.sleep(0)
+            return await command(*args)
+
+        return run
+
+    for name in ("lrange", "lrem", "lset", "rpush", "delete", "expire"):
+        setattr(redis_store, name, interleaved(getattr(redis_store, name)))
+
+
+def _after_first_read(redis_store, write):
+    """Run ``write`` once, right after the next LRANGE returns."""
+    read = redis_store.lrange
+    pending = [write]
+
+    async def lrange(*args):
+        entries = await read(*args)
+        if pending:
+            await pending.pop()()
+        return entries
+
+    redis_store.lrange = lrange
+
+
+@pytest.mark.asyncio
+async def test_interleaved_context_entry_deletes_keep_every_other_entry(adapter, redis_store):
+    """Two cleanups deleting in one session at once: neither restores the other's entry."""
+    for entry_id in ("x", "a", "b", "y"):
+        await adapter.create_session_context_entry("u1", "s1", {"id": entry_id})
+    _interleave(redis_store)
+
+    deleted = await asyncio.gather(
+        adapter.delete_session_context_entry("u1", "s1", "x"),
+        adapter.delete_session_context_entry("u1", "s1", "y"),
+    )
+
+    assert deleted == [True, True]
+    assert [e["id"] for e in await adapter.get_session_context_entries("u1", "s1")] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_a_lesson_a_turn_stamps_while_it_is_deleted_is_still_deleted(adapter, redis_store):
+    """A session turn rewrites a lesson it served between the delete's read and its LREM."""
+    for entry_id in ("lesson", "other"):
+        await adapter.create_session_context_entry("u1", "s1", {"id": entry_id})
+    _after_first_read(
+        redis_store,
+        lambda: adapter.update_session_context_entry("u1", "s1", "lesson", {"served": True}),
+    )
+
+    assert await adapter.delete_session_context_entry("u1", "s1", "lesson") is True
+    assert [e["id"] for e in await adapter.get_session_context_entries("u1", "s1")] == ["other"]
+
+
+@pytest.mark.asyncio
+async def test_interleaved_qa_deletes_keep_every_other_answer(adapter, redis_store):
+    for qa_id in ("x", "a", "b", "y"):
+        await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id=qa_id)
+    _interleave(redis_store)
+
+    deleted = await asyncio.gather(
+        adapter.delete_qa_entry("u1", "s1", "x"), adapter.delete_qa_entry("u1", "s1", "y")
+    )
+
+    assert deleted == [True, True]
+    assert [e.qa_id for e in await adapter.get_all_qa_entries("u1", "s1")] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_an_answer_added_while_another_is_deleted_is_kept(adapter, redis_store):
+    for qa_id in ("old", "kept"):
+        await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id=qa_id)
+    _after_first_read(
+        redis_store, lambda: adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="new")
+    )
+
+    assert await adapter.delete_qa_entry("u1", "s1", "old") is True
+    assert [e.qa_id for e in await adapter.get_all_qa_entries("u1", "s1")] == ["kept", "new"]
 
 
 @pytest.mark.asyncio

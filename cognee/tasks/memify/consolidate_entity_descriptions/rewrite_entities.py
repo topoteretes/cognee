@@ -1,0 +1,240 @@
+import asyncio
+import json
+from typing import Any, cast
+from uuid import UUID
+
+from cognee.infrastructure.engine.models.DataPoint import DataPoint
+from cognee.infrastructure.engine.models.Edge import Edge
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import render_prompt
+from cognee.modules.engine.models import EntityType
+from cognee.modules.engine.models.Entity import Entity
+from cognee.shared.logging_utils import get_logger
+
+from .constants import (
+    MAX_CONCURRENT_ENTITY_LLM_CALLS,
+    MAX_NEIGHBOR_LINES_IN_PROMPT,
+    MAX_NEIGHBOR_TEXT_CHARS,
+    PARAGRAPH_MAX_COMPLETION_TOKENS,
+    prompt_name,
+    truncate,
+)
+from .models import NodeDescription
+from .type_links import set_type_links
+
+logger = get_logger("consolidate_entity_descriptions")
+
+
+def load_metadata_to_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {"index_fields": ["name"]}
+    if value is None:
+        return {"index_fields": ["name"]}
+    return value
+
+
+def _neighbor_edges(node, neighbor) -> list[dict[str, Any]]:
+    """Every distinct edge connecting this node to one neighbor.
+
+    A neighbor can be linked by more than one edge (e.g. "works_at" and
+    "visited" connecting the same pair); each becomes its own prompt line
+    rather than only the last one found. Falls back to a single blank edge so
+    a neighbor with no recorded edge still gets a line.
+    """
+    return node.get("edges", {}).get(neighbor.get("id"), []) or [{}]
+
+
+def build_node_neighborhood_prompt(
+    node,
+    max_neighbor_lines: int = MAX_NEIGHBOR_LINES_IN_PROMPT,
+    max_neighbor_text_chars: int = MAX_NEIGHBOR_TEXT_CHARS,
+):
+    """Render one entity's neighborhood, capped at max_neighbor_lines lines.
+
+    The cap is in lines because that is the unit the prompt is built from: a
+    neighbor cap would let an entity with 20 neighbors and 40 edges each send
+    800 lines while reporting nothing dropped.
+    """
+    props = node["properties"]
+    neighbors = node["neighbors"]
+
+    header = (
+        "This node's description is the following: "
+        + props["name"]
+        + " - "
+        + props["description"]
+        + ". It is connected to it's neighbors in the following way:"
+    )
+
+    lines: list[str] = []
+    for neighbor in neighbors:
+        if len(lines) >= max_neighbor_lines:
+            break
+
+        neighbor_name = neighbor.get("name", "")
+        neighbor_desc = neighbor.get("description", "")
+        chunk_text = neighbor.get("text", "")
+
+        for edge_info in _neighbor_edges(node, neighbor):
+            if len(lines) >= max_neighbor_lines:
+                break
+
+            relationship_name = edge_info.get("relationship_name", "related to")
+            edge_text = edge_info.get("edge_text")
+
+            if neighbor_desc:
+                line = (
+                    f"- {relationship_name}: {neighbor_name} - "
+                    f"{truncate(neighbor_desc, max_neighbor_text_chars)}"
+                )
+                if edge_text:
+                    line += (
+                        f" (relationship detail: {truncate(edge_text, max_neighbor_text_chars)})"
+                    )
+            elif neighbor.get("type") == "DocumentChunk" and chunk_text:
+                # Use the chunk's source text, not contains edge_text ("Document chunk
+                # mentions …") - that meta label makes the LLM echo provenance instead
+                # of the underlying facts.
+                line = f"- {relationship_name} - {truncate(chunk_text, max_neighbor_text_chars)}"
+            elif edge_text:
+                line = f"- {relationship_name} - {truncate(edge_text, max_neighbor_text_chars)}"
+            else:
+                line = f"- {relationship_name} - {truncate(chunk_text, max_neighbor_text_chars)}"
+
+            lines.append(line)
+
+    available_lines = sum(len(_neighbor_edges(node, neighbor)) for neighbor in neighbors)
+    dropped_count = available_lines - len(lines)
+    if dropped_count > 0:
+        logger.warning(
+            "build_node_neighborhood_prompt: dropping %d of %d neighbor lines for entity %r "
+            "(cap is %d)",
+            dropped_count,
+            available_lines,
+            props.get("name"),
+            max_neighbor_lines,
+        )
+
+    return "\n".join([header, *lines])
+
+
+async def query_LLM(
+    text_input, system_prompt, max_completion_tokens: int = PARAGRAPH_MAX_COMPLETION_TOKENS
+):
+    return await LLMGateway.acreate_structured_output(
+        text_input=text_input,
+        system_prompt=system_prompt,  # no format()
+        response_model=NodeDescription,
+        max_completion_tokens=max_completion_tokens,
+    )
+
+
+def build_entity_type(entity_type_node):
+    entity_type_id, entity_type_props = entity_type_node["id"], entity_type_node
+    entity_type_props = {
+        **entity_type_props,
+        "id": entity_type_id,
+        "metadata": load_metadata_to_dict(entity_type_props.get("metadata")),
+    }
+    entity_type = EntityType(**entity_type_props)
+    return entity_type
+
+
+def build_entity(props: dict[str, Any], entity_types: list[EntityType], description: str) -> Entity:
+    """Rebuild an Entity from its full stored properties and (possibly empty) list of EntityType nodes.
+
+    Rebuilt from the full stored props - not a hand-picked subset - because
+    add_data_points()'s upsert replaces a node's whole property blob instead
+    of merging into it: any field missing from the rebuilt Entity is gone
+    from the graph afterward, not left as it was. is_a/relations are always
+    recomputed from entity_types rather than read off props, since they are
+    graph edges, not node properties.
+
+    The is_a / relations convention itself lives in type_links.py - this
+    function just hands it the types it found.
+    """
+    entity_props = {
+        **props,
+        "description": description,
+        "metadata": load_metadata_to_dict(props.get("metadata")),
+    }
+    entity_props.pop("is_a", None)
+    entity_props.pop("relations", None)
+    entity = cast(Entity, Entity.from_dict(entity_props))
+    entity_id = props["id"]
+    entity.id = entity_id if isinstance(entity_id, UUID) else UUID(str(entity_id))
+    set_type_links(entity, entity_types)
+    return entity
+
+
+async def generate_consolidated_entity(
+    node,
+    system_prompt,
+    max_neighbor_lines: int = MAX_NEIGHBOR_LINES_IN_PROMPT,
+    max_neighbor_text_chars: int = MAX_NEIGHBOR_TEXT_CHARS,
+    max_completion_tokens: int = PARAGRAPH_MAX_COMPLETION_TOKENS,
+) -> Entity:
+    props = node["properties"]
+    text = build_node_neighborhood_prompt(node, max_neighbor_lines, max_neighbor_text_chars)
+    result = await query_LLM(text, system_prompt, max_completion_tokens)
+    entity_types = [build_entity_type(entity_type) for entity_type in node["entity_types"]]
+    entity = build_entity(props, entity_types, result.description)
+    return entity
+
+
+def build_unchanged_entity(node) -> Entity:
+    """Rebuild an entity with the description it already had.
+
+    Used when the rewrite call for this entity fails. Dropping it instead
+    would also drop it from its EntityType's member list, and
+    total_member_count - which the type summary must state, and which decides
+    whether members are named individually - would silently shrink to however
+    many entities happened to succeed.
+    """
+    props = node["properties"]
+    entity_types = [build_entity_type(entity_type) for entity_type in node["entity_types"]]
+    return build_entity(props, entity_types, props.get("description") or "")
+
+
+async def generate_consolidated_entities(
+    nodes,
+    max_concurrent_calls: int = MAX_CONCURRENT_ENTITY_LLM_CALLS,
+    max_neighbor_lines: int = MAX_NEIGHBOR_LINES_IN_PROMPT,
+    max_neighbor_text_chars: int = MAX_NEIGHBOR_TEXT_CHARS,
+    max_completion_tokens: int = PARAGRAPH_MAX_COMPLETION_TOKENS,
+) -> list[DataPoint]:
+    system_prompt = render_prompt(prompt_name, {})
+    semaphore = asyncio.Semaphore(max_concurrent_calls)
+
+    async def generate_with_limit(node):
+        async with semaphore:
+            try:
+                return await generate_consolidated_entity(
+                    node,
+                    system_prompt,
+                    max_neighbor_lines,
+                    max_neighbor_text_chars,
+                    max_completion_tokens,
+                )
+            except asyncio.CancelledError:
+                # A BaseException since 3.8, so it would slip past `except
+                # Exception` - and swallowing it keeps a cancelled run doing
+                # LLM work and writing partial results (same reason run_tasks
+                # catches it explicitly, CLO-365).
+                raise
+            except Exception as error:
+                # add_data_points runs after every enrichment task, so raising
+                # here would discard every entity that did succeed over one
+                # provider hiccup.
+                logger.warning(
+                    "generate_consolidated_entities: keeping %r unchanged (%s)",
+                    node["properties"].get("name"),
+                    error,
+                    exc_info=True,
+                )
+                return build_unchanged_entity(node)
+
+    return await asyncio.gather(*(generate_with_limit(node) for node in nodes))

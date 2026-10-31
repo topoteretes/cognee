@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pyarrow as pa
 import pytest
-from uuid import uuid4
+
 from cognee.infrastructure.engine import DataPoint
 
 try:
     from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import (
-        LanceDBAdapter,
         IndexSchema,
+        LanceDBAdapter,
     )
 
     HAS_LANCEDB = True

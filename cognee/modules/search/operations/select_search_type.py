@@ -1,7 +1,7 @@
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 logger = get_logger("SearchTypeSelector")
 
@@ -48,6 +48,6 @@ async def select_search_type(
         # If the response is not a valid search type, return the default search type
         logger.info(f"LLM gives an invalid search type: {response.upper()}")
         return default_search_type
-    except Exception as e:
-        logger.error(f"Failed to select search type intelligently from LLM: {str(e)}")
+    except Exception:
+        logger.exception("Failed to select search type intelligently from LLM")
         return default_search_type

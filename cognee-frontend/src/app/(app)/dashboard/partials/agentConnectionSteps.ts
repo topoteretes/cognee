@@ -1,16 +1,8 @@
-import {
-  CLAUDE_MARKETPLACE_ADD,
-  CLAUDE_PLUGIN_INSTALL,
-  CODEX_HOOKS_ENABLE,
-  CODEX_MARKETPLACE_ADD,
-  CODEX_PLUGIN_INSTALL,
-  OPENCODE_PLUGIN_SETUP,
-  OPENCLAW_SKILL_INSTALL,
-  GENERIC_SKILL_INSTALL,
-  UPLOAD_MEMORY_PROMPT,
-  UPLOAD_SAMPLE_PROMPT,
-  RECALL_SAMPLE_PROMPT,
-} from "@/data/prompts";
+import type { ReactNode } from "react";
+import { openclawSkillInstall, genericSkillInstall } from "@/data/prompts";
+import { terminalName } from "@/modules/integrations/agentSetupSteps";
+import { curlBin, exportEnvVar, homePath } from "@/utils/osCommands";
+import type { PreferredOs } from "@/ui/layout/OsPreferenceContext";
 
 export interface AciStepDef {
   title: string;
@@ -21,135 +13,70 @@ export interface AciStepDef {
   codeBlocks?: { code: string; toCopy?: string; label?: string }[];
   skillPath?: string;
   skillContent?: string;
+  /** Numbered terminal block with one "copy the lot" button — the shape the
+   *  onboarding flow uses. */
+  lines?: string[];
+  copyLabel?: string;
+  /** Extra visual below the block (the status-line callout). */
+  content?: ReactNode;
 }
 
-export type AciAgentKey = "upload" | "claude-code" | "codex" | "opencode" | "openclaw" | "api-mcp";
+export type AciAgentKey = "upload" | "claude-code" | "codex" | "openclaw" | "api-mcp";
 
 export interface AciCardConfig {
   key: AciAgentKey;
   name: string;
+  /** One-line card description — kept short so it never wraps in the card grid. */
   description: string;
+  /** Fixed card width (px). Content-based, not equal-stretch: agents ~248,
+   *  API/MCP a touch narrower, Company Dataset a touch wider. */
+  width: number;
 }
 
 export const CARDS_CFG: AciCardConfig[] = [
-  { key: "claude-code", name: "Claude Code",   description: "Give Claude Code persistent memory across all your projects" },
-  { key: "codex",       name: "Codex",         description: "Connect OpenAI Codex to your knowledge graph via the Cognee plugin" },
-  { key: "opencode",    name: "OpenCode",      description: "Give OpenCode persistent memory with the Cognee plugin" },
-  { key: "openclaw",    name: "Openclaw",       description: "Connect Openclaw to your knowledge graph via AGENTS.md" },
-  { key: "api-mcp",     name: "API / MCP",      description: "Connect any agent or app via the REST API or MCP" },
-  { key: "upload",      name: "Company Brain",  description: "Upload PDFs, docs, and data to build your knowledge graph" },
+  { key: "claude-code", name: "Claude Code",   description: "Memory for every project",     width: 248 },
+  { key: "codex",       name: "Codex",         description: "Wire Codex to your graph",     width: 248 },
+  { key: "openclaw",    name: "Openclaw",       description: "Connect via AGENTS.md",         width: 248 },
+  { key: "api-mcp",     name: "API / MCP",      description: "Via REST API or MCP",         width: 228 },
+  { key: "upload",      name: "Company Dataset",  description: "Upload docs to build memory",   width: 268 },
 ];
 
 interface StepOptions {
   baseUrl: string;
   resolvedKey: string;
-  credsCode: string;
   isInitializing: boolean;
-  connectVerified: boolean;
+  os: PreferredOs;
 }
 
 export function getSteps(key: AciAgentKey, opts: StepOptions): AciStepDef[] {
-  const { baseUrl, resolvedKey, credsCode, isInitializing, connectVerified } = opts;
+  const { baseUrl, resolvedKey, isInitializing, os } = opts;
 
+  // Shell exports, not the ~/.cognee/.env file — only the Claude Code and Codex
+  // plugins read that file, and neither reaches this function any more:
+  // AgentConnectionSection routes them straight to AgentSetupModal, which
+  // builds their steps from agentSetupSteps() itself (see SetupConnectorCfg).
+  // Openclaw and API / MCP go on to run a skill that curls with
+  // "X-Api-Key: $COGNEE_API_KEY", so they need the variables in the shell's
+  // own environment (CLO-532).
   const credStep: AciStepDef = {
     title: "Set your API credentials",
-    description: "Open a terminal and run these commands to configure your Cognee endpoint and key.",
-    code: `export COGNEE_BASE_URL="${baseUrl}"`,
-    codeToCopy: credsCode,
+    description: `Run these in the ${terminalName(os)} you will start your agent from — they apply to that session. Add them to your shell profile to keep them across terminals.`,
+    code: exportEnvVar(os, "COGNEE_BASE_URL", baseUrl),
+    codeToCopy: `${exportEnvVar(os, "COGNEE_BASE_URL", baseUrl)}\n${exportEnvVar(os, "COGNEE_API_KEY", resolvedKey)}`,
     loading: isInitializing,
   };
-
-  if (key === "claude-code") return [
-    credStep,
-    {
-      title: "Install the Cognee plugin",
-      description: "Run these in your terminal one at a time — register the Cognee marketplace, then install the memory plugin.",
-      codeBlocks: [{ code: CLAUDE_MARKETPLACE_ADD }, { code: CLAUDE_PLUGIN_INSTALL }],
-    },
-    {
-      title: "Upload something to Cognee",
-      description: "Pick one and paste it into Claude — it stores the content in your Cognee memory so you can recall it in the next step.",
-      codeBlocks: [
-        { label: "Option A · Your existing memory", code: UPLOAD_MEMORY_PROMPT },
-        { label: "Option B · Try it with a sample", code: UPLOAD_SAMPLE_PROMPT },
-      ],
-    },
-    {
-      title: connectVerified ? "Connected — session detected ✓" : "Recall it from Cognee",
-      description: connectVerified
-        ? "We detected your new session in Cognee Cloud — you're connected."
-        : "First run /exit to close the session — that syncs it into Cognee Cloud — then reopen Claude Code and ask the question below. Answering from a fresh session proves it's recalling from your cloud memory.",
-      codeBlocks: [{ code: "/exit" }, { code: RECALL_SAMPLE_PROMPT }],
-    },
-    {
-      title: "You're all set",
-      description: "The Cognee plugin hooks into Claude Code's lifecycle — no curl or manual API calls — and captures your session as you work. When a session ends (e.g. /exit), it consolidates that session into your Cognee Cloud knowledge graph, and every new session automatically recalls it back. Sessions are disposable; your memory isn't.",
-    },
-  ];
-
-  if (key === "codex") return [
-    credStep,
-    {
-      title: "Install the Cognee plugin",
-      description: "Run these in your terminal one at a time — enable Codex hooks, register the Cognee marketplace, then install the memory plugin.",
-      codeBlocks: [{ code: CODEX_HOOKS_ENABLE }, { code: CODEX_MARKETPLACE_ADD }, { code: CODEX_PLUGIN_INSTALL }],
-    },
-    {
-      title: "Upload something to Cognee",
-      description: "Pick one and paste it into Codex — it stores the content in your Cognee memory so you can recall it in the next step.",
-      codeBlocks: [
-        { label: "Option A · Your existing memory", code: UPLOAD_MEMORY_PROMPT },
-        { label: "Option B · Try it with a sample", code: UPLOAD_SAMPLE_PROMPT },
-      ],
-    },
-    {
-      title: "Recall it from Cognee",
-      description: "First run /exit to close the session — that syncs it into Cognee Cloud — then reopen Codex and ask the question below. Answering from a fresh session proves it's recalling from your cloud memory.",
-      codeBlocks: [{ code: "/exit" }, { code: RECALL_SAMPLE_PROMPT }],
-    },
-    {
-      title: "You're all set",
-      description: "The Cognee plugin hooks into Codex's lifecycle — no curl or manual API calls — and captures your session as you work. When a session ends (e.g. /exit), it consolidates that session into your Cognee Cloud knowledge graph, and every new session automatically recalls it back. Sessions are disposable; your memory isn't.",
-    },
-  ];
-
-  if (key === "opencode") return [
-    credStep,
-    {
-      title: "Install the Cognee plugin",
-      description: "Run the OpenCode plugin setup command in your terminal, then restart OpenCode.",
-      codeBlocks: [{ code: OPENCODE_PLUGIN_SETUP }],
-    },
-    {
-      title: "Upload something to Cognee",
-      description: "Pick one and paste it into OpenCode — it stores the content in your Cognee memory so you can recall it in the next step.",
-      codeBlocks: [
-        { label: "Option A · Your existing memory", code: UPLOAD_MEMORY_PROMPT },
-        { label: "Option B · Try it with a sample", code: UPLOAD_SAMPLE_PROMPT },
-      ],
-    },
-    {
-      title: "Recall it from Cognee",
-      description: "Open a fresh OpenCode session and ask the question below. Answering from the new session proves it is recalling your Cognee memory.",
-      codeBlocks: [{ code: RECALL_SAMPLE_PROMPT }],
-    },
-    {
-      title: "You're all set",
-      description: "The Cognee plugin captures OpenCode sessions as you work and recalls relevant knowledge in new sessions. Your sessions are disposable; your memory isn't.",
-    },
-  ];
 
   if (key === "openclaw") return [
     credStep,
     {
       title: "Install the Cognee skill",
       description: "Click below to copy the install command to your clipboard, then paste and run it in your local terminal. Nothing is sent to our servers — the skill file is written on your own machine.",
-      skillPath: "~/.openclaw/skills/cognee/SKILL.md",
-      skillContent: OPENCLAW_SKILL_INSTALL,
+      skillPath: homePath(os, "/.openclaw/skills/cognee/SKILL.md"),
+      skillContent: openclawSkillInstall(os),
     },
     {
       title: "Test the connection",
-      description: `Open Openclaw in your project and ask: "What do you know from cognee?" — if it responds with knowledge from your brain, you're connected.`,
+      description: `Open Openclaw in your project and ask: "What do you know from cognee?" — if it responds with knowledge from your dataset, you're connected.`,
     },
   ];
 
@@ -158,19 +85,21 @@ export function getSteps(key: AciAgentKey, opts: StepOptions): AciStepDef[] {
     {
       title: "Query the REST API",
       description: "Send a recall query to your Cognee endpoint from any HTTP client or language.",
-      code: `curl -X POST ${baseUrl}/api/v1/recall`,
-      codeToCopy: `curl -X POST ${baseUrl}/api/v1/recall \\\n  -H "X-Api-Key: ${resolvedKey}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"query": "What are the main entities?"}'`,
+      code: `${curlBin(os)} -X POST ${baseUrl}/api/v1/recall`,
+      codeToCopy: os === "windows"
+        ? `${curlBin(os)} -X POST ${baseUrl}/api/v1/recall -H "X-Api-Key: ${resolvedKey}" -H "Content-Type: application/json" -d '{"query": "What are the main entities?"}'`
+        : `curl -X POST ${baseUrl}/api/v1/recall \\\n  -H "X-Api-Key: ${resolvedKey}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"query": "What are the main entities?"}'`,
       loading: isInitializing,
     },
     {
       title: "Or install the Cognee skill",
       description: "Prefer skills? Run this command from your project root to create the skill file, then point your agent at it. The skill teaches your agent to call the Cognee API using the credentials from step 1.",
       code: "skills/cognee/SKILL.md",
-      codeToCopy: GENERIC_SKILL_INSTALL,
+      codeToCopy: genericSkillInstall(os),
     },
     {
       title: "Test the connection",
-      description: `Ask your agent: "What do you know from cognee?" — Cognee's memory should respond with knowledge from your brain.`,
+      description: `Ask your agent: "What do you know from cognee?" — Cognee's memory should respond with knowledge from your dataset.`,
     },
   ];
 

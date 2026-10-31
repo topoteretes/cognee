@@ -3,7 +3,7 @@ import pytest
 from fastapi.encoders import jsonable_encoder
 
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
-from cognee.modules.graph.exceptions import InvalidDimensionsError, DimensionOutOfRangeError
+from cognee.modules.graph.exceptions import DimensionOutOfRangeError, InvalidDimensionsError
 
 
 def test_node_initialization():

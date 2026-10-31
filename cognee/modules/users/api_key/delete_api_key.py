@@ -1,13 +1,14 @@
 import secrets
 from uuid import UUID
+
 from sqlalchemy import select
 
-from cognee.modules.users.models import User
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.users.models import User
 from cognee.modules.users.models.UserApiKey import UserApiKey
-from .exceptions import ApiKeyDeletionError
+from cognee.shared.logging_utils import get_logger
 
+from .exceptions import ApiKeyDeletionError, ApiKeyNotFoundError
 
 logger = get_logger(__name__)
 
@@ -22,13 +23,15 @@ async def delete_api_key(user: User, api_key_id: UUID):
             ).scalar()
 
             if not user_api_key:
-                raise ApiKeyDeletionError(f"No API key found for user {user.id}.")
+                raise ApiKeyNotFoundError(f"No API key found for user {user.id}.")
 
             await session.delete(user_api_key)
 
             await session.commit()
-        except Exception as error:
-            logger.error(f"Failed to delete API key for user {user.id}: {str(error)}")
+        except ApiKeyNotFoundError:
+            raise
+        except Exception:
+            logger.exception(f"Failed to delete API key for user {user.id}")
             await session.rollback()
 
             raise ApiKeyDeletionError(f"Failed to delete API key for user {user.id}.")

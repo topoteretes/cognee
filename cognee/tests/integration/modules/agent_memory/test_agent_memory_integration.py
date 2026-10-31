@@ -1,6 +1,7 @@
 """Integration tests for the public cognee.agent_memory decorator behavior."""
 
 import importlib
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -11,13 +12,15 @@ import pytest_asyncio
 import cognee
 from cognee.context_global_variables import graph_db_config, vector_db_config
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.session.session_manager import SessionManager
 from cognee.modules.agent_memory.runtime import get_current_agent_memory_context
 from cognee.modules.data.methods import get_datasets_by_name
 from cognee.modules.engine.models import NodeSet
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import create_user, get_default_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.infrastructure.session.session_manager import SessionManager
+
+logger = logging.getLogger(__name__)
 
 
 async def _reset_engines_and_prune() -> None:
@@ -29,13 +32,13 @@ async def _reset_engines_and_prune() -> None:
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _reset_engines_and_prune", exc_info=True)
 
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
-    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -78,20 +81,22 @@ def _count_document_chunks(nodes) -> int:
     document_chunk_count = 0
     for _node_id, props in nodes:
         node_type = props.get("type")
-        if isinstance(node_type, dict) and node_type.get("DocumentChunk"):
-            document_chunk_count += 1
-        elif node_type == "DocumentChunk":
+        if (
+            isinstance(node_type, dict)
+            and node_type.get("DocumentChunk")
+            or node_type == "DocumentChunk"
+        ):
             document_chunk_count += 1
     return document_chunk_count
 
 
 @pytest_asyncio.fixture
 async def agent_memory_integration_env(tmp_path, monkeypatch):
-    """Create a clean environment with ladybug graph storage and FS-backed session traces."""
+    """Create a clean environment with ladybug graph storage and SQL-backed session traces."""
     pytest.importorskip("ladybug")
 
     root = Path(tmp_path)
-    monkeypatch.setenv("CACHE_BACKEND", "fs")
+    monkeypatch.setenv("CACHE_BACKEND", "sqlite")
     monkeypatch.setenv("COGNEE_SKIP_CONNECTION_TEST", "true")
     _reset_cache_backend_caches()
     vector_db_config.set(None)
@@ -110,32 +115,29 @@ async def agent_memory_integration_env(tmp_path, monkeypatch):
     cognee.config.set_vector_db_url(str(root / "system" / "databases" / "cognee.lancedb"))
 
     cache_root = root / "cache"
-    with patch(
-        "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-        return_value={"data_root_directory": str(cache_root)},
-    ):
-        from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import FSCacheAdapter
+    cache_root.mkdir()
+    from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 
-        cache_adapter = FSCacheAdapter()
-        session_manager = SessionManager(cache_engine=cache_adapter)
-        _patch_session_manager(monkeypatch, session_manager)
-        monkeypatch.setattr(
-            session_manager,
-            "_generate_agent_trace_feedback",
-            AsyncMock(side_effect=_fake_trace_feedback),
-        )
+    cache_adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{cache_root}/cache.db")
+    session_manager = SessionManager(cache_engine=cache_adapter)
+    _patch_session_manager(monkeypatch, session_manager)
+    monkeypatch.setattr(
+        session_manager,
+        "_generate_agent_trace_feedback",
+        AsyncMock(side_effect=_fake_trace_feedback),
+    )
 
-        await _reset_engines_and_prune()
-        await engine_setup()
+    await _reset_engines_and_prune()
+    await engine_setup()
 
-        yield {
-            "root": root,
-            "session_manager": session_manager,
-        }
+    yield {
+        "root": root,
+        "session_manager": session_manager,
+    }
 
-        cache_adapter.cache.close()
-        await _reset_engines_and_prune()
-        _reset_cache_backend_caches()
+    await cache_adapter.close()
+    await _reset_engines_and_prune()
+    _reset_cache_backend_caches()
 
 
 @pytest.mark.asyncio

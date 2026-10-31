@@ -1,11 +1,12 @@
 import json
-from cognee.shared.logging_utils import get_logger
 import os
 import re
-from typing import Dict, List, Pattern, Any
+from re import Pattern
+from typing import Any
 
 from cognee.modules.engine.models.EntityType import EntityType
 from cognee.root_dir import get_absolute_path
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("regex_entity_config")
 
@@ -19,7 +20,7 @@ class RegexEntityConfig:
         self.entity_configs = {}
         self._load_config()
 
-    def _validate_config_fields(self, config: Dict[str, Any]) -> None:
+    def _validate_config_fields(self, config: dict[str, Any]) -> None:
         """Validate that all required fields are present in the configuration."""
         required_fields = ["entity_name", "entity_description", "regex", "description_template"]
         missing_fields = [field for field in required_fields if field not in config]
@@ -34,8 +35,8 @@ class RegexEntityConfig:
         try:
             return re.compile(pattern)
         except re.error as e:
-            logger.error(f"Invalid regex pattern for entity '{entity_name}': {str(e)}")
-            raise ValueError(f"Invalid regex pattern for entity '{entity_name}': {str(e)}")
+            logger.error(f"Invalid regex pattern for entity '{entity_name}': {e!s}")
+            raise ValueError(f"Invalid regex pattern for entity '{entity_name}': {e!s}")
 
     def _load_config(self) -> None:
         """Load and process the configuration from the JSON file."""
@@ -46,8 +47,8 @@ class RegexEntityConfig:
             logger.error(f"Config file not found: {self.config_path}")
             raise
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in config file {self.config_path}: {str(e)}")
-            raise ValueError(f"Invalid JSON in config file: {str(e)}")
+            logger.error(f"Invalid JSON in config file {self.config_path}: {e!s}")
+            raise ValueError(f"Invalid JSON in config file: {e!s}")
 
         for config in config_list:
             self._validate_config_fields(config)
@@ -68,11 +69,11 @@ class RegexEntityConfig:
             f"Loaded {len(self.entity_configs)} entity configurations from {self.config_path}"
         )
 
-    def get_entity_names(self) -> List[str]:
+    def get_entity_names(self) -> list[str]:
         """Return a list of all configured entity names."""
         return list(self.entity_configs.keys())
 
-    def get_entity_config(self, entity_name: str) -> Dict[str, Any]:
+    def get_entity_config(self, entity_name: str) -> dict[str, Any]:
         """Get the configuration for a specific entity type."""
         if entity_name not in self.entity_configs:
             raise KeyError(f"Unknown entity type: {entity_name}")

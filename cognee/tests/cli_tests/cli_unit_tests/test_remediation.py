@@ -8,6 +8,7 @@ invented string would silently downgrade the first-run experience back to
 a bare stack trace while the tests stayed green.
 """
 
+import httpx
 import litellm
 import pytest
 
@@ -77,6 +78,23 @@ def test_matches_real_authentication_exception() -> None:
     hint = find_remediation(str(err))
     assert hint is not None
     assert "rejected the API key" in hint
+
+
+def test_matches_real_provider_permission_exception() -> None:
+    """A permission denial raised by litellm must resolve to the provider hint."""
+    response = httpx.Response(
+        403,
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
+    err = litellm.exceptions.PermissionDeniedError(
+        message="Access denied",
+        llm_provider="openai",
+        model="gpt-4o",
+        response=response,
+    )
+    hint = find_remediation(str(err))
+    assert hint is not None
+    assert "denied the request" in hint
 
 
 def test_no_match_returns_none() -> None:

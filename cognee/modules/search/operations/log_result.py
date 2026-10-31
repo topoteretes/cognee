@@ -1,19 +1,18 @@
-import os
-from typing import Optional
 from uuid import UUID
-from cognee.infrastructure.databases.relational import get_relational_engine
-from ..models.Result import Result
 
-_LOG_ENABLED = os.getenv("COGNEE_LOG_SEARCH_HISTORY", "true").lower() in ("true", "1", "yes")
+from cognee.infrastructure.databases.relational import get_relational_engine
+
+from ..models.Result import Result
+from .search_history_config import search_history_enabled
 
 
 async def log_result(
     query_id: UUID,
     result: str,
     user_id: UUID,
-    dataset_id: Optional[UUID] = None,
+    dataset_id: UUID | None = None,
 ):
-    if not _LOG_ENABLED:
+    if not search_history_enabled():
         return
 
     db_engine = get_relational_engine()

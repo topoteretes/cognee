@@ -64,6 +64,13 @@ export default function ApiKeysPage() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newName, setNewName] = useState("");
+  // Separate from the Mantine toast: a toast auto-dismisses after a few
+  // seconds, so a slow reader (or a screenshot taken later, e.g. by a CI
+  // timeout) sees an open modal with no visible reason why nothing happened.
+  // This is what actually made a genuine backend failure look like a silent
+  // hang in CLO-816: the request had already failed and been reported, the
+  // toast had simply already disappeared by the time anything looked.
+  const [createError, setCreateError] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [keysWarmed, setKeysWarmed] = useState(false);
 
@@ -101,19 +108,37 @@ export default function ApiKeysPage() {
   }
 
   async function handleCreate() {
-    if (!newName.trim()) return;
+    const name = newName.trim();
+    if (!name) return;
     setCreating(true);
+    setCreateError(null);
     try {
-      const created = await createApiKey({ name: newName.trim(), noRedirectOnAuth: true });
-      trackEvent({ pageName: "API Keys", eventName: "api_key_created", additionalProperties: { key_name: newName.trim() } });
+      const result = await createApiKey({ name, noRedirectOnAuth: true });
+      if (!result.ok) {
+        setCreateError(result.error);
+        notifications.show({ title: "Could not create API key", message: result.error, color: "red" });
+        return;
+      }
+      trackEvent({ pageName: "API Keys", eventName: "api_key_created", additionalProperties: { key_name: name } });
       setNewName("");
       setShowCreateModal(false);
-      // Reload the list, then surface the full key once — this is the only
-      // time the server returns it in clear text.
       await loadKeys();
-      setKeys((prev) => prev.map((k) => (k.id === created.id ? { ...k, key: created.key, isNew: true } : k)));
+      const created = result.key;
+      if (created) {
+        // Surface the full key once — this is the only time the server returns
+        // it in clear text.
+        setKeys((prev) => prev.map((k) => (k.id === created.id ? { ...k, key: created.key, isNew: true } : k)));
+      } else {
+        // The key was created but the response carried no clear-text key, so
+        // there is nothing to reveal. Say so rather than silently listing a
+        // masked key the user can never read.
+        notifications.show({ title: "API key created", message: `"${name}" was created, but the key could not be shown. Revoke it and create a new one if you need the value.`, color: "yellow" });
+      }
     } catch (err) {
       console.error("Failed to create key:", err);
+      const message = "Something went wrong while creating the key. Please try again.";
+      setCreateError(message);
+      notifications.show({ title: "Could not create API key", message, color: "red" });
     } finally {
       setCreating(false);
     }
@@ -158,6 +183,7 @@ export default function ApiKeysPage() {
         <button
           onClick={() => { trackEvent({ pageName: "API Keys", eventName: "api_key_create_clicked" }); setShowCreateModal(true); }}
           disabled={!hasAccess}
+          data-testid="api-key-create-open"
           className="cursor-pointer hover:bg-[#5A0ED6]"
           style={{ background: hasAccess ? "#6510F4" : "rgba(255,255,255,0.08)", color: hasAccess ? "#fff" : "rgba(237,236,234,0.35)", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6, cursor: hasAccess ? "pointer" : "not-allowed" }}
         >
@@ -168,12 +194,13 @@ export default function ApiKeysPage() {
 
       {/* Create modal */}
       {showCreateModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setShowCreateModal(false)}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => { setShowCreateModal(false); setCreateError(null); }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 420, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 16px 48px rgba(0,0,0,0.4)" }}>
             <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Create API key</h2>
             <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0 }}>Give your key a name to identify it later.</p>
             <input
               autoFocus
+              data-testid="api-key-name-input"
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -183,9 +210,14 @@ export default function ApiKeysPage() {
               onFocus={(e) => { e.target.style.borderColor = "#6510F4"; e.target.style.boxShadow = "0 0 0 3px rgba(188,155,255,0.10)"; }}
               onBlur={(e) => { e.target.style.borderColor = "rgba(255,255,255,0.12)"; e.target.style.boxShadow = "none"; }}
             />
+            {createError && (
+              <p data-testid="api-key-create-error" style={{ fontSize: 13, color: "#F87171", margin: 0 }}>
+                {createError}
+              </p>
+            )}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => { setShowCreateModal(false); setNewName(""); }} className="cursor-pointer" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.7)", fontFamily: "inherit" }}>Cancel</button>
-              <button onClick={handleCreate} disabled={creating || !newName.trim()} className="cursor-pointer" style={{ background: newName.trim() ? "#6510F4" : "rgba(255,255,255,0.08)", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: newName.trim() ? "#fff" : "rgba(237,236,234,0.35)", fontFamily: "inherit" }}>
+              <button onClick={() => { setShowCreateModal(false); setNewName(""); setCreateError(null); }} className="cursor-pointer" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.7)", fontFamily: "inherit" }}>Cancel</button>
+              <button onClick={handleCreate} disabled={creating || !newName.trim()} data-testid="api-key-create-submit" className="cursor-pointer" style={{ background: newName.trim() ? "#6510F4" : "rgba(255,255,255,0.08)", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 500, color: newName.trim() ? "#fff" : "rgba(237,236,234,0.35)", fontFamily: "inherit" }}>
                 {creating ? "Creating..." : "Create"}
               </button>
             </div>
@@ -351,14 +383,14 @@ export default function ApiKeysPage() {
               {k.isNew ? (
                 /* Show full key once for newly created keys */
                 <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 6, padding: "6px 12px" }}>
-                  <span style={{ fontSize: 12, color: "#22C55E", fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace', wordBreak: "break-all" }}>{k.key}</span>
+                  <span className="cs-mask" data-cs-mask="true" data-testid="api-key-new-value" style={{ fontSize: 12, color: "#22C55E", fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace', wordBreak: "break-all" }}>{k.key}</span>
                   <button onClick={() => handleCopy(k.id, k.key)} className="cursor-pointer" style={{ background: "none", border: "none", padding: 2, display: "flex", flexShrink: 0 }} title="Copy key">
                     {copiedId === k.id ? <CheckIcon /> : <CopyIcon />}
                   </button>
                 </div>
               ) : (
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontSize: 13, color: "rgba(237,236,234,0.7)", fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace' }}>{k.label || k.key}</span>
+                  <span className="cs-mask" data-cs-mask="true" style={{ fontSize: 13, color: "rgba(237,236,234,0.7)", fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace' }}>{k.label || k.key}</span>
                   <button onClick={() => handleCopy(k.id, k.key)} className="cursor-pointer" style={{ background: "none", border: "none", padding: 2, display: "flex" }} title="Copy key">
                     {copiedId === k.id ? <CheckIcon /> : <CopyIcon />}
                   </button>

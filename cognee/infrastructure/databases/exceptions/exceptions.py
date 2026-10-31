@@ -1,9 +1,10 @@
 from fastapi import status
+
 from cognee.exceptions import (
     CogneeApiError,
+    CogneeConfigurationError,
     CogneeSystemError,
     CogneeValidationError,
-    CogneeConfigurationError,
 )
 
 
@@ -25,6 +26,18 @@ class DatabaseNotCreatedError(CogneeSystemError):
         log_level: str = "ERROR",
     ):
         super().__init__(message, name, status_code, log=log, log_level=log_level)
+
+
+class UnsupportedGraphOperation(CogneeApiError):
+    """Raised when a graph adapter does not implement a narrow optional operation."""
+
+    def __init__(
+        self,
+        message: str = "This graph backend does not support this operation.",
+        name: str = "UnsupportedGraphOperation",
+        status_code: int = status.HTTP_501_NOT_IMPLEMENTED,
+    ):
+        super().__init__(message, name, status_code)
 
 
 class UnsupportedProvenanceCapability(CogneeApiError):
@@ -136,6 +149,50 @@ class EmbeddingContextWindowTooSmallError(EmbeddingException):
         super().__init__(message, name, status_code)
 
 
+class EmbeddingEncodingError(EmbeddingException):
+    """Raised when base64 vectors were requested but the server answered otherwise.
+
+    The route does not support base64, whether picked by default for OpenAI's API or
+    set via EMBEDDING_ENCODING_FORMAT: a provider or proxy translated the request into
+    its own format (Bedrock answers with 1-bit binary vectors, as a list), the payload
+    does not decode as little-endian float32, or the server refused the parameter. Only
+    the openai_compatible engine raises this for a refusal; the LiteLLM engine re-raises
+    litellm's 400/422 and logs ENCODING_FORMAT_HINT. Terminal: the same request gets the
+    same answer, so the engines never retry it.
+    """
+
+    def __init__(self, detail: str):
+        super().__init__(
+            f"The embedding server did not return base64 vectors ({detail}). This "
+            "provider or route does not support base64 embeddings. Fix: set "
+            "EMBEDDING_ENCODING_FORMAT=float in your .env file or environment, or "
+            "remove the setting if you set it to base64.",
+            name="EmbeddingEncodingError",
+        )
+
+
+class EmbeddingCredentialsError(EmbeddingException):
+    """
+    Raised when the embedding endpoint rejects the request's credentials.
+
+    Covers both directions: credentials the server does not accept (401) and
+    credentials it accepts but does not permit for this model or organization
+    (403). Neither can clear inside a retry window, so engines raise this
+    instead of the provider's own class: keeping the failure inside the
+    ``CogneeApiError`` family is what lets the API return an actionable 422
+    rather than a 500, while listing it as terminal is what stops the backoff
+    ladder. The provider's own message is carried through as *message*.
+    """
+
+    def __init__(
+        self,
+        message: str = "Embedding endpoint rejected the credentials.",
+        name: str = "EmbeddingCredentialsError",
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
+
+
 class MissingQueryParameterError(CogneeValidationError):
     """
     Raised when neither 'query_text' nor 'query_vector' is provided,
@@ -233,6 +290,32 @@ class SharedLadybugLockRequiresRedisError(CogneeConfigurationError):
 
 
 SharedKuzuLockRequiresRedisError = SharedLadybugLockRequiresRedisError
+
+
+class TursoDatabaseInUseError(CogneeConfigurationError):
+    """
+    Raised when a Turso database file is already open in another process.
+
+    The Turso engine (pyturso 0.7.x) locks a database file to the one process that
+    opened it, until that process exits, so a second cognee process on the same
+    files cannot open them. Stock SQLite allows this; the Turso backend does not.
+    """
+
+    def __init__(
+        self,
+        database_path: str = "",
+        name: str = "TursoDatabaseInUseError",
+        status_code: int = status.HTTP_409_CONFLICT,
+    ):
+        where = f" '{database_path}'" if database_path else ""
+        message = (
+            f"The Turso database file{where} is already open in another process. "
+            "The Turso backend allows one process per database file, and the lock is held "
+            "until that process exits. Stop the other cognee process using these files (an "
+            "API server, CLI command, or script), or give each process its own "
+            "SYSTEM_ROOT_DIRECTORY. See docs/turso-local.md."
+        )
+        super().__init__(message, name, status_code)
 
 
 class DatabaseCredentialsError(CogneeConfigurationError):

@@ -22,7 +22,7 @@ environment:
     # survives restarts and is easy to inspect or back up.
     DATA_ROOT_DIRECTORY: /home/agent/.cognee/data
     SYSTEM_ROOT_DIRECTORY: /home/agent/.cognee/system
-    LLM_MODEL: openai/gpt-5-mini
+    LLM_MODEL: openai/gpt-5.6-luna
     TELEMETRY_DISABLED: "1"
     # User permissioning: multi-tenant ACLs + per-user+dataset DB isolation.
     # This is cognee's default; pinned here so the kit is explicit about it.

@@ -1,10 +1,11 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore, ReactNode } from "react";
+import { useQuery, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import getDatasets from "@/modules/datasets/getDatasets";
-import { BACKGROUND_QUERY_RETRY_COUNT, backgroundQueryRetryDelay } from "@/modules/query/backgroundQueryRetry";
+import getAgents, { type Agent } from "@/modules/agents/getAgents";
+import { backgroundQueryRetry, backgroundQueryRetryDelay } from "@/modules/query/backgroundQueryRetry";
 
 // Local/loaded pods can take several seconds per request (see COG-5722) —
 // a background poll shouldn't surface a false "error" at the default 10s
@@ -17,15 +18,9 @@ const BACKGROUND_POLL_TIMEOUT_MS = 25_000;
 // way COG-5721/5722 just fixed.
 const DATASET_SYNC_CHANNEL = "cognee-selected-dataset-sync";
 
-export interface Agent {
-  id: string;
-  email: string;
-  agent_type: string;
-  agent_short_id: string;
-  is_agent: boolean;
-  is_default: boolean;
-  status: string;
-}
+// Declared next to the fetch that produces it (a module must not depend on
+// @/ui), re-exported here because this context is where consumers reach for it.
+export type { Agent };
 
 export interface Dataset {
   id: string;
@@ -56,9 +51,27 @@ interface FilterContextValue {
   agents: Agent[];
   datasets: Dataset[];
   loading: boolean;
+  /**
+   * True when the dataset list could not be fetched at all. Separate from
+   * `loading`, which goes false on failure while `datasets` falls back to `[]`
+   * — a consumer reading only those two cannot tell an outage from a workspace
+   * with no datasets, and renders onboarding copy for a 500 (CLO-726).
+   */
+  datasetsUnavailable: boolean;
+  /** Same signal as `datasetsUnavailable`, under the name the Analytics/
+   *  Datasets consumers already use. Both read one computed value — see
+   *  `datasetsUnavailable` below — so the two names cannot drift apart. */
+  datasetsError: boolean;
+  /** Separate from `loading`, which tracks datasets only: an empty `agents`
+   *  means "none exist" only once this is false and `agentsError` is false.
+   *  Without it a consumer renders "no agents" for a fetch that is still in
+   *  flight, or one that failed against a pod without the route. */
+  agentsLoading: boolean;
+  agentsError: boolean;
 
   // Refresh
   refreshDatasets: () => void;
+  refreshAgents: () => void;
 
 }
 
@@ -77,7 +90,12 @@ const FilterContext = createContext<FilterContextValue>({
   agents: [],
   datasets: [],
   loading: true,
+  datasetsUnavailable: false,
+  datasetsError: false,
+  agentsLoading: true,
+  agentsError: false,
   refreshDatasets: () => {},
+  refreshAgents: () => {},
 });
 
 // Pick a deterministic color for a tenant based on its ID
@@ -88,14 +106,115 @@ function colorForTenant(id: string): string {
   return TENANT_COLORS[Math.abs(hash) % TENANT_COLORS.length];
 }
 
+const PERSISTED_TENANT_KEY = "cognee_selected_tenant";
+const PERSISTED_TENANT_NAME_KEY = "cognee_selected_tenant_name";
+const PERSISTED_FIELD_SEPARATOR = "::";
+
+// Persisted workspace as one string, for useSyncExternalStore to compare by
+// value. Server snapshot is always empty (no localStorage there), matching
+// hydration's first client pass; React swaps in the real value right after.
+function getPersistedWorkspaceSnapshot(): string {
+  const id = localStorage.getItem(PERSISTED_TENANT_KEY);
+  const name = localStorage.getItem(PERSISTED_TENANT_NAME_KEY);
+  return id && name ? `${id}${PERSISTED_FIELD_SEPARATOR}${name}` : "";
+}
+function getServerPersistedWorkspaceSnapshot(): string { return ""; }
+function subscribeToPersistedWorkspace(onStoreChange: () => void): () => void {
+  window.addEventListener("storage", onStoreChange);
+  return () => window.removeEventListener("storage", onStoreChange);
+}
+
+// Shared with useRefreshDatasetsOnMount below, so both land on the exact same
+// query — same key, same fetch behavior — and react-query dedupes them into
+// one in-flight request instead of two independent fetches.
+function datasetsQueryOptions(
+  cogniInstance: ReturnType<typeof useCogniInstance>["cogniInstance"],
+  tenantId: string | null,
+  enabled: boolean,
+): UseQueryOptions<Dataset[]> {
+  return {
+    queryKey: ["datasets", tenantId],
+    queryFn: ({ signal }) =>
+      getDatasets(cogniInstance!, signal, BACKGROUND_POLL_TIMEOUT_MS).then((d: Dataset[]) => (Array.isArray(d) ? d : [])),
+    enabled,
+    refetchInterval: false,
+    // Same predicate as the agents query below: a 401/403 on a rotated key is
+    // an answer that will not change, and the bare budget spends four
+    // requests and ~7s of backoff discovering that on every page load.
+    retry: backgroundQueryRetry,
+    retryDelay: backgroundQueryRetryDelay,
+  };
+}
+
+// The registered-agents list — the humans and agents that exist in this
+// tenant. An agent appearing here is out of band (it registers on its first
+// connection), so that half relies on react-query's refetch-on-focus rather
+// than a poll; `refreshAgents` covers the half the app does drive, adding an
+// existing user on the Members page. Removal deliberately does not (see the
+// comment there), and neither does minting an API key: keys attach to an
+// existing user and the roster shape this reads carries no key count.
+//
+// The retry predicate matters here specifically: a pod image that has not
+// allowlisted GET /v1/activity/agents answers 404 forever, and the default
+// budget would spend four requests and ~7s of backoff on it every page load.
+function agentsQueryOptions(
+  cogniInstance: ReturnType<typeof useCogniInstance>["cogniInstance"],
+  tenantId: string | null,
+  enabled: boolean,
+): UseQueryOptions<Agent[]> {
+  return {
+    queryKey: ["agents", tenantId],
+    // No `Array.isArray(...) ? ... : []` here: getAgents already rejects a
+    // non-array payload, and coercing it would turn a broken endpoint back
+    // into an empty workspace that agentsError can never report.
+    queryFn: ({ signal }) => getAgents(cogniInstance!, signal, BACKGROUND_POLL_TIMEOUT_MS),
+    enabled,
+    refetchInterval: false,
+    retry: backgroundQueryRetry,
+    retryDelay: backgroundQueryRetryDelay,
+  };
+}
+
+// FilterProvider lives in the layout and never remounts on navigation, so its
+// datasets query never gets a mount-triggered refetch just from moving
+// between pages — only from a user-initiated create/delete/upload. That
+// leaves datasets created out-of-band (e.g. by an agent session) stale on
+// pages that read the list from FilterContext. Pages that need the list to be
+// current (Mindmap, Dashboard) call this once to opt into a
+// mount-time freshness check — it shares the provider's query key, so
+// react-query dedupes it with the provider's own fetch instead of firing a
+// second network request, and only actually hits the network if the cached
+// data is stale.
+export function useRefreshDatasetsOnMount(): void {
+  const { cogniInstance, isInitializing } = useCogniInstance();
+  const { tenant, tenantReady } = useTenant();
+  const tenantId = tenant?.tenant_id ?? null;
+  useQuery({
+    ...datasetsQueryOptions(cogniInstance, tenantId, !!cogniInstance && !isInitializing && tenantReady),
+    refetchOnMount: "always",
+  });
+}
+
 export function FilterProvider({ children }: { children: ReactNode }) {
   const { cogniInstance, isInitializing } = useCogniInstance();
   const { tenant, tenantReady, availableTenants, switchTenant } = useTenant();
   const queryClient = useQueryClient();
-  const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
   const tenantId = tenant?.tenant_id ?? null;
+
+  // Registered agents for this tenant — who/what has actually connected.
+  // Was dead state (`useState<Agent[]>([])`, setter discarded, nothing ever
+  // fetched it) until the backend allowlisted GET /v1/activity/agents.
+  const agentsQuery = useQuery(
+    agentsQueryOptions(cogniInstance, tenantId, !!cogniInstance && !isInitializing && tenantReady),
+  );
+  const agents = useMemo(() => agentsQuery.data ?? [], [agentsQuery.data]);
+  // isPending, not isLoading: while the query is disabled (no cogniInstance
+  // yet, tenant not ready) isLoading is already false even though nothing has
+  // been fetched, which would let a consumer call an empty roster final.
+  const agentsLoading = agentsQuery.isPending;
+  const agentsError = agentsQuery.isError;
 
   // Single source of truth for the datasets list — shared via this query key
   // with any other hook/page that needs it (e.g. OverviewPage), so they
@@ -105,24 +224,24 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   // react-query's default refetchOnWindowFocus keeps it from going stale
   // across tabs/sessions without hammering every page that mounts this
   // provider (most of which never even render the list).
-  const datasetsQuery = useQuery({
-    queryKey: ["datasets", tenantId],
-    queryFn: ({ signal }) =>
-      getDatasets(cogniInstance!, signal, BACKGROUND_POLL_TIMEOUT_MS).then((d: Dataset[]) => (Array.isArray(d) ? d : [])),
+  const datasetsQuery = useQuery(
     // tenantReady, not just cogniInstance: a freshly-created workspace's pod
     // can still be unreachable while cogniInstance already exists (see
     // useDashboardTelemetry.ts / useGraphSummary.ts for the same fix).
-    enabled: !!cogniInstance && !isInitializing && tenantReady,
-    refetchInterval: false,
-    retry: BACKGROUND_QUERY_RETRY_COUNT,
-    retryDelay: backgroundQueryRetryDelay,
-  });
+    datasetsQueryOptions(cogniInstance, tenantId, !!cogniInstance && !isInitializing && tenantReady),
+  );
 
   // Memoized so the fallback `[]` isn't a fresh reference on every render —
   // keeps the `value` memo below (and its consumers) stable when there's no
   // query data yet.
   const datasets = useMemo(() => datasetsQuery.data ?? [], [datasetsQuery.data]);
   const loading = datasetsQuery.isLoading;
+  // A failed fetch keeps whatever it had, so this is an outage only while
+  // there is nothing to show — a failing background refetch over good data is
+  // not one.
+  const datasetsUnavailable = datasetsQuery.isError && datasetsQuery.data === undefined;
+  // Same computation, exposed under the name Analytics/Datasets already read.
+  const datasetsError = datasetsUnavailable;
 
   // Build workspaces from available tenants
   const tenantWorkspaces = useMemo<Workspace[]>(() => {
@@ -136,27 +255,24 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     }));
   }, [availableTenants]);
 
-  // Snapshot of the persisted workspace selection. Starts null so the first
-  // client render matches the server-rendered HTML exactly (the server has no
-  // localStorage) — reading it eagerly in a lazy useState initializer caused
-  // a hydration mismatch, since that initializer runs during the hydration
-  // pass itself, not after it. Read it in an effect instead; this still
-  // means the hardcoded personal default paints for one frame before
-  // correcting itself, but that's the tradeoff for a correct hydration.
-  const [persistedSelection, setPersistedSelection] = useState<Workspace | null>(null);
-  useEffect(() => {
-    const id = localStorage.getItem("cognee_selected_tenant");
-    const name = localStorage.getItem("cognee_selected_tenant_name");
-    if (id && name) {
-      setPersistedSelection({
-        id,
-        name,
-        initial: name.charAt(0).toUpperCase(),
-        color: colorForTenant(id),
-        type: "organization" as const,
-      });
-    }
-  }, []);
+  // Persisted workspace selection. A plain effect flashes the hardcoded
+  // default for one frame first; a lazy useState initializer reading
+  // localStorage removes that flash but disagrees with the server's
+  // (localStorage-less) render, causing a hydration mismatch.
+  // useSyncExternalStore avoids both: hydration's first client pass matches
+  // the server, then swaps in the real value synchronously before paint.
+  const persistedKey = useSyncExternalStore(
+    subscribeToPersistedWorkspace,
+    getPersistedWorkspaceSnapshot,
+    getServerPersistedWorkspaceSnapshot,
+  );
+  const persistedSelection = useMemo<Workspace | null>(() => {
+    if (!persistedKey) return null;
+    const separatorIndex = persistedKey.indexOf(PERSISTED_FIELD_SEPARATOR);
+    const id = persistedKey.slice(0, separatorIndex);
+    const name = persistedKey.slice(separatorIndex + PERSISTED_FIELD_SEPARATOR.length);
+    return { id, name, initial: name.charAt(0).toUpperCase(), color: colorForTenant(id), type: "organization" as const };
+  }, [persistedKey]);
 
   // The workspace shown in the topbar — derived, not its own state. It used
   // to be mirrored into a separate useState synced by an effect, which added
@@ -167,15 +283,23 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     if (tenant) return tenantWorkspaces.find((ws) => ws.id === tenant.tenant_id) ?? tenantWorkspaces[0];
     // tenant not resolved yet — prefer the persisted selection over the
     // hardcoded personal default so a user on another workspace never sees
-    // "Personal workspace" flash first.
-    return persistedSelection ?? tenantWorkspaces[0];
-  }, [tenant, tenantWorkspaces, persistedSelection]);
+    // "Personal workspace" flash first. Once this account's list is in, a
+    // selection outside it is another account's leftover (a login without a
+    // sign-out keeps localStorage) and must not be shown.
+    const persistedIsOurs = availableTenants.length === 0
+      || availableTenants.some((t) => t.id === persistedSelection?.id);
+    return (persistedIsOurs ? persistedSelection : null) ?? tenantWorkspaces[0];
+  }, [tenant, tenantWorkspaces, persistedSelection, availableTenants]);
 
   // Window-focus refetch, retry-with-backoff, and interval polling are all
   // handled by the query above (refetchOnWindowFocus defaults to true,
   // respecting staleTime so rapid alt-tabbing doesn't burst-refetch).
   const refreshDatasets = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["datasets", tenantId] });
+  }, [queryClient, tenantId]);
+
+  const refreshAgents = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["agents", tenantId] });
   }, [queryClient, tenantId]);
 
   // Read inside the channel's onmessage below instead of depending on
@@ -236,8 +360,13 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     agents,
     datasets,
     loading,
+    datasetsUnavailable,
+    datasetsError,
+    agentsLoading,
+    agentsError,
     refreshDatasets,
-  }), [workspace, tenantWorkspaces, selectedAgent, selectedDataset, agents, datasets, loading, handleAgentChange, handleWorkspaceChange, refreshDatasets, setSelectedDatasetSynced]);
+    refreshAgents,
+  }), [workspace, tenantWorkspaces, selectedAgent, selectedDataset, agents, datasets, loading, datasetsUnavailable, datasetsError, agentsLoading, agentsError, handleAgentChange, handleWorkspaceChange, refreshDatasets, refreshAgents, setSelectedDatasetSynced]);
 
   return (
     <FilterContext.Provider value={value}>

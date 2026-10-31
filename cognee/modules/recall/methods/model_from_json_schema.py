@@ -4,7 +4,7 @@ The recall HTTP API accepts structured-output requests as a JSON Schema
 (``response_schema``, typically produced client-side via
 ``MyModel.model_json_schema()``) because a Python class cannot cross the HTTP
 boundary. This module turns that schema back into a real ``BaseModel`` subclass
-so the entire existing completion pipeline — instructor validation, retries,
+so the entire existing completion pipeline — schema validation, retries,
 result normalization — runs unchanged against it.
 
 Deliberately supports only the structural subset Pydantic itself emits:
@@ -97,7 +97,7 @@ def _type_from(
             _type_from(member, defs, depth + 1, in_flight_refs, budget)
             for member in schema["anyOf"]
         ]
-        return Union[tuple(members)]
+        return Union[tuple(members)]  # noqa: UP007 - built from a runtime list; no | spelling
 
     schema_type = schema.get("type")
     if isinstance(schema_type, list):
@@ -105,7 +105,7 @@ def _type_from(
             _type_from({**schema, "type": single}, defs, depth + 1, in_flight_refs, budget)
             for single in schema_type
         ]
-        return Union[tuple(members)]
+        return Union[tuple(members)]  # noqa: UP007 - built from a runtime list; no | spelling
 
     if schema_type == "null":
         return type(None)
@@ -144,7 +144,7 @@ def _build_object(
         if field_name in required:
             fields[field_name] = (annotation, ...)
         else:
-            fields[field_name] = (Optional[annotation], None)
+            fields[field_name] = (Optional[annotation], None)  # noqa: UP045 - annotation may be a forward-reference string
 
     raw_name = schema.get("title") or fallback_name
     model_name = raw_name if raw_name.isidentifier() else fallback_name

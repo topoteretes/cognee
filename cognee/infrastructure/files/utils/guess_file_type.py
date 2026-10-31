@@ -1,7 +1,7 @@
 import io
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
-from typing import Any, BinaryIO, Optional
+from typing import BinaryIO
 
 import filetype
 from filetype.types.base import Type

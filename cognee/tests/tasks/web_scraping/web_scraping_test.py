@@ -1,7 +1,8 @@
 import asyncio
+
 import cognee
-from cognee.tasks.web_scraper.config import DefaultCrawlerConfig
 from cognee.tasks.web_scraper import cron_web_scraper_task
+from cognee.tasks.web_scraper.config import DefaultCrawlerConfig
 
 
 async def test_web_scraping_using_bs4():

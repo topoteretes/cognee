@@ -1,3 +1,13 @@
+"""Toggle self-coded run stages (prune, remember, recall) per run over a bundled CV corpus.
+
+Five CVs from the data folder are remembered when rebuild_kg is True, and a GRAPH_COMPLETION
+recall asks who has design-tool experience when retrieve is True. Flip the flags in __main__ to
+rerun only the retrieval against an existing graph.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/demos/custom_pipelines/dynamic_steps_resume_analysis_hr_example.py
+"""
+
 import asyncio
 from pathlib import Path
 

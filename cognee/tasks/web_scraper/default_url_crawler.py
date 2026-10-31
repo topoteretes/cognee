@@ -1,15 +1,16 @@
 import asyncio
+import os
+import time
 from dataclasses import dataclass, field
 from functools import lru_cache
-import time
-from typing import Any, Union, List, Dict, Optional
+from typing import Any
 from urllib.parse import urlparse
+
 import httpx
-import os
 
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.web_scraper.types import UrlsToHtmls
 from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
+from cognee.tasks.web_scraper.types import UrlsToHtmls
 
 logger = get_logger()
 
@@ -49,11 +50,11 @@ class DefaultUrlCrawler:
         *,
         concurrency: int = 5,
         crawl_delay: float = 0.5,
-        max_crawl_delay: Optional[float] = float(os.getenv("WEB_SCRAPER_MAX_DELAY", 10.0)),
-        timeout: float = float(os.getenv("WEB_SCRAPER_TIMEOUT", 15.0)),
+        max_crawl_delay: float | None = float(os.getenv("WEB_SCRAPER_MAX_DELAY", "10.0")),
+        timeout: float = float(os.getenv("WEB_SCRAPER_TIMEOUT", "15.0")),
         max_retries: int = 2,
         retry_delay_factor: float = 0.5,
-        headers: Optional[Dict[str, str]] = None,
+        headers: dict[str, str] | None = None,
         robots_cache_ttl: float = 3600.0,
     ):
         """Initialize the DefaultUrlCrawler.
@@ -81,9 +82,9 @@ class DefaultUrlCrawler:
             "Accept-Language": "en-US,en;q=0.9",
         }
         self.robots_cache_ttl = robots_cache_ttl
-        self._last_request_time_per_domain: Dict[str, float] = {}
-        self._robots_cache: Dict[str, RobotsTxtCache] = {}
-        self._client: Optional[httpx.AsyncClient] = None
+        self._last_request_time_per_domain: dict[str, float] = {}
+        self._robots_cache: dict[str, RobotsTxtCache] = {}
+        self._client: httpx.AsyncClient | None = None
         self._robots_lock = asyncio.Lock()
 
     async def _ensure_client(self):
@@ -110,8 +111,9 @@ class DefaultUrlCrawler:
         """Exit the context manager, closing the HTTP client."""
         await self.close()
 
+    @staticmethod
     @lru_cache(maxsize=1024)
-    def _domain_from_url(self, url: str) -> str:
+    def _domain_from_url(url: str) -> str:
         """Extract the domain (netloc) from a URL.
 
         Args:
@@ -123,10 +125,14 @@ class DefaultUrlCrawler:
         try:
             return urlparse(url).netloc
         except Exception:
+            logger.debug(
+                "Falling back after error in DefaultUrlCrawler._domain_from_url", exc_info=True
+            )
             return url
 
+    @staticmethod
     @lru_cache(maxsize=1024)
-    def _get_domain_root(self, url: str) -> str:
+    def _get_domain_root(url: str) -> str:
         """Get the root URL (scheme and netloc) from a URL.
 
         Args:
@@ -138,7 +144,7 @@ class DefaultUrlCrawler:
         parsed = urlparse(url)
         return f"{parsed.scheme}://{parsed.netloc}"
 
-    async def _respect_rate_limit(self, url: str, crawl_delay: Optional[float] = None):
+    async def _respect_rate_limit(self, url: str, crawl_delay: float | None = None):
         """Enforce rate limiting for requests to the same domain.
 
         Args:
@@ -163,7 +169,7 @@ class DefaultUrlCrawler:
             logger.info(f"Rate limit wait completed for {url}")
         self._last_request_time_per_domain[domain] = time.time()
 
-    async def _get_robots_cache(self, domain_root: str) -> Optional[RobotsTxtCache]:
+    async def _get_robots_cache(self, domain_root: str) -> RobotsTxtCache | None:
         """Get cached robots.txt data if valid.
 
         Args:
@@ -204,7 +210,7 @@ class DefaultUrlCrawler:
                 resp = await self._client.get(robots_url, timeout=5.0)
                 content = resp.text if resp.status_code == 200 else ""
             except Exception as e:
-                logger.debug(f"Failed to fetch robots.txt from {domain_root}: {e}")
+                logger.debug(f"Failed to fetch robots.txt from {domain_root}: {e}", exc_info=True)
                 content = ""
 
             protego = Protego.parse(content) if content.strip() else None
@@ -252,7 +258,7 @@ class DefaultUrlCrawler:
             agent = next((v for k, v in self.headers.items() if k.lower() == "user-agent"), "*")
             return cache.protego.can_fetch(agent, url) or cache.protego.can_fetch("*", url)
         except Exception as e:
-            logger.debug(f"Error checking robots.txt for {url}: {e}")
+            logger.debug(f"Error checking robots.txt for {url}: {e}", exc_info=True)
             return True
 
     async def _get_crawl_delay(self, url: str) -> float:
@@ -274,6 +280,9 @@ class DefaultUrlCrawler:
                 cache = await self._fetch_and_cache_robots(domain_root)
             return cache.crawl_delay
         except Exception:
+            logger.debug(
+                "Falling back after error in DefaultUrlCrawler._get_crawl_delay", exc_info=True
+            )
             return self.crawl_delay
 
     async def _fetch_httpx(self, url: str) -> str:
@@ -317,7 +326,7 @@ class DefaultUrlCrawler:
                 await asyncio.sleep(delay)
 
     async def _render_with_playwright(
-        self, url: str, js_wait: float = 1.0, timeout: Optional[float] = None
+        self, url: str, js_wait: float = 1.0, timeout: float | None = None
     ) -> str:
         """Fetch and render a URL using Playwright for JavaScript content.
 
@@ -381,7 +390,7 @@ class DefaultUrlCrawler:
 
     async def fetch_urls(
         self,
-        urls: Union[str, List[str]],
+        urls: str | list[str],
         *,
         use_playwright: bool = False,
         playwright_js_wait: float = 0.8,
@@ -407,10 +416,10 @@ class DefaultUrlCrawler:
         elif not isinstance(urls, list):
             raise ValueError(f"Invalid urls type: {type(urls)}")
 
-        async def _task(url: str):
+        async def _task(url: str, position: int):
             async with self._sem:
                 try:
-                    logger.info(f"Processing URL: {url}")
+                    logger.info(f"Processing URL {position} of {len(urls)}")
 
                     # SSRF guard: validate the target before any outbound request
                     # (including the robots.txt fetch) so internal/reserved hosts
@@ -441,20 +450,18 @@ class DefaultUrlCrawler:
 
                     return url, html
 
-                except Exception as e:
-                    logger.error(f"Error processing {url}: {e}")
+                except Exception:
+                    logger.exception(f"Error processing {url}")
                     return url, ""
 
         logger.info(f"Creating {len(urls)} async tasks for concurrent fetching")
-        tasks = [asyncio.create_task(_task(u)) for u in urls]
+        tasks = [asyncio.create_task(_task(u, position)) for position, u in enumerate(urls, 1)]
         results = {}
-        completed = 0
         total = len(tasks)
 
-        for coro in asyncio.as_completed(tasks):
+        for completed, coro in enumerate(asyncio.as_completed(tasks), 1):
             url, html = await coro
             results[url] = html
-            completed += 1
             logger.info(f"Progress: {completed}/{total} URLs processed")
 
         logger.info(f"Completed fetching all {len(results)} URL(s)")

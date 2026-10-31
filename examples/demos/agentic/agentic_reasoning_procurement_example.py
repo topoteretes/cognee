@@ -1,8 +1,20 @@
+"""Run scoped recalls per node_set category, then have an LLM justify a procurement decision.
+
+Vendor conversations, purchase history and procurement policies from the bundled data folder are
+remembered under separate node sets. Each research question is recalled with node_name=[category]
+(GRAPH_COMPLETION, top_k=30), and the collected Q&A pairs are handed to
+LLMGateway.acreate_structured_output for the final vendor recommendation, printed last.
+
+Requires: LLM_API_KEY; the script pins GRAPH_DATABASE_PROVIDER=ladybug (node sets need Ladybug
+or Neo4j).
+Run: uv run python examples/demos/agentic/agentic_reasoning_procurement_example.py
+"""
+
 # ruff: noqa: E402
 import asyncio
-from pathlib import Path
 import logging
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -13,10 +25,10 @@ load_dotenv()
 # assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
 os.environ["GRAPH_DATABASE_PROVIDER"] = "ladybug"
 
-import cognee  # noqa: E402
-from cognee import SearchType  # noqa: E402
-from cognee.infrastructure.llm.LLMGateway import LLMGateway  # noqa: E402
-from cognee.shared.logging_utils import setup_logging  # noqa: E402
+import cognee
+from cognee import SearchType
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.shared.logging_utils import setup_logging
 
 
 class ProcurementMemorySystem:

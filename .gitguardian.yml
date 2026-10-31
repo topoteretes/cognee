@@ -9,7 +9,6 @@ secret:
     - "examples/**"
     - "tests/**"
     - "docker-compose.yml"
-    - "deployment/helm/docker-compose-helm.yml"
 
   # Ignore specific detector types (test/CI credentials, not real secrets)
   ignored-detectors:

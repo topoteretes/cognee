@@ -11,19 +11,20 @@ import pytest
 import pytest_asyncio
 
 try:
-    import libsql_experimental  # noqa: F401
+    import turso
 
+    from cognee.infrastructure.databases.turso import get_turso_config
     from cognee.infrastructure.databases.vector.turso.TursoVectorAdapter import (
         TursoVectorAdapter,
     )
     from cognee.infrastructure.engine import DataPoint
 
-    HAS_LIBSQL = True
-except ModuleNotFoundError:
-    HAS_LIBSQL = False
+    HAS_TURSO = True
+except ImportError:
+    HAS_TURSO = False
 
 
-pytestmark = pytest.mark.skipif(not HAS_LIBSQL, reason="libsql-experimental not installed")
+pytestmark = pytest.mark.skipif(not HAS_TURSO, reason="pyturso not installed")
 
 DIM = 4
 
@@ -50,7 +51,7 @@ class _FakeEmbeddingEngine:
         return out
 
 
-if HAS_LIBSQL:
+if HAS_TURSO:
 
     class _Doc(DataPoint):
         text: str
@@ -158,6 +159,27 @@ async def test_nodeset_and_filtering(adapter):
 
 
 @pytest.mark.asyncio
+async def test_nodeset_filtering_matches_escaped_names(adapter):
+    # Payloads are stored with json.dumps, so these names are JSON escapes in the
+    # stored text; the filter must still match them, in both modes.
+    names = ["Bücher", 'say "hi"', r"C:\docs", "session:u1:café"]
+    await adapter.create_data_points("DocumentChunk_text", [_Doc(text="t", belongs_to_set=names)])
+
+    async def hits(node_name, operator):
+        return await adapter.search(
+            "DocumentChunk_text",
+            query_text="t",
+            limit=None,
+            node_name=node_name,
+            node_name_filter_operator=operator,
+        )
+
+    for name in names:
+        assert len(await hits([name], "OR")) == 1, name
+    assert len(await hits(names, "AND")) == 1
+
+
+@pytest.mark.asyncio
 async def test_retrieve_by_ids(adapter):
     docs = _docs()
     await adapter.create_data_points("DocumentChunk_text", docs)
@@ -211,6 +233,20 @@ async def test_remove_tags_preserves_untagged_rows(adapter):
 
 
 @pytest.mark.asyncio
+async def test_remove_tags_keeps_escaped_tags_intact(adapter):
+    # Payloads are stored with json.dumps, so non-ASCII, quotes and backslashes
+    # are JSON escapes in the stored text; the surviving tags must come back decoded.
+    doc = _Doc(text="tagged", belongs_to_set=["Bücher", 'say "hi"', r"C:\docs", "drop"])
+    await adapter.create_data_points("DocumentChunk_text", [doc])
+
+    await adapter.remove_belongs_to_set_tags(["drop"])
+    await adapter.remove_belongs_to_set_tags(["Bücher"])
+
+    row = (await adapter.retrieve("DocumentChunk_text", [doc.id]))[0]
+    assert row.payload["belongs_to_set"] == ['say "hi"', r"C:\docs"]
+
+
+@pytest.mark.asyncio
 async def test_delete_data_points(adapter):
     docs = _docs()
     await adapter.create_data_points("DocumentChunk_text", docs)
@@ -229,8 +265,20 @@ async def test_batch_search(adapter):
 
 
 @pytest.mark.asyncio
-async def test_prune_drops_all_collections(adapter):
-    await adapter.create_data_points("DocumentChunk_text", _docs())
-    await adapter.prune()
-    assert await adapter.has_collection("DocumentChunk_text") is False
-    assert await adapter.get_table_names() == []
+@pytest.mark.parametrize("journal_mode", ["wal", "mvcc"])
+async def test_prune_drops_all_collections(tmp_path, monkeypatch, journal_mode):
+    # In mvcc the engine keeps its own __turso_internal_* table in sqlite_master;
+    # prune must skip it rather than fail with "Cannot drop system table".
+    monkeypatch.setenv("TURSO_JOURNAL_MODE", journal_mode)
+    get_turso_config.cache_clear()
+    instance = TursoVectorAdapter(
+        url=str(tmp_path / "turso_test.db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
+    )
+    try:
+        await instance.create_data_points("DocumentChunk_text", _docs())
+        await instance.prune()
+        assert await instance.has_collection("DocumentChunk_text") is False
+        assert await instance.get_table_names() == []
+    finally:
+        await instance.close()
+        get_turso_config.cache_clear()

@@ -1,9 +1,10 @@
 from uuid import UUID
-from typing import Optional
-from sqlalchemy import select, func
+
+from sqlalchemy import func, select
 from sqlalchemy.orm import aliased
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+
 from ..models import PipelineRun
 
 

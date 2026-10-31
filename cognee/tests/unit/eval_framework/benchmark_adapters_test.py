@@ -1,13 +1,14 @@
+from unittest.mock import mock_open, patch
+
 import pytest
+
+from cognee.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
 from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
 from cognee.eval_framework.benchmark_adapters.logistics_system_adapter import (
     LogisticsSystemAdapter,
 )
 from cognee.eval_framework.benchmark_adapters.musique_adapter import MusiqueQAAdapter
-from cognee.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
 from cognee.eval_framework.benchmark_adapters.twowikimultihop_adapter import TwoWikiMultihopAdapter
-from unittest.mock import patch, mock_open
-
 
 MOCK_JSONL_DATA = """\
 {"id": "1", "question": "What is AI?", "answer": "Artificial Intelligence", "paragraphs": [{"paragraph_text": "AI is a field of computer science."}]}

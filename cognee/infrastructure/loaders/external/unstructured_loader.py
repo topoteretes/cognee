@@ -1,18 +1,20 @@
+import importlib.util
 from typing import Any
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
+from cognee.shared.logging_utils import get_logger
 
-try:
-    from unstructured.partition.auto import partition  # ty:ignore[unresolved-import]
-except ImportError as e:
+# Only check that unstructured is installed here; the actual import happens in
+# load(). Importing unstructured probes libmagic through python-magic, which can
+# hang on Windows when a broken libmagic DLL is on PATH, and that must never be
+# part of `import cognee`.
+if importlib.util.find_spec("unstructured") is None:
     raise ImportError(
         "unstructured is required for document processing. Install with: pip install unstructured"
-    ) from e
+    )
 
 logger = get_logger(__name__)
 
@@ -68,10 +70,9 @@ class UnstructuredLoader(LoaderInterface):
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """Check if file can be handled by this loader."""
         # Check file extension
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
-            return True
-
-        return False
+        return bool(
+            extension in self.supported_extensions and mime_type in self.supported_mime_types
+        )
 
     async def load(
         self, file_path: str, strategy: str = "auto", **kwargs: Any
@@ -91,6 +92,8 @@ class UnstructuredLoader(LoaderInterface):
             ImportError: If unstructured is not installed
             Exception: If document processing fails
         """
+        from unstructured.partition.auto import partition  # ty:ignore[unresolved-import]
+
         try:
             logger.info(f"Processing document: {file_path}")
 
@@ -127,4 +130,4 @@ class UnstructuredLoader(LoaderInterface):
 
         except Exception as e:
             logger.error(f"Failed to process document {file_path}: {e}")
-            raise Exception(f"Document processing failed: {e}") from e
+            raise RuntimeError(f"Document processing failed: {e}") from e

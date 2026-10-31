@@ -1,7 +1,9 @@
 """Test for the config.set method to verify Issue #2047 fix."""
 
-import pytest
 import inspect
+
+import pytest
+
 from cognee.api.v1.config.config import config
 from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
 

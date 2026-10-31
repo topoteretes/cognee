@@ -1,8 +1,9 @@
 from functools import lru_cache
+
 from fastapi_users.authentication import AuthenticationBackend, JWTStrategy
 
-from cognee.modules.users.authentication.api_key.get_api_key_transport import get_api_key_transport
 from cognee.modules.users.authentication.api_key.api_key_jwt_strategy import ApiKeyJWTStrategy
+from cognee.modules.users.authentication.api_key.get_api_key_transport import get_api_key_transport
 
 
 @lru_cache

@@ -1,14 +1,28 @@
-"""Integration test that runs the real enola binary; skipped when not installed."""
+"""Integration test that runs the real enola binary; skipped when not installed.
 
-import shutil
+"Installed" is judged the way cognee itself resolves the binary — ENOLA_PATH,
+the environment's scripts directory (the ``enola-cli`` wheel), or PATH.
+"""
 
 import pytest
 
-from cognee.tasks.code_graph.enola import parse_enola_snapshot, run_enola_generate
-
-pytestmark = pytest.mark.skipif(
-    shutil.which("enola") is None, reason="enola binary is not installed"
+from cognee.tasks.code_graph.enola import (
+    EnolaNotInstalledError,
+    find_enola_binary,
+    parse_enola_snapshot,
+    run_enola_generate,
 )
+
+
+def _enola_available() -> bool:
+    try:
+        find_enola_binary()
+        return True
+    except EnolaNotInstalledError:
+        return False
+
+
+pytestmark = pytest.mark.skipif(not _enola_available(), reason="enola binary is not installed")
 
 
 @pytest.mark.asyncio

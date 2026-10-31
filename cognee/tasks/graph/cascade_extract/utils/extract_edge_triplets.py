@@ -1,13 +1,11 @@
-from typing import List
-
-from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.shared.data_models import KnowledgeGraph
+from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.root_dir import get_absolute_path
+from cognee.shared.data_models import KnowledgeGraph
 
 
 async def extract_edge_triplets(
-    content: str, nodes: List[str], relationship_names: List[str], n_rounds: int = 2
+    content: str, nodes: list[str], relationship_names: list[str], n_rounds: int = 2
 ) -> KnowledgeGraph:
     """Creates a knowledge graph by identifying relationships between the provided nodes."""
     final_graph = KnowledgeGraph(nodes=[], edges=[])

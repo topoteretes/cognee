@@ -1,5 +1,5 @@
 import types
-from uuid import uuid4, uuid5, NAMESPACE_OID
+from uuid import NAMESPACE_OID, uuid4, uuid5
 
 import pytest
 
@@ -132,3 +132,12 @@ async def test_api_code_query_rejects_non_code_search(api_search_mod):
             user=_make_user(),
             code_query={"operation": "explore"},
         )
+
+
+def test_search_dto_carries_session_id_in_both_casings():
+    """/v1/search previously dropped the session_id the cloud client already sends."""
+    from cognee.api.v1.search.routers.get_search_router import SearchPayloadDTO
+
+    assert SearchPayloadDTO(query="q", sessionId="s1").session_id == "s1"
+    assert SearchPayloadDTO(query="q", session_id="s1").session_id == "s1"
+    assert SearchPayloadDTO(query="q").session_id is None

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import gc
 import os
+import sys
 
 import pytest
 
@@ -29,16 +30,29 @@ from cognee.infrastructure.databases.graph.get_graph_engine import (
     graph_engine_cache,
 )
 
+# These tests construct subprocess workers explicitly, so the
+# *_SUBPROCESS_ENABLED=false the Windows CI jobs set cannot keep them from
+# spawning. On Windows the spawned child intermittently deadlocks at
+# interpreter startup (a python.exe frozen at ~3.8 MB that never signals
+# ready) and pytest hangs on it until the job timeout -- observed with the
+# watchdog on runs 33643650, 33648260941 and 33729891452. Tracked as
+# SDK-540; unskip these when its fix lands. Full coverage continues on the
+# ubuntu and macOS legs.
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="explicit worker spawn deadlocks intermittently on Windows (SDK-540)",
+)
+
 
 def _config(tmp_path) -> dict:
-    return dict(
-        graph_database_provider="ladybug",
-        graph_file_path=os.path.join(str(tmp_path), "graphdir"),
-        graph_database_subprocess_enabled=True,
+    return {
+        "graph_database_provider": "ladybug",
+        "graph_file_path": os.path.join(str(tmp_path), "graphdir"),
+        "graph_database_subprocess_enabled": True,
         # Small pools keep the worker cheap to spawn in tests.
-        kuzu_buffer_pool_size=1 << 28,
-        kuzu_max_db_size=1 << 30,
-    )
+        "kuzu_buffer_pool_size": 1 << 28,
+        "kuzu_max_db_size": 1 << 30,
+    }
 
 
 async def _evict_after_use(cfg, *, use_async):

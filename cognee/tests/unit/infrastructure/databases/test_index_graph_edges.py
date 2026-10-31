@@ -1,5 +1,7 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+
 from cognee.tasks.storage.index_graph_edges import create_edge_type_datapoints, index_graph_edges
 
 
@@ -103,12 +105,14 @@ def test_create_edge_type_datapoints_skips_empty_retrieval_text():
 @pytest.mark.asyncio
 async def test_index_graph_edges_initialization_error():
     """Test that index_graph_edges raises a RuntimeError if initialization fails."""
-    with patch.dict(
-        index_graph_edges.__globals__,
-        {
-            "get_graph_engine": AsyncMock(side_effect=Exception("Graph engine failed")),
-            "get_vector_engine_async": AsyncMock(return_value=AsyncMock()),
-        },
+    with (
+        patch.dict(
+            index_graph_edges.__globals__,
+            {
+                "get_graph_engine": AsyncMock(side_effect=Exception("Graph engine failed")),
+                "get_vector_engine_async": AsyncMock(return_value=AsyncMock()),
+            },
+        ),
+        pytest.raises(RuntimeError, match="Graph edge indexing error"),
     ):
-        with pytest.raises(RuntimeError, match="Graph edge indexing error"):
-            await index_graph_edges()
+        await index_graph_edges()

@@ -1,6 +1,10 @@
 import { CogneeInstance } from "../instances/types";
 import { getPipelineSettingsFromStorage } from "../configuration/pipelineSettings";
 
+// Same query class as recall (HYBRID_COMPLETION on a large graph) — needs the
+// same headroom over the client's 30s default. See CLO-333.
+const SEARCH_TIMEOUT_MS = 120_000;
+
 export default function searchDataset(instance: CogneeInstance, request: SearchRequest) {
   const settings = getPipelineSettingsFromStorage();
   const requestWithDefaults = {
@@ -16,6 +20,7 @@ export default function searchDataset(instance: CogneeInstance, request: SearchR
     headers: {
       "Content-Type": "application/json",
     },
+    timeoutMs: SEARCH_TIMEOUT_MS,
   }).then((response) => response.json());
 }
 

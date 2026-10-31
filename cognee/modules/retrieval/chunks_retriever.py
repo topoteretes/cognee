@@ -1,9 +1,15 @@
-from typing import Any, Optional, List, Union
-from cognee.shared.logging_utils import get_logger
+from typing import Any
+
 from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.modules.retrieval.utils.conflict_context import (
+    attach_chunk_conflicts,
+    public_chunk_payload,
+    render_chunk_context,
+)
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ChunksRetriever")
 
@@ -20,10 +26,15 @@ class ChunksRetriever(BaseRetriever):
     not given.
     """
 
+    # Chunk search returns raw payloads and never calls an LLM, so the conversational
+    # session-turn analysis would add a pre-retrieval LLM round trip to an otherwise
+    # sub-second, deterministic path. Opt out, like the other non-generative retrievers.
+    supports_session_turn_preparation = False
+
     def __init__(
         self,
-        top_k: Optional[int] = 5,
-        node_name: Optional[List[str]] = None,
+        top_k: int | None = 5,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         """
@@ -46,7 +57,7 @@ class ChunksRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
-    ) -> Union[List[str], List[dict]]:
+    ) -> list[str] | list[dict]:
         """
         Generates a completion using document chunks context.
         In case of the Chunks Retriever, we do not generate a completion, we just return
@@ -62,11 +73,16 @@ class ChunksRetriever(BaseRetriever):
         Returns:
         --------
 
-            - List[dict]: A list of payloads of found chunks.
+            - List[dict]: A list of payloads of found chunks. Each payload carries the
+              vector search ``score`` of the chunk: the raw backend distance (cosine
+              distance for built-in adapters), where a lower value is a better match.
         """
         # TODO: Do we want to generate a completion using LLM here?
         if retrieved_objects:
-            chunk_payloads = [found_chunk.payload for found_chunk in retrieved_objects]
+            chunk_payloads = [
+                public_chunk_payload(found_chunk) | {"score": found_chunk.score}
+                for found_chunk in retrieved_objects
+            ]
             return chunk_payloads
         else:
             return []
@@ -88,8 +104,8 @@ class ChunksRetriever(BaseRetriever):
               empty string if none are found.
         """
         if retrieved_objects:
-            chunk_payload_texts = [found_chunk.payload["text"] for found_chunk in retrieved_objects]
-            return "\n".join(chunk_payload_texts)
+            payloads = [chunk.payload for chunk in retrieved_objects]
+            return render_chunk_context(payloads)
         else:
             return ""
 
@@ -121,10 +137,10 @@ class ChunksRetriever(BaseRetriever):
                 node_name=self.node_name,
                 node_name_filter_operator=self.node_name_filter_operator,
             )
-            logger.info(f"Found {len(found_chunks)} chunks from vector search")
-
-            return found_chunks
-
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error
+
+        logger.info(f"Found {len(found_chunks)} chunks from vector search")
+        await attach_chunk_conflicts(found_chunks, graph_engine=unified.graph)
+        return found_chunks

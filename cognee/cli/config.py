@@ -17,7 +17,7 @@ COMMAND_DESCRIPTIONS = {
     "agents": "Manage agents (create, list, get, delete, register, unregister, connections)",
     "sessions": "View conversation sessions and Q&A history",
     "feedback": "Add or remove feedback on session Q&A entries",
-    "memify": "Run the memory enrichment pipeline on a dataset",
+    "memify": "Deprecated: run the memory enrichment pipeline (use improve)",
     "remember": "Ingest data and build the knowledge graph in a single call",
     "recall": "Search the knowledge graph for relevant information",
     "improve": "Enrich an existing knowledge graph with additional context and rules",
@@ -31,6 +31,8 @@ COMMAND_DESCRIPTIONS = {
     "current": "Show each database's stamped migration revision (and last failure, if any)",
     "push": "Upload a local dataset's knowledge graph to Cognee Cloud",
     "report": "Generate a Graph Insight Report (hub nodes, surprising links, confidence tags, suggested questions)",
+    "demo": "Load a bundled demo knowledge graph and search it — no API key needed",
+    "doctor": "Diagnose configuration and local services (config traps, databases, providers)",
 }
 
 # Search type choices
@@ -39,13 +41,19 @@ SEARCH_TYPE_CHOICES = [
     "HYBRID_COMPLETION",
     "RAG_COMPLETION",
     "CHUNKS",
+    "CHUNKS_LEXICAL",
     "SUMMARIES",
     "CODE",
     "CYPHER",
     "GRAPH_REPORT",
+    "BROAD",
+    "SKILLS",
+    "TEMPORAL",
 ]
 
 DEFAULT_SEARCH_TYPE = "HYBRID_COMPLETION"
+# Label for a recall with no -t: the SDK or server picks the type.
+AUTO_QUERY_TYPE = "auto"
 COMPLETION_SEARCH_TYPES = frozenset({"GRAPH_COMPLETION", "HYBRID_COMPLETION", "RAG_COMPLETION"})
 
 # Chunker choices

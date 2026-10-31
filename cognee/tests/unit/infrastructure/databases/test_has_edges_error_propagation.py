@@ -11,8 +11,9 @@ The adapter is instantiated via ``__new__`` to bypass the real database
 connection — ``has_edges`` only depends on ``self.query``.
 """
 
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
 
 from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
 
@@ -25,7 +26,8 @@ def _adapter_with_query(query_mock) -> LadybugAdapter:
 
 @pytest.mark.asyncio
 async def test_has_edges_returns_existing_edges_on_success():
-    adapter = _adapter_with_query(AsyncMock(return_value=[("n1", "n2", "rel")]))
+    # Rows as the edge lookup returns them: from id, to id, relationship, properties.
+    adapter = _adapter_with_query(AsyncMock(return_value=[("n1", "n2", "rel", "{}")]))
     assert await adapter.has_edges([("n1", "n2", "rel")]) == [("n1", "n2", "rel")]
 
 

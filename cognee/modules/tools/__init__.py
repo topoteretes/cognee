@@ -9,7 +9,7 @@ from cognee.modules.tools.registry import (
 )
 
 # Import built-ins to register them at package load time.
-from cognee.modules.tools import builtin as _builtin  # noqa: F401
+from cognee.modules.tools import builtin as _builtin
 
 __all__ = [
     "add_skills",

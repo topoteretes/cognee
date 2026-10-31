@@ -1,35 +1,32 @@
 from uuid import UUID
-from sqlalchemy import select, func
-from cognee.infrastructure.databases.relational import get_relational_engine
-from ..models import PipelineRun
-from sqlalchemy.orm import aliased
+
+from ..methods import get_latest_pipeline_runs_by_datasets
 
 
 async def get_pipeline_status(dataset_ids: list[UUID], pipeline_name: str):
-    db_engine = get_relational_engine()
+    runs = await get_latest_pipeline_runs_by_datasets(dataset_ids, pipeline_name)
 
-    async with db_engine.get_async_session() as session:
-        query = (
-            select(
-                PipelineRun,
-                func.row_number()
-                .over(
-                    partition_by=PipelineRun.dataset_id,
-                    order_by=PipelineRun.created_at.desc(),
-                )
-                .label("rn"),
-            )
-            .filter(PipelineRun.dataset_id.in_(dataset_ids))
-            .filter(PipelineRun.pipeline_name == pipeline_name)
-            .subquery()
-        )
+    return {str(dataset_id): run.status for dataset_id, run in runs.items()}
 
-        aliased_pipeline_run = aliased(PipelineRun, query)
 
-        latest_runs = select(aliased_pipeline_run).filter(query.c.rn == 1)
+async def get_pipeline_progress(dataset_ids: list[UUID], pipeline_name: str):
+    """Same latest-run lookup as get_pipeline_status, plus the in-flight
+    progress snapshot (see log_pipeline_run_progress). A separate function —
+    and a separate /status/progress endpoint — rather than a flag on
+    get_pipeline_status/get_status, so neither call's response shape ever
+    branches at runtime on how it was called.
 
-        runs = (await session.execute(latest_runs)).scalars().all()
+    run_info["progress"] is written incrementally as items/stages complete
+    (see run_tasks.py / run_tasks_data_item.py); it is only present while a
+    run is STARTED, so absence just means "no progress ticks yet" rather
+    than an error.
+    """
+    runs = await get_latest_pipeline_runs_by_datasets(dataset_ids, pipeline_name)
 
-        pipeline_statuses = {str(run.dataset_id): run.status for run in runs}
-
-        return pipeline_statuses
+    return {
+        str(dataset_id): {
+            "status": run.status,
+            "progress": (run.run_info or {}).get("progress"),
+        }
+        for dataset_id, run in runs.items()
+    }

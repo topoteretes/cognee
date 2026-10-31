@@ -1,13 +1,14 @@
 import asyncio
 import os
 from unittest.mock import patch
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
-    llm_rate_limiter,
-)
+
 from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
+    llm_rate_limiter,
+)
+from cognee.shared.logging_utils import get_logger
 
 
 async def test_rate_limiting_realistic():

@@ -1,13 +1,15 @@
 from types import SimpleNamespace
-from sqlalchemy.orm import selectinload
+
 from sqlalchemy.exc import NoResultFound, OperationalError
 from sqlalchemy.future import select
-from cognee.modules.users.models import User
+from sqlalchemy.orm import selectinload
+
 from cognee.base_config import get_base_config
-from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods.create_default_user import create_default_user
+from cognee.modules.users.models import User
 
 
 async def get_default_user() -> User:

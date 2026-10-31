@@ -1,19 +1,22 @@
 import os
 import pathlib
+
 import cognee
 from cognee.infrastructure.files.storage import get_storage_config
-from cognee.modules.search.operations import get_history
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.models import Data
+from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
 async def test_local_file_deletion(data_text, file_location, dataset_1_id, dataset_2_id):
-    from sqlalchemy import select
     import hashlib
+
+    from sqlalchemy import select
+
     from cognee.infrastructure.databases.relational import get_relational_engine
 
     engine = get_relational_engine()
@@ -218,7 +221,14 @@ async def test_vector_nodeset_filtering_retriever_integration():
 
 async def main():
     cognee.config.set_vector_db_config(
-        {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "pgvector"}
+        {
+            "vector_db_url": "",
+            "vector_db_key": "",
+            "vector_db_provider": "pgvector",
+            # Derived from the provider only when the provider comes from the
+            # environment, so a config dict has to name it.
+            "vector_dataset_database_handler": "pgvector",
+        }
     )
     cognee.config.set_relational_db_config(
         {
@@ -340,6 +350,22 @@ async def main():
         dataset_1_id=add_1_payload.dataset_id,
         dataset_2_id=add_2_payload.dataset_id,
     )
+
+    # remember() / recall() reach this store the way an SDK caller does;
+    # everything above drives add() / cognify() / search() instead. Kept after
+    # the search-history assert, since recall() adds to that history too.
+    remember_dataset = "store_remember_check"
+    await cognee.remember(
+        ["Cognee keeps embeddings in the vector store and entities in the graph store."],
+        dataset_name=remember_dataset,
+        self_improvement=False,
+    )
+    recall_results = await cognee.recall(
+        query_text="Where does cognee keep embeddings?",
+        query_type=SearchType.CHUNKS,
+        datasets=[remember_dataset],
+    )
+    assert recall_results, "recall() returned nothing after remember() on PGVector"
 
     await cognee.prune.prune_data()
     data_root_directory = get_storage_config()["data_root_directory"]

@@ -11,8 +11,9 @@ datasets.empty_dataset.
 
 import os
 import pathlib
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 import cognee
 from cognee.api.v1.datasets import datasets
@@ -23,8 +24,7 @@ from cognee.modules.graph.methods.get_formatted_graph_data import (
     get_formatted_graph_data,
 )
 from cognee.modules.users.methods import get_default_user
-from cognee.shared.data_models import KnowledgeGraph, Node, Edge, SummarizedContent
-
+from cognee.shared.data_models import Edge, KnowledgeGraph, Node, SummarizedContent
 
 GET_DATASET_QUEUE_SETTINGS = (
     "cognee.infrastructure.databases.dataset_queue.queue.get_dataset_queue_settings"
@@ -91,6 +91,9 @@ async def test_max_concurrent_one_does_not_accumulate_slots(mock_llm):
     with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
         mock_settings.return_value.enabled = True
         mock_settings.return_value.max_concurrent = 1
+        # A MagicMock converts to 1.0, which would run the idle reaper with a
+        # one-second TTL; the queue's own default keeps it out of this test.
+        mock_settings.return_value.idle_ttl_seconds = 600.0
 
         # Reset singleton so the patched settings take effect.
         dataset_queue._instance = None
@@ -111,7 +114,7 @@ async def test_max_concurrent_one_does_not_accumulate_slots(mock_llm):
 
         # ---- cognify ----------------------------------------------------
         cognify_result = await cognee.cognify()
-        dataset_id = list(cognify_result.keys())[0]
+        dataset_id = next(iter(cognify_result.keys()))
         _assert_queue_empty(queue, "cognify")
 
         # ---- get_formatted_graph_data -----------------------------------

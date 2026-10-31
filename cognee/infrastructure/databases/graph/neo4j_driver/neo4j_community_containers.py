@@ -28,14 +28,13 @@ This module deliberately has no neo4j / heavy imports so it is safe to import
 from the eagerly-loaded dataset-database-handler registry.
 """
 
+import asyncio
 import os
 import shutil
 import socket
 import subprocess
 import threading
-import asyncio
 from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple
 
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
@@ -85,7 +84,7 @@ def get_startup_timeout_seconds() -> float:
     return float(os.environ.get("NEO4J_COMMUNITY_STARTUP_TIMEOUT", "120"))
 
 
-def check_docker_available() -> Tuple[bool, str]:
+def check_docker_available() -> tuple[bool, str]:
     """Check that the Docker CLI exists and the daemon responds.
 
     Same preflight contract as ``cognee.api.v1.ui.ui._check_docker_available``
@@ -100,7 +99,7 @@ def check_docker_available() -> Tuple[bool, str]:
         )
 
     try:
-        result = subprocess.run(["docker", "info"], capture_output=True, timeout=15)
+        result = subprocess.run(["docker", "info"], capture_output=True, timeout=15, check=False)
     except subprocess.TimeoutExpired:
         return False, (
             "Docker daemon did not respond within 15 seconds. "
@@ -147,11 +146,11 @@ def bolt_url_for_port(host_port: int) -> str:
     return f"bolt://localhost:{host_port}"
 
 
-def _run_docker_sync(args: List[str], timeout: float) -> subprocess.CompletedProcess:
-    return subprocess.run(["docker", *args], capture_output=True, timeout=timeout)
+def _run_docker_sync(args: list[str], timeout: float) -> subprocess.CompletedProcess:
+    return subprocess.run(["docker", *args], capture_output=True, timeout=timeout, check=False)
 
 
-async def _docker(args: List[str], timeout: float = DOCKER_COMMAND_TIMEOUT_SECONDS) -> str:
+async def _docker(args: list[str], timeout: float = DOCKER_COMMAND_TIMEOUT_SECONDS) -> str:
     """Run a docker CLI command off-loop and return stdout; raise on failure."""
     result = await asyncio.to_thread(_run_docker_sync, args, timeout)
     if result.returncode != 0:
@@ -183,8 +182,8 @@ class Neo4jCommunityContainerManager:
 
     def __init__(self):
         # container name -> bolt url, most recently used last.
-        self._recency: "OrderedDict[str, str]" = OrderedDict()
-        self._url_to_container: Dict[str, str] = {}
+        self._recency: OrderedDict[str, str] = OrderedDict()
+        self._url_to_container: dict[str, str] = {}
         # Guards only the fast in-memory maps; never held across awaits.
         self._registry_lock = threading.Lock()
 
@@ -194,18 +193,18 @@ class Neo4jCommunityContainerManager:
             self._recency[container_name] = bolt_url
             self._url_to_container[bolt_url] = container_name
 
-    def _forget(self, container_name: str, bolt_url: Optional[str] = None) -> None:
+    def _forget(self, container_name: str, bolt_url: str | None = None) -> None:
         with self._registry_lock:
             registered_url = self._recency.pop(container_name, None)
             for url in {registered_url, bolt_url}:
                 if url is not None and self._url_to_container.get(url) == container_name:
                     self._url_to_container.pop(url, None)
 
-    def container_for_url(self, bolt_url: str) -> Optional[str]:
+    def container_for_url(self, bolt_url: str) -> str | None:
         with self._registry_lock:
             return self._url_to_container.get(bolt_url)
 
-    async def _container_state(self, container_name: str) -> Optional[str]:
+    async def _container_state(self, container_name: str) -> str | None:
         """Return docker's state string ("running", "exited", ...) or None
         when no container with that name exists."""
         result = await asyncio.to_thread(
@@ -217,7 +216,7 @@ class Neo4jCommunityContainerManager:
             return None
         return result.stdout.decode("utf-8", errors="replace").strip()
 
-    async def _running_managed_containers(self) -> List[str]:
+    async def _running_managed_containers(self) -> list[str]:
         output = await _docker(
             [
                 "ps",
@@ -366,7 +365,7 @@ class Neo4jCommunityContainerManager:
         self._touch(container_name, bolt_url)
 
     async def remove_container(
-        self, container_name: str, volume_name: str, bolt_url: Optional[str] = None
+        self, container_name: str, volume_name: str, bolt_url: str | None = None
     ) -> None:
         """Remove the dataset's container and its data volume (teardown)."""
         self._forget(container_name, bolt_url)
@@ -395,7 +394,7 @@ class Neo4jCommunityContainerManager:
         )
 
 
-_container_manager: Optional[Neo4jCommunityContainerManager] = None
+_container_manager: Neo4jCommunityContainerManager | None = None
 _container_manager_lock = threading.Lock()
 
 

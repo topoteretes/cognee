@@ -1,19 +1,18 @@
 import asyncio
-
-from typing import Any, Awaitable, Callable, List, Optional, Union
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import AsyncExitStack
+from contextvars import ContextVar
+from typing import Any
 from uuid import UUID
 
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
-from cognee.modules.users.models import User
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.pipelines.utils import generate_pipeline_id
-from cognee.modules.pipelines.exceptions import PipelineRunFailedError
-from cognee.tasks.ingestion import resolve_data_directories
+from cognee.modules.operations import scrub_error_message
+from cognee.modules.operations.usage_accumulator import operation_usage_scope, parent_run_scope
+from cognee.modules.pipelines.exceptions import AfterRunHookError, PipelineRunFailedError
 from cognee.modules.pipelines.layers.validate_pipeline_tasks import validate_pipeline_tasks
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.PipelineRunInfo import (
@@ -21,32 +20,64 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunErrored,
     PipelineRunStarted,
 )
-from cognee.modules.operations.usage_accumulator import operation_usage_scope, parent_run_scope
 from cognee.modules.pipelines.operations import (
-    log_pipeline_run_start,
     log_pipeline_run_complete,
     log_pipeline_run_error,
+    log_pipeline_run_progress,
+    log_pipeline_run_start,
 )
-from .run_tasks_data_item import run_tasks_data_item
-from ..tasks.task import Task
+from cognee.modules.pipelines.run_ownership import pipeline_run_ownership
+from cognee.modules.pipelines.utils import generate_pipeline_id
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry, telemetry_exception_properties, telemetry_guard
+from cognee.tasks.ingestion import resolve_data_directories
 
+from ..tasks.task import Task
+from .run_tasks_data_item import run_tasks_data_item
+from .run_tasks_with_telemetry import (
+    PIPELINE_RUN_COMPLETED,
+    PIPELINE_RUN_ERRORED,
+    PIPELINE_RUN_STARTED,
+    pipeline_run_telemetry_properties,
+)
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
 
+# Why a caller closed a run it holds paused (close_run_with_cause).
+_close_cause: ContextVar[Exception | None] = ContextVar("pipeline_run_close_cause", default=None)
+
+
+async def close_run_with_cause(run: AsyncGenerator, cause: Exception) -> None:
+    """Close a paused run and record ``cause`` as its failure.
+
+    Closing a run records it errored with ``GeneratorExit``; a caller that
+    stops a run because of a known failure passes it here, so the run's row
+    and its error class name the real cause.
+    """
+    token = _close_cause.set(cause)
+    try:
+        await run.aclose()
+    finally:
+        _close_cause.reset(token)
+
 
 async def run_tasks(
-    tasks: Union[List[Task], Callable[[Any], List[Task]]],
+    tasks: list[Task] | Callable[[Any], list[Task]],
     dataset_id: UUID,
-    data: Optional[List[Any]] = None,
-    user: Optional[User] = None,
+    data: list[Any] | None = None,
+    user: User | None = None,
     pipeline_name: str = "unknown_pipeline",
     incremental_loading: bool = False,
     data_per_batch: int = 20,
-    extras: Optional[dict] = None,
-    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    extras: dict | None = None,
+    rollback_handler: Callable[..., Awaitable[None]] | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = False,
+    after_run_completed: Callable[[], Awaitable[Any]] | None = None,
+    after_items_ran: Callable[[], Awaitable[Any]] | None = None,
 ):
     """Run a pipeline over a dataset as ONE logical run.
 
@@ -56,6 +87,20 @@ async def run_tasks(
     domain-blind). A constant list is just the degenerate resolver; items
     resolved to different lists still share this run's lifecycle — one run
     record, one database context, one rollback, one terminal status.
+
+    ``after_run_completed`` is awaited once the run is recorded and reported
+    complete, still inside this dataset's database context (cognify uses it
+    to compact the vector store, see ``compact_vector_store``). It sits
+    outside the run's error handling: it cannot fail, roll back, or re-mark a
+    run that already completed. An exception it raises propagates to the
+    caller as ``AfterRunHookError``; the run stays recorded as completed.
+
+    ``after_items_ran`` is awaited before it, and also when items of the run failed,
+    whether they reported or raised it. Cognify reconciles the document structure
+    with it, which one failing item must not freeze. On a completed run its error
+    propagates as ``AfterRunHookError`` too. On a failed run the run's own error wins:
+    a raised one goes on with the hook's error as its cause, a reported one is returned
+    and the hook's is logged.
     """
     task_resolver = tasks if callable(tasks) else None
     if not user:
@@ -66,40 +111,63 @@ async def run_tasks(
 
         dataset = await session.get(Dataset, dataset_id)
 
-    pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
-    pipeline_run = await log_pipeline_run_start(
-        pipeline_id, pipeline_name, dataset.id, data, user=user
-    )
-    pipeline_run_id = pipeline_run.pipeline_run_id
-    # getattr (not attribute access) because unit tests stub
-    # log_pipeline_run_start with plain namespaces lacking the field.
-    run_started_at = getattr(pipeline_run, "started_at", None)
+    with pipeline_run_ownership() as ownership:
+        pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
+        pipeline_run = await log_pipeline_run_start(
+            pipeline_id, pipeline_name, dataset.id, user=user, recovery_token=ownership.token
+        )
+        pipeline_run_id = pipeline_run.pipeline_run_id
+        # getattr (not attribute access) because unit tests stub
+        # log_pipeline_run_start with plain namespaces lacking the field.
+        run_started_at = getattr(pipeline_run, "started_at", None)
 
-    yield PipelineRunStarted(
-        pipeline_run_id=pipeline_run_id,
-        dataset_id=dataset.id,
-        dataset_name=dataset.name,
-        payload=data,
-    )
-
-    # Note: Setting of global context has to be done after yielding PipelineRunStarted due to running in
-    #       background mode requiring the pipeline run started yield.
-    # parent_run_scope makes nested runs (a pipeline started by one of our
-    # tasks, or a recorded operation called mid-pipeline) parent to THIS run,
-    # mirroring how their tokens chain into run_usage.
-    with operation_usage_scope() as run_usage, parent_run_scope(pipeline_run_id):
-        async with set_database_global_context_variables(
-            dataset.id,
-            dataset.owner_id,
+        telemetry_properties = pipeline_run_telemetry_properties(
+            pipeline_id,
+            pipeline_run_id,
+            user.tenant_id,
+            graph_extractor=(extras or {}).get("graph_extractor"),
             llm_config=llm_config,
             embedding_config=embedding_config,
-        ):
+        ) | {"pipeline_event_scope": "run"}
+        with telemetry_guard():
+            send_telemetry(PIPELINE_RUN_STARTED, user, additional_properties=telemetry_properties)
+
+        run_usage = None
+        database_ready = False
+        run_finished = False
+        items_failed = False
+        async with AsyncExitStack() as stack:
             try:
+                yield PipelineRunStarted(
+                    pipeline_run_id=pipeline_run_id,
+                    dataset_id=dataset.id,
+                    dataset_name=dataset.name,
+                    payload=data,
+                )
+
+                # Background execution resumes this generator in another task. Open
+                # context scopes only after the handoff; the start event is already sent.
+                run_usage = stack.enter_context(operation_usage_scope())
+                stack.enter_context(parent_run_scope(pipeline_run_id))
+                await stack.enter_async_context(
+                    set_database_global_context_variables(
+                        dataset.id,
+                        dataset.owner_id,
+                        llm_config=llm_config,
+                        embedding_config=embedding_config,
+                    )
+                )
+                database_ready = True
                 if not isinstance(data, list):
                     data = [data]
 
                 if data_cache or incremental_loading:
-                    data = await resolve_data_directories(data, user=user, dataset_id=dataset.id)
+                    data = await resolve_data_directories(
+                        data,
+                        user=user,
+                        dataset_id=dataset.id,
+                        branch=(extras or {}).get("repo_branch"),
+                    )
 
                 # Build (item, item_tasks) work pairs: a resolver picks each
                 # item's task list; a plain list applies uniformly. Validate each
@@ -118,42 +186,117 @@ async def run_tasks(
                 # but at most data_per_batch run concurrently at any time.
                 semaphore = asyncio.Semaphore(data_per_batch)
 
-                async def _run_item(data_item, item_tasks):
-                    async with semaphore:
-                        return await run_tasks_data_item(
-                            data_item,
-                            dataset,
-                            item_tasks,
-                            pipeline_name,
-                            pipeline_id,
-                            pipeline_run_id,
-                            PipelineContext(
-                                user=user,
-                                data_item=data_item,
-                                dataset=dataset,
-                                pipeline_run_id=pipeline_run_id,
-                                pipeline_name=pipeline_name,
-                                # Copy per item: a shared dict would let one item's
-                                # ctx.extras mutations leak into every other item.
-                                extras=dict(extras) if isinstance(extras, dict) else {},
-                            ),
-                            user,
-                            incremental_loading,
-                            data_cache,
+                # Item-level progress ("N of M files done"): a single counter shared
+                # across all concurrently-gathered items, guarded by a lock since
+                # multiple _run_item calls finish interleaved under the semaphore.
+                total_items = len(work_items)
+                completed_items = 0
+                completed_items_lock = asyncio.Lock()
+
+                # Throttle the DB write, not just the in-memory count: one insert
+                # per item would mean one extra write transaction per item, on top
+                # of the pipeline's own writes — real contention on the default
+                # SQLite relational backend, which serializes writers behind a
+                # file lock. Capping at ~20 ticks per run keeps /status fresh
+                # enough without adding write pressure proportional to batch size.
+                # The first and last item always persist, so progress starts and
+                # ends visible regardless of how coarse the throttle is.
+                progress_log_every = max(1, total_items // 20)
+
+                # Stage-level progress ("currently: graph extraction"): a shared
+                # dict every item's stage ticks write current_stage into (see
+                # _push_stage_progress in run_tasks_data_item.py). Items run
+                # concurrently through the same task chain, so this is a
+                # best-effort "what stage are things at" signal, not a per-item
+                # value — good enough to answer /status without adding one DB
+                # write per stage per item.
+                progress_state = {"current_stage": None}
+
+                async def _record_item_progress():
+                    # An item that hard-raised (e.g. incremental loading with
+                    # RAISE_INCREMENTAL_LOADING_ERRORS=true, the default) never
+                    # reaches _run_item's `return` — this is called from `finally`
+                    # instead, so completed_items reaches total_items regardless of
+                    # how the item ended. The error/success split itself still
+                    # happens after gather() below; this only tracks "done", not
+                    # outcome.
+                    nonlocal completed_items
+                    async with completed_items_lock:
+                        completed_items += 1
+                        progress_count = completed_items
+
+                    is_first_or_last = progress_count == 1 or progress_count == total_items
+                    if not (is_first_or_last or progress_count % progress_log_every == 0):
+                        return
+
+                    try:
+                        await log_pipeline_run_progress(
+                            pipeline_run_id=pipeline_run_id,
+                            pipeline_id=pipeline_id,
+                            pipeline_name=pipeline_name,
+                            dataset_id=dataset.id,
+                            completed_items=progress_count,
+                            total_items=total_items,
+                            current_stage=progress_state["current_stage"],
+                        )
+                    except Exception:
+                        # Progress reporting must never fail the pipeline run.
+                        logger.exception(
+                            "Failed to log pipeline run progress",
                         )
 
-                gathered = await asyncio.gather(
-                    *[
-                        asyncio.create_task(_run_item(item, item_tasks))
-                        for item, item_tasks in work_items
-                    ],
-                )
+                async def _run_item(data_item, item_tasks):
+                    try:
+                        async with semaphore:
+                            return await run_tasks_data_item(
+                                data_item,
+                                dataset,
+                                item_tasks,
+                                pipeline_name,
+                                pipeline_id,
+                                pipeline_run_id,
+                                PipelineContext(
+                                    user=user,
+                                    data_item=data_item,
+                                    dataset=dataset,
+                                    pipeline_run_id=pipeline_run_id,
+                                    pipeline_name=pipeline_name,
+                                    # Copy per item: a shared dict would let one item's
+                                    # ctx.extras mutations leak into every other item.
+                                    extras=dict(extras) if isinstance(extras, dict) else {},
+                                ),
+                                user,
+                                incremental_loading,
+                                data_cache,
+                                progress_state,
+                            )
+                    finally:
+                        await _record_item_progress()
+
+                item_futures = [
+                    asyncio.create_task(_run_item(item, item_tasks))
+                    for item, item_tasks in work_items
+                ]
+                try:
+                    gathered = await asyncio.gather(*item_futures)
+                except BaseException as gather_error:
+                    # No item may still mutate the graph when rollback begins or
+                    # the run releases its ownership lock.
+                    for future in item_futures:
+                        future.cancel()
+                    await asyncio.gather(*item_futures, return_exceptions=True)
+                    # By default (RAISE_INCREMENTAL_LOADING_ERRORS) a failing item raises
+                    # its own error here; a cancellation is not an item failure.
+                    items_failed = isinstance(gather_error, Exception)
+                    raise
 
                 # Separate successes from unhandled exceptions
                 results = []
+                first_item_error: BaseException | None = None
                 for i, result in enumerate(gathered):
                     if isinstance(result, BaseException):
                         logger.error(f"Item {i} failed: {result}", exc_info=result)
+                        first_item_error = first_item_error or result
                         results.append(
                             {
                                 "run_info": PipelineRunErrored(
@@ -161,6 +304,8 @@ async def run_tasks(
                                     payload=repr(result),
                                     dataset_id=dataset.id,
                                     dataset_name=dataset.name,
+                                    error_class=type(result).__name__,
+                                    error_message=scrub_error_message(result),
                                 ),
                             }
                         )
@@ -173,10 +318,20 @@ async def run_tasks(
                     for result in results
                     if isinstance(result["run_info"], PipelineRunErrored)
                 ]
+                for errored_result in errored_results:
+                    # The non-raising per-item path hands the root cause along
+                    # in the result dict rather than as a gathered exception.
+                    first_item_error = first_item_error or errored_result.get("error")
                 if errored_results:
-                    raise PipelineRunFailedError(
+                    failure = PipelineRunFailedError(
                         message="Pipeline run failed. Data item could not be processed."
                     )
+                    # Keep the underlying exception reachable: the outer handler
+                    # logs/classifies the ROOT cause, not this generic wrapper —
+                    # "Pipeline run failed" as the only recorded error text is
+                    # exactly the observability gap this exists to close.
+                    failure.first_error = first_item_error
+                    raise failure
 
                 # Flush durable storage BEFORE marking the run complete. If a push
                 # fails it must be treated as a failure of this run (rollback +
@@ -196,12 +351,18 @@ async def run_tasks(
                     pipeline_id,
                     pipeline_name,
                     dataset.id,
-                    data,
                     user=user,
                     started_at=run_started_at,
-                    tokens_in=run_usage.tokens_in,
-                    tokens_out=run_usage.tokens_out,
+                    tokens_in=run_usage.tokens_in if run_usage else 0,
+                    tokens_out=run_usage.tokens_out if run_usage else 0,
+                    embedding_tokens=run_usage.embedding_tokens if run_usage else 0,
                 )
+                ownership.closed = True
+                run_finished = True
+                with telemetry_guard():
+                    send_telemetry(
+                        PIPELINE_RUN_COMPLETED, user, additional_properties=telemetry_properties
+                    )
 
                 yield PipelineRunCompleted(
                     pipeline_run_id=pipeline_run_id,
@@ -210,8 +371,12 @@ async def run_tasks(
                     data_ingestion_info=results,
                 )
 
-            except Exception as error:
-                if callable(rollback_handler):
+            except (Exception, asyncio.CancelledError, GeneratorExit) as error:
+                if run_finished:
+                    raise
+                # Rollback needs a successfully opened database context. Failures
+                # during setup and generator closure still receive a terminal record.
+                if database_ready and callable(rollback_handler):
                     try:
                         await rollback_handler(
                             pipeline_run_id=pipeline_run_id,
@@ -223,32 +388,84 @@ async def run_tasks(
                             data_ingestion_info=locals().get("results"),
                             error=error,
                         )
-                    except Exception as rollback_error:
-                        logger.error("Rollback errored: %s", rollback_error, exc_info=True)
+                    except Exception:
+                        logger.exception("Rollback errored")
+
+                # Per-item failures arrive wrapped in a generic
+                # PipelineRunFailedError; record and surface the ROOT cause so
+                # the run record and the yielded run info say what actually
+                # broke ("AuthenticationError: invalid api key"), not
+                # "Pipeline run failed".
+                root_error = getattr(error, "first_error", None) or error
+                if isinstance(error, GeneratorExit):
+                    root_error = _close_cause.get() or root_error
+                with telemetry_guard():
+                    send_telemetry(
+                        PIPELINE_RUN_ERRORED,
+                        user,
+                        additional_properties=telemetry_properties
+                        | telemetry_exception_properties(error),
+                    )
 
                 await log_pipeline_run_error(
                     pipeline_run_id,
                     pipeline_id,
                     pipeline_name,
                     dataset.id,
-                    data,
-                    error,
+                    root_error,
                     user=user,
                     started_at=run_started_at,
-                    tokens_in=run_usage.tokens_in,
-                    tokens_out=run_usage.tokens_out,
+                    tokens_in=run_usage.tokens_in if run_usage else 0,
+                    tokens_out=run_usage.tokens_out if run_usage else 0,
+                    embedding_tokens=run_usage.embedding_tokens if run_usage else 0,
                 )
+
+                ownership.closed = True
+                if isinstance(error, GeneratorExit):
+                    raise
+                items_failed = items_failed or isinstance(error, PipelineRunFailedError)
 
                 yield PipelineRunErrored(
                     pipeline_run_id=pipeline_run_id,
-                    payload=repr(error),
+                    payload=repr(root_error),
                     dataset_id=dataset.id,
                     dataset_name=dataset.name,
                     data_ingestion_info=locals().get(
                         "results"
                     ),  # Returns results if they exist or returns None
+                    error_class=type(root_error).__name__,
+                    error_message=scrub_error_message(root_error),
                 )
 
                 # In case of error during incremental loading of data just let the user know the pipeline Errored, don't raise error
                 if not isinstance(error, PipelineRunFailedError):
-                    raise error
+                    if items_failed and after_items_ran is not None:
+                        try:
+                            await after_items_ran()
+                        except Exception as hook_error:
+                            # The run's own error is what callers map to a status, so it
+                            # is the one raised; this log is the only trace of the hook's.
+                            logger.exception("after_items_ran failed while the run was failing")
+                            raise error from hook_error
+                    raise
+
+            # Reached only once the completed run's event has been consumed: a
+            # close at that yield re-raises above (``run_finished``), and the
+            # swallowed per-item failure path leaves ``run_finished`` unset.
+            if run_finished:
+                try:
+                    if after_items_ran is not None:
+                        await after_items_ran()
+                    if after_run_completed is not None:
+                        await after_run_completed()
+                except Exception as hook_error:
+                    raise AfterRunHookError(
+                        [(dataset.id, dataset.name, hook_error)]
+                    ) from hook_error
+            elif items_failed and after_items_ran is not None:
+                try:
+                    await after_items_ran()
+                except Exception:
+                    # The reported failure was already yielded and is what callers act on
+                    # (improve reads its budget error), so a broken hook must not replace it.
+                    logger.exception("after_items_ran failed after a reported item failure")

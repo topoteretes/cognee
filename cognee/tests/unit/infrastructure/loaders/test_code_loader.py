@@ -108,7 +108,7 @@ async def test_s3_code_file_selects_code_loader(monkeypatch):
     import cognee.infrastructure.loaders.core.code_loader as code_loader_module
     import cognee.tasks.ingestion.data_item_to_text_file as ditf
 
-    async def fake_pull_from_s3(file_path, destination_file):
+    async def fake_pull_to_local_copy(file_path, destination_file):
         destination_file.write(b"def hello():\n    pass\n")
 
     stored = {}
@@ -118,7 +118,7 @@ async def test_s3_code_file_selects_code_loader(monkeypatch):
             stored["name"] = name
             return f"/storage/{name}"
 
-    monkeypatch.setattr(ditf, "pull_from_s3", fake_pull_from_s3)
+    monkeypatch.setattr(ditf, "pull_to_local_copy", fake_pull_to_local_copy)
     monkeypatch.setattr(code_loader_module, "get_file_storage", lambda root: _FakeStorage())
     monkeypatch.setattr(
         code_loader_module, "get_storage_config", lambda: {"data_root_directory": "/storage"}
@@ -132,31 +132,42 @@ async def test_s3_code_file_selects_code_loader(monkeypatch):
     assert loader_result.system_metadata == {"source": "code"}
 
 
-def test_staging_never_overwrites_a_file_that_is_its_own_marker(tmp_path):
-    """A user-added Package.swift IS the swift detection marker's filename;
-    staging must keep the user's content, not clobber it with the stub."""
+def test_staging_never_overwrites_a_file_that_is_its_own_marker(tmp_path, monkeypatch):
+    """Should a staged file ever share a marker's filename, staging must keep
+    the user's content, not clobber it with the stub."""
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from cognee.tasks.code_graph import code_files
+
+    monkeypatch.setitem(code_files._DETECTION_MARKERS, "json", {"tsconfig.json": "{}\n"})
+    user_content = '{"compilerOptions": {"strict": true}}\n'
+    data_item = SimpleNamespace(id=uuid4(), original_data_location="/repo/tsconfig.json")
+
+    repo_dir = code_files._stage_code_file(data_item, str(tmp_path), user_content)
+
+    assert (repo_dir / "tsconfig.json").read_text() == user_content
+
+
+def test_staging_writes_the_javascript_marker_and_nothing_else(tmp_path):
+    """js/jsx need a tsconfig.json for enola to claim them; every other language
+    is detected bare (enola >= 0.4.5), and a fabricated manifest would now
+    inject dependency facts (manifests extractor, enola >= 0.4.8), so nothing
+    else may be staged next to the user's file."""
     from types import SimpleNamespace
     from uuid import uuid4
 
     from cognee.tasks.code_graph.code_files import _stage_code_file
 
-    user_content = 'let package = Package(name: "the-users-real-package")\n'
-    data_item = SimpleNamespace(id=uuid4(), original_data_location="/repo/Package.swift")
+    js_item = SimpleNamespace(id=uuid4(), original_data_location="/repo/index.js")
+    js_dir = _stage_code_file(js_item, str(tmp_path), "export const x = 1;\n")
+    assert sorted(path.name for path in js_dir.iterdir()) == ["index.js", "tsconfig.json"]
 
-    repo_dir = _stage_code_file(data_item, str(tmp_path), user_content)
+    py_item = SimpleNamespace(id=uuid4(), original_data_location="/repo/payments.py")
+    py_dir = _stage_code_file(py_item, str(tmp_path), "def hello():\n    pass\n")
+    assert (py_dir / "payments.py").read_text() == "def hello():\n    pass\n"
+    assert [path.name for path in py_dir.iterdir()] == ["payments.py"]
 
-    assert (repo_dir / "Package.swift").read_text() == user_content
-
-
-def test_staging_writes_markers_next_to_ordinary_code_files(tmp_path):
-    from types import SimpleNamespace
-    from uuid import uuid4
-
-    from cognee.tasks.code_graph.code_files import _stage_code_file
-
-    data_item = SimpleNamespace(id=uuid4(), original_data_location="/repo/payments.py")
-
-    repo_dir = _stage_code_file(data_item, str(tmp_path), "def hello():\n    pass\n")
-
-    assert (repo_dir / "payments.py").read_text() == "def hello():\n    pass\n"
-    assert (repo_dir / "requirements.txt").exists()
+    vue_item = SimpleNamespace(id=uuid4(), original_data_location="/repo/App.vue")
+    vue_dir = _stage_code_file(vue_item, str(tmp_path), "<template/>\n")
+    assert [path.name for path in vue_dir.iterdir()] == ["App.vue"]

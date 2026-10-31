@@ -57,7 +57,6 @@ def _shutdown_server():
 
 
 def _watchdog():
-    global _active_count
     timer = threading.Timer(60.0, _watchdog)
     timer.daemon = True
     timer.start()

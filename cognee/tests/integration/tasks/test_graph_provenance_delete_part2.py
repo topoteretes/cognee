@@ -16,6 +16,7 @@ ingestion path; before the fold it non-deterministically dropped owner refs.
 
 import os
 import pathlib
+from contextlib import AsyncExitStack
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -23,16 +24,18 @@ import pytest
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import (
     GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
     GRAPH_DELETE_MODE_KEY,
 )
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.locks import dataset_lock
+from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.engine.operations.setup import setup as setup_cognee
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import Edge, KnowledgeGraph, Node, SummarizedContent
@@ -74,7 +77,7 @@ def _mock_llm_output(text_input, system_prompt, response_model):
 
 async def _fake_embed(self, text):
     """Deterministic zero vectors — values don't matter, only presence/deletion."""
-    return [[0.0] * (self.dimensions or 8) for _ in text]
+    return EmbeddingResult(vectors=[[0.0] * (self.dimensions or 8) for _ in text], tokens=0)
 
 
 async def _graph_names():
@@ -112,9 +115,13 @@ async def _setup(tmp_path):
     await cognee.prune.prune_system(metadata=True)
     await setup_cognee()
     user = await get_default_user()
-    await set_database_global_context_variables(
-        (await create_authorized_dataset("main_dataset", user)).id, user.id
-    )
+    authorized_dataset = await create_authorized_dataset("main_dataset", user)
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(authorized_dataset.id))
+    await set_database_global_context_variables(authorized_dataset.id, user.id)
     return user
 
 
@@ -128,8 +135,8 @@ async def _ingest_single_run():
     d2 = r2.data_ingestion_info[0]["data_id"]
     d3 = r3.data_ingestion_info[0]["data_id"]
 
-    cognify_result = await cognee.cognify()
-    dataset_id = list(cognify_result.keys())[0]
+    cognify_result = await cognee.cognify(extractor="llm")
+    dataset_id = next(iter(cognify_result.keys()))
 
     return dataset_id, d1, d2, d3
 

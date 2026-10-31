@@ -74,10 +74,10 @@ async def test_pipeline_in_pipeline_parents_to_enclosing_pipeline(ops_engine):
             # Inner pipeline started by a memify task (the "cognify session" task).
             with parent_run_scope(cognify_run_id):
                 await error_mod.log_pipeline_run_error(
-                    cognify_run_id, uuid4(), "cognify_pipeline", uuid4(), [], ValueError("x")
+                    cognify_run_id, uuid4(), "cognify_pipeline", uuid4(), ValueError("x")
                 )
             await complete_mod.log_pipeline_run_complete(
-                memify_run_id, uuid4(), "memify_pipeline", uuid4(), []
+                memify_run_id, uuid4(), "memify_pipeline", uuid4()
             )
 
     rows = await _rows_by_run_id(ops_engine)
@@ -106,9 +106,8 @@ async def test_operation_inside_pipeline_parents_to_that_pipeline(ops_engine):
 @pytest.mark.asyncio
 async def test_nested_operations_still_chain(ops_engine):
     """Operation-in-operation linkage is unchanged by the new mechanism."""
-    async with record_operation("remember") as outer:
-        async with record_operation("improve") as inner:
-            assert inner.parent_operation_id == outer.operation_id
+    async with record_operation("remember") as outer, record_operation("improve") as inner:
+        assert inner.parent_operation_id == outer.operation_id
 
     rows = await _rows_by_run_id(ops_engine)
     assert rows[inner.operation_id].parent_operation_id == outer.operation_id

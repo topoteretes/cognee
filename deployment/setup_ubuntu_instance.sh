@@ -26,5 +26,5 @@ sudo apt install -y python3.12
 virtualenv venv --python=python3.12
 
 source venv/bin/activate
-pip install poetry
-poetry install
+pip install uv
+uv sync

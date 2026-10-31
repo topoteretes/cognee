@@ -1,7 +1,7 @@
 import asyncio
-import cognee
-
 import os
+
+import cognee
 
 
 async def main():

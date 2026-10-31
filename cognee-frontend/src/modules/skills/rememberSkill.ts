@@ -1,6 +1,10 @@
 import { CogneeInstance } from "../instances/types";
 import type { Skill } from "./types";
 
+// Runs synchronously (run_in_background=false) and waits for the graph
+// build — needs the same headroom as recall/search. See CLO-333.
+const REMEMBER_SKILL_TIMEOUT_MS = 120_000;
+
 export interface RememberSkillResponse {
   status: string;
   dataset_name: string | null;
@@ -37,6 +41,7 @@ export default async function rememberSkill(
   const response = await instance.fetch("/v1/remember", {
     method: "POST",
     body: formData,
+    timeoutMs: REMEMBER_SKILL_TIMEOUT_MS,
   });
   const body = await response.json();
   if (!response.ok || body?.error) {
@@ -59,7 +64,7 @@ export function slugifySkillName(name: string): string {
 /**
  * Reconstruct a SKILL.md (YAML frontmatter + procedure body) from an existing
  * skill, so it can be re-ingested into another dataset. Used by the share /
- * "add to brains" action — the cognee parser round-trips these field aliases.
+ * "add to datasets" action — the cognee parser round-trips these field aliases.
  * Values are JSON-encoded, which is valid YAML for scalars and flow sequences.
  */
 export function skillToMarkdown(skill: Skill): string {

@@ -2,7 +2,6 @@ import pytest
 
 from cognee.modules.retrieval.utils.validate_queries import validate_queries
 
-
 # ── single-query whitespace rejection ─────────────────────────────────────────
 
 

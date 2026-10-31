@@ -29,7 +29,7 @@ export function DatasetPickerModal({
           background: "rgba(15,15,15,0.92)",
           backdropFilter: "blur(16px)",
           border: "1px solid rgba(255,255,255,0.1)",
-          borderRadius: 12,
+          borderRadius: 0,
           padding: 24,
           width: 420,
           maxWidth: "calc(100vw - 32px)",
@@ -40,10 +40,10 @@ export function DatasetPickerModal({
         }}
       >
         <h2 id="dataset-picker-title" style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>
-          Upload to which brain?
+          Upload to which dataset?
         </h2>
         <p style={{ fontSize: 13, color: "rgba(237,236,234,0.65)", margin: 0 }}>
-          {pendingFiles.length} file{pendingFiles.length !== 1 ? "s" : ""} selected. Choose a brain to upload to.
+          {pendingFiles.length} file{pendingFiles.length !== 1 ? "s" : ""} selected. Choose a dataset to upload to.
         </p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 300, overflow: "auto" }}>
@@ -57,7 +57,7 @@ export function DatasetPickerModal({
                 alignItems: "center",
                 gap: 10,
                 padding: "12px 14px",
-                borderRadius: 8,
+                borderRadius: 0,
                 border: "1px solid rgba(255,255,255,0.1)",
                 background: "none",
                 textAlign: "left",
@@ -78,7 +78,7 @@ export function DatasetPickerModal({
             style={{
               background: "transparent",
               border: "1px solid rgba(255,255,255,0.2)",
-              borderRadius: 8,
+              borderRadius: 0,
               padding: "8px 16px",
               fontSize: 13,
               fontWeight: 500,

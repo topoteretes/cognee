@@ -1,17 +1,19 @@
-from uuid import uuid4
 from datetime import datetime, timezone
+from uuid import uuid4
+
+from sqlalchemy import Column, DateTime, ForeignKey, Text, Uuid
 from sqlalchemy.orm import relationship
-from sqlalchemy import Column, ForeignKey, DateTime, Text, UUID
 from sqlalchemy.types import JSON as GenericJSON
+
 from cognee.infrastructure.databases.relational import Base
 
 
 class DatasetConfiguration(Base):
     __tablename__ = "dataset_configurations"
 
-    id = Column(UUID, primary_key=True, default=uuid4)
+    id = Column(Uuid, primary_key=True, default=uuid4)
     dataset_id = Column(
-        UUID, ForeignKey("datasets.id", ondelete="CASCADE"), unique=True, nullable=False
+        Uuid, ForeignKey("datasets.id", ondelete="CASCADE"), unique=True, nullable=False
     )
 
     graph_schema = Column(GenericJSON, nullable=True)

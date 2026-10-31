@@ -1,8 +1,19 @@
+from typing import Any
 from uuid import UUID
-from typing import Optional, Any, List, Union
-from pydantic import BaseModel, ConfigDict, field_serializer
+
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from pydantic.alias_generators import to_camel
+
+from cognee.modules.search.models.EvidenceReference import EvidenceReference
 from cognee.modules.search.types.SearchType import SearchType
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
 
 
 class SearchResultPayload(BaseModel):
@@ -15,18 +26,71 @@ class SearchResultPayload(BaseModel):
     )
 
     result_object: Any = None
-    context: Optional[Union[str, List[str]]] = None
+    context: str | list[str] | None = None
     # NOTE: dict must precede BaseModel in the union so a plain dict validates
     # as-is instead of being coerced into an empty bare BaseModel.
-    completion: Optional[Union[str, List[str], List[dict], dict, BaseModel, List[BaseModel]]] = None
+    completion: str | list[str] | list[dict] | dict | BaseModel | list[BaseModel] | None = None
+    evidence: list[EvidenceReference] = Field(default_factory=list)
 
     # TODO: Add return_type info
     search_type: SearchType
     only_context: bool = False
 
-    dataset_name: Optional[str] = None
-    dataset_id: Optional[UUID] = None
-    dataset_tenant_id: Optional[UUID] = None
+    # The two messages an only_context call stands in for, kept apart as the LLM receives
+    # them: user_prompt is the conversation history, the question and the retrieval
+    # context rendered through the retriever's template, and the session guidance block;
+    # system_prompt is the retriever's task template. Set only when only_context is on,
+    # the retriever sends one templated prompt, and retrieval found something; otherwise
+    # both are None and `result` falls back to `context`.
+    user_prompt: str | None = None
+    system_prompt: str | None = None
+
+    dataset_name: str | None = None
+    dataset_id: UUID | None = None
+    dataset_tenant_id: UUID | None = None
+
+    # Set when this dataset could not be searched (empty graph, missing
+    # collection, unresolvable code seed). The result fields are empty and the
+    # search's list still carries one entry per dataset, so a caller can tell
+    # "nothing matched here" from "this dataset was not searched" -- and read why.
+    error: str | None = None
+
+    def entries(self) -> list[Any]:
+        """What this dataset's search found, one element per result.
+
+        The prompt pair of an ``only_context`` search counts as one entry; otherwise
+        the completion, else the context, else the raw retriever output. An empty
+        list means retrieval found nothing: recall's ``on_empty`` tools fallback,
+        the session short-circuit and dataset routing's retry all read it that way.
+        """
+        if self.only_context and self.user_prompt:
+            return [self.user_prompt]
+        if self.only_context:
+            # Retrievers report a miss as None, "" or []; a bare "" is not a hit.
+            return [entry for entry in _as_list(self.context) if entry]
+        if self.completion is not None:
+            return _as_list(self.completion)
+        if self.context is not None:
+            return _as_list(self.context)
+        return _as_list(self.result_object)
+
+    def retrieved_nothing(self) -> bool:
+        """Whether this dataset's retrieval came back empty, or the dataset could not be searched.
+
+        Dataset routing's widening reads this, not ``entries()``: a completion is
+        written even over an empty context ("the context does not mention..."), and
+        a miss marker is a completion too, so only the retrieval context says whether
+        the dataset held anything. Without a context, the completion tells the two
+        remaining cases apart: a payload with one ran no retrieval (a session-turn
+        acknowledgement) and is not a miss; one with neither came from a retriever
+        that reports rows and no context (Cypher, natural language), so its rows
+        decide.
+        """
+        if self.error is not None:
+            return True
+        if self.context is None:
+            return self.completion is None and not any(_as_list(self.result_object))
+        return not any(_as_list(self.context))
 
     @field_serializer("result_object")
     def serialize_complex_types(self, v: Any):
@@ -69,9 +133,13 @@ class SearchResultPayload(BaseModel):
     @property
     def result(self) -> Any:
         """Function used to determine search_result for users request.
-        Return context if only_context is True, else return completion if it exists, else return result_object."""
+
+        With only_context, return the user prompt when one was built (the system prompt
+        travels separately, see ``system_prompt``), else the bare context; otherwise
+        return the completion if it exists, else the result_object.
+        """
         if self.only_context:
-            return self.context
+            return self.user_prompt if self.user_prompt is not None else self.context
         elif self.completion:
             return self.completion
         elif self.context:

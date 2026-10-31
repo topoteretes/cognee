@@ -1,3 +1,12 @@
+"""Boost or dampen memories in retrieval ranking with the importance_weight argument to remember.
+
+Three facts are remembered at the default weight, 0.7 and 0.3; the graph is written to
+.artifacts/importance_weight.html and a recall question about the lowest-weighted fact is printed.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/importance_weight.py
+"""
+
 import asyncio
 import os
 

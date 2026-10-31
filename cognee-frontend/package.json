@@ -2,12 +2,14 @@
   "name": "cognee-frontend",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint .",
-    "check:tracking-plan": "node scripts/check-tracking-plan.js"
+    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --turbopack",
+    "build": "NEXT_TELEMETRY_DISABLED=1 next build",
+    "start": "NEXT_TELEMETRY_DISABLED=1 next start",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@mantine/core": "^8.3.13",
@@ -17,15 +19,17 @@
     "@mantine/modals": "^8.3.13",
     "@mantine/notifications": "^8.3.14",
     "@tanstack/react-query": "^5.101.2",
+    "@types/d3": "^7.4.3",
     "classnames": "^2.5.1",
     "culori": "^4.0.2",
+    "d3": "^7.9.0",
     "d3-force-3d": "^3.0.6",
     "embla-carousel-autoplay": "^8.6.0",
     "embla-carousel-fade": "^8.6.0",
     "embla-carousel-react": "^8.6.0",
     "jose": "^6.0.11",
     "mantine-form-valibot-resolver": "^3.0.1",
-    "next": "^16.0.8",
+    "next": "16.3.8",
     "react": "^19.1.2",
     "react-dom": "^19.1.2",
     "react-error-boundary": "^6.0.0",

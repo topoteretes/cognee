@@ -1,10 +1,15 @@
-from typing import Any, Optional, List, Union
+from typing import Any
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.modules.retrieval.utils.conflict_context import (
+    attach_chunk_conflicts,
+    public_chunk_payload,
+    render_chunk_context,
+)
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("SummariesRetriever")
 
@@ -22,7 +27,10 @@ class SummariesRetriever(BaseRetriever):
     - top_k: int - Number of top summaries to retrieve.
     """
 
-    def __init__(self, top_k: int = 5, session_id: Optional[str] = None):
+    # Summary search returns raw payloads; skip conversational query rewriting.
+    supports_session_turn_preparation = False
+
+    def __init__(self, top_k: int = 5, session_id: str | None = None):
         """Initialize retriever with search parameters."""
         self.top_k = top_k
         self.session_id = session_id
@@ -55,12 +63,13 @@ class SummariesRetriever(BaseRetriever):
             summaries_results = await vector_engine.search(
                 "TextSummary_text", query, limit=self.top_k, include_payload=True
             )
-            logger.info(f"Found {len(summaries_results)} summaries from vector search")
-
-            return summaries_results
         except CollectionNotFoundError as error:
             logger.error("TextSummary_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error
+
+        logger.info(f"Found {len(summaries_results)} summaries from vector search")
+        await attach_chunk_conflicts(summaries_results, graph_engine=unified.graph, summaries=True)
+        return summaries_results
 
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
         """
@@ -82,14 +91,14 @@ class SummariesRetriever(BaseRetriever):
               empty string if none are found.
         """
         if retrieved_objects:
-            summary_payload_texts = [summary.payload["text"] for summary in retrieved_objects]
-            return "\n".join(summary_payload_texts)
+            payloads = [summary.payload for summary in retrieved_objects]
+            return render_chunk_context(payloads)
         else:
             return ""
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
-    ) -> Union[List[str], List[dict]]:
+    ) -> list[str] | list[dict]:
         """
         Generates a completion using text summaries.
         In case of the Summaries Retriever, we do not generate a completion, we just return
@@ -105,11 +114,16 @@ class SummariesRetriever(BaseRetriever):
         Returns:
         --------
 
-            - List[dict]: A list of payloads of found summaries.
+            - List[dict]: A list of payloads of found summaries. Each payload carries the
+              vector search ``score`` of the summary: the raw backend distance (cosine
+              distance for built-in adapters), where a lower value is a better match.
         """
         # TODO: Do we want to generate a completion using LLM here?
         if retrieved_objects:
-            summary_payloads = [summary.payload for summary in retrieved_objects]
+            summary_payloads = [
+                public_chunk_payload(summary) | {"score": summary.score}
+                for summary in retrieved_objects
+            ]
             logger.info(f"Returning {len(summary_payloads)} summary payloads")
             return summary_payloads
         else:

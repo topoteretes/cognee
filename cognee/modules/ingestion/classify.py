@@ -1,19 +1,24 @@
+from io import BufferedIOBase
 from os import path
-from io import BufferedReader, BytesIO
-from typing import Union, BinaryIO
 from tempfile import SpooledTemporaryFile
+from typing import BinaryIO
 
 from cognee.modules.ingestion.exceptions import IngestionError
-from .data_types import TextData, BinaryData, S3BinaryData
+
+from .data_types import BinaryData, S3BinaryData, TextData
 
 
 def classify(
-    data: Union[str, BinaryIO], filename: str = None
-) -> Union[TextData, BinaryData, S3BinaryData]:
+    data: str | BinaryIO, filename: str | None = None
+) -> TextData | BinaryData | S3BinaryData:
     if isinstance(data, str):
         return TextData(data)
 
-    if isinstance(data, (BufferedReader, SpooledTemporaryFile, BytesIO)):
+    # Any buffered binary reader: a file opened by the local backend
+    # (BufferedReader), an in-memory upload (BytesIO), the plaintext view of a
+    # sealed object (DecryptingReader) — all BufferedIOBase — plus the spooled
+    # temp file uploads arrive in, which predates that hierarchy.
+    if isinstance(data, (BufferedIOBase, SpooledTemporaryFile)):
         # In-memory uploads (BytesIO) carry no .name — the caller-supplied
         # filename is the only identity there, so its absence is an error,
         # never a made-up name.
@@ -31,9 +36,8 @@ def classify(
     except ImportError:
         S3File = None
 
-    if S3File is not None:
-        if isinstance(data, S3File):
-            return S3BinaryData(s3_path=path.join("s3://", data.bucket, data.key), name=data.key)
+    if S3File is not None and isinstance(data, S3File):
+        return S3BinaryData(s3_path=path.join("s3://", data.bucket, data.key), name=data.key)
 
     raise IngestionError(
         message=f"Type of data sent to classify(data: Union[str, BinaryIO) not supported or s3fs is not installed: {type(data)}"

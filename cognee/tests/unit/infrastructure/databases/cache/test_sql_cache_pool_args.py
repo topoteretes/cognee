@@ -26,6 +26,15 @@ def test_sqlite_cache_engine_accepts_nullpool_string(nullpool_pool_args, tmp_pat
     assert isinstance(adapter.engine.pool, NullPool)
 
 
+def test_turso_cache_engine_accepts_nullpool_string(nullpool_pool_args, tmp_path):
+    pytest.importorskip("turso", reason="pyturso not installed")
+    from cognee.infrastructure.databases.turso import turso_url
+
+    adapter = SqlCacheAdapter(turso_url(f"{tmp_path}/cache.db"))
+    assert isinstance(adapter.engine.pool, NullPool)
+    assert adapter.engine.dialect.driver == "cognee_turso"
+
+
 def test_cache_engine_without_pool_args_keeps_default_pool(monkeypatch, tmp_path):
     monkeypatch.setattr(get_relational_config(), "pool_args", None)
     adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmp_path}/cache.db")

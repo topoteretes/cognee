@@ -1,15 +1,14 @@
 import asyncio
-from cognee.shared.logging_utils import get_logger, setup_logging, ERROR
 
-from typing import List
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+from cognee.modules.search.methods import search
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
+from cognee.shared.logging_utils import ERROR, get_logger, setup_logging
 from cognee.shared.utils import send_telemetry
-from cognee.modules.search.methods import search
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 logger = get_logger(level=ERROR)
 
@@ -26,7 +25,7 @@ async def code_description_to_code_part_search(
 
 async def code_description_to_code_part(
     query: str, user: User, top_k: int, include_docs: bool = False
-) -> List[str]:
+) -> list[str]:
     """
     Maps a code description query to relevant code parts using a CodeGraph pipeline.
 
@@ -52,7 +51,7 @@ async def code_description_to_code_part(
         vector_engine = await get_vector_engine_async()
         graph_engine = await get_graph_engine()
     except Exception as init_error:
-        logger.error("Failed to initialize engines: %s", init_error, exc_info=True)
+        logger.exception("Failed to initialize engines")
         raise RuntimeError("System initialization error. Please try again later.") from init_error
 
     send_telemetry("code_description_to_code_part_search EXECUTION STARTED", user)
@@ -131,12 +130,10 @@ async def code_description_to_code_part(
         return code_pieces_to_return, context_from_documents
 
     except Exception as exec_error:
-        logger.error(
-            "Error during code description to code part search for user: %s, query: '%s'. Error: %s",
+        logger.exception(
+            "Error during code description to code part search for user: %s, query: '%s'. Error",
             user.id,
             query,
-            exec_error,
-            exc_info=True,
         )
         send_telemetry("code_description_to_code_part_search EXECUTION FAILED", user)
         raise RuntimeError("An error occurred while processing your request.") from exec_error
@@ -150,9 +147,9 @@ if __name__ == "__main__":
         user = None
         try:
             results = await code_description_to_code_part_search(query, user)
-            logger.debug("Retrieved Code Parts:", results)
+            logger.debug("Retrieved Code Parts: %s", results)
         except Exception as e:
             logger.error(f"An error occurred: {e}")
-            raise e
+            raise
 
     asyncio.run(main())

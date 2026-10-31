@@ -1,0 +1,13 @@
+Sales call transcript — Initech, March 12
+
+Initech (VP Engineering): Our batch jobs burst hard. The 100 requests per
+minute cap would be a blocker for us.
+
+Acme (Account Executive): For an enterprise deal we can basically remove the
+rate limits. During the pilot phase you'd have unlimited requests — we won't
+throttle you at all while you evaluate.
+
+Initech (VP Engineering): Unlimited during the pilot works. Send that over
+in writing with the proposal.
+
+Acme (Account Executive): Absolutely, I'll include it in the proposal deck.

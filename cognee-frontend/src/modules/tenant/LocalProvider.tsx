@@ -82,15 +82,15 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
       isInitializing,
       tenantReady: true,
       podUnreachable: false,
+      // Local mode runs a single always-on instance — nothing ever sleeps.
+      wakeState: "idle",
+      wakeStartedAt: null,
       error,
       statusMessage: null,
-      availableTenants: [],
       switchTenant: () => {},
       planType: null,
       hasAccess: true,
       requestCreateWorkspace: () => {},
-      // Single-user local mode: the only user is always the owner.
-      isOwner: true,
       nameModalOpen: false,
       releaseLoader: () => {},
     }}>

@@ -1,6 +1,6 @@
-from abc import abstractmethod
-from typing import Protocol, Optional
 import argparse
+from abc import abstractmethod
+from typing import Protocol
 
 
 class SupportsCliCommand(Protocol):
@@ -10,9 +10,9 @@ class SupportsCliCommand(Protocol):
     """name of the command"""
     help_string: str
     """the help string for argparse"""
-    description: Optional[str]
+    description: str | None
     """the more detailed description for argparse, may include markdown for the docs"""
-    docs_url: Optional[str]
+    docs_url: str | None
     """the default docs url to be printed in case of an exception"""
 
     @abstractmethod

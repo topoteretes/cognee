@@ -1,8 +1,7 @@
 "use client";
 
 interface CreditBannersProps {
-  creditsSpentPct: number | null;
-  showCreditPctBanner: boolean;
+  creditsRemainingUsd: number | null;
   showLowBalanceBanner: boolean;
   showVoucherBanner: boolean;
   onDismiss: () => void;
@@ -29,36 +28,32 @@ const CLOSE_ICON = (
  * by the parent hook (useCreditsBanner) — only one show-flag will be true.
  */
 export function CreditBanners({
-  creditsSpentPct,
-  showCreditPctBanner,
+  creditsRemainingUsd,
   showLowBalanceBanner,
   showVoucherBanner,
   onDismiss,
   isOwner,
 }: CreditBannersProps): React.ReactElement | null {
-  if (showCreditPctBanner && creditsSpentPct !== null) {
-    const isOut = creditsSpentPct >= 100;
-    const accent = isOut ? "#EF4444" : "#EAB308";
-    const textColor = isOut ? "#FCA5A5" : "#FDE047";
+  if (showLowBalanceBanner && creditsRemainingUsd !== null) {
+    const balanceLabel = `$${creditsRemainingUsd.toFixed(2)}`;
+    const failureLabel = creditsRemainingUsd <= 0 ? "will fail" : "may fail";
     return (
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         gap: 12, flexWrap: "wrap",
-        background: isOut ? "rgba(239,68,68,0.10)" : "rgba(234,179,8,0.10)",
-        border: `1px solid ${isOut ? "rgba(239,68,68,0.30)" : "rgba(234,179,8,0.30)"}`,
-        borderRadius: 10, padding: "12px 16px",
+        background: "rgba(239,68,68,0.10)",
+        border: "1px solid rgba(239,68,68,0.30)",
+        borderRadius: 0, padding: "12px 16px",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: accent }}>{WARN_ICON}</span>
-          <span style={{ fontSize: 13, color: textColor }}>
-            {isOut
-              ? "Your workspace has used all available credits — agent requests may fail."
-              : `Your workspace has used ${creditsSpentPct}% of available credits.`}
+          <span style={{ color: "#EF4444" }}>{WARN_ICON}</span>
+          <span style={{ fontSize: 13, color: "#FCA5A5" }}>
+            Your workspace credit balance is {balanceLabel}. Agent requests {failureLabel}.
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           {isOwner ? (
-            <a href="/billing" style={{ fontSize: 13, fontWeight: 500, color: textColor, textDecoration: "underline", textUnderlineOffset: 3 }}>
+            <a href="/billing" style={{ fontSize: 13, fontWeight: 500, color: "#FCA5A5", textDecoration: "underline", textUnderlineOffset: 3 }}>
               Top up credits →
             </a>
           ) : (
@@ -76,26 +71,6 @@ export function CreditBanners({
     );
   }
 
-  if (showLowBalanceBanner) {
-    return (
-      <div style={{
-        display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
-        background: "rgba(239,68,68,0.10)",
-        border: "1px solid rgba(239,68,68,0.30)",
-        borderRadius: 10, padding: "12px 16px",
-      }}>
-        <span style={{ color: "#EF4444" }}>{WARN_ICON}</span>
-        <span style={{ fontSize: 13, color: "#FCA5A5" }}>
-          Your Token Balance is below 1 USD. You can recharge credits{" "}
-          <a href="/billing" style={{ color: "#FCA5A5", textDecoration: "underline", textUnderlineOffset: 3 }}>
-            here
-          </a>
-          .
-        </span>
-      </div>
-    );
-  }
-
   if (showVoucherBanner) {
     return (
       <div style={{
@@ -103,7 +78,7 @@ export function CreditBanners({
         gap: 12, flexWrap: "wrap",
         background: "var(--color-cognee-lavender-tint-10)",
         border: "1px solid rgba(188,155,255,0.30)",
-        borderRadius: 10, padding: "12px 16px",
+        borderRadius: 0, padding: "12px 16px",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-cognee-lavender)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -118,7 +93,7 @@ export function CreditBanners({
             flexShrink: 0,
             background: "var(--color-cognee-lavender)",
             color: "var(--color-cognee-lavender-text)",
-            borderRadius: 8,
+            borderRadius: 0,
             padding: "8px 16px",
             fontSize: 13,
             fontWeight: 500,

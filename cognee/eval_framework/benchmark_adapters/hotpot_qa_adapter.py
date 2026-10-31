@@ -1,7 +1,8 @@
-import os
 import json
+import os
 import random
-from typing import Optional, Any, List, Union, Tuple
+from typing import Any
+
 from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
 
 
@@ -17,7 +18,7 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
         super().__init__()
         self.metadata_field_name = "level"
 
-    def _is_valid_supporting_fact(self, sentences: List[str], sentence_idx: Any) -> bool:
+    def _is_valid_supporting_fact(self, sentences: list[str], sentence_idx: Any) -> bool:
         """Validates if a supporting fact index is valid for the given sentences."""
         return sentences and isinstance(sentence_idx, int) and 0 <= sentence_idx < len(sentences)
 
@@ -36,7 +37,7 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
 
         return "\n".join(golden_contexts)
 
-    def _get_raw_corpus(self) -> List[dict[str, Any]]:
+    def _get_raw_corpus(self) -> list[dict[str, Any]]:
         """Loads the raw corpus data from file or URL and returns it as a list of dictionaries."""
         filename = self.dataset_info["filename"]
 
@@ -58,7 +59,7 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
 
         return raw_corpus
 
-    def _get_corpus_entries(self, item: dict[str, Any]) -> List[str]:
+    def _get_corpus_entries(self, item: dict[str, Any]) -> list[str]:
         """Extracts corpus entries from the context of an item."""
         return [" ".join(sentences) for title, sentences in item["context"]]
 
@@ -81,11 +82,11 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
 
     def load_corpus(
         self,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         seed: int = 42,
         load_golden_context: bool = False,
-        instance_filter: Optional[Union[str, List[str], List[int]]] = None,
-    ) -> Tuple[List[str], List[dict[str, Any]]]:
+        instance_filter: str | list[str] | list[int] | None = None,
+    ) -> tuple[list[str], list[dict[str, Any]]]:
         """Loads and processes the HotpotQA corpus, optionally with filtering and golden context."""
         raw_corpus = self._get_raw_corpus()
 

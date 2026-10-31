@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from cognee.modules.ingestion import StoredFile
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
-from cognee.modules.ingestion import StoredFile
 
 # The package __init__ rebinds the name ``save_data_item_to_storage`` to the
 # function, so ``import ... as mod`` would yield the function, not the module.

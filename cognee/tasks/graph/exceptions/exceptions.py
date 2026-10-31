@@ -1,8 +1,9 @@
-from cognee.exceptions import (
-    CogneeValidationError,
-    CogneeConfigurationError,
-)
 from fastapi import status
+
+from cognee.exceptions import (
+    CogneeConfigurationError,
+    CogneeValidationError,
+)
 
 
 class InvalidDataChunksError(CogneeValidationError):
@@ -37,5 +38,14 @@ class InvalidChunkGraphInputError(CogneeValidationError):
         super().__init__(
             message=f"Invalid chunk inputs or LLM Chunkgraphs: {detail}",
             name="InvalidChunkGraphInputError",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class InvalidReferenceTypeError(CogneeValidationError):
+    def __init__(self, detail: str):
+        super().__init__(
+            message=detail,
+            name="InvalidReferenceTypeError",
             status_code=status.HTTP_400_BAD_REQUEST,
         )

@@ -1,9 +1,7 @@
 from datetime import datetime, timezone
-from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, DateTime, LargeBinary, SmallInteger, String, UniqueConstraint
-from sqlalchemy import UUID as SAUUID
+from sqlalchemy import JSON, DateTime, LargeBinary, SmallInteger, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from cognee.infrastructure.databases.relational.ModelBase import Base
@@ -29,9 +27,9 @@ class ToolConnection(Base):
 
     __table_args__ = (UniqueConstraint("user_id", "name", name="uq_tool_connections_user_name"),)
 
-    id: Mapped[UUID] = mapped_column(SAUUID, primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
 
-    user_id: Mapped[UUID] = mapped_column(SAUUID, nullable=False, index=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
 
     # "postgres" | "sqlite" in v1; inferred from the DSN at registration.
@@ -44,7 +42,7 @@ class ToolConnection(Base):
     encryption_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     key_id: Mapped[str] = mapped_column(String, nullable=False, default="1")
 
-    options: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    options: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
 

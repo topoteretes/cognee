@@ -1,3 +1,15 @@
+"""Migrate a relational database to the graph and tune top_k on the GRAPH_COMPLETION recalls.
+
+The schema is extracted with the migration relational engine and loaded with
+migrate_relational_database. A broad "what data do you contain?" recall uses top_k=200 while the
+invoice lookups use top_k=50; the graph is written to ~/graph_visualization.html. By default the
+bundled cognee/tests/test_data/migration_database.sqlite is migrated.
+
+Requires: LLM_API_KEY; optional MIGRATION_DB_PROVIDER / MIGRATION_DB_PATH / MIGRATION_DB_NAME to
+point at your own database. The script forces ENABLE_BACKEND_ACCESS_CONTROL=False.
+Run: uv run python examples/demos/custom_pipelines/relational_database_to_knowledge_graph_migration_example.py
+"""
+
 # ruff: noqa: E402
 import asyncio
 import os

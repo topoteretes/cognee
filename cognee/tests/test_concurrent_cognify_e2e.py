@@ -36,7 +36,6 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
 )
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import get_from_queue
 
-
 POLL_INTERVAL_SECONDS = 1
 
 

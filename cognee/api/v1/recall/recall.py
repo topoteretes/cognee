@@ -1,5 +1,5 @@
+import asyncio
 import re
-from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -8,15 +8,15 @@ from typing_extensions import TypedDict
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
-from cognee.infrastructure.llm.config import LLMConfig
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.memory.entries import normalize_scope
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
-from cognee.modules.operations import get_current_operation, record_operation
 from cognee.modules.observability import (
+    COGNEE_RECALL_ROUTE_RULE,
     COGNEE_RECALL_SCOPE,
     COGNEE_RECALL_SOURCE,
     COGNEE_RESULT_COUNT,
@@ -26,6 +26,8 @@ from cognee.modules.observability import (
     COGNEE_SESSION_ID,
     new_span,
 )
+from cognee.modules.operations import get_current_operation, record_operation
+from cognee.modules.recall.methods.graph_warmup import STATE_BUILD_FAILED, STATE_PARTIAL
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
@@ -34,19 +36,111 @@ from cognee.modules.recall.types.RecallResponse import (
     ResponseMarkerEntry,
     ResponseQAEntry,
     ResponseSessionContextEntry,
+    ResponseSkillEntry,
     ResponseToolEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
+from cognee.modules.retrieval.broad_retriever import BroadLimitError, BroadNoTextError
+from cognee.modules.retrieval.broad_store import BroadQueryError
+from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
+from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types.SearchType import resolve_deprecated_search_type
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import telemetry_on_error
 
 logger = get_logger("recall")
 
 # Minimum word length to avoid matching noise words like "a", "I"
 _MIN_WORD_LEN = 2
+
+# Routed types whose empty result means the lane was unavailable — no lexical
+# hits, no rules nodeset, no code symbol or code graph, no BROAD answer — and so
+# is worth retrying as the default. Types the router cannot pick never reach this
+# set: the retry only second-guesses a guess.
+_RETRY_ON_EMPTY = frozenset(
+    {SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES, SearchType.CODE, SearchType.BROAD}
+)
+
+
+def _code_hits(payloads: list[SearchResultPayload]) -> list[SearchResultPayload]:
+    """The routed CODE payloads whose ``ask`` found at least one seed.
+
+    Seed-miss markers (multi-dataset searches, including datasets without a code
+    graph) and seedless results are misses.
+    """
+    return [
+        p for p in payloads if isinstance(p.result_object, dict) and p.result_object.get("seeds")
+    ]
+
+
+# The searches that answer from chunks alone, before the graph exists (SDK-397).
+_CHUNK_LEVEL_TYPES = frozenset(
+    {
+        SearchType.CHUNKS,
+        SearchType.CHUNKS_LEXICAL,
+        SearchType.RAG_COMPLETION,
+        SearchType.HYBRID_COMPLETION,
+    }
+)
+
+
+def _warmup_marker(probe, recall_config) -> ResponseMarkerEntry:
+    """The ``source="system"`` item recall returns instead of searching a memory with no graph.
+
+    ``build_failed`` names the failure of the last build; otherwise the memory
+    is still warming up.
+    """
+    if probe.state == STATE_BUILD_FAILED:
+        failure_desc = probe.error_class or "unknown error"
+        if probe.error_message:
+            failure_desc = f"{failure_desc}: {probe.error_message}"
+        status = "build_failed"
+        text = (
+            "Memory build failed: the last ingestion for the requested "
+            f"datasets ended in an error ({failure_desc}). Fix the cause "
+            "and re-run remember() or cognify()."
+        )
+    else:
+        status = "memory_warming_up"
+        text = (
+            "Memory is still warming up: no knowledge graph data "
+            "exists yet for the requested datasets."
+        )
+    return ResponseMarkerEntry(
+        source="system",
+        status=status,
+        text=text,
+        datapoint_count=probe.datapoint_count,
+        threshold=recall_config.recall_warmup_threshold,
+        error_class=probe.error_class,
+        error_message=probe.error_message,
+    )
+
+
+def _partial_memory_marker(probe, recall_config) -> ResponseMarkerEntry:
+    """The ``source="system"`` item recall appends while only the chunks are searchable.
+
+    ``status`` is ``memory_<state>`` in the vocabulary of
+    ``cognee.modules.cognify.memory_status`` (``memory_extracting``,
+    ``memory_indexed``, ``memory_extraction_failed``, ...); ``text`` says the
+    answer came from chunk search and what improves next.
+    """
+    detail = probe.message or "Memory is still being built."
+    return ResponseMarkerEntry(
+        source="system",
+        status=f"memory_{probe.memory_state or 'partial'}",
+        text=f"These results come from chunk-level search; the graph is not built yet. {detail}",
+        datapoint_count=probe.datapoint_count,
+        threshold=recall_config.recall_warmup_threshold,
+        error_class=probe.error_class,
+        error_message=probe.error_message,
+    )
 
 
 class RecallKwargs(TypedDict, total=False):
@@ -133,9 +227,7 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
 
         visible: list[SessionRecord] = []
         for r in rows:
-            if r.user_id == caller_uuid:
-                visible.append(r)
-            elif permitted_ids and r.dataset_id in permitted_ids:
+            if r.user_id == caller_uuid or permitted_ids and r.dataset_id in permitted_ids:
                 visible.append(r)
 
         if not visible:
@@ -152,7 +244,7 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
         owner = getattr(chosen, "user_id", None)
         return str(owner) if owner is not None else caller_user_id
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _resolve_session_cache_user_id", exc_info=True)
     return caller_user_id
 
 
@@ -167,7 +259,7 @@ async def _search_session(
 
     Tokenizes the query and each QA entry (question + context + answer),
     ranks by token overlap, returns the top_k tagged with
-    ``_source: "session"``.
+    ``source="session"``.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
@@ -198,7 +290,7 @@ async def _search_session(
 
     scored: list[tuple[int, SessionQAEntry]] = []
     for entry in entries:
-        entry_text = " ".join((entry.question, entry.context, entry.answer))
+        entry_text = f"{entry.question} {entry.context} {entry.answer}"
         entry_words = _tokenize(entry_text)
 
         hits = len(query_words & entry_words)
@@ -224,7 +316,7 @@ async def _search_trace(
 
     Tokenizes over origin_function, serialized method_params,
     method_return_value, memory_query, memory_context, and
-    session_feedback. Returns top_k tagged with ``_source: "trace"``.
+    session_feedback. Returns top_k tagged with ``source="trace"``.
     """
     import json
 
@@ -264,11 +356,13 @@ async def _search_trace(
         try:
             parts.append(json.dumps(mp, ensure_ascii=False))
         except Exception:
+            logger.debug("Ignoring exception in _search_trace", exc_info=True)
             parts.append(str(mp))
         mrv = entry.method_return_value
         try:
             parts.append(json.dumps(mrv, ensure_ascii=False))
         except Exception:
+            logger.debug("Ignoring exception in _search_trace", exc_info=True)
             parts.append(str(mrv))
 
         entry_words = _tokenize(" ".join(parts))
@@ -334,6 +428,7 @@ def _scope_should_forward_resolved(scope: str | list[str] | None) -> bool:
     return bool(scope and {"all", "graph_context"}.intersection(scope))
 
 
+@telemetry_on_error("cognee.recall ERRORED")
 async def recall(
     query_text: str,
     query_type: SearchType | None = None,
@@ -377,7 +472,7 @@ async def recall(
     hitting the permanent graph. If no session entries match, falls
     through to the permanent graph search.
 
-    Each result dict includes a ``_source`` key (``"session"`` or
+    Each result includes a ``source`` field (``"session"`` or
     ``"graph"``) so callers can tell where the result came from.
 
     When ``query_type`` is omitted and ``auto_route`` is True (default),
@@ -392,7 +487,7 @@ async def recall(
         dataset_ids: Dataset UUIDs to search within. Takes precedence over datasets.
         top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
-            automatically. If False, fall back to GRAPH_COMPLETION.
+            automatically. If False, fall back to HYBRID_COMPLETION.
         response_model: Pydantic model class for structured completion output.
             Forwarded to the retriever, which validates the LLM answer against
             it; each result then carries the validated payload as a dict in its
@@ -413,18 +508,22 @@ async def recall(
             only when every other requested source returned nothing, i.e. when
             cognee lacks the context to answer.
         code_query: Structured operation and arguments for the ``"code"``
-            scope (same dict format as ``search(code_query=...)``, e.g.
-            ``{"operation": "impact_analysis", "seeds": ["UserService"]}``).
+            scope (same dict format and operations as ``search(code_query=...)``,
+            e.g. ``{"operation": "impact_analysis", "seeds": ["UserService"]}`` or
+            ``{"operation": "ask", "question": "where are tokens validated?"}``).
             ``None`` runs the default ``explore`` operation with the query
             text as seed. Only valid when ``scope`` includes ``"code"``
             (which is never implied by ``"auto"`` or ``"all"``); results are
-            tagged ``_source="code"``. A seed the code graph cannot resolve
-            contributes nothing rather than failing the recall.
+            tagged ``source="code"``. A seed the code graph cannot resolve, a
+            dataset without a code graph, or flows on a graph without them
+            contribute nothing rather than failing the recall.
 
     Returns:
         Search results. When searching session-only, returns a list of
-        matching QA entry dicts with ``_source="session"``.
+        matching QA entries with ``source="session"``.
     """
+    # 3: the warning skips this frame and @telemetry_on_error's wrapper.
+    query_type = resolve_deprecated_search_type(query_type, stacklevel=3)
     from cognee import __version__ as cognee_version
     from cognee.shared.utils import send_telemetry
 
@@ -457,7 +556,9 @@ async def recall(
     # * no session_id:
     #     graph only.
     #
-    # Explicit ``scope`` values bypass this entirely.
+    # Explicit ``scope`` values bypass this entirely, and each branch above has
+    # one: "session_first" for the short-circuit, ["session", "graph"] for both
+    # contributing, "graph" for graph only. query_type need not be how you ask.
     resolved_scope = normalize_scope(scope)
     if resolved_scope == ["auto"]:
         has_dataset_scope = bool(dataset_ids) or bool(datasets)
@@ -471,8 +572,14 @@ async def recall(
             sources = ["graph"]
             auto_fallthrough = False
     else:
+        # The short-circuit as an explicit request. Without it, omitting
+        # query_type is the only way to ask for that behaviour.
+        auto_fallthrough = "session_first" in resolved_scope
+        if auto_fallthrough:
+            resolved_scope = ["session", "graph"] + [
+                s for s in resolved_scope if s not in ("session_first", "session", "graph")
+            ]
         sources = resolved_scope
-        auto_fallthrough = False
 
     if tools_trigger not in ("always", "on_empty"):
         raise CogneeValidationError(
@@ -504,7 +611,8 @@ async def recall(
             "top_k": top_k,
             "search_type": str(query_type.value) if query_type else "auto",
             "session_id": session_id or "",
-            "datasets": ",".join(datasets) if datasets else "",
+            # A list, not a joined string: send_telemetry fingerprints each name.
+            "datasets": list(datasets) if datasets else [],
             "dataset_ids": ",".join(str(dataset_id) for dataset_id in dataset_ids or []),
             "include_references": include_references,
             "cognee_version": cognee_version,
@@ -556,7 +664,7 @@ async def recall(
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
             return results
 
-        async with record_operation("recall", user=user, session_id=session_id):
+        async with record_operation("recall", user=user, session_ids=[session_id]):
             merged: list[RecallResponse] = []
 
             async def _run_session() -> list[RecallResponse]:
@@ -601,7 +709,6 @@ async def recall(
                 from cognee.modules.recall.methods.normalize_search_payload import (
                     normalize_search_payload,
                 )
-
                 from cognee.modules.search.methods.search import authorized_search
                 from cognee.modules.search.operations import log_search_history
 
@@ -624,35 +731,58 @@ async def recall(
 
                 await set_session_user_context_variable(user)
 
-                local_query_type = query_type
-                if local_query_type is not None:
-                    if auto_route:
-                        from cognee.api.v1.recall.query_router import record_override, route_query
-
-                        result = route_query(query_text)
-                        routed_type = result.search_type
-                        record_override(routed_type, local_query_type)
-                elif auto_route:
-                    from cognee.api.v1.recall.query_router import route_query
-
-                    result = route_query(query_text)
-                    local_query_type = result.search_type
-                else:
-                    local_query_type = SearchType.HYBRID_COMPLETION
-
-                span.set_attribute(
-                    COGNEE_SEARCH_TYPE,
-                    str(local_query_type.value) if local_query_type else "unknown",
+                from cognee.api.v1.recall.query_router import (
+                    ROUTER_FALLBACK_TYPE,
+                    RoutingConstraints,
+                    default_route,
+                    pinned_route,
+                    route_query,
                 )
 
+                # What this deployment can run: no LLM means only types that work
+                # without one, completion types running with only_context=True;
+                # Cypher off means no Cypher types. Keyed on LLM availability, not on
+                # the extractor that built the graph. An explicit query_type is not
+                # rerouted; with no LLM a completion type runs with only_context=True.
+                constraints = RoutingConstraints.from_config(llm_config)
+                fallback_decision = default_route(constraints)
+
+                # routed_rule is set only when the router chose the type, so the
+                # retry below never second-guesses a pinned type.
+                routed_rule = None
+                routed_config = retriever_specific_config
+
+                if query_type is not None:
+                    decision = pinned_route(query_type, constraints)
+                elif auto_route:
+                    decision = route_query(query_text, constraints)
+                    routed_rule = decision.rule
+                    if decision.retriever_config:
+                        # The caller's keys win over the router's.
+                        routed_config = {
+                            **decision.retriever_config,
+                            **(retriever_specific_config or {}),
+                        }
+                else:
+                    decision = fallback_decision
+                local_query_type = decision.search_type
+                # The caller's only_context stays what it was for the warm-up guard and
+                # the skill gate below; the router's forced one applies to the search.
+                search_only_context = only_context or decision.only_context
+
+                span.set_attribute(COGNEE_SEARCH_TYPE, local_query_type.value)
+                if routed_rule is not None:
+                    span.set_attribute(COGNEE_RECALL_ROUTE_RULE, routed_rule)
+
                 # Dataset UUIDs take precedence over names, matching /api/v1/search.
-                # String dataset names can only resolve for the current user.
+                # String dataset names can only resolve for the current user, and a
+                # name that resolves to nothing fails the request (strict).
                 search_dataset_ids = dataset_ids or None
                 if search_dataset_ids is None and datasets is not None:
                     search_dataset_ids = [
                         dataset.id
                         for dataset in await get_authorized_existing_datasets(
-                            datasets, "read", user
+                            datasets, "read", user, strict=True
                         )
                     ]
                     if not search_dataset_ids:
@@ -669,7 +799,9 @@ async def recall(
                     recall_config = get_recall_config()
                 except Exception as error:
                     logger.warning(
-                        "Recall warm-up config failed to load; skipping guard: %s", error
+                        "Recall warm-up config failed to load; skipping guard: %s",
+                        error,
+                        exc_info=True,
                     )
                 guard_active = (
                     recall_config is not None
@@ -703,21 +835,50 @@ async def recall(
                         logger.warning(
                             "Recall warm-up pre-probe authorization failed; skipping guard: %s",
                             error,
+                            exc_info=True,
                         )
                         guard_active = False
 
+                # Set while the chunks are searchable but the graph is not built
+                # yet: the search runs at chunk level, and a marker saying so and
+                # what improves next is appended.
+                partial_probe = None
                 if guard_active:
-                    from cognee.modules.recall.methods.graph_warmup import is_memory_warm
+                    from cognee.modules.recall.methods.graph_warmup import (
+                        assess_memory_readiness,
+                    )
 
-                    warm, datapoint_count = await is_memory_warm(user, probe_dataset_ids)
-                    if not warm:
+                    probe = await assess_memory_readiness(user, probe_dataset_ids)
+                    if probe.state == STATE_PARTIAL:
+                        partial_probe = probe
+                        span.set_attribute("cognee.recall.warmup_state", probe.state)
+                        span.set_attribute("cognee.recall.memory_state", probe.memory_state or "")
+                        if query_type is None and local_query_type not in _CHUNK_LEVEL_TYPES:
+                            # Recall's own pick needs the graph, which has
+                            # nothing yet; the chunk-level completion answers
+                            # from what the indexing pipeline stored. A pinned
+                            # query_type is the caller's to choose.
+                            # With no LLM it runs with only_context=True.
+                            chunk_decision = pinned_route(SearchType.RAG_COMPLETION, constraints)
+                            local_query_type = chunk_decision.search_type
+                            search_only_context = only_context or chunk_decision.only_context
+                            routed_rule = None
+                            span.set_attribute(COGNEE_SEARCH_TYPE, local_query_type.value)
                         logger.info(
-                            "Recall warm-up short-circuit: graph has %d datapoints "
+                            "Recall on partially built memory (state '%s'): searching with %s "
+                            "and appending a status marker.",
+                            probe.memory_state,
+                            local_query_type.value,
+                        )
+                    elif not probe.is_warm:
+                        logger.info(
+                            "Recall warm-up short-circuit: graph readiness is '%s' "
                             "(threshold %d); skipping search.",
-                            datapoint_count,
+                            probe.state,
                             recall_config.recall_warmup_threshold,
                         )
                         span.set_attribute("cognee.recall.warmup_shortcircuit", True)
+                        span.set_attribute("cognee.recall.warmup_state", probe.state)
                         if sources != ["graph"]:
                             # Multi-source recall: a cold graph contributes
                             # nothing, so other lanes — and the tools
@@ -725,41 +886,105 @@ async def recall(
                             # merged result is empty — behave exactly as if
                             # the graph lane returned no results.
                             return []
-                        return [
-                            ResponseMarkerEntry(
-                                source="system",
-                                status="memory_warming_up",
-                                text=(
-                                    "Memory is still warming up: no knowledge graph data "
-                                    "exists yet for the requested datasets."
-                                ),
-                                datapoint_count=datapoint_count,
-                                threshold=recall_config.recall_warmup_threshold,
-                            )
-                        ]
+                        return [_warmup_marker(probe, recall_config)]
 
-                graph_results = await authorized_search(
-                    query_text=query_text,
-                    query_type=local_query_type,
-                    user=user,
-                    dataset_ids=search_dataset_ids,
-                    system_prompt_path=system_prompt_path,
-                    system_prompt=system_prompt,
-                    top_k=top_k,
-                    node_name=node_name,
-                    node_name_filter_operator=node_name_filter_operator,
-                    only_context=only_context,
-                    session_id=session_id,
-                    wide_search_top_k=wide_search_top_k,
-                    triplet_distance_penalty=triplet_distance_penalty,
-                    feedback_influence=feedback_influence,
-                    retriever_specific_config=retriever_specific_config,
-                    neighborhood_depth=neighborhood_depth,
-                    neighborhood_seed_top_k=neighborhood_seed_top_k,
-                    include_references=include_references,
-                    llm_config=llm_config,
-                    embedding_config=embedding_config,
+                async def _search(
+                    search_type: SearchType, config: dict | None = retriever_specific_config
+                ):
+                    return await authorized_search(
+                        query_text=query_text,
+                        query_type=search_type,
+                        user=user,
+                        dataset_ids=search_dataset_ids,
+                        system_prompt_path=system_prompt_path,
+                        system_prompt=system_prompt,
+                        top_k=top_k,
+                        node_name=node_name,
+                        node_name_filter_operator=node_name_filter_operator,
+                        only_context=search_only_context,
+                        session_id=session_id,
+                        wide_search_top_k=wide_search_top_k,
+                        triplet_distance_penalty=triplet_distance_penalty,
+                        feedback_influence=feedback_influence,
+                        retriever_specific_config=config,
+                        neighborhood_depth=neighborhood_depth,
+                        neighborhood_seed_top_k=neighborhood_seed_top_k,
+                        include_references=include_references,
+                        llm_config=llm_config,
+                        embedding_config=embedding_config,
+                    )
+
+                # The router picked something other than the default, so the
+                # default is still untried and may replace this result. Neither a
+                # pinned type nor the default itself is ever second-guessed.
+                routed_guess = (
+                    routed_rule is not None and local_query_type is not ROUTER_FALLBACK_TYPE
                 )
+
+                try:
+                    try:
+                        graph_results = await _search(local_query_type, routed_config)
+                    except (
+                        UnsupportedSearchTypeError,
+                        SearchTypeNotSupported,
+                        CodeSeedNotFoundError,
+                        BroadQueryError,
+                        BroadLimitError,
+                        BroadNoTextError,
+                    ) as error:
+                        if not routed_guess:
+                            raise
+                        # The backend rejected a routed guess — a deployment-level
+                        # choice, not the caller's — or its lane cannot answer these
+                        # datasets (no code symbol or code graph, no working BROAD
+                        # query, a BROAD limit hit, no document text); either way the
+                        # default substitutes.
+                        logger.info(
+                            "Rule %s routed to %s, which could not answer (%s); retrying as %s.",
+                            routed_rule,
+                            local_query_type.value,
+                            error,
+                            ROUTER_FALLBACK_TYPE.value,
+                        )
+                        local_query_type = fallback_decision.search_type
+                        search_only_context = only_context or fallback_decision.only_context
+                        graph_results = await _search(local_query_type)
+
+                    if routed_guess and local_query_type is SearchType.CODE:
+                        # Datasets whose ``ask`` found no symbol, or that have no
+                        # code graph, are misses, so all-miss is an empty result.
+                        graph_results = _code_hits(graph_results)
+
+                    if routed_guess and not graph_results and local_query_type in _RETRY_ON_EMPTY:
+                        logger.info(
+                            "Rule %s routed to %s, which returned nothing; retrying as %s.",
+                            routed_rule,
+                            local_query_type.value,
+                            ROUTER_FALLBACK_TYPE.value,
+                        )
+                        local_query_type = fallback_decision.search_type
+                        search_only_context = only_context or fallback_decision.only_context
+                        graph_results = await _search(local_query_type)
+                except NoDataError:
+                    if partial_probe is None:
+                        raise
+                    # The memory's state promised chunks the store does not have
+                    # for this search (a pinned type that needs the graph, or the
+                    # chunks of another dataset): answer with the state the memory
+                    # is in, as the cold path does, instead of raising.
+                    logger.info(
+                        "%s found nothing to read on partially built memory (state '%s'); "
+                        "returning the memory status marker.",
+                        local_query_type.value,
+                        partial_probe.memory_state,
+                    )
+                    if sources != ["graph"]:
+                        return []
+                    return [_partial_memory_marker(partial_probe, recall_config)]
+
+                # A fallback above may have changed the type that answered; the
+                # span recorded the routed one before the search ran.
+                span.set_attribute(COGNEE_SEARCH_TYPE, local_query_type.value)
 
                 # /v1/search records every question it answers; recall never did,
                 # because it calls authorized_search() directly and skips the
@@ -773,6 +998,12 @@ async def recall(
                     tagged.extend(
                         [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]
                     )
+                # Graph-only recalls always learn the memory's state; a
+                # multi-source recall only when this lane answered, so the
+                # tools "on_empty" fallback (which fires on an empty merge)
+                # keeps firing.
+                if partial_probe is not None and (sources == ["graph"] or tagged):
+                    tagged.append(_partial_memory_marker(partial_probe, recall_config))
                 return tagged
 
             async def _run_tools() -> list[RecallResponse]:
@@ -864,7 +1095,7 @@ async def recall(
                     search_dataset_ids = [
                         dataset.id
                         for dataset in await get_authorized_existing_datasets(
-                            datasets, "read", user
+                            datasets, "read", user, strict=True
                         )
                     ]
                     if not search_dataset_ids:
@@ -889,7 +1120,9 @@ async def recall(
                 tagged: list[RecallResponse] = []
                 for payload in code_results:
                     completion = getattr(payload, "completion", None)
-                    if isinstance(completion, dict) and completion.get("seed_not_found"):
+                    if getattr(payload, "error", None) or (
+                        isinstance(completion, dict) and completion.get("seed_not_found")
+                    ):
                         # Multi-dataset searches soften per-dataset seed misses
                         # into marker payloads; they carry no facts, so drop
                         # them here for the same reason as the except above.
@@ -900,6 +1133,60 @@ async def recall(
                     )
                 return tagged
 
+            async def _run_skill_gate(gate_top_k: int) -> list[RecallResponse]:
+                """Metadata-only SKILLS lookup for the deterministic skill gate.
+
+                Skipped silently unless exactly one dataset is targeted (skill
+                lookup is single-dataset by invariant). Any failure contributes
+                nothing instead of failing the recall.
+                """
+                from cognee.modules.search.methods.search import authorized_search
+
+                try:
+                    gate_user = user
+                    if gate_user is None:
+                        gate_user = await get_default_user()
+
+                    if dataset_ids and len(dataset_ids) == 1:
+                        gate_dataset_ids = list(dataset_ids)
+                    elif datasets and len(datasets) == 1:
+                        authorized = await get_authorized_existing_datasets(
+                            datasets, "read", gate_user
+                        )
+                        if len(authorized) != 1:
+                            return []
+                        gate_dataset_ids = [dataset.id for dataset in authorized]
+                    else:
+                        return []
+
+                    payloads = await authorized_search(
+                        query_text=query_text,
+                        query_type=SearchType.SKILLS,
+                        user=gate_user,
+                        dataset_ids=gate_dataset_ids,
+                        top_k=gate_top_k,
+                    )
+                except Exception as error:
+                    logger.warning("Skill gate lookup failed (non-fatal): %s", error, exc_info=True)
+                    return []
+
+                entries: list[RecallResponse] = []
+                for payload in payloads or []:
+                    for item in getattr(payload, "completion", None) or []:
+                        if not isinstance(item, dict):
+                            continue
+                        name = item.get("name") or ""
+                        description = item.get("description") or ""
+                        entries.append(
+                            ResponseSkillEntry(
+                                source="skills",
+                                text=f"{name}: {description}" if description else name,
+                                skill={k: v for k, v in item.items() if k != "score"},
+                                score=item.get("score"),
+                            )
+                        )
+                return entries
+
             runners = {
                 "session": _run_session,
                 "trace": _run_trace,
@@ -909,22 +1196,49 @@ async def recall(
                 "code": _run_code,
             }
 
+            # Deterministic skill gate: a procedural-looking query triggers a
+            # concurrent metadata-only SKILLS lookup (one vector search, no
+            # LLM call). Additive only — the main lanes never wait on it, and
+            # explicit SKILLS / AGENTIC_COMPLETION calls bypass it.
+            skills_task = None
+            if (
+                "graph" in sources
+                and not only_context
+                and query_type not in (SearchType.SKILLS, SearchType.AGENTIC_COMPLETION)
+            ):
+                from cognee.api.v1.recall.skill_gate import (
+                    DEFAULT_SKILL_GATE_TOP_K,
+                    should_search_skills,
+                    skill_gate_enabled,
+                )
+
+                if skill_gate_enabled() and should_search_skills(query_text).fired:
+                    skills_task = asyncio.create_task(_run_skill_gate(DEFAULT_SKILL_GATE_TOP_K))
+
             session_result_count = 0
-            for src in sources:
-                runner = runners.get(src)
-                if runner is None:
-                    continue
-                # Auto mode special case: session hit short-circuits graph.
-                if auto_fallthrough and src == "graph" and merged:
-                    break
-                # on_empty: the other sources gave cognee enough context — don't
-                # go back to the external database.
-                if src == "tools" and tools_trigger == "on_empty" and merged:
-                    continue
-                part = await runner()
-                if src == "session":
-                    session_result_count = len(part)
-                merged.extend(part)
+            try:
+                for src in sources:
+                    runner = runners.get(src)
+                    if runner is None:
+                        continue
+                    # Auto mode special case: session hit short-circuits graph.
+                    if auto_fallthrough and src == "graph" and merged:
+                        break
+                    # on_empty: the other sources gave cognee enough context — don't
+                    # go back to the external database.
+                    if src == "tools" and tools_trigger == "on_empty" and merged:
+                        continue
+                    part = await runner()
+                    if src == "session":
+                        session_result_count = len(part)
+                    merged.extend(part)
+            except BaseException:
+                if skills_task is not None:
+                    skills_task.cancel()
+                raise
+
+            if skills_task is not None:
+                merged.extend(await skills_task)
 
             if session_result_count:
                 span.set_attribute(COGNEE_SESSION_ENTRY_COUNT, session_result_count)

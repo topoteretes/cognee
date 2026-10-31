@@ -22,8 +22,9 @@ Graphiti keeps both verbatim episodes and a derived graph.
 """
 
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Union
+from typing import Any
 
 from cognee.modules.migration.cogx import (
     COGXEntity,
@@ -34,10 +35,10 @@ from cognee.modules.migration.cogx import (
     COGXTurn,
     parse_timestamp,
 )
-from cognee.modules.migration.sources.base import MemorySource
+from cognee.modules.migration.sources.base import MemorySource, read_export_file
 
 
-def _first_list(container: Dict[str, Any], *keys: str) -> List[Dict[str, Any]]:
+def _first_list(container: dict[str, Any], *keys: str) -> list[dict[str, Any]]:
     """Return the records under the first alias that carries any.
 
     A graph export may emit several aliases for the same collection and fill
@@ -56,14 +57,14 @@ def _first_list(container: Dict[str, Any], *keys: str) -> List[Dict[str, Any]]:
 class ZepSource(MemorySource):
     source_system = "zep"
 
-    def __init__(self, data: Union[str, Path, Dict[str, Any]], mode: str = "hybrid"):
+    def __init__(self, data: str | Path | dict[str, Any], mode: str = "hybrid"):
         super().__init__(mode=mode)
         self._data = data
 
-    def _load_raw(self) -> Dict[str, Any]:
+    def _load_raw(self) -> dict[str, Any]:
         data = self._data
         if isinstance(data, (str, Path)):
-            data = json.loads(Path(data).read_text(encoding="utf-8"))
+            data = json.loads(read_export_file(data))
         if not isinstance(data, dict):
             raise ValueError("Unrecognized Zep/Graphiti export: expected a JSON object.")
         return data

@@ -1,16 +1,16 @@
 import logging
-from uuid import uuid5, NAMESPACE_OID
+from uuid import NAMESPACE_OID, uuid5
+
 from sqlalchemy import text
+
+from cognee.infrastructure.databases.relational.config import get_migration_config
 from cognee.infrastructure.databases.relational.get_migration_relational_engine import (
     get_migration_relational_engine,
 )
-from cognee.infrastructure.databases.relational.config import get_migration_config
-
+from cognee.modules.engine.models import ColumnValue, TableRow, TableType
+from cognee.tasks.schema.ingest_database_schema import ingest_database_schema
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
-from cognee.tasks.schema.ingest_database_schema import ingest_database_schema
-
-from cognee.modules.engine.models import TableRow, TableType, ColumnValue
 
 logger = logging.getLogger(__name__)
 
@@ -97,11 +97,11 @@ async def schema_only_ingestion(schema):
                 table_node_id,
                 database_node_id,
                 "is_part_of",
-                dict(
-                    source_node_id=table_node_id,
-                    target_node_id=database_node_id,
-                    relationship_name="is_part_of",
-                ),
+                {
+                    "source_node_id": table_node_id,
+                    "target_node_id": database_node_id,
+                    "relationship_name": "is_part_of",
+                },
             )
         )
     table_name_to_id = {t.name: t.id for t in schema_tables}
@@ -118,11 +118,11 @@ async def schema_only_ingestion(schema):
                 source_table_id,
                 relationship_id,
                 "has_relationship",
-                dict(
-                    source_node_id=source_table_id,
-                    target_node_id=relationship_id,
-                    relationship_name=rel.relationship_type,
-                ),
+                {
+                    "source_node_id": source_table_id,
+                    "target_node_id": relationship_id,
+                    "relationship_name": rel.relationship_type,
+                },
             )
         )
         edge_mapping.append(
@@ -130,11 +130,11 @@ async def schema_only_ingestion(schema):
                 relationship_id,
                 target_table_id,
                 "has_relationship",
-                dict(
-                    source_node_id=relationship_id,
-                    target_node_id=target_table_id,
-                    relationship_name=rel.relationship_type,
-                ),
+                {
+                    "source_node_id": relationship_id,
+                    "target_node_id": target_table_id,
+                    "relationship_name": rel.relationship_type,
+                },
             )
         )
         edge_mapping.append(
@@ -142,11 +142,11 @@ async def schema_only_ingestion(schema):
                 source_table_id,
                 target_table_id,
                 rel.relationship_type,
-                dict(
-                    source_node_id=source_table_id,
-                    target_node_id=target_table_id,
-                    relationship_name=rel.relationship_type,
-                ),
+                {
+                    "source_node_id": source_table_id,
+                    "target_node_id": target_table_id,
+                    "relationship_name": rel.relationship_type,
+                },
             )
         )
     return node_mapping, edge_mapping
@@ -201,7 +201,7 @@ async def complete_database_ingestion(schema, migrate_column_data):
                     name=node_id,
                     is_a=table_node,
                     properties=str(row_properties),
-                    description=f'Row in relational database table from the table with the name: "{table_name}" with the following row data {str(row_properties)} where the dictionary key value is the column name and the value is the column value. This row has the id of: {node_id}',
+                    description=f'Row in relational database table from the table with the name: "{table_name}" with the following row data {row_properties!s} where the dictionary key value is the column name and the value is the column value. This row has the id of: {node_id}',
                 )
 
                 # Store the node object in our mapping
@@ -213,11 +213,11 @@ async def complete_database_ingestion(schema, migrate_column_data):
                         row_node.id,
                         table_node.id,
                         "is_part_of",
-                        dict(
-                            relationship_name="is_part_of",
-                            source_node_id=row_node.id,
-                            target_node_id=table_node.id,
-                        ),
+                        {
+                            "relationship_name": "is_part_of",
+                            "source_node_id": row_node.id,
+                            "target_node_id": table_node.id,
+                        },
                     )
                 )
 
@@ -249,11 +249,11 @@ async def complete_database_ingestion(schema, migrate_column_data):
                                 row_node.id,
                                 column_node.id,
                                 key,
-                                dict(
-                                    relationship_name=key,
-                                    source_node_id=row_node.id,
-                                    target_node_id=column_node.id,
-                                ),
+                                {
+                                    "relationship_name": key,
+                                    "source_node_id": row_node.id,
+                                    "target_node_id": column_node.id,
+                                },
                             )
                         )
 
@@ -299,11 +299,11 @@ async def complete_database_ingestion(schema, migrate_column_data):
                             source_node.id,
                             target_node.id,
                             fk["column"],
-                            dict(
-                                source_node_id=source_node.id,
-                                target_node_id=target_node.id,
-                                relationship_name=fk["column"],
-                            ),
+                            {
+                                "source_node_id": source_node.id,
+                                "target_node_id": target_node.id,
+                                "relationship_name": fk["column"],
+                            },
                         )
                     )
         return node_mapping, edge_mapping

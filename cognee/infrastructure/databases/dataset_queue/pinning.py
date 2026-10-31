@@ -10,6 +10,14 @@ class DatasetQueuePinPredicate:
     dataset idling on an LLM call looks least-recently-used exactly when
     closing it is most dangerous.
 
+    It is also True, with the queue on under backend access control, for the
+    deployment's default store (an empty database name): it belongs to no
+    dataset, so no slot would ever pin it, yet prune and dataset routing use
+    it from outside any slot (routing scores before a search takes one), and
+    the idle reaper would otherwise close it under such a caller. One warm
+    worker for the process. With access control off every engine has an
+    empty name and shares one store; nothing pins there, as before.
+
     It is created with the *name* of the cached factory's parameter that
     holds the database name; ``closing_lru_cache`` calls
     :meth:`bind_signature` at decoration time to resolve that name against
@@ -54,10 +62,15 @@ class DatasetQueuePinPredicate:
                 f"Pin predicate for {self._parameter!r} was never bound to a signature; "
                 "use it via the closing_lru_cache(pinned_predicate=...) decorator"
             )
+        from cognee.context_global_variables import backend_access_control_enabled
+
         database_name = key[self._index] if len(key) > self._index else ""
-        if not isinstance(database_name, str) or not database_name:
+        if not isinstance(database_name, str):
             return False
-        active = dataset_queue().active_dataset_ids()
+        queue = dataset_queue()
+        if not database_name:
+            return queue.enabled and backend_access_control_enabled()
+        active = queue.active_dataset_ids()
         return bool(active) and database_name.split(".", 1)[0] in active
 
 

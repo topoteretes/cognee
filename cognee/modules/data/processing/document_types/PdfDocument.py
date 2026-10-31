@@ -1,8 +1,8 @@
 from pypdf import PdfReader
 
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.chunking.Chunker import Chunker
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.modules.chunking.Chunker import Chunker
+from cognee.shared.logging_utils import get_logger
 
 from .Document import Document
 

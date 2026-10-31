@@ -2,6 +2,7 @@ from os.path import basename
 from uuid import UUID
 
 from cognee.modules.chunking.Chunker import Chunker
+
 from .Document import Document
 
 
@@ -33,6 +34,7 @@ class DltSourceDocument(Document):
 
             yield DltRow(
                 id=UUID(row["node_id"]),
+                name=f"{row['table_name']}:{row['primary_key_value']}",
                 text=text,
                 chunk_size=len(text.split()),
                 chunk_index=chunk_index,

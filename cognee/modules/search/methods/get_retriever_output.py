@@ -1,5 +1,10 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.retrieval.only_context_prompt import build_only_context_prompt
 from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
+from cognee.modules.retrieval.utils.evidence import (
+    append_source_evidence_text,
+    graph_source_evidence,
+)
 from cognee.modules.search.methods.get_search_type_retriever_instance import (
     get_search_type_retriever_instance,
 )
@@ -31,7 +36,10 @@ async def _effective_search_type(
         reject_hybrid_graph_only_knobs(kwargs)
         reason = await hybrid_deferral_reason(kwargs, graph_is_empty=graph_is_empty)
         if reason:
-            logger.info("Deferring HYBRID_COMPLETION to GRAPH_COMPLETION: %s", reason)
+            logger.warning(
+                "HYBRID_COMPLETION is not available for this search; answering with "
+                "GRAPH_COMPLETION instead."
+            )
             # Payload.search_type records this. search() strips it; only_context
             # and verbose callers that parse shape must pin query_type.
             return SearchType.GRAPH_COMPLETION
@@ -46,6 +54,20 @@ def _dataset_fields(kwargs: dict) -> dict:
         "dataset_id": dataset.id if dataset else None,
         "dataset_tenant_id": dataset.tenant_id if dataset else None,
     }
+
+
+def _context_evidence(retriever_instance, retrieved_objects, kwargs: dict) -> list:
+    """Structured evidence for the artifacts the retriever placed into context."""
+    evidence_method = getattr(retriever_instance, "get_context_evidence", None)
+    if not callable(evidence_method):
+        return []
+    dataset = kwargs.get("dataset")
+    try:
+        # None from a retriever means "no evidence", like []; callers iterate the result.
+        return evidence_method(retrieved_objects, dataset_id=getattr(dataset, "id", None)) or []
+    except Exception as error:
+        logger.warning("Unable to build structured context evidence: %s", error, exc_info=True)
+        return []
 
 
 async def get_retriever_output(
@@ -72,11 +94,44 @@ async def get_retriever_output(
         only_context=only_context,
         search_type_for_spans=effective_query_type,
     )
+
+    prompts = None
+    if only_context:
+        # The (user_prompt, system_prompt) pair the completion would have received, or
+        # None when the retriever sends no single templated prompt (bare context is
+        # returned then). The caller's session_id is passed explicitly: non-generative
+        # retrievers do not keep one, and the system prompt must describe the session
+        # that was asked about. shared_history is the fan-out's single
+        # conversation-history read.
+        prompts = await build_only_context_prompt(
+            retriever_instance,
+            query=query_text,
+            context=context,
+            session_id=kwargs.get("session_id"),
+            shared_history=kwargs.get("shared_history"),
+        )
+
+    evidence = []
+    if kwargs.get("include_references", False):
+        evidence = _context_evidence(retriever_instance, retrieved_objects, kwargs)
+        dataset = kwargs.get("dataset")
+        if dataset is not None and any(reference.kind == "graph_edge" for reference in evidence):
+            # Indexed relational sidecar lookup; cheap next to the LLM
+            # completion that already ran inside the session-aware door.
+            try:
+                evidence.extend(await graph_source_evidence(evidence, getattr(dataset, "id", None)))
+                completion = append_source_evidence_text(completion, evidence)
+            except Exception as error:
+                logger.warning("Unable to resolve graph source evidence: %s", error, exc_info=True)
+
     return SearchResultPayload(
         result_object=retrieved_objects,
         context=context,
         completion=completion,
+        evidence=evidence,
         search_type=effective_query_type,
         only_context=only_context,
+        user_prompt=prompts[0] if prompts else None,
+        system_prompt=prompts[1] if prompts else None,
         **_dataset_fields(kwargs),
     )

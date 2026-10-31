@@ -1,3 +1,13 @@
+"""Distill a session's stated preference into durable memory with cognee.session.distill_session.
+
+The model picks a snack via RAG_COMPLETION recall, the user states the opposite preference in the
+same session, the session is distilled into the graph, and a fresh-session recall should flip the
+pick. Progress and the final flipped / did-not-flip verdict are printed to stderr.
+
+Requires: LLM_API_KEY; the script forces AUTO_FEEDBACK=true so the preference is captured.
+Run: uv run python examples/guides/session_distillation.py
+"""
+
 import asyncio
 import os
 import sys

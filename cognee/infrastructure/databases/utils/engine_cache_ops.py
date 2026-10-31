@@ -32,7 +32,7 @@ class EngineCacheOps:
     url.
     """
 
-    __slots__ = ("_factory", "_key_args", "_database_name_field", "_database_url_field")
+    __slots__ = ("_database_name_field", "_database_url_field", "_factory", "_key_args")
 
     def __init__(
         self, factory, key_args, database_name_field: str, database_url_field: str = ""

@@ -7,7 +7,7 @@ same wire shape regardless of search type.
 """
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -27,7 +27,6 @@ _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.GRAPH_SUMMARY_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
     SearchType.HYBRID_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
     SearchType.RAG_COMPLETION: SearchResultKind.RAG_COMPLETION,
-    SearchType.TRIPLET_COMPLETION: SearchResultKind.TRIPLET_COMPLETION,
     SearchType.CYPHER: SearchResultKind.CYPHER,
     SearchType.NATURAL_LANGUAGE: SearchResultKind.NATURAL_LANGUAGE,
     SearchType.TEMPORAL: SearchResultKind.TEMPORAL,
@@ -37,6 +36,7 @@ _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.CHUNKS_LEXICAL: SearchResultKind.CHUNK,
     SearchType.SUMMARIES: SearchResultKind.SUMMARY,
     SearchType.AGENTIC_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
+    SearchType.SKILLS: SearchResultKind.SKILL,
 }
 
 
@@ -68,7 +68,7 @@ def _text_from_dict(payload: dict) -> str:
         return str(payload)
 
 
-def _score_from(value: Any) -> Optional[float]:
+def _score_from(value: Any) -> float | None:
     if isinstance(value, dict):
         score = value.get("score")
         if isinstance(score, (int, float)):
@@ -126,6 +126,10 @@ def _build_item(
         raw = _coerce_to_dict(entry)
         text = _text_from_dict(raw) if raw else str(entry)
 
+    metadata = _provenance_metadata(raw)
+    if payload.evidence:
+        metadata["evidence"] = [reference.model_dump(mode="json") for reference in payload.evidence]
+
     return SearchResultItem(
         kind=kind,
         search_type=payload.search_type,
@@ -133,32 +137,27 @@ def _build_item(
         score=_score_from(entry),
         dataset_id=str(payload.dataset_id) if payload.dataset_id else None,
         dataset_name=payload.dataset_name,
-        metadata=_provenance_metadata(raw),
+        metadata=metadata,
         raw=raw,
         structured=structured,
     )
-
-
-def _flatten(value: Any) -> list[Any]:
-    """Return a flat list of entries from completion/context/result_object."""
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
-    return [value]
 
 
 def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultItem]:
     """Normalize one dataset's retriever payload into SearchResultItems."""
     kind = _KIND_BY_SEARCH_TYPE.get(payload.search_type, SearchResultKind.UNKNOWN)
 
-    if payload.only_context:
-        entries = _flatten(payload.context)
-    elif payload.completion is not None:
-        entries = _flatten(payload.completion)
-    elif payload.context is not None:
-        entries = _flatten(payload.context)
-    else:
-        entries = _flatten(payload.result_object)
+    if payload.only_context and payload.user_prompt:
+        # One item, not one per context entry: the LLM input is a single artifact. Its
+        # text is the user prompt; the system prompt rides on its own field, as the LLM
+        # receives the two as separate messages. The pair is only ever set when
+        # retrieval found something, so the item count keeps meaning "did retrieval
+        # find anything" — recall's on_empty tools fallback and the session
+        # short-circuit both read it.
+        item = _build_item(payload.user_prompt, payload, kind)
+        return [item.model_copy(update={"system_prompt": payload.system_prompt})]
 
-    return [_build_item(entry, payload, kind) for entry in entries]
+    # The payload decides what counts as an entry (completion, else context, else
+    # the raw output; a bare "" context is a miss), so this and dataset routing's
+    # "found nothing" check cannot drift apart.
+    return [_build_item(entry, payload, kind) for entry in payload.entries()]

@@ -8,7 +8,13 @@ from .origin import (
     operation_origin_scope,
     set_operation_origin,
 )
-from .record_operation import OperationContext, get_current_operation, record_operation
+from .record_operation import (
+    OperationContext,
+    finish_operation,
+    get_current_operation,
+    get_current_session_ids,
+    record_operation,
+)
 from .scrub_error import scrub_error_message
 from .usage_accumulator import (
     OperationUsage,
@@ -26,8 +32,10 @@ __all__ = [
     "ORIGIN_SDK",
     "OperationContext",
     "OperationUsage",
+    "finish_operation",
     "get_active_operation_usage",
     "get_current_operation",
+    "get_current_session_ids",
     "get_operation_origin",
     "get_parent_run_id",
     "operation_origin_scope",

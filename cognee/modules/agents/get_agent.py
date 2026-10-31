@@ -1,10 +1,11 @@
 from uuid import UUID
 
+from sqlalchemy import select
+
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.agents.list_agents import AgentInfo
 from cognee.modules.users.methods.get_user import get_user
 from cognee.modules.users.models.UserApiKey import UserApiKey
-from sqlalchemy import select
 
 
 async def get_agent(agent_id: UUID, owner_id: UUID) -> AgentInfo:

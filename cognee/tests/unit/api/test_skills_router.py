@@ -1,7 +1,7 @@
 """Tests for the dataset-scoped skills router (DELETE /api/v1/skills/{skill_id})."""
 
-from types import SimpleNamespace
 from importlib import import_module
+from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi import FastAPI

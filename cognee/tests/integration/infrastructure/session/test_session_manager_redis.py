@@ -1,7 +1,8 @@
 """Integration tests for SessionManager with RedisAdapter."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from cognee.infrastructure.session.feedback_models import (
     AgentTraceFeedbackSummary,
@@ -33,6 +34,17 @@ class _InMemoryRedisList:
 
     async def lset(self, key: str, idx: int, val: str):
         self.data[key][idx] = val
+
+    async def lrem(self, key: str, count: int, val: str):
+        """Only count=0, every occurrence, is used; an emptied list disappears as in Redis."""
+        lst = self.data.get(key, [])
+        kept = [item for item in lst if item != val]
+        if kept:
+            self.data[key] = kept
+        else:
+            self.data.pop(key, None)
+            self.ttls.pop(key, None)
+        return len(lst) - len(kept)
 
     async def delete(self, key: str):
         self.ttls.pop(key, None)
@@ -147,6 +159,12 @@ async def test_add_agent_trace_step_and_get_trace_session(session_manager):
             "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
             new_callable=AsyncMock,
             return_value=AgentTraceFeedbackSummary(session_feedback="Plan created successfully."),
+        ),
+        # The LLM is patched above; also report it as available so the run does
+        # not depend on an LLM key being configured (fork PRs run without one).
+        patch(
+            "cognee.infrastructure.session.session_agent_trace.llm_available",
+            return_value=True,
         ),
     ):
         trace_id_1 = await session_manager.add_agent_trace_step(

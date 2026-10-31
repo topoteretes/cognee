@@ -1,0 +1,12 @@
+Sales call transcript — Hooli, April 3
+
+Hooli (Platform Lead): We run active-active across three regions. Is the
+sync engine real-time?
+
+Acme (Account Executive): Sync is instant across all regions — the moment
+you write in one region it's readable everywhere else.
+
+Hooli (Platform Lead): Great, that means we can drop our own replication
+layer entirely.
+
+Acme (Account Executive): Exactly, that's what most of our customers do.

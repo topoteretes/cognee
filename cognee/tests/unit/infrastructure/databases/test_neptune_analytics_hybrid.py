@@ -8,19 +8,20 @@ automatically when the Neptune optional dependencies (langchain_aws, botocore) a
 not installed.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
+
+import pytest
 
 langchain_aws = pytest.importorskip(
     "langchain_aws", reason="Neptune Analytics tests require langchain_aws"
 )
 botocore = pytest.importorskip("botocore", reason="Neptune Analytics tests require botocore")
 
-from cognee.infrastructure.engine import DataPoint  # noqa: E402
 from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (  # noqa: E402
     NeptuneAnalyticsAdapter,
 )
+from cognee.infrastructure.engine import DataPoint  # noqa: E402
 
 
 class SimpleNode(DataPoint):

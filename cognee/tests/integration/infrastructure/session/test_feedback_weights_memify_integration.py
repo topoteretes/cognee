@@ -3,11 +3,14 @@ import tempfile
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from cognee.infrastructure.session.session_manager import SessionManager
 from cognee.tasks.memify.apply_feedback_weights import apply_feedback_weights
 from cognee.tasks.memify.extract_feedback_qas import extract_feedback_qas
 from cognee.tasks.memify.feedback_weights_constants import (
+    FEEDBACK_WEIGHTS_MAX_ATTEMPTS,
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY,
 )
 
 
@@ -24,12 +27,25 @@ class _InMemoryRedisList:
         e = (end + 1) if end >= 0 else len(lst) + end + 1
         return lst[s:e]
 
+    async def llen(self, key: str):
+        return len(self.data.get(key, []))
+
     async def lindex(self, key: str, idx: int):
         lst = self.data.get(key, [])
         return lst[idx] if -len(lst) <= idx < len(lst) else None
 
     async def lset(self, key: str, idx: int, val: str):
         self.data[key][idx] = val
+
+    async def lrem(self, key: str, count: int, val: str):
+        """Only count=0, every occurrence, is used; an emptied list disappears as in Redis."""
+        lst = self.data.get(key, [])
+        kept = [item for item in lst if item != val]
+        if kept:
+            self.data[key] = kept
+        else:
+            self.data.pop(key, None)
+        return len(lst) - len(kept)
 
     async def delete(self, key: str):
         return 1 if self.data.pop(key, None) is not None else 0
@@ -78,24 +94,10 @@ class InMemoryGraphWithWeights:
         return result
 
 
-@pytest.fixture(params=["fs", "redis", "sqlite"])
+@pytest.fixture(params=["redis", "sqlite"])
 def session_manager_with_backend(request):
     backend = request.param
-    if backend == "fs":
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch(
-                "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-                return_value={"data_root_directory": tmpdir},
-            ):
-                from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                    FSCacheAdapter,
-                )
-
-                adapter = FSCacheAdapter()
-                sm = SessionManager(cache_engine=adapter)
-                yield sm
-                adapter.cache.close()
-    elif backend == "redis":
+    if backend == "redis":
         store = _InMemoryRedisList()
         patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
         with (
@@ -170,7 +172,16 @@ async def test_feedback_weights_first_run_then_idempotent(session_manager_with_b
 
 
 @pytest.mark.asyncio
-async def test_feedback_weights_mixed_success_keeps_false(session_manager_with_backend):
+async def test_feedback_weights_mixed_success_prunes_and_applies_once(session_manager_with_backend):
+    """A missing element id neither compounds the survivors nor seals the row early.
+
+    The surviving element moves exactly once — later runs skip it via the
+    applied-ids bookkeeping, so there is no compounding drift (the B1 regression).
+    The missing id keeps the row PENDING rather than marking it applied, because
+    an id absent here may belong to another dataset's graph and that dataset's
+    improve must still be able to consume the row; the attempt cap bounds the
+    rescans a genuinely deleted id can cost, and only then is the row sealed.
+    """
     sm = session_manager_with_backend
     user = _make_user()
 
@@ -186,25 +197,55 @@ async def test_feedback_weights_mixed_success_keeps_false(session_manager_with_b
 
     graph = InMemoryGraphWithWeights()
 
-    with (
-        patch("cognee.tasks.memify.extract_feedback_qas.session_user") as extract_user_ctx,
-        patch("cognee.tasks.memify.apply_feedback_weights.session_user") as apply_user_ctx,
-        patch("cognee.tasks.memify.extract_feedback_qas.get_session_manager", return_value=sm),
-        patch("cognee.tasks.memify.apply_feedback_weights.get_session_manager", return_value=sm),
-        patch("cognee.tasks.memify.apply_feedback_weights.get_graph_engine", return_value=graph),
-    ):
-        extract_user_ctx.get.return_value = user
-        apply_user_ctx.get.return_value = user
+    async def run_once():
+        with (
+            patch("cognee.tasks.memify.extract_feedback_qas.session_user") as extract_user_ctx,
+            patch("cognee.tasks.memify.apply_feedback_weights.session_user") as apply_user_ctx,
+            patch("cognee.tasks.memify.extract_feedback_qas.get_session_manager", return_value=sm),
+            patch(
+                "cognee.tasks.memify.apply_feedback_weights.get_session_manager", return_value=sm
+            ),
+            patch(
+                "cognee.tasks.memify.apply_feedback_weights.get_graph_engine", return_value=graph
+            ),
+        ):
+            extract_user_ctx.get.return_value = user
+            apply_user_ctx.get.return_value = user
 
-        items = []
-        async for item in extract_feedback_qas([{}], session_ids=["s1"]):
-            items.append(item)
+            items = []
+            async for item in extract_feedback_qas([{}], session_ids=["s1"]):
+                items.append(item)
 
-        result = await apply_feedback_weights(items, alpha=0.1)
+            result = await apply_feedback_weights(items, alpha=0.1) if items else None
+            return items, result
 
+    items, result = await run_once()
     assert len(items) == 1
+    assert result is not None
     assert result["processed"] == 1
-    assert result["applied"] == 0
+    assert result["applied"] == 0  # the missing edge keeps the row pending
+
+    weight_after_first_run = graph.node_weights["n1"]
+    assert weight_after_first_run > 0.5  # the surviving node moved
+    assert "missing-edge" not in graph.edge_weights  # the missing edge was pruned, not created
 
     entries = await sm.get_session(user_id="u1", session_id="s1", formatted=False)
-    assert entries[0].memify_metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is False
+    metadata = entries[0].memify_metadata
+    assert metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is False
+    assert "n1" in metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY]
+
+    # Later runs re-extract the pending row but never re-move the applied node;
+    # at the attempt cap the row is sealed for good.
+    for _ in range(FEEDBACK_WEIGHTS_MAX_ATTEMPTS - 1):
+        items, result = await run_once()
+        assert len(items) == 1
+        assert graph.node_weights["n1"] == weight_after_first_run  # no compounding
+
+    entries = await sm.get_session(user_id="u1", session_id="s1", formatted=False)
+    assert entries[0].memify_metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is True
+
+    # Once sealed, nothing is eligible and nothing moves.
+    items, result = await run_once()
+    assert items == []
+    assert result is None
+    assert graph.node_weights["n1"] == weight_after_first_run

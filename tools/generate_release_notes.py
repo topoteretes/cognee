@@ -11,13 +11,16 @@ which can overwrite CI environment variables with .env file placeholders.
 
 import argparse
 import asyncio
+import logging
 import os
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def run_git_command(command: list[str]) -> str:
@@ -36,16 +39,25 @@ def run_git_command(command: list[str]) -> str:
         sys.exit(1)
 
 
-def get_latest_release_tag() -> str | None:
-    """Get the latest release tag."""
+def get_latest_release_tag(exclude: str | None = None) -> str | None:
+    """Get the latest release tag.
+
+    ``exclude`` skips a tag by name — used to ignore the tag of the release
+    currently being cut, which the release workflow pushes before generating
+    notes. Without it the newest tag is the release itself and the notes
+    would compare the release against itself (issue #4661).
+    """
     try:
         # Get the latest tag that matches version pattern (vX.Y.Z)
         command = ["git", "tag", "--sort=-version:refname", "--list", "v*"]
         tags = run_git_command(command)
-        if tags:
-            return tags.split("\n")[0]
+        for tag in tags.split("\n"):
+            tag = tag.strip()
+            if tag and tag != exclude:
+                return tag
         return None
     except Exception:
+        logger.debug("Falling back to None after error in get_latest_release_tag", exc_info=True)
         return None
 
 
@@ -125,7 +137,7 @@ def _parse_dependencies(pyproject_text: str) -> dict[str, str]:
                 deps[name] = spec
         return deps
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _parse_dependencies", exc_info=True)
 
     # Fallback: extract the [project].dependencies = [ ... ] array textually.
     match = re.search(r"^dependencies\s*=\s*\[(.*?)\]", pyproject_text, re.DOTALL | re.MULTILINE)
@@ -147,6 +159,7 @@ def get_dependency_changes(base_ref: str, target_ref: str) -> dict[str, list[str
     except SystemExit:
         return changes
     except Exception:
+        logger.debug("Falling back after error in get_dependency_changes", exc_info=True)
         return changes
 
     base_deps = _parse_dependencies(base_text)
@@ -169,9 +182,11 @@ def get_compatibility_info(target_ref: str) -> dict[str, str]:
     try:
         text = run_git_command(["git", "show", f"{target_ref}:pyproject.toml"])
     except Exception:
+        logger.debug("Ignoring exception in get_compatibility_info", exc_info=True)
         try:
             text = (Path(__file__).parent.parent / "pyproject.toml").read_text()
         except Exception:
+            logger.debug("Falling back after error in get_compatibility_info", exc_info=True)
             return info
 
     py_match = re.search(r'^requires-python\s*=\s*["\']([^"\']+)["\']', text, re.MULTILINE)
@@ -319,6 +334,9 @@ Create engaging release notes that help users understand what's new and improved
         )
         return response
     except Exception as e:
+        logger.debug(
+            "Falling back to None after error in generate_release_notes_with_llm", exc_info=True
+        )
         print(f"Warning: LLM generation failed: {e}", file=sys.stderr)
         return None
 
@@ -397,7 +415,7 @@ def format_release_notes(
     compat_info: dict[str, str] | None = None,
 ) -> str:
     """Format structured release notes into markdown."""
-    date_str = datetime.now().strftime("%Y-%m-%d")
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     md = f"# {get_release_title(notes, version)}\n\n"
     md += f"**Release Date:** {date_str}\n"
@@ -514,14 +532,17 @@ async def main():
             else:
                 version = "unknown"
         except Exception as e:
+            logger.debug("Ignoring exception in main", exc_info=True)
             print(f"Warning: Could not extract version: {e}", file=sys.stderr)
             version = "unknown"
 
     # Determine base ref (what to compare against)
     base_ref = args.base
     if not base_ref:
-        # Use latest release tag as base
-        latest_tag = get_latest_release_tag()
+        # Use latest release tag as base, excluding the tag of the version being
+        # released — the release workflow pushes the new tag before this script
+        # runs, so the newest tag can be the release itself (issue #4661).
+        latest_tag = get_latest_release_tag(exclude=f"v{version}")
         if latest_tag:
             base_ref = latest_tag
             print(f"Using latest release tag as base: {base_ref}", file=sys.stderr)
@@ -546,12 +567,30 @@ async def main():
     dep_changes = get_dependency_changes(base_ref, target_ref)
     compat_info = get_compatibility_info(target_ref)
 
-    # Generate release notes with LLM, fall back to commit-based notes
-    notes = await generate_release_notes_with_llm(diff, commits, base_ref, target_ref, version)
+    changed_files = run_git_command(["git", "diff", "--name-only", f"{base_ref}...{target_ref}"])
 
-    if notes is None:
-        print("Falling back to commit-based release notes.", file=sys.stderr)
+    if not commits.strip() and not changed_files.strip():
+        # An empty comparison means the base is wrong (e.g. the release compared
+        # against its own tag, issue #4661). Never hand an empty diff to the
+        # LLM — it fabricates plausible-sounding notes for changes that are not
+        # in the release.
+        print(
+            f"Warning: no commits or file changes between {base_ref} and {target_ref}; "
+            "skipping LLM generation to avoid fabricated notes.",
+            file=sys.stderr,
+        )
         notes = generate_fallback_notes(commits, version)
+        notes.summary = (
+            f"No code changes detected between {base_ref} and {target_ref}. "
+            "If this is unexpected, the release notes comparison base is likely wrong."
+        )
+    else:
+        # Generate release notes with LLM, fall back to commit-based notes
+        notes = await generate_release_notes_with_llm(diff, commits, base_ref, target_ref, version)
+
+        if notes is None:
+            print("Falling back to commit-based release notes.", file=sys.stderr)
+            notes = generate_fallback_notes(commits, version)
 
     # Format as markdown
     title = get_release_title(notes, version)

@@ -10,8 +10,8 @@ from uuid import uuid4
 import pytest
 
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
-from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
+from cognee.modules.pipelines.tasks.task import Task
 
 
 @dataclass

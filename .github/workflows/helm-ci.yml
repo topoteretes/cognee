@@ -8,13 +8,18 @@ on:
     paths:
       - 'deployment/helm/**'
 
+# Least-privilege token (OSSF Scorecard: Token-Permissions). Lint/template
+# validation only — no GITHUB_TOKEN writes.
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
 
       - name: Lint
         run: helm lint deployment/helm

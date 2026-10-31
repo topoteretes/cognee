@@ -27,7 +27,7 @@ class RecallConfig(BaseSettings):
     # be searchable on the very next recall.
     recall_warmup_cache_ttl: float = 60.0
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     def to_dict(self) -> dict:
         return {

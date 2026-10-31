@@ -27,7 +27,8 @@ Safe assumptions:
 from __future__ import annotations
 
 import functools
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 
@@ -45,16 +46,16 @@ def install() -> bool:
         return False
 
     try:
-        from openai._utils import _compat as _ou_compat
-        from openai._utils import _typing as _ou_typing
-        from openai import _compat as _openai_compat
-        from openai import _utils as _openai_utils
         from openai import (
             _base_client,
             _legacy_response,
             _models,
             _response,
         )
+        from openai import _compat as _openai_compat
+        from openai import _utils as _openai_utils
+        from openai._utils import _compat as _ou_compat
+        from openai._utils import _typing as _ou_typing
     except ImportError as exc:
         logger.debug(
             "openai SDK not available or has shifted private modules; "

@@ -1,11 +1,11 @@
-from fastapi import Depends, HTTPException, Response, APIRouter
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.authentication.default.default_transport import default_transport
 from cognee.modules.users.authentication.get_client_auth_backend import get_client_auth_backend
 from cognee.modules.users.authentication.methods.authenticate_user import authenticate_user
-from cognee.modules.users.authentication.default.default_transport import default_transport
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
 
 
 def get_auth_router():
@@ -16,6 +16,7 @@ def get_auth_router():
         response: Response,
         credentials: OAuth2PasswordRequestForm = Depends(),
     ):
+        """Login — POST /api/v1/auth/login."""
         user = await authenticate_user(credentials.username, credentials.password)
 
         if user is None:
@@ -40,15 +41,24 @@ def get_auth_router():
 
     @router.post("/logout")
     async def logout(response: Response, user: User = Depends(get_authenticated_user)):
+        """Logout — POST /api/v1/auth/logout."""
+        # Same attributes as the login's set_cookie: a deletion is a Set-Cookie
+        # with a past expiry, and a browser only drops the stored cookie when
+        # its name, path and domain match.
         response.delete_cookie(
             key=default_transport.cookie_name,
+            path=default_transport.cookie_path,
             domain=default_transport.cookie_domain,
+            secure=default_transport.cookie_secure,
+            httponly=default_transport.cookie_httponly,
+            samesite=default_transport.cookie_samesite,
         )
 
         return {}
 
     @router.get("/me")
     async def get_me(user: User = Depends(get_authenticated_user)):
+        """Get me — GET /api/v1/auth/me."""
         return {
             "email": user.email,
         }

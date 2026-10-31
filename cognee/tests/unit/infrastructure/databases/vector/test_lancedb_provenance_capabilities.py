@@ -132,3 +132,24 @@ async def test_delete_data_points_escapes_single_quotes(tmp_path):
         assert {str(r.id) for r in remaining} == {keep_id}
     finally:
         await adapter.close()
+
+
+async def test_retrieve_escapes_single_quotes(tmp_path):
+    adapter = _new_adapter(tmp_path)
+    try:
+        collection = "Entity_name"
+        keep_id = str(uuid4())
+        await _seed(adapter, collection, [keep_id])
+
+        # Not seeded: ScoredResult ids must be UUIDs, so this only pins the
+        # predicate. Both the single-id (`id = ...`) and multi-id (`id IN (...)`)
+        # branches must quote the literal SQL-style; a bare tuple repr emits
+        # "o'brien" in double quotes, which LanceDB >= 0.38 reads as a column.
+        quoted_id = "o'brien"
+
+        assert await adapter.retrieve(collection, [quoted_id]) == []
+
+        rows = await adapter.retrieve(collection, [quoted_id, keep_id])
+        assert {str(r.id) for r in rows} == {keep_id}
+    finally:
+        await adapter.close()

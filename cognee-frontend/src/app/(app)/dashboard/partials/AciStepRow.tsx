@@ -1,8 +1,10 @@
 "use client";
 
-import React from "react";
+import React, { useCallback } from "react";
+import { trackEvent } from "@/modules/analytics";
+import { InlineCodeBlock } from "@/ui/elements/InlineCodeBlock";
+import { TerminalBlock } from "@/ui/elements/AgentSetupBlocks";
 import type { AciStepDef, AciAgentKey } from "./agentConnectionSteps";
-import { InlineCodeBlock } from "./InlineCodeBlock";
 import { SkillCopyBlock } from "./SkillCopyBlock";
 
 interface AciStepRowProps {
@@ -26,6 +28,17 @@ export function AciStepRow({
   onClick,
   onNavigate,
 }: AciStepRowProps): React.ReactElement {
+  const trackCopy = useCallback(
+    (block: string) => (): void => {
+      trackEvent({
+        pageName: "Dashboard",
+        eventName: "agent_config_copied",
+        additionalProperties: { card, block },
+      });
+    },
+    [card],
+  );
+
   return (
     <div
       className="aci-step-row"
@@ -65,7 +78,7 @@ export function AciStepRow({
           {step.title}
         </span>
         {isDone && (
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", background: "rgba(34,197,94,0.18)", color: "#22C55E", borderRadius: 100, padding: "2px 8px", flexShrink: 0, animation: "aci-check 200ms ease forwards" }}>
+          <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", background: "rgba(34,197,94,0.12)", color: "#22C55E", borderRadius: 100, padding: "2px 8px", flexShrink: 0, animation: "aci-check 200ms ease forwards" }}>
             Done
           </span>
         )}
@@ -88,8 +101,17 @@ export function AciStepRow({
                 {step.description}
               </p>
             )}
+            {step.lines && (
+              <TerminalBlock
+                lines={step.lines}
+                loading={step.loading}
+                placeholder="Preparing your credentials…"
+                copyLabel={step.copyLabel}
+                onCopied={trackCopy(step.title)}
+              />
+            )}
             {step.code && (
-              <InlineCodeBlock code={step.code} toCopy={step.codeToCopy} loading={step.loading} card={card} block={step.title} />
+              <InlineCodeBlock code={step.code} toCopy={step.codeToCopy} loading={step.loading} onCopy={trackCopy(step.title)} />
             )}
             {step.codeBlocks && (
               <div style={{ display: "flex", flexDirection: "column", gap: step.codeBlocks.some((cb) => cb.label) ? 14 : 8 }}>
@@ -97,10 +119,10 @@ export function AciStepRow({
                   cb.label ? (
                     <div key={j}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: "#EDECEA", marginBottom: 6 }}>{cb.label}</div>
-                      <InlineCodeBlock code={cb.code} toCopy={cb.toCopy} card={card} block={cb.label} />
+                      <InlineCodeBlock code={cb.code} toCopy={cb.toCopy} onCopy={trackCopy(cb.label)} />
                     </div>
                   ) : (
-                    <InlineCodeBlock key={j} code={cb.code} toCopy={cb.toCopy} card={card} block={step.title} />
+                    <InlineCodeBlock key={j} code={cb.code} toCopy={cb.toCopy} onCopy={trackCopy(step.title)} />
                   ),
                 )}
               </div>
@@ -108,6 +130,7 @@ export function AciStepRow({
             {step.skillPath && step.skillContent && (
               <SkillCopyBlock path={step.skillPath} content={step.skillContent} card={card} />
             )}
+            {step.content}
             {index < total - 1 ? (
               <p style={{ margin: "10px 0 0", fontSize: 12, color: "rgba(237,236,234,0.65)" }}>
                 Click step {index + 2} when ready ↓
@@ -115,7 +138,7 @@ export function AciStepRow({
             ) : (
               <button
                 onClick={(e) => { e.stopPropagation(); onNavigate("/sessions"); }}
-                style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, padding: "7px 14px", fontSize: 13, fontWeight: 500, color: "#EDECEA", fontFamily: "inherit", cursor: "pointer" }}
+                style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 0, padding: "7px 14px", fontSize: 13, fontWeight: 500, color: "#EDECEA", fontFamily: "inherit", cursor: "pointer" }}
               >
                 Go to Sessions →
               </button>

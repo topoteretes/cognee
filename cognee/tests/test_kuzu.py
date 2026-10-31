@@ -1,15 +1,16 @@
 import os
-import shutil
-import cognee
 import pathlib
+import shutil
 
+import cognee
 from cognee.infrastructure.files.storage import get_storage_config
 from cognee.modules.engine.models import NodeSet
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.search.types import SearchType
 from cognee.modules.search.operations import get_history
+from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_logger
+from cognee.tests.utils.ci_search_type import completion_or_chunks
 
 logger = get_logger()
 
@@ -28,8 +29,15 @@ async def main():
     )
 
     try:
-        # Set Ladybug as the graph database provider
-        cognee.config.set_graph_database_provider("ladybug")
+        # Set Ladybug as the graph database provider. The dataset database handler
+        # is derived from the provider only when the provider comes from the
+        # environment, so a config dict has to name both.
+        cognee.config.set_graph_db_config(
+            {
+                "graph_database_provider": "ladybug",
+                "graph_dataset_database_handler": "ladybug",
+            }
+        )
         cognee.config.data_root_directory(data_directory_path)
         cognee.config.system_root_directory(cognee_directory_path)
 
@@ -84,7 +92,7 @@ async def main():
         random_node_name = random_node.payload["text"]
 
         search_results = await cognee.search(
-            query_type=SearchType.GRAPH_COMPLETION, query_text=random_node_name
+            query_type=completion_or_chunks(), query_text=random_node_name
         )
         assert len(search_results) != 0, "The search results list is empty."
         print("\n\nExtracted sentences are:\n")
@@ -179,6 +187,22 @@ async def main():
         )
 
         assert "Alice" not in context
+
+        # remember() / recall() reach this store the way an SDK caller does;
+        # everything above drives add() / cognify() / search() instead. Kept after
+        # the search-history assert, since recall() adds to that history too.
+        remember_dataset = "store_remember_check"
+        await cognee.remember(
+            ["Cognee keeps entities in the graph store and embeddings in the vector store."],
+            dataset_name=remember_dataset,
+            self_improvement=False,
+        )
+        recall_results = await cognee.recall(
+            query_text="Where does cognee keep entities?",
+            query_type=SearchType.CHUNKS,
+            datasets=[remember_dataset],
+        )
+        assert recall_results, "recall() returned nothing after remember() on Ladybug"
 
         await cognee.prune.prune_data()
         data_root_directory = get_storage_config()["data_root_directory"]

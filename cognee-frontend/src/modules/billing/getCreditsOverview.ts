@@ -1,15 +1,15 @@
 "use server";
 
-export interface CreditsOverview {
-  budget: { totalUsd: number; spentUsd: number | null; remainingUsd: number | null; spentPct: number | null };
-  tenants: { tenantId: string; tenantName: string; spentUsd: number | null; maxBudgetUsd: number | null; remainingUsd: number | null }[];
-  purchases: { id: string; tokensPurchased: number; amountPaidUsd: number; currency: string; createdAt: string }[];
-}
+import type { CreditsOverviewResult } from "./creditsOverviewTypes";
 
 /**
  * Open-source stub — credit overview requires the cloud billing backend.
- * Always returns null so the dashboard banner is simply not shown in OSS mode.
+ * Reports `unavailable` so consumers skip the balance UI entirely, without
+ * ever presenting it to the user as an error.
+ *
+ * Nothing but the async function is exported from here — see
+ * creditsOverviewTypes.ts for why the shapes live elsewhere.
  */
-export default async function getCreditsOverview(): Promise<CreditsOverview | null> {
-  return null;
+export default async function getCreditsOverview(): Promise<CreditsOverviewResult> {
+  return { status: "unavailable" };
 }

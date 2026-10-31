@@ -18,10 +18,10 @@ time via ``get_effective_status_sql`` against
 """
 
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Optional, Sequence
 from uuid import UUID as UUIDType
 
 from sqlalchemy import and_, case, func, or_, select, update
@@ -43,6 +43,13 @@ class SessionStatus(str, Enum):
     ABANDONED = "abandoned"  # computed at read time, not stored
 
 
+class UsageKind(str, Enum):
+    """What a session_model_usage row counts: LLM completions or embeddings."""
+
+    LLM = "llm"
+    EMBEDDING = "embedding"
+
+
 # 30 minutes by default; overridable via env var for tests.
 def _abandon_after_seconds() -> int:
     raw = os.environ.get("SESSION_ABANDON_AFTER_SECONDS", "")
@@ -56,6 +63,7 @@ def _dialect_name(bind) -> str:
     try:
         return bind.dialect.name
     except Exception:
+        logger.debug("Falling back to  after error in _dialect_name", exc_info=True)
         return ""
 
 
@@ -63,14 +71,15 @@ async def ensure_and_touch_session(
     *,
     session_id: str,
     user_id: UUIDType,
-    dataset_id: Optional[UUIDType] = None,
+    dataset_id: UUIDType | None = None,
+    agent_id: str | None = None,
 ) -> None:
     """Upsert the session row in one round trip.
 
     Creates the row if absent (status=running). If present AND still
     running, bumps ``last_activity_at``. Terminal sessions are left
     untouched so a late straggler can't accidentally resurrect them.
-    Also fills in ``dataset_id`` when currently null.
+    Also fills in ``dataset_id`` / ``agent_id`` when currently null.
     """
     now = datetime.now(timezone.utc)
     engine = get_relational_engine()
@@ -83,6 +92,7 @@ async def ensure_and_touch_session(
             "session_id": session_id,
             "user_id": user_id,
             "dataset_id": dataset_id,
+            "agent_id": agent_id,
             "status": SessionStatus.RUNNING.value,
             "started_at": now,
             "last_activity_at": now,
@@ -96,10 +106,14 @@ async def ensure_and_touch_session(
             insert = sqlite_insert if dialect == "sqlite" else pg_insert
             stmt = insert(SessionRecord).values(**values)
             set_ = {"last_activity_at": now}
-            # Back-fill a previously-unset dataset_id.
+            # Back-fill a previously-unset dataset_id / agent_id.
             set_["dataset_id"] = case(
                 (SessionRecord.dataset_id.is_(None), dataset_id),
                 else_=SessionRecord.dataset_id,
+            )
+            set_["agent_id"] = case(
+                (SessionRecord.agent_id.is_(None), agent_id),
+                else_=SessionRecord.agent_id,
             )
             stmt = stmt.on_conflict_do_update(
                 index_elements=["session_id", "user_id"],
@@ -127,6 +141,38 @@ async def ensure_and_touch_session(
             existing.last_activity_at = now
             if existing.dataset_id is None and dataset_id is not None:
                 existing.dataset_id = dataset_id
+            if existing.agent_id is None and agent_id is not None:
+                existing.agent_id = agent_id
+        await session.commit()
+
+
+async def set_session_agent(
+    *,
+    session_id: str,
+    user_id: UUIDType,
+    agent_id: str,
+) -> None:
+    """Attribute an existing session to an agent connection (fill-if-null).
+
+    First agent to claim a session wins — re-registration of the same
+    connection is a no-op, and a second agent cannot overwrite the
+    attribution. Missing rows are left alone (the session may not have
+    started yet; ``ensure_and_touch_session`` carries agent_id for that
+    case).
+    """
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        await session.execute(
+            update(SessionRecord)
+            .where(
+                and_(
+                    SessionRecord.session_id == session_id,
+                    SessionRecord.user_id == user_id,
+                    SessionRecord.agent_id.is_(None),
+                )
+            )
+            .values(agent_id=agent_id)
+        )
         await session.commit()
 
 
@@ -137,7 +183,10 @@ async def accumulate_usage(
     tokens_in: int = 0,
     tokens_out: int = 0,
     cost_usd: float = 0.0,
-    model: Optional[str] = None,
+    embedding_tokens: int = 0,
+    embedding_cost_usd: float = 0.0,
+    model: str | None = None,
+    kind: UsageKind = UsageKind.LLM,
     errored: bool = False,
 ) -> None:
     """Atomically add usage counters to the session row + per-model row.
@@ -146,8 +195,20 @@ async def accumulate_usage(
     frozen. Per-model accumulation runs against
     ``session_model_usage`` via an upsert so mixed-model sessions
     attribute correctly in ``cost-by-model``.
+
+    Embedding usage (``kind=UsageKind.EMBEDDING``) goes to the session's own
+    embedding columns, never into its LLM ``tokens_in``/``cost_usd``; the
+    embedding model's per-model row is tagged with that kind.
     """
-    if tokens_in == 0 and tokens_out == 0 and cost_usd == 0.0 and not errored and model is None:
+    if (
+        tokens_in == 0
+        and tokens_out == 0
+        and cost_usd == 0.0
+        and embedding_tokens == 0
+        and embedding_cost_usd == 0.0
+        and not errored
+        and model is None
+    ):
         return
 
     engine = get_relational_engine()
@@ -162,9 +223,13 @@ async def accumulate_usage(
             values["tokens_out"] = SessionRecord.tokens_out + tokens_out
         if cost_usd:
             values["cost_usd"] = SessionRecord.cost_usd + cost_usd
+        if embedding_tokens:
+            values["embedding_tokens"] = SessionRecord.embedding_tokens + embedding_tokens
+        if embedding_cost_usd:
+            values["embedding_cost_usd"] = SessionRecord.embedding_cost_usd + embedding_cost_usd
         if errored:
             values["error_count"] = SessionRecord.error_count + 1
-        if model:
+        if model and kind == UsageKind.LLM:
             values["last_model"] = model
 
         if values:
@@ -180,6 +245,11 @@ async def accumulate_usage(
                 .values(**values)
             )
 
+        # An embedding model's own row counts its input tokens and cost in the
+        # ordinary columns; kind tells it apart from an LLM's row.
+        if kind == UsageKind.EMBEDDING:
+            tokens_in, tokens_out, cost_usd = embedding_tokens, 0, embedding_cost_usd
+
         # 2) Per-model row — only when there's usage to credit.
         if model and (tokens_in or tokens_out or cost_usd):
             now = datetime.now(timezone.utc)
@@ -192,6 +262,7 @@ async def accumulate_usage(
                     session_id=session_id,
                     user_id=user_id,
                     model=model,
+                    kind=kind.value,
                     tokens_in=tokens_in,
                     tokens_out=tokens_out,
                     cost_usd=cost_usd,
@@ -226,6 +297,7 @@ async def accumulate_usage(
                             session_id=session_id,
                             user_id=user_id,
                             model=model,
+                            kind=kind.value,
                             tokens_in=tokens_in,
                             tokens_out=tokens_out,
                             cost_usd=cost_usd,
@@ -296,10 +368,10 @@ async def get_session_row(
     *,
     session_id: str,
     user_id: UUIDType,
-    user_ids: Optional[list[UUIDType]] = None,
-    permitted_dataset_ids: Optional[list[UUIDType]] = None,
+    user_ids: list[UUIDType] | None = None,
+    permitted_dataset_ids: list[UUIDType] | None = None,
     prefer_other_owner: bool = False,
-) -> Optional[SessionRecord]:
+) -> SessionRecord | None:
     """Fetch a session row visible to the caller.
 
     Returns the row if the caller (or their child agents, via
@@ -369,11 +441,11 @@ class SessionListPage:
 
 async def list_session_rows(
     *,
-    user_id: Optional[UUIDType] = None,
-    user_ids: Optional[list[UUIDType]] = None,
-    permitted_dataset_ids: Optional[list[UUIDType]] = None,
-    since: Optional[datetime] = None,
-    status_filter: Optional[str] = None,
+    user_id: UUIDType | None = None,
+    user_ids: list[UUIDType] | None = None,
+    permitted_dataset_ids: list[UUIDType] | None = None,
+    since: datetime | None = None,
+    status_filter: str | None = None,
     limit: int = 50,
     offset: int = 0,
     order_by: str = "last_activity_at",
@@ -489,11 +561,32 @@ async def list_sessions_for_dataset(dataset_id: UUIDType) -> list[tuple[UUIDType
     return [(row.user_id, row.session_id) for row in rows]
 
 
+async def list_unattributed_sessions() -> list[tuple[UUIDType, str]]:
+    """Return (user_id, session_id) pairs for sessions with no dataset attribution.
+
+    A search that spans multiple datasets (or resolves none) runs in the plain
+    default session, whose SessionRecord row carries no ``dataset_id`` and no
+    dataset suffix — so dataset-scoped invalidation can never find it. Data-level
+    invalidation matches turns by deleted element ids, which is precise, so these
+    sessions are safe to over-scan (COG-6292).
+    """
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        rows = (
+            await session.execute(
+                select(SessionRecord.user_id, SessionRecord.session_id).where(
+                    SessionRecord.dataset_id.is_(None),
+                )
+            )
+        ).all()
+    return [(row.user_id, row.session_id) for row in rows]
+
+
 async def record_session_activity(
     user_id: str,
     session_id: str,
     *,
-    dataset_id: Optional[UUIDType] = None,
+    dataset_id: UUIDType | None = None,
     errored: bool = False,
 ) -> None:
     """Write a lifecycle heartbeat for a session: upsert + touch the SessionRecord row.
@@ -524,4 +617,4 @@ async def record_session_activity(
                 exc,
             )
         else:
-            logger.debug("session_records write failed (%s)", exc)
+            logger.debug("session_records write failed (%s)", exc, exc_info=True)
