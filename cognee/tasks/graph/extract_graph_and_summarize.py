@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.data.methods import get_dataset_custom_prompt
 from cognee.modules.ontology.ontology_config import Config
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.summarization import summarize_text
@@ -23,6 +24,10 @@ async def extract_graph_and_summarize(
     summary_method: Literal["llm", "from_extraction"] | None = None,
     **kwargs,
 ) -> list[TextSummary | DocumentChunk]:
+    # A call without its own prompt extracts with the one stored on the dataset, so
+    # every entry point (SDK, HTTP, MCP, update) uses the same default.
+    if not custom_prompt and ctx is not None and ctx.dataset is not None:
+        custom_prompt = await get_dataset_custom_prompt(ctx.dataset.id)
     if summary_method is None:
         summary_method = get_cognify_config().summary_method
     if summary_method == "from_extraction":
