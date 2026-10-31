@@ -171,3 +171,18 @@ async def test_the_requested_dataset_is_passed_down_as_the_collection_scope():
         await visualize_module.get_live_events(DATASET_ID, user=user)
 
     collect.assert_awaited_once_with(user=user, dataset_id=DATASET_ID)
+
+@pytest.mark.asyncio
+async def test_trailing_z_event_time_is_parsed_not_dropped():
+    """RFC 3339 producers emit ``...Z``; ``fromisoformat`` only accepts it from
+    Python 3.11 on, so a 3.10 runner would drop the event instead of comparing
+    it. Normalizing "Z" to "+00:00" first keeps both runtimes on one path."""
+    older = _event("2026-08-03T09:00:00Z")
+    newer = _event("2026-08-03T09:00:10Z")
+    since = datetime(2026, 8, 3, 9, 0, 5)  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
+
+    ctx_a, ctx_b = _patches([older, newer])
+    with ctx_a, ctx_b:
+        result = await visualize_module.get_live_events(DATASET_ID, since=since)
+
+    assert result["events"] == [newer]
