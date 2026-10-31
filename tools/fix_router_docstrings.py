@@ -27,6 +27,7 @@ import os
 import re
 import sys
 import textwrap
+import types
 import typing
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -66,6 +67,8 @@ KNOWN_DESCRIPTIONS = {
     "agent_id": "The agent's user ID (from GET /api/v1/agents/list).",
     "agent_session_name": "Name of the agent connection.",
     "api_key_id": "UUID of the API key (from GET /api/v1/auth/api-keys).",
+    "account_id": "Connection to use (from GET /api/v1/integrations/{provider}/connections); "
+    "the newest one is used when omitted.",
     "provider": "Key of a registered OAuth provider (see GET /api/v1/integrations/status).",
     "plugin_key": "Key of a known plugin (see GET /api/v1/integrations/status).",
     "skill_id": "ID of the skill (from GET /api/v1/skills/).",
@@ -94,8 +97,53 @@ def _literal_values(annotation) -> list:
     return values
 
 
-def _describe(name: str, annotation, explicit: str | None, default) -> str:
-    """Best mechanical description: code first, then vocabulary, then the type."""
+def _base_type(annotation):
+    """The annotation with Annotated and Optional stripped off."""
+    if typing.get_origin(annotation) is typing.Annotated:
+        return _base_type(typing.get_args(annotation)[0])
+    if typing.get_origin(annotation) in (typing.Union, types.UnionType):
+        args = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
+        if len(args) == 1:
+            return _base_type(args[0])
+    return annotation
+
+
+def _constraints(metadata, annotation=None) -> str:
+    """Field limits (ge/le/gt/lt, min/max length) as a sentence, or ""."""
+    bounds: dict[str, object] = {}
+    for item in metadata or ():
+        for attr in ("ge", "le", "gt", "lt", "min_length", "max_length"):
+            value = getattr(item, attr, None)
+            if value is not None:
+                bounds[attr] = value
+    parts = []
+    low, high = bounds.get("ge"), bounds.get("le")
+    if low is not None and high is not None:
+        parts.append(f"Must be between {low} and {high}.")
+    else:
+        if low is not None:
+            parts.append(f"Must be at least {low}.")
+        if high is not None:
+            parts.append(f"Must be at most {high}.")
+    if bounds.get("gt") is not None:
+        parts.append(f"Must be greater than {bounds['gt']}.")
+    if bounds.get("lt") is not None:
+        parts.append(f"Must be less than {bounds['lt']}.")
+    unit = "characters" if _base_type(annotation) is str else "items"
+    if bounds.get("min_length") is not None:
+        parts.append(f"At least {bounds['min_length']} {unit}.")
+    if bounds.get("max_length") is not None:
+        parts.append(f"At most {bounds['max_length']} {unit}.")
+    return " ".join(parts)
+
+
+def _describe(name: str, annotation, explicit: str | None, default, metadata=()) -> str:
+    """Best mechanical description: code first, then vocabulary, then the type.
+
+    Literal values and field limits are appended mechanically. A Literal keeps
+    the placeholder in front, so describe_router_params.py still asks Claude
+    what each value means — the bare list of values does not say.
+    """
     from pydantic_core import PydanticUndefined
 
     if explicit and explicit.strip():
@@ -106,9 +154,13 @@ def _describe(name: str, annotation, explicit: str | None, default) -> str:
         literals = _literal_values(annotation)
         if literals:
             rendered = ", ".join(repr(value) for value in literals)
-            text = f"One of: {rendered}."
+            text = f"{FALLBACK_DESCRIPTION} One of: {rendered}."
         else:
             text = FALLBACK_DESCRIPTION
+
+    limits = _constraints(metadata, annotation)
+    if limits:
+        text = f"{text} {limits}"
 
     has_default = default is not None and default is not ... and default is not PydanticUndefined
     if has_default and "default" not in text.lower():
@@ -133,7 +185,9 @@ def format_annotation(annotation) -> str:
     if origin is typing.Literal:
         rendered = ", ".join(repr(value) for value in typing.get_args(annotation))
         return f"Literal[{rendered}]"
-    if origin is typing.Union or str(origin) == "types.UnionType":
+    # `X | None` has origin types.UnionType, distinct from typing.Union
+    # before Python 3.14.
+    if origin is typing.Union or origin is types.UnionType:
         args = list(typing.get_args(annotation))
         if type(None) in args and len(args) == 2:
             other = args[0] if args[1] is type(None) else args[1]
@@ -231,7 +285,13 @@ def collect_param_docs(endpoint, route_path: str) -> dict[str, ParamDoc]:
         base = annotation
         if typing.get_origin(annotation) is typing.Annotated:
             base = typing.get_args(annotation)[0]
-        if inspect.isclass(base) and issubclass(base, framework_types):
+        # On Python 3.10, inspect.isclass(list[str]) is True but issubclass()
+        # rejects it, so generic aliases must be ruled out first.
+        if (
+            inspect.isclass(base)
+            and typing.get_origin(base) is None
+            and issubclass(base, framework_types)
+        ):
             continue
 
         models = _pydantic_models(annotation)
@@ -250,6 +310,7 @@ def collect_param_docs(endpoint, route_path: str) -> dict[str, ParamDoc]:
                             model_field.annotation,
                             model_field.description,
                             model_field.default,
+                            model_field.metadata,
                         ),
                     )
             continue
@@ -265,7 +326,13 @@ def collect_param_docs(endpoint, route_path: str) -> dict[str, ParamDoc]:
             name=wire_name,
             section=_section_for(parameter, route_path, name),
             type_text=format_annotation(annotation),
-            description=_describe(wire_name, annotation, description, default),
+            description=_describe(
+                wire_name,
+                annotation,
+                description,
+                default,
+                getattr(meta, "metadata", ()) if meta is not None else (),
+            ),
         )
     return docs
 
@@ -389,7 +456,7 @@ def _insert_bullets(lines: list[str], additions: list[ParamDoc]) -> list[str]:
                     break
 
         if target is not None:
-            # Append at the end of the section: before the next heading.
+            # The section runs up to the next heading.
             end = len(lines)
             for index in range(target + 1, len(lines)):
                 if _is_heading(lines[index]):
@@ -397,7 +464,7 @@ def _insert_bullets(lines: list[str], additions: list[ParamDoc]) -> list[str]:
                     break
             while end > target + 1 and not lines[end - 1].strip():
                 end -= 1
-            lines[end:end] = bullet_lines
+            lines[target + 1 : end] = _merge_bullets(lines[target + 1 : end], docs)
             continue
 
         # No such section: create one before the first trailing heading.
@@ -414,9 +481,50 @@ def _insert_bullets(lines: list[str], additions: list[ParamDoc]) -> list[str]:
     return lines
 
 
+BULLET_NAME_RE = re.compile(r"^(?P<indent>\s*)- \*\*(?P<name>\w+)\*\*")
+
+
+def _merge_bullets(section: list[str], docs: list[ParamDoc]) -> list[str]:
+    """Add bullets to a section body, keeping alphabetical order if it has one.
+
+    When the existing bullets are alphabetical (case-insensitive), each new one
+    goes in its sorted place; otherwise they are appended, so a deliberate
+    hand-made order is never reshuffled.
+    """
+    names = [match.group("name") for line in section if (match := BULLET_NAME_RE.match(line))]
+    keys = [name.lower() for name in names]
+    if keys != sorted(keys):
+        out = list(section)
+        for doc in docs:
+            out.extend(doc.bullet())
+        return out
+
+    pending = sorted(docs, key=lambda doc: doc.name.lower())
+    out: list[str] = []
+    for line in section:
+        match = BULLET_NAME_RE.match(line)
+        if match:
+            while pending and pending[0].name.lower() < match.group("name").lower():
+                out.extend(pending.pop(0).bullet())
+        out.append(line)
+    for doc in pending:
+        out.extend(doc.bullet())
+    return out
+
+
+def escape_docstring(text: str) -> str:
+    """Docstring text as it must appear between triple quotes in source.
+
+    Backslashes are doubled so ``\\d`` or ``\\n`` in the text stays literal
+    instead of becoming an escape (or a SyntaxError, for ``\\N``), and
+    ``\"\"\"`` is escaped so it cannot close the docstring early.
+    """
+    return text.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+
+
 def _rebuild_docstring(text: str, indent: str, summary_on_first_line: bool) -> list[str]:
     """Render docstring text back into source lines (with quotes)."""
-    safe = text.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+    safe = escape_docstring(text)
     lines = safe.splitlines() or [""]
     out: list[str] = []
     if summary_on_first_line and lines[0].strip():
