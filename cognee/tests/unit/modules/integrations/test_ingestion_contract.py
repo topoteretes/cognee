@@ -143,3 +143,16 @@ def test_importing_the_neutral_module_loads_no_provider_library():
         "assert not bad, bad"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        key
+        for key, entry in ingestion._PROVIDERS.items()
+        if entry.service_builder is not None and key != "google_drive"
+    ],
+)
+def test_a_provider_without_service_options_rejects_them(provider):
+    with pytest.raises(TypeError):
+        ingestion.build_service(provider, "a-token", expires_at=None)

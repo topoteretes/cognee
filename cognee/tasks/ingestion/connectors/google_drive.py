@@ -50,6 +50,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from cognee.shared.logging_utils import get_logger
@@ -139,6 +140,7 @@ class _DriveConfig:
     max_file_size_mb: int | None = None
     shared_drive_id: str | None = None
     max_workers: int = DEFAULT_MAX_WORKERS
+    check_active: Callable[[], None] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -213,19 +215,56 @@ def build_drive_service(
     )
 
 
-def build_drive_service_from_access_token(access_token: str) -> Any:
+class TokenRenewalError(Exception):
+    """The host could not supply a new access token (refused, revoked or unreachable)."""
+
+
+def build_drive_service_from_access_token(
+    access_token: str,
+    *,
+    expires_at: datetime | None = None,
+    refresh_access_token: Callable[[str], tuple[str, datetime]] | None = None,
+) -> Any:
     """Build a Drive client from a short-lived token supplied by a host.
 
     Cloud hosts keep refresh tokens in their control plane and pass only an
-    access token to the ingestion worker. This helper deliberately does not
-    persist the token or attempt an interactive OAuth flow.
+    access token to the ingestion worker. For long runs, supply its expiry and a
+    synchronous host callback that takes the token the client used and returns a new token and
+    its UTC expiry (a host serving several clients can hand back one already renewed); it needs
+    ``expires_at`` too, since google-auth refuses a renewal that carries no expiry. Google's
+    transport calls it when the token expires or Drive rejects it, never while the
+    client is built. The callback raises ``TokenRenewalError`` when it cannot supply one.
     """
+    if refresh_access_token is not None and expires_at is None:
+        raise ValueError(
+            "refresh_access_token needs expires_at: without an expiry it cannot renew."
+        )
     try:
+        from google.auth.exceptions import RefreshError
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
     except ImportError as exc:  # pragma: no cover - optional dependency
         raise ImportError('The Google Drive connector requires the "google-drive" extra.') from exc
-    credentials = Credentials(token=access_token, scopes=DRIVE_READONLY_SCOPES)
+
+    def utc_naive(value: datetime) -> datetime:
+        # google-auth compares expiry with naive UTC datetimes (SQLite also returns these).
+        if value.tzinfo is None:
+            return value
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+    def refresh_handler(request, scopes):
+        try:
+            token, expiry = refresh_access_token(credentials.token)
+        except TokenRenewalError:
+            raise RefreshError("Google access token renewal failed.") from None
+        return token, utc_naive(expiry)
+
+    credentials = Credentials(
+        token=access_token,
+        scopes=DRIVE_READONLY_SCOPES,
+        expiry=utc_naive(expires_at) if expires_at is not None else None,
+        refresh_handler=refresh_handler if refresh_access_token is not None else None,
+    )
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
 
 
@@ -279,7 +318,7 @@ def is_supported_mime_type(mime_type: str) -> bool:
 
 
 class DriveAuthError(Exception):
-    """Drive rejected the access token (HTTP 401) before the run produced anything."""
+    """The access token was rejected or could not be renewed before any rows were emitted."""
 
 
 class _CutShort(Exception):
@@ -299,7 +338,8 @@ _RATE_LIMIT_REASONS = (
 
 
 def _cut_reason(exc: Exception) -> str | None:
-    """``rate_limit`` or ``auth`` for a Drive error that outlasted the retries, else None."""
+    """``rate_limit`` or ``auth`` for a Drive error that outlasted the retries or a failed
+    credential renewal, else None."""
     status = getattr(getattr(exc, "resp", None), "status", None)
     if status == 429:
         return "rate_limit"
@@ -307,7 +347,21 @@ def _cut_reason(exc: Exception) -> str | None:
         return "auth"
     if status == 403 and any(reason in str(exc) for reason in _RATE_LIMIT_REASONS):
         return "rate_limit"
+    # AuthorizedHttp refreshes on 401 before googleapiclient can expose HttpError.
+    # Google is optional, so ordinary source tests need not install its auth library.
+    try:
+        from google.auth.exceptions import RefreshError
+    except ImportError:
+        return None
+    if isinstance(exc, RefreshError):
+        return "auth"
     return None
+
+
+def _describe(exc: Exception) -> str:
+    """The status of a failed Drive request; its text carries the URI, ids and the body."""
+    status = getattr(getattr(exc, "resp", None), "status", None)
+    return f"HTTP {status}" if status else type(exc).__name__
 
 
 def _raise_if_cut(exc: Exception) -> None:
@@ -322,7 +376,9 @@ def _record_cut(stats: dict[str, int], cut: _CutShort, *, emitted: bool) -> None
     A token refused before anything came out is raised instead: the caller must reconnect.
     """
     if cut.reason == "auth" and not emitted:
-        raise DriveAuthError("Google Drive rejected the access token (HTTP 401).") from cut
+        raise DriveAuthError(
+            "Google Drive access token was rejected or could not be renewed."
+        ) from cut
     stats["failed"] += 1
     stats[f"failed_{cut.reason}"] = 1
     logger.warning("Google Drive sync stopped early (%s); it resumes on the next run.", cut.reason)
@@ -546,6 +602,13 @@ def _ordered_map(fn, items, service, service_factory, workers, weight=None):
             client.close()
 
 
+STATE_VERSION = 1  # of the keys kept in the resource state; bump when their meaning changes
+
+
+def _stamp_state(state: dict, scope: list) -> None:
+    state.update(v=STATE_VERSION, scope=scope)
+
+
 def _blocks_cursor(stats: dict[str, int]) -> bool:
     """True when a failure a rerun can cure keeps the Changes cursor where it was."""
     return stats["failed"] > sum(stats.get(key, 0) for key in _PERMANENT_FAILURES)
@@ -603,6 +666,11 @@ def _iter_rows(
     stats.clear()
     stats.update(scanned=0, skipped=0, failed=0, deleted=0, unchanged=0)
     page_token = state.get("page_token")
+    # A cursor only covers the scope it was taken for; a widened scope needs a full listing.
+    scope = [config.folder_id, config.shared_drive_id, config.include_subfolders]
+    if state.get("scope", scope) != scope:
+        state.pop("page_token", None)
+        page_token = None
     known_ids = set(state.get("known_ids", []))
     versions = dict(state.get("versions", {}))
 
@@ -632,7 +700,9 @@ def _iter_rows(
             # during a slow initial sync is caught on the next incremental run
             # rather than missed. Re-processing such a file is idempotent under
             # write_disposition="merge".
-            start_token = _get_start_page_token(service, config.shared_drive_id)
+            start_token = _get_start_page_token(
+                service, config.shared_drive_id, config.check_active
+            )
             for file_meta, (row, local) in _ordered_map(
                 fetch_row,
                 files_to_fetch(),
@@ -657,6 +727,7 @@ def _iter_rows(
             _record_cut(stats, cut, emitted=bool(yielded or stats["deleted"]))
             # The listing is incomplete, so nothing is reconciled as absent; what was
             # fetched stays fetched, and the next run goes on from there.
+            _stamp_state(state, scope)
             state["known_ids"] = sorted(known_ids | present_ids)
             kept = {**versions, **fetched_versions}
             state["versions"] = {
@@ -666,6 +737,7 @@ def _iter_rows(
         for file_id in sorted(known_ids - present_ids):
             stats["deleted"] += 1
             yield {"id": file_id, "_deleted": True}
+        _stamp_state(state, scope)
         state["known_ids"] = sorted(present_ids)
         state["versions"] = fetched_versions
         if not _blocks_cursor(stats):
@@ -676,9 +748,10 @@ def _iter_rows(
     try:
         sizes: dict[str, int] = {}
         changed_ids, deleted_ids, new_page_token = _list_changed_file_ids(
-            service, page_token, config.shared_drive_id, sizes
+            service, page_token, config.shared_drive_id, sizes, config.check_active
         )
     except _CutShort as cut:
+        _stamp_state(state, scope)
         _record_cut(stats, cut, emitted=False)
         return
 
@@ -709,7 +782,7 @@ def _iter_rows(
                 if _is_not_found(e):
                     return None, None, {}
                 raise RuntimeError(
-                    f"Google Drive: failed to fetch metadata for file '{file_id}': {e}"
+                    f"Google Drive: failed to fetch file metadata ({_describe(e)})"
                 ) from e
 
             if file_meta.get("trashed") or not _is_in_scope(
@@ -729,7 +802,7 @@ def _iter_rows(
                 # Drive reports a file's parents by real id, never by the "root" alias the
                 # scope may hold, so a file directly in the folder would read as out of scope.
                 scope_folder_ids = scope_folder_ids | {
-                    _resolve_folder_id(service, config.folder_id)
+                    _resolve_folder_id(service, config.folder_id, config.check_active)
                 }
             for file_id, (file_meta, row, local) in _ordered_map(
                 fetch_changed,
@@ -767,6 +840,7 @@ def _iter_rows(
 
     # Retry transient extraction failures on the next run instead of losing
     # them behind a successfully advanced changes cursor.
+    _stamp_state(state, scope)
     state["known_ids"] = sorted(known_ids)
     state["versions"] = versions
     if not _blocks_cursor(stats):
@@ -793,6 +867,8 @@ def _get_scope_folder_ids(service, config: _DriveConfig) -> set[str]:
         current = queue.pop(0)
         page_token = None
         while True:
+            if config.check_active:
+                config.check_active()
             try:
                 response = (
                     service.files()
@@ -812,7 +888,7 @@ def _get_scope_folder_ids(service, config: _DriveConfig) -> set[str]:
             except Exception as e:
                 _raise_if_cut(e)
                 raise RuntimeError(
-                    f"Google Drive: failed to list subfolders of folder '{current}': {e}"
+                    f"Google Drive: failed to list subfolders ({_describe(e)})"
                 ) from e
 
             for f in response.get("files", []):
@@ -837,10 +913,16 @@ def _list_files_in_scope(service, config: _DriveConfig):
             config.folder_id,
             shared_drive_id=config.shared_drive_id,
             all_files=True,
+            check_active=config.check_active,
         )
         return
     for folder_id in _get_scope_folder_ids(service, config):
-        yield from _list_files_in_folder(service, folder_id, shared_drive_id=config.shared_drive_id)
+        yield from _list_files_in_folder(
+            service,
+            folder_id,
+            shared_drive_id=config.shared_drive_id,
+            check_active=config.check_active,
+        )
 
 
 def _list_files_in_folder(
@@ -849,9 +931,12 @@ def _list_files_in_folder(
     *,
     shared_drive_id: str | None = None,
     all_files: bool = False,
+    check_active: Callable[[], None] | None = None,
 ):
     page_token = None
     while True:
+        if check_active:
+            check_active()
         try:
             params = {
                 "q": "trashed=false"
@@ -876,7 +961,7 @@ def _list_files_in_folder(
         except Exception as e:
             _raise_if_cut(e)
             raise RuntimeError(
-                f"Google Drive: failed to list files in folder '{folder_id}': {e}"
+                f"Google Drive: failed to list files in a folder ({_describe(e)})"
             ) from e
 
         for file_meta in response.get("files", []):
@@ -888,7 +973,11 @@ def _list_files_in_folder(
             break
 
 
-def _get_start_page_token(service, shared_drive_id: str | None = None) -> str:
+def _get_start_page_token(
+    service, shared_drive_id: str | None = None, check_active: Callable[[], None] | None = None
+) -> str:
+    if check_active:
+        check_active()
     try:
         params = {"supportsAllDrives": True}
         if shared_drive_id:
@@ -896,7 +985,9 @@ def _get_start_page_token(service, shared_drive_id: str | None = None) -> str:
         response = service.changes().getStartPageToken(**params).execute(num_retries=API_RETRIES)
     except Exception as e:
         _raise_if_cut(e)
-        raise RuntimeError(f"Google Drive: failed to get changes start page token: {e}") from e
+        raise RuntimeError(
+            f"Google Drive: failed to get changes start page token ({_describe(e)})"
+        ) from e
     return response["startPageToken"]
 
 
@@ -905,6 +996,7 @@ def _list_changed_file_ids(
     page_token: str,
     shared_drive_id: str | None = None,
     sizes: dict[str, int] | None = None,
+    check_active: Callable[[], None] | None = None,
 ) -> tuple[set[str], set[str], str]:
     """Return the changed and the deleted file ids since ``page_token``, and the next token.
 
@@ -920,6 +1012,8 @@ def _list_changed_file_ids(
         params["driveId"] = shared_drive_id
 
     while True:
+        if check_active:
+            check_active()
         try:
             response = (
                 service.changes()
@@ -935,7 +1029,7 @@ def _list_changed_file_ids(
             )
         except Exception as e:
             _raise_if_cut(e)
-            raise RuntimeError(f"Google Drive: failed to list changes: {e}") from e
+            raise RuntimeError(f"Google Drive: failed to list changes ({_describe(e)})") from e
 
         for change in response.get("changes", []):
             file_id = change.get("fileId")
@@ -958,7 +1052,11 @@ def _list_changed_file_ids(
     return changed_ids, deleted_ids, new_start_token
 
 
-def _resolve_folder_id(service, folder_id: str) -> str:
+def _resolve_folder_id(
+    service, folder_id: str, check_active: Callable[[], None] | None = None
+) -> str:
+    if check_active:
+        check_active()
     try:
         response = (
             service.files()
@@ -967,7 +1065,7 @@ def _resolve_folder_id(service, folder_id: str) -> str:
         )
     except Exception as e:
         _raise_if_cut(e)
-        raise RuntimeError(f"Google Drive: failed to resolve folder '{folder_id}': {e}") from e
+        raise RuntimeError(f"Google Drive: failed to resolve folder ({_describe(e)})") from e
     return response["id"]
 
 
@@ -1152,6 +1250,7 @@ def google_drive_source(
         max_workers=_first_set(
             max_workers, _env_int("GOOGLE_DRIVE_MAX_WORKERS"), DEFAULT_MAX_WORKERS
         ),
+        check_active=check_active,
     )
     if config.max_workers < 1:
         raise ValueError(
