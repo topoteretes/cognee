@@ -195,32 +195,59 @@ def _evidence_rank(reference: Any) -> tuple[bool, int]:
     return (True, 0)
 
 
-def recall_item_dataset(item: Any) -> str | None:
-    """The dataset line for a hit whose data ids are cited in its text, not in refs.
+# One bullet of the Evidence block cognee appends to a cited answer:
+# "- chunk N of document NAME (data_id: UUID, chunk_id: UUID): "..."".
+_EVIDENCE_BULLET = re.compile(
+    r"^- chunk \d+ of document (?P<document>.+?) \(data_id: (?P<data_id>[0-9a-f-]{36})",
+    re.MULTILINE,
+)
 
-    The default hybrid answer lists its sources' data_ids in an ``Evidence:``
-    block inside the answer; ``forget`` also needs the dataset, which only the
-    hit itself carries.
+
+def _refs_from_evidence_text(item: Any, hit_dataset_id: Any) -> list[dict[str, str]]:
+    """Refs for a hit whose Evidence block cites data_ids but carries no structured refs.
+
+    cognee releases up to 1.6.5 return no structured evidence for the default
+    (hybrid) answer: the ids its Evidence block cites exist only in the answer
+    text, already best match first, and the dataset is the hit's own. Used only
+    when the structured references are empty, so on releases that fill them
+    the text is never read.
     """
-    dataset_id = _get_field(item, "dataset_id")
-    if not dataset_id:
-        return None
-    name = _get_field(item, "dataset_name")
-    if name:
-        return f"dataset: {' '.join(str(name).split())[:60]} (dataset_id={dataset_id})"
-    return f"dataset: dataset_id={dataset_id}"
+    if not hit_dataset_id:
+        return []
+    text = _get_field(item, "answer", "text", "content", "search_result", "result")
+    if not isinstance(text, str):
+        return []
+    refs: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for match in _EVIDENCE_BULLET.finditer(text):
+        data_id = match.group("data_id")
+        if data_id in seen:
+            continue
+        seen.add(data_id)
+        refs.append(
+            {
+                "data_id": data_id,
+                "dataset_id": str(hit_dataset_id),
+                "document": " ".join(match.group("document").split())[:80],
+            }
+        )
+        if len(refs) == MAX_RECALL_REFS:
+            break
+    return refs
 
 
 def recall_item_refs(item: Any) -> list[dict[str, str]]:
     """Forgettable data items behind one recall hit, as (data_id, dataset_id) pairs.
 
     Two places carry them: a chunk/summary hit names its own document in
-    ``metadata.data_id``, and a completion hit lists the segments it drew on in
-    ``metadata.evidence`` (only with ``include_references``). Graph-node, edge
+    ``metadata.data_id``, and a completion hit lists the segments its answer is
+    grounded in (the default answer) or drew on in ``metadata.evidence`` (only
+    with ``include_references``). Graph-node, edge
     and triplet references name no document and are skipped. A reference
     without its own ``dataset_id`` takes the hit's, since ``forget`` needs both.
     Evidence is taken best match first (lowest ``rank``; unranked last), so the
-    cap keeps the most relevant items.
+    cap keeps the most relevant items. A hit with no structured refs falls back
+    to the data_ids its Evidence block cites (:func:`_refs_from_evidence_text`).
     """
     metadata = _model_dump(_get_field(item, "metadata"))
     if not isinstance(metadata, dict):
@@ -250,6 +277,8 @@ def recall_item_refs(item: Any) -> list[dict[str, str]]:
         refs.append(ref)
         if len(refs) == MAX_RECALL_REFS:
             break
+    if not refs:
+        refs = _refs_from_evidence_text(item, hit_dataset_id)
     return refs
 
 
@@ -262,9 +291,9 @@ def format_recall_body(
     """Render recall results, including normalized response envelopes.
 
     With ``include_references``, each hit backed by stored data gets one
-    ``refs:`` line per data item, carrying the ids ``forget`` takes. A hit with
-    no structured refs (the default hybrid answer cites data_ids in its text)
-    gets one ``dataset:`` line instead, so the cited ids can be paired with it.
+    ``refs:`` line per data item, carrying the ids ``forget`` takes, read from
+    the hit's structured references; a hit without them (older cognee releases)
+    gets the data_ids its Evidence block cites, paired with the hit's dataset.
     """
     results = _unwrap_results(results)
     if not results:
@@ -285,9 +314,6 @@ def format_recall_body(
             refs = recall_item_refs(result)
             for ref in refs:
                 line += "\n  refs: " + ", ".join(f"{key}={value}" for key, value in ref.items())
-            dataset = None if refs else recall_item_dataset(result)
-            if dataset:
-                line += f"\n  {dataset}"
         lines.append(line)
 
     return "\n\n".join(lines)

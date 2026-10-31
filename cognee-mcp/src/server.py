@@ -602,15 +602,13 @@ async def recall(
         Show the ids `forget` needs to delete one stored item. Use it when
         asked to forget something specific, then pass a data_id together
         with its dataset_id to `forget`.
-        - The default answer cites its sources in an `Evidence:` block (each
-          with a data_id, best match first) and ends with a
-          `dataset: <name> (dataset_id=...)` line.
-        - CHUNKS, SUMMARIES, RAG and graph-completion hits instead get
-          `refs: data_id=..., dataset_id=..., document=...` lines, at most 5
-          per hit, best match first. A chunk hit names the one item its text
-          came from; a graph-completion answer lists every item in its
-          context, so prefer the default type or CHUNKS to find one fact.
-        Session hits are not stored data and get neither. With backend
+        Each hit backed by stored data gets
+        `refs: data_id=..., dataset_id=..., document=...` lines, at most 5 per
+        hit, best match first. The default answer lists only the items it is
+        grounded in (the ones its `Evidence:` block cites) and a chunk hit the
+        one item its text came from, while a RAG or graph-completion answer
+        lists every item in its context, so prefer the default type or CHUNKS
+        to find one fact. Session hits are not stored data and get no refs. With backend
         access control off, ids are only shown when recall is scoped to a
         single dataset.
 
@@ -775,8 +773,7 @@ async def forget(
         UUID of a single data item to delete. Must be paired with `dataset`
         or `dataset_id` so the owning dataset is unambiguous. To find both,
         call `recall` with include_references=true and copy them from the
-        hit to delete: from its `refs:` line, or the data_id from its
-        `Evidence:` block and the dataset_id from its `dataset:` line.
+        `refs:` line of the hit to delete.
     dataset_id : str, optional
         UUID of the dataset to delete entirely, or to scope `data_id`.
     clean_history : bool
