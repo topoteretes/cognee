@@ -4,12 +4,12 @@ import time
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
+from cognee.tasks.web_scraper.ssrf_protection import SSRFProtectionError, validate_outbound_url
 from cognee.tasks.web_scraper.types import UrlsToHtmls
 
 logger = get_logger()
@@ -21,6 +21,7 @@ except ImportError:
     Protego = None
 
 try:
+    from playwright.async_api import Error as PlaywrightError
     from playwright.async_api import async_playwright
 except ImportError:
     logger.debug(
@@ -352,21 +353,55 @@ class DefaultUrlCrawler:
             f"Rendering URL with Playwright (js_wait={js_wait}s, timeout={timeout_val}s): {url}"
         )
 
+        blocked_navigations: list[SSRFProtectionError] = []
+
+        async def guard_request(route) -> None:
+            # SSRF guard for every browser request. Chromium does not pass redirect
+            # hops through the route handler, so fetch with redirects disabled and
+            # validate the Location target before handing the response back; the
+            # browser's follow-up request then comes through this handler again.
+            request = route.request
+            try:
+                await validate_outbound_url(request.url)
+                response = await route.fetch(max_redirects=0)
+                location = response.headers.get("location")
+                if location:
+                    await validate_outbound_url(urljoin(request.url, location))
+            except SSRFProtectionError as error:
+                logger.warning(f"Blocked Playwright request to {request.url}: {error}")
+                if request.is_navigation_request():
+                    blocked_navigations.append(error)
+                await route.abort("blockedbyclient")
+                return
+            except PlaywrightError:
+                await route.abort()
+                return
+            await route.fulfill(response=response)
+
         attempt = 0
         while True:
+            blocked_navigations.clear()
             try:
                 async with async_playwright() as p:
                     logger.info(f"Launching headless Chromium browser for {url}")
                     browser = await p.chromium.launch(headless=True)
                     try:
-                        context = await browser.new_context()
+                        # Service workers can answer requests without passing through
+                        # context.route(), so block them while the SSRF guard is active.
+                        context = await browser.new_context(service_workers="block")
+                        await context.route("**/*", guard_request)
                         page = await context.new_page()
                         logger.info(f"Navigating to {url} and waiting for network idle")
-                        await page.goto(
-                            url,
-                            wait_until="networkidle",
-                            timeout=int(timeout_val * 1000),
-                        )
+                        try:
+                            await page.goto(
+                                url,
+                                wait_until="networkidle",
+                                timeout=int(timeout_val * 1000),
+                            )
+                        except PlaywrightError as exc:
+                            if blocked_navigations:
+                                raise blocked_navigations[0] from exc
+                            raise
                         if js_wait:
                             logger.info(f"Waiting {js_wait}s for JavaScript to execute")
                             await asyncio.sleep(js_wait)
@@ -377,6 +412,9 @@ class DefaultUrlCrawler:
                         return content
                     finally:
                         await browser.close()
+            except SSRFProtectionError:
+                # A blocked target stays blocked; retrying would only repeat the request.
+                raise
             except Exception as exc:
                 attempt += 1
                 if attempt > self.max_retries:
