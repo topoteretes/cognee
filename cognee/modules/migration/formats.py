@@ -95,7 +95,9 @@ def _cypher_props(properties: dict[str, Any]) -> str:
     for key, value in properties.items():
         if value is None:
             continue
-        safe_key = "".join(ch for ch in key if ch.isalnum() or ch == "_") or "prop"
+        # Quoted identifiers preserve property names; double embedded backticks
+        # so distinct keys cannot collapse into the same exported property.
+        safe_key = key.replace("`", "``")
         parts.append(f"`{safe_key}`: {json.dumps(_scalar(value), default=str)}")
     return "{" + ", ".join(parts) + "}"
 
