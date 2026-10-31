@@ -83,6 +83,7 @@ class DefaultUrlCrawler:
         }
         self.robots_cache_ttl = robots_cache_ttl
         self._last_request_time_per_domain: dict[str, float] = {}
+        self._rate_limit_locks: dict[str, asyncio.Lock] = {}
         self._robots_cache: dict[str, RobotsTxtCache] = {}
         self._client: httpx.AsyncClient | None = None
         self._robots_lock = asyncio.Lock()
@@ -152,22 +153,28 @@ class DefaultUrlCrawler:
             crawl_delay: Custom crawl delay in seconds (if any).
         """
         domain = self._domain_from_url(url)
-        last = self._last_request_time_per_domain.get(domain)
         delay = crawl_delay if crawl_delay is not None else self.crawl_delay
 
-        if last is None:
-            self._last_request_time_per_domain[domain] = time.time()
-            return
+        lock = self._rate_limit_locks.get(domain)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._rate_limit_locks[domain] = lock
 
-        elapsed = time.time() - last
-        wait_for = delay - elapsed
-        if wait_for > 0:
-            logger.info(
-                f"Rate limiting: waiting {wait_for:.2f}s before requesting {url} (crawl_delay={delay}s from robots.txt)"
-            )
-            await asyncio.sleep(wait_for)
-            logger.info(f"Rate limit wait completed for {url}")
-        self._last_request_time_per_domain[domain] = time.time()
+        async with lock:
+            last = self._last_request_time_per_domain.get(domain)
+            if last is None:
+                self._last_request_time_per_domain[domain] = time.time()
+                return
+
+            elapsed = time.time() - last
+            wait_for = delay - elapsed
+            if wait_for > 0:
+                logger.info(
+                    f"Rate limiting: waiting {wait_for:.2f}s before requesting {url} (crawl_delay={delay}s from robots.txt)"
+                )
+                await asyncio.sleep(wait_for)
+                logger.info(f"Rate limit wait completed for {url}")
+            self._last_request_time_per_domain[domain] = time.time()
 
     async def _get_robots_cache(self, domain_root: str) -> RobotsTxtCache | None:
         """Get cached robots.txt data if valid.
