@@ -1,7 +1,7 @@
 export type ApiErrorBody = {
-  detail?: string | { message?: string };
-  error?: string;
-  message?: string;
+  detail?: unknown;
+  error?: unknown;
+  message?: unknown;
   [key: string]: unknown;
 };
 
@@ -11,10 +11,24 @@ export function isApiErrorBody(v: unknown): v is ApiErrorBody {
 
 // cognee's error handler nests the real message as `detail.message` (e.g.
 // `{"detail": {"message": "... [EntityAlreadyExistsError]"}}`) instead of
-// putting it directly on `detail`.
-function extractDetailMessage(detail: ApiErrorBody["detail"]): string | undefined {
-  if (typeof detail === "string") return detail;
-  if (detail && typeof detail.message === "string") return detail.message;
+// putting it directly on `detail`, and the same shape can turn up under
+// `error` or `message` from other backends. `String(anObject)` silently
+// produces the literal text "[object Object]" with no diagnostic value at
+// all, which is exactly what shipped in production here: a UI finally grew
+// somewhere to actually display this message, and it read "[object Object]"
+// instead of the real failure. JSON.stringify keeps the raw shape visible
+// when there is nothing to unwrap.
+function extractMessage(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const candidate = (value as Record<string, unknown>).message;
+    if (typeof candidate === "string") return candidate;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return undefined;
+    }
+  }
   return undefined;
 }
 
@@ -46,7 +60,11 @@ export async function toHttpError(res: Response): Promise<never> {
     const parsed: unknown = JSON.parse(text);
     if (isApiErrorBody(parsed)) {
       body = parsed;
-      message = extractDetailMessage(body.detail) ?? String(body.error ?? body.message ?? res.statusText);
+      message =
+        extractMessage(body.detail) ??
+        extractMessage(body.error) ??
+        extractMessage(body.message) ??
+        res.statusText;
     } else {
       body = text;
       message = text || res.statusText;

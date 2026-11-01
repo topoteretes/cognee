@@ -20,6 +20,9 @@ const EXT_META: Record<string, FileTypeMeta> = {
   json: { fill: "#FEF3C7", stroke: "#D97706", text: "#B45309", label: "JSON" },
 };
 
+/** A connector-synced repository: stored as a text blob, but not a text file. */
+export const REPOSITORY_META: FileTypeMeta = { fill: "#F3F4F6", stroke: "#6B7280", text: "#374151", label: "GIT" };
+
 export function getExtMeta(name: string, ext?: string): FileTypeMeta {
   const e = (ext || name.split(".").pop() || "").toLowerCase();
   return (

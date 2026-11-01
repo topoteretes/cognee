@@ -1,10 +1,10 @@
-"""LanceDB compaction: bounded, once per cognify run, fail-open.
+"""LanceDB compaction: bounded, once per cognify run, failures raise.
 
 Every ``merge_insert`` appends a fragment and leaves the superseded rows on
 disk; LanceDB reclaims neither on its own (issue #4684). ``LanceDBAdapter.compact``
 merges only small fragments, deletes a version only once its successor has
 aged past the retention window, does a bounded number of tasks and version
-deletions per run so a backlog drains over several runs, and never raises. These tests pin each of those
+deletions per run so a backlog drains over several runs, and raises a failure. These tests pin each of those
 properties, plus the pylance/lancedb pairing the compaction depends on.
 """
 
@@ -492,31 +492,38 @@ async def test_a_delete_before_the_rewrite_takes_the_lock_does_not_fail_it(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_compact_is_fail_open_per_collection(tmp_path, compaction_settings, monkeypatch):
+async def test_a_failing_collection_raises_after_the_others_are_compacted(
+    tmp_path, compaction_settings, monkeypatch
+):
     compaction_settings(retention_seconds=0)
     adapter, _ = _adapter(tmp_path)
     await _write_n_points(adapter, "Healthy_label", 2)
     await _write_n_points(adapter, "Broken_label", 2)
     original = adapter._compact_collection
+    compacted = []
 
     async def flaky(name, *args):
         if name == "Broken_label":
             raise RuntimeError("boom")
+        compacted.append(name)
         return await original(name, *args)
 
     monkeypatch.setattr(adapter, "_compact_collection", flaky)
 
-    stats = await adapter.compact()
+    with pytest.raises(RuntimeError, match="'Broken_label': RuntimeError\\('boom'\\)") as raised:
+        await adapter.compact()
 
-    assert "error" in stats["Broken_label"]
-    assert stats["Healthy_label"]["executed_tasks"] == 1
+    assert str(raised.value.__cause__) == "boom"
+    assert compacted == ["Healthy_label"]
+    assert adapter._compaction_dirty == {"Broken_label"}, "the failed table lost its place"
 
 
 @pytest.mark.asyncio
-async def test_an_incompatible_pylance_turns_compaction_off(
+async def test_an_incompatible_pylance_raises_and_writes_still_work(
     tmp_path, compaction_settings, monkeypatch
 ):
-    """lancedb and pylance on different Lance cores: stop, warn once, never fail writes."""
+    """lancedb and pylance on different Lance cores: compaction raises once, then is
+    off for the adapter's lifetime; writes are unaffected."""
     from cognee_db_workers.lancedb_compaction import PylanceIncompatibleError
 
     adapter_module = importlib.import_module(
@@ -534,11 +541,13 @@ async def test_an_incompatible_pylance_turns_compaction_off(
 
     monkeypatch.setattr(adapter_module, "open_as_lance", incompatible)
 
-    first = await adapter.compact()
+    with pytest.raises(PylanceIncompatibleError, match="unsupported manifest version"):
+        await adapter.compact()
 
     assert len(attempts) == 1, "kept trying other tables after an incompatibility"
-    assert [value for value in first.values() if "error" in value]
+    # Raised once: every later pass would fail the same way, so they skip.
     assert await adapter.compact() == {"skipped": "pylance_incompatible"}
+    assert len(attempts) == 1
     await _write_n_points(adapter, "PylanceA_label", 1, start=2)  # writes still work
 
 
@@ -682,6 +691,21 @@ async def test_pylance_reads_the_tables_lancedb_writes(tmp_path, compaction_sett
     assert dataset.to_table().num_rows == 3
 
 
+@pytest.mark.asyncio
+async def test_open_as_lance_names_the_pylance_fix():
+    from cognee_db_workers.lancedb_compaction import PylanceIncompatibleError, open_as_lance
+
+    class Unreadable:
+        async def to_lance(self):
+            raise ValueError("unsupported manifest version")
+
+    with pytest.raises(PylanceIncompatibleError) as raised:
+        await open_as_lance(Unreadable())
+
+    assert "unsupported manifest version" in str(raised.value)
+    assert "install the pylance release line" in str(raised.value)
+
+
 def _engine_getter(engine):
     async def get_vector_engine_async():
         return engine
@@ -690,7 +714,7 @@ def _engine_getter(engine):
 
 
 @pytest.mark.asyncio
-async def test_compact_vector_store_never_fails_the_pipeline(monkeypatch):
+async def test_compact_vector_store_raises_compaction_failures(monkeypatch):
     module = importlib.import_module("cognee.infrastructure.databases.vector.compact_vector_store")
 
     class Exploding:
@@ -705,10 +729,12 @@ async def test_compact_vector_store_never_fails_the_pipeline(monkeypatch):
         raise RuntimeError("no vector engine")
 
     monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Exploding()))
-    assert await module.compact_vector_store() is None
+    with pytest.raises(RuntimeError, match="disk on fire"):
+        await module.compact_vector_store()
 
     monkeypatch.setattr(module, "get_vector_engine_async", unavailable)
-    assert await module.compact_vector_store() is None
+    with pytest.raises(RuntimeError, match="no vector engine"):
+        await module.compact_vector_store()
 
     monkeypatch.setattr(module, "get_vector_engine_async", _engine_getter(Quiet()))
     assert await module.compact_vector_store() == {

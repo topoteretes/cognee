@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.6.5"
+version = "1.6.6"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "openai>=1.80.1",
     "python-dotenv>=1.0.1,<2.0.0",
-    "pydantic>=2.10.5",
+    "pydantic>=2.13",
     # GHSA-4xgf-cpjx-pc3j: 2.12.0–2.14.1 vulnerable, fixed in 2.14.2. Exclude the
     # vulnerable range rather than capping, so the patched 2.14.2+ is adopted once
     # it clears the `exclude-newer` window (it was <2 days old at time of writing).
@@ -32,7 +32,9 @@ dependencies = [
     "numpy>=1.26.4, <=4.0.0",
     "sqlalchemy>=2.0.39,<3.0.0",
     "aiosqlite>=0.20.0,<1.0.0",
-    "filelock>=3.12.0,<4.0.0",  # cross-process migration lock for SQLite (Linux/macOS/Windows)
+    # cross-process migration lock for SQLite (Linux/macOS/Windows). No upper bound: cognee
+    # uses only FileLock (OS locks), and filelock 4.x is picked up as soon as litellm allows it.
+    "filelock>=3.12.0",
     "packaging>=24.0",  # requirement parsing for the GLiNER runtime install
     # gliner2 needs transformers<5, and transformers 4.x needs these two ranges. Pinned
     # in core (the lockfile already resolves inside them) so the GLiNER runtime installed
@@ -47,6 +49,11 @@ dependencies = [
     "instructor>=1.9.1,<1.15.3",
     "filetype>=1.2.0,<2.0.0",
     "aiohttp>=3.13.5,<4.0.0",
+    # >=2026.10.19: earlier bundles still trust the eMudhra intermediates whose
+    # private keys are recoverable from the public certificates (ENG-28). httpx,
+    # requests and botocore verify against certifi, so installs that never see
+    # our lockfile need the floor.
+    "certifi>=2026.10.19",
     "aiofiles>=23.2.1",
     # AES-256-GCM encryption for stored OAuth integration credentials
     # (cognee/modules/integrations/crypto.py) — unconditionally imported via
@@ -78,13 +85,19 @@ dependencies = [
     "fastapi-users[sqlalchemy]>=15.0.2",
     # Local CPU embeddings (onnxruntime, ~65 MB): the embedder cognee runs on when no
     # LLM key and no EMBEDDING_* settings are configured, so a bare install can ingest.
-    "fastembed<=0.8.0",
-    # onnxruntime 1.23.2 only ships wheels through cp313; cp314 wheels start
-    # at onnxruntime 1.24.1. Split by python_version so existing 3.10–3.13
-    # users keep the pinned version and 3.14 picks up the first cp314-capable
-    # release.
-    "onnxruntime<=1.23.2 ; python_version < '3.14'",
-    "onnxruntime>=1.24.1 ; python_version >= '3.14'",
+    # 0.9.1 is the first release that admits Pillow 13 (3.11+; Pillow 13 dropped 3.10).
+    "fastembed>=0.9.1,<0.10",
+    # onnxruntime 1.23.2 is the last release with cp310 wheels (1.24-1.30 still claim
+    # >=3.10 in metadata, so the resolver needs telling), and the last with a wheel
+    # for macOS 13 (Darwin 22): from 1.24.1 the only macOS wheel is macosx_14_0_arm64,
+    # with no sdist. Same Darwin-22 split as ladybug below. 3.14 cannot be held back
+    # (no cp314 wheel below 1.24.1), so macOS 13 gets no usable wheel there, as on
+    # dev before this change. Intel Macs need no clause: lancedb has shipped no
+    # x86_64 macOS wheel since 0.25.3, so cognee does not install there anyway.
+    # Everywhere else the resolver takes the newest release; fastembed and
+    # unstructured carry their own onnxruntime floors.
+    "onnxruntime<=1.23.2 ; python_version < '3.11' or (python_version < '3.14' and sys_platform == 'darwin' and 'Darwin Kernel Version 22.' in platform_version)",
+    "onnxruntime>=1.17",
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
     "pylance>=12.0.0,<12.1.0",  # same Lance release line as lancedb, see above
@@ -113,7 +126,6 @@ dependencies = [
     "websockets>=15.0.1,<16.0.0",
     "tenacity>=9.0.0",
     "fakeredis[lua]>=2.32.0",
-    "diskcache>=5.6.3",
     "aiolimiter>=1.2.1",
     "urllib3>=2.6.0",
     "cbor2>=5.8.0",
@@ -135,11 +147,9 @@ scraping = [
     "tavily-python>=0.7.12",
     "beautifulsoup4>=4.13.1",
     "playwright>=1.9.0",
-    "lxml>=4.9.3,<5 ; python_version < '3.13'",
-    "lxml>=5,<6 ; python_version >= '3.13' and python_version < '3.14'",
-    # cp314 wheels start at lxml 6.0.1; without this 3.14 falls back to a
-    # source build that requires libxml2/libxslt headers (CI doesn't have them).
-    "lxml>=6.0.1,<7 ; python_version >= '3.14'",
+    # GHSA-vfmq-68hx-4jfw is fixed in lxml 6.1.0, which ships wheels for every
+    # supported CPython (3.10-3.14), so one floor replaces the old per-version split.
+    "lxml>=6.1.0,<7",
     "protego>=0.1",
     "APScheduler>=3.10.0,<=3.11.0"
 ]
@@ -163,7 +173,8 @@ turso = ["pyturso>=0.7.2,<0.8"]
 notebook = ["notebook>=7.1.0,<8"]
 langchain = [
     "langsmith>=0.2.3,<1.0.0",
-    "langchain_text_splitters>=0.3.2,<1.0.0",
+    # GHSA-fv5p-p927-qmxr is fixed in 1.1.2; 1.x pairs with the langchain-core 1.x floor below.
+    "langchain_text_splitters>=1.1.2,<2",
     "langchain-core>=1.2.5"
 ]
 llama-index = ["llama-index-core>=0.14.20,<0.15"]
@@ -177,11 +188,14 @@ posthog = ["posthog>=3.5.0,<4"]
 groq = ["groq>=0.8.0,<1.0.0"]
 llama-cpp = ["llama-cpp-python[server]>=0.3.0,<1.0.0"]
 docs = [
-    "lxml>=4.9.3,<5 ; python_version < '3.13'",
-    "lxml>=5,<6 ; python_version >= '3.13' and python_version < '3.14'",
-    # cp314 wheels start at lxml 6.0.1.
-    "lxml>=6.0.1,<7 ; python_version >= '3.14'",
-    "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19",
+    # GHSA-vfmq-68hx-4jfw is fixed in lxml 6.1.0 (see the scraping extra).
+    "lxml>=6.1.0,<7",
+    # GHSA-4mvj-m6j5-pmf7 (critical) and GHSA-v5mq-3xhg-98m9 are fixed in 0.24.1.
+    # The resolver takes 0.24.1+ wherever it can install (GHSA-4mvj-m6j5-pmf7, critical).
+    # Its pdf extra needs unstructured-inference>=1.6.12 -> onnxruntime>=1.25, and
+    # 0.24+ itself is 3.11-3.13 only, so Python 3.10, 3.14 and macOS 13 fall back to
+    # the 0.18 line (see onnxruntime above) and stay exposed to those advisories.
+    "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<1",
     "nltk>=3.9.3,<4", # TODO: Remove when unstructured is above v0.21.0 as it won't use nltk anymore
 ]
 # enola-cli is a core dependency. The empty extra keeps `cognee[codegraph]` installable.
@@ -195,10 +209,13 @@ evals = [
     "locust>=2.0.0,<3",
 ]
 
-# s3fs pins fsspec and, through its boto3 extra, an aiobotocore whose botocore range has
-# to admit the boto3 litellm requires (>=1.43.1 since litellm 1.101). Keep it on one
-# fixed, known-compatible release and move it together with litellm.
-aws = ["s3fs[boto3]==2026.9.0"]
+# S3 storage and Bedrock. boto3 and s3fs (through aiobotocore) must share one botocore:
+# aiobotocore admits a narrow botocore window, boto3 a matching one. s3fs expressed that
+# through its [boto3] extra (#809) until s3fs 2026.3 / aiobotocore 3.0 removed it, so both
+# are listed and the resolver picks the compatible pair, as aiobotocore's changelog asks.
+# Keep s3fs on one fixed release (it pins fsspec exactly) and move it together with
+# litellm, whose boto3 floor (>=1.43.1 since litellm 1.101) the window has to admit.
+aws = ["s3fs==2026.9.0", "boto3>=1.43.1,<2"]
 # dlt is a core dependency. The empty extra keeps `cognee[dlt]` installable.
 dlt = []
 gmail = [
@@ -228,7 +245,6 @@ dev = [
     "notebook>=7.1.0,<8",
     "deptry>=0.20.0,<0.21",
     "ruff>=0.9.2,<=0.16.6",
-    "tweepy>=4.14.0,<5.0.0",
     "gitpython>=3.1.43,<4",
     "mkdocs-material>=9.5.42,<10",
     "mkdocs-minify-plugin>=0.8.0,<0.9",
@@ -244,6 +260,11 @@ tracing = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.20.0,<2",
     "opentelemetry-exporter-otlp-proto-http>=1.20.0,<2",
 ]
+
+# OWL-RL reasoning over the loaded ontology (ONTOLOGY_REASONING=owl_rl). owlrl 7.6+
+# requires rdflib>=7.6, which the core rdflib pin above does not admit, so keep the
+# window on the last series that works with rdflib 7.1.x.
+ontology = ["owlrl>=7.1.4,<7.2"]
 
 # Slim docling profile: converts office/HTML/email/markdown/LaTeX documents
 # without torch or the ML layout models (~280MB installed vs multiple GB).

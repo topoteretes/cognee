@@ -70,6 +70,8 @@ SAMPLE_ARGUMENTS = {
     "dataset_id": "sample-dataset-id",
     "detail": "sample detail",
     "dimension": 1,
+    # AfterRunHookError: (dataset_id, dataset_name, error) per dataset whose step failed.
+    "failures": [("sample-dataset-id", "sample_dataset", RuntimeError("sample reason"))],
     "field": "sample_field",
     "got": "sample",
     "max_index": 2,

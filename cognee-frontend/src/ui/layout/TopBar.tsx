@@ -3,6 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import { useCurrentUser } from "@/modules/users/useCurrentUser";
+import { useUser } from "@/modules/users/UserContext";
+import { displayName } from "@/modules/users/profileName";
 import getLocalUser from "@/modules/users/getLocalUser";
 import CogneeUser from "@/modules/users/CogneeUser";
 import isCloudEnvironment from "@/utils/isCloudEnvironment";
@@ -13,6 +15,9 @@ import HelpMenu from "./HelpMenu";
 import ProfileMenu from "./ProfileMenu";
 import { useFilter } from "./FilterContext";
 import { useTenant } from "@/modules/tenant/TenantContext";
+import isTenantSuspended from "@/modules/tenant/isTenantSuspended";
+import WorkspaceBadge from "./WorkspaceBadge";
+import type { WorkspaceBadgeState } from "./WorkspaceBadge";
 import useBoolean from "@/utils/useBoolean";
 import useOutsideClick from "@/utils/useOutsideClick";
 
@@ -52,7 +57,7 @@ function Slash() {
 
 const ROUTE_LABELS: Record<string, string> = {
   "/": "Overview", "/dashboard": "Overview",
-  "/datasets": "Brain", "/sessions": "Sessions", "/search": "Search",
+  "/datasets": "Datasets", "/sessions": "Sessions", "/search": "Search",
   "/knowledge-graph": "Mindmap",
   // /business is the same page as /knowledge-graph (page.tsx re-exports
   // BusinessPage) but had no entry here, so visiting it directly fell back
@@ -79,9 +84,10 @@ export default function TopBar() {
   const cloud = isCloudEnvironment();
   const { data: cloudUser } = useCurrentUser(cloud);
   const user = cloud ? cloudUser : localUser;
+  const { userMe } = useUser();
   const pathname = usePathname();
   const { workspace, workspaces, setWorkspace } = useFilter();
-  const { requestCreateWorkspace, availableTenants } = useTenant();
+  const { requestCreateWorkspace, availableTenants, wakeState, tenant } = useTenant();
 
   useEffect(() => {
     if (!cloud) getLocalUser().then((u) => { if (u) setLocalUser(u); });
@@ -94,22 +100,42 @@ export default function TopBar() {
   // Check if we're on a dataset detail page
   const isDatasetDetail = /^\/datasets\/.+$/.test(pathname);
 
+  // The trigger badge carries the state too, because the picker is shut for all
+  // but a second or two of a wake and the caption inside it is unreachable then.
+  //
+  // Keyed on the connected tenant, never on `workspace`: that one is derived
+  // from the list and falls back to its first entry when the active tenant is
+  // missing from it, so keying the suspension lookup on it made the trigger
+  // report a DIFFERENT workspace's state — the same trap the picker rows below
+  // spell out and avoid. When the two disagree there is nothing trustworthy to
+  // say, so the badge says nothing.
+  const connectedId = tenant?.tenant_id;
+  const triggerIsConnected = !!connectedId && connectedId === workspace.id;
+  const connectedInfo = availableTenants.find((t) => t.id === connectedId);
+  const triggerBadgeState: WorkspaceBadgeState = !triggerIsConnected
+    ? "active"
+    : connectedInfo && !connectedInfo.ownerHasSubscription
+      ? "blocked"
+      : wakeState === "waking"
+        ? "waking"
+        : isTenantSuspended(availableTenants, connectedId)
+          ? "asleep"
+          : "active";
+
   return (
     <header className="flex items-center justify-between flex-shrink-0" style={{ height: 53, paddingInline: 24, position: "relative", zIndex: 300, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
       {/* Left: logo + breadcrumbs */}
       <div className="flex items-center" style={{ gap: 8 }}>
         {/* Logo fixed-width box so workspace aligns with right edge of navbar (240px - 24px padding) */}
         <div style={{ width: 240, flexShrink: 0, display: "flex", alignItems: "center" }}>
-          <Image src="/cognee-logo-black.svg" alt="Cognee" width={110} height={24} style={{ flexShrink: 0, filter: "invert(1)" }} />
+          <Image src="/cognee-logo-black.svg" alt="Cognee" width={110} height={32} loading="eager" style={{ width: 110, height: "auto", flexShrink: 0, filter: "invert(1)" }} />
         </div>
 
         {/* 1. Workspace switcher */}
         <Dropdown
           trigger={
             <div className="flex items-center" style={{ gap: 6 }}>
-              <div className="flex items-center justify-center rounded-[4px] flex-shrink-0" style={{ width: 20, height: 20, background: workspace.color }}>
-                <span style={{ color: "#fff", fontSize: 10, fontWeight: 700 }}>{workspace.initial}</span>
-              </div>
+              <WorkspaceBadge initial={workspace.initial} color={workspace.color} size={20} state={triggerBadgeState} />
               <span style={{ fontSize: 14, fontWeight: 500, color: "#EDECEA", flexShrink: 0 }}>{workspace.name}</span>
               <Chevron />
             </div>
@@ -119,14 +145,41 @@ export default function TopBar() {
           {workspaces.map((ws) => {
             const tenantInfo = availableTenants.find((t) => t.id === ws.id);
             const blocked = tenantInfo ? !tenantInfo.ownerHasSubscription : false;
+            // Scaled to zero. Deliberately NOT styled like `blocked`: blocked is
+            // a dead end (grayed out, click disabled), while an asleep workspace
+            // opens normally and just takes a moment. WorkspaceBadge draws it
+            // hollow rather than grey, and lightens the workspace colour so the
+            // outline survives on the dark chrome across the whole palette.
+            const asleep = !blocked && isTenantSuspended(availableTenants, ws.id);
+            // Keyed on the connected tenant, not on `workspace`: that is derived
+            // from the list and falls back to its first entry when the active
+            // tenant is missing from it, which would caption the wrong row.
+            // Not gated on `asleep` either — a wake discovered by the pod probe
+            // (a stale list, or a workspace that fell asleep with the tab open)
+            // never shows as suspended in the list it came from.
+            const isWaking = !blocked && tenant?.tenant_id === ws.id && wakeState === "waking";
+            // A wake that gave up leaves the list still saying "suspended"
+            // (only the success path refetches it), so without this the row
+            // invites a click to wake a workspace the content area has just
+            // reported as failed — and it is the active row, so the click is a
+            // no-op anyway.
+            const wakeFailed = !blocked && tenant?.tenant_id === ws.id && wakeState === "failed";
             return (
               <div key={ws.id} onClick={() => !blocked && setWorkspace(ws)} className={blocked ? "" : "cursor-pointer"} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 6, background: workspace.id === ws.id ? "rgba(188,155,255,0.20)" : "transparent", opacity: blocked ? 0.5 : 1, cursor: blocked ? "default" : "pointer" }}>
-                <div style={{ width: 16, height: 16, borderRadius: 3, background: blocked ? "#555" : ws.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <span style={{ color: "#fff", fontSize: 8, fontWeight: 700 }}>{ws.initial}</span>
-                </div>
+                <WorkspaceBadge
+                  initial={ws.initial}
+                  color={ws.color}
+                  size={16}
+                  state={blocked ? "blocked" : isWaking ? "waking" : (asleep || wakeFailed) ? "asleep" : "active"}
+                />
                 <div style={{ display: "flex", flexDirection: "column" }}>
                   <span style={{ fontSize: 13, fontWeight: workspace.id === ws.id ? 500 : 400, color: blocked ? "#71717A" : workspace.id === ws.id ? "rgba(188,155,255,0.60)" : "#EDECEA" }}>{ws.name}</span>
                   {blocked && <span style={{ fontSize: 10, color: "rgba(237,236,234,0.55)" }}>No active subscription</span>}
+                  {(asleep || isWaking || wakeFailed) && (
+                    <span style={{ fontSize: 10, color: "rgba(237,236,234,0.55)" }}>
+                      {wakeFailed ? "Didn't wake up" : isWaking ? "Waking up…" : "Asleep · wakes when you open it"}
+                    </span>
+                  )}
                 </div>
                 {workspace.id === ws.id && !blocked && <Check />}
               </div>
@@ -153,7 +206,7 @@ export default function TopBar() {
         {isDatasetDetail ? (
           <>
             <Slash />
-            <Link href="/datasets" className="hover:opacity-70" style={{ fontSize: 14, fontWeight: 500, color: "rgba(237,236,234,0.55)" }}>Brain</Link>
+            <Link href="/datasets" className="hover:opacity-70" style={{ fontSize: 14, fontWeight: 500, color: "rgba(237,236,234,0.55)" }}>Datasets</Link>
             <Slash />
             <span style={{ fontSize: 14, fontWeight: 500, color: "rgba(237,236,234,0.7)" }}>Documents</span>
           </>
@@ -166,7 +219,10 @@ export default function TopBar() {
       <div className="flex items-center gap-3">
         <HelpMenu />
         <ProfileMenu
-          userName={user?.name || ""}
+          // The name the person set on their profile, else the sign-in provider's.
+          // Without this the header kept showing the old one after a rename, while
+          // everyone else in the workspace already saw the new one.
+          userName={cloud ? displayName(userMe?.profile ?? null, user?.name) : user?.name || ""}
           userEmail={user?.email || ""}
           logoutHref={cloud ? "/api/signout" : "/api/local-signout"}
         />

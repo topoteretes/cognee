@@ -292,6 +292,8 @@ Before exposing Cognee publicly, review these defaults:
 - **Authentication.** `ENABLE_BACKEND_ACCESS_CONTROL=True` (default) **requires auth** on the API
   — a `REQUIRE_AUTHENTICATION=False` is ignored while access control is on. Create a user, or for
   a single-user setup behind a token set `ENABLE_BACKEND_ACCESS_CONTROL=False`.
+- **Secure auth cookie.** Cognee sees plain http behind Traefik, so it cannot tell the site is on
+  TLS. Set `AUTH_TOKEN_COOKIE_SECURE=true` so browsers send the auth cookie over https only.
 - **JWT secret.** Set `FASTAPI_USERS_JWT_SECRET` to a securely generated secret, identical across
   replicas. When unset, each server process generates its own secret at startup, so tokens
   stop working after a restart and are not accepted by other replicas.

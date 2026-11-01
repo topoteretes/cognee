@@ -83,7 +83,7 @@ class SessionManager:
         Initialize SessionManager with a cache engine.
 
         Args:
-            cache_engine: CacheDBInterface implementation (RedisAdapter or FsCacheAdapter).
+            cache_engine: CacheDBInterface implementation (RedisAdapter or SqlCacheAdapter).
                          Can be None if caching is disabled.
             default_session_id: Session ID to use when session_id is None. Defaults to
                                "default_session".
@@ -981,6 +981,7 @@ class SessionManager:
             user_id=user_id,
             session_id=session_id,
         )
-        if deleted:
-            await delete_session_qa_vectors(user_id=user_id, session_id=session_id)
+        # Unconditionally: cache entries expire (session TTL) while their Q&A
+        # vectors, which hold the question and answer text, do not.
+        await delete_session_qa_vectors(user_id=user_id, session_id=session_id)
         return deleted

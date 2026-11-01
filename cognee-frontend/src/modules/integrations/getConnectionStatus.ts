@@ -9,6 +9,9 @@ export interface ConnectionStatus {
   connectedAt?: string;
   syncStatus?: string;
   lastSyncedAt?: string;
+  datasetName?: string;
+  datasetId?: string;
+  datasetIsDefault?: boolean;
   viaRouting?: boolean;
   routedTeamName?: string;
   routedChannelCount?: number;

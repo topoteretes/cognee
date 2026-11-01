@@ -9,6 +9,7 @@ from cognee.infrastructure.locks import get_dataset_lock, held_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.methods.get_selected_dataset_data import get_selected_dataset_data
 from cognee.modules.data.models import Data, Dataset
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.layers import validate_pipeline_tasks
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
@@ -16,6 +17,7 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
 from cognee.modules.pipelines.layers.setup_and_check_environment import (
     setup_and_check_environment,
 )
+from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.tasks.task import Task, pipeline_needs_llm
 from cognee.modules.users.models import User
@@ -29,7 +31,7 @@ logger = get_logger("cognee.pipeline")
 # parallel. See cognee/infrastructure/locks/dataset_lock.py.
 
 
-async def _drive_marking_held(dataset_id: UUID, source: AsyncIterator[Any]) -> AsyncIterator[Any]:
+async def drive_marking_held(dataset_id: UUID, source: AsyncIterator[Any]) -> AsyncIterator[Any]:
     """Yield from ``source`` while ``dataset_id`` is recorded as locked.
 
     A pipeline body runs its work in child tasks (``run_tasks`` -> ``create_task``),
@@ -71,6 +73,7 @@ async def run_pipeline(
     needs_llm: bool = True,
     extras: dict | None = None,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
+    after_items_ran: Callable[[], Awaitable[Any]] | None = None,
 ):
     """``tasks`` is either the task list every data item runs, or a callable
     mapping one item to its task list (a task resolver — see ``run_tasks``);
@@ -84,8 +87,11 @@ async def run_pipeline(
     when ``tasks`` is a resolver, whose caller must pass the union over every
     list the resolver can return.
 
-    ``after_run_completed`` is awaited after each dataset's run completes,
-    inside that dataset's database context (see ``run_tasks``)."""
+    ``after_run_completed`` is awaited after each dataset's run completes, and
+    ``after_items_ran`` also when items in the run failed, both inside that dataset's
+    database context (see ``run_tasks``). When either fails on a completed run, the
+    remaining datasets still run and one ``AfterRunHookError`` naming every failed
+    dataset is raised after them."""
     if tasks is None:
         raise ValueError(
             "run_pipeline requires tasks: a task list or a per-item task resolver callable"
@@ -104,6 +110,7 @@ async def run_pipeline(
 
     # TODO: If multiple datasets are provided, we currently run them sequentially to avoid overwhelming the system with too many concurrent pipeline runs.
     #       In the future, we could consider adding concurrency here with proper resource management and limits.
+    hook_failures = []
     for dataset in authorized_datasets:
         source = run_pipeline_per_dataset(
             dataset=dataset,
@@ -119,10 +126,26 @@ async def run_pipeline(
             data_cache=data_cache,
             extras=extras,
             after_run_completed=after_run_completed,
+            after_items_ran=after_items_ran,
         )
-        async with aclosing(source):
-            async for run_info in source:
-                yield run_info
+        run_completed = False
+        try:
+            async with aclosing(source):
+                async for run_info in source:
+                    run_completed = isinstance(run_info, PipelineRunCompleted)
+                    yield run_info
+        except AfterRunHookError as error:
+            # Only this dataset's own step after its completed run; one a task
+            # raised (an improve bridge) failed the run and goes on as is.
+            if not run_completed:
+                raise
+            # This dataset's run completed, so the next ones still run; every
+            # failed step is raised together after them.
+            hook_failures.extend(error.failures)
+    if hook_failures:
+        raise AfterRunHookError(hook_failures) from next(
+            (error for *_, error in hook_failures if isinstance(error, BaseException)), None
+        )
 
 
 async def run_pipeline_per_dataset(
@@ -139,6 +162,7 @@ async def run_pipeline_per_dataset(
     data_cache=False,
     extras: dict | None = None,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
+    after_items_ran: Callable[[], Awaitable[Any]] | None = None,
 ):
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
@@ -167,6 +191,7 @@ async def run_pipeline_per_dataset(
             data_cache=data_cache,
             extras=extras,
             after_run_completed=after_run_completed,
+            after_items_ran=after_items_ran,
         )
 
         async with aclosing(pipeline_run):
@@ -182,7 +207,7 @@ async def run_pipeline_per_dataset(
 
         async with (
             await get_dataset_lock(dataset.id),
-            aclosing(_drive_marking_held(dataset.id, body)) as source,
+            aclosing(drive_marking_held(dataset.id, body)) as source,
         ):
             async for run_info in source:
                 yield run_info

@@ -271,6 +271,8 @@ async def test_hybrid_retrieve_one_carries_grounding_and_pins_entity_lane():
     retriever._unified_engine.vector.embedding_engine.embed_text = AsyncMock(
         return_value=[[0.1, 0.2]]
     )
+    # Dev reads user conflict resolutions off the graph (SDK-1333); none here.
+    retriever._unified_engine.graph.get_filtered_graph_data = AsyncMock(return_value=([], []))
     truth = MagicMock(q_coords=None, truth_state_by_id={}, current_truth_epoch=None)
 
     with (
@@ -328,6 +330,8 @@ async def test_hybrid_result_has_no_grounding_key_when_nothing_matches():
     retriever._unified_engine.vector.embedding_engine.embed_text = AsyncMock(
         return_value=[[0.1, 0.2]]
     )
+    # Dev reads user conflict resolutions off the graph (SDK-1333); none here.
+    retriever._unified_engine.graph.get_filtered_graph_data = AsyncMock(return_value=([], []))
     truth = MagicMock(q_coords=None, truth_state_by_id={}, current_truth_epoch=None)
 
     with (

@@ -483,7 +483,8 @@ async def test_startup_recovery_closes_stale_runs_of_every_pipeline(
     assert closed.started_at is not None and closed.started_at.replace(
         tzinfo=None
     ) == started_at.replace(tzinfo=None)
-    assert closed.run_info["data"] == ["some-data-id"]
+    # The seeded STARTED row is a legacy one: its data is not carried onto the new row.
+    assert "data" not in closed.run_info
 
     # Running recovery again leaves the ERRORED run alone.
     await recover_stale_pipeline_runs_on_startup()

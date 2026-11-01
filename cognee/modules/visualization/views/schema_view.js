@@ -51,6 +51,7 @@
     '3': 'Types',
     '4': 'Summaries',
     '5': 'Context',
+    '6': 'Tables',
   };
   function stageLabel(rank){
     if (typeof rank !== 'number' || !isFinite(rank)) return '';

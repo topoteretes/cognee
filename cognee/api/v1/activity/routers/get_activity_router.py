@@ -46,6 +46,14 @@ def get_activity_router() -> APIRouter:
                 "unrelated operation records."
             ),
         ),
+        session_id: str | None = Query(
+            None,
+            description=(
+                "Return only rows that belong to this session-cache id: the operation "
+                "record of a session-bound call (e.g. an improve given one or more "
+                "sessions) and the pipeline runs it launched."
+            ),
+        ),
         limit: int = Query(50, ge=1, le=500, description="Page size (max 500)."),
         offset: int = Query(0, ge=0, description="Rows to skip for pagination."),
         user: User = Depends(get_authenticated_user),
@@ -64,6 +72,15 @@ def get_activity_router() -> APIRouter:
         - **dataset_id** (Optional[UUID]): Restrict to one dataset (403 if not readable).
         - **pipeline_name** (Optional[str]): Exact-match filter; also excludes
           operation records, which have no `pipeline_name`.
+        - **session_id** (Optional[str]): Rows that belong to this session-cache
+          id. Pipeline runs inherit their sessions from the operation that
+          launched them, so `pipeline_name=memify_pipeline&session_id=…` lists
+          every memify run of each improve given that session: the stages that
+          bridge the session and the graph-wide stages (conflict review, the
+          global context index) alike, and an improve over several sessions is
+          listed under each of them. Each row lists its sessions in
+          `session_ids`. Rows written before that inheritance carry it on the
+          operation record only.
         - **limit** (int): Page size, 1-500 (default: 50).
         - **offset** (int): Rows to skip for pagination (default: 0).
 
@@ -121,6 +138,10 @@ def get_activity_router() -> APIRouter:
         from cognee.infrastructure.databases.relational import get_relational_engine
         from cognee.modules.data.models.Dataset import Dataset
         from cognee.modules.pipelines.models import PipelineRun
+        from cognee.modules.pipelines.operations.run_sessions import (
+            get_run_session_ids,
+            rows_of_session,
+        )
         from cognee.modules.users.models import User
 
         if dataset_id is not None:
@@ -170,9 +191,13 @@ def get_activity_router() -> APIRouter:
             )
             if pipeline_name is not None:
                 stmt = stmt.where(PipelineRun.pipeline_name == pipeline_name)
+            if session_id is not None:
+                stmt = stmt.where(PipelineRun.id.in_(rows_of_session(session_id)))
 
             result = await session.execute(stmt)
             rows = result.all()
+
+        sessions_by_row = await get_run_session_ids(run.id for run, *_ in rows)
 
         return [
             {
@@ -213,7 +238,10 @@ def get_activity_router() -> APIRouter:
                 "started_at": run.started_at.isoformat() if run.started_at else None,
                 "ended_at": run.ended_at.isoformat() if run.ended_at else None,
                 "user_id": str(run.user_id) if run.user_id else None,
-                "session_id": run.session_id,
+                # Every session the row belongs to: one for a session-bound
+                # search or recall, several for an improve over several
+                # sessions, none for most rows. Stored in pipeline_run_sessions.
+                "session_ids": sessions_by_row.get(run.id, []),
                 "parent_operation_id": str(run.parent_operation_id)
                 if run.parent_operation_id
                 else None,
@@ -223,7 +251,11 @@ def get_activity_router() -> APIRouter:
 
     @router.get("/spans")
     async def get_spans(user: User = Depends(get_authenticated_user)):
-        """Return in-memory OTEL spans from the CogneeSpanExporter buffer."""
+        """Return the caller's and their own agents' traces from the in-memory buffer.
+
+        A trace belongs to the users its requests authenticated as
+        (``bind_trace_owner``); one with no owner is returned to nobody.
+        """
         try:
             from cognee.modules.observability.trace_context import is_tracing_enabled
             from cognee.modules.observability.tracing import get_exporter
@@ -236,11 +268,17 @@ def get_activity_router() -> APIRouter:
             if exporter is None:
                 return []
 
-            all_traces = exporter.get_all_traces()
+            visible_ids = {str(user_id) for user_id in await get_visible_user_ids(user.id)}
+            visible_traces = exporter.get_traces_owned_by(visible_ids)
 
             result = []
-            for trace_id, spans in all_traces.items():
-                root = spans[0] if spans else None
+            for trace_id, spans in visible_traces.items():
+                # Spans are buffered as they finish, children before their
+                # parent, so the root is the span without a parent, not spans[0].
+                root = next(
+                    (s for s in spans if s.get("parent_span_id") is None),
+                    min(spans, key=lambda s: s.get("start_time_ns") or 0, default=None),
+                )
                 duration = max((s.get("duration_ms", 0) for s in spans), default=0)
                 result.append(
                     {
@@ -265,32 +303,26 @@ def get_activity_router() -> APIRouter:
 
     @router.get("/users")
     async def get_tenant_users(user: User = Depends(get_authenticated_user)):
-        """Return users in the current tenant (includes agents as API key users)."""
-        try:
-            from cognee.modules.users.tenants.methods import get_users_in_tenant
+        """Return users in the caller's tenant as [{"id", "email", "roles"}].
 
-            users = await get_users_in_tenant(user.tenant_id)
-            return [
-                {
-                    "id": str(u.id),
-                    "email": u.email,
-                    "is_superuser": u.is_superuser,
-                    "created_at": u.created_at.isoformat()
-                    if hasattr(u, "created_at") and u.created_at
-                    else None,
-                }
-                for u in users
-            ]
-        except Exception:
-            logger.debug(
-                "Falling back to [] after error in get_activity_router.get_tenant_users",
-                exc_info=True,
-            )
+        Requires user-management permission in that tenant (tenant owner or an
+        admin role); a denial propagates as 403. A caller outside any tenant
+        (single-user/local mode) has no tenant to list and gets [].
+        """
+        from cognee.modules.users.tenants.methods import get_users_in_tenant
+
+        if user.tenant_id is None:
             return []
+
+        return await get_users_in_tenant(user.tenant_id, user)
 
     @router.get("/agents")
     async def get_agents(user: User = Depends(get_authenticated_user)):
-        """Return registered agents (users with @cognee.agent emails)."""
+        """Return the caller and the agents they own (``parent_user_id == caller``).
+
+        Every query below is scoped to that id set, so nothing about other
+        users — accounts, key counts or activity — is read or returned.
+        """
         from datetime import datetime, timedelta, timezone
 
         from sqlalchemy import func, select
@@ -301,23 +333,29 @@ def get_activity_router() -> APIRouter:
         from cognee.modules.users.models import User
         from cognee.modules.users.models.UserApiKey import UserApiKey
 
+        visible_ids = await get_visible_user_ids(user.id)
+
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
-            # Get all users (agents have @cognee.agent, but show all non-default)
-            users_q = select(User).filter(User.is_active.is_(True))
+            # The caller plus their agents (agents have @cognee.agent emails)
+            users_q = select(User).filter(User.is_active.is_(True), User.id.in_(visible_ids))
             users_result = await session.execute(users_q)
             all_users = users_result.scalars().all()
 
             # Count API keys per user
-            keys_q = select(UserApiKey.user_id, func.count().label("key_count")).group_by(
-                UserApiKey.user_id
+            keys_q = (
+                select(UserApiKey.user_id, func.count().label("key_count"))
+                .filter(UserApiKey.user_id.in_(visible_ids))
+                .group_by(UserApiKey.user_id)
             )
             keys_result = await session.execute(keys_q)
             key_counts = {str(row.user_id): row.key_count for row in keys_result}
 
             # Get latest data ingestion per user
-            data_created_q = select(Data.owner_id, func.max(Data.created_at).label("ts")).group_by(
-                Data.owner_id
+            data_created_q = (
+                select(Data.owner_id, func.max(Data.created_at).label("ts"))
+                .filter(Data.owner_id.in_(visible_ids))
+                .group_by(Data.owner_id)
             )
             data_created_result = await session.execute(data_created_q)
             last_active_map = {
@@ -327,7 +365,7 @@ def get_activity_router() -> APIRouter:
             # Get latest data access per user
             data_accessed_q = (
                 select(Data.owner_id, func.max(Data.last_accessed).label("ts"))
-                .filter(Data.last_accessed.isnot(None))
+                .filter(Data.last_accessed.isnot(None), Data.owner_id.in_(visible_ids))
                 .group_by(Data.owner_id)
             )
             data_accessed_result = await session.execute(data_accessed_q)
@@ -339,8 +377,10 @@ def get_activity_router() -> APIRouter:
                     last_active_map[uid] = row.ts
 
             # Get latest search query per user
-            search_q = select(Query.user_id, func.max(Query.created_at).label("ts")).group_by(
-                Query.user_id
+            search_q = (
+                select(Query.user_id, func.max(Query.created_at).label("ts"))
+                .filter(Query.user_id.in_(visible_ids))
+                .group_by(Query.user_id)
             )
             search_result = await session.execute(search_q)
             for row in search_result:

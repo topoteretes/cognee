@@ -1,12 +1,12 @@
 """The improve stages that draft text with an LLM decline cleanly without one (SDK-753).
 
 A keyless install (GLiNER + fastembed) can bridge sessions and traces into the
-graph, but it cannot draft agent-context lessons, distil sessions or write the
-global context summaries. Those stages used to run, build an LLM client that
-raised, and end ``errored`` with a traceback in the log. Their gates now
-report ``no_llm_configured`` instead, with zero LLM calls, like every other
-gate. The trace-step summary follows the same rule: the deterministic
-fallback, no client.
+graph, but it cannot draft agent-context lessons or distil sessions. Those
+stages used to run, build an LLM client that raised, and end ``errored`` with a
+traceback in the log. Their gates now report ``no_llm_configured`` instead, with
+zero LLM calls, like every other gate. The trace-step summary follows the same
+rule: the deterministic fallback, no client. ``global_context_index`` is not in
+this set: its default method counts entities and never prompts.
 """
 
 import ast
@@ -23,10 +23,9 @@ import cognee.modules.improve.stages as stages_module
 from cognee import __file__ as cognee_package_file
 from cognee.modules.improve.stages import (
     REASON_NO_LLM_CONFIGURED,
-    REASON_OPT_IN_DISABLED,
+    REASON_TURNED_OFF,
     DistillSessionsStage,
     ExtractAgentContextStage,
-    GlobalContextIndexStage,
     ReviewConflictsStage,
 )
 from cognee.tests.utils.keyless_gate_targets import (
@@ -41,9 +40,7 @@ session_manager_module = sys.modules["cognee.infrastructure.session.get_session_
 
 
 def _inputs(**overrides):
-    return SimpleNamespace(
-        **{"build_global_context_index": True, "review_conflicts": True, **overrides}
-    )
+    return SimpleNamespace(**{"review_conflicts": True, **overrides})
 
 
 def _session_manager(available=True, auto_feedback=True):
@@ -57,6 +54,9 @@ def test_keyless_gate_fixture_covers_module_level_llm_available_imports():
     package_root = Path(cognee_package_file).resolve().parent
     importing_modules = set()
     for path in package_root.rglob("*.py"):
+        # Product gates only: tests may check llm_available to pick a keyless path.
+        if path.relative_to(package_root).parts[0] == "tests":
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         if any(
             isinstance(node, ast.ImportFrom)
@@ -77,7 +77,6 @@ def test_keyless_gate_fixture_covers_module_level_llm_available_imports():
         ExtractAgentContextStage(),
         DistillSessionsStage(),
         ReviewConflictsStage(),
-        GlobalContextIndexStage(),
     ],
     ids=lambda stage: stage.name,
 )
@@ -97,7 +96,6 @@ def test_llm_stages_decline_without_a_usable_llm(stage):
         ExtractAgentContextStage(),
         DistillSessionsStage(),
         ReviewConflictsStage(),
-        GlobalContextIndexStage(),
     ],
     ids=lambda stage: stage.name,
 )
@@ -113,10 +111,7 @@ def test_llm_stages_run_when_an_llm_is_configured(stage):
 
 def test_earlier_gates_keep_precedence_over_the_llm_check():
     with patch.object(stages_module, "llm_available", return_value=False):
-        assert (
-            GlobalContextIndexStage().gate(_inputs(build_global_context_index=False))
-            == REASON_OPT_IN_DISABLED
-        )
+        assert ReviewConflictsStage().gate(_inputs(review_conflicts=False)) == REASON_TURNED_OFF
 
 
 @pytest.mark.asyncio

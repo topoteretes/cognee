@@ -400,6 +400,37 @@ async def test_get_retriever_output_attaches_structured_context_evidence():
 
 
 @pytest.mark.asyncio
+async def test_get_retriever_output_treats_none_evidence_as_empty():
+    # BROAD returned None from its evidence hook, and include_references then
+    # failed with "'NoneType' object is not iterable".
+    retriever = _EvidenceRetriever()
+    retriever.get_context_evidence = lambda *_args, **_kwargs: None
+    dataset = SimpleNamespace(id=uuid4(), name="reports", tenant_id=uuid4())
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+    ):
+        result = await get_retriever_output(
+            SearchType.RAG_COMPLETION,
+            "That was wrong. What should I audit in Lisbon?",
+            dataset=dataset,
+            include_references=True,
+        )
+
+    assert result.evidence == []
+
+
+@pytest.mark.asyncio
 async def test_get_retriever_output_skips_evidence_hook_when_references_disabled():
     retriever = _EvidenceRetriever()
     retriever.get_context_evidence = lambda *_args, **_kwargs: (_ for _ in ()).throw(

@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.modules.improve import GraphCapabilities, ImproveResult
-from cognee.modules.improve.stages import REASON_OPT_IN_DISABLED
+from cognee.modules.improve.stages import REASON_TURNED_OFF
 
 
 class DummySpan:
@@ -36,6 +36,7 @@ async def test_global_context_index_pipeline_calls_memify(monkeypatch):
     result = await pipeline_module.global_context_index_pipeline(
         user=user,
         dataset="docs",
+        method="llm",
         max_bucket_size=7,
         placement_distance_threshold=0.8,
         rebuild=True,
@@ -55,6 +56,22 @@ async def test_global_context_index_pipeline_calls_memify(monkeypatch):
     task_kwargs = call_kwargs["enrichment_tasks"][0].default_params["kwargs"]
     assert task_kwargs["bucketing_strategy"] == "graph"
     assert task_kwargs["min_overlap"] == 0.2
+
+
+def test_default_method_builds_the_deterministic_task_pair():
+    from cognee.memify_pipelines.global_context_index import (
+        get_global_context_index_memify_tasks,
+    )
+
+    extraction_tasks, enrichment_tasks = get_global_context_index_memify_tasks()
+
+    assert [task.executable.__name__ for task in extraction_tasks] == ["load_dataset_content"]
+    assert [task.executable.__name__ for task in enrichment_tasks] == ["build_document_index"]
+    # No LLM task, so the run skips the first-run LLM connection probe.
+    assert not any(task.needs_llm for task in extraction_tasks + enrichment_tasks)
+
+    with pytest.raises(ValueError, match="from_entities"):
+        get_global_context_index_memify_tasks(method="hierarchical")
 
 
 def _stub_orchestrator(monkeypatch, resolved):
@@ -116,14 +133,12 @@ async def test_improve_global_context_index_opt_in(monkeypatch, build_global_con
             user=user,
             dataset=resolved.id,
             run_in_background=False,
-            bucketing_strategy="graph",
-            max_bucket_size=4,
         )
         assert stage.status == "completed"
     else:
         global_context_mock.assert_not_awaited()
         assert stage.status == "skipped"
-        assert stage.reason == REASON_OPT_IN_DISABLED
+        assert stage.reason == REASON_TURNED_OFF
 
 
 @pytest.mark.asyncio
@@ -141,6 +156,7 @@ async def test_improve_background_runs_global_context_index_in_the_chain(monkeyp
         user=SimpleNamespace(id="user-id"),
         run_in_background=True,
         build_global_context_index=True,
+        review_conflicts=False,
     )
 
     assert result.status == "running"
@@ -152,7 +168,7 @@ async def test_improve_background_runs_global_context_index_in_the_chain(monkeyp
     assert result.stage("global_context_index").status == "completed"
 
 
-def test_improve_payload_global_context_index_defaults_to_false():
+def test_improve_payload_global_context_index_defaults_to_the_server_config():
     router_module = import_module("cognee.api.v1.improve.routers.get_improve_router")
 
     payload = router_module.ImprovePayloadDTO(dataset_name="docs")
@@ -161,5 +177,42 @@ def test_improve_payload_global_context_index_defaults_to_false():
         build_global_context_index=True,
     )
 
-    assert payload.build_global_context_index is False
+    # None: the server's IMPROVE_GLOBAL_CONTEXT_INDEX decides; an explicit value wins.
+    assert payload.build_global_context_index is None
     assert enabled_payload.build_global_context_index is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("config_default", [True, False])
+async def test_improve_global_context_index_follows_the_config_when_not_given(
+    monkeypatch, config_default
+):
+    """No argument means IMPROVE_GLOBAL_CONTEXT_INDEX decides (default true)."""
+    from cognee.modules.improve.config import ImproveConfig
+
+    pipeline_module = import_module("cognee.memify_pipelines.global_context_index")
+    resolved = SimpleNamespace(id=uuid4(), name="docs", owner_id=uuid4())
+    improve_module = _stub_orchestrator(monkeypatch, resolved)
+    monkeypatch.setattr(
+        improve_module,
+        "get_improve_config",
+        lambda: ImproveConfig(global_context_index=config_default),
+    )
+    global_context_mock = AsyncMock(return_value={"status": "global-context-ok"})
+    monkeypatch.setattr(pipeline_module, "global_context_index_pipeline", global_context_mock)
+
+    result = await improve_module.improve(dataset="docs", user=SimpleNamespace(id="user-id"))
+
+    stage = result.stage("global_context_index")
+    if config_default:
+        global_context_mock.assert_awaited_once()
+        assert stage.status == "completed"
+    else:
+        global_context_mock.assert_not_awaited()
+        assert stage.reason == REASON_TURNED_OFF
+
+
+def test_global_context_index_is_on_by_default():
+    from cognee.modules.improve.config import ImproveConfig
+
+    assert ImproveConfig(_env_file=None).global_context_index is True

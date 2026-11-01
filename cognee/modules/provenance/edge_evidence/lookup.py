@@ -30,12 +30,8 @@ class EdgeEvidenceRecord:
 
 
 def _active_support(dataset_id: UUID, edge_ids: list[UUID]):
-    completed_run_exists = exists(
-        select(PipelineRun.id).where(
-            PipelineRun.pipeline_run_id == ProvenanceEdgeEvidence.pipeline_run_id,
-            PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
-        )
-    )
+    # A row counts once its run completes and is observed then, the clock
+    # get_touched_entity_ids selects by; a row without a run is observed when written.
     return (
         select(
             ProvenanceEdgeEvidence.edge_id,
@@ -43,15 +39,21 @@ def _active_support(dataset_id: UUID, edge_ids: list[UUID]):
             ProvenanceEdgeEvidence.chunk_id,
             ProvenanceEdgeEvidence.chunk_index,
             func.min(ProvenanceEdgeEvidence.created_at).label("first_seen_at"),
-            func.max(ProvenanceEdgeEvidence.created_at).label("observed_at"),
+            func.max(
+                func.coalesce(PipelineRun.created_at, ProvenanceEdgeEvidence.created_at)
+            ).label("observed_at"),
+        )
+        .outerjoin(
+            PipelineRun,
+            and_(
+                PipelineRun.pipeline_run_id == ProvenanceEdgeEvidence.pipeline_run_id,
+                PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+            ),
         )
         .where(
             ProvenanceEdgeEvidence.dataset_id == dataset_id,
             ProvenanceEdgeEvidence.edge_id.in_(edge_ids),
-            or_(
-                ProvenanceEdgeEvidence.pipeline_run_id.is_(None),
-                completed_run_exists,
-            ),
+            or_(ProvenanceEdgeEvidence.pipeline_run_id.is_(None), PipelineRun.id.is_not(None)),
         )
         .group_by(
             ProvenanceEdgeEvidence.edge_id,

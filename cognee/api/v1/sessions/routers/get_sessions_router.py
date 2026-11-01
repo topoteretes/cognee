@@ -414,6 +414,39 @@ def get_sessions_router() -> APIRouter:
             logger.exception("cost_by_user_agent failed")
             return JSONResponse(status_code=500, content={"error": "aggregation failed"})
 
+    @router.delete("/{session_id}")
+    async def delete_session_endpoint(
+        session_id: str = Path(
+            ...,
+            description=(
+                "Client-supplied session identifier; the same value passed as session_id "
+                "to POST /api/v1/remember."
+            ),
+            examples=["claude-code-1718000000"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Delete one of the caller's sessions — DELETE /api/v1/sessions/{session_id}.
+
+        Removes the session's Q&A turns, agent traces, session context and
+        watermarks, its Q&A vectors, and its dashboard and usage rows. Only the
+        caller's own sessions: read access to a session through a dataset grant
+        does not allow deleting it. Lessons already distilled from the session
+        into a dataset stay; delete them with POST /api/v1/forget and their data id.
+
+        ## Path Parameters
+        - **session_id** (str): The session to delete.
+
+        ## Response
+        `{"session_id": ..., "deleted": true}`; 404 when the caller has no such
+        session; 422 when session memory is disabled (CACHING=false).
+        """
+        from cognee.modules.session_lifecycle.delete_session import delete_session
+
+        if not await delete_session(user.id, session_id):
+            raise HTTPException(status_code=404, detail="session not found")
+        return {"session_id": session_id, "deleted": True}
+
     @router.get("/{session_id}")
     async def get_session_detail(
         session_id: str = Path(

@@ -20,11 +20,18 @@ class OntologyConfig(TypedDict, total=False):
             ``realizes`` edge; retrieval prefers authoritative tables when
             several realize the same class. Falls back to
             ONTOLOGY_AUTHORITATIVE_SOURCES when omitted.
+        ontology_reasoning: Whether to expand the ontology's OWL 2 RL closure
+            before matching — "none" (the default) or "owl_rl" (requires the
+            optional ``owlrl`` package). Applies when cognee builds the resolver
+            (from ``ontology_file_path`` or the environment); an explicit
+            ``ontology_resolver`` instance keeps the reasoning it was built with.
+            Falls back to the ONTOLOGY_REASONING environment value when omitted.
     """
 
     ontology_resolver: BaseOntologyResolver | None
     ontology_mode: str | None
     authoritative_sources: dict[str, Any] | None
+    ontology_reasoning: str | None
 
 
 class Config(TypedDict, total=False):

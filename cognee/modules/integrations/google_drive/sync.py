@@ -17,6 +17,21 @@ def _dataset_name(credential: IntegrationCredential) -> str:
     return ingestion.dataset_name_for_credential(GOOGLE_DRIVE_DATASET_PREFIX, credential)
 
 
+def _classify_error(error: BaseException) -> str:
+    """The count key a failed folder is reported under, from the source's typed error."""
+    from cognee.tasks.ingestion.connectors.google_drive import DriveAuthError
+
+    # dlt and remember() wrap the source's error; follow the chain to its end.
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        if isinstance(current, DriveAuthError):
+            return "failed_auth"
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return "failed_ingestion"
+
+
 async def sync_drive(credential: IntegrationCredential) -> None:
     """Run an initial or manual sync and record its outcome."""
     await ingestion.run_sync("google_drive", credential, _sync_source)
@@ -60,6 +75,7 @@ async def _sync_source(
             "folder_id": folder_id,
             "resource_name": resource_name,
             "service": service,
+            "service_factory": lambda: ingestion.build_service("google_drive", access_token),
             "check_active": check_active,
         }
         if folder_id in shared_drive_ids:
@@ -73,6 +89,7 @@ async def _sync_source(
         scopes=folder_ids,
         dataset_name=_dataset_name(credential),
         make_source=make_source,
+        classify_error=_classify_error,
     )
     if not counts["failed"]:
         await ingestion.retire_resources(

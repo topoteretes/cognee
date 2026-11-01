@@ -20,9 +20,12 @@ retried on ``Write-write conflict``.
 
 import asyncio
 import json
+import os
 import threading
 from typing import Any
 from uuid import UUID
+
+from pydantic import BaseModel
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.databases.turso import (
@@ -40,7 +43,7 @@ from ..embeddings.EmbeddingGateway import EmbeddingGateway
 from ..exceptions import CollectionNotFoundError
 from ..models.ScoredResult import ScoredResult
 from ..pgvector.serialize_data import serialize_data
-from ..vector_db_interface import VectorDBInterface
+from ..vector_db_interface import VectorDBInterface, validate_raw_vector_points
 
 logger = get_logger("TursoVectorAdapter")
 
@@ -143,6 +146,13 @@ class TursoVectorAdapter(VectorDBInterface):
             return self._connection
 
         import turso
+
+        # The dataset handler makes the directory of every per-dataset file; the
+        # deployment's default store (dataset routing) has no handler, so its
+        # directory is made here. Local files only, so a plain path.
+        directory = os.path.dirname(self.url)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
 
         config = self.turso_config
         # Driver autocommit in both modes: single statements commit on their own,
@@ -280,6 +290,11 @@ class TursoVectorAdapter(VectorDBInterface):
             )
             self._known_collections.add(collection_name)
 
+    async def delete_collection(self, collection_name: str) -> None:
+        """Drop the table for ``collection_name``; a missing table is not an error."""
+        await self._execute(f'DROP TABLE IF EXISTS "{collection_name}"', commit=True, ddl=True)
+        self._known_collections.discard(collection_name)
+
     async def _is_collection(self, table_name: str) -> bool:
         """True when ``table_name`` has the vector-collection columns."""
         rows = await self._execute(f'PRAGMA table_info("{table_name}")', fetch=True)
@@ -330,14 +345,21 @@ class TursoVectorAdapter(VectorDBInterface):
 
         await retry_on_conflict(lambda: asyncio.to_thread(self._upsert_rows, collection_name, rows))
 
-    def _upsert_rows(self, collection_name: str, rows: dict[str, dict[str, Any]]) -> None:
+    def _upsert_rows(
+        self,
+        collection_name: str,
+        rows: dict[str, dict[str, Any]],
+        *,
+        replace_vector: bool = False,
+    ) -> None:
         """Upsert ``rows`` in one transaction, merging ``belongs_to_set`` with stored rows.
 
         The engine rejects a scalar subquery inside ``ON CONFLICT DO UPDATE SET``, so
         the stored tag arrays are read first and unioned here; the upsert itself
         then only assigns ``excluded.payload``. As in PGVector, a conflicting row
-        keeps its stored vector. Read and write share one transaction (see
-        ``_transaction``), so a concurrent writer cannot make the merge stale.
+        keeps its stored vector, unless ``replace_vector`` is set (a vector copy).
+        Read and write share one transaction (see ``_transaction``), so a
+        concurrent writer cannot make the merge stale.
         """
 
         def work(connection):
@@ -362,6 +384,7 @@ class TursoVectorAdapter(VectorDBInterface):
                 f'INSERT INTO "{collection_name}" (id, payload, vector) '
                 f"VALUES (?, ?, vector32(?)) "
                 f"ON CONFLICT(id) DO UPDATE SET payload = excluded.payload"
+                + (", vector = excluded.vector" if replace_vector else "")
             )
             for row_id, row in rows.items():
                 connection.execute(
@@ -442,11 +465,55 @@ class TursoVectorAdapter(VectorDBInterface):
         # stale payload.
         await retry_on_conflict(lambda: asyncio.to_thread(self._transaction, work))
 
-    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
-        """Return rows from ``collection_name`` matching any of ``data_point_ids``."""
+    async def upsert_raw_vectors(
+        self,
+        collection_name: str,
+        points: list[dict],
+        payload_schema: type[BaseModel] | None = None,
+    ) -> None:
+        """Upsert caller-provided vectors without invoking the embedding engine.
+
+        Payloads are stored as given (the payload column is schemaless JSON text;
+        ``payload_schema`` only names the collection's type for ``create_collection``),
+        so a row read with ``retrieve(..., include_vector=True)`` lands here unchanged.
+        A conflicting id takes the new payload and the new vector (``create_data_points``
+        keeps the stored vector, which is right for re-ingested text but not for a
+        vector copy), except ``belongs_to_set``, which ``_upsert_rows`` unions with the
+        stored row's. The same id twice in one call is written once, see
+        ``validate_raw_vector_points``.
+        """
+        if not points:
+            return
+
+        vector_size = self.embedding_engine.get_vector_size()
+        # Every check runs before the table exists, so a rejected call creates nothing.
+        rows: dict[str, dict[str, Any]] = {
+            row_id: {
+                "payload": serialize_data(row["payload"]),
+                "vector": _vector_literal(row["vector"]),
+            }
+            for row_id, row in validate_raw_vector_points(points, vector_size).items()
+        }
+
+        if not await self.has_collection(collection_name):
+            await self.create_collection(collection_name, payload_schema=payload_schema)
+
+        await retry_on_conflict(
+            lambda: asyncio.to_thread(self._upsert_rows, collection_name, rows, replace_vector=True)
+        )
+
+    async def retrieve(
+        self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False
+    ):
+        """Return rows from ``collection_name`` matching any of ``data_point_ids``.
+
+        With ``include_vector`` the stored embedding rides along as ``payload["vector"]``
+        (``vector_extract`` renders the ``F32_BLOB`` back as a JSON array).
+        """
         if not await self.has_collection(collection_name):
             return []
 
+        columns = "id, payload, vector_extract(vector)" if include_vector else "id, payload"
         results = []
         seen_ids = set()
         ids = [str(data_point_id) for data_point_id in data_point_ids]
@@ -454,7 +521,7 @@ class TursoVectorAdapter(VectorDBInterface):
             id_batch = ids[start : start + QUERY_BATCH_SIZE]
             placeholders = ",".join("?" for _ in id_batch)
             rows = await self._execute(
-                f'SELECT id, payload FROM "{collection_name}" WHERE id IN ({placeholders})',
+                f'SELECT {columns} FROM "{collection_name}" WHERE id IN ({placeholders})',
                 id_batch,
                 fetch=True,
             )
@@ -462,13 +529,10 @@ class TursoVectorAdapter(VectorDBInterface):
                 if row[0] in seen_ids:
                     continue
                 seen_ids.add(row[0])
-                results.append(
-                    ScoredResult(
-                        id=parse_id(row[0]),
-                        payload=json.loads(row[1]) if row[1] else {},
-                        score=0,
-                    )
-                )
+                payload = json.loads(row[1]) if row[1] else {}
+                if include_vector:
+                    payload = {**payload, "vector": json.loads(row[2])}
+                results.append(ScoredResult(id=parse_id(row[0]), payload=payload, score=0))
         return results
 
     async def score_by_ids(

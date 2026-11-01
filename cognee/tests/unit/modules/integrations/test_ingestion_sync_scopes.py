@@ -3,13 +3,20 @@
 import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 
 from cognee.modules.integrations import ingestion
 from cognee.modules.integrations.credentials import CredentialInactiveError
 
-CREDENTIAL = SimpleNamespace(user_id="user-1", provider_account_id="acct-1")
+CREDENTIAL = SimpleNamespace(
+    id=UUID("11111111-1111-1111-1111-111111111111"),
+    user_id=UUID("22222222-2222-2222-2222-222222222222"),
+    provider="linear",
+    workspace_id=None,
+    provider_account_id="acct-1",
+)
 
 
 @pytest.fixture

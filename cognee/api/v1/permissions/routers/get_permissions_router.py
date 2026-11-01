@@ -176,7 +176,7 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"GET /v1/permissions/principals/{principal_id!s}/datasets",
                 "principal_id": str(principal_id),

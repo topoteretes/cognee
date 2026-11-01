@@ -21,6 +21,15 @@ function instance(): CogneeInstance {
   return { name: "CloudCognee", instanceId: "inst-1", fetch: mockFetch };
 }
 
+// Every cloud tenant looks like this: createPodClient always builds a
+// socketTarget, whether or not the pod behind it actually serves the socket.
+function socketCapableInstance(): CogneeInstance {
+  return {
+    ...instance(),
+    socketTarget: (path: string) => ({ url: `wss://tenant-x.example.com/api${path}`, apiKey: "key" }),
+  };
+}
+
 function Wrapper({ children }: { children: ReactNode }) {
   // No retry override here on purpose: the hook must bring its own
   // `retry: false`, and a wrapper-level one would hide a missing one.
@@ -28,10 +37,22 @@ function Wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
+// The shared Wrapper mints a QueryClient per render, which is fine for a
+// hook that never re-renders with new props but would wipe the cache under
+// rerender() — this keeps one client across a test's renders.
+function stableWrapper() {
+  const client = new QueryClient();
+  return function StableWrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  };
+}
+
 const payload = { nodes: [], links: [] };
 
+// A pod that answers with JSON; the streamed transport is getBrainGraph's own
+// concern and is covered in its test.
 function respondOk() {
-  mockFetch.mockResolvedValue({ json: async () => payload });
+  mockFetch.mockResolvedValue({ headers: { get: () => "application/json" }, json: async () => payload });
 }
 
 // The pod http client rejects on non-2xx (it never hands back a non-ok
@@ -73,9 +94,17 @@ describe("useBrainGraph", () => {
 
     await settle();
     expect(result.current.data).toBe(payload);
-    expect(mockFetch).toHaveBeenCalledWith(
-      "/v1/visualize/json?dataset_id=ds-1&max_nodes=500&include_session_events=false",
-    );
+    // Asserting the URL alone: the request options are getBrainGraph's own
+    // concern and are covered in its test, so this stays about which dataset
+    // gets fetched.
+    expect(mockFetch.mock.calls[0][0]).toBe("/v1/visualize/json?dataset_id=ds-1&max_nodes=1000");
+  });
+
+  it("hands the read React Query's abort signal, so a cancelled refetch frees its connection", async () => {
+    renderHook(() => useBrainGraph(instance(), "ds-1"), { wrapper: Wrapper });
+
+    await settle();
+    expect(mockFetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
   });
 
   it("stays idle while no dataset is focused", async () => {
@@ -164,5 +193,59 @@ describe("useBrainGraph", () => {
 
     await advance(POLL_MS + TICK_SLACK_MS);
     expect(mockFetch).toHaveBeenCalledTimes(FAILURES_TO_OPEN + 2);
+  });
+
+  // The growth signal is either the socket's `graph_grew` or this poll, never
+  // neither. Gating the poll on the instance being socket-CAPABLE rather than
+  // on the socket actually working left a pod that does not serve the
+  // endpoint with no growth signal at all, silently, for the whole session.
+  describe("growth-signal handover", () => {
+    it("keeps polling a dataset that holds rows on the stream, handing the previous payload to the read", async () => {
+      mockFetch.mockResolvedValue({
+        headers: { get: () => "application/json" },
+        json: async () => ({ nodes: [{ id: "row", type: "DltRow", text: "Row Data:\n  person: Ana" }], links: [] }),
+      });
+      renderHook(() => useBrainGraph(instance(), "csv"), { wrapper: stableWrapper() });
+      await settle();
+
+      await advance(POLL_MS + TICK_SLACK_MS);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockFetch.mock.calls[1][1].headers.Accept).toContain("text/event-stream");
+    });
+
+    it("keeps polling a socket-capable instance until pushes are confirmed", async () => {
+      renderHook(() => useBrainGraph(socketCapableInstance(), "ds-1"), { wrapper: Wrapper });
+
+      await settle();
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      await advance(POLL_MS + TICK_SLACK_MS);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("stops polling while the socket is pushing growth", async () => {
+      renderHook(() => useBrainGraph(socketCapableInstance(), "ds-1", true), { wrapper: Wrapper });
+
+      await settle();
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      await advance(POLL_MS * 2);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("resumes polling as soon as the pushes stop", async () => {
+      const { rerender } = renderHook(({ push }) => useBrainGraph(socketCapableInstance(), "ds-1", push), {
+        initialProps: { push: true },
+        wrapper: stableWrapper(),
+      });
+
+      await settle();
+      await advance(POLL_MS * 2);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      rerender({ push: false });
+      await advance(POLL_MS + TICK_SLACK_MS);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
   });
 });

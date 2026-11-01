@@ -5,6 +5,7 @@ before something else checkpoints, and the WAL cannot be replayed on the next
 open, that write is gone from the graph.
 """
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -16,6 +17,8 @@ from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
 def _adapter(query_result=None):
     adapter = LadybugAdapter.__new__(LadybugAdapter)
     adapter.query = AsyncMock(return_value=query_result if query_result is not None else [])
+    # add_edge is a batch of one, and the batch path serializes under this lock.
+    adapter._bulk_write_lock = asyncio.Lock()
     return adapter
 
 

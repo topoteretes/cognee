@@ -71,7 +71,7 @@ cognee-cli feedback ...                      # attach feedback to results
 `-s`), and `--background`/`-b` (`--node-name` is deprecated: it warns and is
 ignored). It prints one line per stage — name, status
 (`completed` / `already_completed` / `skipped` / `errored`) and the skip
-reason (e.g. `no_session_ids`, `lock_held`, `opt_in_disabled`).
+reason (e.g. `no_session_ids`, `opt_in_disabled`).
 `remember`/`improve` build their graphs through `cognify()`, so cognify-level
 settings (e.g. `PROVENANCE_TRACKING=true`) apply to them too.
 

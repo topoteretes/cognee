@@ -1,4 +1,5 @@
 import type { BrainState } from "./sceneTypes";
+import type { ColorEncoding } from "./colorEncoding";
 import { setsOf, sourceLabel } from "./computeBrainState";
 
 export interface SourceTypeBreakdownEntry {
@@ -57,12 +58,12 @@ function countBridges(name: string, brainState: BrainState): number {
 // plumbing layer), and how many other sources this one bridges into (the
 // hub metric's own _bridge flag, aggregated per source). All derived from
 // BrainState the canvas already computed — no extra fetch.
-export function computeSourceDetail(name: string, brainState: BrainState): SourceDetail {
+export function computeSourceDetail(name: string, brainState: BrainState, encoding: ColorEncoding): SourceDetail {
   const { names, total } = buildDocumentNames(name, brainState);
   return {
     name,
     displayName: sourceLabel(name),
-    color: brainState.setColor[name] || "#7E8CA6",
+    color: encoding.sourceColor(name),
     entityCount: brainState.setEntityCount[name] || 0,
     docCount: brainState.setDocCount[name] || 0,
     typeBreakdown: buildTypeBreakdown(name, brainState),

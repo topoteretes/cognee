@@ -77,6 +77,7 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import GLINER_DEMO_EXTRACTOR, LLM_EXTRACTOR, get_cognify_config
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
+from cognee.modules.conflicts.methods import retire_decisions_after_edit
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
     StagedContent,
@@ -102,7 +103,9 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
 )
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
+from cognee.modules.pipelines.methods.get_pipeline_run import get_latest_pipeline_run
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
+from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
 from cognee.modules.pipelines.operations.log_pipeline_run_complete import (
     log_pipeline_run_complete,
 )
@@ -237,6 +240,62 @@ async def _require_chunk_scoped_ownership(
                 f"stored chunk {chunk_id} has no chunk-scoped ownership baseline",
                 RefusalReason.NO_BASELINE,
             )
+    return delete_data
+
+
+async def _require_extraction_completed(data_id: UUID, dataset_id: UUID) -> None:
+    """Refuse a baseline whose entities were never extracted.
+
+    The indexing pipeline stores a document's chunks before the cognify
+    pipeline extracts its entities (SDK-397); between the two, or after an
+    extraction that failed and was rolled back, the chunks tile the text and
+    carry v2 ownership but have no entities. Treating them as a baseline would
+    re-extract only the edited regions and stamp the document complete, so the
+    untouched chunks would never get their entities. The chunks keep the
+    indexing run's id as their writer even after extraction rewrote them, so
+    the cognify completion stamp is the one proof extraction ran; without it
+    the full flow rebuilds the document.
+    """
+    if not await is_data_processed(data_id, dataset_id):
+        raise IncrementalUpdateNotPossible(
+            "the document's entities have not been extracted yet (no completed cognify "
+            "run has stamped it)",
+            RefusalReason.NO_BASELINE,
+        )
+
+
+async def _require_chunk_writers_completed(
+    delete_data: dict, data_id: UUID, dataset_id: UUID
+) -> None:
+    """Refuse a baseline whose chunks were written by a run that never finished them.
+
+    The indexing pipeline stores a document's chunks in a run of its own
+    (SDK-397). A run killed mid-way leaves a partial chunk set; one that ended
+    in an error rolls back per item, so it keeps the documents it completed.
+    Completion is therefore checked per document: a writer run that did not
+    complete is accepted when it stamped this document complete, and refused
+    otherwise. Chunks that carry no run ids (older graphs, adapters without
+    run stamping) keep the previous behaviour.
+    """
+    run_ids: set[str] = set()
+    for snapshot in delete_data.values():
+        run_ids.update(getattr(snapshot, "source_run_ids", None) or [])
+    for run_id in sorted(run_ids):
+        try:
+            run_uuid = UUID(run_id)
+        except ValueError:
+            continue
+        run = await get_latest_pipeline_run(run_uuid)
+        if run is None or run.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED:
+            continue
+        pipeline_name = getattr(run, "pipeline_name", None)
+        if pipeline_name and await is_data_processed(data_id, dataset_id, pipeline_name):
+            continue
+        raise IncrementalUpdateNotPossible(
+            f"stored chunks were written by pipeline run {run_id}, which did not "
+            f"complete ({getattr(run.status, 'value', run.status)})",
+            RefusalReason.NO_BASELINE,
+        )
 
 
 async def recorded_chunk_budget(data_id: UUID, dataset_id: UUID, user: User) -> int | None:
@@ -743,12 +802,10 @@ async def _run_incremental_update(
         return {**_unchanged_result(0, bundle["stored_count"]), "pipeline_run_id": None}
 
     pipeline_id = generate_pipeline_id(user.id, dataset.id, RUN_PIPELINE_NAME)
-    pipeline_run = await log_pipeline_run_start(
-        pipeline_id, RUN_PIPELINE_NAME, dataset.id, [data_id]
-    )
+    pipeline_run = await log_pipeline_run_start(pipeline_id, RUN_PIPELINE_NAME, dataset.id)
     send_telemetry(
         "Incremental Update Run Started",
-        user.id,
+        user,
         additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id)},
     )
     try:
@@ -769,22 +826,25 @@ async def _run_incremental_update(
                 chunker=chunker,
                 extractor=extractor,
             )
+            # An edit can remove the fact a user chose, or restate it under another
+            # relationship; its decision must not outlive it. Read once the new
+            # chunks' facts are written, so a fact the edit kept is still found.
+            await retire_decisions_after_edit(dataset, user)
     except Exception as error:
         await log_pipeline_run_error(
             pipeline_run.pipeline_run_id,
             pipeline_id,
             RUN_PIPELINE_NAME,
             dataset.id,
-            [data_id],
             error,
         )
         raise
     await log_pipeline_run_complete(
-        pipeline_run.pipeline_run_id, pipeline_id, RUN_PIPELINE_NAME, dataset.id, result
+        pipeline_run.pipeline_run_id, pipeline_id, RUN_PIPELINE_NAME, dataset.id
     )
     send_telemetry(
         "Incremental Update Run Completed",
-        user.id,
+        user,
         additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id), **result},
     )
     return {**result, "pipeline_run_id": pipeline_run.pipeline_run_id}
@@ -824,8 +884,10 @@ async def _stage_and_plan(
 
     old_text = await _read_processed_text(old_data.raw_data_location)
     stored_chunks = await _get_stored_chunks(data_id)
-    await _require_chunk_scoped_ownership(stored_chunks, dataset_id, data_id)
+    delete_data = await _require_chunk_scoped_ownership(stored_chunks, dataset_id, data_id)
     _require_stored_chunks_tile(stored_chunks, old_text)
+    await _require_chunk_writers_completed(delete_data, data_id, dataset_id)
+    await _require_extraction_completed(data_id, dataset_id)
 
     # Stage the new content through ingestion's own loader machinery. The Data
     # row is NOT written: readers keep resolving the old version until publish.
@@ -843,18 +905,13 @@ async def _stage_and_plan(
     document = _build_document(old_data, staged, node_set)
 
     if content_unchanged:
-        # Same content re-submitted. Two things can still be stale, and both
-        # are reported rather than repaired here: chunk indexes left behind by
-        # a crash between an earlier delete and its renumbering, and a missing
-        # cognify-completion stamp (without which a later cognify would redo
-        # the whole document). A missing stamp counts as a repair so the
-        # self-heal keeps its reach — it is a write either way, and every write
-        # belongs under a run.
+        # Same content re-submitted. One thing can still be stale, and it is
+        # reported rather than repaired here: chunk indexes left behind by a
+        # crash between an earlier delete and its renumbering (a write, so it
+        # belongs under a run). The cognify stamp is proven present by the
+        # guard above.
         shifted = _misindexed_chunks(document, stored_chunks)
-        needs_stamp = not await is_data_processed(data_id, dataset_id)
         repairs = ["indexes"] if shifted else []
-        if needs_stamp:
-            repairs.append("stamp")
         return {
             "status": "unchanged",
             "repairs": repairs,

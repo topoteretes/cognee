@@ -2,10 +2,11 @@ FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim@sha256:4f5d923c9dcea037f57bda
 WORKDIR /app
 ENV UV_LINK_MODE=copy
 
-# System deps (superset of all CI needs)
+# System deps (superset of all CI needs). ca-certificates refreshes the
+# digest-pinned base's CA bundle (eMudhra revocation, ENG-28).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ libpq-dev git curl cmake clang build-essential \
-    postgresql-client libgl1 libglib2.0-0 \
+    postgresql-client libgl1 libglib2.0-0 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock README.md ./

@@ -67,7 +67,6 @@ async def test_empty_dataset_waits_for_pipeline_lock():
         ),
         patch.object(datasets_module, "set_database_global_context_variables", _NoopContextManager),
         patch.object(datasets_module, "delete_dataset_nodes_and_edges", delete_nodes_and_edges),
-        patch.object(datasets_module, "get_dataset_data", AsyncMock(return_value=[])),
         patch.object(
             data_methods_module,
             "delete_dataset",
@@ -84,7 +83,7 @@ async def test_empty_dataset_waits_for_pipeline_lock():
 @pytest.mark.asyncio
 async def test_delete_data_waits_for_pipeline_lock():
     dataset_id = uuid4()
-    delete_nodes_and_edges = AsyncMock()
+    delete_nodes_and_edges = AsyncMock(return_value=DeletedGraphElements(node_ids={"n1"}))
 
     with (
         patch.object(
@@ -95,8 +94,12 @@ async def test_delete_data_waits_for_pipeline_lock():
         patch.object(datasets_module, "set_database_global_context_variables", _NoopContextManager),
         # No matching Data record -> custom-graph-model path, which only
         # calls delete_data_nodes_and_edges.
-        patch.object(datasets_module, "get_dataset_data", AsyncMock(return_value=[])),
+        patch.object(data_methods_module, "get_data", AsyncMock(return_value=None)),
         patch.object(datasets_module, "delete_data_nodes_and_edges", delete_nodes_and_edges),
+        patch.object(datasets_module, "retire_forgotten_decisions", AsyncMock(return_value=set())),
+        patch.object(
+            datasets_module, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()
+        ),
     ):
         await _assert_waits_for_pipeline_lock(
             dataset_id,

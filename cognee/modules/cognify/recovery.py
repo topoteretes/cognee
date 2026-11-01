@@ -20,12 +20,15 @@ from cognee.modules.pipelines.methods import get_unterminated_pipeline_runs
 from cognee.modules.pipelines.methods.get_pipeline_run import get_latest_pipeline_run
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
+from cognee.modules.pipelines.operations.run_sessions import get_run_session_ids
 from cognee.modules.pipelines.operations.run_tasks_with_telemetry import (
     PIPELINE_RUN_ERRORED,
     pipeline_run_telemetry_properties,
 )
 from cognee.modules.pipelines.run_ownership import claim_run_ownership
+from cognee.modules.users.methods import get_user
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME
 from cognee.shared.utils import send_telemetry
 
 logger = get_logger("cognify.recovery")
@@ -39,7 +42,10 @@ RECOVERY_POLL_SECONDS = 60
 # run_tasks applies when a run errors inline). A pipeline without an entry has
 # nothing to roll back at error time either, so at startup it is only closed.
 ROLLBACK_HANDLERS = {
-    "cognify_pipeline": cognify_rollback_handler,
+    COGNIFY_PIPELINE_NAME: cognify_rollback_handler,
+    # The indexing run stores its chunks under its own run id; the same handler
+    # undoes them and clears its stamps (pipeline_name selects the stamp slot).
+    INDEXING_PIPELINE_NAME: cognify_rollback_handler,
 }
 
 
@@ -67,6 +73,8 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
     """
     try:
         recovery_candidates = await get_unterminated_pipeline_runs()
+        # One lookup for every candidate's sessions, not one per closed run.
+        sessions_by_row = await get_run_session_ids(run.id for run in recovery_candidates)
     except Exception:
         logger.exception("Failed to load pipeline runs for startup recovery.")
         return
@@ -114,11 +122,14 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
                                 pipeline_run_id=current.pipeline_run_id,
                                 dataset=dataset,
                                 keep_completed_data=True,
+                                pipeline_name=current.pipeline_name,
                             )
-                        await _close_as_abandoned(current, dataset)
+                        await _close_as_abandoned(
+                            current, dataset, sessions_by_row.get(current.id, [])
+                        )
                     ownership.closed = True
                     logger.info("Recovery closed run %s as abandoned", current.pipeline_run_id)
-                    _send_abandoned_run_telemetry(current)
+                    _send_abandoned_run_telemetry(current, await _run_principal(current))
         except Exception:
             logger.exception("Recovery failed for run %s; will retry", pipeline_run.pipeline_run_id)
 
@@ -142,32 +153,57 @@ async def pipeline_recovery_service():
             await task
 
 
-async def _close_as_abandoned(pipeline_run, dataset) -> None:
-    """Write the ERRORED row for ``pipeline_run``, carrying the STARTED row's metadata."""
+async def _close_as_abandoned(pipeline_run, dataset, session_ids: list[str]) -> None:
+    """Write the ERRORED row for ``pipeline_run``, carrying the STARTED row's metadata.
+
+    ``session_ids`` are the STARTED row's, read in one batch by the caller.
+    """
     await log_pipeline_run_error(
         pipeline_run_id=pipeline_run.pipeline_run_id,
         pipeline_id=pipeline_run.pipeline_id,
         pipeline_name=pipeline_run.pipeline_name,
         dataset_id=dataset.id,
-        data=None,
         e=AbandonedPipelineRunError(),
         user_id=pipeline_run.user_id,
         tenant_id=pipeline_run.tenant_id,
         started_at=getattr(pipeline_run, "started_at", None),
-        data_info=(getattr(pipeline_run, "run_info", None) or {}).get("data"),
         origin=getattr(pipeline_run, "origin", None),
         parent_operation_id=getattr(pipeline_run, "parent_operation_id", None),
+        session_ids=tuple(session_ids),
     )
 
 
-def _send_abandoned_run_telemetry(pipeline_run) -> None:
+async def _run_principal(pipeline_run):
+    """The run's ``User`` when it still loads, else its stored ``user_id``.
+
+    Telemetry can tell an agent's run from a human's only from the model
+    (``parent_user_id``); a bare id cannot be resolved there without a
+    database lookup, so recovery does that lookup here. Never raises: a
+    missing or unloadable user only costs the event its agent attribution.
+    """
+    if pipeline_run.user_id is None:
+        return None
+    try:
+        return await get_user(pipeline_run.user_id)
+    except Exception:
+        logger.debug(
+            "Could not load the user of recovered run %s",
+            pipeline_run.pipeline_run_id,
+            exc_info=True,
+        )
+        return pipeline_run.user_id
+
+
+def _send_abandoned_run_telemetry(pipeline_run, user) -> None:
     """Emit the terminal telemetry event the dead process never sent.
 
     The run's ``Pipeline Run Started`` went out when it began; without this the
     warehouse counts an abandoned run as a silent gap forever while the local
     ``pipeline_runs`` table shows it closed. ``pipeline_name`` is the pipeline
     id, as the live emitter sends it; ``exception_type`` is the class the ERRORED
-    row carries. Diagnostic failures warn without turning a successful recovery
+    row carries. ``user`` is the run's loaded ``User`` (or its stored id, see
+    :func:`_run_principal`); the stored ``tenant_id`` is passed explicitly and
+    wins over the model's. Diagnostic failures warn without turning a successful recovery
     into a failed recovery or preventing other runs from being recovered.
     """
     try:
@@ -181,7 +217,7 @@ def _send_abandoned_run_telemetry(pipeline_run) -> None:
         }
         send_telemetry(
             PIPELINE_RUN_ERRORED,
-            pipeline_run.user_id,
+            user,
             tenant_id=tenant_id,
             additional_properties=properties,
         )

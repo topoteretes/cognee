@@ -8,10 +8,12 @@ import pytest
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval import broad_retriever
 from cognee.modules.retrieval.broad_retriever import (
+    BroadNoTextError,
     BroadRetriever,
     DecisionLarge,
     DecisionSmall,
 )
+from cognee.modules.retrieval.broad_store import BroadQueryError
 
 
 class _Graph:
@@ -130,6 +132,25 @@ async def test_on_a_small_dataset_the_retry_may_answer_instead(monkeypatch):
     found = await BroadRetriever().get_retrieved_objects("How many apples?")
 
     assert (found.route, found.answer) == ("answer", "3")
+
+
+@pytest.mark.asyncio
+async def test_a_decision_with_neither_answer_nor_query_is_a_query_error(monkeypatch):
+    _use(monkeypatch, {"notes": "Three apples."})
+    _llm(monkeypatch, [DecisionSmall()])
+
+    with pytest.raises(BroadQueryError, match="neither an answer nor a query"):
+        await BroadRetriever().get_retrieved_objects("How many apples?")
+
+
+@pytest.mark.asyncio
+async def test_a_dataset_without_document_text_is_a_no_text_error(monkeypatch):
+    _use(monkeypatch, {})
+
+    with pytest.raises(BroadNoTextError) as error:
+        await BroadRetriever().get_retrieved_objects("How many apples?")
+
+    assert error.value.status_code == 404
 
 
 class _Vector:
@@ -256,3 +277,59 @@ async def test_a_dataset_over_store_mb_is_represented_by_its_most_similar_parts(
     assert found.route == "sql" and found.rows == [(3, "b")]  # only b's three lines were loaded
     assert "1 parts of the dataset most similar" in found.coverage
     assert "over the 1 parts of the dataset most similar" in found.note
+
+
+def test_broad_reports_no_structured_evidence_as_an_empty_list():
+    retriever = BroadRetriever.__new__(BroadRetriever)
+    assert retriever.get_context_evidence({"route": "small"}, dataset_id="d") == []
+
+
+class _SchemaGraph:
+    """SchemaTable nodes only, as the DLT route writes them."""
+
+    def __init__(self, tables: list[tuple[str, str]]):
+        self.nodes = [
+            (f"t{n}", {"type": "SchemaTable", "name": name, "foreign_keys": foreign_keys})
+            for n, (name, foreign_keys) in enumerate(tables)
+        ]
+
+    async def get_filtered_graph_data(self, filters):
+        return [node for node in self.nodes if node[1]["type"] in filters[0]["type"]], []
+
+
+@pytest.mark.asyncio
+async def test_dlt_foreign_keys_are_shown_with_their_table():
+    """Keys of every table of one name are listed together, once each."""
+    from cognee.modules.retrieval.broad_store import RecordStore
+
+    orders_fk = '[{"column": "customer_id", "ref_table": "customers", "ref_column": "id"}]'
+    other_orders_fk = '[{"column": "shop_id", "ref_table": "shops", "ref_column": "id"}]'
+    graph = _SchemaGraph(
+        [("orders", orders_fk), ("orders", other_orders_fk), ("orders", orders_fk), ("notes", "[]")]
+    )
+    foreign_keys = await BroadRetriever().dlt_foreign_keys(graph)
+    assert foreign_keys == {
+        "orders": ["customer_id references customers.id", "shop_id references shops.id"],
+        "notes": [],
+    }
+
+    store = RecordStore()
+    try:
+        store.add_dlt_tables(foreign_keys)
+        store.add_dlt_rows(["Table: orders\nRow Data:\n  id: 7\n  customer_id: 3"])
+        assert "customer_id references customers.id; shop_id references shops.id" in (
+            store.describe("orders")
+        )
+    finally:
+        store.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("foreign_keys", "error"),
+    [("not json", ValueError), ('[{"column": "a"}]', KeyError), (None, TypeError)],
+)
+async def test_a_table_node_with_unreadable_keys_raises(foreign_keys, error):
+    """cognee writes these keys itself, so one that does not parse is a bug, not data to skip."""
+    with pytest.raises(error):
+        await BroadRetriever().dlt_foreign_keys(_SchemaGraph([("broken", foreign_keys)]))

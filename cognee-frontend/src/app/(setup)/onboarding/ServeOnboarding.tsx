@@ -210,12 +210,12 @@ function ServeStep3({ onNext, cogniInstance }: {
 // Step 4: Done
 function ServeStep4() {
   const router = useRouter();
-  const { markOnboardingComplete } = useUser();
+  const { markWelcomeSeen, markOnboardingComplete } = useUser();
   const track = useOnboardingTrackEvent();
 
   const finish = (destination: string): void => {
     track({ pageName: "Onboarding Serve", eventName: "serve_onboarding_completed", additionalProperties: { destination } });
-    completeOnboardingAndNavigate(markOnboardingComplete, () => router.push(`/${destination}`));
+    void completeOnboardingAndNavigate(markWelcomeSeen, markOnboardingComplete, () => router.push(`/${destination}`));
   };
 
   return (
@@ -239,12 +239,12 @@ function ServeStep4() {
 
 export default function ServeOnboarding() {
   const { cogniInstance, isInitializing } = useCogniInstance();
-  const { markOnboardingComplete } = useUser();
+  const { markWelcomeSeen, markOnboardingComplete } = useUser();
   const router = useRouter();
   const [step, setStep] = useState(1);
 
   function skipToDashboard(): void {
-    completeOnboardingAndNavigate(markOnboardingComplete, () => router.push("/dashboard"));
+    void completeOnboardingAndNavigate(markWelcomeSeen, markOnboardingComplete, () => router.push("/dashboard"));
   }
 
   if (isInitializing || !cogniInstance) {

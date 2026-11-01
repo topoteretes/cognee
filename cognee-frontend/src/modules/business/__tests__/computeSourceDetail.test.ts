@@ -1,6 +1,9 @@
 import type { BrainState, SemanticLink, TypeNode } from "../sceneTypes";
 import type { BusinessGraphNode } from "../types";
 import { computeSourceDetail } from "../computeSourceDetail";
+import { createSourceEncoding, createTypeEncoding } from "../colorEncoding";
+
+const noColors = createSourceEncoding({}, () => false);
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -22,16 +25,19 @@ function baseBrainState(overrides: Partial<BrainState> = {}): BrainState {
     entities: [],
     entityById: {},
     sourceNames: [],
-    setColor: {},
-    isSessionSet: () => false,
+    sessionSetNames: [],
+    encodings: { source: noColors, type: createTypeEncoding({}, () => false) },
     setEntityCount: {},
     setDocCount: {},
     setMemberCount: {},
     semanticLinks: [],
+    graphLinks: [],
     docLinks: [],
     anchors: {},
+    entityAnchors: {},
     typeNodes: [],
     typeLinks: [],
+    entityType: {},
     importanceMax: 1,
     plumbingNodes: [],
     plumbingEntityId: {},
@@ -47,16 +53,15 @@ function baseBrainState(overrides: Partial<BrainState> = {}): BrainState {
 describe("computeSourceDetail", () => {
   it("carries through the counts, color, and display name the Sources rail already shows", () => {
     const brainState = baseBrainState({
-      setColor: { crm: "#43D9E8" },
       setEntityCount: { crm: 12 },
       setDocCount: { crm: 3 },
     });
-    const detail = computeSourceDetail("crm", brainState);
+    const detail = computeSourceDetail("crm", brainState, createSourceEncoding({ crm: "#43D9E8" }, () => false));
     expect(detail).toMatchObject({ name: "crm", displayName: "crm", color: "#43D9E8", entityCount: 12, docCount: 3 });
   });
 
   it("falls back to the neutral gray when a source has no assigned color", () => {
-    const detail = computeSourceDetail("crm", baseBrainState());
+    const detail = computeSourceDetail("crm", baseBrainState(), noColors);
     expect(detail.color).toBe("#7E8CA6");
   });
 
@@ -65,7 +70,7 @@ describe("computeSourceDetail", () => {
       const brainState = baseBrainState({
         typeNodes: [typeNode("Person", { crm: 3 }), typeNode("Company", { crm: 7 }), typeNode("Deal", { other: 5 })],
       });
-      const detail = computeSourceDetail("crm", brainState);
+      const detail = computeSourceDetail("crm", brainState, noColors);
       expect(detail.typeBreakdown).toEqual([
         { type: "Company", count: 7 },
         { type: "Person", count: 3 },
@@ -74,7 +79,7 @@ describe("computeSourceDetail", () => {
 
     it("caps the breakdown at 5 rows", () => {
       const typeNodes = Array.from({ length: 8 }, (_, i) => typeNode(`Type${i}`, { crm: i + 1 }));
-      const detail = computeSourceDetail("crm", baseBrainState({ typeNodes }));
+      const detail = computeSourceDetail("crm", baseBrainState({ typeNodes }), noColors);
       expect(detail.typeBreakdown.length).toBe(5);
     });
   });
@@ -85,7 +90,7 @@ describe("computeSourceDetail", () => {
         node("d1", { name: "invoice_2024.pdf", belongs_to_set: ["crm"] }),
         node("d2", { name: "unrelated.pdf", belongs_to_set: ["other"] }),
       ];
-      const detail = computeSourceDetail("crm", baseBrainState({ plumbingNodes }));
+      const detail = computeSourceDetail("crm", baseBrainState({ plumbingNodes }), noColors);
       expect(detail.documentNames).toEqual(["invoice_2024.pdf"]);
       expect(detail.documentTotal).toBe(1);
     });
@@ -94,14 +99,14 @@ describe("computeSourceDetail", () => {
       const plumbingNodes = Array.from({ length: 10 }, (_, i) =>
         node(`d${i}`, { name: `doc${i}.pdf`, belongs_to_set: ["crm"] }),
       );
-      const detail = computeSourceDetail("crm", baseBrainState({ plumbingNodes }));
+      const detail = computeSourceDetail("crm", baseBrainState({ plumbingNodes }), noColors);
       expect(detail.documentNames.length).toBe(6);
       expect(detail.documentTotal).toBe(10);
     });
 
     it("excludes plumbing nodes with no name even if they belong to the source", () => {
       const plumbingNodes = [node("d1", { belongs_to_set: ["crm"] })];
-      const detail = computeSourceDetail("crm", baseBrainState({ plumbingNodes }));
+      const detail = computeSourceDetail("crm", baseBrainState({ plumbingNodes }), noColors);
       expect(detail.documentNames).toEqual([]);
     });
   });
@@ -114,7 +119,7 @@ describe("computeSourceDetail", () => {
         c: node("c", { belongs_to_set: ["support"] }),
       };
       const semanticLinks = [link("a", "b", true), link("a", "c", true)];
-      const detail = computeSourceDetail("crm", baseBrainState({ byId, semanticLinks }));
+      const detail = computeSourceDetail("crm", baseBrainState({ byId, semanticLinks }), noColors);
       expect(detail.bridgeCount).toBe(2);
     });
 
@@ -124,7 +129,7 @@ describe("computeSourceDetail", () => {
         b: node("b", { belongs_to_set: ["marketing"] }),
       };
       const semanticLinks = [link("a", "b", false)];
-      const detail = computeSourceDetail("crm", baseBrainState({ byId, semanticLinks }));
+      const detail = computeSourceDetail("crm", baseBrainState({ byId, semanticLinks }), noColors);
       expect(detail.bridgeCount).toBe(0);
     });
 
@@ -134,7 +139,7 @@ describe("computeSourceDetail", () => {
         b: node("b", { belongs_to_set: ["support"] }),
       };
       const semanticLinks = [link("a", "b", true)];
-      const detail = computeSourceDetail("crm", baseBrainState({ byId, semanticLinks }));
+      const detail = computeSourceDetail("crm", baseBrainState({ byId, semanticLinks }), noColors);
       expect(detail.bridgeCount).toBe(0);
     });
 
@@ -144,7 +149,7 @@ describe("computeSourceDetail", () => {
         b: node("b", { belongs_to_set: ["crm", "marketing"] }),
       };
       const semanticLinks = [link("a", "b", true)];
-      const detail = computeSourceDetail("crm", baseBrainState({ byId, semanticLinks }));
+      const detail = computeSourceDetail("crm", baseBrainState({ byId, semanticLinks }), noColors);
       expect(detail.bridgeCount).toBe(1);
     });
   });
