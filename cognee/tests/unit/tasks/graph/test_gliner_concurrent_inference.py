@@ -22,6 +22,18 @@ real_inference_threads = extractor_module.inference_threads
 GIB = 1024**3
 
 
+@pytest.fixture
+def pool_size(monkeypatch):
+    """``pool_size(n)``: size this process's thread pool to n, as the configuration would."""
+
+    def configure(threads: int) -> None:
+        monkeypatch.setattr(extractor_module, "inference_threads", lambda *_args: threads)
+        extractor_module.reset_inference_pool()
+
+    yield configure
+    extractor_module.reset_inference_pool()
+
+
 def names_text(seed: int, words: int) -> str:
     vocabulary = ["Pierre", "Natasha", "Moscow", "walked", "with", "the", "Prince", "and", "army"]
     return " ".join(vocabulary[(seed * 7 + i * 3) % len(vocabulary)] for i in range(words))
@@ -46,6 +58,10 @@ def window_model():
                 self.threads.add(threading.current_thread().name)
             time.sleep(0.02)  # long enough for concurrent batches to overlap
             return [self.forward(text) for text in texts]
+
+        def create_schema(self):
+            """What a worker process uses to rebuild the schema from plain data."""
+            return SimpleNamespace(entities=lambda _spec: None, relations=lambda _spec: None)
 
         @staticmethod
         def forward(text):
@@ -82,20 +98,19 @@ def sequential_reference(model):
     )
 
 
-def test_concurrent_path_matches_the_runtimes_sequential_long_text_path():
+def test_concurrent_path_matches_the_runtimes_sequential_long_text_path(pool_size):
+    pool_size(4)
     reference = sequential_reference(window_model())
     model = window_model()
-    with ThreadPoolExecutor(4) as pool:
-        concurrent = extractor_module._extract_long_concurrently(
-            model, pool, TEXTS, object(), **OPTIONS
-        )
+    concurrent = extractor_module._extract_long_concurrently(model, TEXTS, object(), **OPTIONS)
     assert concurrent == reference
     assert len(model.threads) > 1, "batches did not run on more than one thread"
 
 
-def test_every_batch_keeps_its_single_threaded_members():
+def test_every_batch_keeps_its_single_threaded_members(pool_size):
     """Same windows, grouped the same way: the property that keeps scores bit-identical."""
     model = window_model()  # skips first when gliner2 is not installed
+    pool_size(3)
     from gliner2.inference.chunking import split_text_into_chunks
 
     windows = [
@@ -107,8 +122,7 @@ def test_every_batch_keeps_its_single_threaded_members():
     ]
     size = OPTIONS["batch_size"]
     expected = [windows[start : start + size] for start in range(0, len(windows), size)]
-    with ThreadPoolExecutor(3) as pool:
-        extractor_module._extract_long_concurrently(model, pool, TEXTS, object(), **OPTIONS)
+    extractor_module._extract_long_concurrently(model, TEXTS, object(), **OPTIONS)
     assert sorted(model.batches) == sorted(expected)
 
 
@@ -232,7 +246,7 @@ class OverlapCountingModel:
 def test_one_thread_keeps_the_runtimes_long_text_call():
     """The single-threaded path is the unchanged public call, batches run in turn."""
     extractor_module.reset_inference_pool()
-    assert extractor_module._inference_pool() is None
+    assert extractor_module._thread_pool() is None
 
 
 def test_one_thread_runs_one_model_call_at_a_time(monkeypatch):
@@ -246,12 +260,11 @@ def test_one_thread_runs_one_model_call_at_a_time(monkeypatch):
     assert model.peak == 1
 
 
-def test_several_threads_share_one_pool(monkeypatch):
-    monkeypatch.setattr(extractor_module, "inference_threads", lambda: 3)
-    extractor_module.reset_inference_pool()
-    first = extractor_module._inference_pool()
+def test_several_threads_share_one_pool(pool_size):
+    pool_size(3)
+    first = extractor_module._thread_pool()
     assert first is not None and first._max_workers == 3
-    assert extractor_module._inference_pool() is first, "one pool per process"
+    assert extractor_module._thread_pool() is first, "one pool per process, never replaced"
 
 
 def test_no_cgroup_files_means_no_container_limits(cgroup):
@@ -394,9 +407,10 @@ def test_a_container_quota_and_limit_both_bound_the_pool(machine, cgroup):
     assert extractor_module.auto_inference_threads() == 2
 
 
-def test_a_failing_batch_raises_and_the_pool_keeps_working():
+def test_a_failing_batch_raises_and_the_pool_keeps_working(pool_size):
     """An error in one batch reaches the caller, and the shared pool stays usable."""
     model = window_model()
+    pool_size(3)
     real_batch_extract = model.batch_extract
 
     def failing(texts, schemas, **options):
@@ -405,18 +419,16 @@ def test_a_failing_batch_raises_and_the_pool_keeps_working():
         return real_batch_extract(texts, schemas, **options)
 
     model.batch_extract = failing
-    with ThreadPoolExecutor(3) as pool:
-        with pytest.raises(RuntimeError, match="model failed on this batch"):
-            extractor_module._extract_long_concurrently(model, pool, TEXTS, object(), **OPTIONS)
-        model.batch_extract = real_batch_extract
-        recovered = extractor_module._extract_long_concurrently(
-            model, pool, TEXTS, object(), **OPTIONS
-        )
+    with pytest.raises(RuntimeError, match="model failed on this batch"):
+        extractor_module._extract_long_concurrently(model, TEXTS, object(), **OPTIONS)
+    model.batch_extract = real_batch_extract
+    recovered = extractor_module._extract_long_concurrently(model, TEXTS, object(), **OPTIONS)
     assert recovered == sequential_reference(window_model())
 
 
-def test_concurrent_callers_share_the_pool_without_mixing_results():
+def test_concurrent_callers_share_the_pool_without_mixing_results(pool_size):
     """Two documents extracted at once through one pool each get their own result."""
+    pool_size(4)
     other_texts = [names_text(seed, 300) for seed in (7, 8, 9)]
     expected_a = sequential_reference(window_model())
     expected_b = window_model().batch_extract_long(
@@ -431,14 +443,17 @@ def test_concurrent_callers_share_the_pool_without_mixing_results():
         overlap_policy=extractor_module.OVERLAP_POLICY,
     )
     model = window_model()
-    with ThreadPoolExecutor(4) as pool, ThreadPoolExecutor(2) as callers:
+    with ThreadPoolExecutor(2) as callers:
         future_a = callers.submit(
-            extractor_module._extract_long_concurrently, model, pool, TEXTS, object(), **OPTIONS
+            extractor_module._extract_long_concurrently,
+            model,
+            TEXTS,
+            object(),
+            **OPTIONS,
         )
         future_b = callers.submit(
             extractor_module._extract_long_concurrently,
             model,
-            pool,
             other_texts,
             object(),
             **OPTIONS,
@@ -449,14 +464,267 @@ def test_concurrent_callers_share_the_pool_without_mixing_results():
 
 def test_repeated_extraction_does_not_grow_the_thread_count(monkeypatch):
     """The process-wide pool is reused: many calls never exceed its size in threads."""
-    monkeypatch.setattr(extractor_module, "inference_threads", lambda: 3)
+    monkeypatch.setattr(extractor_module, "inference_threads", lambda *_args, **_kwargs: 3)
     extractor_module.reset_inference_pool()
-    pool = extractor_module._inference_pool()
     model = window_model()
     for _ in range(10):
-        extractor_module._extract_long_concurrently(model, pool, TEXTS, object(), **OPTIONS)
+        extractor_module._extract_long_concurrently(model, TEXTS, object(), **OPTIONS)
     gliner_threads = [t for t in threading.enumerate() if t.name.startswith("gliner")]
     assert 0 < len(gliner_threads) <= 3
     extractor_module.reset_inference_pool()
     time.sleep(0.1)
     assert not [t for t in threading.enumerate() if t.name.startswith("gliner")]
+
+
+def test_worker_processes_take_every_nth_batch_and_the_result_is_unchanged(monkeypatch):
+    """processes=3: this process keeps every 3rd batch, workers run the rest, and the
+    merged result equals the runtime's sequential path. A thread pool stands in for
+    the worker processes, running the real worker entry point on a fake model."""
+    local, remote = window_model(), window_model()  # skips first without gliner2
+    from gliner2.inference.chunking import split_text_into_chunks
+
+    from cognee.tasks.graph.gliner_demo.schema import GlinerSchema
+
+    monkeypatch.setattr(extractor_module, "_worker", {"extractor": remote})
+    with ThreadPoolExecutor(2) as stand_in_for_processes:
+        result = extractor_module._extract_long_concurrently(
+            local,
+            TEXTS,
+            object(),
+            processes=3,
+            schema=GlinerSchema({"name": ""}, {}, source="caller"),
+            process_pool=stand_in_for_processes,
+            **OPTIONS,
+        )
+    assert result == sequential_reference(window_model())
+
+    windows = [
+        window.text
+        for text in TEXTS
+        for window in split_text_into_chunks(
+            text, chunk_size=OPTIONS["window_words"], chunk_overlap=OPTIONS["window_overlap_words"]
+        )
+    ]
+    size = OPTIONS["batch_size"]
+    batches = [windows[start : start + size] for start in range(0, len(windows), size)]
+    assert local.batches == batches[0::3], "this process keeps every third batch, in order"
+    assert sorted(remote.batches) == sorted(batches[1::3] + batches[2::3])
+
+
+@pytest.mark.parametrize(
+    ("torch_threads", "available_gib", "processes", "expected"),
+    [
+        (10, 64, 1, 5),  # one process: the machine's 5 concurrent batches
+        (10, 64, 2, 2),  # split across 2 processes: 5 // 2
+        (10, 64, 3, 1),
+        (10, 12, 2, 1),  # the 2nd model copy costs 3 GiB: 1 + (12 - 3 - 4) // 2 = 3, // 2 = 1
+        (14, 64, 2, 3),
+    ],
+)
+def test_auto_sizing_divides_the_machine_across_processes(
+    machine, torch_threads, available_gib, processes, expected
+):
+    machine(torch_threads, available_gib)
+    assert extractor_module.auto_inference_threads(processes=processes) == expected
+
+
+def test_process_count_defaults_to_one_and_must_be_at_least_one():
+    from cognee.modules.cognify.config import CognifyConfig
+
+    assert CognifyConfig().gliner_inference_processes == 1
+    with pytest.raises(ValueError, match="gliner_inference_processes"):
+        CognifyConfig(gliner_inference_processes=0)
+
+
+def test_pool_sizes_are_resolved_once(monkeypatch):
+    """Auto-sizing reads free memory, which the pools then use: the first answer sticks."""
+    calls = []
+
+    def counting_threads(processes):
+        calls.append(processes)
+        return 2
+
+    monkeypatch.setattr(extractor_module, "inference_threads", counting_threads)
+    monkeypatch.setattr(extractor_module, "inference_processes", lambda: 3)
+    extractor_module.reset_inference_pool()
+    assert extractor_module._pool_sizes() == (3, 2)
+    assert extractor_module._pool_sizes() == (3, 2)
+    assert calls == [3]
+    extractor_module.reset_inference_pool()
+
+
+def test_a_broken_worker_pool_is_dropped_so_the_next_call_starts_fresh(monkeypatch):
+    """A worker killed for memory breaks its pool for good; it must not poison later calls."""
+    from concurrent.futures.process import BrokenProcessPool
+
+    from cognee.tasks.graph.gliner_demo.schema import GlinerSchema
+
+    extractor_module.reset_inference_pool()
+    monkeypatch.setattr(extractor_module, "_pool_sizes", lambda: (2, 1))
+    monkeypatch.setattr(extractor_module, "build_gliner_schema", lambda *_args: object())
+    shut_down = []
+    executor = SimpleNamespace(shutdown=lambda **kwargs: shut_down.append(kwargs))
+    pool = extractor_module._WorkerPool("model", executor)
+    monkeypatch.setitem(extractor_module._worker_pools, "model", pool)
+
+    def broken(*_args, **_kwargs):
+        raise BrokenProcessPool("a worker died")
+
+    monkeypatch.setattr(extractor_module, "_extract_long_concurrently", broken)
+    with pytest.raises(BrokenProcessPool):
+        extractor_module.extract_batch(
+            object(), ["text"], GlinerSchema({"name": ""}, {}, source="caller"), model_name="model"
+        )
+    assert "model" not in extractor_module._worker_pools
+    assert shut_down == [{"wait": False, "cancel_futures": True}]
+    assert pool.users == 0
+
+
+def test_no_more_batches_run_at_once_than_the_pool_has_threads(pool_size):
+    """A pool of 2: batches overlap, but never more than 2 run at once."""
+    model = window_model()
+    pool_size(2)
+    in_flight, peak, lock = [0], [0], threading.Lock()
+    real = model.batch_extract
+
+    def counting(texts, schemas, **options):
+        with lock:
+            in_flight[0] += 1
+            peak[0] = max(peak[0], in_flight[0])
+        try:
+            return real(texts, schemas, **options)
+        finally:
+            with lock:
+                in_flight[0] -= 1
+
+    model.batch_extract = counting
+    extractor_module._extract_long_concurrently(model, TEXTS, object(), **OPTIONS)
+    assert extractor_module._thread_pool()._max_workers == 2
+    assert peak[0] == 2
+
+
+def test_one_thread_runs_the_batches_in_turn_on_the_calling_thread():
+    """One configured thread keeps the historic path: sequential batches, no pool thread."""
+    model = window_model()
+    extractor_module._run_batches(
+        model, object(), [["Pierre"], ["Natasha"]], threshold=0.5, batch_size=4, window_words=60
+    )
+    assert model.batches == [["Pierre"], ["Natasha"]]
+    assert model.threads == {threading.current_thread().name}
+
+
+def test_idle_worker_processes_are_reaped(monkeypatch):
+    extractor_module.reset_inference_pool()
+    monkeypatch.setattr(extractor_module, "WORKER_IDLE_SECONDS", 0.05)
+    shut_down = []
+    fake_pool = SimpleNamespace(shutdown=lambda **kwargs: shut_down.append(kwargs))
+    monkeypatch.setattr(extractor_module, "ProcessPoolExecutor", lambda *a, **k: fake_pool)
+    monkeypatch.setattr(extractor_module, "_pool_sizes", lambda: (2, 1))
+    pool = extractor_module._acquire_worker_pool("model")
+    assert pool.executor is fake_pool and pool.users == 1
+    extractor_module._release_worker_pool(pool)
+    deadline = time.time() + 2
+    while "model" in extractor_module._worker_pools and time.time() < deadline:
+        time.sleep(0.02)
+    assert "model" not in extractor_module._worker_pools, "idle workers were not dropped"
+    assert shut_down == [{"wait": False, "cancel_futures": True}]
+
+
+def test_workers_in_use_are_not_reaped(monkeypatch):
+    extractor_module.reset_inference_pool()
+    monkeypatch.setattr(extractor_module, "WORKER_IDLE_SECONDS", 0.05)
+    fake_pool = SimpleNamespace(shutdown=lambda **kwargs: None)
+    monkeypatch.setattr(extractor_module, "ProcessPoolExecutor", lambda *a, **k: fake_pool)
+    monkeypatch.setattr(extractor_module, "_pool_sizes", lambda: (2, 1))
+    pool = extractor_module._acquire_worker_pool("model")
+    assert extractor_module._acquire_worker_pool("model") is pool  # a second caller
+    extractor_module._release_worker_pool(pool)  # the first is done, the second still runs
+    time.sleep(0.2)
+    assert extractor_module._worker_pools["model"] is pool
+    extractor_module._release_worker_pool(pool)
+    extractor_module.reset_inference_pool()
+
+
+def test_more_processes_than_the_machine_fits_is_warned_about(machine, caplog):
+    machine(10, 64)  # 5 concurrent batches fit
+    with caplog.at_level("WARNING"):
+        assert extractor_module.auto_inference_threads(processes=8) == 1
+    assert "8 processes asked for" in caplog.text
+
+
+def test_a_late_broken_release_leaves_a_fresh_pool_alone(monkeypatch):
+    """Two calls fail on one broken pool and a third starts a fresh one in between:
+    the second failure's release drops only the broken pool, not the fresh one."""
+    extractor_module.reset_inference_pool()
+    monkeypatch.setattr(extractor_module, "_pool_sizes", lambda: (2, 1))
+    monkeypatch.setattr(
+        extractor_module,
+        "ProcessPoolExecutor",
+        lambda *a, **k: SimpleNamespace(shutdown=lambda **kwargs: None),
+    )
+    broken = extractor_module._acquire_worker_pool("model")
+    assert extractor_module._acquire_worker_pool("model") is broken
+    extractor_module._release_worker_pool(broken, broken=True)
+    fresh = extractor_module._acquire_worker_pool("model")
+    extractor_module._release_worker_pool(broken, broken=True)
+    assert fresh is not broken
+    assert extractor_module._worker_pools["model"] is fresh
+    extractor_module._release_worker_pool(fresh)
+    extractor_module.reset_inference_pool()
+
+
+def test_a_failed_call_cancels_its_queued_shares_and_waits_for_running_ones():
+    started, finish = threading.Event(), threading.Event()
+
+    def running():
+        started.set()
+        finish.wait()
+        return "done"
+
+    with ThreadPoolExecutor(1) as workers:
+        first = workers.submit(running)
+        queued = workers.submit(lambda: "never")
+        started.wait()
+        threading.Timer(0.05, finish.set).start()
+        extractor_module._abandon_shares([first, queued])
+        assert queued.cancelled()
+        assert first.done() and first.result() == "done"
+
+
+def test_a_worker_takes_its_thread_count_from_the_parent(monkeypatch):
+    monkeypatch.setattr(extractor_module, "load_extractor", lambda _name: "model")
+    monkeypatch.setattr(extractor_module, "inference_threads", lambda *_: pytest.fail())
+    monkeypatch.setattr(extractor_module, "_worker", {})
+    extractor_module.reset_inference_pool()
+    extractor_module._worker_init("model", 3)
+    assert extractor_module._pool_sizes() == (1, 3)
+    extractor_module.reset_inference_pool()
+
+
+def spawned_worker_init(model_name, threads):
+    """Start-up of a real worker process: patches do not reach it, so swap the
+    model in here, then run the real start-up."""
+    extractor_module.load_extractor = lambda _name: window_model()
+    extractor_module._worker_init(model_name, threads)
+
+
+def test_a_real_worker_process_runs_its_share(monkeypatch):
+    """processes=2 on a real spawned pool: the start-up arguments, the share and its
+    results cross the process boundary, and the merged result is unchanged."""
+    from cognee.tasks.graph.gliner_demo.schema import GlinerSchema
+
+    model = window_model()  # skips first without gliner2
+    monkeypatch.setattr(extractor_module, "_worker_init", spawned_worker_init)
+    monkeypatch.setattr(extractor_module, "inference_processes", lambda: 2)
+    extractor_module.reset_inference_pool()
+    try:
+        result = extractor_module.extract_batch(
+            model,
+            TEXTS,
+            GlinerSchema({"name": ""}, {}, source="caller"),
+            model_name="model",
+            **OPTIONS,
+        )
+    finally:
+        extractor_module.reset_inference_pool()
+    assert result == sequential_reference(window_model())
