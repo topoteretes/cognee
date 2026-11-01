@@ -23,7 +23,7 @@ import cognee.modules.improve.stages as stages_module
 from cognee import __file__ as cognee_package_file
 from cognee.modules.improve.stages import (
     REASON_NO_LLM_CONFIGURED,
-    REASON_OPT_IN_DISABLED,
+    REASON_TURNED_OFF,
     DistillSessionsStage,
     ExtractAgentContextStage,
     ReviewConflictsStage,
@@ -54,6 +54,9 @@ def test_keyless_gate_fixture_covers_module_level_llm_available_imports():
     package_root = Path(cognee_package_file).resolve().parent
     importing_modules = set()
     for path in package_root.rglob("*.py"):
+        # Product gates only: tests may check llm_available to pick a keyless path.
+        if path.relative_to(package_root).parts[0] == "tests":
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         if any(
             isinstance(node, ast.ImportFrom)
@@ -108,9 +111,7 @@ def test_llm_stages_run_when_an_llm_is_configured(stage):
 
 def test_earlier_gates_keep_precedence_over_the_llm_check():
     with patch.object(stages_module, "llm_available", return_value=False):
-        assert (
-            ReviewConflictsStage().gate(_inputs(review_conflicts=False)) == REASON_OPT_IN_DISABLED
-        )
+        assert ReviewConflictsStage().gate(_inputs(review_conflicts=False)) == REASON_TURNED_OFF
 
 
 @pytest.mark.asyncio

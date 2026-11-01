@@ -73,6 +73,16 @@ async def test_improve_forwards_every_option():
 
 
 @pytest.mark.asyncio
+async def test_improve_sends_an_explicit_review_conflicts_false():
+    """False must reach the server, or its on-by-default review would run anyway."""
+    client, posts = _client_with_recorder()
+
+    await client.improve("docs", review_conflicts=False)
+
+    assert posts[0][1]["review_conflicts"] is False
+
+
+@pytest.mark.asyncio
 async def test_improve_defaults_send_only_the_dataset():
     client, posts = _client_with_recorder()
     dataset_id = uuid4()

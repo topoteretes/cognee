@@ -45,11 +45,13 @@ class SourceRefRemovalResult:
 
     Consumed by session invalidation to find cached answers that used the
     deleted elements. Instances are always truthy — "handled, deleted nothing"
-    must still read as handled.
+    must still read as handled. ``matched`` is whether the refs owned any
+    artifact, deleted or surviving.
     """
 
     deleted_node_ids: list[str] = dataclasses.field(default_factory=list)
     deleted_edges: list[EdgeIdentity] = dataclasses.field(default_factory=list)
+    matched: bool = False
 
 
 def _is_unowned(current_refs: list[str], removed_refs: list[str]) -> bool:
@@ -170,6 +172,7 @@ async def execute_source_ref_removal(
     return SourceRefRemovalResult(
         deleted_node_ids=list(unowned_node_ids),
         deleted_edges=list(unowned_edges),
+        matched=bool(node_data or edge_data),
     )
 
 

@@ -627,3 +627,195 @@ async def test_cold_states_are_not_cached_but_warm_is(
     third = await graph_warmup_mod.assess_memory_readiness(user, None)
     assert third.state == graph_warmup_mod.STATE_WARM
     assert len(calls) == 2
+
+
+# --- partially built memory (SDK-397) ---------------------------------------
+
+
+def _partial_probe(graph_warmup_mod, memory_state, **kwargs):
+    return graph_warmup_mod.WarmupProbe(
+        graph_warmup_mod.STATE_PARTIAL,
+        0,
+        memory_state=memory_state,
+        message=f"Memory is {memory_state}.",
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_graph_search_on_indexed_chunks_becomes_a_chunk_completion(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+    stubbed_graph_lane,
+):
+    """Recall's own pick needs the graph, which has nothing yet: it answers from the chunks
+    the indexing pipeline stored, and says so."""
+    _use_config(monkeypatch, recall_config_mod)
+    _stub_probe(monkeypatch, graph_warmup_mod, _partial_probe(graph_warmup_mod, "extracting"))
+    graph_warmup_mod.clear_warmup_cache()
+    router = importlib.import_module("cognee.api.v1.recall.query_router")
+    monkeypatch.setattr(
+        router,
+        "route_query",
+        lambda query, constraints=None: types.SimpleNamespace(
+            search_type=SearchType.GRAPH_COMPLETION,
+            rule="relational",
+            only_context=False,
+            retriever_config=None,
+        ),
+    )
+
+    out = await api_recall_mod.recall(query_text="q", dataset_ids=[uuid4()], user=_make_user())
+
+    assert stubbed_graph_lane[0]["query_type"] == SearchType.RAG_COMPLETION
+    marker = out[-1]
+    assert isinstance(marker, ResponseMarkerEntry)
+    assert marker.status == "memory_extracting"
+    assert "chunk-level search" in marker.text
+    assert "Memory is extracting." in marker.text
+
+
+@pytest.mark.asyncio
+async def test_without_an_llm_the_chunk_completion_returns_its_context(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+    stubbed_graph_lane,
+):
+    """The chunk-level fallback is a completion type: with no LLM it runs with
+    only_context=True, as the router runs every completion type then."""
+    _use_config(monkeypatch, recall_config_mod)
+    _stub_probe(monkeypatch, graph_warmup_mod, _partial_probe(graph_warmup_mod, "extracting"))
+    graph_warmup_mod.clear_warmup_cache()
+    router = importlib.import_module("cognee.api.v1.recall.query_router")
+    monkeypatch.setattr(
+        router.RoutingConstraints,
+        "from_config",
+        classmethod(lambda cls, llm_config=None: cls(llm_available=False)),
+    )
+    monkeypatch.setattr(
+        router,
+        "route_query",
+        lambda query, constraints=None: types.SimpleNamespace(
+            search_type=SearchType.GRAPH_COMPLETION,
+            rule="relational",
+            only_context=False,
+            retriever_config=None,
+        ),
+    )
+
+    await api_recall_mod.recall(query_text="q", dataset_ids=[uuid4()], user=_make_user())
+
+    assert stubbed_graph_lane[0]["query_type"] == SearchType.RAG_COMPLETION
+    assert stubbed_graph_lane[0]["only_context"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_level_pick_is_kept_on_partial_memory(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+    stubbed_graph_lane,
+):
+    _use_config(monkeypatch, recall_config_mod)
+    _stub_probe(monkeypatch, graph_warmup_mod, _partial_probe(graph_warmup_mod, "indexed"))
+    graph_warmup_mod.clear_warmup_cache()
+
+    out = await api_recall_mod.recall(
+        query_text="q", dataset_ids=[uuid4()], auto_route=False, user=_make_user()
+    )
+
+    assert stubbed_graph_lane[0]["query_type"] in api_recall_mod._CHUNK_LEVEL_TYPES
+    assert out[-1].status == "memory_indexed"
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_query_type_is_honoured_on_partial_memory(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+    stubbed_graph_lane,
+):
+    _use_config(monkeypatch, recall_config_mod)
+    _stub_probe(monkeypatch, graph_warmup_mod, _partial_probe(graph_warmup_mod, "extracting"))
+    graph_warmup_mod.clear_warmup_cache()
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=[uuid4()],
+        user=_make_user(),
+    )
+
+    assert stubbed_graph_lane[0]["query_type"] == SearchType.GRAPH_COMPLETION
+    assert out[-1].status == "memory_extracting"
+
+
+@pytest.mark.asyncio
+async def test_a_search_with_nothing_to_read_returns_the_marker(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+    stubbed_graph_lane,
+):
+    from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+
+    _use_config(monkeypatch, recall_config_mod)
+    _stub_probe(
+        monkeypatch,
+        graph_warmup_mod,
+        _partial_probe(
+            graph_warmup_mod,
+            "extraction_failed",
+            error_class="AuthenticationError",
+            error_message="invalid api key",
+        ),
+    )
+    graph_warmup_mod.clear_warmup_cache()
+    search_methods = importlib.import_module("cognee.modules.search.methods.search")
+
+    async def _no_data(**kwargs):
+        raise NoDataError("nothing stored")
+
+    monkeypatch.setattr(search_methods, "authorized_search", _no_data)
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=[uuid4()],
+        user=_make_user(),
+    )
+
+    assert len(out) == 1
+    assert out[0].status == "memory_extraction_failed"
+    assert out[0].error_class == "AuthenticationError"
+
+
+@pytest.mark.asyncio
+async def test_partial_verdicts_are_never_cached(monkeypatch, graph_warmup_mod, recall_config_mod):
+    _use_config(monkeypatch, recall_config_mod)
+    calls = _stub_probe(monkeypatch, graph_warmup_mod, _partial_probe(graph_warmup_mod, "indexed"))
+    graph_warmup_mod.clear_warmup_cache()
+    user = _make_user()
+
+    first = await graph_warmup_mod.assess_memory_readiness(user, None)
+    second = await graph_warmup_mod.assess_memory_readiness(user, None)
+
+    assert first.state == second.state == graph_warmup_mod.STATE_PARTIAL
+    assert len(calls) == 2

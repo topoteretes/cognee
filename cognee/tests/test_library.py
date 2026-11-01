@@ -1,9 +1,15 @@
+import base64
 import os
 import pathlib
+from uuid import UUID
 
 import cognee
 from cognee import update
+from cognee.infrastructure.files.encryption.envelope import MAGIC
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.modules.data.methods import get_dataset_data, get_datasets_by_name
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchType
@@ -14,12 +20,55 @@ from cognee.tests.utils.get_latest_pipeline_run import get_latest_pipeline_run
 logger = get_logger()
 
 
+async def assert_documents_sealed_and_readable(dataset_name: str, expected_texts: dict[UUID, str]):
+    """Every object under the data root is an envelope on disk, every data item of
+    the dataset reads back as plaintext through the storage layer, and the items
+    in ``expected_texts`` (by data id) read back as exactly that text — the
+    document that was processed, not what encryption made of it.
+    """
+    data_root = get_storage_config()["data_root_directory"]
+    stored_files = [
+        os.path.join(directory, name)
+        for directory, _, names in os.walk(data_root)
+        for name in names
+    ]
+    assert stored_files, "No stored objects under the data root."
+    for path in stored_files:
+        with open(path, "rb") as stored:
+            assert stored.read(len(MAGIC)) == MAGIC, f"{path} is stored in plaintext."
+
+    user = await get_default_user()
+    dataset = (await get_datasets_by_name([dataset_name], user.id))[0]
+    data_items = await get_dataset_data(dataset.id)
+    assert data_items, "The dataset has no data items to check."
+    read_back = {}
+    for item in data_items:
+        with open(get_data_file_path(item.raw_data_location), "rb") as stored:
+            assert stored.read(len(MAGIC)) == MAGIC, f"{item.name} is stored in plaintext."
+        async with open_data_file(item.raw_data_location, mode="rb") as plaintext:
+            content = plaintext.read()
+        assert not content.startswith(MAGIC), f"{item.name} read back as ciphertext."
+        read_back[item.id] = content.decode("utf-8")
+
+    for data_id, expected in expected_texts.items():
+        assert data_id in read_back, f"Data item {data_id} is missing from the dataset."
+        assert read_back[data_id] == expected, (
+            f"Data item {data_id} read back differs from the document that was processed."
+        )
+
+
 async def main():
     # Disable session-turn gating (auto_feedback). This script issues several searches against the
     # same session; with gating on, the turn analysis can intercept a follow-up search with a
     # clarifying acknowledgement instead of an answer. That layer has dedicated coverage
     # (e.g. test_session_context_turn_flow.py); here we assert direct retrieval results.
     os.environ["AUTO_FEEDBACK"] = "False"
+
+    # Run the whole pipeline with file encryption on: every object under the data
+    # root must be sealed on disk, and add/cognify/search/update must read the
+    # same documents back through the layer as they would in plaintext.
+    os.environ["FILE_ENCRYPTION_ENABLED"] = "true"
+    os.environ["FILE_ENCRYPTION_KEY"] = base64.b64encode(os.urandom(32)).decode()
 
     data_directory_path = str(
         pathlib.Path(
@@ -58,6 +107,15 @@ async def main():
         pipeline_name="cognify_pipeline", status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED
     )
     assert cognify_run.embedding_tokens > 0, "Cognify recorded no embedding tokens."
+
+    # The processed documents are sealed on disk and the text item (the dataset
+    # holds the PDF and the text at this point) reads back as exactly what was added.
+    user = await get_default_user()
+    dataset = (await get_datasets_by_name([dataset_name], user.id))[0]
+    text_item = next(
+        item for item in await get_dataset_data(dataset.id) if item.name.startswith("text_")
+    )
+    await assert_documents_sealed_and_readable(dataset_name, {text_item.id: text})
 
     from cognee.infrastructure.databases.vector import get_vector_engine_async
 
@@ -131,6 +189,15 @@ async def main():
             data_id=data_item["data_id"],
             data="Mark met with Cindy at a cafe.",
         )
+
+    # The rewritten documents are sealed too and read back as the new content.
+    await assert_documents_sealed_and_readable(
+        dataset_name,
+        {
+            UUID(str(data_item["data_id"])): "Mark met with Cindy at a cafe."
+            for data_item in pipeline_run_obj.data_ingestion_info
+        },
+    )
 
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,

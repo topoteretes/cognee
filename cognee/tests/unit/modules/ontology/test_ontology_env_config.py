@@ -4,6 +4,7 @@ from cognee.modules.ontology.get_default_ontology_resolver import get_ontology_r
 from cognee.modules.ontology.ontology_env_config import (
     OntologyEnvConfig,
     normalize_ontology_mode,
+    normalize_ontology_reasoning,
 )
 
 
@@ -34,3 +35,29 @@ def test_normalize_ontology_mode_never_raises():
     assert normalize_ontology_mode("strict") == "strict"
     assert normalize_ontology_mode("Bogus") == "annotate"
     assert normalize_ontology_mode(None) == "annotate"
+
+
+def test_ontology_reasoning_defaults_to_none():
+    assert OntologyEnvConfig(_env_file=None).ontology_reasoning == "none"
+
+
+def test_ontology_reasoning_is_case_insensitive():
+    config = OntologyEnvConfig(_env_file=None, ontology_reasoning=" OWL_RL ")
+    assert config.ontology_reasoning == "owl_rl"
+
+
+def test_unknown_ontology_reasoning_falls_back_to_none(caplog):
+    with caplog.at_level("WARNING"):
+        config = OntologyEnvConfig(_env_file=None, ontology_reasoning="bogus")
+    assert config.ontology_reasoning == "none"
+
+
+def test_normalize_ontology_reasoning_never_raises():
+    assert normalize_ontology_reasoning("owl_rl") == "owl_rl"
+    assert normalize_ontology_reasoning("Bogus") == "none"
+    assert normalize_ontology_reasoning(None) == "none"
+
+
+def test_to_dict_carries_ontology_reasoning():
+    config = OntologyEnvConfig(_env_file=None, ontology_reasoning="owl_rl")
+    assert config.to_dict()["ontology_reasoning"] == "owl_rl"

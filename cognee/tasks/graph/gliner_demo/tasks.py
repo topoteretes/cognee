@@ -2,7 +2,9 @@
 
 ``get_gliner_demo_tasks`` returns the complete task list
 ``classify_documents -> prepare_gliner_schema -> extract_chunks_from_documents ->
-extract_graph_and_summarize_with_gliner -> add_data_points``. Run it with
+index_chunks_for_search -> extract_graph_and_summarize_with_gliner ->
+add_data_points`` (the early chunk write is dropped when
+``EARLY_CHUNK_INDEXING`` is off). Run it with
 ``cognee.run_custom_pipeline(tasks=..., dataset=..., pipeline_name="cognify_pipeline")``;
 the pipeline loads the dataset's Data records itself, exactly as ``cognify()`` does.
 
@@ -21,6 +23,7 @@ from typing import Literal
 from cognee.infrastructure.llm.utils import resolve_chunk_size
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.cognify.chunking_tasks import build_chunking_tasks, resolve_chunks_per_batch
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument
 from cognee.modules.data.processing.document_types.Document import Document
@@ -32,11 +35,10 @@ from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.pipelines.tasks.task import Task, task_summary
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
 from cognee.tasks.graph.exceptions import InvalidDataChunksError
 from cognee.tasks.graph.extract_graph_from_data import extract_graph_from_data
 from cognee.tasks.provenance import record_provenance
-from cognee.tasks.storage import add_data_points
+from cognee.tasks.storage import add_data_points, find_indexed_chunks
 from cognee.tasks.summarization.models import TextSummary
 
 from .extractor import (
@@ -226,8 +228,8 @@ def build_gliner_extraction_task(
 ) -> Task:
     """Build only the GLiNER extract+summarize ``Task``.
 
-    This is the task ``get_gliner_demo_tasks`` places fourth and the one
-    ``get_gliner_demo_tasks`` places in its extraction step. Raises
+    This is the task ``get_gliner_demo_tasks`` places right before the final
+    ``add_data_points`` and the one it uses as its extraction step. Raises
     :class:`GlinerNotInstalledError` when ``gliner2`` is not installed and
     ``ValueError`` on bad options.
     """
@@ -296,6 +298,7 @@ async def get_gliner_demo_tasks(
     config: Config | None = None,
     chunk_attachment: Literal["direct", "all"] | None = None,
     track_provenance: bool = False,
+    early_chunk_indexing: bool | None = None,
     stats: GlinerRunStats | None = None,
 ) -> list[Task]:
     """Build the GLiNER cognify task list.
@@ -308,12 +311,16 @@ async def get_gliner_demo_tasks(
     document sketch. ``stats`` is filled in as the run progresses.
 
     Embeddings in ``add_data_points`` still run; graph extraction and summaries
-    are LLM-free. Raises :class:`GlinerNotInstalledError` when ``gliner2`` is
+    are LLM-free. With ``early_chunk_indexing`` (default: the
+    ``EARLY_CHUNK_INDEXING`` setting) the indexing pipeline stored the chunks
+    before this run, as on the LLM route, and this list finds them in the
+    vector store instead of embedding them again. Raises :class:`GlinerNotInstalledError` when ``gliner2`` is
     not installed.
     """
-    if chunks_per_batch is None:
-        configured = get_cognify_config().chunks_per_batch
-        chunks_per_batch = configured if configured is not None else 2000
+    cognify_config = get_cognify_config()
+    chunks_per_batch = resolve_chunks_per_batch(chunks_per_batch)
+    if early_chunk_indexing is None:
+        early_chunk_indexing = cognify_config.early_chunk_indexing
 
     ontology_resolver = None
     if not entity_types and not relation_types:
@@ -346,15 +353,21 @@ async def get_gliner_demo_tasks(
         stats=stats,
     )
 
-    tasks = [
-        Task(classify_documents, needs_llm=False),
-        schema_task,
-        Task(
-            extract_chunks_from_documents,
-            max_chunk_size=max_chunk_size,
-            chunker=chunker,
-            needs_llm=False,
-        ),
+    # The chunking step the indexing pipeline uses too, so both runs cut the
+    # same chunks; the schema is sketched from the classified documents.
+    classify_task, chunk_task = build_chunking_tasks(chunker, max_chunk_size)
+    tasks = [classify_task, schema_task, chunk_task]
+    if early_chunk_indexing:
+        # Same as the LLM route (SDK-397): the indexing pipeline stored these
+        # chunks before this run; add_data_points skips re-embedding them.
+        tasks.append(
+            Task(
+                find_indexed_chunks,
+                task_config={"batch_size": chunks_per_batch},
+                needs_llm=False,
+            )
+        )
+    tasks += [
         extraction_task,
         Task(
             add_data_points,

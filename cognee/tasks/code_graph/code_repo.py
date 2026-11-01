@@ -136,6 +136,17 @@ def is_code_repo_sourced(metadata) -> bool:
     return metadata_source(metadata) == "code_repo"
 
 
+def code_repo_node_set(data_item) -> list[str] | None:
+    """The call-level node_set tag a ``code_repo`` row carries, or None.
+
+    Read off the manifest row's external_metadata (identical shape to
+    classify_documents) so every code node the row produces carries the same
+    tag its documents got from add()/remember().
+    """
+    metadata = decode_external_metadata(getattr(data_item, "external_metadata", None))
+    return validate_node_set_names(metadata.get("node_set")) if metadata else None
+
+
 def detect_code_project(directory: Path) -> bool:
     """Whether a directory's ROOT carries a code-project marker."""
     return any((directory / marker).exists() for marker in PROJECT_MARKERS)
@@ -425,6 +436,10 @@ async def extract_code_repo_graph(
     there, exactly like remember(content_type="code")). One repository node,
     cross-file edges, one graph read per repo. No LLM, no embeddings.
 
+    A dataset holding several repositories is one enola cluster: the first of
+    its rows to get here loads all of them from one snapshot, with the edges
+    between repositories (see cluster.load_dataset_cluster).
+
     A call-level node_set (add()/remember()'s ``node_set`` argument) reaches
     every document this manifest's repo carries, but not the code nodes
     themselves -- add_data_points only tags the DataPoints it is given, and
@@ -434,6 +449,7 @@ async def extract_code_repo_graph(
     down so every code node -- CodeRepository included -- carries it too.
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
+    from cognee.tasks.code_graph.cluster import load_dataset_cluster
     from cognee.tasks.code_graph.extract_code_graph import (
         add_code_graph_data_points,
         add_code_graph_edges,
@@ -458,8 +474,10 @@ async def extract_code_repo_graph(
                 "its current location."
             )
 
-        metadata = decode_external_metadata(data_item.external_metadata)
-        node_set = validate_node_set_names(metadata.get("node_set")) if metadata else None
+        if await load_dataset_cluster(ctx):
+            continue
+
+        node_set = code_repo_node_set(data_item)
 
         data_points = await extract_code_graph(repo_path=repo_path, node_set=node_set)
         state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)

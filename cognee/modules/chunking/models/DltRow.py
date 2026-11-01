@@ -11,5 +11,8 @@ class DltRow(DocumentChunk):
     and the row-aware search type reads it directly. Rows carry
     ``cut_type="dlt_row"`` and structural edges (is_row_of → SchemaTable, FK
     edges, column-value edges). Subclassing DocumentChunk reuses the chunk
-    field shape; filter by type NAME, not isinstance.
+    field shape; filter by type NAME, not isinstance. ``name`` is the row's
+    table and primary key, ``table:pk``, which labels the row in the graph.
     """
+
+    name: str

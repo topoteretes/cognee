@@ -382,7 +382,7 @@ function SessionDetailPanel({ detail, refreshNonce }: { detail: SessionDetail; r
   const lastFull = formatDate(lastActivity);
   const lastRel = lastActivity ? formatRelativeTime(lastActivity) : null;
 
-  const { runs: enrichmentRuns, loading: enrichmentLoading } = useGraphEnrichment(detail.dataset_id, refreshNonce);
+  const { runs: enrichmentRuns, loading: enrichmentLoading } = useGraphEnrichment(detail.dataset_id, detail.session_id, refreshNonce);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

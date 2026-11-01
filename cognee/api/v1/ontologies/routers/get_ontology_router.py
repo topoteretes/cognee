@@ -1,7 +1,7 @@
 import asyncio
 
-from fastapi import APIRouter, Depends, File, Form, Path, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, File, Form, Path, Query, Request, UploadFile
+from fastapi.responses import JSONResponse, Response
 
 from cognee import __version__ as cognee_version
 from cognee.exceptions import CogneeApiError
@@ -10,7 +10,14 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 
-from ..ontologies import DuplicateOntologyKeyError, OntologyService
+from ..ontologies import (
+    EXPORT_FORMATS,
+    DuplicateOntologyKeyError,
+    OntologyNotFoundError,
+    OntologyParseError,
+    OntologySerializationError,
+    OntologyService,
+)
 
 logger = get_logger(__name__)
 
@@ -197,5 +204,133 @@ def get_ontology_router() -> APIRouter:
         except Exception:
             logger.exception("Ontology list failed")
             return JSONResponse(status_code=500, content={"error": "Ontology list failed."})
+
+    @router.get(
+        "/{ontology_key}/export",
+        response_class=Response,
+        responses={
+            200: {
+                "description": "The ontology serialized in the requested RDF syntax.",
+                "content": {media_type: {} for _, media_type, _ in EXPORT_FORMATS.values()},
+            },
+            400: {"description": "Unsupported format"},
+            404: {"description": "Ontology key not found for this user"},
+            422: {
+                "description": (
+                    "Stored ontology file is not parseable RDF, or cannot be written in the "
+                    "requested format"
+                )
+            },
+        },
+    )
+    async def export_ontology(
+        ontology_key: str = Path(
+            ...,
+            examples=["medical_ontology"],
+            description=(
+                "Key of the ontology to export, exactly as provided at upload time "
+                "(see GET /api/v1/ontologies for available keys)."
+            ),
+        ),
+        format: str = Query(
+            "turtle",
+            examples=["turtle"],
+            description=(
+                "RDF serialization to return. One of: "
+                + ", ".join(EXPORT_FORMATS)
+                + ". Defaults to turtle."
+            ),
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Download an uploaded ontology re-serialized in a chosen RDF syntax.
+
+        The stored file is parsed with rdflib and serialized again, so the
+        output is normalized regardless of the syntax it was uploaded in.
+
+        ## Path Parameters
+        - **ontology_key** (str): The key of the ontology to export.
+
+        ## Query Parameters
+        - **format** (str): `turtle` (text/turtle, default), `xml` (application/rdf+xml),
+          `json-ld` (application/ld+json) or `nt` (application/n-triples).
+
+        ## Response
+        The serialized ontology as an attachment (`Content-Disposition: attachment;
+        filename="<ontology_key>.<ext>"`) with the matching `Content-Type`.
+
+        ## Error Codes
+        - **400 Bad Request**: Unsupported format (the message lists the valid options)
+        - **404 Not Found**: Ontology key not found for the authenticated user
+        - **422 Unprocessable Entity**: Stored ontology file is not parseable RDF (JSON-LD
+          that references an external `@context` is refused), or the ontology cannot be
+          written in the requested format (the message names a format to try instead)
+        - **500 Internal Server Error**: File system or serialization errors
+        """
+        send_telemetry(
+            "Ontology Export API Endpoint Invoked",
+            user,
+            additional_properties={
+                "endpoint": "GET /api/v1/ontologies/{ontology_key}/export",
+                "cognee_version": cognee_version,
+                "format": format,
+            },
+        )
+
+        if format not in EXPORT_FORMATS:
+            logger.warning("Ontology export rejected: unsupported format")
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Unsupported format. Use one of: " + ", ".join(EXPORT_FORMATS) + "."
+                },
+            )
+        _, media_type, extension = EXPORT_FORMATS[format]
+
+        try:
+            # Parsing and serializing with rdflib is CPU-bound file IO; run it
+            # off the event loop like the other ontology routes.
+            payload = await asyncio.to_thread(
+                ontology_service.export_ontology,
+                ontology_key=ontology_key,
+                user=user,
+                export_format=format,
+            )
+        except OntologyNotFoundError as error:
+            # Covers both "invalid key" and "key not found for this user"; a key
+            # owned by someone else is indistinguishable from a missing one.
+            logger.warning("Ontology export request failed: %s", error)
+            return JSONResponse(status_code=404, content={"error": "Ontology key not found."})
+        except OntologyParseError as error:
+            logger.warning("Ontology export failed to parse stored file: %s", error)
+            return JSONResponse(
+                status_code=422,
+                content={"error": "Stored ontology file could not be parsed as RDF."},
+            )
+        except OntologySerializationError as error:
+            logger.warning("Ontology export failed to serialize: %s", error)
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": f"This ontology cannot be exported as {format}. "
+                    "Try format=turtle, which can represent any RDF graph."
+                },
+            )
+        except CogneeApiError:
+            raise
+        except Exception:
+            logger.exception("Ontology export failed")
+            return JSONResponse(status_code=500, content={"error": "Ontology export failed."})
+
+        # ontology_key passed service validation (^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$),
+        # so it is safe to embed verbatim in the header.
+        return Response(
+            content=payload,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{ontology_key.strip()}.{extension}"'
+            },
+        )
 
     return router
