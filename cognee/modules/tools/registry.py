@@ -24,13 +24,29 @@ logger = get_logger("cognee.tools.registry")
 _BUILTIN_TOOLS: dict[str, Tool] = {}
 
 
-def register_builtin_tool(tool: Tool) -> None:
-    """Register a built-in Tool. Built-ins are global (dataset_id is None)."""
-    _BUILTIN_TOOLS[tool.name] = tool
+# Security invariant: a handler_ref is executable only when its module path lives
+# inside one of these packages. Graph-persisted Tool nodes are user-reachable via
+# custom graph models, so without this an attacker-supplied node could point a
+# handler_ref at any importable module (e.g. "os:system"). Enforced at resolution
+# (resolve_handler) *and* discovery (_query_tool_nodes) so an unauthorized tool is
+# neither importable nor listable.
+ALLOWED_HANDLER_MODULE_PACKAGES: tuple[str, ...] = ("cognee.modules.tools",)
 
 
-def resolve_handler(handler_ref: str) -> ToolHandler:
-    """Import and return the async handler referenced by a dotted path."""
+def _module_is_allowed(module_path: str) -> bool:
+    return any(
+        module_path == package or module_path.startswith(f"{package}.")
+        for package in ALLOWED_HANDLER_MODULE_PACKAGES
+    )
+
+
+def validate_handler_ref(handler_ref: str) -> tuple[str, str]:
+    """Parse ``handler_ref`` and enforce the allowed handler namespace.
+
+    Returns the ``(module_path, attr)`` pair for the caller to import. Parsing is
+    shared with tool discovery so a reference that cannot resolve is never listed.
+    Raises ``ToolInvocationError`` when the reference is malformed or unauthorized.
+    """
     if ":" in handler_ref:
         module_path, attr = handler_ref.split(":", 1)
     elif "." in handler_ref:
@@ -39,6 +55,37 @@ def resolve_handler(handler_ref: str) -> ToolHandler:
         raise ToolInvocationError(
             f"handler_ref must be a dotted path or module:attr form, got {handler_ref!r}"
         )
+    if not module_path or not attr:
+        raise ToolInvocationError(
+            f"handler_ref must be a dotted path or module:attr form, got {handler_ref!r}"
+        )
+    if not _module_is_allowed(module_path):
+        raise ToolInvocationError(
+            f"handler_ref {handler_ref!r} targets module {module_path!r}, which is outside "
+            f"the allowed handler packages {ALLOWED_HANDLER_MODULE_PACKAGES}"
+        )
+    return module_path, attr
+
+
+def handler_ref_is_allowed(handler_ref: str) -> bool:
+    """True when ``handler_ref`` passes the :func:`validate_handler_ref` invariant."""
+    if not isinstance(handler_ref, str):
+        return False
+    try:
+        validate_handler_ref(handler_ref)
+    except ToolInvocationError:
+        return False
+    return True
+
+
+def register_builtin_tool(tool: Tool) -> None:
+    """Register a built-in Tool. Built-ins are global (dataset_id is None)."""
+    _BUILTIN_TOOLS[tool.name] = tool
+
+
+def resolve_handler(handler_ref: str) -> ToolHandler:
+    """Import and return the async handler referenced by a dotted path."""
+    module_path, attr = validate_handler_ref(handler_ref)
 
     try:
         module = importlib.import_module(module_path)
@@ -131,6 +178,14 @@ async def _query_tool_nodes(dataset_id: UUID | None) -> list[Tool]:
     for raw in raw_nodes or []:
         tool = _coerce_tool(raw)
         if tool is None:
+            continue
+        if not handler_ref_is_allowed(tool.handler_ref):
+            logger.warning(
+                "Skipping graph tool %r: handler_ref %r is outside the allowed packages %s",
+                tool.name,
+                tool.handler_ref,
+                ALLOWED_HANDLER_MODULE_PACKAGES,
+            )
             continue
         if dataset_id is None:
             if tool.dataset_id is not None:
