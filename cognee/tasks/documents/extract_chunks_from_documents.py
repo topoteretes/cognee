@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncGenerator
 from uuid import UUID
 
@@ -62,8 +63,12 @@ async def extract_chunks_from_documents(
         ):
             document_token_count += document_chunk.chunk_size
             document_chunk.belongs_to_set = document.belongs_to_set
-            document_chunk._temporal_hints, temporal_base = hint_lines(
-                document_chunk.text, temporal_base
+            # dateparser is pure-Python and takes hundreds of ms to seconds per
+            # chunk, so it runs in a worker thread to keep the event loop
+            # responsive. Each chunk is still awaited before the next is read,
+            # which keeps the rolling base ordered.
+            document_chunk._temporal_hints, temporal_base = await asyncio.to_thread(
+                hint_lines, document_chunk.text, temporal_base
             )
             yield document_chunk
 
