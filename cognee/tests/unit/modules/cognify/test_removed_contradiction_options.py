@@ -14,6 +14,7 @@ serve_state_module = importlib.import_module("cognee.api.v1.serve.state")
 _BASE_SEQUENCE = [
     "classify_documents",
     "extract_chunks_from_documents",
+    "find_indexed_chunks",
     "extract_graph_and_summarize",
     "add_data_points",
 ]
@@ -60,7 +61,7 @@ async def test_removed_setting_warns_once_per_cache_fill_and_leaves_tasks_unchan
             config = get_cognify_config()
             assert get_cognify_config() is config
             warning.assert_called_once()
-            assert "improve(review_conflicts=True)" in warning.call_args.args[0]
+            assert "improve() reviews conflicts by default" in warning.call_args.args[0]
             assert "IMPROVE_REVIEW_CONFLICTS" in warning.call_args.args[0]
             assert await _task_name_sequence(config) == unset_tasks == _BASE_SEQUENCE
             get_cognify_config.cache_clear()

@@ -74,10 +74,10 @@ async def test_pipeline_in_pipeline_parents_to_enclosing_pipeline(ops_engine):
             # Inner pipeline started by a memify task (the "cognify session" task).
             with parent_run_scope(cognify_run_id):
                 await error_mod.log_pipeline_run_error(
-                    cognify_run_id, uuid4(), "cognify_pipeline", uuid4(), [], ValueError("x")
+                    cognify_run_id, uuid4(), "cognify_pipeline", uuid4(), ValueError("x")
                 )
             await complete_mod.log_pipeline_run_complete(
-                memify_run_id, uuid4(), "memify_pipeline", uuid4(), []
+                memify_run_id, uuid4(), "memify_pipeline", uuid4()
             )
 
     rows = await _rows_by_run_id(ops_engine)

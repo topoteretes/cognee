@@ -6,9 +6,8 @@ export interface DatasetGraphSummary {
   numNodes: number;
   numEdges: number;
   // null while pipelineRunId is set means the last count attempt degraded
-  // (graph store unavailable) and wasn't cached. The backend holds that
-  // degraded result for a few seconds before trying again, so a null here
-  // can repeat across consecutive polls and the counts may be stale.
+  // (graph store unavailable) and wasn't cached — the backend retries on
+  // the next poll, so callers should treat the counts as possibly stale.
   computedAt: string | null;
 }
 

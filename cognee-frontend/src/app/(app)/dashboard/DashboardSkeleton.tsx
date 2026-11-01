@@ -35,6 +35,10 @@ function StatCard() {
   );
 }
 
+// Past this the "usually under a minute" line stops being true for a genuinely
+// slow provision. A workspace being WOKEN never reaches this component.
+const ESCALATE_AFTER_MS = 30_000;
+
 function ConnectionCard() {
   return (
     <div style={cardStyle}>
@@ -45,23 +49,34 @@ function ConnectionCard() {
   );
 }
 
+// A workspace being woken gets WorkspaceWaking instead — this skeleton and its
+// brand-new-account escalation are both wrong for one that already exists.
 export default function DashboardSkeleton() {
-  // Escalates the message after 30s so a genuinely slow (but not yet
-  // podUnreachable) pod doesn't sit silently under the same "usually under a
-  // minute" text well past when that stops being true.
+  // Escalates the message so a genuinely slow (but not yet podUnreachable) pod
+  // doesn't sit silently under the same "usually under a minute" text well past
+  // when that stops being true.
   const [elapsedMs, setElapsedMs] = useState(0);
+  const takingLonger = elapsedMs > ESCALATE_AFTER_MS;
   useEffect(() => {
     const start = Date.now();
-    const id = setInterval(() => setElapsedMs(Date.now() - start), 1000);
+    const id = setInterval(() => {
+      const elapsed = Date.now() - start;
+      setElapsedMs(elapsed);
+      // Nothing reads the clock once it has escalated, and the wait can run
+      // for minutes, so stop re-rendering once a second for no reason.
+      if (elapsed > ESCALATE_AFTER_MS) clearInterval(id);
+    }, 1000);
     return () => clearInterval(id);
   }, []);
-  const takingLonger = elapsedMs > 30_000;
 
   return (
     <div style={{ minHeight: "100%", flexShrink: 0 }}>
       <div style={{ padding: "clamp(16px, 3vw, 32px)", display: "flex", flexDirection: "column", gap: 40 }}>
 
-        {/* Provisioning note */}
+        {/* Deliberately NOT a live region. ProvisioningBanner is rendered by
+            the app shell on the same !tenantReady condition that puts this
+            skeleton up, and it already announces; two regions with near-identical
+            copy talk over each other. */}
         <p style={{ margin: 0, fontSize: 13, color: "rgba(237,236,234,0.5)" }}>
           {takingLonger
             ? "Still going — this can take a couple of minutes on a brand-new account."

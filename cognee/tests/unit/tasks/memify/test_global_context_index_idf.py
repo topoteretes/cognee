@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from cognee.tasks.memify.global_context_index.bucketing.graph.scoring import (
+from cognee.modules.graph.utils.entity_scoring import (
     compute_idf_from_counts,
     entities_weight,
     entity_weight,

@@ -9,6 +9,7 @@ from .exceptions import (
     DocumentNotFoundError,
     DatasetNotFoundError,
     DataNotFoundError,
+    DataDeletionIncompleteError,
     DocumentSubgraphNotFoundError,
     DocumentUpdateRequiredError,
     UpdateTargetNotFoundError,

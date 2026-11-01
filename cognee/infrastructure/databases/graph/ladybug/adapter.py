@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import threading
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
@@ -41,6 +42,7 @@ from cognee.infrastructure.databases.provenance.source_refs import (
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticEvent, LoopAgnosticLock
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.observability import new_span
@@ -56,14 +58,128 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 
-# Rows per bulk MERGE statement (same convention as the Postgres/Turso
+# Rows per bulk write statement (same convention as the Postgres/Turso
 # adapters' _WRITE_CHUNK_SIZE). Bulk node/edge writes are split into chunks of
 # this size so no single statement can exceed the subprocess engine's per-call
 # deadline on large graphs (e.g. code-graph ingests with tens of thousands of
-# facts). Each chunk is its own statement; the writes are idempotent MERGEs
-# and failed runs are swept by the pipeline rollback ledger, so partial
-# progress is safe. Does not change how many data points the pipeline batches.
+# facts). Each chunk is its own probe / CREATE / SET sequence, an upsert, and
+# failed runs are swept by the pipeline rollback ledger, so partial progress is
+# safe. Does not change how many data points the pipeline batches.
 _WRITE_CHUNK_SIZE = 2000
+
+# Properties improve() writes onto stored elements after ingestion (feedback
+# weights, the truth subspace). A DataPoint only ever carries their defaults, so
+# a re-add of an existing element (the same entity in a new document, a session
+# window, an update) must keep the stored value instead of resetting it. The
+# update replaces the whole properties blob, so the existing-row probe returns
+# the stored blob and these keys are carried into the new one.
+LEARNED_NODE_PROPERTIES = ("feedback_weight", "truth_alignment", "truth_epoch")
+LEARNED_EDGE_PROPERTIES = ("feedback_weight",)
+
+
+def _with_learned(properties: str, stored: str | None, keys: tuple[str, ...]) -> str:
+    """``properties`` (a JSON blob) with the learned ``keys`` of the ``stored`` blob kept."""
+    learned = json.loads(stored) if stored else {}
+    kept = {key: learned[key] for key in keys if key in learned}
+    if not kept:
+        return properties
+    return json.dumps({**json.loads(properties), **kept}, cls=JSONEncoder)
+
+
+# ── Bulk upsert statements (COG-6773, #5474) ────────────────────────────────────────
+#
+# Kuzu never plans ``MERGE`` through the ``Node.id`` primary-key index. EXPLAIN
+# on ``UNWIND $rows AS row MERGE (n:Node {id: row.id})`` returns
+# SCAN_NODE_TABLE + HASH_JOIN, so ONE statement costs a full scan of the node
+# table and a batch split into C chunks costs C scans:
+#
+#     total  ~  (rows / _WRITE_CHUNK_SIZE) * node_table_size    ->    O(N^2)
+#
+# ``MATCH`` does use the index — it plans as QUERY_PRIMARY_KEY_LOOKUP, a
+# per-row seek — so the upsert is spelled out as probe-existing /
+# CREATE-missing / SET-existing. Three index-driven statements per chunk beat
+# one scanning statement by ~20x at 40k nodes and, unlike MERGE, stay linear.
+#
+# The edge statements match their two endpoints in SEPARATE ``MATCH`` clauses.
+# A single comma-separated ``MATCH (a {id: ...}), (b {id: ...})`` plans as a
+# cartesian product of two scans; split clauses plan as two seeks.
+#
+# COG-6185 recorded that splitting the endpoints into two ``MATCH`` clauses
+# segfaults ladybug 0.19.x mid-write. That was observed with ``MERGE``, which
+# is gone from these statements: split ``MATCH`` + ``CREATE`` and split
+# ``MATCH`` + ``SET`` were exercised on 0.19.0 up to 40k edges, in-process and
+# through the subprocess worker, without a SIGSEGV. Keep ``MERGE`` out of the
+# split-MATCH shape.
+#
+# ``test_ladybug_write_query_plans.py`` asserts these plans against a real
+# database, so a Kuzu upgrade that changes the planner fails there rather than
+# silently reintroducing the quadratic.
+_NODE_PROBE_QUERY = """
+UNWIND $ids AS node_id
+MATCH (n:Node {id: node_id})
+RETURN n.id, n.properties
+"""
+
+_NODE_CREATE_QUERY = """
+UNWIND $nodes AS node
+CREATE (n:Node {
+    id: node.id,
+    name: node.name,
+    type: node.type,
+    properties: node.properties,
+    created_at: TIMESTAMP(node.created_at),
+    updated_at: TIMESTAMP(node.updated_at)
+})
+"""
+
+_NODE_UPDATE_QUERY = """
+UNWIND $nodes AS node
+MATCH (n:Node {id: node.id})
+SET n.name = node.name,
+    n.type = node.type,
+    n.properties = node.properties,
+    n.updated_at = TIMESTAMP(node.updated_at)
+"""
+
+# Existing edges are found by expanding the source nodes' outgoing edges rather
+# than by matching both endpoints and the relationship in one pattern: the
+# latter plans as a scan even with both endpoints bound.
+# Source ids one edge lookup statement expands. Each statement costs about one
+# read of the graph however many ids it gets, so fewer statements are cheaper
+# (160k ids at 160k nodes through the worker: 1 statement 0.9s, 8 of 20k 1.5s,
+# 80 of 2k 9.4s); the cap bounds a single reply to the outgoing edges of this
+# many sources, so one statement can never carry a whole re-ingest's edges
+# and blobs back through the worker pipe. A hub source still returns all of
+# its edges in the statement that holds it, as the per-chunk probe did.
+_EDGE_LOOKUP_IDS_PER_STATEMENT = 10 * _WRITE_CHUNK_SIZE
+
+_EDGE_LOOKUP_QUERY = """
+UNWIND $source_ids AS node_id
+MATCH (from:Node {id: node_id})-[r:EDGE]->(to:Node)
+RETURN from.id, to.id, r.relationship_name, r.properties
+"""
+
+_EDGE_CREATE_QUERY = """
+UNWIND $edges AS edge
+MATCH (from:Node {id: edge.from_id})
+MATCH (to:Node {id: edge.to_id})
+CREATE (from)-[r:EDGE {
+    relationship_name: edge.relationship_name,
+    created_at: TIMESTAMP(edge.created_at),
+    updated_at: TIMESTAMP(edge.updated_at),
+    properties: edge.properties
+}]->(to)
+"""
+
+_EDGE_UPDATE_QUERY = """
+UNWIND $edges AS edge
+MATCH (from:Node {id: edge.from_id})
+MATCH (to:Node {id: edge.to_id})
+MATCH (from)-[r:EDGE]->(to)
+WHERE r.relationship_name = edge.relationship_name
+SET r.updated_at = TIMESTAMP(edge.updated_at),
+    r.properties = edge.properties
+"""
 
 
 DEFAULT_KUZU_BUFFER_POOL_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
@@ -370,14 +486,24 @@ class LadybugAdapter(GraphDBInterface):
                 self._ensure_schema()
             else:
                 self._initialize_connection()
-        self.LADYBUG_ASYNC_LOCK = asyncio.Lock()
-        self._source_ref_change_lock = asyncio.Lock()
-        self._connection_lock = asyncio.Lock()
+        # Loop-agnostic: the adapter is cached across event loops, and an
+        # asyncio.Lock binds to the first loop that awaits it.
+        self.LADYBUG_ASYNC_LOCK = LoopAgnosticLock()
+        self._source_ref_change_lock = LoopAgnosticLock()
+        # Serializes the probe -> create -> update sequence in add_nodes /
+        # add_edges (see the bulk upsert statements above): those reads decide
+        # what the following writes do, so two concurrent callers must not
+        # interleave them.
+        self._bulk_write_lock = LoopAgnosticLock()
+        self._connection_lock = LoopAgnosticLock()
         # Set when ``open_connections == 0``; used by transient teardown
         # paths (e.g. ``delete_graph``) to wait for in-flight queries to
-        # finish before dropping native resources. ``close()`` does NOT use
-        # this — see ``close()``'s docstring for the cross-loop reason.
-        self._all_queries_drained = asyncio.Event()
+        # finish before dropping native resources. Loop-agnostic like the
+        # locks above: the waiting teardown and the query that finally sets
+        # it may run on different loops (an ``asyncio.Event`` is bound to
+        # one loop and its ``set()`` is not thread-safe). ``close()`` does
+        # NOT use this — see ``close()``'s docstring for the reason.
+        self._all_queries_drained = LoopAgnosticEvent()
         self._all_queries_drained.set()
         # Brief sync lock for atomic counter+event mutations. Cannot reuse
         # ``_connection_lock`` here: teardown holds that lock across the
@@ -907,8 +1033,9 @@ class LadybugAdapter(GraphDBInterface):
         Used by transient-teardown paths (currently ``delete_graph`` and
         the shared-lock per-query cleanup) so ``_drop_native_resources``
         doesn't tear out a connection an executor thread is still using.
-        ``close()`` does NOT use this — see its docstring for why
-        (cross-loop ``asyncio.Event.wait()`` would raise).
+        The event is loop-agnostic, so a query finishing on another loop
+        (or thread) wakes this wait. ``close()`` does NOT use this — see
+        its docstring for why.
 
         Reads the counter under ``_counter_lock`` so a stale ``set()``
         from a finishing query can't race a fresh increment from a new
@@ -1031,35 +1158,6 @@ class LadybugAdapter(GraphDBInterface):
 
     # Helper method for building edge queries
 
-    def _edge_query_and_params(
-        self, from_node: str, to_node: str, relationship_name: str, properties: dict[str, Any]
-    ) -> tuple[str, dict]:
-        """Build the edge creation query and parameters."""
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
-        query = """
-            MATCH (from:Node), (to:Node)
-            WHERE from.id = $from_id AND to.id = $to_id
-            MERGE (from)-[r:EDGE {
-                relationship_name: $relationship_name
-            }]->(to)
-            ON CREATE SET
-                r.created_at = TIMESTAMP($created_at),
-                r.updated_at = TIMESTAMP($updated_at),
-                r.properties = $properties
-            ON MATCH SET
-                r.updated_at = TIMESTAMP($updated_at),
-                r.properties = $properties
-        """
-        params = {
-            "from_id": from_node,
-            "to_id": to_node,
-            "relationship_name": relationship_name,
-            "created_at": now,
-            "updated_at": now,
-            "properties": json.dumps(properties, cls=JSONEncoder),
-        }
-        return query, params
-
     # Node Operations
 
     async def has_node(self, node_id: str) -> bool:
@@ -1085,63 +1183,18 @@ class LadybugAdapter(GraphDBInterface):
 
     async def add_node(self, node: DataPoint) -> None:
         """
-        Add a single node to the graph if it doesn't exist.
+        Upsert a single node: create it, or overwrite name/type/properties on match.
 
-        This method constructs and executes a query to add a node to the graph, ensuring that it
-        is not duplicated by checking its existence first. An error is raised if the operation
-        fails.
+        Delegates to ``add_nodes`` so there is one MERGE write path. That path keeps
+        ``created_at`` on an existing node, refreshes ``updated_at``, and checkpoints
+        after the write. An error is raised if the operation fails.
 
         Parameters:
         -----------
 
             - node (DataPoint): The node to be added, represented as a DataPoint.
         """
-        try:
-            properties = node.model_dump() if hasattr(node, "model_dump") else vars(node)
-
-            # Extract core fields with defaults if not present
-            core_properties = {
-                "id": str(properties.get("id", "")),
-                "name": str(properties.get("name", "")),
-                "type": str(properties.get("type", "")),
-            }
-
-            # Remove core fields from other properties
-            for key in core_properties:
-                properties.pop(key, None)
-
-            # Provenance lives in declared STRING columns, never the JSON blob.
-            for key in PROVENANCE_COLUMNS:
-                properties.pop(key, None)
-
-            core_properties["properties"] = json.dumps(properties, cls=JSONEncoder)
-
-            # Add timestamps for new node
-            now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
-            fields = []
-            params = {}
-            for key, value in core_properties.items():
-                if value is not None:
-                    param_name = f"param_{key}"
-                    fields.append(f"{key}: ${param_name}")
-                    params[param_name] = value
-
-            # Add timestamp fields
-            fields.extend(
-                ["created_at: TIMESTAMP($created_at)", "updated_at: TIMESTAMP($updated_at)"]
-            )
-            params.update({"created_at": now, "updated_at": now})
-
-            merge_query = f"""
-            MERGE (n:Node {{id: $param_id}})
-            ON CREATE SET n += {{{", ".join(fields)}}}
-            """
-            await self.query(merge_query, params)
-            await self.checkpoint()
-
-        except Exception as e:
-            logger.error(f"Failed to add node: {e}")
-            raise
+        await self.add_nodes([node])
 
     async def add_nodes(
         self,
@@ -1215,48 +1268,73 @@ class LadybugAdapter(GraphDBInterface):
                     }
                 )
 
+            # Deduplicate by id (last wins). MERGE absorbed repeats within one
+            # UNWIND batch; CREATE would raise a primary-key violation on them.
+            # Mirrors PostgresAdapter.add_nodes, which dedupes for ON CONFLICT.
+            node_params = list({node["id"]: node for node in node_params}.values())
+
             if node_params:
-                # Batch merge nodes
-                merge_query = """
-                UNWIND $nodes AS node
-                MERGE (n:Node {id: node.id})
-                ON CREATE SET
-                    n.name = node.name,
-                    n.type = node.type,
-                    n.properties = node.properties,
-                    n.created_at = TIMESTAMP(node.created_at),
-                    n.updated_at = TIMESTAMP(node.updated_at)
-                ON MATCH SET
-                    n.name = node.name,
-                    n.type = node.type,
-                    n.properties = node.properties,
-                    n.updated_at = TIMESTAMP(node.updated_at)
-                """
+                create_query = _NODE_CREATE_QUERY
+                update_query = _NODE_UPDATE_QUERY
                 extra_params = {}
                 if per_row_refs:
-                    merge_query += _provenance_fold_clause("n", row="node")
+                    create_query += _provenance_fold_clause("n", row="node")
+                    update_query += _provenance_fold_clause("n", row="node")
                 elif source_ref_key is not None:
-                    merge_query += _provenance_fold_clause("n")
+                    create_query += _provenance_fold_clause("n")
+                    update_query += _provenance_fold_clause("n")
                     extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
                 total = len(node_params)
-                # A folded write appends the row's owner key in one statement,
-                # but attach/remove are a read-then-write pair under
+                # The probe -> create -> update sequence is a read-modify-write:
+                # serialize it per adapter instance so two concurrent writers
+                # cannot both see an id as missing and both CREATE it (which
+                # would raise a primary-key violation).
+                #
+                # A folded write also appends the row's owner key, and
+                # attach/remove are a read-then-write pair under
                 # _source_ref_change_lock. A fold landing between that read
                 # and write is overwritten (lost update) — seen when two
                 # documents of one cognify run wrote a shared entity
-                # concurrently. Folds take the same lock; query() takes the
-                # engine lock inside it, the same order attach/remove use.
+                # concurrently. Folds take that lock too, inside the bulk
+                # lock; query() takes the engine lock inside both, the same
+                # order attach/remove use.
                 folds_provenance = per_row_refs or source_ref_key is not None
-                async with self._source_ref_change_lock if folds_provenance else nullcontext():
+                async with (
+                    self._bulk_write_lock,
+                    self._source_ref_change_lock if folds_provenance else nullcontext(),
+                ):
                     for start in range(0, total, _WRITE_CHUNK_SIZE):
                         chunk = node_params[start : start + _WRITE_CHUNK_SIZE]
-                        await self.query(merge_query, {"nodes": chunk, **extra_params})
+                        # id -> stored properties blob, for the rows that exist.
+                        existing = {
+                            row[0]: row[1]
+                            for row in await self.query(
+                                _NODE_PROBE_QUERY, {"ids": [node["id"] for node in chunk]}
+                            )
+                        }
+                        new_nodes = [node for node in chunk if node["id"] not in existing]
+                        old_nodes = [
+                            {
+                                **node,
+                                "properties": _with_learned(
+                                    node["properties"],
+                                    existing[node["id"]],
+                                    LEARNED_NODE_PROPERTIES,
+                                ),
+                            }
+                            for node in chunk
+                            if node["id"] in existing
+                        ]
+                        if new_nodes:
+                            await self.query(create_query, {"nodes": new_nodes, **extra_params})
+                        if old_nodes:
+                            await self.query(update_query, {"nodes": old_nodes, **extra_params})
                         if total > _WRITE_CHUNK_SIZE:
                             logger.info("Merged nodes %d/%d", start + len(chunk), total)
-                # Outside the lock: the race it guards is between this fold's
+                # Outside the locks: the race they guard is between this fold's
                 # read-modify-write of source_ref_keys and attach/remove's, and
-                # a checkpoint is durability, not provenance. Holding the lock
+                # a checkpoint is durability, not provenance. Holding a lock
                 # across it made every concurrently scheduled data item queue
                 # behind every other item's checkpoint for nothing.
                 await self.checkpoint()
@@ -1965,31 +2043,11 @@ class LadybugAdapter(GraphDBInterface):
             return []
 
         try:
-            # Transform edges into format needed for batch query
-            edge_params = [
-                {
-                    "from_id": str(from_node),  # Ensure string type
-                    "to_id": str(to_node),  # Ensure string type
-                    "relationship_name": str(edge_label),  # Ensure string type
-                }
+            existing = await self._existing_edges(
+                (str(from_node), str(to_node), str(edge_label))
                 for from_node, to_node, edge_label in edges
-            ]
-
-            # Batch check query with direct string comparison
-            query = """
-            UNWIND $edges AS edge
-            MATCH (from:Node)-[r:EDGE]->(to:Node)
-            WHERE from.id = edge.from_id
-            AND to.id = edge.to_id
-            AND r.relationship_name = edge.relationship_name
-            RETURN from.id, to.id, r.relationship_name
-            """
-
-            results = await self.query(query, {"edges": edge_params})
-
-            # Convert results back to tuples and ensure string types
-            existing_edges = [(str(row[0]), str(row[1]), str(row[2])) for row in results]
-
+            )
+            existing_edges = list(existing)
             logger.debug(f"Found {len(existing_edges)} existing edges out of {len(edges)} checked")
             return existing_edges
 
@@ -2031,11 +2089,9 @@ class LadybugAdapter(GraphDBInterface):
         if edge_properties is None:
             edge_properties = {}
         try:
-            query, params = self._edge_query_and_params(
-                from_node, to_node, relationship_name, edge_properties
-            )
-            await self.query(query, params)
-            await self.checkpoint()
+            # One edge is a batch of one: the same probe -> CREATE / SET path,
+            # so the single write neither MERGEs nor resets learned properties.
+            await self.add_edges([(from_node, to_node, relationship_name, edge_properties)])
         except Exception as e:
             logger.error(f"Failed to add edge: {e}")
             raise
@@ -2075,11 +2131,15 @@ class LadybugAdapter(GraphDBInterface):
             per_row_refs = isinstance(source_ref_key, dict)
             fold_fields = _per_row_fold_fields(pipeline_run_id) if per_row_refs else None
 
+            # Endpoint ids are stringified here, not just handed to Kuzu as
+            # whatever the caller passed (usually UUID): the existing-edge probe
+            # compares them against ids read back from the STRING `Node.id`
+            # column, and UUID != str would make every edge look new.
             edge_params = [
                 {
-                    "from_id": from_node,
-                    "to_id": to_node,
-                    "relationship_name": relationship_name,
+                    "from_id": str(from_node),
+                    "to_id": str(to_node),
+                    "relationship_name": str(relationship_name),
                     "properties": json.dumps(properties, cls=JSONEncoder),
                     "created_at": now,
                     "updated_at": now,
@@ -2095,50 +2155,68 @@ class LadybugAdapter(GraphDBInterface):
                 for from_node, to_node, relationship_name, properties in edges
             ]
 
-            # Property-map matches (primary-key index seeks) instead of a
-            # cartesian MATCH + WHERE, which planned as a scan on large graphs.
-            #
-            # Both endpoints must be matched in ONE comma-separated clause.
-            # Splitting them into two MATCH clauses segfaults ladybug 0.19.x
-            # mid-write (SIGSEGV in the native engine, surfacing through the
-            # subprocess worker as "Subprocess exited unexpectedly (exit code
-            # -11)") — 0.19.0 introduced a row-driven primary-key lookup for
-            # MATCH (LadybugDB/ladybug#722) that this shape lands on. The comma
-            # form keeps the index seeks and is equally fast on 0.17.1, 0.18.2
-            # and 0.19.0 (~80s for 20k edges on all three), and writes an
-            # identical graph. See COG-6185.
-            query = """
-            UNWIND $edges AS edge
-            MATCH (from:Node {id: edge.from_id}), (to:Node {id: edge.to_id})
-            MERGE (from)-[r:EDGE {
-                relationship_name: edge.relationship_name
-            }]->(to)
-            ON CREATE SET
-                r.created_at = TIMESTAMP(edge.created_at),
-                r.updated_at = TIMESTAMP(edge.updated_at),
-                r.properties = edge.properties
-            ON MATCH SET
-                r.updated_at = TIMESTAMP(edge.updated_at),
-                r.properties = edge.properties
-            """
+            # Deduplicate by (from, to, relationship_name), last wins. MERGE
+            # absorbed repeats within one UNWIND batch; CREATE would write them
+            # twice. Mirrors PostgresAdapter.add_edges, which dedupes by the
+            # same composite key for ON CONFLICT.
+            edge_params = list(
+                {
+                    (edge["from_id"], edge["to_id"], edge["relationship_name"]): edge
+                    for edge in edge_params
+                }.values()
+            )
+
+            create_query = _EDGE_CREATE_QUERY
+            update_query = _EDGE_UPDATE_QUERY
             extra_params = {}
             if per_row_refs:
-                query += _provenance_fold_clause("r", row="edge")
+                create_query += _provenance_fold_clause("r", row="edge")
+                update_query += _provenance_fold_clause("r", row="edge")
             elif source_ref_key is not None:
-                query += _provenance_fold_clause("r")
+                create_query += _provenance_fold_clause("r")
+                update_query += _provenance_fold_clause("r")
                 extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
             total = len(edge_params)
-            # Same lost-update guard as add_nodes: folded edge writes and the
-            # attach/remove read-then-write pair share one lock.
+            # Same two guards as add_nodes: the probe -> create -> update
+            # sequence under the bulk lock, folded writes also under the
+            # attach/remove lock.
             folds_provenance = per_row_refs or source_ref_key is not None
-            async with self._source_ref_change_lock if folds_provenance else nullcontext():
+            async with (
+                self._bulk_write_lock,
+                self._source_ref_change_lock if folds_provenance else nullcontext(),
+            ):
+                # One lookup for the whole call, ahead of the chunk loop: the
+                # same probe once per chunk read the graph once per chunk, so
+                # a big write paid for the graph as many times as it had chunks.
+                existing = await self._existing_edges(
+                    (edge["from_id"], edge["to_id"], edge["relationship_name"])
+                    for edge in edge_params
+                )
                 for start in range(0, total, _WRITE_CHUNK_SIZE):
                     chunk = edge_params[start : start + _WRITE_CHUNK_SIZE]
-                    await self.query(query, {"edges": chunk, **extra_params})
+                    new_edges = []
+                    old_edges = []
+                    for edge in chunk:
+                        key = (edge["from_id"], edge["to_id"], edge["relationship_name"])
+                        if key in existing:
+                            old_edges.append(
+                                {
+                                    **edge,
+                                    "properties": _with_learned(
+                                        edge["properties"], existing[key], LEARNED_EDGE_PROPERTIES
+                                    ),
+                                }
+                            )
+                        else:
+                            new_edges.append(edge)
+                    if new_edges:
+                        await self.query(create_query, {"edges": new_edges, **extra_params})
+                    if old_edges:
+                        await self.query(update_query, {"edges": old_edges, **extra_params})
                     if total > _WRITE_CHUNK_SIZE:
                         logger.info("Merged edges %d/%d", start + len(chunk), total)
-            # Outside the lock, same reasoning as add_nodes.
+            # Outside the locks, same reasoning as add_nodes.
             await self.checkpoint()
 
         except Exception as e:
@@ -2489,6 +2567,39 @@ class LadybugAdapter(GraphDBInterface):
         await self.checkpoint()
         rows_dicts = self._rows_to_dicts(result, ["edge_object_id"])
         return {str(r["edge_object_id"]) for r in rows_dicts if r.get("edge_object_id") is not None}
+
+    async def _existing_edges(
+        self, keys: Iterable[tuple[str, str, str]]
+    ) -> dict[tuple[str, str, str], str]:
+        """(from, to, relationship) -> stored properties blob, for the keys that exist.
+
+        Expands the outgoing edges of the keys' source nodes, at most
+        _EDGE_LOOKUP_IDS_PER_STATEMENT sources per statement, and matches the
+        keys in Python. A statement reads the graph once however many ids it
+        gets (0.14s empty, 0.49s with 320k edges stored, at 160k nodes), so the
+        cap is as high as the reply size allows, not the 2,000 of the writes:
+        the same shape once per 2,000-row chunk cost 10.8s and 18.6s there.
+        Shapes that bind both endpoints by primary key cost per key instead,
+        4.4s for the same call, and 2.7s against 0.15s for a 20k-edge
+        has_edges. cognee's hubs are hubs by in-degree (EntityType, NodeSet),
+        which this never expands.
+        """
+        wanted = set(keys)
+        if not wanted:
+            return {}
+        source_ids = sorted({from_id for from_id, _, _ in wanted})
+        existing: dict[tuple[str, str, str], str] = {}
+        for start in range(0, len(source_ids), _EDGE_LOOKUP_IDS_PER_STATEMENT):
+            rows = await self.query(
+                _EDGE_LOOKUP_QUERY,
+                {"source_ids": source_ids[start : start + _EDGE_LOOKUP_IDS_PER_STATEMENT]},
+            )
+            existing.update(
+                (key, row[3])
+                for row in rows
+                if (key := (str(row[0]), str(row[1]), str(row[2]))) in wanted
+            )
+        return existing
 
     async def get_node_feedback_weights(self, node_ids: list[str]) -> dict[str, float]:
         if not node_ids:
@@ -3202,7 +3313,9 @@ class LadybugAdapter(GraphDBInterface):
 
         return nodes, edges
 
-    async def get_filtered_graph_data(self, attribute_filters: list[dict[str, list[str | int]]]):
+    async def get_filtered_graph_data(
+        self, attribute_filters: list[dict[str, list[str | int]]], *, include_edges: bool = True
+    ):
         """
         Get filtered nodes and relationships based on attributes.
 
@@ -3260,9 +3373,12 @@ class LadybugAdapter(GraphDBInterface):
         WHERE {where_clause.replace("n.", "n1.")} AND {where_clause.replace("n.", "n2.")}
         RETURN n1.id, n2.id, r.relationship_name, r.properties
         """
-        nodes, edges = await asyncio.gather(
-            self.query(nodes_query, params), self.query(edges_query, params)
-        )
+        if include_edges:
+            nodes, edges = await asyncio.gather(
+                self.query(nodes_query, params), self.query(edges_query, params)
+            )
+        else:
+            nodes, edges = await self.query(nodes_query, params), []
         formatted_nodes = []
         for n in nodes:
             if n[0]:

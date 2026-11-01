@@ -7,11 +7,13 @@ import { useTenant } from "@/modules/tenant/TenantProvider";
 import { useUser } from "@/modules/users/UserContext";
 import { trackEvent } from "@/modules/analytics";
 import TetrisBackground from "@/ui/elements/Auth/TetrisBackground";
+import { useIsMounted } from "@/utils/useIsMounted";
 
 export default function WelcomePage() {
   const router = useRouter();
   const { releaseLoader } = useTenant();
   const { markWelcomeSeen } = useUser();
+  const isMounted = useIsMounted();
   const [saving, setSaving] = useState(false);
   const [primaryHover, setPrimaryHover] = useState(false);
   const [secondaryHover, setSecondaryHover] = useState(false);
@@ -33,18 +35,15 @@ export default function WelcomePage() {
   async function handleLetsGo() {
     setSaving(true);
     trackEvent({ pageName: "Onboarding", eventName: "onboarding_welcome_cta" });
-    // Navigate before persisting: markWelcomeSeen's optimistic cache update
-    // flips isSeenWelcome to true while pathname is still "/welcome", which
-    // races UserProvider's "already seen welcome" effect — that effect calls
-    // router.replace("/dashboard") before this function's own router.push
-    // below fires, so every user landed on the dashboard instead of
-    // onboarding. Navigating first removes the race entirely. Onboarding now
-    // goes straight to the preparing screen (its own former welcome step was
-    // this same content, moved here to remove the duplicate).
-    router.push("/onboarding");
     try {
       await markWelcomeSeen();
+      // The dashboard checks this value server-side. Persist it before moving
+      // on so every later onboarding finish sees the same state as the client.
+      if (isMounted()) router.push("/onboarding");
     } catch {
+      // Re-enable the button: this page has no other way forward, so a
+      // failed save must leave the user able to try again without a reload.
+      setSaving(false);
       notifications.show({ color: "red", message: "Something went wrong, please try again." });
     }
   }
@@ -204,7 +203,7 @@ export default function WelcomePage() {
               poster="/videos/full-demo-poster.jpg"
               style={{
                 width: "100%",
-                aspectRatio: "1280 / 962",
+                aspectRatio: "1280 / 708",
                 background: "rgba(255,255,255,0.05)",
                 border: "1px solid rgba(255,255,255,0.1)",
                 borderRadius: 12,

@@ -273,7 +273,7 @@ def get_visualize_router() -> APIRouter:
         """
         send_telemetry(
             "Visualize JSON API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/visualize/json",
                 "dataset_id": str(dataset_id),
@@ -440,7 +440,7 @@ def get_visualize_router() -> APIRouter:
         """
         send_telemetry(
             "Visualize Semantic API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/visualize/semantic",
                 "dataset_id": str(dataset_id),
@@ -505,7 +505,7 @@ def get_visualize_router() -> APIRouter:
         """
         send_telemetry(
             "Visualize Brains API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/visualize/brains",
                 "cognee_version": cognee_version,
@@ -570,7 +570,7 @@ def get_visualize_router() -> APIRouter:
         """
         send_telemetry(
             "Visualize Brains Summary API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/visualize/brains-summary",
                 "cognee_version": cognee_version,
@@ -645,7 +645,7 @@ def get_visualize_router() -> APIRouter:
         """
         send_telemetry(
             "Visualize Live Events API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/visualize/live-events",
                 "dataset_id": str(dataset_id),
@@ -740,7 +740,7 @@ def get_visualize_router() -> APIRouter:
 
         send_telemetry(
             "Visualize Subscribe API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "WS /v1/visualize/subscribe/{dataset_id}",
                 "dataset_id": str(dataset_id),

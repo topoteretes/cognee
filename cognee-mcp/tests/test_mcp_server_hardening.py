@@ -812,6 +812,7 @@ async def test_mcp_recall_forwards_system_prompt(monkeypatch):
         "top_k": 5,
         "scope": None,
         "code_query": None,
+        "include_references": False,
     }
 
 

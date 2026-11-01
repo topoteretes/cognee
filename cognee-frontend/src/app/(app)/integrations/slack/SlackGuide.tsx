@@ -38,15 +38,15 @@ const SECTIONS: GuideSection[] = [
     title: "Where it ends up",
     body: (
       <>
-        Two brains per Slack workspace. Everything read from channels goes into{" "}
+        Two datasets per Slack workspace. Everything read from channels goes into{" "}
         <code className={CODE}>slack-&lt;your team id&gt;</code>; anything somebody deliberately
         remembers goes into <code className={CODE}>slack-&lt;your team id&gt;-remembered</code>,
         kept apart so removing one of those can never take a channel&apos;s history with it. Both
         are in{" "}
         <Link href="/datasets" className="text-cognee-lavender underline">
-          Brain
+          Datasets
         </Link>{" "}
-        alongside the brains you build yourself, and questions search all of them.
+        alongside the datasets you build yourself, and questions search all of them.
       </>
     ),
   },

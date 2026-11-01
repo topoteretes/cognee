@@ -18,22 +18,33 @@ from cognee.modules.engine.utils import generate_edge_object_id
 
 @dataclass
 class DeletedGraphElements:
-    """Node/edge identities hard-deleted from the graph by a delete operation."""
+    """Node/edge identities hard-deleted from the graph by a delete operation.
+
+    ``owned`` is whether the deleted id owned any graph element before the delete,
+    including elements that survive because other data still owns them.
+    """
 
     node_ids: set[str] = field(default_factory=set)
     edge_ids: set[str] = field(default_factory=set)
     edge_keys: set[tuple[str, str, str]] = field(default_factory=set)
+    owned: bool = False
 
     def merge(self, other: "DeletedGraphElements") -> None:
         self.node_ids |= other.node_ids
         self.edge_ids |= other.edge_ids
         self.edge_keys |= other.edge_keys
+        self.owned |= other.owned
 
     @classmethod
     def from_edge_triples(
-        cls, node_ids: set[str], edge_triples: list[tuple[str, str, str]]
+        cls,
+        node_ids: set[str],
+        edge_triples: list[tuple[str, str, str]],
+        *,
+        owned: bool = False,
     ) -> "DeletedGraphElements":
         return cls(
+            owned=owned,
             node_ids=node_ids,
             edge_ids={
                 str(generate_edge_object_id(source, target, relationship_name))
@@ -43,7 +54,7 @@ class DeletedGraphElements:
         )
 
     @classmethod
-    def from_ledger_rows(cls, nodes: list, edges: list) -> "DeletedGraphElements":
+    def from_ledger_rows(cls, nodes: list, edges: list, *, owned: bool) -> "DeletedGraphElements":
         """Build from relational-ledger Node/Edge rows (slug = graph node id)."""
         return cls.from_edge_triples(
             {str(node.slug) for node in nodes},
@@ -51,6 +62,7 @@ class DeletedGraphElements:
                 (str(edge.source_node_id), str(edge.destination_node_id), edge.relationship_name)
                 for edge in edges
             ],
+            owned=owned,
         )
 
     @classmethod
@@ -62,4 +74,5 @@ class DeletedGraphElements:
                 (str(edge.source_id), str(edge.target_id), edge.relationship_name)
                 for edge in result.deleted_edges
             ],
+            owned=result.matched,
         )

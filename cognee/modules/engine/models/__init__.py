@@ -4,6 +4,7 @@ from .FactConflict import FactConflict
 from .TableRow import TableRow
 from .TableType import TableType
 from .node_set import NodeSet
+from .StructureContainer import CHILD_OF, StructureContainer
 from .ColumnValue import ColumnValue
 from .DltColumn import DltColumn
 from .Timestamp import Timestamp

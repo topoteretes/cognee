@@ -9,13 +9,13 @@ import socketserver
 import ssl
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import lru_cache
 from threading import Thread
 from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
-import aiohttp
-
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.telemetry_sender import TelemetrySender
 
 logger = get_logger()
 
@@ -27,11 +27,6 @@ TELEMETRY_REQUEST_TIMEOUT: int = int(os.getenv("TELEMETRY_REQUEST_TIMEOUT", "5")
 _TELEMETRY_API_KEY_TRACKING_SALT_ENV = "TELEMETRY_API_KEY_TRACKING_SALT"
 _DEFAULT_TELEMETRY_API_KEY_TRACKING_SALT = b"cognee.telemetry.api-key-tracking.v1"
 _TELEMETRY_API_KEY_TRACKING_ITERATIONS = 100_000
-
-# Strong refs for fire-and-forget telemetry tasks. asyncio only holds a weak
-# reference to a task, so without anchoring here the gc can collect an
-# in-flight telemetry request mid-run. Tasks remove themselves on done.
-_TELEMETRY_TASKS: set = set()
 
 
 def as_uuid(value) -> UUID | None:
@@ -143,6 +138,31 @@ TELEMETRY_DATASET_NAME_PROPERTIES = ["dataset_name", "dataset"]
 
 # Deployments may override the operation context's origin for telemetry.
 TELEMETRY_ORIGIN_ENV = "TELEMETRY_ORIGIN"
+# The only events a "cloud" origin sends: operation outcomes and run milestones.
+# Task, item start/completion and endpoint events stay local (CLO-799).
+CLOUD_TELEMETRY_EVENTS = frozenset(
+    {
+        "Pipeline Run Started",
+        "Pipeline Run Completed",
+        "Pipeline Run Errored",
+        "Incremental Update Run Started",
+        "Incremental Update Run Completed",
+        "cognee.cognify DEFAULT TASKS CREATION ERRORED",
+        "cognee.remember",
+        "cognee.remember.code_graph",
+        "cognee.remember.import",
+        "cognee.recall",
+        "cognee.recall ERRORED",
+        "cognee.improve",
+        "cognee.forget",
+        "cognee.push",
+        "cognee.export",
+        "cognee.search EXECUTION STARTED",
+        "cognee.search EXECUTION COMPLETED",
+        "cognee.search EXECUTION ERRORED",
+        "Pipeline Item Errored",
+    }
+)
 # A model setting that is a filesystem path (a local GGUF, a mounted checkpoint)
 # carries the account name in it. It leaves the process as this closed value.
 TELEMETRY_LOCAL_PATH_LABEL = "local_path"
@@ -383,123 +403,19 @@ def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
         return obj
 
 
-# A single ClientSession is reused across telemetry calls to avoid the
-# per-call DNS + TCP + TLS handshake to `proxy_url`. The session is bound to
-# the asyncio loop it was created on; if the loop changes (tests, reload), the
-# helper rebuilds it transparently.
-_telemetry_session: aiohttp.ClientSession | None = None
-_telemetry_session_loop: asyncio.AbstractEventLoop | None = None
-_telemetry_session_lock: asyncio.Lock | None = None
-_telemetry_session_lock_loop: asyncio.AbstractEventLoop | None = None
+# One sender per process: events are queued and posted to `proxy_url` in
+# batches from a background thread (see telemetry_sender.py).
+_telemetry_sender = TelemetrySender(proxy_url, TELEMETRY_REQUEST_TIMEOUT)
 
 
-async def _get_telemetry_session() -> aiohttp.ClientSession:
-    """Return a process-wide aiohttp.ClientSession for telemetry, creating it lazily.
+async def flush_telemetry() -> None:
+    """Send queued telemetry and stop the sender thread, waiting at most one request timeout.
 
-    The session is bound to the asyncio loop it was created on. If the running
-    loop changes (e.g. across tests or `asyncio.run` boundaries) or the session
-    has been closed, a fresh session is built. Concurrent callers are
-    serialized by an `asyncio.Lock` that is itself re-created when the loop
-    changes, because `asyncio.Lock` captures its loop on construction. Intended
-    for use only from inside a running event loop.
+    Called from the FastAPI lifespan shutdown; scripts are covered by the
+    sender's own ``atexit`` hook. Telemetry sent afterwards starts a new thread.
     """
-    global _telemetry_session, _telemetry_session_loop
-    global _telemetry_session_lock, _telemetry_session_lock_loop
-
-    loop = asyncio.get_running_loop()
-
-    # `asyncio.Lock` captures the running loop on creation, so a lock from a
-    # previous loop is unusable. Recreate it when the loop changes.
-    if _telemetry_session_lock is None or _telemetry_session_lock_loop is not loop:
-        _telemetry_session_lock = asyncio.Lock()
-        _telemetry_session_lock_loop = loop
-
-    async with _telemetry_session_lock:
-        if (
-            _telemetry_session is None
-            or _telemetry_session.closed
-            or _telemetry_session_loop is not loop
-        ):
-            # Close the stale session instead of dropping it: aiohttp accepts
-            # close() from a different loop, and an unowned session emits
-            # "Unclosed client session" at garbage collection.
-            if _telemetry_session is not None and not _telemetry_session.closed:
-                try:
-                    await _telemetry_session.close()
-                except Exception:
-                    logger.debug("Ignoring exception in _get_telemetry_session", exc_info=True)
-            timeout = aiohttp.ClientTimeout(total=TELEMETRY_REQUEST_TIMEOUT)
-            _telemetry_session = aiohttp.ClientSession(timeout=timeout)
-            _telemetry_session_loop = loop
-            _register_telemetry_session_atexit()
-        return _telemetry_session
-
-
-async def close_telemetry_session() -> None:
-    """Flush in-flight telemetry tasks and close the shared aiohttp session.
-
-    Safe to call repeatedly and from any loop; ``_get_telemetry_session``
-    rebuilds transparently if telemetry fires again afterwards. Called from the
-    FastAPI lifespan shutdown and, as a last resort, from an ``atexit`` hook so
-    SDK scripts don't print "Unclosed client session" at interpreter exit.
-    """
-    global _telemetry_session, _telemetry_session_loop
-
-    if _TELEMETRY_TASKS:
-        try:
-            await asyncio.gather(*list(_TELEMETRY_TASKS), return_exceptions=True)
-        except Exception:
-            logger.debug("Ignoring exception in close_telemetry_session", exc_info=True)
-    session = _telemetry_session
-    _telemetry_session = None
-    _telemetry_session_loop = None
-    if session is not None and not session.closed:
-        try:
-            await session.close()
-        except Exception:
-            logger.debug("Ignoring exception in close_telemetry_session", exc_info=True)
-
-
-_telemetry_atexit_registered = False
-
-
-def _register_telemetry_session_atexit() -> None:
-    global _telemetry_atexit_registered
-    if _telemetry_atexit_registered:
-        return
-    _telemetry_atexit_registered = True
-
-    import atexit
-
-    def _close_at_exit() -> None:
-        # The loop that owned the session is gone by now; run the closer on a
-        # fresh one. In-flight tasks died with their loop, so gather() over
-        # them is a no-op here — this exists purely to release the session.
-        if _telemetry_session is None or _telemetry_session.closed:
-            return
-        try:
-            asyncio.run(close_telemetry_session())
-        except Exception:
-            logger.debug(
-                "Ignoring exception in _register_telemetry_session_atexit._close_at_exit",
-                exc_info=True,
-            )
-
-    atexit.register(_close_at_exit)
-
-
-async def _send_telemetry_request(payload: dict) -> None:
-    """Send telemetry payload via async HTTP. Best-effort, never raises."""
-    try:
-        session = await _get_telemetry_session()
-        async with session.post(proxy_url, json=payload) as response:
-            if response.status != 200:
-                logger.debug("Telemetry proxy returned status %s", response.status)
-    except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as e:
-        # RuntimeError covers the case where the loop was closed between task
-        # creation and session use (fire-and-forget telemetry tasks can outlive
-        # the loop that scheduled them).
-        logger.debug("Telemetry request failed: %s", e)
+    # close() blocks; keep the event loop free while it waits.
+    await asyncio.to_thread(_telemetry_sender.close)
 
 
 def _get_api_key_tracking_id() -> str:
@@ -512,8 +428,6 @@ def _get_api_key_tracking_id() -> str:
     TELEMETRY_API_KEY_TRACKING_SALT can be set by deployments that want their own
     namespace. A default public namespace keeps tracking stable for local installs.
     """
-    import hashlib
-
     key = os.getenv("LLM_API_KEY", "")
     if not key:
         return ""
@@ -524,6 +438,14 @@ def _get_api_key_tracking_id() -> str:
         if configured_salt
         else _DEFAULT_TELEMETRY_API_KEY_TRACKING_SALT
     )
+    return _derive_api_key_tracking_id(key, salt)
+
+
+@lru_cache(maxsize=1)
+def _derive_api_key_tracking_id(key: str, salt: bytes) -> str:
+    """PBKDF2 is slow; cache the latest key/salt pair. A rotated key or salt recomputes."""
+    import hashlib
+
     derived = hashlib.pbkdf2_hmac(
         "sha256",
         key.encode("utf-8"),
@@ -537,6 +459,53 @@ def _get_api_key_tracking_id() -> str:
 def _get_api_key_fingerprint() -> str:
     """Backward-compatible alias for the API-key telemetry tracking ID."""
     return _get_api_key_tracking_id()
+
+
+# Only Cognee Cloud hosts are sent as-is; a self-hosted server's hostname can be
+# an internal name or IP, so it is reduced to a category.
+_CLOUD_HOST_SUFFIX = ".cognee.ai"
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _connected_host_label(service_url: str) -> str:
+    from urllib.parse import urlparse
+
+    host = urlparse(service_url).hostname or ""
+    if host.endswith(_CLOUD_HOST_SUFFIX):
+        return host
+    if host in _LOCAL_HOSTS:
+        return "localhost"
+    return "self_hosted"
+
+
+def _get_connected_tenant() -> dict[str, str]:
+    """Return the tenant of this process's active ``serve()`` connection, if any.
+
+    ``serve(url=..., api_key=...)`` keeps the ``tenant_id`` the instance's
+    ``/api/v1/users/me`` reports on the connected client. On a Cognee Cloud
+    instance that is the control-plane ``tenants.id``, so analytics can join an
+    install's ``persistent_id`` to its cloud tenant (CLO-804); self-hosted
+    servers report their own local tenant, told apart by ``connected_host``.
+
+    Read from memory, never from disk: events are tagged only while the
+    process is connected, not after ``disconnect()`` or in a process that never
+    called ``serve()``. Never sends the API key, and a self-hosted hostname is
+    reduced to ``self_hosted`` / ``localhost``.
+    """
+    try:
+        from cognee.api.v1.serve.state import peek_remote_client
+
+        client = peek_remote_client()
+        if client is None or not client.tenant_id:
+            return {}
+        # Parsed inside the guard: a malformed URL can raise.
+        return {
+            "connected_tenant_id": str(client.tenant_id),
+            "connected_host": _connected_host_label(client.service_url),
+        }
+    except Exception:
+        logger.debug("Ignoring exception in _get_connected_tenant", exc_info=True)
+        return {}
 
 
 def _resolve_identity(user) -> tuple[str, str | None]:
@@ -606,6 +575,17 @@ def send_telemetry(
     - **api_key_tracking_id**: Stable pseudonymous ID derived from the full
       LLM API key when configured. Use this to group activity by key without
       sending the key or visible key fragments.
+    - **connected_tenant_id** / **connected_host**: Only when the install has
+      connected to an instance via ``serve()``: the tenant id it reported and
+      the instance host (a ``*.cognee.ai`` host for Cognee Cloud, otherwise
+      ``self_hosted`` or ``localhost``). Absent otherwise.
+    - **is_agent** / **agent_owner_id** / **agent_plugin**: Whether ``user``
+      is an agent (a child user with its own API key, such as a provisioned
+      plugin); ``user_id`` is then the agent itself. ``agent_owner_id`` is
+      the human user who owns it and ``agent_plugin`` a known plugin key or
+      ``"custom"``; both ``None`` otherwise. Read off the ``User`` model only:
+      a bare id cannot be told apart from a human's without a database
+      lookup, so pass the model when you hold it.
     """
     if additional_properties is None:
         additional_properties = {}
@@ -614,6 +594,12 @@ def send_telemetry(
 
     env = os.getenv("ENV")
     if env in ["test", "dev"]:
+        return
+    # Where this telemetry event originates. Defaults to "sdk"; deployments such
+    # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
+    # segmented by origin.
+    origin = telemetry_origin()
+    if origin == "cloud" and event_name not in CLOUD_TELEMETRY_EVENTS:
         return
     additional_properties = _sanitize_nested_properties(
         obj=additional_properties, property_names=TELEMETRY_SANITIZED_PROPERTIES
@@ -624,20 +610,25 @@ def send_telemetry(
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
     api_key_tracking_id = _get_api_key_tracking_id()
-    # Where this telemetry event originates. Defaults to "sdk"; deployments such
-    # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
-    # segmented by origin.
-    origin = telemetry_origin()
+    connected_tenant = _get_connected_tenant()
+    from cognee.modules.integrations.agent_identity import agent_telemetry_properties
+
+    agent_properties = agent_telemetry_properties(user if user is not None else user_id)
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,
         "event_name": event_name,
+        # When the event happened; batching delays delivery, so the proxy's
+        # receive time is no longer accurate.
+        "event_time": current_time.isoformat(),
         "user_properties": {
             "user_id": resolved_user_id,
             "tenant_id": resolved_tenant_id or "Single User Tenant",
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
+            **connected_tenant,
+            "is_agent": agent_properties["is_agent"],
         },
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
@@ -647,20 +638,20 @@ def send_telemetry(
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
-            "telemetry_origin": origin,
+            **connected_tenant,
+            **agent_properties,
             **additional_properties,
+            # Last, so an event property cannot override the deployment's origin.
+            "telemetry_origin": origin,
         },
     }
 
     try:
-        loop = asyncio.get_running_loop()
-        task = loop.create_task(_send_telemetry_request(payload))
-        _TELEMETRY_TASKS.add(task)
-        task.add_done_callback(_TELEMETRY_TASKS.discard)
-    except RuntimeError:
-        # No running event loop (shutdown, sync context, etc.) — telemetry is
+        _telemetry_sender.enqueue(payload)
+    except Exception:
+        # Starting the sender thread fails at interpreter shutdown — telemetry is
         # best-effort; dropping the event is better than crashing the caller.
-        pass
+        logger.debug("Ignoring exception in send_telemetry", exc_info=True)
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):

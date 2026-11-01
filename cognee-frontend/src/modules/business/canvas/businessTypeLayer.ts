@@ -1,5 +1,6 @@
 import { color as d3color } from "d3-color";
 import type { TypeNode, TypeLink } from "../sceneTypes";
+import type { ColorEncoding } from "../colorEncoding";
 import { quadraticPoint } from "./businessCanvasHelpers";
 import { truncate } from "../textUtils";
 
@@ -89,13 +90,18 @@ export function drawTypeModelLayer(
   ctx: CanvasRenderingContext2D,
   typeNodes: TypeNode[],
   typeLinks: TypeLink[],
-  setColor: Record<string, string>,
-  isSessionSet: (name: string) => boolean,
+  encoding: ColorEncoding,
   typeAlpha: number,
   dimmed: number,
   focusSets: Set<string> | null,
+  focusTypes: Set<string> | null,
   transformK: number,
 ): void {
+  // layoutTypeNodes already filtered each node's _visible members against
+  // BOTH lenses — this only needs to know whether either is active, to
+  // decide whether an empty _visible means "hidden by a filter" rather than
+  // "a graph with no type layer at all".
+  const hasFocusLens = Boolean(focusSets || focusTypes);
   ctx.textAlign = "center";
   const byName: Record<string, TypeNode> = {};
   typeNodes.forEach((tn) => { byName[tn.name] = tn; });
@@ -152,7 +158,7 @@ export function drawTypeModelLayer(
     group.forEach((tl, idx) => {
       const a = byName[tl.a], b = byName[tl.b];
       if (!a || a.x == null || a.y == null || !b || b.x == null || b.y == null) return;
-      if (focusSets && (!a._visible?.length || !b._visible?.length)) return;
+      if (hasFocusLens && (!a._visible?.length || !b._visible?.length)) return;
       const dx = b.x - a.x, dy = b.y - a.y;
       // Fan: first relation bows one way, second the other, growing wider.
       const bow = (idx % 2 === 0 ? 1 : -1) * (0.1 + Math.floor(idx / 2) * 0.14);
@@ -197,14 +203,8 @@ export function drawTypeModelLayer(
 
   typeNodes.forEach((tn) => {
     if (tn.x == null || tn.y == null) return;
-    if (focusSets && !tn._visible?.length) return;
-    // The dominant NON-session source decides the fill — a type is "mostly
-    // crm with a sliver of google_drive," one color, not a proportional pie
-    // (source doesn't draw one; a single dominant-source fill is what it
-    // actually does).
-    const ranked = Object.keys(tn.sets).sort((x, y) => tn.sets[y] - tn.sets[x]);
-    const dominant = focusSets ? [...focusSets][0] : ranked.find((x) => !isSessionSet(x)) || ranked[0];
-    const fill = d3color((dominant && setColor[dominant]) || "#8A7BD8");
+    if (hasFocusLens && !tn._visible?.length) return;
+    const fill = d3color(encoding.typeFill(tn.sets, focusSets, tn.name));
     const rgb = fill ? fill.rgb() : { r: 138, g: 123, b: 216 };
     const r = tn._r || 20;
     ctx.globalAlpha = typeAlpha * dimmed;

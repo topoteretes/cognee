@@ -2,13 +2,13 @@ import pytest
 
 import cognee
 from cognee.modules.engine.operations.setup import setup
-from cognee.modules.search.types import SearchType
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import create_user, get_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
 from cognee.modules.users.roles.methods import add_user_to_role, create_role
 from cognee.modules.users.tenants.methods import add_user_to_tenant, create_tenant, select_tenant
 from cognee.shared.logging_utils import CRITICAL, get_logger, setup_logging
+from cognee.tests.utils.ci_search_type import completion_or_chunks
 
 logger = get_logger()
 
@@ -54,7 +54,7 @@ async def main():
 
     # We can see here that user_1 can read his own dataset (AI dataset)
     search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
+        query_type=completion_or_chunks(),
         query_text="What is in the document?",
         user=user_1,
         datasets=[ai_dataset_id],
@@ -63,7 +63,7 @@ async def main():
     # Verify that user_2 cannot access user_1's dataset without permission
     with pytest.raises(PermissionDeniedError):
         search_results = await cognee.search(
-            query_type=SearchType.GRAPH_COMPLETION,
+            query_type=completion_or_chunks(),
             query_text="What is in the document?",
             user=user_2,
             datasets=[ai_dataset_id],
@@ -103,7 +103,7 @@ async def main():
     )
 
     search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
+        query_type=completion_or_chunks(),
         query_text="What is in the document?",
         user=user_2,
         dataset_ids=[ai_cognee_lab_dataset_id],
@@ -120,7 +120,7 @@ async def main():
     await cognee.cognify(["AI_COGNEE_LAB"], user=user_1)
 
     search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
+        query_type=completion_or_chunks(),
         query_text="What is in the document?",
         user=user_1,
     )
@@ -141,7 +141,7 @@ async def main():
     # Refresh user_1 object
     user_1 = await get_user(user_1.id)
     search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
+        query_type=completion_or_chunks(),
         query_text="What is in the document?",
         user=user_1,
     )

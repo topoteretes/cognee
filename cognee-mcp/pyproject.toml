@@ -19,10 +19,19 @@ dependencies = [
     "mcp>=1.24.0,<2.0.0",
     "uv>=0.6.3,<1.0.0",
     "httpx>=0.27.0,<1.0.0",
+    # Same floor as cognee core, declared here until a cognee release that
+    # carries it is pinned above: earlier bundles still trust the eMudhra
+    # intermediates whose private keys are recoverable (ENG-28).
+    "certifi>=2026.10.19",
     # Declared explicitly (already pulled in transitively via cognee[docs] ->
     # unstructured) so the [tool.uv.sources] CPU-index redirect below actually
     # binds — uv only applies source overrides to direct dependencies.
     "torch>=2.0.0",
+    # Declared for the same reason (pulled in via timm/effdet): torchvision's
+    # compiled ops must match the torch build, so it has to come from the same
+    # CPU index. A PyPI torchvision next to the +cpu torch fails to import with
+    # "operator torchvision::nms does not exist".
+    "torchvision>=0.15.0",
     # Core dependency of cognee since SDK-827 (temporal hints in graph extraction).
     # docker-compose mounts the local ./cognee source over the released cognee this
     # lock resolves, so a new core dependency must be declared here until a release
@@ -46,7 +55,7 @@ packages = ["src"]
 [dependency-groups]
 dev = [
     "debugpy>=1.8.12,<2.0.0",
-    "pytest>=7.4.0,<9",
+    "pytest>=7.4.0,<10",
     "pytest-asyncio>=0.21.1,<2",
 ]
 
@@ -75,6 +84,7 @@ explicit = true
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [tool.uv]
 # onnxruntime is pulled in transitively via cognee[docs] -> unstructured.

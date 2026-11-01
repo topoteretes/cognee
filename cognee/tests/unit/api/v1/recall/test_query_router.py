@@ -4,8 +4,14 @@ import pytest
 
 from cognee.api.v1.recall.query_router import (
     _RULES,
+    COMPLETION_ONLY_TYPES,
+    CYPHER_TYPES,
     ROUTER_FALLBACK_TYPE,
     RouteDecision,
+    RoutingConstraints,
+    constrain,
+    default_route,
+    pinned_route,
     route_query,
 )
 from cognee.modules.search.types import SearchType
@@ -18,6 +24,8 @@ ROUTABLE_TYPES = {
     SearchType.HYBRID_COMPLETION,
     SearchType.CHUNKS_LEXICAL,
     SearchType.CODING_RULES,
+    SearchType.CODE,
+    SearchType.BROAD,
     SearchType.TEMPORAL,
 }
 
@@ -28,6 +36,42 @@ GOLDEN = [
     ("What coding rules apply to error handling?", SearchType.CODING_RULES),
     ("Show me the code review guidelines", SearchType.CODING_RULES),
     ("What coding rules apply to gate.py?", SearchType.CODING_RULES),
+    # code_question: code phrasing with an identifier right next to the code word
+    ("Where is parse_config defined?", SearchType.CODE),
+    ("WHERE IS parse_config DEFINED?", SearchType.CODE),
+    ("Where is the add_data_points function defined?", SearchType.CODE),
+    ("What calls route_query?", SearchType.CODE),
+    ("Who imports CodeRetriever?", SearchType.CODE),
+    ("Which classes inherit from BaseRetriever?", SearchType.CODE),
+    ("What does getUser depend on?", SearchType.CODE),
+    ("Show the callers of foo()", SearchType.CODE),
+    ("List the usages of DEFAULT_TIMEOUT", SearchType.CODE),
+    # one code signal alone stays on the default
+    ("What calls the billing service?", SearchType.HYBRID_COMPLETION),
+    ("What did Alice say about parse_config?", SearchType.HYBRID_COMPLETION),
+    ("Which customers use acme.com?", SearchType.HYBRID_COMPLETION),
+    # `use` is not code phrasing: brand names look like CamelCase identifiers
+    ("Which teams use PowerPoint?", SearchType.HYBRID_COMPLETION),
+    ("Who uses McDonald's coupons?", SearchType.HYBRID_COMPLETION),
+    # a code word not right next to the identifier is a noun or prose
+    ("What is the call schedule for JohnSmith?", SearchType.HYBRID_COMPLETION),
+    ("Which reference letters mention PayPal?", SearchType.HYBRID_COMPLETION),
+    ("What imports did China make from LinkedIn?", SearchType.HYBRID_COMPLETION),
+    ("Who calls the shots at YouTube?", SearchType.HYBRID_COMPLETION),
+    ("Which customers call support about their MacBook?", SearchType.HYBRID_COMPLETION),
+    # count_question: a count across records
+    ("How many customers churned?", SearchType.BROAD),
+    ("how many rows are in table 2024_sales?", SearchType.BROAD),
+    ("What is the total number of open tickets?", SearchType.BROAD),
+    # aggregate-looking words that are often prose or a stated value stay on the default
+    ("We found a number of issues in the audit", SearchType.HYBRID_COMPLETION),
+    ("How much does the premium plan cost?", SearchType.HYBRID_COMPLETION),
+    ("What is the average response time?", SearchType.HYBRID_COMPLETION),
+    ("Is the whole more than the sum of its parts?", SearchType.HYBRID_COMPLETION),
+    ("Who wrote The Count of Monte Cristo?", SearchType.HYBRID_COMPLETION),
+    # a count phrase that does not open the question is prose or a title
+    ("I don't know how many people came, what did Alice say?", SearchType.HYBRID_COMPLETION),
+    ("Tell me about the movie How Many Kinds of Love", SearchType.HYBRID_COMPLETION),
     # default
     ("Who won Nobel Prizes?", SearchType.HYBRID_COMPLETION),
     ("What did Einstein discover?", SearchType.HYBRID_COMPLETION),
@@ -85,7 +129,6 @@ GOLDEN = [
     ("What was the 1990s policy on remote work?", SearchType.HYBRID_COMPLETION),
     ("Open ticket 2048", SearchType.HYBRID_COMPLETION),
     ("Error 1045 in the logs", SearchType.HYBRID_COMPLETION),
-    ("How many rows are in table 2024_sales?", SearchType.HYBRID_COMPLETION),
     ("Which version shipped in Q4 2024?", SearchType.HYBRID_COMPLETION),
     ("What did Alice say in 2 meetings?", SearchType.HYBRID_COMPLETION),
     ("What is the budget for 2000 users?", SearchType.HYBRID_COMPLETION),
@@ -144,6 +187,16 @@ def test_shape_rules_win_over_intent_rules():
     assert route_query('"coding rules"').rule == "quoted_phrase"
 
 
+def test_code_wins_over_count():
+    """BROAD reads document text and code has none, so a counting code question is CODE's."""
+    assert route_query("How many callers of parse_config are there?").rule == "code_question"
+
+
+def test_count_wins_over_temporal():
+    """TEMPORAL only reranks HYBRID's top results, so a dated count is BROAD's."""
+    assert route_query("How many incidents happened in 2019?").rule == "count_question"
+
+
 class TestRouteDecision:
     def test_default_rule_name(self):
         decision = route_query("Tell me something")
@@ -152,6 +205,15 @@ class TestRouteDecision:
     def test_matching_rule_name(self):
         assert route_query('"polonium and radium"').rule == "quoted_phrase"
         assert route_query("Show me the coding rules").rule == "coding_rules_intent"
+
+    def test_code_route_asks_about_the_identifiers_only(self):
+        decision = route_query("What calls parse_config and getUser?")
+        assert decision.rule == "code_question"
+        assert decision.retriever_config == {"operation": "ask", "question": "parse_config getUser"}
+
+    def test_code_route_asks_about_each_name_once_without_parentheses(self):
+        decision = route_query("Who calls foo() besides the callers of foo()?")
+        assert decision.retriever_config == {"operation": "ask", "question": "foo"}
 
     def test_whitespace_is_ignored(self):
         assert route_query('   "polonium and radium"  ').search_type == SearchType.CHUNKS_LEXICAL
@@ -229,3 +291,104 @@ class TestTemporalRoute:
 
     def test_rule_name(self):
         assert route_query("What happened in 1898?").rule == "time_scoped_question"
+
+
+class TestRoutingConstraints:
+    """What the deployment can run is applied after the rules, in one place."""
+
+    def test_unconstrained_routing_is_unchanged(self):
+        assert route_query("Tell me something", RoutingConstraints()) == route_query(
+            "Tell me something"
+        )
+        assert route_query('"radium"', RoutingConstraints()).only_context is False
+
+    def test_no_llm_default_is_hybrid_with_only_context(self):
+        decision = route_query(
+            "Where was Marie Curie born?", RoutingConstraints(llm_available=False)
+        )
+        assert decision == RouteDecision(
+            search_type=SearchType.HYBRID_COMPLETION, rule="default", only_context=True
+        )
+        assert default_route(RoutingConstraints(llm_available=False)) == decision
+
+    def test_no_llm_keeps_llm_free_rules_as_they_are(self):
+        no_llm = RoutingConstraints(llm_available=False)
+        assert route_query('"polonium and radium"', no_llm) == RouteDecision(
+            search_type=SearchType.CHUNKS_LEXICAL, rule="quoted_phrase"
+        )
+        assert route_query("show me the coding rules", no_llm) == RouteDecision(
+            search_type=SearchType.CODING_RULES, rule="coding_rules_intent"
+        )
+        assert route_query("What calls parse_config?", no_llm) == RouteDecision(
+            search_type=SearchType.CODE,
+            rule="code_question",
+            retriever_config={"operation": "ask", "question": "parse_config"},
+        )
+
+    @pytest.mark.parametrize("search_type", sorted(COMPLETION_ONLY_TYPES, key=lambda s: s.value))
+    def test_no_llm_runs_completion_only_types_as_only_context(self, search_type):
+        decision = constrain(
+            RouteDecision(search_type=search_type, rule="r"),
+            RoutingConstraints(llm_available=False),
+        )
+        assert decision == RouteDecision(search_type=search_type, rule="r", only_context=True)
+
+    def test_no_llm_sends_a_temporal_pick_to_the_fallback(self):
+        """TEMPORAL extracts the time window with an LLM, so with no LLM the rule's
+        pick resolves to the fallback; any type outside the two lists does."""
+        decision = route_query("What happened in 1898?", RoutingConstraints(llm_available=False))
+        assert decision == RouteDecision(
+            search_type=ROUTER_FALLBACK_TYPE, rule="time_scoped_question", only_context=True
+        )
+
+    def test_no_llm_sends_a_count_pick_to_the_fallback(self):
+        """BROAD writes its answer with an LLM, so with no LLM a count resolves to the
+        fallback too."""
+        decision = route_query(
+            "How many tickets are open?", RoutingConstraints(llm_available=False)
+        )
+        assert decision == RouteDecision(
+            search_type=ROUTER_FALLBACK_TYPE, rule="count_question", only_context=True
+        )
+
+    @pytest.mark.parametrize("search_type", sorted(CYPHER_TYPES, key=lambda s: s.value))
+    def test_cypher_disabled_never_emits_a_cypher_type(self, search_type):
+        decision = constrain(
+            RouteDecision(search_type=search_type, rule="r"),
+            RoutingConstraints(cypher_allowed=False),
+        )
+        assert decision == RouteDecision(search_type=ROUTER_FALLBACK_TYPE, rule="r")
+
+    def test_cypher_disabled_and_no_llm_compose(self):
+        decision = constrain(
+            RouteDecision(search_type=SearchType.CYPHER, rule="r"),
+            RoutingConstraints(llm_available=False, cypher_allowed=False),
+        )
+        assert decision == RouteDecision(
+            search_type=ROUTER_FALLBACK_TYPE, rule="r", only_context=True
+        )
+
+    def test_constraints_come_from_the_shared_predicates(self, monkeypatch):
+        from cognee.modules import preflight
+        from cognee.modules.search.methods import get_search_type_retriever_instance as factory
+
+        monkeypatch.setattr(preflight, "llm_available", lambda _config: False)
+        monkeypatch.setattr(factory, "cypher_queries_allowed", lambda: False)
+
+        assert RoutingConstraints.from_config(None) == RoutingConstraints(
+            llm_available=False, cypher_allowed=False
+        )
+
+    @pytest.mark.parametrize("search_type", sorted(COMPLETION_ONLY_TYPES, key=lambda s: s.value))
+    def test_no_llm_runs_a_pinned_completion_type_as_only_context(self, search_type):
+        decision = pinned_route(search_type, RoutingConstraints(llm_available=False))
+        assert decision == RouteDecision(search_type=search_type, rule="pinned", only_context=True)
+
+    def test_pinned_types_are_never_rerouted(self):
+        no_llm = RoutingConstraints(llm_available=False)
+        assert pinned_route(SearchType.TEMPORAL, no_llm) == RouteDecision(
+            search_type=SearchType.TEMPORAL, rule="pinned"
+        )
+        assert pinned_route(SearchType.HYBRID_COMPLETION, RoutingConstraints()) == RouteDecision(
+            search_type=SearchType.HYBRID_COMPLETION, rule="pinned"
+        )

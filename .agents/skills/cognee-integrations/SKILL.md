@@ -51,7 +51,7 @@ host services with `DB_HOST=host.docker.internal`.
 
 - **S3 storage** (`cognee[aws]`): `STORAGE_BACKEND=s3` + bucket/credentials,
   and point `DATA_ROOT_DIRECTORY`/`SYSTEM_ROOT_DIRECTORY` at `s3://` paths.
-- **Session cache**: `CACHE_BACKEND` = sqlite (default) | postgres | redis | fs | tapes.
+- **Session cache**: `CACHE_BACKEND` = sqlite (default) | postgres | redis | tapes.
 - **Ontologies**: `ONTOLOGY_FILE_PATH` to an OWL file, resolver/matching via
   `ONTOLOGY_RESOLVER` / `MATCHING_STRATEGY`.
 

@@ -33,6 +33,7 @@ from sqlalchemy import case, func, or_, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.agents.registry import AGENT_CONFIG_NAME, list_persisted_agent_connections
+from cognee.modules.integrations.agent_identity import plugin_key_from_agent_email
 from cognee.modules.integrations.plugins import KNOWN_PLUGINS
 from cognee.modules.session_lifecycle.models import SessionRecord
 from cognee.modules.session_lifecycle.visibility import child_agent_emails
@@ -107,21 +108,6 @@ def coerce_provisioned_at(value) -> datetime | None:
     return None
 
 
-def _plugin_key_from_agent_email(email: str | None, parent_id: UUID) -> str | None:
-    """Plugin key encoded in a child agent's server-assigned email, if any.
-
-    ``create_agent`` mints ``<plugin_key>+<parent_id>@cognee.agent``
-    deterministically, so the email is the one identity signal a child
-    agent cannot rewrite — unlike its principal-configuration blob.
-    Returns ``None`` for agents that aren't a known plugin identity.
-    """
-    suffix = f"+{parent_id}@cognee.agent"
-    if not (email or "").endswith(suffix):
-        return None
-    plugin_key = email[: -len(suffix)]
-    return plugin_key if plugin_key in KNOWN_PLUGINS else None
-
-
 def _escape_like_prefix(prefix: str) -> str:
     r"""Build a LIKE pattern matching ids that start with ``prefix`` literally.
 
@@ -152,7 +138,7 @@ async def identity_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
     """
     plugin_agents: dict[UUID, tuple[str, datetime | None]] = {}
     for agent_id, email in (await child_agent_emails(user_id)).items():
-        plugin_key = _plugin_key_from_agent_email(email, user_id)
+        plugin_key = plugin_key_from_agent_email(email, user_id)
         if plugin_key is None:
             continue
         for config in await get_principal_all_configuration(agent_id):
@@ -312,7 +298,7 @@ async def registry_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
         )
 
     for agent_id, email in (await child_agent_emails(user_id)).items():
-        email_key = _plugin_key_from_agent_email(email, user_id)
+        email_key = plugin_key_from_agent_email(email, user_id)
         if email_key is None:
             continue
         for connection in await list_persisted_agent_connections([agent_id], active_only=True):

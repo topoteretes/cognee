@@ -2,6 +2,8 @@
 
 import type { SceneHit } from "../canvas/businessHitTest";
 import { setsOf } from "../computeBrainState";
+import { codeDisplayName } from "../codeGraph";
+import { structuredTypeName } from "@/modules/business/structuredGraph";
 
 interface HoverTooltipProps {
   hit: SceneHit;
@@ -50,12 +52,24 @@ export default function HoverTooltip({ hit, docCount, connectionCount, x, y, con
 
   const entity = hit.node;
   const sets = setsOf(entity);
+  const fullName = String(entity.name ?? "");
+  const displayName = codeDisplayName(entity);
+  // A code node's raw name is a fully qualified path — displayName differs
+  // from it only in that case, which is exactly when the full path is worth
+  // showing as a secondary line (a plain entity's name never shortens, so
+  // this never fires for it).
+  const showFullName = displayName !== fullName;
   return (
     <div className={className} style={style}>
-      <b className="text-[#E9EEF6]">{entity.name}</b>
+      <b className="text-[#E9EEF6]">{displayName}</b>
+      {showFullName && (
+        <div className="block truncate text-[10px] text-[#7E8CA6]" title={fullName}>
+          {fullName}
+        </div>
+      )}
       <br />
       <span className="text-[#7E8CA6]">
-        {entity.type || ""}
+        {structuredTypeName(entity) || entity.type || ""}
         {sets.length ? ` · from ${sets.join(", ")}` : ""}
         {docCount ? ` · seen in ${docCount} places` : ""}
         {connectionCount ? ` · ${connectionCount} connection${connectionCount === 1 ? "" : "s"}` : ""}

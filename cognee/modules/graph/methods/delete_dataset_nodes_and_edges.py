@@ -63,4 +63,6 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Del
     await delete_dataset_related_nodes(dataset_id)
     await delete_dataset_related_edges(dataset_id)
     await tombstone_dataset(dataset_id, user=user)
-    return DeletedGraphElements.from_ledger_rows(affected_nodes or [], affected_edges or [])
+    return DeletedGraphElements.from_ledger_rows(
+        affected_nodes or [], affected_edges or [], owned=bool(affected_nodes)
+    )

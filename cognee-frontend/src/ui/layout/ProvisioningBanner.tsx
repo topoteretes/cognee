@@ -4,8 +4,13 @@
  * Slim sticky banner shown at the top of the app shell while the tenant pod is
  * still provisioning (`!tenantReady`). Derived from context per-render, so it
  * survives a page refresh and clears automatically when the pod comes online.
+ *
+ * Suppressed only where WorkspaceWaking is on screen saying the same thing.
+ * On the routes that have no waking screen — settings, members, integrations,
+ * billing and the rest — this banner is the only signal a wake is running, so
+ * it stays and takes the wake wording instead.
  */
-export default function ProvisioningBanner() {
+export default function ProvisioningBanner({ waking = false }: { waking?: boolean }) {
   return (
     <div
       style={{
@@ -30,8 +35,10 @@ export default function ProvisioningBanner() {
           flexShrink: 0,
         }}
       />
-      <span style={{ fontSize: 13, color: "#EDECEA" }}>
-        Setting up your workspace — this can take a minute. Some features unlock once it&apos;s ready.
+      <span role="status" aria-live="polite" style={{ fontSize: 13, color: "#EDECEA" }}>
+        {waking
+          ? "Waking your workspace — it went to sleep after a quiet spell. Nothing was lost, and it should be back in under a minute."
+          : "Setting up your workspace — this can take a minute. Some features unlock once it's ready."}
       </span>
     </div>
   );

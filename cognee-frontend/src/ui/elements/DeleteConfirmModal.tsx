@@ -5,7 +5,7 @@ import { Loader } from "@mantine/core";
 import ModalShell from "./ModalShell";
 
 // Generic confirm-and-delete modal shared by the "delete document" and
-// "delete brain" flows. The message is passed as a node so each caller can
+// "delete dataset" flows. The message is passed as a node so each caller can
 // bold the target name inline.
 export default function DeleteConfirmModal({
   title,

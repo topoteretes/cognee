@@ -279,7 +279,7 @@ def get_schema_router() -> APIRouter:
         """
         send_telemetry(
             "Schema Provenance JSON API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/schema/provenance/json",
                 "cognee_version": cognee_version,
