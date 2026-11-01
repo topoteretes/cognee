@@ -5,6 +5,10 @@ from fastapi.responses import JSONResponse, Response
 
 from cognee import __version__ as cognee_version
 from cognee.exceptions import CogneeApiError
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
+    supported_rdf_content_types,
+    supported_rdf_extensions,
+)
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -17,9 +21,21 @@ from ..ontologies import (
     OntologyParseError,
     OntologySerializationError,
     OntologyService,
+    UnsupportedOntologyFormatError,
+    unsupported_ontology_format_message,
 )
 
 logger = get_logger(__name__)
+
+# Built from the resolver's EXTENSION_FORMATS / CONTENT_TYPE_FORMATS tables so the
+# OpenAPI docs, the 400 message and the frontend picker cannot drift apart.
+_ONTOLOGY_FILE_DESCRIPTION = (
+    "Single ontology file in any RDF serialization rdflib parses. The format is taken "
+    f"from the filename extension ({', '.join(supported_rdf_extensions())}), or - when "
+    "the extension is not one of these - from the part's Content-Type "
+    f"({', '.join(supported_rdf_content_types())}). Files matching neither are rejected "
+    "with 400. Exactly one file per request."
+)
 
 
 def get_ontology_router() -> APIRouter:
@@ -37,13 +53,7 @@ def get_ontology_router() -> APIRouter:
                 "ontology_key parameter of the cognify/remember endpoints."
             ),
         ),
-        ontology_file: UploadFile = File(
-            ...,
-            description=(
-                "Single ontology file in OWL (RDF/XML) format. The filename must end with .owl "
-                "— other extensions are rejected with 400. Exactly one file per request."
-            ),
-        ),
+        ontology_file: UploadFile = File(..., description=_ONTOLOGY_FILE_DESCRIPTION),
         description: str | None = Form(
             None,
             examples=["OWL ontology of medical conditions and treatments"],
@@ -59,14 +69,14 @@ def get_ontology_router() -> APIRouter:
 
         ## Request Parameters
         - **ontology_key** (str): Unique, user-defined identifier for the ontology (plain string — values starting with '[' or '{' are rejected; duplicate keys return 400). Use this key later as the `ontology_key` parameter in /api/v1/cognify or /api/v1/remember.
-        - **ontology_file** (UploadFile): Single ontology file in OWL (RDF/XML) format; the filename must end with .owl.
+        - **ontology_file** (UploadFile): Single ontology file in any RDF serialization rdflib parses (RDF/XML, Turtle, N3, JSON-LD, N-Triples, N-Quads, TriG). The accepted filename extensions and, for filenames without one of them, the accepted Content-Types are listed on the parameter itself; both come from `EXTENSION_FORMATS` / `CONTENT_TYPE_FORMATS` in `RDFLibOntologyResolver`.
         - **description** (Optional[str]): Optional description for the ontology (plain string; values starting with '[' or '{' are rejected).
 
         ## Response
         Returns metadata about the uploaded ontology including key, filename, size, and upload timestamp.
 
         ## Error Codes
-        - **400 Bad Request**: Invalid file format, duplicate key, multiple files uploaded
+        - **400 Bad Request**: Unsupported file format (the message lists accepted extensions and content types), duplicate key, multiple files uploaded
         - **500 Internal Server Error**: File system or processing errors
         """
         send_telemetry(
@@ -116,6 +126,13 @@ def get_ontology_router() -> APIRouter:
         except DuplicateOntologyKeyError:
             logger.warning("Ontology upload rejected: ontology key already exists")
             return JSONResponse(status_code=400, content={"error": "Ontology key already exists."})
+        except UnsupportedOntologyFormatError:
+            # The message is built from the static accepted-format lists, not from
+            # the exception, so no request or stack-trace text reaches the client.
+            logger.warning("Ontology upload rejected: unsupported ontology format")
+            return JSONResponse(
+                status_code=400, content={"error": unsupported_ontology_format_message()}
+            )
         except ValueError as error:
             logger.warning("Ontology upload request failed: %s", error)
             return JSONResponse(status_code=400, content={"error": "Invalid ontology request."})
