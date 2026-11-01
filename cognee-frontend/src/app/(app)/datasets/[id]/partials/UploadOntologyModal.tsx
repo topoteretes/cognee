@@ -4,6 +4,11 @@ import { useState, type ReactElement } from "react";
 import { Loader } from "@mantine/core";
 import ModalShell from "@/ui/elements/ModalShell";
 
+// Mirrors EXTENSION_FORMATS in cognee/modules/ontology/rdf_xml/RDFLibOntologyResolver.py,
+// the backend's single list of accepted upload extensions. A unit test
+// (cognee/tests/unit/api/test_ontology_upload_formats.py) keeps the two in step.
+const ACCEPTED_ONTOLOGY_EXTENSIONS = ".owl,.rdf,.xml,.ttl,.n3,.jsonld,.nt,.nq,.trig";
+
 export default function UploadOntologyModal({
   onSubmit,
   onClose,
@@ -48,7 +53,7 @@ export default function UploadOntologyModal({
             <label className="cursor-pointer" style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", color: "rgba(237,236,234,0.55)" }}>
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1v10M4 5l4-4 4 4" stroke="#A1A1AA" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /><path d="M1 11v2.5A1.5 1.5 0 002.5 15h11a1.5 1.5 0 001.5-1.5V11" stroke="#A1A1AA" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
               <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file?.name ?? "Choose an ontology file…"}</span>
-              <input name="ontologyFile" type="file" required accept=".owl,.rdf,.xml,.ttl,.n3,.jsonld,.nt,.nq,.trig" style={{ display: "none" }} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              <input name="ontologyFile" type="file" required accept={ACCEPTED_ONTOLOGY_EXTENSIONS} style={{ display: "none" }} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
             </label>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>

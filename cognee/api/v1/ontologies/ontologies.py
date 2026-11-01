@@ -38,35 +38,52 @@ class DuplicateOntologyKeyError(ValueError):
     """
 
 
+def unsupported_ontology_format_message() -> str:
+    """Client-facing text for a rejected upload format.
+
+    Built only from the static accepted-format lists (never from the upload
+    itself), so the router can send it verbatim without echoing request data.
+    """
+    return (
+        "Unsupported ontology format. Accepted file extensions: "
+        f"{', '.join(supported_rdf_extensions())}. "
+        "Accepted content types (for filenames without a known extension): "
+        f"{', '.join(supported_rdf_content_types())}."
+    )
+
+
 class UnsupportedOntologyFormatError(ValueError):
     """Raised when neither the filename extension nor the content type names an RDF format.
 
-    The message is built only from the static accepted-format lists (never from
-    the upload itself), so the router can return it to the client verbatim.
+    Carries :func:`unsupported_ontology_format_message`; the router calls that
+    function itself rather than stringifying the exception.
     """
 
     def __init__(self) -> None:
-        super().__init__(
-            "Unsupported ontology format. Accepted file extensions: "
-            f"{', '.join(supported_rdf_extensions())}. "
-            "Accepted content types (for filenames without a known extension): "
-            f"{', '.join(supported_rdf_content_types())}."
-        )
+        super().__init__(unsupported_ontology_format_message())
 
 
 class OntologyFile(BytesIO):
-    """Stored ontology bytes plus the upload's filename and content type.
+    """Stored ontology bytes plus the upload's filename, content type and format.
 
-    ``RDFLibOntologyResolver`` reads ``filename``/``name`` and ``content_type``
-    off the file object to pick the parser, so both must survive the round
-    trip through storage.
+    ``RDFLibOntologyResolver`` reads ``rdf_format`` (the parser name recorded at
+    upload time), then ``filename``/``name`` and ``content_type``, off the file
+    object to pick the parser, so all of them must survive the round trip
+    through storage.
     """
 
-    def __init__(self, content: bytes, filename: str, content_type: str | None) -> None:
+    def __init__(
+        self,
+        content: bytes,
+        filename: str,
+        content_type: str | None,
+        rdf_format: str | None = None,
+    ) -> None:
         super().__init__(content)
         self.filename = filename
         self.name = filename
         self.content_type = content_type
+        self.rdf_format = rdf_format
 
 
 class OntologyNotFoundError(ValueError):
@@ -252,33 +269,15 @@ class OntologyService:
             located.append((file_path, metadata[key]))
         return located
 
-    def get_ontology_contents(self, ontology_key: list[str], user) -> list[str]:
-        """
-        Retrieve ontology content for one or more keys.
-
-        Args:
-            ontology_key: List of ontology keys to retrieve (can contain single item)
-            user: Authenticated user
-
-        Returns:
-            List of ontology content strings
-
-        Raises:
-            ValueError: If any ontology key not found
-        """
-        contents = []
-        for file_path, _ in self._locate_ontologies(ontology_key, user):
-            with open(file_path, "r", encoding="utf-8") as f:
-                contents.append(f.read())
-        return contents
-
     def get_ontology_files(self, ontology_key: list[str], user) -> list[OntologyFile]:
         """
         Retrieve ontologies as file objects ready for ``RDFLibOntologyResolver``.
 
-        Unlike :meth:`get_ontology_contents`, each returned object carries the
-        original upload filename and content type so the resolver can pick the
-        right RDF parser (Turtle, JSON-LD, ...) instead of trial-parsing.
+        This is the one way a stored ontology is loaded for cognify/remember
+        (REST routers and the MCP server alike). Each returned object carries
+        the format detected at upload time plus the original filename and
+        content type, so the resolver picks the right RDF parser (Turtle,
+        JSON-LD, ...) instead of trial-parsing.
 
         Raises:
             ValueError: If any ontology key not found
@@ -292,6 +291,7 @@ class OntologyService:
                     content,
                     filename=entry.get("filename") or file_path.name,
                     content_type=entry.get("content_type"),
+                    rdf_format=entry.get("format"),
                 )
             )
         return files

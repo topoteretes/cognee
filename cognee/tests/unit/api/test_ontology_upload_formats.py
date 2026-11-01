@@ -7,7 +7,9 @@ its filename and content type so ``RDFLibOntologyResolver`` parses it with the
 right parser rather than trial-and-error.
 """
 
+import re
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -17,7 +19,11 @@ from rdflib import Graph
 
 from cognee.api.v1.ontologies.ontologies import OntologyFile, OntologyService
 from cognee.api.v1.ontologies.routers.get_ontology_router import get_ontology_router
-from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
+    EXTENSION_FORMATS,
+    RDFLibOntologyResolver,
+    supported_rdf_extensions,
+)
 from cognee.modules.users.methods import get_authenticated_user
 
 _ROUTER_MODULE = "cognee.api.v1.ontologies.routers.get_ontology_router"
@@ -139,7 +145,7 @@ def test_unknown_extension_and_content_type_are_rejected_with_format_list(client
     assert response.status_code == 400
     error = response.json()["error"]
     assert error.startswith("Unsupported ontology format.")
-    for accepted in (".owl", ".rdf", ".xml", ".ttl", ".n3", ".jsonld", ".nt"):
+    for accepted in supported_rdf_extensions():
         assert accepted in error
     for accepted in (
         "application/rdf+xml",
@@ -160,6 +166,54 @@ def test_unknown_extension_without_content_type_is_rejected(client):
 
     assert response.status_code == 400
     assert "Unsupported ontology format" in response.json()["error"]
+
+
+def test_extension_outside_the_table_needs_a_content_type(client, user):
+    """``.json`` is not in EXTENSION_FORMATS, so only an RDF Content-Type admits it."""
+    _, rejected = _upload(client, "vehicles.json", _serialize("json-ld"))
+    assert rejected.status_code == 400
+    assert "Unsupported ontology format" in rejected.json()["error"]
+
+    key, accepted = _upload(client, "vehicles.json", _serialize("json-ld"), "application/ld+json")
+    assert accepted.status_code == 200, accepted.text
+    assert OntologyService().list_ontologies(user)[key]["format"] == "json-ld"
+
+
+def test_frontend_picker_matches_backend_extension_table():
+    """The upload modal's ``accept`` list is a copy of EXTENSION_FORMATS; keep them equal."""
+    modal = (
+        Path(__file__).resolve().parents[4]
+        / "cognee-frontend/src/app/(app)/datasets/[id]/partials/UploadOntologyModal.tsx"
+    )
+    if not modal.is_file():
+        pytest.skip("frontend sources not present")
+
+    match = re.search(r'ACCEPTED_ONTOLOGY_EXTENSIONS = "([^"]+)"', modal.read_text())
+    assert match, "UploadOntologyModal.tsx no longer defines ACCEPTED_ONTOLOGY_EXTENSIONS"
+    assert match.group(1).split(",") == list(EXTENSION_FORMATS) == supported_rdf_extensions()
+
+
+def test_stored_format_is_tried_before_filename_and_content_type(client, user):
+    """``format`` recorded at upload time travels on ``OntologyFile`` and leads the parser order."""
+    key, response = _upload(client, "vehicles.ttl", _serialize("turtle"), "text/turtle")
+    assert response.status_code == 200, response.text
+
+    (ontology_file,) = OntologyService().get_ontology_files([key], user)
+    assert ontology_file.rdf_format == "turtle"
+
+    resolver = RDFLibOntologyResolver(ontology_file=None)
+    # A stored format wins even when the name and MIME type would say otherwise.
+    legacy_name = OntologyFile(
+        _serialize("turtle"), "vehicles.owl", "application/rdf+xml", rdf_format="turtle"
+    )
+    assert resolver._get_candidate_formats(legacy_name)[:2] == ["turtle", "xml"]
+    assert RDFLibOntologyResolver(ontology_file=legacy_name).lookup["classes"].keys() >= {
+        "vehicle",
+        "car",
+    }
+    # Uploads that predate the field (no ``rdf_format``) fall back to name/MIME.
+    without_format = OntologyFile(b"", "vehicles.owl", "application/rdf+xml")
+    assert resolver._get_candidate_formats(without_format)[0] == "xml"
 
 
 def test_stored_file_carries_filename_and_content_type_to_resolver(client, user):

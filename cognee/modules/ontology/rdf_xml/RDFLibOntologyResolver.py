@@ -4,7 +4,7 @@ from collections import deque
 from typing import IO
 
 from rdflib import OWL, RDF, RDFS, Graph, URIRef
-from rdflib.util import SUFFIX_FORMAT_MAP, guess_format
+from rdflib.util import guess_format
 
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.exceptions import (
@@ -41,10 +41,20 @@ CONTENT_TYPE_FORMATS = {
     "application/ld+json": "json-ld",
 }
 
-# Every rdflib serialization an uploaded ontology may arrive in. Uploads are
-# admitted when either the filename extension or the MIME type maps onto one
-# of these parser names.
-SUPPORTED_RDF_FORMATS = frozenset(FALLBACK_FORMATS)
+# Upload filename extension -> rdflib parser name. This table is the single
+# list of accepted upload extensions: the 400 message, the router docs and the
+# frontend picker (UploadOntologyModal.tsx ``accept``) all mirror it.
+EXTENSION_FORMATS = {
+    ".owl": "xml",
+    ".rdf": "xml",
+    ".xml": "xml",
+    ".ttl": "turtle",
+    ".n3": "n3",
+    ".jsonld": "json-ld",
+    ".nt": "nt",
+    ".nq": "nquads",
+    ".trig": "trig",
+}
 
 
 def normalize_content_type(content_type: str | None) -> str | None:
@@ -57,14 +67,14 @@ def normalize_content_type(content_type: str | None) -> str | None:
 def detect_rdf_format(filename: str | None, content_type: str | None) -> str | None:
     """Return the rdflib parser name implied by ``filename`` or ``content_type``.
 
-    The extension wins when it is one rdflib knows (``.owl``, ``.ttl``, ...);
+    The extension wins when it is in ``EXTENSION_FORMATS`` (``.owl``, ``.ttl``, ...);
     otherwise the MIME type decides (``text/turtle``, ``application/ld+json``, ...).
     Returns ``None`` when neither identifies a supported RDF serialization.
     """
     if filename:
-        guessed_format = guess_format(str(filename))
-        if guessed_format in SUPPORTED_RDF_FORMATS:
-            return guessed_format
+        extension = os.path.splitext(str(filename))[1].lower()
+        if extension in EXTENSION_FORMATS:
+            return EXTENSION_FORMATS[extension]
 
     normalized_content_type = normalize_content_type(content_type)
     if normalized_content_type:
@@ -75,11 +85,7 @@ def detect_rdf_format(filename: str | None, content_type: str | None) -> str | N
 
 def supported_rdf_extensions() -> list[str]:
     """File extensions (with leading dot) accepted for ontology uploads."""
-    return sorted(
-        f".{suffix}"
-        for suffix, rdf_format in SUFFIX_FORMAT_MAP.items()
-        if rdf_format in SUPPORTED_RDF_FORMATS
-    )
+    return list(EXTENSION_FORMATS)
 
 
 def supported_rdf_content_types() -> list[str]:
@@ -274,6 +280,12 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
 
     def _get_candidate_formats(self, file_obj: IO) -> list[str]:
         formats = []
+
+        # A stored upload (``OntologyFile``) carries the format detected at upload
+        # time; it is tried before anything re-derived from the name or MIME type.
+        stored_format = getattr(file_obj, "rdf_format", None)
+        if stored_format:
+            formats.append(stored_format)
 
         filename = getattr(file_obj, "filename", None) or getattr(file_obj, "name", None)
         if filename:

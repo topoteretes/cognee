@@ -173,7 +173,8 @@ class TestOntologyServiceExport:
                 attempted_formats.append(kwargs.get("format"))
                 return super().parse(*args, **kwargs)
 
-        with patch("cognee.api.v1.ontologies.ontologies.Graph", RecordingGraph):
+        # Parsing happens in parse_rdf_content, so record the Graph it instantiates.
+        with patch("cognee.modules.ontology.rdf_xml.parse_rdf_content.Graph", RecordingGraph):
             graph = ontology_service.load_ontology_graph("ttl", user)
 
         assert len(graph) == EXPECTED_TRIPLES
