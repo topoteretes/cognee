@@ -240,7 +240,7 @@ async def test_session_node_set_scopes_what_improve_bridges_into_the_graph(clean
     )
     assert await get_session_node_set(sm, user_id, SESSION_B) == (PROJECT_B,)
     # Plain-text session writes start the background self-improvement bridge;
-    # wait for it so the explicit improve below is not refused with lock_held.
+    # wait for it so the explicit improve below does not queue behind it.
     await stored_b
 
     # --- 5. bridge both sessions, then recall scoped by node set -------------------

@@ -3313,7 +3313,9 @@ class LadybugAdapter(GraphDBInterface):
 
         return nodes, edges
 
-    async def get_filtered_graph_data(self, attribute_filters: list[dict[str, list[str | int]]]):
+    async def get_filtered_graph_data(
+        self, attribute_filters: list[dict[str, list[str | int]]], *, include_edges: bool = True
+    ):
         """
         Get filtered nodes and relationships based on attributes.
 
@@ -3371,9 +3373,12 @@ class LadybugAdapter(GraphDBInterface):
         WHERE {where_clause.replace("n.", "n1.")} AND {where_clause.replace("n.", "n2.")}
         RETURN n1.id, n2.id, r.relationship_name, r.properties
         """
-        nodes, edges = await asyncio.gather(
-            self.query(nodes_query, params), self.query(edges_query, params)
-        )
+        if include_edges:
+            nodes, edges = await asyncio.gather(
+                self.query(nodes_query, params), self.query(edges_query, params)
+            )
+        else:
+            nodes, edges = await self.query(nodes_query, params), []
         formatted_nodes = []
         for n in nodes:
             if n[0]:

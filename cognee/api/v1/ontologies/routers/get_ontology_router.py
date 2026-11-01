@@ -13,7 +13,9 @@ from cognee.shared.utils import send_telemetry
 from ..ontologies import (
     EXPORT_FORMATS,
     DuplicateOntologyKeyError,
+    OntologyNotFoundError,
     OntologyParseError,
+    OntologySerializationError,
     OntologyService,
     UnsupportedOntologyFormatError,
 )
@@ -223,7 +225,12 @@ def get_ontology_router() -> APIRouter:
             },
             400: {"description": "Unsupported format"},
             404: {"description": "Ontology key not found for this user"},
-            422: {"description": "Stored ontology file is not parseable RDF"},
+            422: {
+                "description": (
+                    "Stored ontology file is not parseable RDF, or cannot be written in the "
+                    "requested format"
+                )
+            },
         },
     )
     async def export_ontology(
@@ -266,7 +273,9 @@ def get_ontology_router() -> APIRouter:
         ## Error Codes
         - **400 Bad Request**: Unsupported format (the message lists the valid options)
         - **404 Not Found**: Ontology key not found for the authenticated user
-        - **422 Unprocessable Entity**: Stored ontology file is not parseable RDF
+        - **422 Unprocessable Entity**: Stored ontology file is not parseable RDF (JSON-LD
+          that references an external `@context` is refused), or the ontology cannot be
+          written in the requested format (the message names a format to try instead)
         - **500 Internal Server Error**: File system or serialization errors
         """
         send_telemetry(
@@ -298,7 +307,7 @@ def get_ontology_router() -> APIRouter:
                 user=user,
                 export_format=format,
             )
-        except ValueError as error:
+        except OntologyNotFoundError as error:
             # Covers both "invalid key" and "key not found for this user"; a key
             # owned by someone else is indistinguishable from a missing one.
             logger.warning("Ontology export request failed: %s", error)
@@ -308,6 +317,15 @@ def get_ontology_router() -> APIRouter:
             return JSONResponse(
                 status_code=422,
                 content={"error": "Stored ontology file could not be parsed as RDF."},
+            )
+        except OntologySerializationError as error:
+            logger.warning("Ontology export failed to serialize: %s", error)
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": f"This ontology cannot be exported as {format}. "
+                    "Try format=turtle, which can represent any RDF graph."
+                },
             )
         except CogneeApiError:
             raise

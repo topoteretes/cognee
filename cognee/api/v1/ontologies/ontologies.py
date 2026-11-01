@@ -11,24 +11,15 @@ from fastapi import UploadFile
 from rdflib import Graph
 
 from cognee.base_config import get_base_config
+from cognee.modules.ontology.rdf_xml.parse_rdf_content import FALLBACK_FORMATS, parse_rdf_content
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
     detect_rdf_format,
     normalize_content_type,
     supported_rdf_content_types,
     supported_rdf_extensions,
 )
-from cognee.shared.logging_utils import get_logger
-
-logger = get_logger(__name__)
 
 _ONTOLOGY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
-
-# Uploads are stored as ``.owl`` regardless of their actual RDF syntax. Newer
-# uploads record the detected rdflib parser name under ``format`` in metadata
-# and are parsed with it directly; uploads that predate that field are parsed
-# by trying RDF/XML first and then the other rdflib syntaxes until one succeeds
-# (same order RDFLibOntologyResolver uses).
-_PARSE_FORMATS = ("xml", "turtle", "n3", "nt", "json-ld", "trig", "nquads")
 
 # Query-parameter name -> (rdflib serializer name, media type, file extension).
 EXPORT_FORMATS: dict[str, tuple[str, str, str]] = {
@@ -78,11 +69,26 @@ class OntologyFile(BytesIO):
         self.content_type = content_type
 
 
+class OntologyNotFoundError(ValueError):
+    """Raised when an ontology key is invalid or not uploaded by this user.
+
+    A key owned by another user is indistinguishable from a missing one.
+    """
+
+
 class OntologyParseError(Exception):
     """Raised when a stored ontology file cannot be parsed as RDF by rdflib.
 
     Deliberately not a ``ValueError`` so the router can tell "key not found"
     (404) apart from "file exists but is not valid RDF" (422).
+    """
+
+
+class OntologySerializationError(Exception):
+    """Raised when a parsed ontology cannot be written in the requested format.
+
+    rdflib's RDF/XML writer, for one, refuses predicates it cannot shorten to a
+    QName (an IRI ending in digits, such as ``http://example.org/123``).
     """
 
 
@@ -318,42 +324,30 @@ class OntologyService:
         ``delete_ontology``: a key uploaded by another user is "not found".
 
         Raises:
-            ValueError: If the key is invalid or not found for this user
+            OntologyNotFoundError: If the key is invalid or not found for this user
             OntologyParseError: If the stored file is not parseable RDF
         """
-        ontology_key = self._validate_ontology_key(ontology_key)
-        ((file_path, entry),) = self._locate_ontologies([ontology_key], user)
+        try:
+            ((file_path, entry),) = self._locate_ontologies([ontology_key], user)
+        except ValueError as error:
+            raise OntologyNotFoundError(str(error)) from error
 
-        content = file_path.read_bytes()
-        # The format recorded at upload time is tried first; uploads that
-        # predate the ``format`` field fall back to probing every syntax.
-        candidate_formats = list(_PARSE_FORMATS)
+        # Uploads are stored as ``.owl`` whatever their real syntax. The format
+        # recorded at upload time is tried first; uploads that predate the
+        # ``format`` field fall back to probing every syntax.
+        candidate_formats = list(FALLBACK_FORMATS)
         stored_format = entry.get("format")
         if stored_format in candidate_formats:
             candidate_formats.remove(stored_format)
             candidate_formats.insert(0, stored_format)
 
-        parse_errors = []
-        for rdf_format in candidate_formats:
-            graph = Graph()
-            try:
-                graph.parse(data=content, format=rdf_format)
-            except Exception as error:
-                # rdflib parsers raise a different exception type per syntax;
-                # a failed guess is expected, so log at debug and try the next one.
-                logger.debug(
-                    "Ontology '%s' is not %s, trying next format",
-                    ontology_key,
-                    rdf_format,
-                    exc_info=True,
-                )
-                parse_errors.append(f"{rdf_format}: {error}")
-                continue
-            return graph
-
-        raise OntologyParseError(
-            f"Unable to parse ontology '{ontology_key}'. Tried formats: " + "; ".join(parse_errors)
-        )
+        try:
+            graph, _ = parse_rdf_content(file_path.read_bytes(), candidate_formats)
+        except ValueError as error:
+            raise OntologyParseError(
+                f"Unable to parse ontology '{ontology_key}'. {error}"
+            ) from error
+        return graph
 
     def export_ontology(self, ontology_key: str, user, export_format: str = "turtle") -> bytes:
         """
@@ -364,12 +358,18 @@ class OntologyService:
 
         Raises:
             KeyError: If ``export_format`` is not a supported export format
-            ValueError: If the key is invalid or not found for this user
+            OntologyNotFoundError: If the key is invalid or not found for this user
             OntologyParseError: If the stored file is not parseable RDF
+            OntologySerializationError: If the ontology cannot be written in ``export_format``
         """
         rdflib_format = EXPORT_FORMATS[export_format][0]
         graph = self.load_ontology_graph(ontology_key, user)
-        serialized = graph.serialize(format=rdflib_format, encoding="utf-8")
+        try:
+            serialized = graph.serialize(format=rdflib_format, encoding="utf-8")
+        except ValueError as error:
+            raise OntologySerializationError(
+                f"Ontology '{ontology_key}' cannot be serialized as {export_format}: {error}"
+            ) from error
         if isinstance(serialized, str):
             return serialized.encode("utf-8")
         return serialized

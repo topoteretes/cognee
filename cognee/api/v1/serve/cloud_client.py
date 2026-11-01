@@ -8,6 +8,7 @@ from uuid import UUID
 
 import aiohttp
 
+from cognee.modules.conflicts.models import ConflictDetail
 from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
@@ -49,6 +50,9 @@ class CloudClient:
     def __init__(self, service_url: str, api_key: str):
         self.service_url = service_url.rstrip("/")
         self.api_key = api_key
+        # Tenant /api/v1/users/me reported at connect time; read by telemetry
+        # while this client is the active connection.
+        self.tenant_id = ""
         self._session: aiohttp.ClientSession | None = None
 
     # Default for ordinary API calls: aiohttp's standard 5-minute total,
@@ -60,6 +64,9 @@ class CloudClient:
     # can legitimately exceed any fixed total; per-read inactivity stays
     # bounded instead. Applied per-request, only to archive uploads.
     UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=600)
+    # The tenant lookup only feeds telemetry; a slow instance must not delay
+    # serve(), so it gives up quickly and the connection proceeds without it.
+    TENANT_LOOKUP_TIMEOUT = aiohttp.ClientTimeout(total=5)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -108,6 +115,33 @@ class CloudClient:
                 "Falling back to None after error in CloudClient._auth_check", exc_info=True
             )
             return None
+
+    async def _get_tenant_id(self) -> str:
+        """Tenant id of the connected API key's user, or "" when there is none.
+
+        Every instance answers ``/api/v1/users/me`` with fastapi-users'
+        ``UserRead``. On a Cloud tenant instance its ``tenant_id`` is the
+        control-plane ``tenants.id``; a self-hosted server reports its own
+        local tenant. Both are recorded — analytics tells them apart by host.
+        Any failure, including a timeout after ``TENANT_LOOKUP_TIMEOUT``,
+        returns "": this must never fail or stall a connection.
+        """
+        try:
+            session = await self._get_session()
+            async with session.get(
+                f"{self.service_url}/api/v1/users/me", timeout=self.TENANT_LOOKUP_TIMEOUT
+            ) as resp:
+                if resp.status != 200:
+                    return ""
+                data = await resp.json()
+            tenant_id = data.get("tenant_id") if isinstance(data, dict) else None
+            return str(UUID(str(tenant_id))) if tenant_id else ""
+        except Exception:
+            logger.debug(
+                "Falling back to no tenant after error in CloudClient._get_tenant_id",
+                exc_info=True,
+            )
+            return ""
 
     # ----- V2 Operations -----
 
@@ -309,8 +343,8 @@ class CloudClient:
             payload["build_global_context_index"] = True
         if kwargs.get("build_truth_subspace"):
             payload["build_truth_subspace"] = True
-        if kwargs.get("review_conflicts"):
-            payload["review_conflicts"] = True
+        if kwargs.get("review_conflicts") is not None:
+            payload["review_conflicts"] = kwargs["review_conflicts"]
         if kwargs.get("feedback_alpha") is not None:
             payload["feedback_alpha"] = kwargs["feedback_alpha"]
         # Deprecated custom tasks (SDK-1115): the /improve DTO takes registry task
@@ -704,3 +738,49 @@ class CloudClient:
                 body = await resp.text()
                 raise RuntimeError(f"Remote forget failed ({resp.status}): {body}")
             return await resp.json()
+
+    async def list_conflicts(
+        self, dataset_id: UUID, *, status: str | None = None
+    ) -> list[ConflictDetail]:
+        """GET /api/v1/conflicts — a dataset's conflicts with their competing facts."""
+        session = await self._get_session()
+
+        params = {"dataset_id": str(dataset_id)}
+        if status:
+            params["status"] = status
+
+        async with session.get(
+            f"{self.service_url}/api/v1/conflicts",
+            params=params,
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote list_conflicts failed ({resp.status}): {body}")
+            payload = await resp.json()
+        if not isinstance(payload, list):
+            raise RuntimeError("Remote list_conflicts returned an invalid conflict list")
+        return [ConflictDetail.model_validate(item) for item in payload]
+
+    async def resolve_conflict(
+        self,
+        conflict_id: UUID,
+        *,
+        dataset_id: UUID,
+        selected_fact_id: UUID,
+        reason: str | None = None,
+    ) -> ConflictDetail:
+        """POST /api/v1/conflicts/{conflict_id}/resolve — accept one competing fact."""
+        session = await self._get_session()
+
+        payload: dict = {"datasetId": str(dataset_id), "selectedFactId": str(selected_fact_id)}
+        if reason is not None:
+            payload["reason"] = reason
+
+        async with session.post(
+            f"{self.service_url}/api/v1/conflicts/{conflict_id}/resolve",
+            json=payload,
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote resolve_conflict failed ({resp.status}): {body}")
+            return ConflictDetail.model_validate(await resp.json())

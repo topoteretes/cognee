@@ -15,6 +15,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.operations import record_operation
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME
 
 logger = get_logger("forget")
 
@@ -402,6 +403,25 @@ async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
         dataset_lock(dataset_id),
         set_database_global_context_variables(dataset_id, user.id),
     ):
+        # 0. The routing rows mirrored the index this dataset is about to lose.
+        # They live in the default store, which can be unreachable, so they go
+        # before the irreversible step: a failure here leaves the memory in
+        # place and the forget can be retried, instead of deleted memory whose
+        # summary text survives in the routing collection.
+        from cognee.modules.search.dataset_routing import remove_dataset_routes
+
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            data_ids = [
+                record.id
+                for record in (
+                    await session.execute(select(Data).where(Data.dataset_id == dataset_id))
+                )
+                .scalars()
+                .all()
+            ]
+        await remove_dataset_routes(dataset_id, data_ids)
+
         # 1. Delete graph nodes/edges and vector embeddings
         deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
@@ -435,7 +455,6 @@ async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
         await delete_edge_evidence(dataset_id)
 
         # 2. Reset pipeline_status on all data records in this dataset
-        db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
             data_records = (
                 (await session.execute(select(Data).where(Data.dataset_id == dataset_id)))
@@ -505,6 +524,14 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
         dataset_lock(dataset_id),
         set_database_global_context_variables(dataset_id, user.id),
     ):
+        # 0. The routing rows that mirrored the item's bucket and the dataset's
+        # root (its text names the item) go first: they live in the default
+        # store, which can be unreachable, and a failure there must leave the
+        # memory in place for a retry.
+        from cognee.modules.search.dataset_routing import remove_dataset_routes
+
+        await remove_dataset_routes(dataset_id, [data_id])
+
         # 1. Delete graph nodes/edges and vector embeddings for this data item
         deleted_elements = await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
@@ -535,6 +562,13 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
 
         await delete_edge_evidence(dataset_id, data_id)
 
+        # 1d. The index: the item's bucket and the dataset's root, which names
+        # the item, go by their derived ids (the memory delete above does not
+        # reach them). Same stores as that delete, so it belongs with it.
+        from cognee.tasks.memify.global_context_index import remove_document_index
+
+        await remove_document_index(dataset_id, [data_id])
+
         # 2. Reset pipeline_status for this data record
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
@@ -545,14 +579,14 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
             if data_record and data_record.pipeline_status:
                 dataset_id_str = str(dataset_id)
                 updated = False
-                # Memory-only forget removes cognify artifacts (graph/vector), so only
-                # cognify_pipeline status should be reset. Keep add status intact.
-                if (
-                    "cognify_pipeline" in data_record.pipeline_status
-                    and dataset_id_str in data_record.pipeline_status["cognify_pipeline"]
-                ):
-                    del data_record.pipeline_status["cognify_pipeline"][dataset_id_str]
-                    updated = True
+                # Memory-only forget removes the chunks, graph and vectors the
+                # indexing and cognify pipelines wrote, so both stamps are reset
+                # (a kept indexing stamp would skip the document's early
+                # indexing). Keep add status intact.
+                for pipeline_name in (INDEXING_PIPELINE_NAME, COGNIFY_PIPELINE_NAME):
+                    if dataset_id_str in data_record.pipeline_status.get(pipeline_name, {}):
+                        del data_record.pipeline_status[pipeline_name][dataset_id_str]
+                        updated = True
                 if updated:
                     orm_attributes.flag_modified(data_record, "pipeline_status")
                 await session.commit()

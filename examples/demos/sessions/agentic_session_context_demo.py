@@ -43,7 +43,7 @@ import sys
 from typing import Any
 
 os.environ["CACHING"] = "true"
-os.environ["CACHE_BACKEND"] = "fs"
+os.environ["CACHE_BACKEND"] = "sqlite"
 os.environ["AUTO_FEEDBACK"] = "true"
 os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
 os.environ.setdefault("LOG_LEVEL", "ERROR")

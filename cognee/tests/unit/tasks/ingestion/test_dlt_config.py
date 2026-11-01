@@ -76,3 +76,11 @@ def test_option_names_are_the_model_fields():
         "column_value_columns",
         "temporal_columns",
     }
+
+
+def test_every_column_becomes_value_nodes_by_default(monkeypatch):
+    """Rows that share a value meet in one node without any selection being given."""
+    from cognee.tasks.ingestion.config import IngestionConfig
+
+    monkeypatch.delenv("DLT_COLUMN_VALUE_COLUMNS", raising=False)
+    assert IngestionConfig().dlt_column_value_columns == {"*": ["*"]}

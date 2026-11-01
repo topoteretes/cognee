@@ -1,0 +1,34 @@
+{
+  "scene_1": [
+    {
+      "last_product_viewed": "Talusworks Ridgeline",
+      "last_order_status_viewed": null,
+      "size_guide_views_10m": 1,
+      "returns_page_views_10m": 0
+    },
+    {
+      "last_product_viewed": "Talusworks Ridgeline",
+      "last_order_status_viewed": "4502",
+      "size_guide_views_10m": 2,
+      "returns_page_views_10m": 1
+    },
+    {
+      "last_product_viewed": "Talusworks Ridgeline",
+      "last_order_status_viewed": "4502",
+      "size_guide_views_10m": 3,
+      "returns_page_views_10m": 2
+    },
+    {
+      "last_product_viewed": "Talusworks Ridgeline",
+      "last_order_status_viewed": "4502",
+      "size_guide_views_10m": 4,
+      "returns_page_views_10m": 3
+    }
+  ],
+  "scene_2": {
+    "last_product_viewed": "Northpeak Summit Hiker",
+    "last_order_status_viewed": null,
+    "size_guide_views_10m": 2,
+    "returns_page_views_10m": 0
+  }
+}

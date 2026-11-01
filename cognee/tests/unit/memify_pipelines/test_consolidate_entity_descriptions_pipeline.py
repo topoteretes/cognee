@@ -1295,7 +1295,7 @@ async def test_pipeline_wires_memify_tasks_dataset_and_user():
         patch(
             f"{module}.run_memify_tasks", new=AsyncMock(return_value={"status": "ok"})
         ) as memify_mock,
-        pytest.warns(DeprecationWarning, match="review_conflicts"),
+        pytest.warns(DeprecationWarning, match="reviews conflicts by default"),
     ):
         result = await consolidate_entity_descriptions_pipeline(user=user, dataset="ds-1")
 

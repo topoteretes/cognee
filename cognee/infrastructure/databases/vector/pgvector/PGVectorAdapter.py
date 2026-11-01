@@ -6,6 +6,7 @@ from typing import Any, get_type_hints
 from uuid import UUID
 
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
+from pydantic import BaseModel
 from sqlalchemy import JSON, Column, MetaData, Table, cast, delete, exc, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import make_url
@@ -30,7 +31,7 @@ from ..embeddings.EmbeddingGateway import EmbeddingGateway
 from ..exceptions import CollectionNotFoundError, SharedDatabasePruneError
 from ..models.ScoredResult import ScoredResult
 from ..stored_vector_size import choose_stored_vector_size
-from ..vector_db_interface import VectorDBInterface
+from ..vector_db_interface import VectorDBInterface, validate_raw_vector_points
 from .serialize_data import serialize_data
 
 logger = get_logger("PGVectorAdapter")
@@ -453,6 +454,18 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         return collection_name in self._metadata.tables
 
+    async def delete_collection(self, collection_name: str) -> None:
+        """Drop the table for ``collection_name``; a missing table is not an error.
+
+        Resolved through the connection's ``search_path`` like every other
+        statement here, so a schema-pinned adapter drops its own schema's table.
+        """
+        async with self.engine.begin() as connection:
+            await connection.execute(text(f'DROP TABLE IF EXISTS "{collection_name}" CASCADE'))
+        table = self._metadata.tables.get(collection_name)
+        if table is not None:
+            self._metadata.remove(table)
+
     @retry(
         retry=retry_if_exception_type(
             (DuplicateTableError, UniqueViolationError, ProgrammingError)
@@ -498,6 +511,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                             self.vector = vector
 
                     async with self.engine.begin() as connection:
+                        # The dataset handlers install the extension in the databases
+                        # they create; the deployment's default database (dataset
+                        # routing) has no handler, so the collection installs it.
+                        # A no-op where it is installed.
+                        await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
                         if len(Base.metadata.tables.keys()) > 0:
                             await connection.run_sync(
                                 Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
@@ -517,6 +535,34 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     # might be rolled back.
                     async with self.engine.begin() as connection:
                         await connection.run_sync(self._metadata.reflect, only=[collection_name])
+
+    @staticmethod
+    def _merged_belongs_to_set_payload(collection_name: str):
+        """The ``ON CONFLICT`` payload: the incoming one with ``belongs_to_set`` unioned
+        with the stored row's, so an upsert never drops a tag the row already carries.
+
+        A side whose ``belongs_to_set`` is absent or JSON ``null`` (a DataPoint's default)
+        counts as empty: ``COALESCE`` alone leaves a JSON ``null`` in place, and
+        ``'null' || '["a"]'`` is ``[null, "a"]``.
+        """
+        quoted_table = f'"{collection_name}"'
+        stored_tags = f"NULLIF({quoted_table}.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
+        incoming_tags = "NULLIF(EXCLUDED.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
+        return text(
+            f"""
+            jsonb_set(
+                EXCLUDED.payload::jsonb,
+                '{{belongs_to_set}}',
+                (
+                    SELECT COALESCE(jsonb_agg(DISTINCT val), '[]'::jsonb)
+                    FROM jsonb_array_elements_text(
+                        COALESCE({stored_tags}, '[]'::jsonb)
+                        || COALESCE({incoming_tags}, '[]'::jsonb)
+                    ) AS val
+                )
+            )::json
+            """
+        )
 
     @retry(
         retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
@@ -610,25 +656,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             for start_index in range(0, len(point_dicts), QUERY_BATCH_SIZE):
                 point_batch = point_dicts[start_index : start_index + QUERY_BATCH_SIZE]
                 insert_statement = insert(PGVectorDataPoint).values(point_batch)
-                quoted_table = f'"{collection_name}"'
-                merged_payload_expr = text(
-                    f"""
-                                    jsonb_set(
-                                        EXCLUDED.payload::jsonb,
-                                        '{{belongs_to_set}}',
-                                        (
-                                            SELECT COALESCE(jsonb_agg(DISTINCT val), '[]'::jsonb)
-                                            FROM jsonb_array_elements_text(
-                                                COALESCE({quoted_table}.payload::jsonb->'belongs_to_set', '[]'::jsonb)
-                                                || COALESCE(EXCLUDED.payload::jsonb->'belongs_to_set', '[]'::jsonb)
-                                            ) AS val
-                                        )
-                                    )::json
-                                    """
-                )
                 insert_statement = insert_statement.on_conflict_do_update(
                     index_elements=["id"],
-                    set_={"payload": merged_payload_expr},
+                    set_={"payload": self._merged_belongs_to_set_payload(collection_name)},
                 )
                 await session.execute(insert_statement)
             await session.commit()
@@ -729,8 +759,69 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 )
             await session.commit()
 
-    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
-        """Return rows from `collection_name` matching any of `data_point_ids`."""
+    @retry(
+        retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=1, max=6),
+    )
+    async def upsert_raw_vectors(
+        self,
+        collection_name: str,
+        points: list[dict],
+        payload_schema: type[BaseModel] | None = None,
+    ) -> None:
+        """Upsert caller-provided vectors without invoking the embedding engine.
+
+        Payloads are stored as given (the JSON column has no schema; ``payload_schema``
+        only names the collection's type for ``create_collection``), so a row read with
+        ``retrieve(..., include_vector=True)`` lands here unchanged. A conflicting id
+        takes the new payload and the new vector, except ``belongs_to_set``, which is
+        unioned with the stored row's as in ``create_data_points``. The same id twice
+        in one call is written once (one INSERT cannot touch a row twice), see
+        ``validate_raw_vector_points``. Retried on deadlock like ``create_data_points``:
+        the write lock is per process, and two workers' multi-row upserts can lock
+        rows in opposite orders.
+        """
+        if not points:
+            return
+
+        vector_size = self.embedding_engine.get_vector_size()
+        # Every check runs before the table exists, so a rejected call creates nothing.
+        row_list = [
+            {
+                "id": row["id"],
+                "vector": row["vector"],
+                "payload": sanitize_relational_payload(serialize_data(row["payload"])),
+            }
+            for row in validate_raw_vector_points(points, vector_size).values()
+        ]
+
+        if not await self.has_collection(collection_name):
+            await self.create_collection(collection_name, payload_schema=payload_schema)
+        table = await self.get_table(collection_name)
+
+        async with self._get_write_lock(collection_name), self.get_async_session() as session:
+            for start_index in range(0, len(row_list), QUERY_BATCH_SIZE):
+                statement = insert(table).values(
+                    row_list[start_index : start_index + QUERY_BATCH_SIZE]
+                )
+                statement = statement.on_conflict_do_update(
+                    index_elements=["id"],
+                    set_={
+                        "payload": self._merged_belongs_to_set_payload(collection_name),
+                        "vector": statement.excluded.vector,
+                    },
+                )
+                await session.execute(statement)
+            await session.commit()
+
+    async def retrieve(
+        self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False
+    ):
+        """Return rows from `collection_name` matching any of `data_point_ids`.
+
+        With ``include_vector`` the stored embedding rides along as ``payload["vector"]``.
+        """
         # Get PGVectorDataPoint Table from database
         try:
             PGVectorDataPoint = await self.get_table(collection_name)
@@ -756,7 +847,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 unique_results.append(result)
 
             return [
-                ScoredResult(id=parse_id(result.id), payload=result.payload, score=0)
+                ScoredResult(
+                    id=parse_id(result.id),
+                    # pgvector hands the column back as a numpy array; callers get floats.
+                    payload={**result.payload, "vector": [float(v) for v in result.vector]}
+                    if include_vector
+                    else result.payload,
+                    score=0,
+                )
                 for result in unique_results
             ]
 

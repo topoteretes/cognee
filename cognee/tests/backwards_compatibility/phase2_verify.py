@@ -757,9 +757,18 @@ async def _verify_delete(stage: str) -> None:
                 f"hard delete (e.g. {next(iter(missed_nodes))}) — delete missed migrated nodes."
             )
 
+        # Derived bookkeeping is exempt from the collateral check: an EdgeType
+        # node is GC'd with its last edge, and the global context index root
+        # (a GlobalContextSummary carrying a dataset-level ref, never a
+        # document's) is dropped with ANY document deletion, since its text
+        # names every document, and written again by the next improve. A
+        # document's own bucket carries the document's ref and is expected
+        # gone above like any other node it owns.
         disappeared_nodes = before_nodes - after_nodes
         allowed_gone = expected_gone_nodes | {
-            node_id for node_id in before_nodes if before_props[node_id].get("type") == "EdgeType"
+            node_id
+            for node_id in before_nodes
+            if before_props[node_id].get("type") in ("EdgeType", "GlobalContextSummary")
         }
         collateral_nodes = disappeared_nodes - allowed_gone
         if collateral_nodes:

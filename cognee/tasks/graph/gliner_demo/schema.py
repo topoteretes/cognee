@@ -234,11 +234,13 @@ def schema_from_ontology(ontology_file_path: str | None = None) -> GlinerSchema:
     from rdflib import Graph
     from rdflib.exceptions import ParserError
 
+    from cognee.modules.ontology.rdf_xml.parse_rdf_content import parse_rdf_file
+
     graph = Graph()
     parsed = False
     for fmt in (None, "xml", "turtle"):
         try:
-            graph.parse(path, format=fmt)
+            parse_rdf_file(graph, path, fmt)
             parsed = True
             break
         except (OSError, ParserError, SyntaxError) as error:
