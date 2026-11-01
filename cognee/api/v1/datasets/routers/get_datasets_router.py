@@ -1358,6 +1358,7 @@ def get_datasets_router() -> APIRouter:
         The merged document, in the shape GET /schema returns.
 
         ## Error Codes
+        Error bodies are `{"message": ...}`.
         - **404 Not Found**: Dataset not found or no write permission.
         - **422 Unprocessable Content**: The merged schema is not a valid graph-model
           spec, a removed entity is still targeted by a relation, or a removal names an
@@ -1365,19 +1366,26 @@ def get_datasets_router() -> APIRouter:
         """
         dataset = await get_authorized_existing_datasets([dataset_id], "write", user)
         if not dataset:
-            return JSONResponse(status_code=404, content={"error": "Dataset not found"})
+            return JSONResponse(
+                status_code=404,
+                content=ErrorResponseDTO(message="Dataset not found").model_dump(),
+            )
 
         stored = await _read_dataset_schema(dataset_id)
         try:
             merged = merge_graph_schema(stored["graph_schema"], payload)
         except GraphSchemaMergeError as error:
-            return JSONResponse(status_code=422, content={"error": str(error)})
+            # The message is composed by merge_graph_schema and only names the offending item.
+            return JSONResponse(
+                status_code=422,
+                content=ErrorResponseDTO(message=str(error)).model_dump(),
+            )
         except ValidationError as error:
             return JSONResponse(
                 status_code=422,
-                content={
-                    "error": f"Merged graph schema is invalid: {format_validation_error(error)}"
-                },
+                content=ErrorResponseDTO(
+                    message=f"Merged graph schema is invalid: {format_validation_error(error)}"
+                ).model_dump(),
             )
 
         await _store_dataset_schema(dataset_id, merged, None)

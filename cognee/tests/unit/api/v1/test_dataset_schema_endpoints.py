@@ -389,8 +389,8 @@ def test_patch_schema_rejects_removing_relation_target(schema_api):
     )
 
     assert response.status_code == 422, response.text
-    assert "'Organization'" in response.json()["error"]
-    assert "Person.works_at" in response.json()["error"]
+    assert "'Organization'" in response.json()["message"]
+    assert "Person.works_at" in response.json()["message"]
     assert store.writes == []
     assert store.rows[dataset_id]["graph_schema"] == STORED_SCHEMA
 
@@ -426,8 +426,8 @@ def test_patch_schema_rejects_invalid_merged_spec(schema_api):
     )
 
     assert response.status_code == 422, response.text
-    assert "'bad-name'" in response.json()["error"]
-    assert "plain identifier" in response.json()["error"]
+    assert "'bad-name'" in response.json()["message"]
+    assert "plain identifier" in response.json()["message"]
     assert store.writes == []
 
 
