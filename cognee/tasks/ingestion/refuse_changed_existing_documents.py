@@ -22,7 +22,9 @@ Not covered: s3:// objects and repository URLs, whose bytes are not local.
 """
 
 import os
+from io import BufferedReader, BytesIO
 from pathlib import Path, PureWindowsPath
+from tempfile import SpooledTemporaryFile
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -75,6 +77,11 @@ async def _origins(data: Any) -> tuple[dict[str, str], dict[tuple[str, str], str
             by_location[path.as_uri()] = metadata["content_hash"]
         stream = getattr(item, "file", None)
         filename = getattr(item, "filename", None)
+        if isinstance(item, (BufferedReader, BytesIO, SpooledTemporaryFile)):
+            # An open file object is stored like an upload, named from its ``.name``.
+            stream = item
+            name = getattr(item, "name", None)
+            filename = name if isinstance(name, str) else None
         if stream is not None and filename:
             # An upload is stored under its user-visible filename: the stem is
             # the row's name (ingestion derives it the same way), the extension
