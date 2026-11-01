@@ -151,10 +151,17 @@ async def emit_dlt_schema_graph(
         except Exception as error:  # an ontology misconfiguration must not block ingestion
             logger.warning("Skipping ontology alignment of DLT tables: %s", error, exc_info=True)
             ontology_resolver = None
+        # ``table_node_ids`` is keyed by ``(scope, name)``; ``tables`` by its own key.
         alignment = align_tables_with_ontology(
             [
-                SchemaTableSpec(node_id, name, column_specs_from(tables[name].get("schema_info")))
-                for name, node_id in table_node_ids.items()
+                SchemaTableSpec(
+                    table_node_ids[
+                        (table_meta.get("scope", ""), table_meta.get("name", table_key))
+                    ],
+                    table_meta.get("name", table_key),
+                    column_specs_from(table_meta.get("schema_info")),
+                )
+                for table_key, table_meta in tables.items()
             ],
             ontology_resolver,
             authoritative_sources=get_configured_authoritative_sources(wrapped_config),

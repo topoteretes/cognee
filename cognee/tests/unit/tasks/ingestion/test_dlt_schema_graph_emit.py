@@ -188,3 +188,32 @@ async def test_tables_of_one_name_from_two_sources_are_separate_nodes(monkeypatc
     assert row_of == {(shop_row, shop_table), (crm_row, crm_table)}
     table_of = {(source, str(target)) for source, target, name, _ in edges if name == "is_table_of"}
     assert table_of == {(shop_table, shop), (crm_table, crm)}
+
+
+@pytest.mark.asyncio
+async def test_ontology_alignment_sees_each_scoped_table_under_its_bare_name(monkeypatch):
+    """Tables are keyed ``"{source}:{name}"`` and their node ids by ``(scope, name)``;
+    the ontology alignment must be handed every table's own node id with the bare
+    table name the ontology is matched against (regression: KeyError on scoped tables)."""
+    graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
+    _wire(monkeypatch, graph, {"source_ref_key": None, "pipeline_run_id": None})
+    seen = []
+
+    def fake_align(specs, resolver, **kwargs):
+        seen.extend(specs)
+        return SimpleNamespace(nodes=[], edges=[])
+
+    monkeypatch.setattr(schema_graph_module, "align_tables_with_ontology", fake_align)
+    shop, crm = str(uuid4()), str(uuid4())
+    orders = _tables()["orders"]
+    tables = {
+        f"{shop}:orders": {**orders, "name": "orders", "scope": shop},
+        f"{crm}:orders": {**orders, "name": "orders", "scope": crm},
+    }
+
+    await emit_dlt_schema_graph(tables, [], _ctx())
+
+    assert [(spec.node_id, spec.name) for spec in seen] == [
+        (schema_graph_module._table_node_id("orders", shop), "orders"),
+        (schema_graph_module._table_node_id("orders", crm), "orders"),
+    ]
