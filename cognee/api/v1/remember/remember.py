@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Union
 from uuid import UUID
 
+from fastapi import UploadFile
+
 try:
     from typing import Unpack
 except ImportError:
@@ -1013,6 +1015,8 @@ async def remember(
     data: Union[
         str,
         list[str],
+        UploadFile,
+        list[UploadFile],
         DataItem,
         list[DataItem],
         "MemoryEntry",
@@ -1052,10 +1056,10 @@ async def remember(
     modes (see ``ImproveConfig``).
 
     Args:
-        data: The data to store: text, file paths, URLs, ``DataItem``s or typed
-            memory entries. Open file objects are not accepted; pass the path, or
-            upload the file through ``POST /api/v1/remember``, whose ``data`` field
-            takes FastAPI ``UploadFile``s.
+        data: The data to store: text, file paths, URLs, ``DataItem``s, typed memory
+            entries, or FastAPI ``UploadFile`` objects as ``POST /api/v1/remember`` hands
+            them in. Plain open file objects (``open(path, "rb")``, ``BytesIO``) are
+            not accepted: pass the file's path instead.
         dataset_name: Target dataset. Defaults to ``"main_dataset"``.
         dataset_id: UUID of an existing dataset to target directly. Takes
             precedence over ``dataset_name``. Typed ``MemoryEntry`` payloads

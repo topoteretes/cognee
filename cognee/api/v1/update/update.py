@@ -2,6 +2,7 @@ from time import perf_counter
 from typing import Any, Literal
 from uuid import UUID
 
+from fastapi import UploadFile
 from pydantic import BaseModel
 
 from cognee.api.v1.add import add
@@ -32,7 +33,7 @@ logger = get_logger("update")
 
 async def update(
     data_id: UUID,
-    data: str | list[str],
+    data: str | list[str] | UploadFile | list[UploadFile],
     dataset_id: UUID,
     user: User = None,
     node_set: list[str] | None = None,
@@ -69,9 +70,10 @@ async def update(
             * Absolute paths: "/path/to/document.pdf"
             * File URLs: "file:///path/to/document.pdf" or "file://relative/path.txt"
             * S3 paths: "s3://bucket-name/path/to/file.pdf"
-        - **Open file objects are not accepted**: pass the file's path instead. The one
-          stream input is the HTTP API: ``PATCH /api/v1/update`` takes the replacement as
-          a multipart upload, ``data: list[UploadFile]`` (FastAPI ``UploadFile``).
+        - **File uploads**: FastAPI ``UploadFile`` objects, which is what
+          ``PATCH /api/v1/update`` hands in for its multipart ``data`` field. Plain open
+          file objects (``open(path, "rb")``, ``BytesIO``) are not accepted: pass the
+          file's path instead.
 
     Supported File Formats:
         - Text files (.txt, .md, .csv)
@@ -91,6 +93,7 @@ async def update(
             - Absolute file path: "/path/to/document.pdf"
             - File URL: "file:///absolute/path/to/document.pdf" or "file://relative/path.txt"
             - S3 path: "s3://my-bucket/documents/file.pdf"
+            - File upload: a FastAPI UploadFile, as PATCH /api/v1/update receives it
         dataset_id: UUID of the dataset holding the document (required).
         user: User object for authentication and permissions. Uses default user if None.
               Default user: "default_user@example.com" (created automatically on first use).
