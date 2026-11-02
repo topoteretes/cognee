@@ -3,7 +3,7 @@ import hashlib
 import os
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, Literal, Union
+from typing import TYPE_CHECKING, Any, Literal, Union
 from uuid import UUID
 
 try:
@@ -1011,8 +1011,6 @@ class RememberResult:
 
 async def remember(
     data: Union[
-        BinaryIO,
-        list[BinaryIO],
         str,
         list[str],
         DataItem,
@@ -1054,7 +1052,10 @@ async def remember(
     modes (see ``ImproveConfig``).
 
     Args:
-        data: The data to store (text, file paths, binary streams, etc.).
+        data: The data to store: text, file paths, URLs, ``DataItem``s or typed
+            memory entries. Open file objects are not accepted; pass the path, or
+            upload the file through ``POST /api/v1/remember``, whose ``data`` field
+            takes FastAPI ``UploadFile``s.
         dataset_name: Target dataset. Defaults to ``"main_dataset"``.
         dataset_id: UUID of an existing dataset to target directly. Takes
             precedence over ``dataset_name``. Typed ``MemoryEntry`` payloads

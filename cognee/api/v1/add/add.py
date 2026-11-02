@@ -1,4 +1,4 @@
-from typing import Any, BinaryIO
+from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
@@ -38,7 +38,7 @@ logger = get_logger()
 
 
 async def add(
-    data: BinaryIO | list[BinaryIO] | str | list[str] | DataItem | list[DataItem] | Any,
+    data: str | list[str] | DataItem | list[DataItem] | Any,
     dataset_name: str = DEFAULT_DATASET_NAME,
     user: User = None,
     node_set: list[str] | None = None,
@@ -62,8 +62,8 @@ async def add(
     Add data to Cognee for knowledge graph processing.
 
     This is the first step in the Cognee workflow - it ingests raw data and prepares it
-    for processing. The function accepts various data formats including text, files, urls and
-    binary streams, then stores them in a specified dataset for further processing.
+    for processing. The function accepts text, file paths and URLs, then stores them in a
+    specified dataset for further processing.
 
     Prerequisites:
         - **LLM_API_KEY**: Must be set in environment variables for content processing
@@ -82,7 +82,10 @@ async def add(
             * Absolute paths: "/path/to/document.pdf"
             * File URLs: "file:///path/to/document.pdf" or "file://relative/path.txt"
             * S3 paths: "s3://bucket-name/path/to/file.pdf"
-        - **Binary file objects**: File handles/streams (BinaryIO)
+        - **Open file objects are not accepted**: pass the file's path instead. The one
+          stream input is the HTTP API: ``POST /api/v1/add`` takes multipart uploads as
+          ``data: list[UploadFile]`` (FastAPI ``UploadFile``) and stores each one under
+          its upload filename.
         - **Web URLs**: "https://example.com/page" is fetched and ingested as a page
         - **Code repository URLs**: "https://github.com/<owner>/<repo>" (or a gitlab.com
           project, or any URL ending in .git) is shallow-cloned and ingested as ONE
@@ -113,8 +116,7 @@ async def add(
             - Absolute file path: "/path/to/document.pdf"
             - File URL: "file:///absolute/path/to/document.pdf" or "file://relative/path.txt"
             - S3 path: "s3://my-bucket/documents/file.pdf"
-            - List of mixed types: ["text content", "/path/file.pdf", "file://doc.txt", file_handle]
-            - Binary file object: open("file.txt", "rb")
+            - List of mixed types: ["text content", "/path/file.pdf", "file://doc.txt"]
             - url: A web link url (https or http); a GitHub/GitLab repository URL is
               cloned and indexed as a code graph instead of fetched as a page
         dataset_name: Name of the dataset to store data in. Defaults to "main_dataset".
