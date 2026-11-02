@@ -111,4 +111,3 @@ OAuth secrets, redirects, signature checks and how Slack text is stored are here
 So a change to OAuth state, webhook signatures, token exchange or ingestion of provider text
 in either copy needs the same change in the other, in the same PR or a linked one.
 Retiring the in-tree copies is follow-up work to SDK-1262.
-
