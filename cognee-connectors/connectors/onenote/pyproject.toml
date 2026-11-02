@@ -58,6 +58,17 @@ onenote = "cognee_connector_onenote:onenote_source"
 # No "cognee.integrations" entry point: OneNote has no OAuth flow and no host adapter in
 # cognee, so a cognee server has nothing to register for it (cognee_host/__init__.py).
 
+[tool.uv]
+# Note: exclude newer packages that are less than 2 days old, as cognee's own
+# pyproject does. Inside the cognee-connectors workspace uv reads only the
+# workspace root's settings, which carry the same lines; this copy applies when
+# the package is checked out and resolved on its own.
+exclude-newer = "2 days"
+# ...but never for cognee itself (or enola-cli, which cognee pins exactly): the
+# window otherwise resolves a release-day cognee to the previous release, as in
+# cognee-mcp (issue #4360).
+exclude-newer-package = { cognee = "0 days", enola-cli = "0 days" }
+
 [tool.hatch.build.targets.wheel]
 packages = ["cognee_connector_onenote"]
 

@@ -50,6 +50,17 @@ Repository = "https://github.com/topoteretes/cognee"
 Issues = "https://github.com/topoteretes/cognee/issues"
 Documentation = "https://docs.cognee.ai"
 
+[tool.uv]
+# Note: exclude newer packages that are less than 2 days old, as cognee's own
+# pyproject does. Inside the cognee-connectors workspace uv reads only the
+# workspace root's settings, which carry the same lines; this copy applies when
+# the package is checked out and resolved on its own.
+exclude-newer = "2 days"
+# ...but never for cognee itself (or enola-cli, which cognee pins exactly): the
+# window otherwise resolves a release-day cognee to the previous release, as in
+# cognee-mcp (issue #4360).
+exclude-newer-package = { cognee = "0 days", enola-cli = "0 days" }
+
 [tool.hatch.build.targets.wheel]
 packages = ["cognee_connectors_core"]
 
