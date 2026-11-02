@@ -99,20 +99,28 @@ async def test_deep_mode_shares_one_visited_set_across_the_batch(
 
 @pytest.mark.asyncio
 @patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
-async def test_deep_mode_reuses_the_pipeline_context_visited_set(
+async def test_deep_mode_leaves_the_runner_its_own_pass(
     mock_find_existing, monkeypatch, provenance_mode
 ):
+    """The runner's stamper also writes source_user, topological_rank, node_set and
+    content_hash, and skips ids already in ctx._provenance_visited. The deep walk here
+    must therefore keep its own visited set and leave the context's untouched."""
     mock_find_existing.return_value = set()
     provenance_mode("deep")
     calls = _spy_stamping(monkeypatch)
     ctx = PipelineContext(pipeline_name="p")
 
+    chunk = _chunk()
     await integrate_chunk_graphs(
-        [_chunk()], [_hub_graph()], KnowledgeGraph, None, pipeline_name="p", task_name="t", ctx=ctx
+        [chunk], [_hub_graph()], KnowledgeGraph, None, pipeline_name="p", task_name="t", ctx=ctx
     )
 
-    assert calls and all(v is ctx._provenance_visited for v in calls)
-    assert ctx._provenance_visited, "the runner's later pass must skip what was stamped here"
+    assert calls and all(v is calls[0] for v in calls)
+    assert calls[0] is not ctx._provenance_visited
+    assert ctx._provenance_visited == set(), "the runner must still get to stamp these"
+    stamped = [entity for _, entity in chunk.contains]
+    assert stamped and all(dp.source_pipeline == "p" for dp in stamped)
+    assert all(dp.source_user is None for dp in stamped), "source_user is the runner's to set"
 
 
 @pytest.mark.asyncio

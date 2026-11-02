@@ -213,13 +213,13 @@ async def integrate_chunk_graphs(
         if (pipeline_name or task_name) and get_provenance_config().is_deep():
             # One visited set for the whole batch: attach_new_edges_to_data_points has
             # cross-linked these DataPoints, so a fresh set per DataPoint re-walked the
-            # whole reachable graph every time (quadratic, GH #6498). The pipeline's own
-            # set is reused when there is one, so the runner's stamping pass skips what
-            # was stamped here. Lightweight and disabled modes leave stamping to the
-            # runner, as provenance_config documents.
-            visited = getattr(ctx, "_provenance_visited", None)
-            if not isinstance(visited, set):
-                visited = set()
+            # whole reachable graph every time (quadratic, GH #6498). The set is local
+            # on purpose: the runner's own pass (run_tasks_base._stamp_provenance) also
+            # writes source_user, topological_rank, node_set and content_hash and skips
+            # anything already in ctx._provenance_visited, so sharing that set here would
+            # leave these DataPoints with only pipeline and task stamped. Lightweight and
+            # disabled modes leave stamping to the runner, as provenance_config documents.
+            visited: set[int] = set()
             for data_point in constructed_data_points:
                 _stamp_provenance_deep(data_point, pipeline_name, task_name, visited)
 
