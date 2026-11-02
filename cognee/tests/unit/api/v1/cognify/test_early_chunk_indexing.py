@@ -42,8 +42,15 @@ async def test_both_runs_cut_the_same_chunks(monkeypatch):
     indexing = await cognify_module.get_indexing_tasks(chunker=chunker, chunk_size=300)
     cognify = await cognify_module.get_default_tasks(chunker=chunker, chunk_size=300)
 
-    assert indexing[1].default_params == cognify[1].default_params
-    assert indexing[1].default_params["kwargs"]["chunker"] is chunker
+    indexing_kwargs = dict(indexing[1].default_params["kwargs"])
+    cognify_kwargs = dict(cognify[1].default_params["kwargs"])
+    # The hints never touch the chunk text, so they are the one allowed difference:
+    # only extraction reads them, and the indexing run stops at the vector store.
+    assert indexing_kwargs.pop("temporal_hints") is False
+    assert cognify_kwargs.pop("temporal_hints") is True
+    assert indexing_kwargs == cognify_kwargs
+    assert indexing[1].default_params["args"] == cognify[1].default_params["args"]
+    assert indexing_kwargs["chunker"] is chunker
 
 
 @pytest.mark.asyncio
