@@ -28,6 +28,7 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
     get_configured_ontology_resolver,
 )
 from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.pipelines.provenance_config import get_provenance_config
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
@@ -209,7 +210,7 @@ async def integrate_chunk_graphs(
     constructed_data_points = list(data_points_by_id.values())
 
     if constructed_data_points:
-        if pipeline_name or task_name:
+        if (pipeline_name or task_name) and not get_provenance_config().is_disabled():
             # This walk is the only stamp these DataPoints get: the runner's own pass
             # (run_tasks_base._stamp_provenance) skips the chunks they hang off, which it
             # already visited at the chunking stage, so it never descends into them.
@@ -217,6 +218,7 @@ async def integrate_chunk_graphs(
             # cross-linked the DataPoints, so a fresh set per DataPoint re-walked the
             # whole reachable graph every time (quadratic, GH #6498). The set is local on
             # purpose: ids added to ctx._provenance_visited would be skipped by the runner.
+            # Disabled mode skips it, as run_tasks_base does.
             visited: set[int] = set()
             for data_point in constructed_data_points:
                 _stamp_provenance_deep(data_point, pipeline_name, task_name, visited)

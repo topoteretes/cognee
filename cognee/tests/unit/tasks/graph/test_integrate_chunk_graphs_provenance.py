@@ -13,6 +13,7 @@ import pytest
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.pipelines.models import PipelineContext
+from cognee.modules.pipelines.provenance_config import ProvenanceConfig
 from cognee.shared.data_models import Edge as KGEdge
 from cognee.shared.data_models import KnowledgeGraph, Node
 from cognee.tasks.graph.extract_graph_from_data import (
@@ -105,6 +106,24 @@ async def test_no_pipeline_or_task_name_skips_the_walk(mock_find_existing, monke
 
     chunk = _chunk()
     await integrate_chunk_graphs([chunk], [_hub_graph()], KnowledgeGraph, None)
+
+    assert calls == []
+    assert all(entity.source_pipeline is None for _, entity in chunk.contains)
+
+
+@pytest.mark.asyncio
+@patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
+async def test_disabled_mode_skips_the_walk(mock_find_existing, monkeypatch):
+    mock_find_existing.return_value = set()
+    monkeypatch.setattr(
+        egd_module, "get_provenance_config", lambda: ProvenanceConfig(provenance_mode="disabled")
+    )
+    calls = _spy_stamping(monkeypatch)
+
+    chunk = _chunk()
+    await integrate_chunk_graphs(
+        [chunk], [_hub_graph()], KnowledgeGraph, None, pipeline_name="p", task_name="t"
+    )
 
     assert calls == []
     assert all(entity.source_pipeline is None for _, entity in chunk.contains)
