@@ -17,11 +17,13 @@ import pathlib
 import cognee
 import pytest
 import pytest_asyncio
+from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.llm.config import get_llm_config
 
 from cognee_connector_google_drive import source as gd_source
 
@@ -133,6 +135,14 @@ async def clean_environment(tmp_path, monkeypatch):
     pytest.importorskip("dlt")
 
     monkeypatch.setenv("COGNEE_SKIP_CONNECTION_TEST", "true")
+    # The LLM and the LiteLLM embedder are monkeypatched below, but cognee only
+    # takes that path when a key is configured: with none it reroutes to the local
+    # GLiNER and fastembed defaults, which the mocks never touch.
+    monkeypatch.setenv("LLM_API_KEY", "mocked-offline")
+    # Both configs are cached on first use, which importing cognee already
+    # triggered, so the key only takes effect once they are rebuilt.
+    get_llm_config.cache_clear()
+    get_embedding_config.cache_clear()
     monkeypatch.setenv("GOOGLE_DRIVE_FOLDER_ID", "root")
     monkeypatch.setenv("GOOGLE_DRIVE_AUTH_MODE", "service_account")
     monkeypatch.setenv("GOOGLE_DRIVE_CREDENTIALS_PATH", "unused.json")
@@ -169,6 +179,8 @@ async def clean_environment(tmp_path, monkeypatch):
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
+    get_llm_config.cache_clear()
+    get_embedding_config.cache_clear()
 
 
 @pytest.mark.asyncio

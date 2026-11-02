@@ -271,7 +271,7 @@ python scripts/check_cognee_free.py cognee_connector_obsidian
 
 No Obsidian install is needed: the tests build a vault of plain files in a temporary folder.
 `tests/unit/test_obsidian_source.py` drives the walk with a dict as state and the resource
-through a real dlt pipeline on SQLite, and `tests/unit/test_connector.py` pins `CONNECTOR`. The
+through a real dlt pipeline on SQLite, and `tests/unit/test_obsidian_connector.py` pins `CONNECTOR`. The
 integration tests run the real cognee pipeline: `test_obsidian_ingestion.py` stops at the Data
 records, and `test_obsidian_forget.py` goes through `remember()` with the LLM and embeddings
 mocked, checking the graph after an edit, a deletion, a rename and a narrowed selection.

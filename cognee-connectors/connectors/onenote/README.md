@@ -292,6 +292,6 @@ python scripts/check_cognee_free.py cognee_connector_onenote
 No Microsoft account or token is needed. `tests/unit/fake_onenote.py` is an in-memory Graph
 served through `httpx.MockTransport`: notebooks, section groups, paged pages, HTML and not-found
 answers (20113 for a deleted page, section or notebook by default, 20102 for a page marked as
-hidden). `tests/unit/test_connector.py` pins `CONNECTOR`. `tests/integration/test_onenote_forget.py`
+hidden). `tests/unit/test_onenote_connector.py` pins `CONNECTOR`. `tests/integration/test_onenote_forget.py`
 and `test_onenote_ingestion.py` run the real cognee pipeline with the LLM and embeddings mocked.
 The connector has not been run against a live Microsoft account.

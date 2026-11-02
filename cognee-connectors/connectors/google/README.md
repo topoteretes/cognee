@@ -124,7 +124,7 @@ PYTHONPATH=core:connectors/google python -m pytest connectors/google/tests -q
 python scripts/check_cognee_free.py cognee_connector_google
 ```
 
-`tests/unit` covers the contract object (`test_connector.py`, no cognee needed), the OAuth
+`tests/unit` covers the contract object (`test_google_connector.py`, no cognee needed), the OAuth
 client's log-safe errors, and the cognee host base shared by the three products. The tests
 that drive that base through the three adapters (`test_google_oauth_adapters.py`,
 `test_google_credential_lifecycle.py`, `test_google_dataset_summary.py`) need the service

@@ -54,6 +54,10 @@ dev = [
 
 [tool.pytest.ini_options]
 # `pytest` with no path collects the core suite and every connector's tests/ tree.
+# Test modules carry their provider in the basename (`test_notion_connector.py`,
+# never `test_connector.py`): the trees have no `__init__.py`, so pytest's default
+# import mode registers each module by bare basename and two packages sharing one
+# cannot be collected in the same run.
 # No asyncio_mode: like cognee, the suites mark their coroutine tests explicitly
 # (`@pytest.mark.asyncio`), so pytest-asyncio stays in its strict default mode.
 testpaths = ["core/tests", "connectors"]
