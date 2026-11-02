@@ -16,11 +16,13 @@ import pathlib
 import cognee
 import pytest
 import pytest_asyncio
+from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.llm.config import get_llm_config
 
 add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
 calendar_module = importlib.import_module("cognee_connector_google_calendar.source")
@@ -106,6 +108,14 @@ async def clean_environment(tmp_path, monkeypatch):
     pytest.importorskip("dlt")
 
     monkeypatch.setenv("COGNEE_SKIP_CONNECTION_TEST", "true")
+    # The LLM and the LiteLLM embedder are monkeypatched below, but cognee only
+    # takes that path when a key is configured: with none it reroutes to the local
+    # GLiNER and fastembed defaults, which the mocks never touch.
+    monkeypatch.setenv("LLM_API_KEY", "mocked-offline")
+    # Both configs are cached on first use, which importing cognee already
+    # triggered, so the key only takes effect once they are rebuilt.
+    get_llm_config.cache_clear()
+    get_embedding_config.cache_clear()
     # The guide's documented setup: the installed-app flow from two paths.
     monkeypatch.setenv("GOOGLE_CALENDAR_CREDENTIALS_PATH", "unused.json")
     monkeypatch.setenv("GOOGLE_CALENDAR_TOKEN_PATH", str(tmp_path / "token.json"))
@@ -138,6 +148,8 @@ async def clean_environment(tmp_path, monkeypatch):
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
+    get_llm_config.cache_clear()
+    get_embedding_config.cache_clear()
 
 
 @pytest.mark.asyncio
