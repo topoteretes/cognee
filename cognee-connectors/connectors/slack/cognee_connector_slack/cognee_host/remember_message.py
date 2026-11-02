@@ -11,6 +11,7 @@ from uuid import UUID
 
 from cognee.api.v1.remember.remember import remember as cognee_remember
 from cognee.modules.users.methods import get_user
+from cognee.tasks.ingestion.data_item import DataItem
 
 SLACK_DATASET_NAME = "slack"
 
@@ -38,6 +39,16 @@ def _format_noted_text(text: str, *, author_id: str | None) -> str:
     return f"In Slack, {author} noted: {text}"
 
 
+def _literal(text: str) -> DataItem:
+    """Slack text as a document that is never read as a URL or a file path.
+
+    The text is whatever a Slack user typed. A bare string goes through ingestion's
+    path and URL detection, and the provenance prefix does not protect it: path
+    resolution collapses ``..`` segments through the prefix.
+    """
+    return DataItem(data=text, literal_text=True)
+
+
 async def remember_message(
     user_id: UUID,
     *,
@@ -55,7 +66,7 @@ async def remember_message(
     owner = await get_user(user_id)
     enriched_text = _format_remembered_text(text, channel_name=channel_name, author_id=author_id)
     await cognee_remember(
-        enriched_text,
+        _literal(enriched_text),
         dataset_name=SLACK_DATASET_NAME,
         user=owner,
         run_in_background=True,
@@ -78,7 +89,7 @@ async def remember_note(
     """
     owner = await get_user(user_id)
     await cognee_remember(
-        _format_noted_text(text, author_id=author_id),
+        _literal(_format_noted_text(text, author_id=author_id)),
         dataset_name=SLACK_DATASET_NAME,
         user=owner,
         run_in_background=True,
