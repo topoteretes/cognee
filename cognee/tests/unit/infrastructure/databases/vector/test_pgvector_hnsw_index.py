@@ -11,6 +11,7 @@ import pytest
 
 pytest.importorskip("pgvector")
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 from pgvector.sqlalchemy import Vector
@@ -116,3 +117,92 @@ async def test_migration_is_a_noop_for_other_vector_backends():
     # No engine attribute is touched for a non-pgvector store.
     await pgvector_hnsw_indexes.migrate(SimpleNamespace(vector_engine=object()))
     await pgvector_hnsw_indexes.downgrade(SimpleNamespace(vector_engine=object()))
+
+
+class _Result:
+    def __init__(self, rows=(), scalar=None):
+        self._rows = list(rows)
+        self._scalar = scalar
+
+    def all(self):
+        return self._rows
+
+    def scalar_one_or_none(self):
+        return self._scalar
+
+    def scalar(self):
+        return self._scalar
+
+
+class _Connection:
+    """Records every statement; answers the catalog queries with one 3072-dim table."""
+
+    def __init__(self, log):
+        self.log = log
+
+    async def execute(self, statement, params=None):
+        sql = " ".join(str(statement).split())
+        self.log.append(sql)
+        if "pg_attribute" in sql:
+            return _Result(rows=[("Entity_name", 3072)])
+        if "pg_extension" in sql:
+            return _Result(scalar="0.8.0")
+        return _Result()
+
+
+class _Engine:
+    def __init__(self):
+        self.log = []
+
+    @asynccontextmanager
+    async def connect(self):
+        yield _Connection(self.log)
+
+    @asynccontextmanager
+    async def begin(self):
+        self.log.append("BEGIN")
+        yield _Connection(self.log)
+        self.log.append("COMMIT")
+
+
+def _adapter_with(engine):
+    from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
+
+    adapter = PGVectorAdapter.__new__(PGVectorAdapter)
+    adapter.engine = engine
+    adapter._pgvector_version_cache = None
+    return adapter
+
+
+def _build_transaction(log):
+    start = log.index("BEGIN")
+    return log[start + 1 : log.index("COMMIT")]
+
+
+def _assert_serial_build_in_raised_memory(statements):
+    # Docker caps /dev/shm at 64 MB; a parallel build at the raised maintenance_work_mem
+    # needs a shared segment of that size and fails, so the build must be serial, and the
+    # settings must come before the CREATE INDEX in its own transaction (SET LOCAL).
+    assert statements == [
+        (
+            "SELECT set_config('maintenance_work_mem', :target, true) FROM pg_settings "
+            "WHERE name = 'maintenance_work_mem' AND setting::bigint < :target_kb"
+        ),
+        "SET LOCAL max_parallel_maintenance_workers = 0",
+        hnsw_index_statement("Entity_name", 3072, CURRENT),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_adapter_rebuild_runs_a_serial_build_with_raised_memory():
+    engine = _Engine()
+    result = await _adapter_with(engine).run_migrations()
+    assert result == {"hnsw_index_checked": ["Entity_name"], "hnsw_index_failed": []}
+    _assert_serial_build_in_raised_memory(_build_transaction(engine.log))
+
+
+@pytest.mark.asyncio
+async def test_migration_runs_a_serial_build_with_raised_memory():
+    engine = _Engine()
+    await pgvector_hnsw_indexes.migrate(SimpleNamespace(vector_engine=_adapter_with(engine)))
+    _assert_serial_build_in_raised_memory(_build_transaction(engine.log))
