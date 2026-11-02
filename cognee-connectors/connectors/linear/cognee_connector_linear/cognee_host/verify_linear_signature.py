@@ -1,6 +1,6 @@
 """The cognee shim for Linear webhook verification.
 
-Moved from cognee.modules.integrations.linear.verify_linear_signature (cognee dev,
+Copied from cognee.modules.integrations.linear.verify_linear_signature (cognee dev,
 2026-10-26): the verification itself now lives in :mod:`cognee_connector_linear.webhooks`
 on the core contract (the HMAC over the raw bytes, then the body's ``webhookTimestamp``
 replay guard). This adapts FastAPI's ``Request`` — its body plus its headers — to that
@@ -12,7 +12,7 @@ from cognee.modules.integrations.base import WebhookVerifier
 from fastapi import HTTPException, Request
 
 from cognee_connector_linear import webhooks
-from cognee_connector_linear.webhooks import has_fresh_webhook_timestamp, is_valid_linear_signature
+from cognee_connector_linear.webhooks import has_fresh_webhook_timestamp
 from cognee_connectors_core.errors import WebhookVerificationError
 
 
@@ -30,4 +30,4 @@ class LinearWebhookVerifier(WebhookVerifier):
             raise HTTPException(status_code=error.status_code, detail=error.detail) from None
 
 
-__all__ = ["LinearWebhookVerifier", "has_fresh_webhook_timestamp", "is_valid_linear_signature"]
+__all__ = ["LinearWebhookVerifier", "has_fresh_webhook_timestamp"]

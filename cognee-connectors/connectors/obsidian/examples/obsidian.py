@@ -1,6 +1,6 @@
 """Obsidian connector demo: an edited note replaces its old version, a deleted note is forgotten.
 
-Moved from examples/guides/obsidian.py (cognee dev, 2026-10-27).
+Copied from examples/guides/obsidian.py (cognee dev, 2026-10-27).
 
 ``obsidian_source`` returns a ``dlt`` resource that you hand straight to ``cognee.remember``.
 Each ``*.md`` note of a local vault becomes one document, with its path in the vault as id.

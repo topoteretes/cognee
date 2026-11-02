@@ -1,6 +1,6 @@
 """Notion as an ``OAuthIntegration`` adapter.
 
-Moved from cognee.modules.integrations.notion.adapter (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.notion.adapter (cognee dev, 2026-10-27).
 
 One authorization covers exactly one workspace, so a second workspace is a second
 connection, keyed on the workspace id. Notion's token endpoints authenticate the app

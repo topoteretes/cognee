@@ -1,6 +1,6 @@
 """GitHub settings, read from ``GITHUB_*`` environment variables.
 
-Moved from cognee.modules.integrations.github.github_settings (cognee dev,
+Copied from cognee.modules.integrations.github.github_settings (cognee dev,
 2026-10-26). The environment variable names are unchanged; ``require`` now
 delegates to the shared :func:`cognee_connectors_core.settings.require`, which
 raises the same ``GITHUB_<FIELD> is not configured`` error.

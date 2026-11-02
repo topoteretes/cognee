@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.google_drive.google_drive_settings (cognee dev, 2026-10-26)."""
+"""Copied from cognee.modules.integrations.google_drive.google_drive_settings (cognee dev, 2026-10-26)."""
 
 from pydantic_settings import SettingsConfigDict
 

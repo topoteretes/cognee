@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/unit/tasks/connectors/drive_pdfs.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/unit/tasks/connectors/drive_pdfs.py (cognee dev, 2026-10-26).
 
 Hand-built PDFs for the Drive connector tests: one valid, and corrupt ones on which pypdf
 raises an exception that is not a ``PyPdfError`` (so a rule listing pypdf's own errors misses them).

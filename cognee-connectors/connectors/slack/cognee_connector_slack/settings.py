@@ -1,6 +1,6 @@
 """Slack settings, read from ``SLACK_*`` environment variables.
 
-Moved from cognee.modules.integrations.slack.slack_settings (cognee dev, 2026-10-27):
+Copied from cognee.modules.integrations.slack.slack_settings (cognee dev, 2026-10-27):
 ``IntegrationSettings`` became :class:`cognee_connectors_core.settings.ConnectorSettings`
 and :func:`require` delegates to the core helper of the same name, so the environment
 variable names and the error a missing value raises are unchanged.

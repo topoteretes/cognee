@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.gmail.gmail_settings (cognee dev, 2026-10-26).
+"""Copied from cognee.modules.integrations.gmail.gmail_settings (cognee dev, 2026-10-26).
 
 Settings for the Gmail OAuth grant.
 """

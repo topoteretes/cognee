@@ -1,6 +1,6 @@
 """Shared Google OAuth primitives used by the Drive, Gmail and Calendar connectors.
 
-Moved from cognee.modules.integrations.google (cognee dev, 2026-10-26): the log-safe
+Copied from cognee.modules.integrations.google (cognee dev, 2026-10-26): the log-safe
 OAuth client (``exchange_code``, ``refresh_access_token``, ``revoke_token``,
 ``fetch_userinfo``, ``GoogleAuthError``) and the settings base (``GoogleSettings``,
 ``require``) that package exported, plus the contract pieces the three service packages

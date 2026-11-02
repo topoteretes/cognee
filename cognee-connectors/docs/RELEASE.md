@@ -9,7 +9,8 @@ cognee-mcp does. The workspace root is never published.
 Releases run from
 [`release_connectors.yml`](https://github.com/topoteretes/cognee/actions/workflows/release_connectors.yml)
 in the cognee repository. One run releases either one package or, with `all`,
-every package whose current version is not on PyPI yet.
+every package whose current version is not on PyPI yet. It publishes only from
+`main`, `dev` or a cognee release tag `v*`; the plan job fails on any other ref.
 
 ## How releases are triggered
 
@@ -72,8 +73,21 @@ Dev releases of a connector are cut from `dev` with a pre-release version
 Publishing uses PyPI Trusted Publishing (OpenID Connect): no API token, no
 secret. Every package has its own GitHub environment, `pypi-<distribution>`
 (for example `pypi-cognee-connector-notion`); the release jobs declare it, and
-GitHub creates it on first use. Add required reviewers to one of them to gate
-that package's uploads.
+GitHub creates it on first use, with no protection. Before a package's first
+publish, create its environment with the same refs the workflow allows, so a
+later edit to the workflow cannot bypass them:
+
+```bash
+ENV=pypi-cognee-connector-notion
+gh api -X PUT "repos/topoteretes/cognee/environments/${ENV}" --input - <<'JSON'
+{"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
+JSON
+gh api "repos/topoteretes/cognee/environments/${ENV}/deployment-branch-policies" -f name=main -f type=branch
+gh api "repos/topoteretes/cognee/environments/${ENV}/deployment-branch-policies" -f name=dev -f type=branch
+gh api "repos/topoteretes/cognee/environments/${ENV}/deployment-branch-policies" -f 'name=v*' -f type=tag
+```
+
+Add required reviewers to one of them to gate that package's uploads.
 
 The PyPI publisher of each package:
 

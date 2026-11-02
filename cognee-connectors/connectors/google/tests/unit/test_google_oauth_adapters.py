@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/unit/modules/integrations/test_google_oauth_adapters.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/unit/modules/integrations/test_google_oauth_adapters.py (cognee dev, 2026-10-26).
 
 Gmail, Drive and Calendar share one Google OAuth contract, and each keeps its own scope.
 

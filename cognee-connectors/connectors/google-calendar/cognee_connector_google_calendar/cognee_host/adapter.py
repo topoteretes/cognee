@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.google_calendar.adapter (cognee dev, 2026-10-26).
+"""Copied from cognee.modules.integrations.google_calendar.adapter (cognee dev, 2026-10-26).
 
 Google Calendar OAuth adapter.
 """

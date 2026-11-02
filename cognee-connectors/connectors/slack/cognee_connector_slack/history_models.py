@@ -1,6 +1,6 @@
 """Selection contracts for Slack history ingestion (no memory state).
 
-Moved from cognee.modules.integrations.slack.history_models (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.history_models (cognee dev, 2026-10-27).
 """
 
 import re

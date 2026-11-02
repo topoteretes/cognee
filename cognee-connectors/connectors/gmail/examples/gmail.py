@@ -1,4 +1,4 @@
-"""Moved from examples/guides/gmail.py (cognee dev, 2026-10-26).
+"""Copied from examples/guides/gmail.py (cognee dev, 2026-10-26).
 
 Gmail connector demo — "ask my inbox".
 

@@ -1,6 +1,6 @@
 """The Obsidian source reads a vault completely, and forgets a note only on a complete listing.
 
-Moved from cognee.tests.unit.tasks.connectors.test_obsidian_source (cognee dev, 2026-10-27).
+Copied from cognee.tests.unit.tasks.connectors.test_obsidian_source (cognee dev, 2026-10-27).
 
 Every run walks the whole selection, one row per readable ``*.md`` note with its path as id.
 A previous member the listing no longer contains is tombstoned (deleted, renamed, or outside

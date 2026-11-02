@@ -1,6 +1,6 @@
 """Handle one verified GitHub webhook delivery.
 
-Moved from cognee.modules.integrations.github.handle_github_event (cognee dev,
+Copied from cognee.modules.integrations.github.handle_github_event (cognee dev,
 2026-10-26).
 
 Runs detached from the request (the generic events route acks first), so

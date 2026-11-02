@@ -18,8 +18,8 @@ from fastapi import HTTPException
 from cognee_connector_linear.cognee_host.verify_linear_signature import (
     LinearWebhookVerifier,
     has_fresh_webhook_timestamp,
-    is_valid_linear_signature,
 )
+from cognee_connector_linear.webhooks import SIGNATURE_HEADER
 
 _SECRET = "It's a Secret to Everybody"
 
@@ -55,24 +55,38 @@ class _FakeRequest:
         return self._raw_body
 
 
-def test_valid_signature_passes():
+async def _hmac_accepted(body: bytes, signature: str | None) -> bool:
+    """Whether the verifier the route runs accepts this delivery's signature."""
+    headers = {} if signature is None else {SIGNATURE_HEADER: signature}
+    try:
+        await LinearWebhookVerifier().verify(_FakeRequest(body, headers))
+    except HTTPException:
+        return False
+    return True
+
+
+@pytest.mark.asyncio
+async def test_valid_signature_passes():
     body = _body()
-    assert is_valid_linear_signature(body, _sign(body))
+    assert await _hmac_accepted(body, _sign(body))
 
 
-def test_tampered_body_fails():
-    signature = _sign(b'{"action":"create"}')
-    assert not is_valid_linear_signature(b'{"action":"remove"}', signature)
+@pytest.mark.asyncio
+async def test_tampered_body_fails():
+    signature = _sign(_body())
+    assert not await _hmac_accepted(_body(int(time.time() * 1000) + 1), signature)
 
 
-def test_wrong_secret_fails():
+@pytest.mark.asyncio
+async def test_wrong_secret_fails():
     body = _body()
-    assert not is_valid_linear_signature(body, _sign(body, secret="other-secret"))
+    assert not await _hmac_accepted(body, _sign(body, secret="other-secret"))
 
 
-def test_missing_signature_fails():
-    assert not is_valid_linear_signature(_body(), "")
-    assert not is_valid_linear_signature(_body(), None)
+@pytest.mark.asyncio
+async def test_missing_signature_fails():
+    assert not await _hmac_accepted(_body(), "")
+    assert not await _hmac_accepted(_body(), None)
 
 
 def test_stale_timestamp_is_not_fresh():

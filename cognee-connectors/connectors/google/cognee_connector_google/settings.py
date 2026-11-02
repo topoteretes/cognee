@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.google.google_settings (cognee dev, 2026-10-26).
+"""Copied from cognee.modules.integrations.google.google_settings (cognee dev, 2026-10-26).
 
 Settings shared by Google OAuth integrations.
 """

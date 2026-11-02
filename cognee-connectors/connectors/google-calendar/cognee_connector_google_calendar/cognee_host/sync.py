@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.google_calendar.sync (cognee dev, 2026-10-26).
+"""Copied from cognee.modules.integrations.google_calendar.sync (cognee dev, 2026-10-26).
 
 Sync Google Calendar through the SDK connector's sync-token and tombstone path.
 """

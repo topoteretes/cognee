@@ -1,6 +1,6 @@
 """Answer Linear agent sessions (@mentions / delegated issues) from cognee memory.
 
-Moved from cognee.modules.integrations.linear.agent_session (cognee dev, 2026-10-26).
+Copied from cognee.modules.integrations.linear.agent_session (cognee dev, 2026-10-26).
 
 An agent session opens when a workspace member @mentions the agent or
 delegates an issue to it (action ``created``) and continues when they reply

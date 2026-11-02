@@ -1,6 +1,6 @@
 """Log-safe Notion OAuth, search and parent lookups for the Notion integration.
 
-Moved from cognee.modules.integrations.notion.client (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.notion.client (cognee dev, 2026-10-27).
 
 Notion's token endpoints authenticate the app with HTTP Basic (client id and secret)
 and take a JSON body. Every failure is a :class:`NotionError` carrying Notion's error

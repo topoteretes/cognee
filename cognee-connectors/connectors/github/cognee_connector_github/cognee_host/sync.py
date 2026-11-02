@@ -1,6 +1,6 @@
 """Sync a GitHub installation's repositories into the code graph.
 
-Moved from cognee.modules.integrations.github.sync (cognee dev, 2026-10-26).
+Copied from cognee.modules.integrations.github.sync (cognee dev, 2026-10-26).
 ``clone_url`` now lives in :mod:`cognee_connector_github.app_auth`, where the
 host-free connector also builds clone URLs from; it is re-exported here.
 
@@ -61,7 +61,9 @@ async def list_installation_repositories(token: str) -> list[str]:
     url: str | None = f"{API_BASE_URL}/installation/repositories?per_page=100"
     async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
         while url:
-            async with session.get(url, headers=_api_headers(token)) as response:
+            async with session.get(
+                url, headers=_api_headers(token), allow_redirects=False
+            ) as response:
                 if response.status != 200:
                     raise RuntimeError(
                         f"GitHub installation repository listing failed: HTTP {response.status}"

@@ -1,6 +1,6 @@
 """Unit tests for cognee_connector_slack.cognee_host.adapter.SlackIntegration.
 
-Moved from cognee/tests/unit/modules/integrations/test_slack_adapter.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/unit/modules/integrations/test_slack_adapter.py (cognee dev, 2026-10-27).
 
 Covers the field-extraction logic that used to live in persistence.py's
 save_installation() — team vs. enterprise (Grid) routing id, secret/metadata

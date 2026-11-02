@@ -68,6 +68,12 @@ def test_malformed_state_fails():
     assert validate_state("not-a-uuid:123:deadbeef", signing_secret=_SECRET) is None
 
 
+def test_non_ascii_signature_fails_instead_of_raising():
+    state = make_state(uuid4(), signing_secret=_SECRET)
+    payload, _, _signature = state.rpartition(":")
+    assert validate_state(f"{payload}:\u00e9", signing_secret=_SECRET) is None
+
+
 def test_state_signed_with_other_secret_fails():
     state = make_state(uuid4(), signing_secret=_SECRET)
     assert validate_state(state, signing_secret="rotated-secret") is None

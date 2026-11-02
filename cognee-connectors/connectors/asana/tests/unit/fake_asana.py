@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """In-memory stand-in for the Asana REST API, shaped like its real answers.
 
-Moved from cognee.tests.unit.tasks.connectors.fake_asana (cognee dev, 2026-10-27).
+Copied from cognee.tests.unit.tasks.connectors.fake_asana (cognee dev, 2026-10-27).
 
 It models what was observed against a real workspace: ``/events`` answers 412 with a fresh sync
 token when the token is missing or stale, a listing pages through ``next_page.offset`` (an

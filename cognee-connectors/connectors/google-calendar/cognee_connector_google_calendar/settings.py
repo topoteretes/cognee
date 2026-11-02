@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.google_calendar.google_calendar_settings (cognee dev, 2026-10-26).
+"""Copied from cognee.modules.integrations.google_calendar.google_calendar_settings (cognee dev, 2026-10-26).
 
 Settings for the Google Calendar OAuth grant.
 

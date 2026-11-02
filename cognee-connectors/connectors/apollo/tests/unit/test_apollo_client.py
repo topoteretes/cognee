@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """The Apollo REST client: request shape, error mapping, retries and key hygiene.
 
-Moved from cognee.tests.unit.tasks.connectors.test_apollo_client (cognee dev, 2026-10-27).
+Copied from cognee.tests.unit.tasks.connectors.test_apollo_client (cognee dev, 2026-10-27).
 
 Importing the connectors loads no HTTP client library, so ``requests`` is imported when
 the first request is made. A key never reaches an error message, a repr or a log line, and

@@ -1,6 +1,6 @@
 """Linear webhook delivery verification.
 
-Moved from cognee.modules.integrations.linear.verify_linear_signature (cognee dev,
+Copied from cognee.modules.integrations.linear.verify_linear_signature (cognee dev,
 2026-10-26) and re-expressed on the core contract: the verifier takes the raw body and the
 request headers and refuses a delivery with ``WebhookVerificationError``; the FastAPI shim
 cognee's generic events route needs stays in ``cognee_host/verify_linear_signature.py``.
@@ -20,8 +20,6 @@ after the HMAC has authenticated the bytes — a timestamp from an unverified
 body proves nothing.
 """
 
-import hashlib
-import hmac
 import json
 import time
 from collections.abc import Callable, Mapping
@@ -29,7 +27,6 @@ from collections.abc import Callable, Mapping
 from cognee_connector_linear.settings import linear_settings
 from cognee_connectors_core.base import WebhookVerifier
 from cognee_connectors_core.errors import WebhookVerificationError
-from cognee_connectors_core.settings import require
 from cognee_connectors_core.signatures import HmacVerifier, SignatureScheme
 
 #: The header Linear signs with: a bare hex HMAC-SHA256, no ``sha256=`` prefix.
@@ -49,22 +46,6 @@ def configured_webhook_secret() -> str | None:
     key.
     """
     return linear_settings.webhook_secret or None
-
-
-def is_valid_linear_signature(raw_body: bytes, signature: str) -> bool:
-    """Whether ``signature`` is an authentic Linear signature for ``raw_body``.
-
-    Pure function of its inputs — the verifier and the unit tests share it.
-    """
-    if not signature:
-        return False
-
-    expected = hmac.new(
-        require(linear_settings, "webhook_secret").encode(), raw_body, hashlib.sha256
-    ).hexdigest()
-    # compare_digest, not ==: a timing-safe comparison so the signature cannot
-    # be brute-forced byte by byte from response latencies.
-    return hmac.compare_digest(expected, signature)
 
 
 def has_fresh_webhook_timestamp(raw_body: bytes) -> bool:
@@ -117,5 +98,4 @@ __all__ = [
     "LinearWebhookVerifier",
     "configured_webhook_secret",
     "has_fresh_webhook_timestamp",
-    "is_valid_linear_signature",
 ]

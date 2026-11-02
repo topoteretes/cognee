@@ -5,7 +5,7 @@ Everything under ``cognee_host/`` may import cognee; it is installed with the
 ``__init__`` never imports this subpackage, and nothing here runs at import: a
 host calls :func:`register` and mounts what :func:`routers` lists.
 
-Moved from cognee.modules.integrations.slack.__init__ (cognee dev, 2026-10-27),
+Copied from cognee.modules.integrations.slack.__init__ (cognee dev, 2026-10-27),
 whose import-time ``use_integration(SlackIntegration())`` became the explicit
 :func:`register`; the two routers cognee's ``api/client.py`` mounted by hand are
 what :func:`routers` returns.

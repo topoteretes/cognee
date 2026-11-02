@@ -1,6 +1,6 @@
 """Slack adapter over the generic credential store.
 
-Moved from cognee.modules.integrations.slack.persistence (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.persistence (cognee dev, 2026-10-27).
 
 Exposes team-id-keyed lookups the webhook handlers route through. Persisting
 a completed OAuth exchange now goes through the generic

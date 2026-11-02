@@ -1,6 +1,6 @@
 """Sync a Linear workspace into cognee memory through the SDK's DLT source.
 
-Moved from cognee.modules.integrations.linear.sync (cognee dev, 2026-10-26).
+Copied from cognee.modules.integrations.linear.sync (cognee dev, 2026-10-26).
 
 The agent integration reads from whatever its dataset holds, so this fills one
 dataset per workspace (``linear_<url_key>``) with one DLT table per team: the

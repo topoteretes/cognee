@@ -1,6 +1,6 @@
 """Handle ``/cognee-ask`` slash command — recall from knowledge graph.
 
-Moved from cognee.modules.integrations.slack.handle_cognee_ask (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.handle_cognee_ask (cognee dev, 2026-10-27).
 
 Nothing about a ``/cognee-ask`` becomes visible to the channel until the
 asker has seen the answer and explicitly chosen to share it — neither the

@@ -167,6 +167,9 @@ jobs:
             # fresh resolution would upgrade them one at a time past their locked,
             # exactly-pinned partners (as in .github/actions/install_cognee).
             uv pip install --no-deps --force-reinstall -e ..
+            # A dependency this checkout's cognee adds or raises is not in the
+            # connectors lock yet; take those from the root lock.
+            uv run --no-sync python scripts/install_missing_cognee_deps.py
           else
             uv pip install --force-reinstall "cognee==${COGNEE_VERSION}"
           fi

@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/unit/modules/integrations/test_google_ingestion.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/unit/modules/integrations/test_google_ingestion.py (cognee dev, 2026-10-26).
 
 Google integration factories use SDK sources without community packages.
 """

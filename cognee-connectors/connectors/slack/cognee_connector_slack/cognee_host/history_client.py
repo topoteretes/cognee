@@ -1,6 +1,6 @@
 """Bounded Slack API reads, with complete pagination and no arbitrary URL fetching.
 
-Moved from cognee.modules.integrations.slack.history_client (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.history_client (cognee dev, 2026-10-27).
 """
 
 import asyncio

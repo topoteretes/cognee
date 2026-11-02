@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/unit/modules/integrations/test_gmail_sync.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/unit/modules/integrations/test_gmail_sync.py (cognee dev, 2026-10-26).
 
 Gmail ingestion uses SDK DLT state and preserves the user's scope.
 """

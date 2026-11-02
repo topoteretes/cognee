@@ -1,6 +1,6 @@
 """Opt-in Slack source refresh. Configuration/status use the credential store.
 
-Moved from cognee.modules.integrations.slack.history_sync (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.history_sync (cognee dev, 2026-10-27).
 
 No messages or derived memory are stored here. A fixed backfill start is
 retained for recovery; each successful refresh reconciles the selected source

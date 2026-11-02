@@ -1,7 +1,7 @@
 """Handle ``/cognee-link`` — link the invoking Slack member's own cognee
 account via a magic link, not a pasted API key.
 
-Moved from cognee.modules.integrations.slack.handle_slack_link (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.handle_slack_link (cognee dev, 2026-10-27).
 
 One Slack OAuth install serves an entire workspace, but ``/cognee-ask`` and
 "Remember this" need to know *which* cognee account each individual member
@@ -25,6 +25,7 @@ The command's own reply is ephemeral, same reasoning as everywhere else in
 this integration: only the invoking member should ever see their own link.
 """
 
+import hmac
 import time
 from typing import Any
 from urllib.parse import parse_qs
@@ -83,7 +84,9 @@ def validate_link_code(code: str) -> tuple[str, str] | None:
     team_id, slack_user_id, expires_str, signature = parts
 
     payload = f"{team_id}:{slack_user_id}:{expires_str}"
-    if sign_state_payload(payload, signing_secret=require("signing_secret")) != signature:
+    expected = sign_state_payload(payload, signing_secret=require("signing_secret"))
+    # compare_digest, not !=, and it raises TypeError on a non-ASCII str.
+    if not signature.isascii() or not hmac.compare_digest(expected, signature):
         return None
 
     try:

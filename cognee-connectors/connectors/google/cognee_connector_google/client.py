@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.google.client (cognee dev, 2026-10-26).
+"""Copied from cognee.modules.integrations.google.client (cognee dev, 2026-10-26).
 
 Small async client for Google OAuth and OpenID Connect endpoints.
 """

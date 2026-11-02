@@ -1,6 +1,6 @@
 """Interactive payload dispatch — message shortcuts, block actions, etc.
 
-Moved from cognee.modules.integrations.slack.handle_slack_interactive (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.handle_slack_interactive (cognee dev, 2026-10-27).
 
 Slack POSTs ``application/x-www-form-urlencoded`` for interactive payloads,
 with a single ``payload`` field holding a URL-encoded JSON string — unlike

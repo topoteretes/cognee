@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """One OneNote notebook is one merge resource, and an error never forgets a page.
 
-Moved from cognee.tests.unit.tasks.connectors.test_onenote_source (cognee dev, 2026-10-27).
+Copied from cognee.tests.unit.tasks.connectors.test_onenote_source (cognee dev, 2026-10-27).
 
 The walk runs through a real ``dlt`` pipeline on SQLite against the Graph fake: incremental HTML
 fetching, the body cache that survives a failed run, deletion only on confirmed evidence, the

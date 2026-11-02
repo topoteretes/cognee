@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """In-memory stand-in for the Apollo REST API, shaped like its real responses.
 
-Moved from cognee.tests.unit.tasks.connectors.fake_apollo (cognee dev, 2026-10-27).
+Copied from cognee.tests.unit.tasks.connectors.fake_apollo (cognee dev, 2026-10-27).
 
 An endpoint the connector does not use, the activity feed included, is not answered: a
 call to it raises ``AssertionError`` and fails the test that made it.

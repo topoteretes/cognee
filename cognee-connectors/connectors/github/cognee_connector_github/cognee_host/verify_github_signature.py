@@ -1,6 +1,6 @@
 """GitHub webhook verification on cognee's FastAPI-bound ``WebhookVerifier``.
 
-Moved from cognee.modules.integrations.github.verify_github_signature (cognee
+Copied from cognee.modules.integrations.github.verify_github_signature (cognee
 dev, 2026-10-26). The HMAC check itself now lives in
 :mod:`cognee_connector_github.webhooks` on the core verifier; this shim adapts
 FastAPI's ``Request`` (body plus headers) to it and maps a refused delivery to

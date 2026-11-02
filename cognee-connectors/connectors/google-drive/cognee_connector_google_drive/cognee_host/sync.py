@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.google_drive.sync (cognee dev, 2026-10-26).
+"""Copied from cognee.modules.integrations.google_drive.sync (cognee dev, 2026-10-26).
 
 Sync Drive through the SDK source's incremental, deletion-aware path.
 

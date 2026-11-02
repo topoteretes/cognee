@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/unit/modules/integrations/test_google_resource_retirement.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/unit/modules/integrations/test_google_resource_retirement.py (cognee dev, 2026-10-26).
 
 Retirement uses only system-owned tables in the account owner's dataset.
 """

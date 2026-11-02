@@ -1,6 +1,6 @@
 """Unit tests for cognee_connector_slack.home.publish_home_view.
 
-Moved from cognee/tests/unit/modules/integrations/test_home.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/unit/modules/integrations/test_home.py (cognee dev, 2026-10-27).
 
 Network is mocked. Invariants: the call is authenticated with the bot token
 and targets the given Slack user, and a rejected call raises with Slack's

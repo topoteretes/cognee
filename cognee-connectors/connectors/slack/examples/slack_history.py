@@ -1,6 +1,6 @@
 """Import Slack history through a running Cognee API.
 
-Moved from examples/python/integrations/slack_history.py (cognee dev, 2026-10-27).
+Copied from examples/python/integrations/slack_history.py (cognee dev, 2026-10-27).
 
 Set COGNEE_API_URL, COGNEE_API_KEY, SLACK_TEAM_ID, COGNEE_DATASET_ID and
 SLACK_CHANNEL_IDS (comma-separated). Optional SLACK_IMPORT_DAYS defaults to 7.

@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """A record is re-extracted only when its rendered text changes, and an error never forgets one.
 
-Moved from cognee.tests.unit.tasks.connectors.test_apollo_source (cognee dev, 2026-10-27).
+Copied from cognee.tests.unit.tasks.connectors.test_apollo_source (cognee dev, 2026-10-27).
 
 Nothing the text leaves out (custom fields nobody listed, step positions, activity dates) may
 move a fingerprint, or every sequence step would re-extract its contact. What the text does

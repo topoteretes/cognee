@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.google.oauth_integration (cognee dev, 2026-10-26).
+"""Copied from cognee.modules.integrations.google.oauth_integration (cognee dev, 2026-10-26).
 
 The OAuth flow every Google connector shares.
 

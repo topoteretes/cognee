@@ -1,6 +1,6 @@
 """Import selected Slack conversations through native Cognee add/update/delete.
 
-Moved from cognee.modules.integrations.slack.history (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.history (cognee dev, 2026-10-27).
 
 Only source selection and source identity live here. Documents, graph state,
 ACLs, indexing, and deletion belong to Cognee's existing APIs. A conversation

@@ -1,6 +1,6 @@
 """Slack selection and native-ingestion boundaries; no live Slack/LLM calls.
 
-Moved from cognee/tests/unit/modules/integrations/test_slack_history.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/unit/modules/integrations/test_slack_history.py (cognee dev, 2026-10-27).
 """
 
 import asyncio

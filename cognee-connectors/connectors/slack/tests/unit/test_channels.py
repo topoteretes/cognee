@@ -1,6 +1,6 @@
 """Unit tests for cognee_connector_slack.channels.list_channels.
 
-Moved from cognee/tests/unit/modules/integrations/test_channels.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/unit/modules/integrations/test_channels.py (cognee dev, 2026-10-27).
 
 Network is mocked — the invariants under test: pagination follows Slack's
 next_cursor until exhausted, only the fields the allowlist UI needs are kept,

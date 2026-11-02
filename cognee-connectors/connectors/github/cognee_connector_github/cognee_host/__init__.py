@@ -1,6 +1,6 @@
 """Plugs the GitHub connector into a cognee server (cognee >= 1.6.5).
 
-Moved from cognee.modules.integrations.github.__init__ (cognee dev,
+Copied from cognee.modules.integrations.github.__init__ (cognee dev,
 2026-10-26), where importing the package registered the adapter as a side
 effect; here a host calls ``register()`` explicitly and nothing runs at
 import. GitHub mounts no routers of its own — its webhooks arrive on the

@@ -1,6 +1,6 @@
 # Adapted from topoteretes/cognee-community (Apache-2.0), commit 21d0b36.
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
-"""Moved from cognee/tests/integration/tasks/connectors/test_google_drive_forget.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/integration/tasks/connectors/test_google_drive_forget.py (cognee dev, 2026-10-26).
 
 Forget-on-delete must remove a file's cognified graph content, not just its
 Data record. Ingests two Drive files, cognifies (LLM + embeddings mocked, no

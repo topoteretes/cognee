@@ -1,6 +1,6 @@
 """Unit tests for cognee_connector_slack.cognee_host.remember_message.
 
-Moved from cognee/tests/unit/modules/integrations/test_remember_message.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/unit/modules/integrations/test_remember_message.py (cognee dev, 2026-10-27).
 
 Invariants: the enriched text carries channel/author provenance (falling
 back gracefully when either is missing), the Slack dataset name is used,

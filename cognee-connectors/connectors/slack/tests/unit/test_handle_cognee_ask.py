@@ -1,6 +1,6 @@
 """Unit tests for cognee_connector_slack.cognee_host.handle_cognee_ask.
 
-Moved from cognee/tests/unit/modules/integrations/test_handle_cognee_ask.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/unit/modules/integrations/test_handle_cognee_ask.py (cognee dev, 2026-10-27).
 
 ``/cognee-ask`` validates the workspace/query/authorization and starts the
 search immediately in the background, acking with an in_channel placeholder

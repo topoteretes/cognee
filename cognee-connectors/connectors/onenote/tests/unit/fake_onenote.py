@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """Offline Microsoft Graph fake: notebooks, sections, pages and HTML served through ``httpx``.
 
-Moved from cognee.tests.unit.tasks.connectors.fake_onenote (cognee dev, 2026-10-27).
+Copied from cognee.tests.unit.tasks.connectors.fake_onenote (cognee dev, 2026-10-27).
 """
 
 import json

@@ -1,6 +1,6 @@
 """Slack import dialog and full-thread shortcut. Replies stay private.
 
-Moved from cognee.modules.integrations.slack.handle_history (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.handle_history (cognee dev, 2026-10-27).
 """
 
 import asyncio

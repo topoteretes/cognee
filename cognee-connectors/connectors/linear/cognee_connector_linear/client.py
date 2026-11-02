@@ -1,6 +1,6 @@
 """Thin async client for Linear's GraphQL API.
 
-Moved from cognee.modules.integrations.linear.client (cognee dev, 2026-10-26).
+Copied from cognee.modules.integrations.linear.client (cognee dev, 2026-10-26).
 
 Linear exposes a single GraphQL endpoint rather than REST resources, so this
 module is one generic :func:`graphql` call plus a named wrapper for the one

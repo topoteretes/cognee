@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """Forget-on-delete must hard-delete a task: its row, its Data record and its graph content.
 
-Moved from cognee.tests.integration.tasks.connectors.test_asana_forget (cognee dev, 2026-10-27).
+Copied from cognee.tests.integration.tasks.connectors.test_asana_forget (cognee dev, 2026-10-27).
 
 Ingests two tasks, cognifies them with the LLM mocked, deletes one in Asana and checks that only
 the deleted task leaves every store, rather than being replaced by an emptied document. A task

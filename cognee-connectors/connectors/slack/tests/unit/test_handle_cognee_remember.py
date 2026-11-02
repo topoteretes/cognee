@@ -1,6 +1,6 @@
 """Unit tests for cognee_connector_slack.cognee_host.handle_cognee_remember.
 
-Moved from cognee/tests/unit/modules/integrations/test_handle_cognee_remember.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/unit/modules/integrations/test_handle_cognee_remember.py (cognee dev, 2026-10-27).
 
 Credential lookup, owner resolution, the ingest call and the response_url
 delivery are all patched out — this is about the handler's contract, not

@@ -1,6 +1,6 @@
 """Obsidian connector for cognee: a ``dlt`` source that reads a local vault, one note per document.
 
-Moved from cognee.tasks.ingestion.connectors.obsidian (cognee dev, 2026-10-27).
+Copied from cognee.tasks.ingestion.connectors.obsidian (cognee dev, 2026-10-27).
 
 ``cognee.remember(<folder>)`` stores a note once: an edited note leaves its old version in
 memory and a deleted note is never forgotten. This source gives every note a stable id (its

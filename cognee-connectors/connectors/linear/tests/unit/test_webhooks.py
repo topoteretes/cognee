@@ -19,7 +19,6 @@ from cognee_connector_linear.webhooks import (
     LinearWebhookVerifier,
     configured_webhook_secret,
     has_fresh_webhook_timestamp,
-    is_valid_linear_signature,
 )
 from cognee_connectors_core.errors import WebhookVerificationError
 from cognee_connectors_core.signatures import MAX_BODY_BYTES
@@ -168,11 +167,8 @@ async def test_a_body_over_the_cap_is_refused_before_the_hmac():
     assert caught.value.status_code == 413
 
 
-def test_the_pure_predicates_agree_with_the_verifier():
+def test_the_timestamp_predicate():
     body = _body()
-    assert is_valid_linear_signature(body, _sign(body))
-    assert not is_valid_linear_signature(body, _sign(body, secret="other-secret"))
-    assert not is_valid_linear_signature(body, "")
     assert has_fresh_webhook_timestamp(body)
     assert not has_fresh_webhook_timestamp(_body(int((time.time() - 120) * 1000)))
     assert not has_fresh_webhook_timestamp(b"not json")

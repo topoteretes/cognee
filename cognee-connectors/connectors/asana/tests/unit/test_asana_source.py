@@ -3,7 +3,7 @@
 """An Asana task is re-extracted only when its rendered text changes, and nothing but a complete
 listing ever forgets one.
 
-Moved from cognee.tests.unit.tasks.connectors.test_asana_source (cognee dev, 2026-10-27).
+Copied from cognee.tests.unit.tasks.connectors.test_asana_source (cognee dev, 2026-10-27).
 
 The walk is driven with a plain dict as dlt resource state, and then through a real ``dlt``
 pipeline into SQLite. What a task that cannot be read does is the heart of it: while it is still

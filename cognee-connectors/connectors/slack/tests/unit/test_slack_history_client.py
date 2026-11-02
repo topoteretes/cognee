@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/unit/modules/integrations/test_slack_history_client.py (cognee dev, 2026-10-27)."""
+"""Copied from cognee/tests/unit/modules/integrations/test_slack_history_client.py (cognee dev, 2026-10-27)."""
 
 import asyncio
 from types import SimpleNamespace

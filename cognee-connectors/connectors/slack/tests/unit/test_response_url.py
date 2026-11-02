@@ -1,6 +1,6 @@
 """Unit tests for cognee_connector_slack.response_url.
 
-Moved from cognee/tests/unit/modules/integrations/test_response_url.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/unit/modules/integrations/test_response_url.py (cognee dev, 2026-10-27).
 
 Invariants: never raises, regardless of a missing URL or a network failure —
 callers rely on this to be a safe fire-and-forget delivery.

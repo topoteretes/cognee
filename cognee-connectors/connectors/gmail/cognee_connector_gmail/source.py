@@ -1,6 +1,6 @@
 # Adapted from topoteretes/cognee-community (Apache-2.0), commit 21d0b36.
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
-"""Moved from cognee.tasks.ingestion.connectors.gmail (cognee dev, 2026-10-26).
+"""Copied from cognee.tasks.ingestion.connectors.gmail (cognee dev, 2026-10-26).
 
 Gmail connector for cognee — a ``dlt`` source that turns your inbox into memory.
 

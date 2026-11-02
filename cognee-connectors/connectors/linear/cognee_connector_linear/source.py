@@ -1,6 +1,6 @@
 """Linear connector for cognee: a ``dlt`` source that turns a team's work into memory.
 
-Moved from cognee.tasks.ingestion.connectors.linear (cognee dev, 2026-10-26).
+Copied from cognee.tasks.ingestion.connectors.linear (cognee dev, 2026-10-26).
 
 One source is one Linear team. It yields the team's issues (with their comments
 folded into the issue document) and its projects as flat document rows, and is

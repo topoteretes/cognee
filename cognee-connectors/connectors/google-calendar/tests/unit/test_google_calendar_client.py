@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/unit/modules/integrations/test_google_calendar_client.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/unit/modules/integrations/test_google_calendar_client.py (cognee dev, 2026-10-26).
 
 ``list_calendars`` reads every page and asks for hidden calendars too.
 """

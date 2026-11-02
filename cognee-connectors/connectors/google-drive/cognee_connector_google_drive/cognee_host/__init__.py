@@ -1,6 +1,6 @@
 """Plugs the Google Drive connector into a cognee server (cognee >= 1.6.5).
 
-Moved from cognee.modules.integrations.google_drive.__init__ (cognee dev, 2026-10-26),
+Copied from cognee.modules.integrations.google_drive.__init__ (cognee dev, 2026-10-26),
 where importing the package registered the Drive adapter with the integrations registry
 as a side effect; here a host calls ``register()`` and nothing runs at import. Drive
 mounts no routers of its own (its whole surface is the generic

@@ -1,6 +1,6 @@
 """Linear settings, read from ``LINEAR_*`` environment variables.
 
-Moved from cognee.modules.integrations.linear.linear_settings (cognee dev, 2026-10-26).
+Copied from cognee.modules.integrations.linear.linear_settings (cognee dev, 2026-10-26).
 """
 
 from pydantic import Field

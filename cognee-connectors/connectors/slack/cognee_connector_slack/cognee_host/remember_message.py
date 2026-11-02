@@ -1,6 +1,6 @@
 """Remember a Slack message shortcut's content in Cognee.
 
-Moved from cognee.modules.integrations.slack.remember_message (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.remember_message (cognee dev, 2026-10-27).
 
 Wraps :func:`cognee.remember` with a Slack-specific dataset and
 provenance-carrying text — bare message text alone loses who said it and

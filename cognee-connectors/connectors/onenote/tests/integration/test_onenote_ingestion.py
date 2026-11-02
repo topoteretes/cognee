@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """A stored OneNote document is replaced only when its rendered text changes.
 
-Moved from cognee.tests.integration.tasks.connectors.test_onenote_ingestion (cognee dev, 2026-10-27).
+Copied from cognee.tests.integration.tasks.connectors.test_onenote_ingestion (cognee dev, 2026-10-27).
 
 The source runs through the real cognee.add() pipeline with Microsoft Graph faked. remember()
 runs this same add() step first and then cognify(), which needs an LLM, so this stops at the

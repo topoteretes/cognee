@@ -40,10 +40,10 @@ connectors/<provider>/                  cognee-connector-<provider>
     webhooks.py                         webhook verification on the core contract (when the provider has webhooks)
     cognee_host/                        plugs into cognee 1.6.x; imports cognee; installed with the `cognee` extra
       __init__.py                       register(): registers the OAuthIntegration with cognee's registry
-      adapter.py, sync.py, ...          the host-bound code moved from cognee.modules.integrations.<provider>
+      adapter.py, sync.py, ...          the host-bound code copied from cognee.modules.integrations.<provider>
       routers.py                        routers(): [(APIRouter, prefix, tags)] when the provider has HTTP routes
-  tests/unit/                           moved from cognee/tests/unit/modules/integrations
-  tests/integration/                    moved from cognee/tests/integration/tasks/connectors (needs cognee)
+  tests/unit/                           copied from cognee/tests/unit/modules/integrations
+  tests/integration/                    copied from cognee/tests/integration/tasks/connectors (needs cognee)
   examples/                             runnable examples
   README.md                             install, configuration, usage, host registration
   pyproject.toml
@@ -99,3 +99,16 @@ Package names use dashes (`cognee-connector-google-drive`), module names undersc
   server and the SDK discover installed packages through the entry points above.
 - **cloud-backend** consumes `CONNECTOR` and the sources; its own credential store,
   fan-out and pod hop stay cloud-side.
+
+## Two live copies of the integrations
+
+`core/` and every `cognee_host/` started as copies of `cognee/modules/integrations/**`,
+and the originals stay in cognee: nothing under `cognee/` imports these packages yet. Files
+say "Copied from" for that reason. Until the originals are removed or turn into re-exports
+of these packages, there are two sources of truth, and they have already diverged: fixes to
+OAuth secrets, redirects, signature checks and how Slack text is stored are here only.
+
+So a change to OAuth state, webhook signatures, token exchange or ingestion of provider text
+in either copy needs the same change in the other, in the same PR or a linked one.
+Retiring the in-tree copies is follow-up work to SDK-1262.
+

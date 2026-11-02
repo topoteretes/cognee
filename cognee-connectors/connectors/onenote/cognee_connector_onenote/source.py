@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """OneNote connector for cognee: a ``dlt`` source that syncs one notebook through Microsoft Graph.
 
-Moved from cognee.tasks.ingestion.connectors.onenote (cognee dev, 2026-10-27).
+Copied from cognee.tasks.ingestion.connectors.onenote (cognee dev, 2026-10-27).
 
 One source is one explicit notebook. It yields one document row per new or changed page, with
 the page's place in the notebook as ``cognee_structure``, and is meant to be handed directly to

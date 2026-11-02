@@ -1,6 +1,6 @@
 """Slash command handling for the Slack app.
 
-Moved from cognee.modules.integrations.slack.handle_slack_command (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.handle_slack_command (cognee dev, 2026-10-27).
 
 ``/cognee-ask``, ``/cognee-remember`` and ``/cognee-link`` (per-member
 account linking — see handle_slack_link.py) are implemented today, matching

@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/integration/tasks/connectors/test_google_calendar_example.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/integration/tasks/connectors/test_google_calendar_example.py (cognee dev, 2026-10-26).
 
 CI-safe smoke test for ``examples/guides/google_calendar.py``.
 

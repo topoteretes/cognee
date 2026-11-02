@@ -24,6 +24,9 @@ name: release_connectors.yml
 # that is already on PyPI is refused when asked for explicitly and skipped under
 # `all`.
 #
+# Refs: only main, dev and a cognee release tag `v*` may publish; the plan job fails
+# on any other, so an unreviewed branch cannot reach PyPI under the trusted publisher.
+#
 # Auth: PyPI Trusted Publishing with one GitHub environment per package,
 # `pypi-<distribution>`. PyPI refuses two pending publishers with the same
 # repository, workflow and environment, so a shared environment cannot cover the
@@ -78,6 +81,19 @@ jobs:
       run:
         working-directory: cognee-connectors
     steps:
+      - name: Refuse any ref that may not publish
+        working-directory: .
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          case "${REF}" in
+            refs/heads/main | refs/heads/dev | refs/tags/v*) ;;
+            *)
+              echo "::error::Connector releases run from main, dev or a v* release tag, not ${REF}."
+              exit 1
+              ;;
+          esac
+
       - name: Check out ${{ github.ref_name }} at ${{ github.sha }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:

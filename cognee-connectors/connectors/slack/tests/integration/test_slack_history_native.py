@@ -1,6 +1,6 @@
 """Slack -> native add/update/cognify/delete with real isolated local stores.
 
-Moved from cognee/tests/integration/modules/integrations/test_slack_history_native.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/integration/modules/integrations/test_slack_history_native.py (cognee dev, 2026-10-27).
 
 Slack, LLM and embeddings are deterministic doubles; SQLite, Ladybug,
 LanceDB, dataset authorization, document identity and graph cleanup are real.

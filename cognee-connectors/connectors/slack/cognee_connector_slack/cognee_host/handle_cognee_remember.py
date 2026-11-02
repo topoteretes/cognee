@@ -1,6 +1,6 @@
 """Handle ``/cognee-remember`` slash command — save free text to memory.
 
-Moved from cognee.modules.integrations.slack.handle_cognee_remember (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.handle_cognee_remember (cognee dev, 2026-10-27).
 
 There are two ways to remember, and they answer different needs. The
 "Remember this" message shortcut covers what Slack already has on screen:

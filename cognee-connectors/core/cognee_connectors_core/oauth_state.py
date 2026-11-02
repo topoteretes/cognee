@@ -1,6 +1,6 @@
 """Provider-agnostic OAuth2 ``state`` signing and validation.
 
-Moved from cognee.modules.integrations.oauth_flow (cognee dev, 2026-10-26).
+Copied from cognee.modules.integrations.oauth_flow (cognee dev, 2026-10-26).
 
 Every OAuth2 install flow needs a CSRF token that also binds the incoming
 callback to whichever cognee user started it — the callback itself is
@@ -83,7 +83,9 @@ def validate_state(
     *field_strs, expires_str, signature = parts
     payload = ":".join([*field_strs, expires_str])
 
-    if not hmac.compare_digest(
+    # compare_digest raises TypeError on a non-ASCII str, and ``state`` comes straight
+    # from an unauthenticated callback's query string.
+    if not signature.isascii() or not hmac.compare_digest(
         sign_state_payload(payload, signing_secret=signing_secret), signature
     ):
         return None

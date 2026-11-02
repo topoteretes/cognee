@@ -1,6 +1,6 @@
 """Handle one verified Linear webhook delivery.
 
-Moved from cognee.modules.integrations.linear.handle_linear_event (cognee dev, 2026-10-26).
+Copied from cognee.modules.integrations.linear.handle_linear_event (cognee dev, 2026-10-26).
 
 Runs detached from the request (the generic events route acks first, well
 inside Linear's 5-second response window), so handlers here may run searches

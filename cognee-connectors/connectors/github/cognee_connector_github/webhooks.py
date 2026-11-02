@@ -1,6 +1,6 @@
 """GitHub webhook delivery verification.
 
-Moved from cognee.modules.integrations.github.verify_github_signature (cognee
+Copied from cognee.modules.integrations.github.verify_github_signature (cognee
 dev, 2026-10-26) onto the core contract: the check itself is the core
 ``HmacVerifier`` with GitHub's ``sha256_prefix`` scheme, and the FastAPI shim
 that adapts a request to it stays in ``cognee_host/verify_github_signature.py``.
@@ -18,37 +18,15 @@ idempotent instead (revokes are no-ops on revoked rows, syncs skip unchanged
 snapshots).
 """
 
-import hashlib
-import hmac
 from typing import Any
 
-from cognee_connector_github.settings import github_settings, require
+from cognee_connector_github.settings import github_settings
 from cognee_connectors_core.signatures import HmacVerifier, SignatureScheme
 
 PROVIDER = "github"
 
 #: The header GitHub carries the delivery signature in.
 SIGNATURE_HEADER = "x-hub-signature-256"
-
-_SIGNATURE_PREFIX = "sha256="
-
-
-def is_valid_github_signature(raw_body: bytes, signature: str) -> bool:
-    """Whether ``signature`` is an authentic GitHub signature for ``raw_body``.
-
-    Pure function of its inputs — the unit tests share it with the verifier
-    below as the reference computation.
-    """
-    if not signature or not signature.startswith(_SIGNATURE_PREFIX):
-        return False
-
-    expected = (
-        _SIGNATURE_PREFIX
-        + hmac.new(require("webhook_secret").encode(), raw_body, hashlib.sha256).hexdigest()
-    )
-    # compare_digest, not ==: a timing-safe comparison so the signature cannot
-    # be brute-forced byte by byte from response latencies.
-    return hmac.compare_digest(expected, signature)
 
 
 def github_webhook_verifier(settings: Any = None) -> HmacVerifier:
@@ -69,4 +47,4 @@ def github_webhook_verifier(settings: Any = None) -> HmacVerifier:
     )
 
 
-__all__ = ["PROVIDER", "SIGNATURE_HEADER", "github_webhook_verifier", "is_valid_github_signature"]
+__all__ = ["PROVIDER", "SIGNATURE_HEADER", "github_webhook_verifier"]

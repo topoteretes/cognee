@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/unit/modules/integrations/test_google_credential_lifecycle.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/unit/modules/integrations/test_google_credential_lifecycle.py (cognee dev, 2026-10-26).
 
 Real SQL regressions for refresh/disconnect races in both Google providers.
 """

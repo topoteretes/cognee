@@ -1,6 +1,6 @@
 # Adapted from topoteretes/cognee-community (Apache-2.0), commit 21d0b36.
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
-"""Moved from cognee/tests/unit/tasks/connectors/test_gmail_source.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/unit/tasks/connectors/test_gmail_source.py (cognee dev, 2026-10-26).
 
 Unit tests for the Gmail connector (cognee_connector_gmail/source.py).
 

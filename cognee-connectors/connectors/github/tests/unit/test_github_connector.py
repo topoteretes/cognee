@@ -21,7 +21,6 @@ from cognee_connector_github.connector import _ACCESS_TOKEN_URL, GithubConnector
 from cognee_connector_github.webhooks import (
     SIGNATURE_HEADER,
     github_webhook_verifier,
-    is_valid_github_signature,
 )
 from cognee_connectors_core import registry
 from cognee_connectors_core.base import (
@@ -517,16 +516,14 @@ async def test_webhook_verifier_reads_the_secret_per_delivery():
 
 
 @pytest.mark.asyncio
-async def test_core_verifier_agrees_with_the_reference_signature_check(monkeypatch):
+async def test_core_verifier_checks_the_delivery_signature(monkeypatch):
     monkeypatch.setattr("cognee_connector_github.settings.github_settings.webhook_secret", _SECRET)
     body = b'{"action":"created","installation":{"id":42}}'
     signature = _signed(body)["X-Hub-Signature-256"]
 
-    assert is_valid_github_signature(body, signature)
     assert await github_webhook_verifier().verify(body, {SIGNATURE_HEADER: signature}) == body
 
     forged = "sha256=" + "f" * 64
-    assert not is_valid_github_signature(body, forged)
     with pytest.raises(WebhookVerificationError):
         await github_webhook_verifier().verify(body, {SIGNATURE_HEADER: forged})
 

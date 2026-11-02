@@ -1,6 +1,6 @@
 """Unit tests for cognee_connector_slack.cognee_host.handle_slack_link.
 
-Moved from cognee/tests/unit/modules/integrations/test_handle_slack_link.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/unit/modules/integrations/test_handle_slack_link.py (cognee dev, 2026-10-27).
 
 Two halves: /cognee-link mints a magic link (no API key involved at all),
 and confirm_link (backing POST /api/v1/slack/link) resolves that link's
@@ -61,6 +61,21 @@ async def test_minted_link_code_resolves_back_to_the_invoking_member():
 
 
 # ── make_link_code / validate_link_code ─────────────────────────────────────
+
+
+def test_validate_link_code_rejects_non_ascii_signature_without_raising():
+    with patch(f"{MODULE}.require", side_effect=_require):
+        payload, _, _signature = make_link_code("T1", "U1").rpartition(":")
+        assert validate_link_code(f"{payload}:\u00e9") is None
+
+
+def test_validate_link_code_compares_in_constant_time():
+    with (
+        patch(f"{MODULE}.require", side_effect=_require),
+        patch(f"{MODULE}.hmac.compare_digest", return_value=False) as compare,
+    ):
+        assert validate_link_code(make_link_code("T1", "U1")) is None
+    compare.assert_called_once()
 
 
 def test_validate_link_code_rejects_tampered_signature():

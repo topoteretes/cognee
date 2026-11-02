@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/unit/modules/integrations/test_gmail_adapter.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/unit/modules/integrations/test_gmail_adapter.py (cognee dev, 2026-10-26).
 
 Exercise Gmail's provider-specific calls through the OAuth adapter.
 """

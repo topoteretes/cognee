@@ -1,6 +1,6 @@
 """Plugs the Notion connector into a cognee server (cognee >= 1.6.5).
 
-Moved from cognee.modules.integrations.notion.__init__ (cognee dev, 2026-10-27), where
+Copied from cognee.modules.integrations.notion.__init__ (cognee dev, 2026-10-27), where
 importing the package registered the adapter with the integrations registry as a side
 effect; here a host calls ``register()`` and nothing runs at import. Notion mounts no
 routers of its own (its whole surface is the generic ``/api/v1/integrations/notion/*``

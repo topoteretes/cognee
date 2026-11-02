@@ -1,6 +1,6 @@
 """A stored Obsidian document is replaced only when its note's text changes.
 
-Moved from cognee.tests.integration.tasks.connectors.test_obsidian_ingestion (cognee dev, 2026-10-27).
+Copied from cognee.tests.integration.tasks.connectors.test_obsidian_ingestion (cognee dev, 2026-10-27).
 
 The source runs through the real cognee.add() pipeline on a vault in ``tmp_path``. remember()
 runs this same add() step first and then cognify(), which needs an LLM, so this stops at the

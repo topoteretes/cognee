@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """A bad argument fails when apollo_source() is built, not halfway through a run.
 
-Moved from cognee.tests.unit.tasks.connectors.test_apollo_resource (cognee dev, 2026-10-27).
+Copied from cognee.tests.unit.tasks.connectors.test_apollo_resource (cognee dev, 2026-10-27).
 
 That covers a bad key, a missing resource_name and an empty or unknown ``include``.
 ``include=None`` and ``custom_field_ids`` reach the walk the way a host passes them, through a

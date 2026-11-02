@@ -1,6 +1,6 @@
 # Adapted from topoteretes/cognee-community (Apache-2.0), PR #370, commit 5e78950.
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
-"""Moved from cognee/tests/unit/tasks/connectors/test_google_calendar_source.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/unit/tasks/connectors/test_google_calendar_source.py (cognee dev, 2026-10-26).
 
 google_calendar_source(): settings, credentials, sign-in builders and the dlt wiring.
 

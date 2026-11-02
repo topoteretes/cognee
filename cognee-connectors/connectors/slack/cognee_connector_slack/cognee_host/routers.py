@@ -1,6 +1,6 @@
 """Slack HTTP routes for a cognee server.
 
-Moved from cognee.api.v1.slack.routers (get_slack_router, get_slack_channels_router,
+Copied from cognee.api.v1.slack.routers (get_slack_router, get_slack_channels_router,
 get_slack_history_router and the package ``__init__``; cognee dev, 2026-10-27) into
 one module. :func:`routers` lists what a host mounts, with the prefix and tags
 cognee's ``api/client.py`` used; each factory keeps its original module docstring as

@@ -1,6 +1,6 @@
 """Continue Linear syncs that stopped early on the rate limit or the request budget.
 
-Moved from cognee.modules.integrations.linear.resume_sync (cognee dev, 2026-10-26).
+Copied from cognee.modules.integrations.linear.resume_sync (cognee dev, 2026-10-26).
 
 ``linear_source`` stops cleanly when Linear's hourly quota is nearly spent, and
 keeps the cursor it reached. Nothing else would start the rest: a team without

@@ -1,6 +1,6 @@
 """Unit tests for cognee_connector_slack.cognee_host.handle_slack_interactive.
 
-Moved from cognee/tests/unit/modules/integrations/test_handle_slack_interactive.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/unit/modules/integrations/test_handle_slack_interactive.py (cognee dev, 2026-10-27).
 
 Payload parsing (form-encoded `payload=<json>`, not raw JSON), dispatch to
 the "Remember this" message shortcut and the ``/cognee-ask`` answer review

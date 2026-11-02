@@ -1,6 +1,6 @@
 """Slack OAuth v2 install flow: authorize URL, signed state, code exchange.
 
-Moved from cognee.modules.integrations.slack.oauth (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.oauth (cognee dev, 2026-10-27).
 
 https://docs.slack.dev/authentication/installing-with-oauth
 
@@ -93,8 +93,11 @@ async def exchange_code(code: str) -> dict[str, Any]:
                 "code": code,
                 "redirect_uri": require("redirect_uri"),
             },
+            allow_redirects=False,  # a followed 307/308 re-sends the secret to the target
         ) as response,
     ):
+        if not 200 <= response.status < 300:
+            raise RuntimeError(f"Slack oauth.v2.access failed: HTTP {response.status}")
         payload = await response.json()
 
     if not payload.get("ok"):

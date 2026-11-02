@@ -1,7 +1,7 @@
 """Notion connector for cognee, a ``dlt`` source that turns Notion pages and
 database rows into memory.
 
-Moved from cognee.tasks.ingestion.connectors.notion (cognee dev, 2026-10-27).
+Copied from cognee.tasks.ingestion.connectors.notion (cognee dev, 2026-10-27).
 
 Sync a set of explicit Notion pages and/or data sources (database "tables")
 into cognee, incrementally and with forget-on-deletion::

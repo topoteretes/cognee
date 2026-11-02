@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """Forget-on-delete must hard-delete a contact: its row, its Data record and its graph content.
 
-Moved from cognee.tests.integration.tasks.connectors.test_apollo_forget (cognee dev, 2026-10-27).
+Copied from cognee.tests.integration.tasks.connectors.test_apollo_forget (cognee dev, 2026-10-27).
 
 Ingests two contacts, cognifies them with the LLM mocked, deletes one in Apollo and
 checks that only the deleted contact leaves every store, rather than being replaced

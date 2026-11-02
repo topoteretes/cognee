@@ -1,6 +1,6 @@
 """Plugs the Google Calendar connector into a cognee server (cognee >= 1.6.5).
 
-Moved from cognee.modules.integrations.google_calendar.__init__ (cognee dev, 2026-10-26),
+Copied from cognee.modules.integrations.google_calendar.__init__ (cognee dev, 2026-10-26),
 where importing the package registered the Calendar adapter with the integrations
 registry as a side effect; here a host calls ``register()`` and nothing runs at import.
 Calendar mounts no routers of its own (its whole surface is the generic

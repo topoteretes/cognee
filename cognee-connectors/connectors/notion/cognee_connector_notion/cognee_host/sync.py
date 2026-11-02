@@ -1,6 +1,6 @@
 """Sync Notion through the SDK source's incremental, deletion-aware path.
 
-Moved from cognee.modules.integrations.notion.sync (cognee dev, 2026-10-27). The
+Copied from cognee.modules.integrations.notion.sync (cognee dev, 2026-10-27). The
 helpers that need no host (``NOTION_DATASET_PREFIX``, ``SELECTION_KEY``,
 ``resource_id``, ``split_root`` and ``without_nested_roots``) live in
 :mod:`cognee_connector_notion.workspace`, shared with the connector's ``sync_scope``

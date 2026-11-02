@@ -1,6 +1,6 @@
 """Publish the Cognee App Home tab.
 
-Moved from cognee.modules.integrations.slack.home (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.home (cognee dev, 2026-10-27).
 
 Slack shows a blank Home tab until the app calls ``views.publish`` — this is
 what makes clicking Cognee in the sidebar show anything at all. The view is
@@ -100,6 +100,7 @@ async def publish_home_view(access_token: str, slack_user_id: str) -> None:
             _VIEWS_PUBLISH_URL,
             headers={"Authorization": f"Bearer {access_token}"},
             json={"user_id": slack_user_id, "view": _build_home_view()},
+            allow_redirects=False,
         ) as response,
     ):
         payload = await response.json()

@@ -1,6 +1,6 @@
 """Slack as an ``OAuthIntegration`` adapter.
 
-Moved from cognee.modules.integrations.slack.adapter (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.adapter (cognee dev, 2026-10-27).
 
 Wraps the already-tested free functions in
 :mod:`cognee_connector_slack.cognee_host.oauth` behind the generic contract so
@@ -114,8 +114,11 @@ class SlackIntegration(OAuthIntegration):
                 session.post(
                     _REVOKE_URL,
                     headers={"Authorization": f"Bearer {access_token}"},
+                    allow_redirects=False,
                 ) as response,
             ):
+                if not 200 <= response.status < 300:
+                    raise RuntimeError(f"Slack auth.revoke answered HTTP {response.status}")
                 payload = await response.json()
         except Exception:  # a failed revoke must never block disconnect
             logger.exception(
@@ -158,8 +161,11 @@ class SlackIntegration(OAuthIntegration):
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,
                 },
+                allow_redirects=False,  # a followed 307/308 re-sends the secret to the target
             ) as response,
         ):
+            if not 200 <= response.status < 300:
+                raise RuntimeError(f"Slack token refresh failed: HTTP {response.status}")
             payload = await response.json()
 
         if not payload.get("ok"):

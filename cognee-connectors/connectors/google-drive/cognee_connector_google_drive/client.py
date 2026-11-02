@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.google_drive.client (cognee dev, 2026-10-26).
+"""Copied from cognee.modules.integrations.google_drive.client (cognee dev, 2026-10-26).
 
 Google Drive API calls used by the Drive integration.
 

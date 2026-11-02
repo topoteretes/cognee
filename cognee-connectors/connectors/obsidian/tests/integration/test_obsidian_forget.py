@@ -1,6 +1,6 @@
 """An edited or deleted note must leave memory: its Data record and its graph content.
 
-Moved from cognee.tests.integration.tasks.connectors.test_obsidian_forget (cognee dev, 2026-10-27).
+Copied from cognee.tests.integration.tasks.connectors.test_obsidian_forget (cognee dev, 2026-10-27).
 
 Syncs a small vault through ``cognee.remember`` with the LLM and embeddings mocked, then edits,
 deletes, renames and un-selects notes. Only the changed note's document is replaced or removed;

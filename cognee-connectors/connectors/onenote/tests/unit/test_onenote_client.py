@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """The Graph client: retries, wait budget, redirects, unsafe links and what an error may carry.
 
-Moved from cognee.tests.unit.tasks.connectors.test_onenote_client (cognee dev, 2026-10-27).
+Copied from cognee.tests.unit.tasks.connectors.test_onenote_client (cognee dev, 2026-10-27).
 
 Every case drives the real client through ``httpx.MockTransport``, so the token and URL handling
 that builds an error message is the code under test. No network.

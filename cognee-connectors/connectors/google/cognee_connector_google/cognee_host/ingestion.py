@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.google.ingestion (cognee dev, 2026-10-26).
+"""Copied from cognee.modules.integrations.google.ingestion (cognee dev, 2026-10-26).
 
 Names hosts import from before the helpers became provider-neutral.
 

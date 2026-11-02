@@ -1,6 +1,6 @@
 """Shared utilities for DLT ingestion.
 
-Moved from cognee.tasks.ingestion.dlt_utils (cognee dev, 2026-10-26). This is
+Copied from cognee.tasks.ingestion.dlt_utils (cognee dev, 2026-10-26). This is
 the one definition both cognee's ingestion and the connector packages read: the
 string values are byte-identical to cognee's and must stay so, because cognee
 reads them by attribute and column name. ``load_dlt_manifest`` stayed in cognee

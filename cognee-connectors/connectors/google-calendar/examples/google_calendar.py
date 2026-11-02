@@ -1,4 +1,4 @@
-"""Moved from examples/guides/google_calendar.py (cognee dev, 2026-10-26).
+"""Copied from examples/guides/google_calendar.py (cognee dev, 2026-10-26).
 
 Ingest a Google Calendar into cognee memory, incrementally.
 

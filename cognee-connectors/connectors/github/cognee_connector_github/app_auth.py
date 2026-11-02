@@ -1,6 +1,6 @@
 """GitHub App authentication: app JWT and short-lived installation tokens.
 
-Moved from cognee.modules.integrations.github.app_auth (cognee dev, 2026-10-26).
+Copied from cognee.modules.integrations.github.app_auth (cognee dev, 2026-10-26).
 The repository helpers at the end (``list_installation_repository_records``,
 ``clone_url``) follow the cloud-backend connector of the same provider; they
 are what :mod:`cognee_connector_github.connector` needs to build a sync scope
@@ -98,6 +98,7 @@ async def get_installation(
         session.get(
             f"{API_BASE_URL}/app/installations/{installation_id}",
             headers=_api_headers(build_app_jwt(settings=settings)),
+            allow_redirects=False,
         ) as response,
     ):
         if response.status != 200:
@@ -120,6 +121,7 @@ async def mint_installation_token(
         session.post(
             f"{API_BASE_URL}/app/installations/{installation_id}/access_tokens",
             headers=_api_headers(build_app_jwt(settings=settings)),
+            allow_redirects=False,
         ) as response,
     ):
         if response.status != 201:
@@ -150,7 +152,9 @@ async def user_can_access_installation(user_token: str, installation_id: int) ->
     url: str | None = f"{API_BASE_URL}/user/installations?per_page=100"
     async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
         while url:
-            async with session.get(url, headers=_api_headers(user_token)) as response:
+            async with session.get(
+                url, headers=_api_headers(user_token), allow_redirects=False
+            ) as response:
                 if response.status != 200:
                     raise RuntimeError(
                         f"GitHub user-installations lookup failed: HTTP {response.status}"
@@ -176,7 +180,9 @@ async def list_installation_repository_records(token: str) -> list[dict[str, Any
     url: str | None = f"{API_BASE_URL}/installation/repositories?per_page=100"
     async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
         while url:
-            async with session.get(url, headers=_api_headers(token)) as response:
+            async with session.get(
+                url, headers=_api_headers(token), allow_redirects=False
+            ) as response:
                 if response.status != 200:
                     raise RuntimeError(
                         f"GitHub installation repository listing failed: HTTP {response.status}"

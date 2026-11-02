@@ -1,6 +1,6 @@
 """The settings base every provider's settings class subclasses.
 
-Moved from cognee.modules.integrations.base.IntegrationSettings (cognee dev,
+Copied from cognee.modules.integrations.base.IntegrationSettings (cognee dev,
 2026-10-26), renamed ``ConnectorSettings``; ``require`` generalizes the
 per-provider ``require()`` helpers the cognee settings modules each carried.
 """

@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/unit/modules/integrations/test_google_drive_sync.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/unit/modules/integrations/test_google_drive_sync.py (cognee dev, 2026-10-26).
 
 Drive sync delegates extraction and incremental state to the SDK source.
 """

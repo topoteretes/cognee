@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.gmail.client (cognee dev, 2026-10-26).
+"""Copied from cognee.modules.integrations.gmail.client (cognee dev, 2026-10-26).
 
 Minimal Gmail REST client used by the core integration.
 """

@@ -1,6 +1,6 @@
 """List a connected Slack workspace's public channels.
 
-Moved from cognee.modules.integrations.slack.channels (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.channels (cognee dev, 2026-10-27).
 
 Backs the per-channel allowlist on the Integrations page: a workspace owner
 picks which channels ``/cognee-ask`` (and future slash commands) may be used
@@ -76,6 +76,7 @@ async def _fetch_page(
             _CHANNELS_URL,
             headers={"Authorization": f"Bearer {access_token}"},
             params=params,
+            allow_redirects=False,
         ) as response:
             payload = await response.json()
             retry_after = response.headers.get("Retry-After")

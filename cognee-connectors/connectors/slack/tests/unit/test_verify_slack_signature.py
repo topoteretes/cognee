@@ -1,6 +1,6 @@
 """Unit tests for cognee_connector_slack.webhooks.
 
-Moved from cognee/tests/unit/modules/integrations/test_verify_slack_signature.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/unit/modules/integrations/test_verify_slack_signature.py (cognee dev, 2026-10-27).
 
 Pure function — no DB, no network. The invariants that matter: only an
 HMAC keyed with the signing secret over the exact raw bytes passes, and the

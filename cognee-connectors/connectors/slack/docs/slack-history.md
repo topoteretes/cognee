@@ -1,6 +1,6 @@
 # Import Slack conversations into Cognee
 
-*Moved from cognee's `docs/slack-history.md` (cognee dev, 2026-10-27); the SDK entry points now live in `cognee_connector_slack`.*
+*Copied from cognee's `docs/slack-history.md` (cognee dev, 2026-10-27); the SDK entry points now live in `cognee_connector_slack`.*
 
 The SDK's Slack integration can import selected channel history or complete
 threads into an existing Cognee dataset. It uses native `add`, `update`,

@@ -1,6 +1,6 @@
 """Unit tests for get_slack_channels_router (the channel-allowlist settings API).
 
-Moved from cognee/tests/unit/modules/integrations/test_get_slack_channels_router.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/unit/modules/integrations/test_get_slack_channels_router.py (cognee dev, 2026-10-27).
 
 get_active_credential_for_user, decrypt_token_payload, list_channels, and
 update_provider_metadata are all patched — these tests only check the

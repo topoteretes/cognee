@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/unit/modules/integrations/test_slack_history_refresh.py (cognee dev, 2026-10-27)."""
+"""Copied from cognee/tests/unit/modules/integrations/test_slack_history_refresh.py (cognee dev, 2026-10-27)."""
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -87,6 +87,7 @@ async def test_token_rotation_preserves_sync_settings_and_cannot_revive_revocati
     )
     monkeypatch.setattr(adapter, "require", lambda name: "test-only")
     response = AsyncMock()
+    response.status = 200
     response.__aenter__.return_value = response
     # Refresh intentionally lacks team, user and enterprise metadata.
     response.json.return_value = {

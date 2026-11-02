@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.gmail.sync (cognee dev, 2026-10-26).
+"""Copied from cognee.modules.integrations.gmail.sync (cognee dev, 2026-10-26).
 
 Sync Gmail through the SDK connector's history and tombstone path.
 """

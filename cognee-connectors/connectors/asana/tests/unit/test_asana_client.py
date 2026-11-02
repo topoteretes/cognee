@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """The Asana REST client: request shape, error mapping, retries and token hygiene.
 
-Moved from cognee.tests.unit.tasks.connectors.test_asana_client (cognee dev, 2026-10-27).
+Copied from cognee.tests.unit.tasks.connectors.test_asana_client (cognee dev, 2026-10-27).
 
 Importing the connectors loads no HTTP client library, so ``requests`` is imported when the
 first request is made. The token never reaches an error message, a ``__cause__``, a repr or a log

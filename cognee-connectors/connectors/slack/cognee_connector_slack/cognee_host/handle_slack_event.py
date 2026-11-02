@@ -1,6 +1,6 @@
 """Events API dispatch for the Slack app.
 
-Moved from cognee.modules.integrations.slack.handle_slack_event (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.handle_slack_event (cognee dev, 2026-10-27).
 
 Handles:
 

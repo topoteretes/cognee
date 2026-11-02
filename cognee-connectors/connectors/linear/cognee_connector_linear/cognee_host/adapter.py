@@ -1,6 +1,6 @@
 """Linear (agent app) as an ``OAuthIntegration`` adapter.
 
-Moved from cognee.modules.integrations.linear.adapter (cognee dev, 2026-10-26).
+Copied from cognee.modules.integrations.linear.adapter (cognee dev, 2026-10-26).
 
 Connects a Linear workspace through an *agent* install rather than a plain
 OAuth consent: the authorize URL carries ``actor=app``, which installs an

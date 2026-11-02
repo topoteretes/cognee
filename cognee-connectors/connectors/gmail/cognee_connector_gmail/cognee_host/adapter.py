@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.gmail.adapter (cognee dev, 2026-10-26).
+"""Copied from cognee.modules.integrations.gmail.adapter (cognee dev, 2026-10-26).
 
 Google Gmail OAuth adapter.
 """

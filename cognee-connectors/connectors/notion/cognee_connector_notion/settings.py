@@ -1,6 +1,6 @@
 """Notion settings, read from ``NOTION_*`` environment variables.
 
-Moved from cognee.modules.integrations.notion.notion_settings (cognee dev, 2026-10-27);
+Copied from cognee.modules.integrations.notion.notion_settings (cognee dev, 2026-10-27);
 the base class is now :class:`cognee_connectors_core.settings.ConnectorSettings` and
 ``require`` delegates to the core helper of the same name.
 """

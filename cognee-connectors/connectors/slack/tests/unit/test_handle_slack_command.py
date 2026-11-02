@@ -1,6 +1,6 @@
 """Unit tests for cognee_connector_slack.cognee_host.handle_slack_command.
 
-Moved from cognee/tests/unit/modules/integrations/test_handle_slack_command.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/unit/modules/integrations/test_handle_slack_command.py (cognee dev, 2026-10-27).
 
 Credential lookup and handle_cognee_ask are patched out. Invariants: an
 unconnected workspace is rejected before anything else runs, an empty (or

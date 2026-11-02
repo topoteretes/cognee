@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/unit/modules/integrations/conftest.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/unit/modules/integrations/conftest.py (cognee dev, 2026-10-26).
 
 Shared fixtures for the integration unit tests.
 """

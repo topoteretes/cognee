@@ -1,6 +1,6 @@
 """Keep connector integration tests inside their disposable storage roots.
 
-Moved from cognee.tests.integration.tasks.connectors.conftest (cognee dev, 2026-10-27), without the
+Copied from cognee.tests.integration.tasks.connectors.conftest (cognee dev, 2026-10-27), without the
 Linear-specific clock pin of the original: no Apollo source reads the wall clock. The unit-test
 directory is put on ``sys.path`` first, so these tests import the in-memory Apollo API
 (``fake_apollo``) the way the unit tests next to it do.

@@ -1,6 +1,6 @@
 # Adapted from topoteretes/cognee-community (Apache-2.0), commit 21d0b36.
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
-"""Moved from cognee/tests/integration/tasks/connectors/test_google_drive_ingestion.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/integration/tasks/connectors/test_google_drive_ingestion.py (cognee dev, 2026-10-26).
 
 End-to-end test: Google Drive connector through the real cognee.add()
 pipeline, with the Drive API mocked (no live credentials).

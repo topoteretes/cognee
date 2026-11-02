@@ -1,6 +1,6 @@
 """Plugs the Gmail connector into a cognee server (cognee >= 1.6.5).
 
-Moved from cognee.modules.integrations.gmail.__init__ (cognee dev, 2026-10-26), where
+Copied from cognee.modules.integrations.gmail.__init__ (cognee dev, 2026-10-26), where
 importing the package registered the Gmail adapter with the integrations registry as a
 side effect; here a host calls ``register()`` and nothing runs at import. Gmail mounts no
 routers of its own (its whole surface is the generic ``/api/v1/integrations/gmail/*``

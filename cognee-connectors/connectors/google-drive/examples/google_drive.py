@@ -1,4 +1,4 @@
-"""Moved from examples/guides/google_drive.py (cognee dev, 2026-10-26).
+"""Copied from examples/guides/google_drive.py (cognee dev, 2026-10-26).
 
 Ingest a Google Drive folder into cognee memory, incrementally.
 

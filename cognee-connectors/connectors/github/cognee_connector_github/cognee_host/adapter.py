@@ -1,6 +1,6 @@
 """GitHub (App) as an ``OAuthIntegration`` adapter.
 
-Moved from cognee.modules.integrations.github.adapter (cognee dev, 2026-10-26).
+Copied from cognee.modules.integrations.github.adapter (cognee dev, 2026-10-26).
 This is the cognee 1.6.x host binding; the host-free contract object the
 same provider exposes to every host is :data:`cognee_connector_github.CONNECTOR`.
 
@@ -84,8 +84,11 @@ class GithubIntegration(OAuthIntegration):
                     "code": code,
                 },
                 headers={"Accept": "application/json"},
+                allow_redirects=False,  # a followed 307/308 re-sends the secret to the target
             ) as response,
         ):
+            if not 200 <= response.status < 300:
+                raise RuntimeError(f"GitHub code exchange failed: HTTP {response.status}")
             payload = await response.json()
 
         if payload.get("error") or not payload.get("access_token"):

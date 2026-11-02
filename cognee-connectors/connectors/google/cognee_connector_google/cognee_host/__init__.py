@@ -1,6 +1,6 @@
 """The cognee-host half of the shared Google OAuth code (cognee >= 1.6.5).
 
-Moved from cognee.modules.integrations.google (cognee dev, 2026-10-26):
+Copied from cognee.modules.integrations.google (cognee dev, 2026-10-26):
 ``oauth_integration`` (the ``GoogleOAuthIntegration`` base the Drive, Gmail and Calendar
 adapters subclass) and ``ingestion`` (the Google-named alias of
 ``cognee.modules.integrations.ingestion`` that the Cloud pod imports). Google itself is

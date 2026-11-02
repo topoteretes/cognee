@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """Apollo.io connector for cognee: a ``dlt`` source that turns a team's CRM into memory.
 
-Moved from cognee.tasks.ingestion.connectors.apollo (cognee dev, 2026-10-27).
+Copied from cognee.tasks.ingestion.connectors.apollo (cognee dev, 2026-10-27).
 
 One source is one Apollo team. It yields the team's own contacts, accounts and sequences
 as flat document rows, never Apollo's enrichment database, and is meant to be handed

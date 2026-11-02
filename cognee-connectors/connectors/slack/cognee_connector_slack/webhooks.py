@@ -1,6 +1,6 @@
 """Slack request signature verification, on the core webhook verifier.
 
-Moved from cognee.modules.integrations.slack.verify_slack_signature (cognee dev,
+Copied from cognee.modules.integrations.slack.verify_slack_signature (cognee dev,
 2026-10-27). The HMAC is now :class:`cognee_connectors_core.signatures.HmacVerifier`
 with the ``slack_v0`` scheme, the one ``CONNECTOR`` declares, so the hand-written
 Slack routes and a host serving the generic ``/events`` route verify deliveries the

@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/unit/modules/integrations/test_google_dataset_summary.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/unit/modules/integrations/test_google_dataset_summary.py (cognee dev, 2026-10-26).
 
 Connection summaries count persisted data and stay scoped to its owner.
 """

@@ -1,6 +1,6 @@
 """POST a followup message to a Slack ``response_url``.
 
-Moved from cognee.modules.integrations.slack.response_url (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.response_url (cognee dev, 2026-10-27).
 
 Shared by every Slack handler that acks fast and delivers its real answer
 later — the async ``/cognee-ask`` search and the "Remember this" message

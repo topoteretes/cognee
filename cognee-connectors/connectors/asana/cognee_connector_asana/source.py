@@ -2,7 +2,7 @@
 # Modified to ship in the Cognee SDK with SDK-local imports and test paths.
 """Asana connector for cognee: a ``dlt`` source that turns selected projects into memory.
 
-Moved from cognee.tasks.ingestion.connectors.asana (cognee dev, 2026-10-27).
+Copied from cognee.tasks.ingestion.connectors.asana (cognee dev, 2026-10-27).
 
 One source is one Asana access token and a selection of projects. It yields one document per
 task (with its comments and subtasks folded in) and one per selected project as flat rows, and

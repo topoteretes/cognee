@@ -1,4 +1,4 @@
-"""Moved from cognee.modules.integrations.google_drive.adapter (cognee dev, 2026-10-26).
+"""Copied from cognee.modules.integrations.google_drive.adapter (cognee dev, 2026-10-26).
 
 Google Drive OAuth adapter.
 """

@@ -1,6 +1,6 @@
 """The FastAPI dependency that verifies a Slack request on a cognee server.
 
-Moved from cognee.modules.integrations.slack.verify_slack_signature (cognee dev,
+Copied from cognee.modules.integrations.slack.verify_slack_signature (cognee dev,
 2026-10-27). The HMAC check itself moved to :mod:`cognee_connector_slack.webhooks`,
 on the core verifier; this is the shim that adapts FastAPI's ``Request`` (raw body
 plus headers) to it and maps a refusal to the ``HTTPException`` the routes have

@@ -1,6 +1,6 @@
 """Unit tests for cognee_connector_slack.cognee_host.handle_slack_event.
 
-Moved from cognee/tests/unit/modules/integrations/test_handle_slack_event.py (cognee dev, 2026-10-27).
+Copied from cognee/tests/unit/modules/integrations/test_handle_slack_event.py (cognee dev, 2026-10-27).
 
 The dispatch logic only — DB access and the Slack API call are patched out.
 Invariants: the url_verification handshake echoes the challenge, both

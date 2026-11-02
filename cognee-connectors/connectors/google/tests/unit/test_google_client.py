@@ -1,4 +1,4 @@
-"""Moved from cognee/tests/unit/modules/integrations/test_google_client.py (cognee dev, 2026-10-26).
+"""Copied from cognee/tests/unit/modules/integrations/test_google_client.py (cognee dev, 2026-10-26).
 
 Shared OAuth response parsing keeps errors useful without exposing secrets.
 """
