@@ -14,9 +14,10 @@ which is the expected answer, so `docstring-critic` is deliberately kept away fr
 Selection principle: files a developer or a coding agent is likely to open while
 *evaluating or integrating* cognee — package entrypoints, public SDK functions, core
 abstractions, extension points, and the enum whose members users pass as arguments.
-Five files have weak or missing docstrings and test whether the author can add real
-context; five are already well documented and test whether the critic has the restraint to
-leave them alone.
+Five files have weak or missing docstrings; five are already documented. Both groups test
+whether supported caller benefits are explicit, including what each capability unlocks
+and which conditions apply. The critic checks truthfulness and tone; existing coverage
+alone does not show that the value is clear.
 
 Docstring counts below were re-measured on `dev` at `3645f2b` and will drift as the
 repo moves. They record why each file was picked, not a contract.
@@ -31,12 +32,12 @@ repo moves. They record why each file was picked, not a contract.
 | `cognee/infrastructure/llm/LLMGateway.py` | The single seam every LLM call in cognee passes through and the place a new provider is wired in, with all three public gateway methods (`acreate_structured_output`, `create_transcript`, `transcribe_image`) undocumented. |
 | `cognee/modules/pipelines/operations/pipeline.py` | The orchestrator that `add`, `cognify`, and `memify` all funnel into; it has no module docstring and its public `run_pipeline_per_dataset` is undocumented, leaving the per-dataset locking and concurrency contract invisible to anyone writing a custom pipeline. |
 
-## Already-good surfaces (restraint tests)
+## Already-documented surfaces
 
 | File | Why it is a high-value docstring surface |
 |---|---|
-| `cognee/api/v1/add/add.py` | Public SDK entrypoint whose single ~9k-character docstring already covers loaders, storage, and permissions — the clearest test of whether the critic pass leaves a strong surface alone instead of padding it. |
-| `cognee/api/v1/remember/remember.py` | The primary v1 memory entrypoint, all six public functions documented; its visibility means an unsupported claim added here would do the most damage, which makes it the strictest restraint test in the set. |
-| `cognee/infrastructure/databases/graph/graph_db_interface.py` | The extension point every new graph backend implements, already documented on 55 of its 56 public members — tests whether the author pass can add missing system-level context (which backends isolate per dataset, what a new adapter must guarantee) without inflating 55 method docstrings. |
-| `cognee/infrastructure/engine/models/DataPoint.py` | The base class every graph node inherits, fully documented today; its metadata and versioning contract is exactly the place a plausible-sounding but unverifiable claim would slip in. |
-| `cognee/modules/retrieval/base_retriever.py` | The extension point a contributor implements to add a new `SearchType`, with all ten public members documented and the three-step retrieval workflow already spelled out in the class docstring — a restraint test on a file people read instead of the docs. |
+| `cognee/api/v1/add/add.py` | Public ingestion entrypoint: clarify the loading, storage, and permission work it handles for callers, and where further processing is needed. |
+| `cognee/api/v1/remember/remember.py` | Primary memory entrypoint: explain which processing steps it combines and when to use dataset or session memory. |
+| `cognee/infrastructure/databases/graph/graph_db_interface.py` | Graph backend extension point: explain what an adapter lets callers reuse and which operations and capabilities it must provide. |
+| `cognee/infrastructure/engine/models/DataPoint.py` | Graph-node base class: explain how identity, indexing, and versioning choices affect the custom models callers build. |
+| `cognee/modules/retrieval/base_retriever.py` | Retrieval extension point: show what the shared retrieval flow handles and what a custom retriever must supply. |
