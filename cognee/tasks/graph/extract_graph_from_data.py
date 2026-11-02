@@ -28,7 +28,6 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
     get_configured_ontology_resolver,
 )
 from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.pipelines.provenance_config import get_provenance_config
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
@@ -210,15 +209,14 @@ async def integrate_chunk_graphs(
     constructed_data_points = list(data_points_by_id.values())
 
     if constructed_data_points:
-        if (pipeline_name or task_name) and get_provenance_config().is_deep():
+        if pipeline_name or task_name:
+            # This walk is the only stamp these DataPoints get: the runner's own pass
+            # (run_tasks_base._stamp_provenance) skips the chunks they hang off, which it
+            # already visited at the chunking stage, so it never descends into them.
             # One visited set for the whole batch: attach_new_edges_to_data_points has
-            # cross-linked these DataPoints, so a fresh set per DataPoint re-walked the
-            # whole reachable graph every time (quadratic, GH #6498). The set is local
-            # on purpose: the runner's own pass (run_tasks_base._stamp_provenance) also
-            # writes source_user, topological_rank, node_set and content_hash and skips
-            # anything already in ctx._provenance_visited, so sharing that set here would
-            # leave these DataPoints with only pipeline and task stamped. Lightweight and
-            # disabled modes leave stamping to the runner, as provenance_config documents.
+            # cross-linked the DataPoints, so a fresh set per DataPoint re-walked the
+            # whole reachable graph every time (quadratic, GH #6498). The set is local on
+            # purpose: ids added to ctx._provenance_visited would be skipped by the runner.
             visited: set[int] = set()
             for data_point in constructed_data_points:
                 _stamp_provenance_deep(data_point, pipeline_name, task_name, visited)

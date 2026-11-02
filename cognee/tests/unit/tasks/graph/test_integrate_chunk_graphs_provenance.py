@@ -2,7 +2,8 @@
 
 The deep walk used to run once per constructed DataPoint with a fresh ``visited`` set.
 The DataPoints are cross-linked by then, so every call re-walked the whole batch
-(quadratic), and the walk ran whatever ``COGNEE_PROVENANCE_MODE`` said.
+(quadratic). The walk is the only stamp extracted entities get: the runner's pass
+skips the chunks they hang off, already visited at the chunking stage.
 """
 
 import importlib
@@ -12,7 +13,6 @@ import pytest
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.pipelines.models import PipelineContext
-from cognee.modules.pipelines.provenance_config import ProvenanceConfig
 from cognee.shared.data_models import Edge as KGEdge
 from cognee.shared.data_models import KnowledgeGraph, Node
 from cognee.tasks.graph.extract_graph_from_data import (
@@ -21,21 +21,6 @@ from cognee.tasks.graph.extract_graph_from_data import (
 )
 
 egd_module = importlib.import_module("cognee.tasks.graph.extract_graph_from_data")
-
-
-@pytest.fixture
-def provenance_mode(monkeypatch):
-    """Pin the provenance mode the integration sees for one test.
-
-    ProvenanceConfig reads COGNEE_PROVENANCE_MODE when the module is imported, so the
-    env var cannot be changed per test; the module-level getter is swapped instead.
-    """
-
-    def _set(mode: str):
-        config = ProvenanceConfig(provenance_mode=mode)
-        monkeypatch.setattr(egd_module, "get_provenance_config", lambda: config)
-
-    return _set
 
 
 def _chunk():
@@ -78,11 +63,8 @@ def _spy_stamping(monkeypatch):
 
 @pytest.mark.asyncio
 @patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
-async def test_deep_mode_shares_one_visited_set_across_the_batch(
-    mock_find_existing, monkeypatch, provenance_mode
-):
+async def test_batch_shares_one_visited_set(mock_find_existing, monkeypatch):
     mock_find_existing.return_value = set()
-    provenance_mode("deep")
     calls = _spy_stamping(monkeypatch)
 
     chunk = _chunk()
@@ -99,14 +81,10 @@ async def test_deep_mode_shares_one_visited_set_across_the_batch(
 
 @pytest.mark.asyncio
 @patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
-async def test_deep_mode_leaves_the_runner_its_own_pass(
-    mock_find_existing, monkeypatch, provenance_mode
-):
-    """The runner's stamper also writes source_user, topological_rank, node_set and
-    content_hash, and skips ids already in ctx._provenance_visited. The deep walk here
-    must therefore keep its own visited set and leave the context's untouched."""
+async def test_visited_set_is_not_the_pipeline_contexts(mock_find_existing, monkeypatch):
+    """The runner skips ids in ctx._provenance_visited, so adding to it here would hide
+    these DataPoints from any later runner pass that does reach them."""
     mock_find_existing.return_value = set()
-    provenance_mode("deep")
     calls = _spy_stamping(monkeypatch)
     ctx = PipelineContext(pipeline_name="p")
 
@@ -115,28 +93,18 @@ async def test_deep_mode_leaves_the_runner_its_own_pass(
         [chunk], [_hub_graph()], KnowledgeGraph, None, pipeline_name="p", task_name="t", ctx=ctx
     )
 
-    assert calls and all(v is calls[0] for v in calls)
-    assert calls[0] is not ctx._provenance_visited
-    assert ctx._provenance_visited == set(), "the runner must still get to stamp these"
-    stamped = [entity for _, entity in chunk.contains]
-    assert stamped and all(dp.source_pipeline == "p" for dp in stamped)
-    assert all(dp.source_user is None for dp in stamped), "source_user is the runner's to set"
+    assert calls and calls[0] is not ctx._provenance_visited
+    assert ctx._provenance_visited == set()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["lightweight", "disabled"])
 @patch.object(egd_module, "find_existing_edge_identities", new_callable=AsyncMock)
-async def test_non_deep_modes_skip_the_deep_walk(
-    mock_find_existing, monkeypatch, provenance_mode, mode
-):
+async def test_no_pipeline_or_task_name_skips_the_walk(mock_find_existing, monkeypatch):
     mock_find_existing.return_value = set()
-    provenance_mode(mode)
     calls = _spy_stamping(monkeypatch)
 
     chunk = _chunk()
-    await integrate_chunk_graphs(
-        [chunk], [_hub_graph()], KnowledgeGraph, None, pipeline_name="p", task_name="t"
-    )
+    await integrate_chunk_graphs([chunk], [_hub_graph()], KnowledgeGraph, None)
 
     assert calls == []
     assert all(entity.source_pipeline is None for _, entity in chunk.contains)
