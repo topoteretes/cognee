@@ -21,36 +21,29 @@ router_module = import_module("cognee.api.v1.datasets.routers.get_datasets_route
 class _InterleavingStore:
     """In-memory dataset_configurations table that behaves like two database sessions.
 
-    A read, and the window between a store's SELECT and its INSERT, wait for the
-    other writers that are in flight (``expected_writers``) before going on, up to a
-    short timeout. Unserialized requests therefore interleave every time, and
-    serialized ones pay the timeout and nothing else.
+    ``arrived`` is set once every request of the test has passed the permission
+    check, which runs before the lock. A read, and the window between a store's
+    SELECT and its INSERT, wait for it before going on. Without the lock all
+    requests are then inside the handler at once and interleave every time; with
+    it they still all arrive, so the lock holder is never kept waiting, and the
+    others queue behind it. No timing is involved.
     """
 
-    def __init__(self, expected_writers: int):
+    def __init__(self):
         self.rows: dict = {}
-        self.expected_writers = expected_writers
-        self._reading = 0
-        self._inserting = 0
-
-    async def _wait_for_company(self, count: int) -> None:
-        deadline = asyncio.get_running_loop().time() + 0.05
-        while count < self.expected_writers and asyncio.get_running_loop().time() < deadline:
-            await asyncio.sleep(0.001)
+        self.arrived = asyncio.Event()
 
     async def read(self, dataset_id):
-        # The SELECT happens now; the session hands the row over only after the
-        # other writers have selected too, as overlapping requests do.
+        # The SELECT happens now; the session hands the row over once the other
+        # requests are in flight, as overlapping requests do.
         row = dict(self.rows.get(dataset_id, {"graph_schema": None, "custom_prompt": None}))
-        self._reading += 1
-        await self._wait_for_company(self._reading)
+        await self.arrived.wait()
         return row
 
     async def store(self, dataset_id, graph_schema, custom_prompt):
         existed = dataset_id in self.rows
         if not existed:
-            self._inserting += 1
-            await self._wait_for_company(self._inserting)
+            await self.arrived.wait()  # the window between SELECT and INSERT
             if dataset_id in self.rows:
                 raise RuntimeError("UNIQUE constraint failed: dataset_configurations.dataset_id")
         row = self.rows.setdefault(dataset_id, {"graph_schema": None, "custom_prompt": None})
@@ -62,10 +55,17 @@ class _InterleavingStore:
 
 @pytest.fixture
 def schema_app(monkeypatch, request):
+    """``request.param`` is the number of concurrent requests the test sends."""
     dataset_id = uuid4()
-    store = _InterleavingStore(expected_writers=request.param)
+    store = _InterleavingStore()
+    expected = request.param
+    checks = 0
 
     async def authorized(_dataset_ids, _permission, _user):
+        nonlocal checks
+        checks += 1
+        if checks == expected:
+            store.arrived.set()
         return [SimpleNamespace(id=dataset_id)]
 
     monkeypatch.setattr(router_module, "get_authorized_existing_datasets", authorized)
