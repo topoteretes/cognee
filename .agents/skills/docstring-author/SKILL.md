@@ -2,7 +2,7 @@
 name: docstring-author
 description: >-
   Write or improve Python docstrings on the ten files in pilot_files.md, making supported
-  Cognee capabilities and caller benefits explicit. Pass 1 of the docstring pilot;
+  Cognee benefits and connections between capabilities explicit. Pass 1 of the docstring pilot;
   a separate critic verifies the patch and writes the claim ledger.
 ---
 
@@ -25,52 +25,48 @@ description: >-
 
 ## 1. Understand the task
 
-Make the strongest truthful case for choosing and using the selected Cognee capability.
-Docstrings are read through IDEs, API docs, and agents, including small models that may
-never inspect the implementation. Make the capability's value clear on that first read:
-what the caller gains, what work Cognee handles, and why it matters. Useful benefits left
-unexplained are missing documentation. A separate critic checks truthfulness and tone.
+Present the strongest truthful account of what this capability enables and how it works
+with the rest of Cognee. Readers, including agents using small models, may see only this
+docstring. Explain what they can build on, what Cognee connects or handles, and what they
+must provide. State supported strengths confidently: listing behaviors alone can leave
+their value invisible. A separate critic checks truthfulness and tone.
 
 ## 2. Inputs
 
-Read the whole target file, its row in [pilot_files.md](pilot_files.md), and repository
-guidance. The selection notes explain why the file matters; establish its actual value
-from code. Use surrounding callers, implementations, and tests during investigation.
+Read the whole target, its row in [pilot_files.md](pilot_files.md), and repository guidance.
+Establish value from code, including surrounding callers, implementations and tests;
+selection notes explain purpose, not evidence.
 
 ## 3. Investigation
 
-- Trace who calls each public entry point and what it delegates to, including concrete
-  implementations of interfaces or base classes.
-- Look deliberately for work handled for callers, useful combinations of capabilities,
-  reuse, and configuration choices. Identify the code or tests that support each benefit.
-- Check outputs, failure behavior, permissions, backend support, and required setup so
-  the explanation makes clear when each benefit applies.
+- Trace relevant inputs, outputs and choices into their consumers: what carries into
+  ingestion, storage, retrieval or improvement, and why is that useful?
+- Identify work the shared flow handles, including for extensions. Verify whether each
+  connection is automatic, requires configuration or registration, or is the caller's job.
+- Check outputs, setup, permissions, backend support and failures that affect using it.
 
 ## 4. Main work
 
-- Lead with the useful outcome and a concrete reason to choose this capability. Explain
-  what the caller can accomplish or avoid implementing, connecting that benefit to the
-  behavior that enables it. State supported strengths confidently and in plain language.
-- Explain the module's role in the wider flow and what public classes represent or let
-  callers extend. For public functions and methods, describe meaningful choices, results,
-  and errors. For enums, explain what options select and when each is useful.
-- Put relevant conditions beside benefits. Include decision-relevant parameters and
-  constraints; let signatures carry obvious names and types. Avoid vague praise and
-  unsupported comparisons, guarantees, or performance claims.
-- Match the existing docstring style and the 100-character line limit. Leave private
-  helpers alone unless their docstrings are wrong. Use only the sections each docstring
-  needs.
+- Lead with the useful capability and its place in the wider flow. Explain the connection
+  and its benefit. For example, when verified: "A registered custom retriever extends the
+  standard search flow, so dataset access checks and database routing are already handled
+  when search() invokes it." Examples guide wording, not evidence.
+- Explain public roles, meaningful choices, results and errors. For enums, explain when
+  each option helps. Put relevant conditions beside benefits; let signatures carry obvious
+  names and types. Avoid vague praise and unsupported comparisons or guarantees.
+- Rewrite repetition and incidental mechanics while preserving useful connections and
+  caller obligations. Keep simple helpers simple. Match the existing docstring style and
+  100-character line limit. Leave private helpers alone unless their docstrings are wrong.
 
 ## 5. Quality check
 
-Read each changed docstring as an agent seeing only that text. Can it explain why to use
-this capability, what Cognee handles, and what conditions matter? Improve accurate prose
-that leaves those answers implicit. Check every stated advantage against its evidence,
-remove repeated signatures and redundant explanation, and confirm edits stay in scope.
+Read as an agent seeing only this text: what does this enable, how does it fit, and what
+can I rely on or must I supply? Make those answers explicit and verify their evidence.
+Remove repeated explanations across module, class, method and parameter sections while
+retaining the brief context each needs. Confirm edits stay in scope.
 
 ## 6. Output
 
-Leave the docstring edits in the target and print a brief summary of the useful context
-added. Leave existing text unchanged only when it already communicates the relevant value
-clearly and accurately; explain that outcome. Write no ledger: the workflow captures your
-patch for the independent critic.
+Leave edits in the target and print a brief summary of useful context added. Leave text
+unchanged when it already communicates the value accurately and concisely; explain why.
+Write no ledger: the workflow captures your patch for the independent critic.
