@@ -71,15 +71,6 @@ SELECT set_config('maintenance_work_mem', :target, true)
 FROM pg_settings
 WHERE name = 'maintenance_work_mem' AND setting::bigint < :target_kb
 """
-# A parallel build keeps the graph in a dynamic shared memory segment of
-# maintenance_work_mem bytes, which Postgres backs with /dev/shm. Docker caps /dev/shm at
-# 64 MB by default (the shipped docker-compose.yml included), so at the raised setting a
-# parallel build fails with "could not resize shared memory segment ... No space left on
-# device" and the collection stays unindexed, searched by a full scan. A serial build
-# keeps the graph in the backend's own memory and needs no segment; it was not slower at
-# the sizes cognee collections reach (24k 3072-dimensional rows: 15.9 s serial, 17.4 s
-# with the default two workers). Set for the build's own transaction only.
-_SERIAL_BUILD_SQL = "SET LOCAL max_parallel_maintenance_workers = 0"
 
 
 def _frozen_pgvector_version(version: str | None) -> tuple[int, ...] | None:
@@ -141,6 +132,11 @@ async def _collections(engine) -> tuple[list[tuple[str, int]], tuple[int, ...] |
 async def migrate(context: MigrationContext) -> None:
     if not _is_pgvector(context.vector_engine):
         return
+    # Session setup, not DDL, so it is shared with the adapter rather than frozen here.
+    from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import (
+        _SERIAL_BUILD_SQL,
+    )
+
     engine = context.vector_engine.engine
     collections, pgvector_version = await _collections(engine)
     for table_name, dimensions in collections:
