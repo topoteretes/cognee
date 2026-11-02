@@ -547,8 +547,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
     @staticmethod
     def _merged_belongs_to_set_payload(collection_name: str):
-        """The ``ON CONFLICT`` payload: the incoming one with ``belongs_to_set`` unioned
-        with the stored row's, so an upsert never drops a tag the row already carries.
+        """The ``ON CONFLICT`` payload column value (see ``_merged_payload_sql``)."""
+        return text(f"({PGVectorAdapter._merged_payload_sql(collection_name)})::json")
+
+    @staticmethod
+    def _merged_payload_sql(collection_name: str) -> str:
+        """The ``ON CONFLICT`` payload as jsonb SQL: the incoming one with ``belongs_to_set``
+        unioned with the stored row's, so an upsert never drops a tag the row already carries.
 
         A side whose ``belongs_to_set`` is absent or JSON ``null`` (a DataPoint's default)
         counts as empty: ``COALESCE`` alone leaves a JSON ``null`` in place, and
@@ -557,8 +562,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         quoted_table = f'"{collection_name}"'
         stored_tags = f"NULLIF({quoted_table}.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
         incoming_tags = "NULLIF(EXCLUDED.payload::jsonb->'belongs_to_set', 'null'::jsonb)"
-        return text(
-            f"""
+        return f"""
             jsonb_set(
                 EXCLUDED.payload::jsonb,
                 '{{belongs_to_set}}',
@@ -569,9 +573,32 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                         || COALESCE({incoming_tags}, '[]'::jsonb)
                     ) AS val
                 )
-            )::json
+            )
             """
+
+    @staticmethod
+    def _vector_if_text_changed(collection_name: str):
+        """``ON CONFLICT`` vector: the new embedding when the row's text changed (a summary
+        keeps its id across re-extraction), else the stored one, so a metadata-only change
+        leaves the indexed column alone and can stay a HOT update.
+        """
+        table = f'"{collection_name}"'
+        return text(
+            f"CASE WHEN {table}.payload::jsonb->'text' IS DISTINCT FROM "
+            f"EXCLUDED.payload::jsonb->'text' THEN EXCLUDED.vector ELSE {table}.vector END"
         )
+
+    @staticmethod
+    def _payload_changed(collection_name: str):
+        """``ON CONFLICT`` condition: the merged payload differs from the stored one.
+
+        The timestamps are stamped on every write and read by no one, so they are left
+        out: an unchanged re-upsert writes no new row version and no HNSW index entry.
+        """
+        volatile = "- 'created_at' - 'updated_at'"
+        merged = PGVectorAdapter._merged_payload_sql(collection_name)
+        stored = f'"{collection_name}".payload::jsonb'
+        return text(f"(({merged}) {volatile}) IS DISTINCT FROM ({stored} {volatile})")
 
     @retry(
         retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
@@ -667,7 +694,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 insert_statement = insert(PGVectorDataPoint).values(point_batch)
                 insert_statement = insert_statement.on_conflict_do_update(
                     index_elements=["id"],
-                    set_={"payload": self._merged_belongs_to_set_payload(collection_name)},
+                    set_={
+                        "payload": self._merged_belongs_to_set_payload(collection_name),
+                        "vector": self._vector_if_text_changed(collection_name),
+                    },
+                    where=self._payload_changed(collection_name),
                 )
                 await session.execute(insert_statement)
             await session.commit()
