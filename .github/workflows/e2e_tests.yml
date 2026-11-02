@@ -491,6 +491,7 @@ jobs:
           uv run pytest -v
           cognee/tests/integration/test_pgvector_hnsw_live.py
           cognee/tests/integration/test_belongs_to_set_pgvector.py
+          cognee/tests/integration/test_pgvector_concurrent_writes_live.py
 
   run-dlt-mixed-input-test:
     name: DLT Mixed Input E2E Test
