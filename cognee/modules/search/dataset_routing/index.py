@@ -168,8 +168,9 @@ async def remove_dataset_routes(dataset_id: UUID | str, document_ids: list[UUID 
 
     Called with one document when it, or its memory, is deleted, and with all
     of them when the dataset is. The root goes either way: its text names every
-    document, so the index drops it with any of them, and the next build
-    writes both anew.
+    document, so the index drops it with any of them. After a document deletion
+    the index writes a ``from_entities`` root again at once and mirrors it here
+    (``rebuild_document_index_root``); the buckets wait for the next build.
     """
     if not backend_access_control_enabled():
         return

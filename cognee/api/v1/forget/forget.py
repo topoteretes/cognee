@@ -564,10 +564,17 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
 
         # 1d. The index: the item's bucket and the dataset's root, which names
         # the item, go by their derived ids (the memory delete above does not
-        # reach them). Same stores as that delete, so it belongs with it.
-        from cognee.tasks.memify.global_context_index import remove_document_index
+        # reach them). Same stores as that delete, so it belongs with it. The
+        # root is then written again from what remains, so broad queries keep
+        # routing to the dataset; a failure there leaves it to the next improve.
+        # A dataset that had no index gets none.
+        from cognee.tasks.memify.global_context_index import (
+            rebuild_document_index_root,
+            remove_document_index,
+        )
 
-        await remove_document_index(dataset_id, [data_id])
+        if await remove_document_index(dataset_id, [data_id]):
+            await rebuild_document_index_root(dataset_id, user)
 
         # 2. Reset pipeline_status for this data record
         db_engine = get_relational_engine()
