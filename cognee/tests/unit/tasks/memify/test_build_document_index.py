@@ -4,6 +4,8 @@ Every test builds a ``DatasetContent`` by hand, so no database is involved.
 """
 
 from importlib import import_module
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
@@ -14,6 +16,7 @@ from cognee.tasks.memify.global_context_index.models import DatasetContent, Data
 build_document_index_module = import_module(
     "cognee.tasks.memify.global_context_index.build_document_index"
 )
+persist_module = import_module("cognee.tasks.memify.global_context_index.persist")
 
 
 def make_content(
@@ -247,13 +250,17 @@ async def test_only_changed_nodes_are_written_and_everything_else_is_deleted(mon
             "bucket-of-a-deleted-document": "orphan",
         }
     )
-    deleted, persisted, edges = [], [], []
+    deleted, persisted, edges, routed, dropped_vectors = [], [], [], [], []
 
     async def fake_engine():
-        return "engine"
+        return SimpleNamespace(graph="graph", vector="vector")
 
     async def fake_delete(engine, node_ids):
         deleted.extend(node_ids)
+
+    async def fake_drop_vectors(vector_engine, ids):
+        assert vector_engine == "vector"
+        dropped_vectors.extend(ids)
 
     async def fake_persist(summaries, ctx):
         persisted.extend(summaries)
@@ -261,16 +268,27 @@ async def test_only_changed_nodes_are_written_and_everything_else_is_deleted(mon
     async def fake_edges(edges_by_relationship, engine, ctx=None):
         edges.append(edges_by_relationship)
 
+    async def fake_sync_routes(dataset_id, desired, index_engine):
+        routed.append((dataset_id, [summary.id for summary in desired]))
+
     monkeypatch.setattr(build_document_index_module, "get_unified_engine", fake_engine)
     monkeypatch.setattr(build_document_index_module, "delete_context_index_nodes", fake_delete)
+    monkeypatch.setattr(
+        build_document_index_module, "safe_delete_context_vectors", fake_drop_vectors
+    )
     monkeypatch.setattr(build_document_index_module, "persist_context_summaries", fake_persist)
     monkeypatch.setattr(build_document_index_module, "persist_context_index_edges", fake_edges)
+    monkeypatch.setattr(build_document_index_module, "sync_dataset_routes", fake_sync_routes)
 
     changed = await build_document_index_module.build_document_index(content)
 
     assert [summary.id for summary in changed] == [beta.id]
     assert [summary.id for summary in persisted] == [beta.id]
     assert deleted == ["bucket-of-a-deleted-document"]
+    # The changed bucket keeps its id, so its stale vector is dropped before the rewrite.
+    assert dropped_vectors == [str(beta.id)]
+    # The routing collection reconciles against the whole desired index, not the diff.
+    assert routed == [("ds", [alpha.id, beta.id, root.id])]
     # One write carrying both edge sets, for the changed bucket only; the
     # summarizes edge targets the document.
     assert edges == [
@@ -278,4 +296,88 @@ async def test_only_changed_nodes_are_written_and_everything_else_is_deleted(mon
             "summarized_in": [(str(beta.id), str(root.id))],
             "summarizes": [(str(beta.id), "d2")],
         }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_rebuilt_root_relinks_every_surviving_bucket(monkeypatch):
+    """A document deletion drops the root, and with it every other bucket's edge to
+    it. The build that writes the root again links the unchanged buckets back,
+    with the root edge only: their document edge was never touched."""
+    alpha, beta, root = build_context_summaries(two_document_content())
+    content = two_document_content(
+        existing_summary_texts={
+            str(alpha.id): alpha.text,  # unchanged, but its root edge is gone
+            str(beta.id): "what the last run wrote",
+            # no root: dropped by a document deletion
+        }
+    )
+    edges = []
+
+    async def fake_engine():
+        return SimpleNamespace(graph="graph", vector="vector")
+
+    async def noop(*args, **kwargs):
+        return None
+
+    async def fake_edges(edges_by_relationship, engine, ctx=None):
+        edges.append(edges_by_relationship)
+
+    monkeypatch.setattr(build_document_index_module, "get_unified_engine", fake_engine)
+    monkeypatch.setattr(build_document_index_module, "delete_context_index_nodes", noop)
+    monkeypatch.setattr(build_document_index_module, "safe_delete_context_vectors", noop)
+    monkeypatch.setattr(build_document_index_module, "persist_context_summaries", noop)
+    monkeypatch.setattr(build_document_index_module, "sync_dataset_routes", noop)
+    monkeypatch.setattr(build_document_index_module, "persist_context_index_edges", fake_edges)
+
+    changed = await build_document_index_module.build_document_index(content)
+
+    assert [summary.id for summary in changed] == [beta.id, root.id]
+    assert edges == [
+        {
+            "summarized_in": [(str(beta.id), str(root.id)), (str(alpha.id), str(root.id))],
+            "summarizes": [(str(beta.id), "d2")],
+        }
+    ]
+
+
+# --- deletion ----------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_removing_a_document_deletes_its_bucket_and_the_root_by_id(monkeypatch):
+    """Explicit ids, so it works on a ledger graph as on a graph-provenance one:
+    the bucket id derives from the Data row like the routing row's, and the root
+    names every document."""
+    from cognee.tasks.memify.global_context_index.constants import (
+        GLOBAL_CONTEXT_SUMMARY_COLLECTION,
+    )
+    from cognee.tasks.memify.global_context_index.ids import (
+        create_document_bucket_id,
+        create_root_summary_id,
+    )
+
+    dataset_id, data_id = uuid4(), uuid4()
+    calls = []
+
+    class Graph:
+        async def delete_nodes(self, node_ids):
+            calls.append(("graph", list(node_ids)))
+
+    class Vector:
+        async def delete_data_points(self, collection, ids):
+            calls.append(("vector", collection, list(ids)))
+
+    async def fake_engine():
+        return SimpleNamespace(graph=Graph(), vector=Vector())
+
+    monkeypatch.setattr(persist_module, "get_unified_engine", fake_engine)
+
+    await persist_module.remove_document_index(dataset_id, [data_id])
+
+    bucket = create_document_bucket_id(str(dataset_id), str(data_id))
+    root = create_root_summary_id(str(dataset_id))
+    assert calls == [
+        ("graph", [str(bucket), str(root)]),
+        ("vector", GLOBAL_CONTEXT_SUMMARY_COLLECTION, [bucket, root]),
     ]

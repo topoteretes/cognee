@@ -15,9 +15,10 @@ from cognee.modules.graph.legacy.has_edges_in_legacy_ledger import has_edges_in_
 from cognee.modules.graph.legacy.has_nodes_in_legacy_ledger import has_nodes_in_legacy_ledger
 from cognee.modules.graph.methods.delete_from_graph_and_vector import delete_from_graph_and_vector
 from cognee.modules.graph.models import Edge, Node
-from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
+from cognee.modules.pipelines.models.DataItemStatus import is_item_stamped
 from cognee.modules.pipelines.utils import iter_ingestion_entries
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME
 
 logger = get_logger("cognify.rollback")
 
@@ -67,8 +68,10 @@ async def _graph_provenance_affected_data_ids(graph_engine, pipeline_run_id: str
     return data_ids
 
 
-async def _reset_pipeline_status(session, target_data_ids: set, dataset_id: Any) -> None:
-    """Clear the cognify_pipeline status for the rolled-back run's data ids."""
+async def _reset_pipeline_status(
+    session, target_data_ids: set, dataset_id: Any, pipeline_name: str = COGNIFY_PIPELINE_NAME
+) -> None:
+    """Clear ``pipeline_name``'s per-item status for the rolled-back run's data ids."""
     if not target_data_ids:
         return
 
@@ -83,29 +86,24 @@ async def _reset_pipeline_status(session, target_data_ids: set, dataset_id: Any)
         if not data_record.pipeline_status:
             continue
         if (
-            "cognify_pipeline" in data_record.pipeline_status
-            and dataset_id_str in data_record.pipeline_status["cognify_pipeline"]
+            pipeline_name in data_record.pipeline_status
+            and dataset_id_str in data_record.pipeline_status[pipeline_name]
         ):
-            del data_record.pipeline_status["cognify_pipeline"][dataset_id_str]
+            del data_record.pipeline_status[pipeline_name][dataset_id_str]
             orm_attributes.flag_modified(data_record, "pipeline_status")
 
 
-async def _completed_data_ids(session, data_ids: set, dataset_id: Any) -> set:
-    """The ids among ``data_ids`` whose cognify status for ``dataset_id`` records a
-    completed item: documents the run finished before it stopped."""
+async def _completed_data_ids(
+    session, data_ids: set, dataset_id: Any, pipeline_name: str = COGNIFY_PIPELINE_NAME
+) -> set:
+    """The ids among ``data_ids`` whose ``pipeline_name`` status for ``dataset_id``
+    records a completed item: documents the run finished before it stopped."""
     if not data_ids:
         return set()
-    dataset_id_str = str(dataset_id)
     records = (
         (await session.execute(select(Data).where(Data.id.in_(list(data_ids))))).scalars().all()
     )
-    return {
-        record.id
-        for record in records
-        if is_data_item_completed(
-            ((record.pipeline_status or {}).get("cognify_pipeline") or {}).get(dataset_id_str)
-        )
-    }
+    return {record.id for record in records if is_item_stamped(record, pipeline_name, dataset_id)}
 
 
 async def cognify_rollback_handler(
@@ -114,6 +112,7 @@ async def cognify_rollback_handler(
     user: Any = None,
     data_ingestion_info: Any = None,
     keep_completed_data: bool = False,
+    pipeline_name: str | None = None,
     **kwargs: Any,
 ) -> None:
     """Undo what ``pipeline_run_id`` wrote into ``dataset``.
@@ -125,7 +124,15 @@ async def cognify_rollback_handler(
     them, so deleting them would leave the dataset with holes nothing refills.
     The inline failure path keeps the default, whole-run rollback: there the
     redo is immediate.
+
+    ``pipeline_name`` is the pipeline whose per-item completion stamps the run
+    set (``run_tasks`` passes it): the cognify pipeline by default, or the
+    indexing pipeline, whose runs are rolled back by this same handler.
+    Artifacts are selected by run id, so rolling back a failed cognify run
+    leaves the chunks the indexing run stored, and the dataset stays
+    searchable.
     """
+    pipeline_name = pipeline_name or COGNIFY_PIPELINE_NAME
     dataset_id = getattr(dataset, "id", None)
     if not dataset_id or not pipeline_run_id:
         logger.warning(
@@ -159,17 +166,22 @@ async def cognify_rollback_handler(
             kept_data_ids = set()
             if keep_completed_data:
                 async with db_engine.get_async_session() as session:
-                    kept_data_ids = await _completed_data_ids(session, target_data_ids, dataset_id)
+                    kept_data_ids = await _completed_data_ids(
+                        session, target_data_ids, dataset_id, pipeline_name
+                    )
             await unified.rollback_by_pipeline_run_id(
                 str(pipeline_run_id), keep_data_ids=kept_data_ids or None
             )
 
             async with db_engine.get_async_session() as session:
-                await _reset_pipeline_status(session, target_data_ids - kept_data_ids, dataset_id)
+                await _reset_pipeline_status(
+                    session, target_data_ids - kept_data_ids, dataset_id, pipeline_name
+                )
                 await session.commit()
 
             logger.info(
-                "Graph-provenance cognify rollback completed for run %s (dataset=%s, user=%s).",
+                "Graph-provenance %s rollback completed for run %s (dataset=%s, user=%s).",
+                pipeline_name,
                 pipeline_run_id,
                 dataset_id,
                 user_id,
@@ -213,7 +225,9 @@ async def cognify_rollback_handler(
         )
         kept_data_ids = set()
         if keep_completed_data:
-            kept_data_ids = await _completed_data_ids(session, target_data_ids, dataset_id)
+            kept_data_ids = await _completed_data_ids(
+                session, target_data_ids, dataset_id, pipeline_name
+            )
             target_nodes = [node for node in target_nodes if node.data_id not in kept_data_ids]
             target_edges = [edge for edge in target_edges if edge.data_id not in kept_data_ids]
 
@@ -293,12 +307,15 @@ async def cognify_rollback_handler(
                 edge_filter = and_(edge_filter, Edge.data_id.notin_(list(kept_data_ids)))
             await session.execute(delete(Edge).where(edge_filter))
 
-        await _reset_pipeline_status(session, target_data_ids - kept_data_ids, dataset_id)
+        await _reset_pipeline_status(
+            session, target_data_ids - kept_data_ids, dataset_id, pipeline_name
+        )
 
         await session.commit()
 
     logger.info(
-        "Cognify rollback completed for run %s (dataset=%s, user=%s, rows=%d nodes/%d edges).",
+        "%s rollback completed for run %s (dataset=%s, user=%s, rows=%d nodes/%d edges).",
+        pipeline_name,
         pipeline_run_id,
         dataset_id,
         user_id,

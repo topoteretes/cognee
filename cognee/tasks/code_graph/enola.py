@@ -17,6 +17,8 @@ import os
 import platform
 import shutil
 import sysconfig
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +58,10 @@ _RELATION_TARGET_KEYS = ("target", "name", "to", "target_name")
 # ~/.enola) is pure noise here — and the run must stay offline-safe. Prompts
 # and terminal hints assume an interactive shell.
 _SUBPROCESS_ENV_OVERRIDES = {"ENOLA_NO_UPDATE_CHECK": "1", "ENOLA_NO_PROMPTS": "1"}
+
+# Where a cluster config is read from when it is piped rather than written:
+# enola treats a path that names a file as a config, and reads it once.
+_STDIN_CONFIG_PATH = "/dev/stdin"
 
 
 class EnolaNotInstalledError(CogneeConfigurationError):
@@ -114,6 +120,59 @@ def find_enola_binary() -> str:
     raise EnolaNotInstalledError()
 
 
+async def _run_enola(
+    command: list[str],
+    cwd: Path,
+    timeout: float,
+    subject: str,
+    stdin_data: bytes | None = None,
+) -> None:
+    """Run one enola generate command to completion; raise EnolaSnapshotError on failure.
+
+    ``stdin_data`` is fed to the process on its standard input (a cluster
+    config passed as ``/dev/stdin``); without it stdin is left unconnected.
+    """
+    logger.info("Running enola: %s (cwd=%s)", " ".join(command), cwd)
+
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=str(cwd),
+        env={**os.environ, **_SUBPROCESS_ENV_OVERRIDES},
+        stdin=asyncio.subprocess.PIPE if stdin_data is not None else None,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    try:
+        communicating = (
+            process.communicate(stdin_data) if stdin_data is not None else process.communicate()
+        )
+        _stdout, stderr = await asyncio.wait_for(communicating, timeout=timeout)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        raise EnolaSnapshotError(message=f"enola timed out after {timeout} seconds on {subject}.")
+
+    stderr_text = stderr.decode(errors="replace") if stderr else ""
+    if process.returncode != 0:
+        # Artifacts already in .enola/ may be from an earlier run; callers
+        # must not ingest them (the error propagates before parsing).
+        raise EnolaSnapshotError(
+            message=(
+                f"enola exited with code {process.returncode} on {subject}. "
+                f"stderr tail: {stderr_text[-2000:]}"
+            )
+        )
+
+    # enola reports the configuration it resolved on stderr ("enola: using
+    # config ..." / "enola: no mcp-arch.yaml in ..., using built-in defaults").
+    # A config decides which extractors run and which paths are ignored, so
+    # the line belongs in the ingestion log next to the snapshot it shaped.
+    for line in stderr_text.splitlines():
+        if line.startswith("enola:"):
+            logger.info("%s", line.strip())
+
+
 async def run_enola_generate(
     repo_path: str | Path,
     timeout: float = 600.0,
@@ -133,46 +192,8 @@ async def run_enola_generate(
     # AND used as cwd: enola resolves an optional mcp-arch.yaml from the
     # working directory, so this honors a repo-local config while making sure
     # an unrelated one from the caller's cwd can never narrow the run.
-    command = [binary, "--generate", str(repo_path)]
     snapshot_dir = repo_path / ".enola"
-
-    logger.info("Running enola: %s (cwd=%s)", " ".join(command), repo_path)
-
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        cwd=str(repo_path),
-        env={**os.environ, **_SUBPROCESS_ENV_OVERRIDES},
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-
-    try:
-        _stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
-        raise EnolaSnapshotError(
-            message=f"enola timed out after {timeout} seconds on '{repo_path}'."
-        )
-
-    stderr_text = stderr.decode(errors="replace") if stderr else ""
-    if process.returncode != 0:
-        # Artifacts already in .enola/ may be from an earlier run; callers
-        # must not ingest them (the error propagates before parsing).
-        raise EnolaSnapshotError(
-            message=(
-                f"enola exited with code {process.returncode} on '{repo_path}'. "
-                f"stderr tail: {stderr_text[-2000:]}"
-            )
-        )
-
-    # enola reports the configuration it resolved on stderr ("enola: using
-    # config ..." / "enola: no mcp-arch.yaml in ..., using built-in defaults").
-    # A config decides which extractors run and which paths are ignored, so
-    # the line belongs in the ingestion log next to the snapshot it shaped.
-    for line in stderr_text.splitlines():
-        if line.startswith("enola:"):
-            logger.info("%s", line.strip())
+    await _run_enola([binary, "--generate", str(repo_path)], repo_path, timeout, f"'{repo_path}'")
 
     if not (snapshot_dir / "facts.jsonl").is_file():
         raise EnolaSnapshotError(
@@ -180,6 +201,111 @@ async def run_enola_generate(
         )
 
     return snapshot_dir
+
+
+def _config_via_stdin() -> bool:
+    """Whether enola can read the cluster config from ``/dev/stdin`` here.
+
+    Windows has no ``/dev/stdin``, so the config goes through a temporary
+    file there. A function rather than a constant so tests can pick the path
+    without patching ``os.name`` (which breaks ``pathlib`` on the running
+    interpreter and pytest's own reporting with it).
+    """
+    return os.name != "nt"
+
+
+def render_cluster_config(repo_paths: list[Path], output_dir: str) -> str:
+    """The enola cluster config for these repositories, as YAML text.
+
+    enola accepts a cluster only as a ``repos:`` config, whose entries must be
+    plain path strings. Paths are written absolute, so the config means the
+    same thing wherever enola resolves it from, and as JSON strings, which are
+    valid YAML scalars and quote any path safely. ``output_dir`` replaces
+    ``.enola`` as the snapshot directory; enola joins it to each repository
+    path and refuses an absolute one. enola's per-repository
+    architecture history (revisions under ``~/.enola/graphs``) is switched
+    off: cognee keeps its own record of the snapshot it loaded.
+    """
+    lines = ["output:", f"  dir: {json.dumps(output_dir)}", "repos:"]
+    lines.extend(f"  - {json.dumps(str(path))}" for path in repo_paths)
+    lines.extend(["history:", "  enabled: false"])
+    return "\n".join(lines) + "\n"
+
+
+async def run_enola_cluster(
+    repo_paths: list[Path],
+    output_dir: str,
+    timeout: float = 600.0,
+) -> Path:
+    """Run `enola --generate` over a cluster of repositories; return one snapshot directory.
+
+    enola links the repositories of a cluster config into one graph and
+    writes that whole graph to every member's ``output_dir``, so any member's
+    directory is the cluster's snapshot. The first member's is returned.
+
+    The config is built from the repositories' paths and handed to enola on
+    its standard input (``--generate /dev/stdin``): enola reads the config
+    once, at start, so nothing has to be written to disk for it. Windows has
+    no ``/dev/stdin``; there the config is a temporary file that is removed
+    as soon as enola exits. The working directory is neutral (the system
+    temporary directory), so no repository's own mcp-arch.yaml narrows a run
+    that covers all of them.
+    """
+    binary = find_enola_binary()
+
+    for repo_path in repo_paths:
+        if not repo_path.is_dir():
+            raise EnolaSnapshotError(message=f"Repository path '{repo_path}' is not a directory.")
+
+    config_text = render_cluster_config(repo_paths, output_dir)
+    subject = f"the {len(repo_paths)}-repository cluster {[path.name for path in repo_paths]}"
+    cwd = Path(tempfile.gettempdir())
+
+    if not _config_via_stdin():
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", prefix="cognee-enola-cluster-", suffix=".yaml", delete=False
+        ) as config_file:
+            config_file.write(config_text)
+        try:
+            await _run_enola([binary, "--generate", config_file.name], cwd, timeout, subject)
+        finally:
+            try:
+                os.unlink(config_file.name)
+            except OSError:
+                pass
+    else:
+        await _run_enola(
+            [binary, "--generate", _STDIN_CONFIG_PATH],
+            cwd,
+            timeout,
+            subject,
+            stdin_data=config_text.encode("utf-8"),
+        )
+
+    snapshot_dir = repo_paths[0] / output_dir
+    if not (snapshot_dir / "facts.jsonl").is_file():
+        raise EnolaSnapshotError(
+            message=f"enola completed but no facts.jsonl was found in '{snapshot_dir}'."
+        )
+
+    return snapshot_dir
+
+
+@dataclass(frozen=True)
+class ParsedSnapshot:
+    """A snapshot read once: its directory, facts and receipt.
+
+    extract_code_graph and add_code_graph_edges take it in place of a
+    ``snapshot_dir`` so a load that covers several repositories (a dataset's
+    cluster) parses ``facts.jsonl`` once, not once per task per member.
+    ``edges`` are the typed relation edges already resolved from these facts
+    (``build_code_graph_edges``), when the caller resolved them once as well.
+    """
+
+    snapshot_dir: Path
+    facts: list
+    receipt: dict | None
+    edges: list | None = None
 
 
 def parse_enola_snapshot(

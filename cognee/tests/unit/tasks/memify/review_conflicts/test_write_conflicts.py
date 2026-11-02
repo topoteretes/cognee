@@ -1,29 +1,30 @@
-"""Partial review writes remain discoverable and safe to repeat."""
+"""What one review batch writes, and partial writes that stay discoverable and safe to repeat."""
 
+import copy
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
-from cognee.modules.engine.models import Entity, FactConflict
+from cognee.modules.engine.models import FactConflict
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.pipelines.models import PipelineContext
-from cognee.modules.provenance.edge_evidence.lookup import EdgeEvidenceRecord
-from cognee.tasks.memify.review_conflicts import read_facts, write_conflicts
-from cognee.tasks.memify.review_conflicts.models import AcceptedConflict, ReviewBatch, ReviewScope
+from cognee.tasks.memify.review_conflicts import write_conflicts
+from cognee.tasks.memify.review_conflicts.facts import select_supporting_facts
+from cognee.tasks.memify.review_conflicts.models import (
+    AcceptedConflict,
+    ConflictsToFinalize,
+    ConflictsToWrite,
+    ReviewScope,
+)
 
 
 @pytest.fixture
 def store(monkeypatch):
     subject, alice, bob, chunk, missing, dataset = [str(uuid4()) for _ in range(6)]
-    entities = {
-        node_id: Entity(id=node_id, name=name, description="Old description").model_dump(
-            mode="json"
-        )
-        for node_id, name in [(subject, "Acme"), (alice, "Alice"), (bob, "Bob")]
-    }
     conflict = FactConflict(
         dataset_id=dataset,
         about_id=subject,
@@ -62,8 +63,8 @@ def store(monkeypatch):
             "effective_date": "2026-01-10",
             "observed_at": None,
         }
-    scope = ReviewScope(dataset, entities, facts, {cid: conflict.model_dump(mode="json")})
-    nodes = {**entities, cid: conflict.model_dump(mode="json")}
+    scope = ReviewScope(dataset, {}, facts, {cid: conflict.model_dump(mode="json")})
+    nodes = {cid: conflict.model_dump(mode="json")}
     edges = {(cid, alice, "conflict_value"): {}, (cid, chunk, "conflict_cites"): {}}
     vectors = {str(EdgeType.id_for(conflict.text))}
     calls = []
@@ -110,8 +111,6 @@ def store(monkeypatch):
 
     async def storage(items, custom_edges=None, ctx=None):
         calls.append((items, custom_edges, ctx))
-        if items and isinstance(items[0], Entity) and fail.at == "entity":
-            raise RuntimeError("entity")
         await add_nodes(items)
         if custom_edges:
             if fail.at == "links":
@@ -136,12 +135,7 @@ def store(monkeypatch):
             for fid, fact in facts.items()
         },
     )
-    batch = ReviewBatch(
-        scope,
-        {eid: "Reviewed description" for eid in entities},
-        [accepted],
-        shown_fact_ids=set(facts),
-    )
+    batch = ConflictsToWrite(scope, [accepted], shown_fact_ids=set(facts))
     ctx = PipelineContext(dataset=SimpleNamespace(id=dataset), data_item={})
     return SimpleNamespace(
         scope=scope,
@@ -160,163 +154,103 @@ def store(monkeypatch):
     )
 
 
-async def finish(store, state):
-    await write_conflicts.write_review_batch(
-        [ReviewBatch(store.scope, final=True)], store.ctx, state
+async def finish(store, *batches):
+    """End the stream as the reviewer does, with every conflict these batches decided."""
+    end = ConflictsToFinalize(
+        accepted_conflicts=[item for batch in batches for item in batch.accepted_conflicts],
+        dropped_conflict_ids=[cid for batch in batches for cid in batch.dropped_conflict_ids],
     )
+    await write_conflicts.write_conflicts([end], store.ctx)
+
+
+def find_fact_id(store, value: str) -> str:
+    """The fixture's fact that links the subject to this value."""
+    return next(fid for fid, fact in store.scope.facts.items() if fact["target"] == value)
+
+
+def read_written_properties(store, fact_id: str) -> dict | None:
+    """The properties the writer stored on this fact's edge; None when it did not write it."""
+    fact = store.scope.facts[fact_id]
+    return store.edges.get((fact["source"], fact["target"], fact["relationship"]))
 
 
 @pytest.mark.asyncio
 async def test_review_replaces_links_preserves_marks_and_finalizes_last(store):
-    state = write_conflicts.ReviewWriteState()
-    await write_conflicts.write_review_batch([store.batch], store.ctx, state)
-    assert store.nodes[store.cid]["review_pending"] is True
+    await write_conflicts.write_conflicts([store.batch], store.ctx)
+    assert store.nodes[store.cid]["write_pending"] is True
+    # Later calls of the run see the conflict as the run leaves it, not as a pending write.
+    assert store.scope.conflicts[store.cid]["write_pending"] is False
     assert store.ctx.data_item == {}
-    conflict_calls = [call for call in store.calls if isinstance(call[0][0], FactConflict)]
-    assert all(call[2] is not store.ctx and call[2].data_item.id for call in conflict_calls)
-    assert all(call[2] is store.ctx for call in store.calls if isinstance(call[0][0], Entity))
+    assert all(isinstance(call[0][0], FactConflict) for call in store.calls)
+    assert all(call[2] is not store.ctx and call[2].data_item.id for call in store.calls)
     for fact in store.scope.facts.values():
         properties = store.edges[(fact["source"], fact["target"], "has_ceo")]
         assert properties["weight"] == 3
         assert {"conflict_id": "other", "status": "conflicting"} in properties["conflict_marks"]
-    await finish(store, state)
-    assert store.nodes[store.cid]["review_pending"] is False
+    await finish(store, store.batch)
+    assert store.nodes[store.cid]["write_pending"] is False
     assert store.nodes[store.cid]["text"] == "Bob is the current CEO."
     assert store.vectors == {str(EdgeType.id_for("Bob is the current CEO."))}
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["marks", "entity", "links", "index", "cleanup"])
+@pytest.mark.parametrize("failure", ["marks", "links", "index", "cleanup"])
 async def test_storage_failure_keeps_pending_node_and_rerun_repairs_it(store, failure):
     store.fail.at = failure
     with pytest.raises(RuntimeError, match=failure):
-        await write_conflicts.write_review_batch(
-            [store.batch], store.ctx, write_conflicts.ReviewWriteState()
-        )
-    assert store.nodes[store.cid]["review_pending"] is True
+        await write_conflicts.write_conflicts([store.batch], store.ctx)
+    assert store.nodes[store.cid]["write_pending"] is True
     # A fresh read sees the stored pending node even after its sources were replaced.
     store.scope.conflicts[store.cid] = dict(store.nodes[store.cid])
     store.fail.at = None
-    state = write_conflicts.ReviewWriteState()
-    await write_conflicts.write_review_batch([store.batch], store.ctx, state)
-    await finish(store, state)
-    assert store.nodes[store.cid]["review_pending"] is False
+    await write_conflicts.write_conflicts([store.batch], store.ctx)
+    await finish(store, store.batch)
+    assert store.nodes[store.cid]["write_pending"] is False
     assert (store.cid, store.bob, "conflict_value") in store.edges
     assert str(EdgeType.id_for("Bob is the current CEO.")) in store.vectors
 
 
 @pytest.mark.asyncio
-async def test_drop_waits_for_failed_value_description_and_cleanup(store):
-    batch = ReviewBatch(
-        store.scope,
-        {eid: "Reviewed" for eid in store.scope.entities if eid != store.bob},
-        dropped_conflict_ids=[store.cid],
-    )
-    state = write_conflicts.ReviewWriteState()
-    await write_conflicts.write_review_batch([batch], store.ctx, state)
-    await write_conflicts.write_review_batch(
-        [ReviewBatch(store.scope, final=True, unreviewed_entity_ids=[store.bob])], store.ctx, state
-    )
-    assert state.unreviewed_entity_ids == [store.bob]
-    assert store.nodes[store.cid]["review_pending"] is True
+async def test_drop_is_deleted_only_when_the_stream_ends(store):
+    batch = ConflictsToWrite(store.scope, dropped_conflict_ids=[store.cid])
+    await write_conflicts.write_conflicts([batch], store.ctx)
+    assert store.nodes[store.cid]["write_pending"] is True
     store.graph.delete_nodes.assert_not_awaited()
-    # Finishing the value in another batch allows the final deletion.
-    await write_conflicts.write_review_batch(
-        [ReviewBatch(store.scope, {store.bob: "Reviewed Bob"})], store.ctx, state
-    )
-    await finish(store, state)
+    await finish(store, batch)
     assert store.cid not in store.nodes
     assert not store.vectors
 
 
 @pytest.mark.asyncio
+async def test_drop_leaves_the_run_scope_at_once(store):
+    """Later calls of the run must not show a dropped conflict or count its citations."""
+    batch = ConflictsToWrite(store.scope, dropped_conflict_ids=[store.cid])
+    await write_conflicts.write_conflicts([batch], store.ctx)
+    assert store.cid not in store.scope.conflicts
+    # Both facts come from a chunk the dropped conflict cites; neither supports a conflict now.
+    supporting = select_supporting_facts(
+        store.scope.facts, store.scope.facts, store.scope.conflicts.values()
+    )
+    assert supporting == set()
+
+
+@pytest.mark.asyncio
 async def test_drop_cleanup_failure_preserves_retry_marker(store):
     store.fail.at = "cleanup"
-    batch = ReviewBatch(store.scope, store.batch.descriptions, dropped_conflict_ids=[store.cid])
+    batch = ConflictsToWrite(store.scope, dropped_conflict_ids=[store.cid])
     with pytest.raises(RuntimeError, match="cleanup"):
-        await write_conflicts.write_review_batch(
-            [batch], store.ctx, write_conflicts.ReviewWriteState()
-        )
-    assert store.nodes[store.cid]["review_pending"] is True
+        await write_conflicts.write_conflicts([batch], store.ctx)
+    assert store.nodes[store.cid]["write_pending"] is True
     store.graph.delete_nodes.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_removed_value_is_retained_for_retry_until_its_description_succeeds(store):
-    store.batch.conflicts[0].conflict.values = [store.bob]
-    store.batch.descriptions.pop(store.alice)
-    state = write_conflicts.ReviewWriteState()
-    await write_conflicts.write_review_batch([store.batch], store.ctx, state)
-    await finish(store, state)
-    assert store.nodes[store.cid]["review_pending"] is True
-    assert store.alice in store.nodes[store.cid]["values"]
-    await write_conflicts.write_review_batch(
-        [ReviewBatch(store.scope, {store.alice: "Updated Alice"})], store.ctx, state
-    )
-    await finish(store, state)
+async def test_removed_value_leaves_the_stored_conflict_at_once(store):
+    store.batch.accepted_conflicts[0].conflict.values = [store.bob]
+    await write_conflicts.write_conflicts([store.batch], store.ctx)
+    await finish(store, store.batch)
     assert store.nodes[store.cid]["values"] == [store.bob]
-
-
-@pytest.mark.asyncio
-async def test_context_only_value_is_selected_on_next_run_before_finalizing(store, monkeypatch):
-    store.scope.nodes = dict(store.scope.entities)
-    store.scope.entities.pop(store.alice)
-    store.batch.descriptions.pop(store.alice)
-    chunk = store.batch.conflicts[0].conflict.sources[0]
-    store.nodes[chunk] = {"id": chunk, "type": "DocumentChunk"}
-    evidence = []
-    for fact_id, fact in store.scope.facts.items():
-        fact["properties"]["edge_object_id"] = fact_id
-        evidence.append(EdgeEvidenceRecord(UUID(fact_id), uuid4(), UUID(chunk), 0, "Report"))
-
-    state = write_conflicts.ReviewWriteState()
-    await write_conflicts.write_review_batch([store.batch], store.ctx, state)
-    await finish(store, state)
-    assert store.nodes[store.cid]["review_pending"] is True
-    assert store.nodes[store.alice]["description"] == "Old description"
-
-    store.graph.get_nodes = AsyncMock(
-        side_effect=lambda ids: [store.nodes[key] for key in ids if key in store.nodes]
-    )
-    store.graph.get_filtered_graph_data = AsyncMock(
-        side_effect=lambda filters: (
-            [
-                (key, node)
-                for key, node in store.nodes.items()
-                if (
-                    key in filters[0]["id"]
-                    if "id" in filters[0]
-                    else node["type"] in filters[0]["type"]
-                )
-            ],
-            [],
-        )
-    )
-    monkeypatch.setattr(read_facts, "get_graph_engine", AsyncMock(return_value=store.graph))
-    monkeypatch.setattr(read_facts, "backend_access_control_enabled", lambda: True)
-    monkeypatch.setattr(read_facts, "get_edge_sources", AsyncMock(return_value=evidence))
-    recovered = await read_facts.read_entity_facts([{}], entity_ids=[], ctx=store.ctx)
-    assert store.alice in recovered.entities
-    batch = ReviewBatch(
-        recovered,
-        {key: "Reviewed again" for key in recovered.entities},
-        store.batch.conflicts,
-        shown_fact_ids=set(recovered.facts),
-    )
-    state = write_conflicts.ReviewWriteState()
-    await write_conflicts.write_review_batch([batch], store.ctx, state)
-    await finish(store, state)
-    assert store.nodes[store.cid]["review_pending"] is False
-    assert store.nodes[store.alice]["description"] == "Reviewed again"
-
-
-@pytest.mark.asyncio
-async def test_deleted_old_value_does_not_block_finalization(store):
-    store.scope.conflicts[store.cid]["values"].append(str(uuid4()))
-    state = write_conflicts.ReviewWriteState()
-    await write_conflicts.write_review_batch([store.batch], store.ctx, state)
-    await finish(store, state)
-    assert store.nodes[store.cid]["review_pending"] is False
+    assert store.nodes[store.cid]["write_pending"] is False
 
 
 @pytest.mark.asyncio
@@ -328,6 +262,72 @@ async def test_unsupported_edge_delete_is_not_swallowed(store):
     """
     store.graph.delete_edge_triples = AsyncMock(side_effect=UnsupportedProvenanceCapability())
     with pytest.raises(UnsupportedProvenanceCapability):
-        await write_conflicts.write_review_batch(
-            [store.batch], store.ctx, write_conflicts.ReviewWriteState()
-        )
+        await write_conflicts.write_conflicts([store.batch], store.ctx)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shown", [True, False])
+async def test_unlabelled_fact_loses_its_mark_only_when_shown(store, shown):
+    """A shown fact the answer did not label loses the conflict's mark.
+
+    The answer judged that fact and left it out of the conflict. An unshown fact was not judged.
+    """
+    alice_fact, bob_fact = find_fact_id(store, store.alice), find_fact_id(store, store.bob)
+    stored_marks = store.scope.facts[alice_fact]["properties"]["conflict_marks"]
+    store.batch.accepted_conflicts[0].fact_statuses = {bob_fact: "current"}
+    store.batch.shown_fact_ids = {alice_fact, bob_fact} if shown else {bob_fact}
+    await write_conflicts.write_conflicts([store.batch], store.ctx)
+    written = read_written_properties(store, alice_fact)
+    if shown:
+        assert written["conflict_marks"] == [{"conflict_id": "other", "status": "conflicting"}]
+    else:
+        assert written is None
+        assert store.scope.facts[alice_fact]["properties"]["conflict_marks"] == stored_marks
+
+
+@pytest.mark.asyncio
+async def test_answer_with_no_conflicts_rewrites_a_changed_date(store):
+    """A shown fact is stored with the date it was judged with, even when nothing else changed."""
+    alice_fact, bob_fact = find_fact_id(store, store.alice), find_fact_id(store, store.bob)
+    store.scope.facts[alice_fact]["properties"]["effective_date"] = "2025-06-01"
+    store.scope.facts[bob_fact]["properties"]["effective_date"] = "2026-01-10"
+    stored_marks = store.scope.facts[alice_fact]["properties"]["conflict_marks"]
+    batch = ConflictsToWrite(store.scope, shown_fact_ids={alice_fact, bob_fact})
+    await write_conflicts.write_conflicts([batch], store.ctx)
+    written = read_written_properties(store, alice_fact)
+    assert written["effective_date"] == "2026-01-10"
+    assert written["conflict_marks"] == stored_marks
+    # Its stored date is the date read now, so there is nothing to rewrite.
+    assert read_written_properties(store, bob_fact) is None
+
+
+@pytest.mark.asyncio
+async def test_value_link_takes_the_strongest_status_of_its_facts(store):
+    """A value's facts can be given different statuses; its link stores the strongest."""
+    facts = store.scope.facts
+    fact_statuses = {}
+    # Alice's stronger status comes second, Bob's weaker one comes second.
+    for value, first_status, second_status in [
+        (store.alice, "superseded", "conflicting"),
+        (store.bob, "superseded", "current"),
+    ]:
+        first_fact, second_fact = find_fact_id(store, value), str(uuid4())
+        facts[second_fact] = copy.deepcopy(facts[first_fact])
+        facts[second_fact].update(id=second_fact, relationship="led_by")
+        fact_statuses.update({first_fact: first_status, second_fact: second_status})
+    store.batch.accepted_conflicts[0].fact_statuses = fact_statuses
+    store.batch.shown_fact_ids = set(facts)
+    await write_conflicts.write_conflicts([store.batch], store.ctx)
+    assert store.edges[(store.cid, store.alice, "conflict_value")]["status"] == "conflicting"
+    assert store.edges[(store.cid, store.bob, "conflict_value")]["status"] == "superseded"
+
+
+@pytest.mark.asyncio
+async def test_stored_metadata_read_as_json_text_is_decoded(store):
+    """Neo4j returns a node's metadata as JSON text; the pending copy needs it as a dict."""
+    stored = store.scope.conflicts[store.cid]
+    metadata = stored["metadata"]
+    stored["metadata"] = json.dumps(metadata)
+    await write_conflicts.write_conflicts([store.batch], store.ctx)
+    pending_nodes = store.calls[0][0]  # marking pending is the batch's first write
+    assert [node.metadata for node in pending_nodes] == [metadata]

@@ -26,6 +26,8 @@ def _unified(vector=None, graph=None):
     unified.vector = vector or MagicMock()
     unified.vector.embedding_engine.embed_text = AsyncMock(return_value=[QUERY_VECTOR])
     unified.graph = graph or MagicMock()
+    if graph is None:
+        unified.graph.get_filtered_graph_data = AsyncMock(return_value=([], []))
     unified.graph.is_empty = AsyncMock(return_value=False)
     return unified
 
@@ -77,7 +79,7 @@ async def test_passage_section_formatting():
 
 
 @pytest.mark.asyncio
-async def test_reviewed_hybrid_retrieval_attaches_sources_and_deduplicates_conflicts():
+async def test_hybrid_retrieval_attaches_sources_and_deduplicates_conflicts():
     conflict = "Bob succeeded Alice as Acme CEO."
     chunk = _result(
         "chunk", {"id": "chunk", "text": "Bob became CEO.", "external_metadata": {"team": "A"}}
@@ -96,7 +98,6 @@ async def test_reviewed_hybrid_retrieval_attaches_sources_and_deduplicates_confl
                 {
                     "name": "Acme",
                     "description": "Bob leads Acme.",
-                    "conflicts_reviewed_at": "2026-01-10",
                 },
             ),
             ("company", {"name": "company"}),
@@ -125,7 +126,8 @@ async def test_reviewed_hybrid_retrieval_attaches_sources_and_deduplicates_confl
     context = await retriever.get_context_from_objects(query="q", retrieved_objects=retrieved)
     assert chunk.payload["conflicts"] == [conflict]
     assert "source: Report (2026-01-10)\nteam: A\nBob became CEO." in context
-    assert "### Acme (company)\nBob leads Acme." in context
+    assert "### Acme (company)\n" in context
+    assert "Bob leads Acme." not in context
     assert context.count(conflict) == 1
     assert "## Fact conflicts" in context
     assert "## Related facts" not in context
@@ -1167,8 +1169,52 @@ def _edge_hit(text):
 
 def _graph(nodes=None, edges=None):
     graph = MagicMock()
+    graph.get_filtered_graph_data = AsyncMock(return_value=([], []))
     graph.get_neighborhood = AsyncMock(return_value=(nodes or [], edges or []))
     return graph
+
+
+@pytest.mark.asyncio
+async def test_user_resolution_preserves_passage_and_summary_and_replaces_standalone_fact():
+    old, selected = "Company has CEO Bob", "Company has CEO Alice"
+    passage = f"{old}. The company was founded in 1998."
+    summary = "Founded in 1998, with Bob as CEO."
+    vector = MagicMock()
+    vector.has_collection = AsyncMock(return_value=False)
+    vector.search = _vector_search(
+        chunks=[_result("chunk-1", {"id": "chunk-1", "text": passage})],
+        summaries=[_result("summary", {"source_chunk_id": "chunk-1", "text": summary})],
+        edge_types=[_edge_hit(old)],
+    )
+    graph = _graph()
+    graph.get_filtered_graph_data.return_value = (
+        [
+            (
+                "conflict",
+                {
+                    "resolution_source": "user",
+                    "selected_fact": selected,
+                    "sources": ["chunk-1"],
+                    "rejected_fact_texts": [old],
+                },
+            )
+        ],
+        [],
+    )
+    retriever = HybridRetriever(text_summaries_top_k=1, facts_top_k=1)
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=_unified(vector=vector, graph=graph),
+    ):
+        objects = await retriever.get_retrieved_objects(query="Who is CEO?")
+        context = await retriever.get_context_from_objects(
+            query="Who is CEO?", retrieved_objects=objects
+        )
+    assert passage in context
+    assert f"Accepted by user: {selected}" in context
+    assert objects["chunk_summaries"] == {"chunk-1": summary}
+    assert [fact["text"] for fact in objects["facts"]] == [selected]
 
 
 @pytest.mark.asyncio
@@ -1336,6 +1382,7 @@ async def test_graph_neighborhood_error_keeps_chunks_entities_and_facts():
     )
     graph = MagicMock()
     graph.get_neighborhood = AsyncMock(side_effect=RuntimeError("graph unavailable"))
+    graph.get_filtered_graph_data = AsyncMock(return_value=([], []))
     retriever = HybridRetriever(text_summaries_top_k=0, facts_top_k=1)
 
     with patch(
@@ -1350,7 +1397,6 @@ async def test_graph_neighborhood_error_keeps_chunks_entities_and_facts():
         {
             "id": "entity-1",
             "name": "Alice",
-            "description": None,
             "type": None,
             "edges": [],
         }

@@ -120,7 +120,8 @@ async def test_agent_memory_e2e_requires_write_then_retrieves_shared_memory(agen
 
     result = await shared_memory_agent()
 
-    assert secret_codename in result
+    # The model may change the codename's case; only the words matter.
+    assert secret_codename.lower() in result.lower()
 
 
 @pytest.mark.asyncio

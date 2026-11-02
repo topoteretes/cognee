@@ -20,9 +20,14 @@ from uuid import UUID
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.migration.cogx import (
     COGXArchiveWriter,
+    COGXConfidence,
+    COGXContributor,
     COGXDocument,
     COGXEntity,
+    COGXEvidence,
     COGXFact,
+    COGXOrigin,
+    header_from_properties,
     parse_timestamp,
     write_social_layer,
 )
@@ -134,6 +139,53 @@ async def _stored_migration_revision(dataset_id) -> str | None:
         return None
 
 
+# What the cognee exporter can state for each OMP header field. Declared in
+# the manifest so an importer never mistakes an absent field for a negative.
+COGX_EXPORT_COVERAGE = {
+    "origin": "cognee node ids; an earlier origin on the node is kept",
+    "content_hash": "sha256 of each record body",
+    "subject": "entities linked to a chunk by contains edges; entity records name themselves",
+    "semantic_kind": "node property only; no classification is performed",
+    "validity": "valid_from/valid_to and invalidated_by read from node and edge properties when present",
+    "evidence": "derived: the chunks whose contains edges reach the record; no source spans",
+    "confidence": "score from the edge confidence property; contradicted for endpoints of contradicts edges; otherwise not stated",
+    "version": "DataPoint version from node properties",
+    "content_type": "text/plain for every body; documents keep their mime type",
+    "checksum": "sha256 over each exported record, header and body",
+    "tags": "node property only",
+    "contributors": "pipeline, task and user stamps on the node (source_pipeline, source_task, source_user)",
+    "accountable": "the user stamped on the node (source_user); otherwise not stated",
+    "ai_involvement": "full for extracted entities and facts; none for source chunks",
+}
+
+
+def _contributors(properties: dict, *, extracted: bool) -> dict:
+    """Provenance list and AI-involvement from a node's pipeline stamps."""
+    header: dict = {}
+    contributors = []
+    user = properties.get("source_user")
+    if user:
+        contributors.append(COGXContributor(role="initiator", actor=str(user), kind="human"))
+        header["accountable"] = str(user)
+    pipeline = properties.get("source_pipeline") or properties.get("source_task")
+    if pipeline:
+        contributors.append(
+            COGXContributor(role="system", actor=f"cognee:{pipeline}", kind="agent")
+        )
+    if contributors:
+        header["contributors"] = contributors
+    header["ai_involvement"] = "full" if extracted else "none"
+    return header
+
+
+def _header_kwargs(properties: dict, node_id, *, default_origin: bool = True) -> dict:
+    """OMP header fields for one node or edge, from stored properties."""
+    header = header_from_properties(properties)
+    if default_origin and "origin" not in header:
+        header["origin"] = COGXOrigin(system="cognee", id=str(node_id))
+    return header
+
+
 def _write_cogx(
     nodes,
     edges,
@@ -143,31 +195,86 @@ def _write_cogx(
     migration_revision: str | None = None,
 ) -> None:
     """Map graph nodes/edges onto typed COGX records; keep the rest raw."""
+    node_types = {str(node_id): (properties or {}).get("type") for node_id, properties in nodes}
+    entity_names = {
+        str(node_id): (properties or {}).get("name")
+        for node_id, properties in nodes
+        if (properties or {}).get("type") == "Entity" and (properties or {}).get("name")
+    }
+    # Topology the header is read from: which chunk contains which entity,
+    # and which nodes a contradiction pass flagged.
+    entities_in_chunk: dict[str, list[str]] = {}
+    chunks_of_entity: dict[str, list[str]] = {}
+    contradicted: set[str] = set()
+    for source, target, relationship, _properties in edges:
+        source, target = str(source), str(target)
+        if relationship == "contains" and node_types.get(source) == "DocumentChunk":
+            entities_in_chunk.setdefault(source, []).append(target)
+            chunks_of_entity.setdefault(target, []).append(source)
+        elif relationship == "contradicts":
+            contradicted.update((source, target))
+
+    def confidence_for(node_id: str, header: dict) -> COGXConfidence | None:
+        if header.get("confidence") is not None:
+            return header["confidence"]
+        if node_id in contradicted:
+            return COGXConfidence(outcome="contradicted", verified_by="automatic")
+        return None
+
     with COGXArchiveWriter(destination, source_system="cognee") as writer:
         writer.add_note(f"Exported from Cognee dataset {dataset_name!r}.")
         writer.embedding_model = embedding_model
         writer.migration_revision = migration_revision
+        writer.coverage = dict(COGX_EXPORT_COVERAGE)
         for node_id, properties in nodes:
             properties = properties or {}
+            node_id = str(node_id)
             node_type = properties.get("type")
+            header = _header_kwargs(properties, node_id)
+            if isinstance(properties.get("version"), int) and "version" not in header:
+                header["version"] = properties["version"]
+            for key, value in _contributors(
+                properties, extracted=node_type != "DocumentChunk"
+            ).items():
+                header.setdefault(key, value)
             if node_type == "Entity" and properties.get("name"):
+                header.setdefault("subject", [properties["name"]])
+                header.setdefault(
+                    "evidence",
+                    [
+                        COGXEvidence(role="derived", ref=chunk_id)
+                        for chunk_id in chunks_of_entity.get(node_id, [])
+                    ],
+                )
                 writer.write(
                     COGXEntity(
                         external_system="cognee",
-                        external_id=str(node_id),
+                        external_id=node_id,
                         name=properties["name"],
                         description=properties.get("description"),
                         created_at=parse_timestamp(properties.get("created_at")),
                         updated_at=parse_timestamp(properties.get("updated_at")),
+                        confidence=confidence_for(node_id, header),
+                        **{k: v for k, v in header.items() if k != "confidence"},
                     )
                 )
             elif node_type == "DocumentChunk" and properties.get("text"):
+                header.setdefault(
+                    "subject",
+                    [
+                        entity_names[entity_id]
+                        for entity_id in entities_in_chunk.get(node_id, [])
+                        if entity_id in entity_names
+                    ],
+                )
                 writer.write(
                     COGXDocument(
                         external_system="cognee",
-                        external_id=str(node_id),
+                        external_id=node_id,
                         content=properties["text"],
                         created_at=parse_timestamp(properties.get("created_at")),
+                        confidence=confidence_for(node_id, header),
+                        **{k: v for k, v in header.items() if k != "confidence"},
                     )
                 )
                 # Also persist the chunk as a raw node: preserve-mode restore
@@ -175,22 +282,53 @@ def _write_cogx(
                 # (e.g. DocumentChunk -contains-> Entity) keep their topology
                 # instead of dangling. The COGXDocument record above carries
                 # the chunk's content for re-derive/cross-provider imports.
-                writer.write_raw_node({"id": str(node_id), **properties})
+                writer.write_raw_node({"id": node_id, **properties})
             else:
-                writer.write_raw_node({"id": str(node_id), **properties})
+                writer.write_raw_node({"id": node_id, **properties})
 
         for source, target, relationship, properties in edges:
             properties = properties or {}
+            source, target = str(source), str(target)
+            external_id = f"{source}:{relationship}:{target}"
+            header = _header_kwargs(properties, external_id)
+            for key, value in _contributors(properties, extracted=True).items():
+                header.setdefault(key, value)
+            if "evidence" not in header and relationship not in {"contains", "contradicts"}:
+                # A fact between two entities is derived from the chunks that
+                # mention both; fall back to chunks mentioning either side.
+                both = [
+                    c
+                    for c in chunks_of_entity.get(source, [])
+                    if c in chunks_of_entity.get(target, [])
+                ]
+                either = both or list(
+                    dict.fromkeys(
+                        chunks_of_entity.get(source, []) + chunks_of_entity.get(target, [])
+                    )
+                )
+                if either:
+                    header["evidence"] = [
+                        COGXEvidence(
+                            role="derived",
+                            ref=chunk_id,
+                            confidence=properties.get("confidence")
+                            if isinstance(properties.get("confidence"), (int, float))
+                            else None,
+                        )
+                        for chunk_id in either
+                    ]
+            header.setdefault("subject", [source, target])
             writer.write(
                 COGXFact(
                     external_system="cognee",
-                    external_id=f"{source}:{relationship}:{target}",
-                    subject_ref=str(source),
+                    external_id=external_id,
+                    subject_ref=source,
                     predicate=str(relationship),
-                    object_ref=str(target),
+                    object_ref=target,
                     fact_text=properties.get("edge_text"),
                     valid_at=parse_timestamp(properties.get("valid_at")),
                     invalid_at=parse_timestamp(properties.get("invalid_at")),
+                    **header,
                 )
             )
 

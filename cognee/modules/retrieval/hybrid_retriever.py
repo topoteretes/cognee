@@ -46,6 +46,7 @@ from cognee.modules.retrieval.utils.global_context import (
     load_root_text,
     search_top_global_context_summaries,
 )
+from cognee.modules.retrieval.utils.resolved_context import user_resolution_scope
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.modules.user_preferences import load_preference_text, load_preference_weights
 from cognee.shared.logging_utils import get_logger
@@ -116,6 +117,7 @@ class HybridRetriever(BaseRetriever):
         user_id = getattr(user, "id", None)
         return bool(user_id and CacheConfig().caching)
 
+    @user_resolution_scope()
     async def get_retrieved_objects(
         self, query: str | None = None, query_batch: list[str] | None = None
     ) -> Any:
@@ -243,6 +245,15 @@ class HybridRetriever(BaseRetriever):
             self.node_name,
             self.node_name_filter_operator,
         )
+        from cognee.modules.retrieval.utils.resolved_context import (
+            apply_entity_resolutions,
+            apply_fact_hit_resolutions,
+            read_user_resolutions,
+        )
+
+        resolutions = await read_user_resolutions(self._unified_engine.graph)
+        edge_hits = apply_fact_hit_resolutions(edge_hits, resolutions)
+        apply_entity_resolutions(entities, resolutions)
         return entities, FactCandidates(
             edge_hits=edge_hits,
             reachable_edge_type_ids=reachable_ids,
@@ -251,6 +262,7 @@ class HybridRetriever(BaseRetriever):
             entity_edge_budget=max_ranked_bullets,
         )
 
+    @user_resolution_scope()
     async def get_context_from_objects(
         self,
         query: str | None = None,
@@ -259,19 +271,30 @@ class HybridRetriever(BaseRetriever):
     ) -> Any:
         if query_batch:
             global_contexts = await asyncio.gather(
-                *[self._build_global_context_section(q) for q in query_batch]
+                *[
+                    self._build_global_context_section(q, objects)
+                    for q, objects in zip(query_batch, retrieved_objects)
+                ]
             )
             return format_hybrid_context_batch(global_contexts, retrieved_objects)
-        global_context = await self._build_global_context_section(query)
+        global_context = await self._build_global_context_section(query, retrieved_objects)
         return format_hybrid_context(global_context, retrieved_objects)
 
-    async def _build_global_context_section(self, query: str | None) -> str:
+    async def _build_global_context_section(
+        self, query: str | None, retrieved_objects: Any = None
+    ) -> str:
         if not self.include_global_context_index or not query:
             return ""
 
         if self._unified_engine is None:
             self._unified_engine = await get_unified_engine()
 
+        from cognee.modules.retrieval.utils.resolved_context import (
+            accepted_facts_context,
+            read_user_resolutions,
+        )
+
+        resolutions = await read_user_resolutions(self._unified_engine.graph)
         root_text, top_summaries = await asyncio.gather(
             load_root_text(),
             search_top_global_context_summaries(
@@ -281,9 +304,12 @@ class HybridRetriever(BaseRetriever):
             ),
         )
         prelude = format_global_context_prelude(root_text, top_summaries)
-        if not prelude:
-            return ""
-        return f"## Global context\n{prelude}"
+        used_ids = extract_hybrid_object_ids(retrieved_objects) or {}
+        accepted = accepted_facts_context(
+            resolutions, used_ids.get("node_ids", []), used_ids.get("edge_ids", [])
+        )
+        global_context = f"## Global context\n{prelude}" if prelude else ""
+        return "\n\n".join(section for section in (global_context, accepted) if section)
 
     async def get_completion_from_context(
         self,
@@ -363,6 +389,7 @@ class HybridRetriever(BaseRetriever):
     def extract_context_object_ids(self, retrieved_objects: Any) -> dict[str, list[str]] | None:
         return extract_hybrid_object_ids(retrieved_objects)
 
+    @user_resolution_scope()
     async def get_completion(
         self, query: str | None = None, query_batch: list[str] | None = None
     ) -> list[Any]:

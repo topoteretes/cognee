@@ -8,6 +8,7 @@ from uuid import UUID
 
 import aiohttp
 
+from cognee.modules.conflicts.models import ConflictDetail
 from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
@@ -342,8 +343,8 @@ class CloudClient:
             payload["build_global_context_index"] = True
         if kwargs.get("build_truth_subspace"):
             payload["build_truth_subspace"] = True
-        if kwargs.get("review_conflicts"):
-            payload["review_conflicts"] = True
+        if kwargs.get("review_conflicts") is not None:
+            payload["review_conflicts"] = kwargs["review_conflicts"]
         if kwargs.get("feedback_alpha") is not None:
             payload["feedback_alpha"] = kwargs["feedback_alpha"]
         # Deprecated custom tasks (SDK-1115): the /improve DTO takes registry task
@@ -737,3 +738,49 @@ class CloudClient:
                 body = await resp.text()
                 raise RuntimeError(f"Remote forget failed ({resp.status}): {body}")
             return await resp.json()
+
+    async def list_conflicts(
+        self, dataset_id: UUID, *, status: str | None = None
+    ) -> list[ConflictDetail]:
+        """GET /api/v1/conflicts — a dataset's conflicts with their competing facts."""
+        session = await self._get_session()
+
+        params = {"dataset_id": str(dataset_id)}
+        if status:
+            params["status"] = status
+
+        async with session.get(
+            f"{self.service_url}/api/v1/conflicts",
+            params=params,
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote list_conflicts failed ({resp.status}): {body}")
+            payload = await resp.json()
+        if not isinstance(payload, list):
+            raise RuntimeError("Remote list_conflicts returned an invalid conflict list")
+        return [ConflictDetail.model_validate(item) for item in payload]
+
+    async def resolve_conflict(
+        self,
+        conflict_id: UUID,
+        *,
+        dataset_id: UUID,
+        selected_fact_id: UUID,
+        reason: str | None = None,
+    ) -> ConflictDetail:
+        """POST /api/v1/conflicts/{conflict_id}/resolve — accept one competing fact."""
+        session = await self._get_session()
+
+        payload: dict = {"datasetId": str(dataset_id), "selectedFactId": str(selected_fact_id)}
+        if reason is not None:
+            payload["reason"] = reason
+
+        async with session.post(
+            f"{self.service_url}/api/v1/conflicts/{conflict_id}/resolve",
+            json=payload,
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote resolve_conflict failed ({resp.status}): {body}")
+            return ConflictDetail.model_validate(await resp.json())

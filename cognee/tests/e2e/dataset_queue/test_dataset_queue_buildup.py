@@ -91,6 +91,9 @@ async def test_max_concurrent_one_does_not_accumulate_slots(mock_llm):
     with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
         mock_settings.return_value.enabled = True
         mock_settings.return_value.max_concurrent = 1
+        # A MagicMock converts to 1.0, which would run the idle reaper with a
+        # one-second TTL; the queue's own default keeps it out of this test.
+        mock_settings.return_value.idle_ttl_seconds = 600.0
 
         # Reset singleton so the patched settings take effect.
         dataset_queue._instance = None

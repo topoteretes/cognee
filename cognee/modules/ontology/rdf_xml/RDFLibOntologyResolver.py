@@ -19,6 +19,11 @@ from cognee.modules.ontology.ontology_env_config import (
     get_ontology_env_config,
     normalize_ontology_reasoning,
 )
+from cognee.modules.ontology.rdf_xml.parse_rdf_content import (
+    FALLBACK_FORMATS,
+    parse_rdf_content,
+    parse_rdf_file,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("OntologyAdapter")
@@ -36,7 +41,57 @@ CONTENT_TYPE_FORMATS = {
     "application/ld+json": "json-ld",
 }
 
-FALLBACK_FORMATS = ("xml", "turtle", "n3", "nt", "json-ld", "trig", "nquads")
+# Upload filename extension -> rdflib parser name. This table is the single
+# list of accepted upload extensions: the 400 message, the router docs and the
+# frontend picker (UploadOntologyModal.tsx ``accept``) all mirror it.
+EXTENSION_FORMATS = {
+    ".owl": "xml",
+    ".rdf": "xml",
+    ".xml": "xml",
+    ".ttl": "turtle",
+    ".n3": "n3",
+    ".jsonld": "json-ld",
+    ".nt": "nt",
+    ".nq": "nquads",
+    ".trig": "trig",
+}
+
+
+def normalize_content_type(content_type: str | None) -> str | None:
+    """Strip parameters (e.g. ``; charset=utf-8``) and lowercase a MIME type."""
+    if not content_type:
+        return None
+    return str(content_type).split(";", maxsplit=1)[0].strip().lower()
+
+
+def detect_rdf_format(filename: str | None, content_type: str | None) -> str | None:
+    """Return the rdflib parser name implied by ``filename`` or ``content_type``.
+
+    The extension wins when it is in ``EXTENSION_FORMATS`` (``.owl``, ``.ttl``, ...);
+    otherwise the MIME type decides (``text/turtle``, ``application/ld+json``, ...).
+    Returns ``None`` when neither identifies a supported RDF serialization.
+    """
+    if filename:
+        extension = os.path.splitext(str(filename))[1].lower()
+        if extension in EXTENSION_FORMATS:
+            return EXTENSION_FORMATS[extension]
+
+    normalized_content_type = normalize_content_type(content_type)
+    if normalized_content_type:
+        return CONTENT_TYPE_FORMATS.get(normalized_content_type)
+
+    return None
+
+
+def supported_rdf_extensions() -> list[str]:
+    """File extensions (with leading dot) accepted for ontology uploads."""
+    return list(EXTENSION_FORMATS)
+
+
+def supported_rdf_content_types() -> list[str]:
+    """MIME types accepted for ontology uploads whose filename has no known extension."""
+    return sorted(CONTENT_TYPE_FORMATS)
+
 
 # Predicates the OWL-RL closure asserts reflexively for every term it touches.
 REFLEXIVE_CLOSURE_PREDICATES = (
@@ -125,7 +180,7 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                     loaded_files = []
                     for file_path in files_to_load:
                         if os.path.exists(file_path):
-                            self.graph.parse(file_path)
+                            parse_rdf_file(self.graph, file_path)
                             loaded_files.append(file_path)
                             logger.info("Ontology loaded successfully from file: %s", file_path)
                         else:
@@ -217,15 +272,20 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
         )
 
     def _get_content_type_format(self, file_obj: IO) -> str | None:
-        content_type = getattr(file_obj, "content_type", None)
+        content_type = normalize_content_type(getattr(file_obj, "content_type", None))
         if not content_type:
             return None
 
-        content_type = str(content_type).split(";", maxsplit=1)[0].strip().lower()
         return CONTENT_TYPE_FORMATS.get(content_type)
 
     def _get_candidate_formats(self, file_obj: IO) -> list[str]:
         formats = []
+
+        # A stored upload (``OntologyFile``) carries the format detected at upload
+        # time; it is tried before anything re-derived from the name or MIME type.
+        stored_format = getattr(file_obj, "rdf_format", None)
+        if stored_format:
+            formats.append(stored_format)
 
         filename = getattr(file_obj, "filename", None) or getattr(file_obj, "name", None)
         if filename:
@@ -252,34 +312,23 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                 f"Ontology file object returned unsupported content type: {type(content)}"
             )
 
-        candidate_formats = self._get_candidate_formats(file_obj)
-        parse_errors = []
+        try:
+            parsed_graph, rdf_format = parse_rdf_content(
+                content, self._get_candidate_formats(file_obj)
+            )
+        except ValueError as error:
+            raise ValueError(
+                f"Unable to parse ontology file object '{self._get_file_object_name(file_obj)}'. "
+                f"{error}"
+            ) from error
 
-        for rdf_format in candidate_formats:
-            parsed_graph = Graph()
-            try:
-                parsed_graph.parse(data=content, format=rdf_format)
-            except Exception as error:
-                logger.debug(
-                    "Skipping item after error in RDFLibOntologyResolver._parse_file_object",
-                    exc_info=True,
-                )
-                parse_errors.append(f"{rdf_format}: {error}")
-                continue
+        for prefix, namespace in parsed_graph.namespaces():
+            target_graph.bind(prefix, namespace, override=False)
 
-            for prefix, namespace in parsed_graph.namespaces():
-                target_graph.bind(prefix, namespace, override=False)
+        for triple in parsed_graph:
+            target_graph.add(triple)
 
-            for triple in parsed_graph:
-                target_graph.add(triple)
-
-            return rdf_format
-
-        raise ValueError(
-            f"Unable to parse ontology file object '{self._get_file_object_name(file_obj)}'. "
-            f"Tried formats: {', '.join(candidate_formats)}. "
-            f"Last error: {parse_errors[-1] if parse_errors else 'unknown error'}"
-        )
+        return rdf_format
 
     def build_lookup(self) -> None:
         try:

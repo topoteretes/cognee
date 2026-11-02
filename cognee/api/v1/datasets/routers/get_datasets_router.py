@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi import Path as PathParam
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from cognee import __version__ as cognee_version
 from cognee import datasets
@@ -35,6 +35,12 @@ from cognee.modules.graph.rdf.sparql import (
     SparqlQueryError,
     SparqlQueryTimeoutError,
     query_dataset_sparql,
+)
+from cognee.modules.graph_models import (
+    GraphSchemaMergeError,
+    GraphSchemaPatch,
+    format_validation_error,
+    merge_graph_schema,
 )
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.users.methods import get_authenticated_user
@@ -74,13 +80,38 @@ StatusPipelineNamesQuery = Annotated[
     Query(
         alias="pipeline",
         description=(
-            "Pipeline names to check: 'add_pipeline', 'cognify_pipeline', or"
-            " 'code_graph_pipeline' (code ingestion via remember"
-            " content_type='code'). Omit to default to cognify_pipeline."
+            "Pipeline names to check: 'add_pipeline', 'indexing_pipeline',"
+            " 'cognify_pipeline' (the two runs cognify makes, in that order), or"
+            " 'code_graph_pipeline' (code ingestion via remember content_type='code')."
+            " Omit to default to cognify_pipeline. For the folded memory state see"
+            " GET /v1/datasets/status/memory."
         ),
         examples=[["cognify_pipeline"]],
     ),
 ]
+
+
+class MemoryStatusDTO(BaseModel):
+    """A dataset's memory state, folded from its indexing and cognify runs."""
+
+    state: str = Field(
+        examples=["extracting"],
+        description=(
+            "empty, staged, indexing, indexed, indexing_failed, extracting, ready or "
+            "extraction_failed"
+        ),
+    )
+    search_level: str = Field(
+        examples=["chunks"],
+        description="The best search the dataset answers: none, chunks or graph",
+    )
+    searchable: bool
+    graph_ready: bool
+    message: str
+    indexing_status: PipelineRunStatus | None = None
+    cognify_status: PipelineRunStatus | None = None
+    error_class: str | None = None
+    error_message: str | None = None
 
 
 class PipelineRunStatusWithProgress(BaseModel):
@@ -164,6 +195,55 @@ class DatasetCreationPayload(InDTO):
 class DatasetSchemaPayloadDTO(InDTO):
     graph_schema: dict[str, Any] | None = None
     custom_prompt: str | None = None
+
+
+async def _read_dataset_schema(dataset_id: UUID) -> dict[str, Any]:
+    """The GET /schema body: stored graph schema and custom prompt (both None if unset)."""
+    from sqlalchemy import select
+
+    from cognee.modules.data.models import DatasetConfiguration
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        config = await session.scalar(
+            select(DatasetConfiguration).where(DatasetConfiguration.dataset_id == dataset_id)
+        )
+    if not config:
+        return {"graph_schema": None, "custom_prompt": None}
+    return {
+        "graph_schema": config.graph_schema,
+        "custom_prompt": config.custom_prompt,
+    }
+
+
+async def _store_dataset_schema(
+    dataset_id: UUID,
+    graph_schema: dict[str, Any] | None,
+    custom_prompt: str | None,
+) -> None:
+    """Upsert the dataset configuration row; a None value leaves that column unchanged."""
+    from sqlalchemy import select
+
+    from cognee.modules.data.models import DatasetConfiguration
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        config = await session.scalar(
+            select(DatasetConfiguration).where(DatasetConfiguration.dataset_id == dataset_id)
+        )
+        if config:
+            if graph_schema is not None:
+                config.graph_schema = graph_schema
+            if custom_prompt is not None:
+                config.custom_prompt = custom_prompt
+        else:
+            config = DatasetConfiguration(
+                dataset_id=dataset_id,
+                graph_schema=graph_schema,
+                custom_prompt=custom_prompt,
+            )
+            session.add(config)
+        await session.commit()
 
 
 class SparqlQueryPayloadDTO(InDTO):
@@ -497,7 +577,9 @@ def get_datasets_router() -> APIRouter:
 
         ## Request Body
         - **query** (str): SELECT, ASK, CONSTRUCT or DESCRIBE. SPARQL Update
-          (INSERT, DELETE, LOAD, CLEAR, DROP, CREATE, ADD, MOVE, COPY) is refused.
+          (INSERT, DELETE, LOAD, CLEAR, DROP, CREATE, ADD, MOVE, COPY) is refused, and
+          so are `SERVICE`, `FROM` and `FROM NAMED`: the query reads this dataset's
+          graph only.
         - **base_iri** (str, optional): prefix for minted IRIs
         - **limit** (int, 1-10000, default 1000): cap on SELECT rows
 
@@ -515,7 +597,8 @@ def get_datasets_router() -> APIRouter:
           finishes on its own.
 
         ## Error Codes
-        - **400 Bad Request**: SPARQL Update keywords, or the query does not parse
+        - **400 Bad Request**: SPARQL Update keywords, `SERVICE` / `FROM` / `FROM NAMED`,
+          or the query does not parse
         - **404 Not Found**: Dataset doesn't exist or user doesn't have access
         - **413 Content Too Large**: Dataset graph exceeds the node ceiling
         - **504 Gateway Timeout**: Query exceeded the wall-clock budget
@@ -561,7 +644,7 @@ def get_datasets_router() -> APIRouter:
                 content=ErrorResponseDTO(message=str(error)).model_dump(),
             )
         except SparqlQueryError as error:
-            # Update keywords or a query rdflib cannot parse: the client's input.
+            # Update keywords, external access or a query rdflib cannot parse: the client's input.
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 content=ErrorResponseDTO(message=str(error)).model_dump(),
@@ -796,7 +879,8 @@ def get_datasets_router() -> APIRouter:
           - If omitted, defaults to **cognify_pipeline** (backward-compatible behavior)
           - If one pipeline is provided, response is a flat map
           - If multiple pipelines are provided, response is nested per dataset and pipeline
-          - **Available options: add_pipeline, cognify_pipeline, code_graph_pipeline**
+          - **Available options: add_pipeline, indexing_pipeline, cognify_pipeline,
+            code_graph_pipeline**
           - Note: a background code ingest creates its pipeline run only once the
             repository is cloned — a dataset missing from the response means the run
             has not started yet, not that it failed
@@ -874,9 +958,9 @@ def get_datasets_router() -> APIRouter:
         ## Query Parameters
         - **dataset** (List[UUID]): Dataset UUIDs to check (from GET /api/v1/datasets). Omit to get
           status for all datasets you can read.
-        - **pipeline** (List[str]): Pipeline names to check: 'add_pipeline', 'cognify_pipeline', or
-          'code_graph_pipeline' (code ingestion via remember content_type='code'). Omit to default
-          to cognify_pipeline.
+        - **pipeline** (List[str]): Pipeline names to check: 'add_pipeline', 'indexing_pipeline',
+          'cognify_pipeline', or 'code_graph_pipeline' (code ingestion via remember
+          content_type='code'). Omit to default to cognify_pipeline.
 
         ## Response
         - Single pipeline (default): {dataset_id: {status, progress}}
@@ -921,6 +1005,67 @@ def get_datasets_router() -> APIRouter:
             return JSONResponse(
                 status_code=409,
                 content={"error": "Unable to retrieve dataset progress."},
+            )
+
+    @router.get("/status/memory", response_model=dict[str, MemoryStatusDTO])
+    async def get_dataset_memory_status(
+        datasets: StatusDatasetIdsQuery = [],
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Get the memory state of datasets: what each one can answer right now.
+
+        cognify() (and remember()) build memory in two runs per dataset: indexing
+        (chunk search) and cognify (the knowledge graph). This endpoint folds their
+        latest runs into one state per dataset, so a client can tell whether a search
+        will answer and how good the answers are, instead of reading two pipeline
+        statuses.
+
+        ## Query Parameters
+        - **dataset** (List[UUID]): Dataset UUIDs to check (from GET /api/v1/datasets). Omit
+          to get the state of all datasets you can read.
+
+        ## Response
+        `{dataset_id: {state, search_level, searchable, graph_ready, message,
+        indexing_status, cognify_status, error_class, error_message}}`. Every requested
+        dataset is present; `state` is `empty` when nothing ran on it.
+
+        - **state**: `empty`, `staged`, `indexing`, `indexed`, `indexing_failed`,
+          `extracting`, `ready` or `extraction_failed`. During a cognify() build it goes
+          `indexing`, `extracting`, then `ready`.
+        - **search_level**: `none`, `chunks` (CHUNKS, CHUNKS_LEXICAL, RAG_COMPLETION,
+          HYBRID_COMPLETION answer) or `graph` (everything answers)
+        - **message**: one sentence saying what answers now and what improves next
+
+        ## Error Codes
+        - **403 Forbidden**: The request owner cannot read every requested dataset
+        - **409 Conflict**: An unexpected error occurred while deriving the state
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user,
+            additional_properties={
+                "endpoint": "GET /v1/datasets/status/memory",
+                "datasets": [str(dataset_id) for dataset_id in datasets],
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
+
+        try:
+            authorized_datasets = await get_authorized_existing_datasets(datasets, "read", user)
+            statuses = await cognee_datasets.get_memory_status(
+                [dataset.id for dataset in authorized_datasets]
+            )
+            return {dataset_id: status.to_dict() for dataset_id, status in statuses.items()}
+        except CogneeApiError:
+            raise
+        except Exception:
+            logger.exception("Error deriving dataset memory status")
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Unable to derive dataset memory status."},
             )
 
     @router.get("/graph-summary", response_model=list[DatasetGraphSummaryDTO])
@@ -1094,11 +1239,13 @@ def get_datasets_router() -> APIRouter:
         raw_location = data.raw_data_location
         parsed_uri = urlparse(raw_location)
 
-        if parsed_uri.scheme == "s3":
+        def stream_through_storage(download_name: str) -> StreamingResponse:
+            # open_data_file goes through the storage layer, so an S3 object is
+            # fetched and a sealed object (FILE_ENCRYPTION_ENABLED) is unsealed;
+            # FileResponse would serve the ciphertext bytes as they lie on disk.
             from cognee.infrastructure.files.utils.open_data_file import open_data_file
             from cognee.infrastructure.utils.run_async import run_async
 
-            download_name = Path(parsed_uri.path).name or data.name
             media_type = data.mime_type or "application/octet-stream"
 
             async def file_iterator(chunk_size: int = 1024 * 1024):
@@ -1115,9 +1262,13 @@ def get_datasets_router() -> APIRouter:
                 headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
             )
 
+        if parsed_uri.scheme == "s3":
+            return stream_through_storage(Path(parsed_uri.path).name or data.name)
+
         if parsed_uri.scheme in ("file", "") or (
             len(parsed_uri.scheme) == 1 and parsed_uri.scheme.isalpha()
         ):
+            from cognee.infrastructure.files.encryption import is_encrypted_local_file
             from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 
             file_path = get_data_file_path(raw_location)
@@ -1125,6 +1276,9 @@ def get_datasets_router() -> APIRouter:
 
             if not path.is_file():
                 raise DataNotFoundError(message=f"Raw file not found on disk for data ({data_id}).")
+
+            if is_encrypted_local_file(file_path):
+                return stream_through_storage(path.name or data.name)
 
             return FileResponse(path=path)
 
@@ -1140,25 +1294,11 @@ def get_datasets_router() -> APIRouter:
         ## Path Parameters
         - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
         """
-        from sqlalchemy import select
-
-        from cognee.modules.data.models import DatasetConfiguration
-
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
         if not dataset:
             return JSONResponse(status_code=404, content={"error": "Dataset not found"})
 
-        db_engine = get_relational_engine()
-        async with db_engine.get_async_session() as session:
-            config = await session.scalar(
-                select(DatasetConfiguration).where(DatasetConfiguration.dataset_id == dataset_id)
-            )
-        if not config:
-            return {"graph_schema": None, "custom_prompt": None}
-        return {
-            "graph_schema": config.graph_schema,
-            "custom_prompt": config.custom_prompt,
-        }
+        return await _read_dataset_schema(dataset_id)
 
     @router.put("/{dataset_id}/schema", response_model=dict)
     async def update_dataset_schema(
@@ -1177,33 +1317,79 @@ def get_datasets_router() -> APIRouter:
         - **graphSchema** (Optional[Dict[str, Any]]): JSON graph schema to store for the
           dataset; omitting it leaves any existing schema unchanged.
         """
-        from sqlalchemy import select
-
-        from cognee.modules.data.models import DatasetConfiguration
-
         dataset = await get_authorized_existing_datasets([dataset_id], "write", user)
         if not dataset:
             return JSONResponse(status_code=404, content={"error": "Dataset not found"})
 
-        db_engine = get_relational_engine()
-        async with db_engine.get_async_session() as session:
-            config = await session.scalar(
-                select(DatasetConfiguration).where(DatasetConfiguration.dataset_id == dataset_id)
-            )
-            if config:
-                if payload.graph_schema is not None:
-                    config.graph_schema = payload.graph_schema
-                if payload.custom_prompt is not None:
-                    config.custom_prompt = payload.custom_prompt
-            else:
-                config = DatasetConfiguration(
-                    dataset_id=dataset_id,
-                    graph_schema=payload.graph_schema,
-                    custom_prompt=payload.custom_prompt,
-                )
-                session.add(config)
-            await session.commit()
+        await _store_dataset_schema(dataset_id, payload.graph_schema, payload.custom_prompt)
         return {"status": "ok"}
+
+    @router.patch(
+        "/{dataset_id}/schema",
+        response_model=dict,
+        responses={404: {"model": ErrorResponseDTO}, 422: {"model": ErrorResponseDTO}},
+    )
+    async def patch_dataset_schema(
+        dataset_id: UUID,
+        payload: GraphSchemaPatch,
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Merge a partial graph-model spec into the dataset's stored graph schema.
+
+        Where PUT replaces the schema wholesale, PATCH upserts by name: each entity
+        in **entities** is added if new, otherwise its fields are upserted by field
+        name (a matching field is replaced whole, whatever its kind) and its scalars
+        (description, primaryLabelField, indexFields, identityFields) overwritten only
+        when sent. Removals apply after the upserts; **options** is shallow-merged.
+        With no stored schema the patch is applied to an empty spec, so it behaves
+        like PUT. Keys may be snake_case or camelCase.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
+
+        ## Request Parameters
+        - **entities** (List[EntitySpec]): Entities to add or update, keyed by name.
+        - **removeEntities** (List[str]): Entity names to drop after the upserts.
+        - **removeFields** (List[{entity, field}]): Fields to drop after the upserts.
+        - **options** (Optional[Dict]): Graph options to shallow-merge (e.g. autoTypeNodes).
+        - **root** (Optional[str]): Replace the root entity when sent.
+
+        ## Response
+        The merged document, in the shape GET /schema returns.
+
+        ## Error Codes
+        Error bodies are `{"message": ...}`.
+        - **404 Not Found**: Dataset not found or no write permission.
+        - **422 Unprocessable Content**: The merged schema is not a valid graph-model
+          spec, a removed entity is still targeted by a relation, or a removal names an
+          entity or field that is not in the schema. The message names the item.
+        """
+        dataset = await get_authorized_existing_datasets([dataset_id], "write", user)
+        if not dataset:
+            return JSONResponse(
+                status_code=404,
+                content=ErrorResponseDTO(message="Dataset not found").model_dump(),
+            )
+
+        stored = await _read_dataset_schema(dataset_id)
+        try:
+            merged = merge_graph_schema(stored["graph_schema"], payload)
+        except GraphSchemaMergeError as error:
+            # The message is composed by merge_graph_schema and only names the offending item.
+            return JSONResponse(
+                status_code=422,
+                content=ErrorResponseDTO(message=str(error)).model_dump(),
+            )
+        except ValidationError as error:
+            return JSONResponse(
+                status_code=422,
+                content=ErrorResponseDTO(
+                    message=f"Merged graph schema is invalid: {format_validation_error(error)}"
+                ).model_dump(),
+            )
+
+        await _store_dataset_schema(dataset_id, merged, None)
+        return await _read_dataset_schema(dataset_id)
 
     @router.get(
         "/{dataset_id}/processing-status",
@@ -1219,7 +1405,7 @@ def get_datasets_router() -> APIRouter:
             "cognify_pipeline",
             description=(
                 "Pipeline whose per-item completion to count: 'cognify_pipeline'"
-                " (default), 'add_pipeline', or 'code_graph_pipeline'."
+                " (default), 'add_pipeline', 'indexing_pipeline', or 'code_graph_pipeline'."
             ),
             examples=["cognify_pipeline"],
         ),

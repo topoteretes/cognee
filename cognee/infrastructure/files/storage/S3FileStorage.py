@@ -324,28 +324,29 @@ class S3FileStorage(Storage):
                 # Just files in the immediate directory
                 pattern = f"{full_path}/*"
 
-            # Use s3fs glob to find files
+            # Use s3fs glob to find files. Only a missing directory means "no files";
+            # permission, transport and endpoint errors propagate, as they do for
+            # LocalFileStorage, so a failed listing is never mistaken for an empty one.
             try:
                 all_paths = self.s3.glob(pattern)
                 # Filter to only files (not directories)
                 files = [path for path in all_paths if self.s3.isfile(path)]
-
-                # Convert back to relative paths from storage root
-                storage_prefix = self.storage_path.replace("s3://", "")
-                relative_files = []
-                for file_path in files:
-                    if file_path.startswith(storage_prefix):
-                        relative_path = file_path[len(storage_prefix) :].lstrip("/")
-                        relative_files.append(relative_path)
-
-                return relative_files
-            except Exception:
-                # If directory doesn't exist or other error, return empty list
+            except FileNotFoundError:
                 logger.debug(
-                    "Falling back to [] after error in S3FileStorage.list_files.list_files_sync",
+                    "Directory not found in S3FileStorage.list_files.list_files_sync",
                     exc_info=True,
                 )
                 return []
+
+            # Convert back to relative paths from storage root
+            storage_prefix = self.storage_path.replace("s3://", "")
+            relative_files = []
+            for file_path in files:
+                if file_path.startswith(storage_prefix):
+                    relative_path = file_path[len(storage_prefix) :].lstrip("/")
+                    relative_files.append(relative_path)
+
+            return relative_files
 
         return await run_async(list_files_sync)
 

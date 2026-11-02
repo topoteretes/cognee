@@ -1,6 +1,7 @@
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack
+from contextvars import ContextVar
 from typing import Any
 from uuid import UUID
 
@@ -43,6 +44,23 @@ from .run_tasks_with_telemetry import (
 )
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
+
+# Why a caller closed a run it holds paused (close_run_with_cause).
+_close_cause: ContextVar[Exception | None] = ContextVar("pipeline_run_close_cause", default=None)
+
+
+async def close_run_with_cause(run: AsyncGenerator, cause: Exception) -> None:
+    """Close a paused run and record ``cause`` as its failure.
+
+    Closing a run records it errored with ``GeneratorExit``; a caller that
+    stops a run because of a known failure passes it here, so the run's row
+    and its error class name the real cause.
+    """
+    token = _close_cause.set(cause)
+    try:
+        await run.aclose()
+    finally:
+        _close_cause.reset(token)
 
 
 async def run_tasks(
@@ -379,6 +397,8 @@ async def run_tasks(
                 # broke ("AuthenticationError: invalid api key"), not
                 # "Pipeline run failed".
                 root_error = getattr(error, "first_error", None) or error
+                if isinstance(error, GeneratorExit):
+                    root_error = _close_cause.get() or root_error
                 with telemetry_guard():
                     send_telemetry(
                         PIPELINE_RUN_ERRORED,

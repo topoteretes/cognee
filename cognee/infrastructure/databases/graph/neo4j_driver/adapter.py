@@ -2147,7 +2147,7 @@ class Neo4jAdapter(GraphDBInterface):
             logger.error(f"Error during nodeset subgraph retrieval: {e!s}")
             raise
 
-    async def get_filtered_graph_data(self, attribute_filters):
+    async def get_filtered_graph_data(self, attribute_filters, *, include_edges: bool = True):
         """
         Fetch nodes and edges filtered by specific attribute criteria.
 
@@ -2185,6 +2185,9 @@ class Neo4jAdapter(GraphDBInterface):
             )
             for record in result_nodes
         ]
+
+        if not include_edges:
+            return nodes, []
 
         query_edges = f"""
         MATCH (n)-[r]->(m)
