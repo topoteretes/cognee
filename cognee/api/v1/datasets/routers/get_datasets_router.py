@@ -1,3 +1,4 @@
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -16,6 +17,7 @@ from cognee.api.v1.datasets.dto import DataDTO, DeleteDataReceiptDTO
 from cognee.api.v1.exceptions import DataNotFoundError
 from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.data.content_hash import normalize_content_hash
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
@@ -244,6 +246,19 @@ async def _store_dataset_schema(
             )
             session.add(config)
         await session.commit()
+
+
+# One in-process lock per dataset for its schema row. PATCH is a read-merge-write and
+# PUT an insert-or-update; two of them interleaving on one dataset lose a writer's
+# change silently, or collide on the row's unique dataset_id when neither finds a row.
+# Process-local, like the locks in cognee.infrastructure.locks.
+_schema_locks: dict[UUID, LoopAgnosticLock] = {}
+_schema_locks_guard = threading.Lock()
+
+
+def _schema_lock(dataset_id: UUID) -> LoopAgnosticLock:
+    with _schema_locks_guard:
+        return _schema_locks.setdefault(dataset_id, LoopAgnosticLock())
 
 
 class SparqlQueryPayloadDTO(InDTO):
@@ -1321,7 +1336,8 @@ def get_datasets_router() -> APIRouter:
         if not dataset:
             return JSONResponse(status_code=404, content={"error": "Dataset not found"})
 
-        await _store_dataset_schema(dataset_id, payload.graph_schema, payload.custom_prompt)
+        async with _schema_lock(dataset_id):
+            await _store_dataset_schema(dataset_id, payload.graph_schema, payload.custom_prompt)
         return {"status": "ok"}
 
     @router.patch(
@@ -1371,25 +1387,26 @@ def get_datasets_router() -> APIRouter:
                 content=ErrorResponseDTO(message="Dataset not found").model_dump(),
             )
 
-        stored = await _read_dataset_schema(dataset_id)
-        try:
-            merged = merge_graph_schema(stored["graph_schema"], payload)
-        except GraphSchemaMergeError as error:
-            # The message is composed by merge_graph_schema and only names the offending item.
-            return JSONResponse(
-                status_code=422,
-                content=ErrorResponseDTO(message=str(error)).model_dump(),
-            )
-        except ValidationError as error:
-            return JSONResponse(
-                status_code=422,
-                content=ErrorResponseDTO(
-                    message=f"Merged graph schema is invalid: {format_validation_error(error)}"
-                ).model_dump(),
-            )
+        async with _schema_lock(dataset_id):
+            stored = await _read_dataset_schema(dataset_id)
+            try:
+                merged = merge_graph_schema(stored["graph_schema"], payload)
+            except GraphSchemaMergeError as error:
+                # The message is composed by merge_graph_schema and only names the offending item.
+                return JSONResponse(
+                    status_code=422,
+                    content=ErrorResponseDTO(message=str(error)).model_dump(),
+                )
+            except ValidationError as error:
+                return JSONResponse(
+                    status_code=422,
+                    content=ErrorResponseDTO(
+                        message=f"Merged graph schema is invalid: {format_validation_error(error)}"
+                    ).model_dump(),
+                )
 
-        await _store_dataset_schema(dataset_id, merged, None)
-        return await _read_dataset_schema(dataset_id)
+            await _store_dataset_schema(dataset_id, merged, None)
+            return await _read_dataset_schema(dataset_id)
 
     @router.get(
         "/{dataset_id}/processing-status",
