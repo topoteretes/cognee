@@ -10,8 +10,8 @@ The worker windows long chunks itself (``window_words``), with the same
 gliner2 call the local runtime makes, so results come back exactly as local
 extraction returns them: one gliner2 result dict per chunk, offsets into it.
 
-Failure scope follows the error class (see :mod:`.errors`): a rejected or
-failed request fails its document, and a fatal error (an outage that outlived
+Failure scope follows the error class (see :mod:`.errors`): a rejected,
+failed or timed-out request fails its document, and a fatal error (an outage that outlived
 the retries, bad credentials, the wrong model, an incompatible worker) is
 latched, so every later extraction of the run fails at once instead of each
 document waiting out its own retries.
@@ -31,7 +31,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, TypeVar
 
 from cognee.modules.observability import new_span
@@ -45,6 +45,7 @@ from .errors import (
     GlinerWorkerModelMismatchError,
     GlinerWorkerRejectedError,
     GlinerWorkerRuntimeError,
+    GlinerWorkerTimeoutError,
     GlinerWorkerUnavailableError,
 )
 from .protocol import (
@@ -72,7 +73,9 @@ T = TypeVar("T")
 class _SharedWorker:
     transport: WorkerTransport
     budget: asyncio.Semaphore
-    ready_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # The readiness probe in flight, if any: callers that need one while it runs
+    # share its outcome, a failure included, instead of each probing in turn.
+    probe: asyncio.Future[WorkerReadiness] | None = None
     readiness: WorkerReadiness | None = None
     ready_until: float = 0.0
 
@@ -163,7 +166,11 @@ async def _close_at_loop_end(
     try:
         yield
     finally:
-        _shared.pop(loop, None)
+        # Only this generator's own entry: close_shared_workers may already have
+        # replaced it with a newer one that must stay registered.
+        entry = _shared.get(loop)
+        if entry is not None and entry.workers is workers:
+            del _shared[loop]
         await _close_workers(workers.values())
         workers.clear()
 
@@ -249,6 +256,7 @@ class RemoteGlinerAdapter:
             else None
         )
         self._failure: Exception | None = None
+        self._required_model: str | None = None
         # From the settings, not the transport: it must be printable even when
         # building the transport is what failed.
         self._label = (
@@ -261,6 +269,13 @@ class RemoteGlinerAdapter:
         self.model: str | None = None
 
     # ------------------------------------------------------------------ public
+
+    def require_model(self, model_name: str) -> None:
+        """Fail the run unless the worker serves ``model_name`` (a caller's
+        explicit ``model_name``; the worker's model is otherwise accepted)."""
+        self._required_model = model_name
+        if self.model is not None:
+            self._record_model(self.model)
 
     async def ensure_ready(self) -> WorkerReadiness:
         """Check (or reuse a recent check) that the worker is up, compatible and
@@ -379,17 +394,14 @@ class RemoteGlinerAdapter:
                 getattr(error, "message", error),
             )
 
-    async def _ready(self) -> WorkerReadiness:
+    async def _ready(self, *, fresh: bool = False) -> WorkerReadiness:
+        """The worker's readiness, probed when the cached answer expired (or
+        ``fresh`` asks for a new probe), then checked against this run."""
         worker = await self._worker()
-        if worker.readiness is None or self._clock() >= worker.ready_until:
-            async with worker.ready_lock:
-                if worker.readiness is None or self._clock() >= worker.ready_until:
-                    readiness = await self._with_retries(
-                        worker.transport.readiness, worker.transport.endpoint_label, "readiness"
-                    )
-                    worker.readiness = readiness
-                    worker.ready_until = self._clock() + READINESS_TTL_SECS
-        readiness = worker.readiness
+        if fresh or worker.readiness is None or self._clock() >= worker.ready_until:
+            readiness = await self._probe(worker)
+        else:
+            readiness = worker.readiness
         if readiness.model is not None:
             self._record_model(readiness.model)
         if readiness.features is not None and WINDOWING_FEATURE not in readiness.features:
@@ -404,6 +416,41 @@ class RemoteGlinerAdapter:
                 f"the worker's limit of {max_inputs} inputs per request.",
                 remediation=f"Set COGNEE_GLINER_INPUTS_PER_REQUEST to {max_inputs} or less.",
             )
+        return readiness
+
+    async def _probe(self, worker: _SharedWorker) -> WorkerReadiness:
+        if worker.probe is None:
+            probe = asyncio.ensure_future(self._run_probe(worker))
+
+            def finished(done: asyncio.Future) -> None:
+                if worker.probe is done:
+                    worker.probe = None
+                if not done.cancelled():
+                    done.exception()  # retrieved here even when every waiter was cancelled
+
+            probe.add_done_callback(finished)
+            worker.probe = probe
+        # Shielded: one waiter's cancellation must not cancel the others' probe.
+        return await asyncio.shield(worker.probe)
+
+    async def _run_probe(self, worker: _SharedWorker) -> WorkerReadiness:
+        label = worker.transport.endpoint_label
+        try:
+            readiness = await self._with_retries(worker.transport.readiness, label, "readiness")
+        except GlinerWorkerError as error:
+            if error.fatal or error.retryable:
+                raise
+            # Not an outage and not a rejected document: whatever answers there
+            # is not a usable worker, and every later probe would say the same.
+            raise GlinerWorkerIncompatibleError(
+                f"The readiness probe of {label} failed: {error.message}",
+                remediation=(
+                    "Check that COGNEE_GLINER_ENDPOINT (and COGNEE_GLINER_TRANSPORT) "
+                    "point at a gliner_worker."
+                ),
+            ) from error
+        worker.readiness = readiness
+        worker.ready_until = self._clock() + READINESS_TTL_SECS
         return readiness
 
     def _check_window(self, window_words: int, window_overlap_words: int) -> None:
@@ -476,9 +523,15 @@ class RemoteGlinerAdapter:
             span.set_attribute("cognee.gliner.remote.inputs", len(texts))
             started = time.perf_counter()
             try:
-                reply = await self._with_retries(
-                    send, worker.transport.endpoint_label, f"request {request_id}"
-                )
+                try:
+                    reply = await self._with_retries(
+                        send, worker.transport.endpoint_label, f"request {request_id}"
+                    )
+                except GlinerWorkerTimeoutError:
+                    # Only this request is slow, unless the worker is gone: a
+                    # fresh probe raises the run-wide outage in that case.
+                    await self._ready(fresh=True)
+                    raise
             except GlinerWorkerError as error:
                 span.set_attribute("cognee.gliner.remote.error", error.name)
                 raise
@@ -517,9 +570,9 @@ class RemoteGlinerAdapter:
         return [by_id[id_] for id_ in ids]
 
     def _record_model(self, model: str) -> None:
-        expected = self.settings.expected_model
-        if expected is not None and model != expected:
-            raise GlinerWorkerModelMismatchError(expected, model)
+        for required in (self.settings.expected_model, self._required_model):
+            if required is not None and model != required:
+                raise GlinerWorkerModelMismatchError(required, model)
         if self.model is None:
             self.model = model
             logger.info("GLiNER worker %s serves %s", self.endpoint_label, model)

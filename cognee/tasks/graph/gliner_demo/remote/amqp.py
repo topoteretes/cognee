@@ -9,8 +9,8 @@ Each attempt publishes the HTTP JSON body to the default exchange as a
 transient, ``mandatory`` message with its own correlation id, an
 ``x-request-id`` header and an ``expiration`` equal to the request timeout, so
 a worker never starts work its client has given up on. Unroutable (no queue),
-nacked or unanswered requests are :class:`GlinerWorkerUnavailableError` and
-retried. The worker delivers at least once, so a duplicate reply is dropped.
+nacked or unconfirmed requests are :class:`GlinerWorkerUnavailableError` and
+retried; a confirmed request left unanswered is :class:`GlinerWorkerTimeoutError`. The worker delivers at least once, so a duplicate reply is dropped.
 
 Readiness passively declares the queue on a throwaway channel (a missing queue
 closes the channel it is asked on) and requires at least one consumer.
@@ -33,6 +33,7 @@ from .errors import (
     GlinerRemoteConfigError,
     GlinerWorkerRejectedError,
     GlinerWorkerRuntimeError,
+    GlinerWorkerTimeoutError,
     GlinerWorkerUnauthorizedError,
     GlinerWorkerUnavailableError,
 )
@@ -142,6 +143,7 @@ class AmqpWorkerTransport:
             headers={"x-request-id": request_id},
             delivery_mode=aio_pika.DeliveryMode.NOT_PERSISTENT,
         )
+        published = False
         try:
             # The publish and its confirm share the request deadline: a broker
             # under a memory or disk alarm blocks publishers without closing them.
@@ -149,12 +151,19 @@ class AmqpWorkerTransport:
                 await session.channel.default_exchange.publish(
                     message, routing_key=self._queue, mandatory=True
                 )
+                published = True
                 body = await future
         except (TimeoutError, asyncio.TimeoutError) as error:
+            if published:
+                # The broker took the request and no reply came: a worker may
+                # still be running it, so it is not resent (see the error class).
+                raise GlinerWorkerTimeoutError(
+                    f"No reply from the GLiNER worker on {self.endpoint_label} within "
+                    f"{self._request_timeout:g}s."
+                ) from error
             raise GlinerWorkerUnavailableError(
-                f"No reply from the GLiNER worker on {self.endpoint_label} within "
-                f"{self._request_timeout:g}s (or the broker, e.g. under a memory alarm, did "
-                "not accept the request)."
+                f"The broker for {self.endpoint_label} did not accept the request within "
+                f"{self._request_timeout:g}s (e.g. under a memory or disk alarm)."
             ) from error
         except GlinerWorkerUnavailableError:
             raise

@@ -11,6 +11,7 @@ from cognee.tasks.graph.gliner_demo.remote import (
     GlinerRemoteConfigError,
     GlinerWorkerRejectedError,
     GlinerWorkerRuntimeError,
+    GlinerWorkerTimeoutError,
     GlinerWorkerUnauthorizedError,
     GlinerWorkerUnavailableError,
 )
@@ -125,11 +126,24 @@ async def test_unreachable_worker_is_unavailable():
     with pytest.raises(GlinerWorkerUnavailableError, match="Cannot reach"):
         await transport_for(handler).extract(PAYLOAD, request_id="r")
 
-    def timeout(request):
-        raise httpx.ReadTimeout("slow", request=request)
+    def connect_timeout(request):
+        raise httpx.ConnectTimeout("slow", request=request)
 
     with pytest.raises(GlinerWorkerUnavailableError):
-        await transport_for(timeout).extract(PAYLOAD, request_id="r")
+        await transport_for(connect_timeout).extract(PAYLOAD, request_id="r")
+
+
+@pytest.mark.asyncio
+async def test_a_sent_request_without_an_answer_times_out_and_readiness_stays_retryable():
+    def read_timeout(request):
+        raise httpx.ReadTimeout("slow", request=request)
+
+    # Sent and unanswered: the worker may still run it, so it is not an outage.
+    with pytest.raises(GlinerWorkerTimeoutError, match="did not answer within"):
+        await transport_for(read_timeout).extract(PAYLOAD, request_id="r")
+    # A slow readiness probe is still a worker that is not ready yet.
+    with pytest.raises(GlinerWorkerUnavailableError):
+        await transport_for(read_timeout).readiness()
 
 
 @pytest.mark.asyncio

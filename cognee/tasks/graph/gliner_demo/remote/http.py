@@ -15,6 +15,7 @@ from .errors import (
     GlinerRemoteConfigError,
     GlinerWorkerRejectedError,
     GlinerWorkerRuntimeError,
+    GlinerWorkerTimeoutError,
     GlinerWorkerUnauthorizedError,
     GlinerWorkerUnavailableError,
 )
@@ -73,6 +74,7 @@ class HttpWorkerTransport:
             )
         self.endpoint_label = redact_url(endpoint)
         self._max_response_bytes = max_response_bytes
+        self._request_timeout = request_timeout
         self._headers = {"authorization": f"Bearer {api_key}"} if api_key else {}
         self._readiness_timeout = httpx.Timeout(
             min(request_timeout, READINESS_TIMEOUT_SECS), connect=connect_timeout
@@ -87,9 +89,19 @@ class HttpWorkerTransport:
 
     async def extract(self, payload: Mapping[str, Any], *, request_id: str) -> WorkerReply:
         headers = {**self._headers, "x-request-id": request_id}
-        status, body, retry_after = await self._send(
-            "POST", "/v1/extract", json=payload, headers=headers
-        )
+        try:
+            status, body, retry_after = await self._send(
+                "POST", "/v1/extract", json=payload, headers=headers
+            )
+        except GlinerWorkerUnavailableError as error:
+            # The request was sent and the worker did not answer in time: it may
+            # still be running it, so this is not resent (see the error class).
+            if isinstance(error.__cause__, httpx.ReadTimeout):
+                raise GlinerWorkerTimeoutError(
+                    f"The GLiNER worker at {self.endpoint_label} did not answer within "
+                    f"{self._request_timeout:g}s."
+                ) from error.__cause__
+            raise
         if status == 200:
             return parse_json_reply(body)
         raise self._error(status, body, retry_after)

@@ -14,6 +14,7 @@ from cognee.tasks.graph.gliner_demo.remote import (  # noqa: E402
     GlinerRemoteConfigError,
     GlinerWorkerRejectedError,
     GlinerWorkerRuntimeError,
+    GlinerWorkerTimeoutError,
     GlinerWorkerUnauthorizedError,
     GlinerWorkerUnavailableError,
     grpc_descriptors,
@@ -108,13 +109,15 @@ async def serve(worker: FakeWorker):
         await server.stop(None)
 
 
-def transport_for(endpoint: str, *, api_key=None, request_timeout=5.0) -> GrpcWorkerTransport:
+def transport_for(
+    endpoint: str, *, api_key=None, request_timeout=5.0, max_response_bytes=1024 * 1024
+) -> GrpcWorkerTransport:
     return GrpcWorkerTransport(
         endpoint,
         api_key=api_key,
         connect_timeout=2.0,
         request_timeout=request_timeout,
-        max_response_bytes=1024 * 1024,
+        max_response_bytes=max_response_bytes,
     )
 
 
@@ -176,19 +179,34 @@ async def test_statuses_map_to_failure_classes(code, error):
 
 
 def test_cancelled_and_deadline_exceeded_are_retryable():
+    # DEADLINE_EXCEEDED here is a readiness probe's (or a proxy's); an Extract
+    # call past its deadline is a timeout, see the test below.
     assert isinstance(classify_status("CANCELLED", ""), GlinerWorkerUnavailableError)
     assert isinstance(classify_status("DEADLINE_EXCEEDED", ""), GlinerWorkerUnavailableError)
     assert isinstance(classify_status("ABORTED", ""), GlinerWorkerUnavailableError)
+    assert isinstance(
+        classify_status("RESOURCE_EXHAUSTED", "overloaded"), GlinerWorkerUnavailableError
+    )
     assert isinstance(classify_status("UNKNOWN", ""), GlinerWorkerRuntimeError)
 
 
 @pytest.mark.asyncio
-async def test_a_call_past_the_request_timeout_is_unavailable():
+async def test_a_call_past_the_request_timeout_times_out():
     worker = FakeWorker()
     worker.stall = 1.0
     async with serve(worker) as endpoint:
         transport = transport_for(endpoint, request_timeout=0.2)
-        with pytest.raises(GlinerWorkerUnavailableError, match="DEADLINE_EXCEEDED"):
+        with pytest.raises(GlinerWorkerTimeoutError, match="did not answer within"):
+            await transport.extract(PAYLOAD, request_id="r")
+        await transport.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_reply_above_the_cap_fails_its_document_like_http_and_amqp():
+    async with serve(FakeWorker()) as endpoint:
+        transport = transport_for(endpoint, max_response_bytes=64)
+        # grpcio reports it as RESOURCE_EXHAUSTED; resending would get the same reply.
+        with pytest.raises(GlinerWorkerRuntimeError, match="MAX_RESPONSE_BYTES"):
             await transport.extract(PAYLOAD, request_id="r")
         await transport.aclose()
 

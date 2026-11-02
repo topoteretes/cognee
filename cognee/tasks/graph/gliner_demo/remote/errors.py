@@ -4,7 +4,8 @@ Each class decides two things: whether the adapter retries it, and how far it
 reaches. ``fatal`` errors (an outage that outlived its retries, bad
 credentials, the wrong model, an incompatible worker, bad settings) fail every
 later extraction of the run at once, because every document would meet the same
-problem. The rest fail only the document whose request caused them.
+problem. The rest (a rejected, failed or timed-out request) fail only the
+document whose request caused them.
 
 None of them log on construction: retried attempts would flood the log, so the
 adapter logs what it decides instead.
@@ -34,8 +35,9 @@ class GlinerWorkerError(CogneeApiError):
 
 
 class GlinerWorkerUnavailableError(GlinerWorkerError):
-    """Unreachable, timed out, overloaded or restarting (HTTP 429/502/503/504,
-    gRPC UNAVAILABLE and friends, RabbitMQ ``unavailable`` or no reply).
+    """Unreachable, overloaded or restarting (HTTP 429/502/503/504, connect
+    timeouts, gRPC UNAVAILABLE and friends, RabbitMQ ``unavailable`` or a request
+    the broker did not accept).
 
     Retried. Once the retries are spent it is fatal for the run.
     """
@@ -76,6 +78,29 @@ class GlinerWorkerRejectedError(GlinerWorkerError):
         )
 
 
+class GlinerWorkerTimeoutError(GlinerWorkerError):
+    """A request reached the worker but got no answer within
+    COGNEE_GLINER_REQUEST_TIMEOUT_SECS (HTTP read timeout, gRPC DEADLINE_EXCEEDED,
+    no RabbitMQ reply to a published request).
+
+    Not retried: the worker may still be running it, and resending a request that
+    is slow on its own would only multiply that work. Fails that document only;
+    the adapter first re-checks readiness, so a worker that went away still fails
+    the run as unavailable.
+    """
+
+    def __init__(self, message: str):
+        super().__init__(
+            message,
+            "GlinerWorkerTimeoutError",
+            status.HTTP_504_GATEWAY_TIMEOUT,
+            remediation=(
+                "Raise COGNEE_GLINER_REQUEST_TIMEOUT_SECS, or lower "
+                "COGNEE_GLINER_INPUTS_PER_REQUEST or the chunk size so one request is smaller."
+            ),
+        )
+
+
 class GlinerWorkerRuntimeError(GlinerWorkerError):
     """Inference failed on the worker (HTTP 500, gRPC INTERNAL, RabbitMQ
     ``internal``), or its reply was malformed. Deterministic, so not retried;
@@ -86,7 +111,8 @@ class GlinerWorkerRuntimeError(GlinerWorkerError):
 
 
 class GlinerWorkerModelMismatchError(GlinerWorkerError):
-    """The worker serves a different model than COGNEE_GLINER_EXPECTED_MODEL."""
+    """The worker serves a different model than COGNEE_GLINER_EXPECTED_MODEL, or
+    than the ``model_name`` the caller passed."""
 
     fatal = True
 
@@ -98,21 +124,23 @@ class GlinerWorkerModelMismatchError(GlinerWorkerError):
             "GlinerWorkerModelMismatchError",
             remediation=(
                 "Point COGNEE_GLINER_ENDPOINT at a worker serving the expected model, "
-                "or change COGNEE_GLINER_EXPECTED_MODEL."
+                "or change COGNEE_GLINER_EXPECTED_MODEL / the model_name argument."
             ),
         )
 
 
 class GlinerWorkerIncompatibleError(GlinerWorkerError):
-    """The worker predates a contract feature this client needs (windowing)."""
+    """The endpoint is not a worker this client can use: it predates a contract
+    feature (windowing), or its readiness probe does not answer like a worker."""
 
     fatal = True
 
-    def __init__(self, message: str):
+    def __init__(self, message: str, remediation: str | None = None):
         super().__init__(
             message,
             "GlinerWorkerIncompatibleError",
-            remediation=(
+            remediation=remediation
+            or (
                 "Upgrade gliner_worker to a version that supports the window_words option "
                 "(main at or after 92aba3c, topoteretes/gliner_worker#4)."
             ),

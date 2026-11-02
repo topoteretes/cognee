@@ -30,7 +30,8 @@ from cognee.tasks.graph.gliner_demo.remote import (
     get_remote_gliner_settings,
     remote_gliner_configured,
 )
-from cognee.tasks.graph.gliner_demo.schema import LABEL_BANK_PROBE_SCHEMA
+from cognee.tasks.graph.gliner_demo.remote.protocol import WorkerLimits, WorkerReadiness
+from cognee.tasks.graph.gliner_demo.schema import LABEL_BANK_PROBE_SCHEMA, MAX_SKETCH_CHARS
 
 APPLE = {
     "entities": {
@@ -69,11 +70,17 @@ class FakeRemote:
 
     model = "fastino/gliner2.5-base-v1"
 
-    def __init__(self, result=APPLE, probe=None):
+    def __init__(self, result=APPLE, probe=None, max_text_chars=None):
         self.result = result
         self.probe = probe or {"entities": {"person": ["Tim Cook"], "organization": ["Apple"]}}
         self.batches: list[tuple] = []
         self.probes: list[tuple] = []
+        self.readiness = WorkerReadiness(
+            model=self.model, limits=WorkerLimits(max_text_chars=max_text_chars)
+        )
+
+    async def ensure_ready(self):
+        return self.readiness
 
     async def extract_batch(self, texts, schema, **options):
         self.batches.append((list(texts), schema, options))
@@ -210,6 +217,42 @@ async def test_label_bank_probe_runs_on_the_worker():
     assert schema is LABEL_BANK_PROBE_SCHEMA
     assert set(document._gliner_schema.entity_types) == {"person", "organization"}
     assert document._gliner_schema.source == "label_bank"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("max_text_chars", [None, 2_000])
+async def test_the_probe_sketch_fits_the_workers_text_limit(max_text_chars):
+    remote = FakeRemote(max_text_chars=max_text_chars)
+    document = TextDocument(name="long.txt", raw_data_location="l.txt", external_metadata=None)
+    sentence = "Tim Cook met Satya Nadella in Seattle on 3 March 2024 to discuss Azure. "
+
+    async def read(document, **_kwargs):
+        for _ in range(40):
+            yield SimpleNamespace(text=sentence * 10)
+
+    with patch.object(TextDocument, "read", read):
+        await tasks_module.prepare_gliner_schema(
+            [document], schema=GlinerSchema(), max_chunk_size=512, remote=remote
+        )
+
+    [(text, _schema, _threshold)] = remote.probes
+    # Without a published limit the sketch cap applies, as for local extraction.
+    assert len(text) <= (max_text_chars or MAX_SKETCH_CHARS)
+    assert len(text) > (max_text_chars or MAX_SKETCH_CHARS) // 2
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_model_name_must_be_the_workers(remote_env):
+    with (
+        patch.object(tasks_module, "resolve_chunk_size", AsyncMock(return_value=512)),
+        patch.object(RemoteGlinerAdapter, "ensure_ready", AsyncMock()),
+        patch.object(RemoteGlinerAdapter, "require_model") as require_model,
+    ):
+        await get_gliner_demo_tasks(["person"])
+        require_model.assert_not_called()  # no model_name: the worker's model is accepted
+
+        await get_gliner_demo_tasks(["person"], model_name="fastino/gliner2-large-v1")
+    require_model.assert_called_with("fastino/gliner2-large-v1")
 
 
 @pytest.mark.asyncio

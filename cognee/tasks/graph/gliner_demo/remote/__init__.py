@@ -21,6 +21,7 @@ from .errors import (
     GlinerWorkerModelMismatchError,
     GlinerWorkerRejectedError,
     GlinerWorkerRuntimeError,
+    GlinerWorkerTimeoutError,
     GlinerWorkerUnauthorizedError,
     GlinerWorkerUnavailableError,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "GlinerWorkerModelMismatchError",
     "GlinerWorkerRejectedError",
     "GlinerWorkerRuntimeError",
+    "GlinerWorkerTimeoutError",
     "GlinerWorkerUnauthorizedError",
     "GlinerWorkerUnavailableError",
     "RemoteGlinerAdapter",

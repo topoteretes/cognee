@@ -12,8 +12,11 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class RetryPolicy:
-    attempts: int = 4
-    base_delay: float = 0.25
+    # 7 waits of 0.5, 1, 2, 4, 8, 8, 8 s, jittered down to half: 16-32 s in all,
+    # enough for a worker to restart and load its model (about 10 s on CPU)
+    # before an outage fails the run.
+    attempts: int = 8
+    base_delay: float = 0.5
     max_delay: float = 8.0
 
     def delay(self, attempt: int, retry_after: float | None = None) -> float:

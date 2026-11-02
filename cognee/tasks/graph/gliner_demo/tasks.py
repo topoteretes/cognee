@@ -55,6 +55,7 @@ from .mapping import map_gliner_result
 from .remote import RemoteGlinerAdapter, create_remote_adapter
 from .schema import (
     LABEL_BANK_PROBE_SCHEMA,
+    MAX_SKETCH_CHARS,
     MAX_SKETCH_WORDS,
     GlinerSchema,
     LabelSpec,
@@ -114,7 +115,8 @@ async def prepare_gliner_schema(
 ) -> list[Document]:
     """Attach one closed schema to each document before it is chunked.
 
-    With ``remote`` the label-bank probe runs on the worker instead of a local model.
+    With ``remote`` the label-bank probe runs on the worker instead of a local
+    model (``model_name`` is then the worker's to choose).
     """
     extractor = None
     for document in documents:
@@ -124,10 +126,17 @@ async def prepare_gliner_schema(
             )
         document_schema = schema
         if document_schema.is_empty:
+            sketch_max_chars = MAX_SKETCH_CHARS
             if remote is not None:
                 # The worker publishes no max_len; the default model's (4096)
                 # is above the sketch cap, so the cap is what applies locally too.
                 sketch_max_words = MAX_SKETCH_WORDS
+                # The probe is one unwindowed input: keep the sketch within the
+                # worker's per-input limit, or the worker rejects the document.
+                readiness = await remote.ensure_ready()
+                max_text_chars = readiness.limits.max_text_chars
+                if max_text_chars is not None:
+                    sketch_max_chars = min(sketch_max_chars, max_text_chars)
             else:
                 if extractor is None:
                     extractor = await get_extractor(model_name)
@@ -139,7 +148,9 @@ async def prepare_gliner_schema(
                 chunker_cls=chunker,
             ):
                 text = f"{sketch}\n{chunk.text}" if sketch else chunk.text
-                sketch = make_document_sketch(text, max_words=sketch_max_words)
+                sketch = make_document_sketch(
+                    text, max_chars=sketch_max_chars, max_words=sketch_max_words
+                )
             if remote is not None:
                 # A blank sketch sends nothing and probes as empty, as locally.
                 probe = await remote.extract_once(
@@ -249,7 +260,7 @@ async def extract_graph_and_summarize_with_gliner(
 
 def build_gliner_extraction_task(
     *,
-    model_name: str = DEFAULT_MODEL,
+    model_name: str | None = None,
     threshold: float = DEFAULT_THRESHOLD,
     gliner_batch_size: int = DEFAULT_BATCH_SIZE,
     window_words: int = DEFAULT_WINDOW_WORDS,
@@ -263,14 +274,16 @@ def build_gliner_extraction_task(
     """Build only the GLiNER extract+summarize ``Task``.
 
     This is the task ``get_gliner_demo_tasks`` places right before the final
-    ``add_data_points`` and the one it uses as its extraction step. Raises
+    ``add_data_points`` and the one it uses as its extraction step.
+    ``model_name`` defaults to :data:`DEFAULT_MODEL` locally; with ``remote`` a
+    given one must be what the worker serves (else the run fails with
+    :class:`GlinerWorkerModelMismatchError`). Raises
     :class:`GlinerNotInstalledError` when ``gliner2`` is not installed (and no
     ``remote`` worker is given) and ``ValueError`` on bad options.
     """
-    if remote is None:
-        require_gliner2()
+    _require_model(remote, model_name)
     options = GlinerOptions(
-        model_name=model_name,
+        model_name=model_name or DEFAULT_MODEL,
         threshold=threshold,
         batch_size=gliner_batch_size,
         window_words=window_words,
@@ -294,15 +307,15 @@ def build_gliner_schema_task(
     *,
     ontology_file_path: str | None = None,
     ontology_resolver=None,
-    model_name: str = DEFAULT_MODEL,
+    model_name: str | None = None,
     threshold: float = DEFAULT_THRESHOLD,
     max_chunk_size: int,
     chunker=TextChunker,
     remote: RemoteGlinerAdapter | None = None,
 ) -> Task:
-    """Build the document-level schema preparation task."""
-    if remote is None:
-        require_gliner2()
+    """Build the document-level schema preparation task (``model_name`` as in
+    :func:`build_gliner_extraction_task`)."""
+    _require_model(remote, model_name)
     schema = resolve_schema(
         entity_types,
         relation_types,
@@ -313,7 +326,7 @@ def build_gliner_schema_task(
         prepare_gliner_schema,
         schema=schema,
         max_chunk_size=max_chunk_size,
-        model_name=model_name,
+        model_name=model_name or DEFAULT_MODEL,
         threshold=threshold,
         chunker=chunker,
         remote=remote,
@@ -321,12 +334,20 @@ def build_gliner_schema_task(
     )
 
 
+def _require_model(remote: RemoteGlinerAdapter | None, model_name: str | None) -> None:
+    """Locally: the runtime must be installed. Remotely: an explicit model must be served."""
+    if remote is None:
+        require_gliner2()
+    elif model_name is not None:
+        remote.require_model(model_name)
+
+
 async def get_gliner_demo_tasks(
     entity_types: LabelSpec | None = None,
     relation_types: LabelSpec | None = None,
     *,
     ontology_file_path: str | None = None,
-    model_name: str = DEFAULT_MODEL,
+    model_name: str | None = None,
     threshold: float = DEFAULT_THRESHOLD,
     gliner_batch_size: int = DEFAULT_BATCH_SIZE,
     window_words: int = DEFAULT_WINDOW_WORDS,
@@ -359,7 +380,9 @@ async def get_gliner_demo_tasks(
     go to the gliner_worker at ``COGNEE_GLINER_ENDPOINT`` (see
     :mod:`cognee.tasks.graph.gliner_demo.remote`): its readiness, model and
     limits are checked here, before any document is read, and ``gliner2`` need
-    not be installed. Otherwise raises :class:`GlinerNotInstalledError` when
+    not be installed. ``model_name`` then only checks the worker's model (it
+    defaults to :data:`DEFAULT_MODEL` locally and to whatever the worker serves
+    remotely). Otherwise raises :class:`GlinerNotInstalledError` when
     ``gliner2`` is not installed.
     """
     cognify_config = get_cognify_config()
@@ -378,6 +401,8 @@ async def get_gliner_demo_tasks(
 
     remote = create_remote_adapter()
     if remote is not None:
+        if model_name is not None:
+            remote.require_model(model_name)
         await remote.ensure_ready()
 
     max_chunk_size = await resolve_chunk_size(chunk_size)

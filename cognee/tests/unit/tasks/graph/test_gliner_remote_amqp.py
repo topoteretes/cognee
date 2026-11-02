@@ -21,6 +21,7 @@ from cognee.tasks.graph.gliner_demo.remote import (  # noqa: E402
     GlinerRemoteConfigError,
     GlinerWorkerRejectedError,
     GlinerWorkerRuntimeError,
+    GlinerWorkerTimeoutError,
     GlinerWorkerUnauthorizedError,
     GlinerWorkerUnavailableError,
 )
@@ -235,11 +236,12 @@ async def test_error_replies_raise_their_class():
 
 @needs_broker
 @pytest.mark.asyncio
-async def test_no_reply_within_the_timeout_is_unavailable():
+async def test_no_reply_to_an_accepted_request_times_out():
     queue = private_queue()
     async with fake_worker(queue, lambda _m: []):
         transport = transport_for(queue, request_timeout=0.5)
-        with pytest.raises(GlinerWorkerUnavailableError, match="No reply"):
+        # The broker took it: a worker may still be running it, so not an outage.
+        with pytest.raises(GlinerWorkerTimeoutError, match="No reply"):
             await transport.extract(PAYLOAD, request_id="r")
         await transport.aclose()
 

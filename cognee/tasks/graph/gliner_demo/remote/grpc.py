@@ -25,6 +25,7 @@ from .errors import (
     GlinerRemoteConfigError,
     GlinerWorkerRejectedError,
     GlinerWorkerRuntimeError,
+    GlinerWorkerTimeoutError,
     GlinerWorkerUnauthorizedError,
     GlinerWorkerUnavailableError,
 )
@@ -79,10 +80,17 @@ _RETRYABLE = frozenset(
 )
 _UNAUTHORIZED = frozenset({"UNAUTHENTICATED", "PERMISSION_DENIED"})
 _REJECTED = frozenset({"INVALID_ARGUMENT", "OUT_OF_RANGE", "FAILED_PRECONDITION"})
+# What grpcio's client reports, as RESOURCE_EXHAUSTED, for a reply above
+# grpc.max_receive_message_length (COGNEE_GLINER_MAX_RESPONSE_BYTES).
+_REPLY_TOO_LARGE = "Received message larger than max"
 
 
 def classify_status(code_name: str, message: str) -> Exception:
     """Map a gRPC status onto the same failure classes HTTP statuses map to."""
+    if code_name == "RESOURCE_EXHAUSTED" and _REPLY_TOO_LARGE in message:
+        # This reply is too large for the cap, and resending it gives the same
+        # reply: fail its document, as HTTP and RabbitMQ do.
+        return GlinerWorkerRuntimeError(f"{message} (the cap is COGNEE_GLINER_MAX_RESPONSE_BYTES).")
     if code_name in _RETRYABLE:
         return GlinerWorkerUnavailableError(message)
     if code_name in _UNAUTHORIZED:
@@ -213,16 +221,28 @@ class GrpcWorkerTransport:
                 if secure
                 else grpc.aio.insecure_channel(target, options=options)
             )
+        messages = _messages()
+        # One callable per channel and method, built once.
+        self._extract_calls = [
+            channel.unary_unary(
+                EXTRACT_METHOD,
+                request_serializer=messages["ExtractRequest"].SerializeToString,
+                response_deserializer=messages["ExtractResponse"].FromString,
+            )
+            for channel in self._channels
+        ]
+        self._health_calls = [
+            channel.unary_unary(
+                HEALTH_METHOD,
+                request_serializer=messages["HealthCheckRequest"].SerializeToString,
+                response_deserializer=messages["HealthCheckResponse"].FromString,
+            )
+            for channel in self._channels
+        ]
         self._next = itertools.cycle(range(len(self._channels)))
 
     async def extract(self, payload: Mapping[str, Any], *, request_id: str) -> WorkerReply:
-        messages = _messages()
-        channel = self._channels[next(self._next)]
-        call = channel.unary_unary(
-            EXTRACT_METHOD,
-            request_serializer=messages["ExtractRequest"].SerializeToString,
-            response_deserializer=messages["ExtractResponse"].FromString,
-        )
+        call = self._extract_calls[next(self._next)]
         try:
             response = await call(
                 payload_to_request(payload),
@@ -230,6 +250,13 @@ class GrpcWorkerTransport:
                 metadata=(*self._metadata, ("x-request-id", request_id)),
             )
         except grpc.aio.AioRpcError as error:
+            if error.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+                # The call was sent and not answered in time: the worker may
+                # still be running it, so it is not resent (see the error class).
+                raise GlinerWorkerTimeoutError(
+                    f"The GLiNER worker at {self.endpoint_label} did not answer within "
+                    f"{self._request_timeout:g}s."
+                ) from error
             raise self._error(error) from error
         return response_to_reply(
             response,
@@ -245,12 +272,7 @@ class GrpcWorkerTransport:
         """
         messages = _messages()
         failure: Exception | None = None
-        for channel in self._channels:
-            check = channel.unary_unary(
-                HEALTH_METHOD,
-                request_serializer=messages["HealthCheckRequest"].SerializeToString,
-                response_deserializer=messages["HealthCheckResponse"].FromString,
-            )
+        for check in self._health_calls:
             try:
                 response = await check(
                     messages["HealthCheckRequest"](service=SERVICE_NAME),

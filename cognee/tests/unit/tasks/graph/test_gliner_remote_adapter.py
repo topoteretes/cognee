@@ -17,6 +17,7 @@ from cognee.tasks.graph.gliner_demo.remote import (
     GlinerWorkerModelMismatchError,
     GlinerWorkerRejectedError,
     GlinerWorkerRuntimeError,
+    GlinerWorkerTimeoutError,
     GlinerWorkerUnauthorizedError,
     GlinerWorkerUnavailableError,
     RemoteGlinerAdapter,
@@ -621,3 +622,138 @@ def test_close_shared_workers_closes_now(built_transports):
 
     asyncio.run(run())
     assert len(built) == 2 and all(transport.closed for transport in built)
+
+
+# --------------------------------------------------------------------------- #
+# Retry window, timeouts, shared readiness probes, required model
+# --------------------------------------------------------------------------- #
+
+
+def test_default_retries_outlast_a_worker_restart():
+    policy = RetryPolicy()
+    waits = [
+        min(policy.max_delay, policy.base_delay * 2**attempt)
+        for attempt in range(policy.attempts - 1)
+    ]
+    # Even fully jittered down to half, a worker reloading its model (about 10 s
+    # on CPU) is waited out before an outage fails the run.
+    assert sum(wait / 2 for wait in waits) >= 15.0
+
+
+@pytest.mark.asyncio
+async def test_a_timed_out_request_fails_its_document_without_a_resend():
+    sleeps: list[float] = []
+    transport = FakeTransport(script=[raise_(GlinerWorkerTimeoutError("slow"))])
+    adapter = make_adapter(transport, sleeps=sleeps)
+
+    with pytest.raises(GlinerWorkerTimeoutError):
+        await extract(adapter, ["Alice works."])
+    # Sent once, no backoff; readiness re-checked once the request timed out.
+    assert len(transport.payloads) == 1 and sleeps == []
+    assert transport.readiness_calls == 2
+
+    # Not latched: the worker is fine, so the next document goes through.
+    assert await extract(adapter, ["Bob works."]) == [extraction_for("Bob works.")]
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_from_a_worker_that_went_away_fails_the_run():
+    transport = FakeTransport(script=[raise_(GlinerWorkerTimeoutError("slow"))])
+    adapter = make_adapter(transport, sleeps=[])
+    await adapter.ensure_ready()
+
+    async def gone():
+        transport.readiness_calls += 1
+        raise GlinerWorkerUnavailableError("no worker consumes the queue")
+
+    transport.readiness = gone
+    with pytest.raises(GlinerWorkerUnavailableError):
+        await extract(adapter, ["Alice works."])
+    with pytest.raises(GlinerWorkerUnavailableError):
+        await extract(adapter, ["Bob works."])
+    assert len(transport.payloads) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_callers_share_one_failed_readiness_probe():
+    transport = FakeTransport()
+
+    async def down():
+        transport.readiness_calls += 1
+        await asyncio.sleep(0.01)  # in flight long enough for every caller to arrive
+        raise GlinerWorkerUnavailableError("down")
+
+    transport.readiness = down
+    adapter = make_adapter(transport, sleeps=[])
+
+    outcomes = await asyncio.gather(
+        *(extract(adapter, [f"Person{n} works."]) for n in range(5)), return_exceptions=True
+    )
+    assert all(isinstance(outcome, GlinerWorkerUnavailableError) for outcome in outcomes)
+    # One probe with its retries, not one round per waiting caller.
+    assert transport.readiness_calls == 4
+
+
+@pytest.mark.asyncio
+async def test_a_readiness_probe_that_is_not_a_worker_fails_the_run():
+    sleeps: list[float] = []
+    transport = FakeTransport()
+
+    async def not_a_worker():
+        transport.readiness_calls += 1
+        raise GlinerWorkerRuntimeError("/readyz did not answer like a GLiNER worker")
+
+    transport.readiness = not_a_worker
+    adapter = make_adapter(transport, sleeps=sleeps)
+
+    with pytest.raises(GlinerWorkerIncompatibleError, match="COGNEE_GLINER_ENDPOINT"):
+        await adapter.ensure_ready()
+    with pytest.raises(GlinerWorkerIncompatibleError):
+        await extract(adapter, ["Alice works."])
+    assert transport.readiness_calls == 1 and sleeps == [] and transport.payloads == []
+
+
+@pytest.mark.asyncio
+async def test_a_model_the_caller_asked_for_must_be_served():
+    adapter = make_adapter(FakeTransport())
+    adapter.require_model("fastino/gliner2-large-v1")
+    with pytest.raises(GlinerWorkerModelMismatchError, match="gliner2-large-v1"):
+        await adapter.ensure_ready()
+
+    served = make_adapter(FakeTransport())
+    served.require_model(MODEL)
+    assert (await served.ensure_ready()).model == MODEL
+
+    # gRPC and RabbitMQ name the model only in replies: checked on the first one.
+    transport = FakeTransport(readiness=WorkerReadiness())
+    late = make_adapter(transport)
+    late.require_model("fastino/gliner2-large-v1")
+    with pytest.raises(GlinerWorkerModelMismatchError):
+        await extract(late, ["Alice works."])
+    with pytest.raises(GlinerWorkerModelMismatchError):
+        await extract(late, ["Bob works."])
+    assert len(transport.payloads) == 1
+
+
+def test_closing_keeps_workers_registered_while_it_ran(built_transports):
+    built, adapter_module = built_transports
+
+    async def run():
+        await _shared_adapter().ensure_ready()
+        first = built[0]
+        close = first.aclose
+
+        async def close_while_another_run_starts():
+            await _shared_adapter().ensure_ready()  # registers a fresh entry
+            await close()
+
+        first.aclose = close_while_another_run_starts
+        await adapter_module.close_shared_workers()
+        # The entry registered meanwhile is still the loop's, not orphaned.
+        assert asyncio.get_running_loop() in adapter_module._shared
+        assert len(built) == 2 and not built[1].closed
+        await _shared_adapter().ensure_ready()
+        assert len(built) == 2  # reused, not rebuilt
+
+    asyncio.run(run())
+    assert all(transport.closed for transport in built)
