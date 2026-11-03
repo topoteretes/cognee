@@ -6,6 +6,7 @@ runs in a subprocess so the modules this test process already loaded do not coun
 """
 
 import json
+import os
 import subprocess
 import sys
 
