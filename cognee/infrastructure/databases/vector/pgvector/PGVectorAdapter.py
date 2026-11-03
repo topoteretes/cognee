@@ -58,6 +58,22 @@ _HNSW_MAX_EF_SEARCH = 1000
 # Postgres truncates identifiers to NAMEDATALEN - 1 bytes, with only a NOTICE.
 _PG_MAX_IDENTIFIER_BYTES = 63
 
+
+def _row_order(row_id: Any) -> str:
+    """The order rows are written in, so concurrent upserts never deadlock.
+
+    A multi-row ``INSERT ... ON CONFLICT DO UPDATE`` locks each conflicting row as it
+    reaches it, in ``VALUES`` order. Two statements that touch the same ids in
+    different orders can each hold a row the other waits for, and Postgres then
+    aborts one with a deadlock. Written in one global order (the uuid's canonical
+    text, which is also its btree order) every statement waits only for rows after
+    the ones it holds, so no cycle can form, and the per-collection lock that used to
+    serialize every insert of a collection is not needed: inserts into one
+    collection run concurrently, and pgvector's HNSW index takes them concurrently.
+    """
+    return str(row_id)
+
+
 PgvectorVersion = tuple[int, ...]
 
 # Collection tables in the engine's current schema (the dataset's own schema in
@@ -220,6 +236,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self.VECTOR_DB_LOCK = LoopAgnosticLock()
         # pgvector's extversion, read on first use (see _pgvector_version).
         self._pgvector_version_cache: PgvectorVersion | None = None
+        # Per-collection locks for the delete paths. Inserts do not take them: their
+        # rows are written in ``_row_order``, which rules out deadlocks between them.
         self._write_locks: dict[str, LoopAgnosticLock] = {}
         # Guards the check-then-insert in ``_get_write_lock``: callers on
         # different threads/loops must get the same lock for a collection.
@@ -669,7 +687,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # still emit same-UUID5 rows in one batch. Union the duplicates'
         # belongs_to_set arrays before collapsing so a tag that only
         # appears on one duplicate isn't dropped (mirrors the in-batch
-        # tag merge in Neo4jAdapter.add_nodes).
+        # tag merge in Neo4jAdapter.add_nodes). The rows are then written
+        # in ``_row_order`` so concurrent batches cannot deadlock.
         deduped_by_id: dict = {}
         for dp in pgvector_data_points:
             existing = deduped_by_id.get(dp.id)
@@ -684,11 +703,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 merged_tags = list(dict.fromkeys(list(existing_tags) + list(incoming_tags)))
                 dp.payload = {**incoming_payload, "belongs_to_set": merged_tags}
             deduped_by_id[dp.id] = dp
-        pgvector_data_points = list(deduped_by_id.values())
+        pgvector_data_points = sorted(deduped_by_id.values(), key=lambda dp: _row_order(dp.id))
 
         point_dicts = [to_dict(data_point) for data_point in pgvector_data_points]
 
-        async with self._get_write_lock(collection_name), self.get_async_session() as session:
+        async with self.get_async_session() as session:
             for start_index in range(0, len(point_dicts), QUERY_BATCH_SIZE):
                 point_batch = point_dicts[start_index : start_index + QUERY_BATCH_SIZE]
                 insert_statement = insert(PGVectorDataPoint).values(point_batch)
@@ -818,29 +837,31 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         takes the new payload and the new vector, except ``belongs_to_set``, which is
         unioned with the stored row's as in ``create_data_points``. The same id twice
         in one call is written once (one INSERT cannot touch a row twice), see
-        ``validate_raw_vector_points``. Retried on deadlock like ``create_data_points``:
-        the write lock is per process, and two workers' multi-row upserts can lock
-        rows in opposite orders.
+        ``validate_raw_vector_points``. Rows are written in ``_row_order``, like
+        ``create_data_points``, so concurrent upserts of the same ids cannot deadlock.
         """
         if not points:
             return
 
         vector_size = self.embedding_engine.get_vector_size()
         # Every check runs before the table exists, so a rejected call creates nothing.
-        row_list = [
-            {
-                "id": row["id"],
-                "vector": row["vector"],
-                "payload": sanitize_relational_payload(serialize_data(row["payload"])),
-            }
-            for row in validate_raw_vector_points(points, vector_size).values()
-        ]
+        row_list = sorted(
+            (
+                {
+                    "id": row["id"],
+                    "vector": row["vector"],
+                    "payload": sanitize_relational_payload(serialize_data(row["payload"])),
+                }
+                for row in validate_raw_vector_points(points, vector_size).values()
+            ),
+            key=lambda row: _row_order(row["id"]),
+        )
 
         if not await self.has_collection(collection_name):
             await self.create_collection(collection_name, payload_schema=payload_schema)
         table = await self.get_table(collection_name)
 
-        async with self._get_write_lock(collection_name), self.get_async_session() as session:
+        async with self.get_async_session() as session:
             for start_index in range(0, len(row_list), QUERY_BATCH_SIZE):
                 statement = insert(table).values(
                     row_list[start_index : start_index + QUERY_BATCH_SIZE]
@@ -1095,8 +1116,18 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             ]
         )
 
+    @retry(
+        retry=retry_if_exception_type(DeadlockDetectedError),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=1, max=6),
+    )
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
-        """Delete rows from `collection_name` whose id is in `data_point_ids`."""
+        """Delete rows from `collection_name` whose id is in `data_point_ids`.
+
+        Inserts no longer take the collection lock, so a delete can meet a concurrent
+        upsert of the same rows; Postgres aborts one side of such a deadlock and the
+        delete is retried.
+        """
         # Skip deletion if collection doesn't exist
         if not await self.has_collection(collection_name):
             return None
