@@ -22,6 +22,11 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_memory.persist_code_findings import (
+    completed_run_id,
+    persist_code_findings,
+    window_data_id,
+)
 from cognee.tasks.ingestion.data_item import DataItem
 
 logger = get_logger("cognify_session")
@@ -98,7 +103,7 @@ async def cognify_session(
             )
 
             node_set = bridge_node_set([USER_SESSIONS_NODE_SET], window.node_set)
-            await cognee.add(
+            add_result = await cognee.add(
                 _dated_content(window),
                 dataset_id=dataset_id,
                 node_set=node_set,
@@ -131,6 +136,19 @@ async def cognify_session(
                 raise_if_budget_exhausted_record(errored_run.error_class, errored_run.error_message)
                 continue
             logger.info("Session data successfully cognified")
+
+            # The window's findings about code, joined to the code graph by id.
+            # Before the watermark moves: a failed persist re-extracts the
+            # window (findings included) on the next improve().
+            if window.code_findings:
+                await persist_code_findings(
+                    window.code_findings,
+                    node_set=node_set,
+                    user=user,
+                    dataset_id=dataset_id,
+                    data_id=window_data_id(add_result),
+                    pipeline_run_id=completed_run_id(cognify_result),
+                )
 
             await save_persisted_qa_count(
                 get_session_manager(),

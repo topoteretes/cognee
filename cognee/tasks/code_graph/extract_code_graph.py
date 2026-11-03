@@ -1136,6 +1136,22 @@ async def add_code_graph_edges(
             repo_scope=repo_scope,
         )
 
+        # Re-join the memories about these repositories to the symbols the
+        # snapshot holds now: a finding written before its code was ingested
+        # gets its edge here, and one whose code moved follows it when nothing
+        # else has that body. Before the stamp, so a failed join is retried.
+        from cognee.tasks.code_memory.link_observed_declarations import (
+            link_observed_declarations,
+        )
+
+        fallback_repo = _resolve_fallback_repo(facts, repo_path)
+        await link_observed_declarations(
+            graph_engine,
+            {repo_scope} if repo_scope is not None else _snapshot_repos(facts, fallback_repo),
+            ctx=ctx,
+            existing_nodes=existing_nodes,
+        )
+
         snapshot_id = snapshot_identity(snapshot_dir, receipt)
         node_delta = getattr(data_points, "node_delta", None) or {}
         delta = {

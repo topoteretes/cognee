@@ -12,6 +12,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_memory.persist_code_findings import code_findings_from_qa_entries
 
 logger = get_logger("extract_user_sessions")
 
@@ -111,6 +112,9 @@ async def extract_user_sessions(
                         persisted_qa_count=len(qa_data),
                         node_set=node_set_from_rows(context_rows),
                         last_entry_time=new_entries[-1].time,
+                        code_findings=code_findings_from_qa_entries(
+                            new_entries, user_id=user_id, session_id=session_id
+                        ),
                     )
                 except Exception as e:
                     logger.warning(f"Failed to extract session {session_id}: {e!s}", exc_info=True)
