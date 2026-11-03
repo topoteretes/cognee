@@ -24,7 +24,7 @@ def test_import_cognee_does_not_load_the_llm_libraries():
         check=True,
         capture_output=True,
         text=True,
-        env={"COGNEE_SKIP_CONNECTION_TEST": "true", "PATH": ""},
+        env={**os.environ, "COGNEE_SKIP_CONNECTION_TEST": "true"},
     ).stdout
     loaded = json.loads(output.strip().splitlines()[-1])
 
