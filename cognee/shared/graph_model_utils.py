@@ -8,15 +8,22 @@ and how the answer becomes DataPoints again) lives in ``cognee.shared.llm_graph_
 import re
 import sys
 import types
-from typing import cast
+from typing import cast, get_args
 
 from datamodel_code_generator import DataModelType, GenerateConfig, InputFileType, generate
 from pydantic import BaseModel
 from pydantic._internal._core_utils import CoreSchemaOrField, is_core_schema
 from pydantic.json_schema import GenerateJsonSchema
 
+from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.models.FieldAnnotations import _FromIdentity
 from cognee.shared.exceptions import ExternalSchemaReferenceError
-from cognee.shared.llm_graph_model import datapoint_model_to_basemodel
+from cognee.shared.llm_graph_model import (
+    _contains_edge_annotation,
+    _field_markers,
+    _strip_annotated,
+    datapoint_model_to_basemodel,
+)
 
 
 def _reject_external_refs(node) -> None:
@@ -88,6 +95,49 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
 
     # Return dynamically created Pydantic model class that can be used in cognee for graph creation and querying
     return graph_model
+
+
+def fields_the_schema_cannot_carry(graph_model: type[BaseModel]) -> list[str]:
+    """``Model.field`` names of the typed ``Edge[...]`` and ``FromIdentity`` fields in
+    ``graph_model`` and every DataPoint type it nests.
+
+    The schema only carries plain JSON types, so ``graph_schema_to_graph_model`` cannot
+    bring these back: an edge row returns as a nested DataPoint with ``source`` and
+    ``target`` strings and a reference as a plain ``str``. On the receiving side they
+    become nodes and attributes, never edges and references.
+    """
+    found: list[str] = []
+    seen: set[type] = set()
+
+    def walk(model: type[BaseModel]) -> None:
+        if model in seen:
+            return
+        seen.add(model)
+        for name, field_info in model.model_fields.items():
+            if name in DataPoint.model_fields:
+                continue
+            if _contains_edge_annotation(field_info.annotation) or any(
+                isinstance(marker, _FromIdentity) for marker in _field_markers(field_info)
+            ):
+                found.append(f"{model.__name__}.{name}")
+            for nested in _datapoint_types_in(field_info.annotation):
+                walk(nested)
+
+    walk(graph_model)
+    return found
+
+
+def _datapoint_types_in(annotation) -> list[type[DataPoint]]:
+    """Every DataPoint subclass named anywhere in ``annotation``."""
+    core, _ = _strip_annotated(annotation)
+    if isinstance(core, type):
+        return [core] if issubclass(core, DataPoint) else []
+    return [
+        nested
+        for arg in get_args(core)
+        if arg is not type(None) and arg is not Ellipsis
+        for nested in _datapoint_types_in(arg)
+    ]
 
 
 def graph_model_to_graph_schema(graph_model: type[BaseModel]) -> dict:
