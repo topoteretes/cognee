@@ -10,6 +10,7 @@ together.
 | SearchType | Retriever | Module | LLM answer? | Notes |
 |---|---|---|---|---|
 | `HYBRID_COMPLETION` | `HybridRetriever` | `hybrid_retriever.py` | yes | Default. Chunk + entity (+ global-context) lanes. Defers to `GRAPH_COMPLETION` for a custom `node_type`, `node_name` with `node_type=None`, `neighborhood_depth`, `feedback_influence > 0`, or a missing chunk collection (`search/methods/hybrid_deferral.py`) |
+| `HYBRID_COMPLETION_DECOMPOSITION` | `HybridDecompositionRetriever` | `hybrid_decomposition_retriever.py` | yes | Hybrid pass for the full question, then LLM decomposition of question + that context into up to 7 subqueries, each retrieved through the hybrid lanes and merged content-keyed. Single query only |
 | `GRAPH_COMPLETION` | `GraphCompletionRetriever` | `graph_completion_retriever.py` | yes | Triplet search + neighbourhood expansion; base for the variants below |
 | `GRAPH_COMPLETION_COT` | `GraphCompletionCotRetriever` | `graph_completion_cot_retriever.py` | yes | Chain-of-thought rounds |
 | `GRAPH_COMPLETION_CONTEXT_EXTENSION` | `GraphCompletionContextExtensionRetriever` | `graph_completion_context_extension_retriever.py` | yes | Iteratively widens context |
@@ -66,3 +67,60 @@ Supporting folders: `hybrid/` (the hybrid lanes), `context_providers/` (triplet
 context formatting), `entity_extractors/`, `utils/` (completion, evidence, ranking
 helpers), `only_context_prompt.py` (the full LLM input an `only_context` search returns), and
 `session_aware_completion.py` (the concurrent/sequential session turn).
+
+## Hybrid decomposition without retrieval
+
+`HybridDecompositionRetriever` adds orchestration to `HybridRetriever`; it does
+not implement its own chunk/entity/fact search, metadata projection, reference
+formatting or answer generation. The stages are independently scoped:
+
+- `decompose_query(question, context)` plans subquestions and can be overridden
+  to use another planner without editing hybrid retrieval.
+- `_retrieve_subqueries` runs expansion searches concurrently using the parent
+  lane implementation. The original question reuses its first-pass results.
+- `hybrid.merge.merge_hybrid_results_union` deduplicates and applies per-channel
+  expansion budgets. First-pass objects retain their original metadata.
+- `decomposition_state` exposes the subqueries, first pass, expansion results
+  and merged result for inspection after retrieval.
+
+Use `SearchType.HYBRID_COMPLETION_DECOMPOSITION` with `search()` or `recall()`.
+Configure `max_subqueries`, `decomposition_system_prompt` (inline text),
+`decomposition_system_prompt_path` and `merged_chunks_limit`,
+`merged_entities_limit`, `merged_facts_limit` through
+`retriever_specific_config`. All standard hybrid configuration, including
+`include_external_metadata` and `external_metadata_keys`, is forwarded too.
+See [the runnable example](../../../examples/guides/hybrid_decomposition.py).
+
+`only_context=True` skips the final answer, but still runs both retrieval passes
+and the decomposition LLM. To inspect subquestions without any graph, vector or
+embedding calls, use the decomposition-only method:
+
+```python
+from cognee.modules.retrieval.hybrid_decomposition_retriever import HybridDecompositionRetriever
+
+retriever = HybridDecompositionRetriever(max_subqueries=12)
+subquestions = await retriever.decompose_query(
+    "Which guarantees cover project X, and what are their expiry rules?",
+    context="Optional source passages supplied by the caller, not retrieved here.",
+)
+```
+
+The default prompt follows `max_subqueries`. An inline
+`decomposition_system_prompt` is passed verbatim, so callers must give it a
+compatible budget. Missing/blank prompts and decomposition errors fall back to
+the original question. The method does not change retrieval run state.
+
+In a full retrieval run, the default union budget covers actual returned objects,
+including the larger fact lane hybrid can use when no entities match. Explicit
+`merged_*_limit` settings cap expansion, with the distinct first-pass items as a
+minimum: a ceiling below the baseline cannot remove baseline evidence. Failed
+extra legs leave the first pass and successful legs intact. Cancellation still
+propagates. Session preparation and session completion are excluded for this
+retriever, and graph-only search knobs are rejected rather than ignored.
+
+Invalid budgets fail at construction. The first retrieval's errors, including
+the parent's empty-graph `NoDataError`, propagate. Graceful degradation applies
+only to the optional decomposition/expansion stage required by SDK-694.
+Preserving evidence does not guarantee a better answer: expansion increases
+context size and should be evaluated for each use case. No ontology planning,
+question router or application-specific prompts are built into this retriever.

@@ -1,3 +1,4 @@
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.only_context_prompt import build_only_context_prompt
 from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
@@ -11,6 +12,7 @@ from cognee.modules.search.methods.get_search_type_retriever_instance import (
 from cognee.modules.search.methods.hybrid_deferral import (
     hybrid_deferral_reason,
     reject_hybrid_graph_only_knobs,
+    request_deferral_reason,
 )
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations.select_search_type import select_search_type
@@ -32,7 +34,16 @@ async def _effective_search_type(
     else:
         resolved = query_type
 
-    if resolved is SearchType.HYBRID_COMPLETION:
+    if resolved is SearchType.HYBRID_COMPLETION_DECOMPOSITION:
+        reject_hybrid_graph_only_knobs(kwargs)
+        reason = request_deferral_reason(kwargs)
+        if reason:
+            raise CogneeValidationError(
+                message=f"{reason} is unsupported by HYBRID_COMPLETION_DECOMPOSITION. "
+                "Use GRAPH_COMPLETION or remove the graph-only configuration.",
+                name="InvalidHybridSearchConfig",
+            )
+    elif resolved is SearchType.HYBRID_COMPLETION:
         reject_hybrid_graph_only_knobs(kwargs)
         reason = await hybrid_deferral_reason(kwargs, graph_is_empty=graph_is_empty)
         if reason:

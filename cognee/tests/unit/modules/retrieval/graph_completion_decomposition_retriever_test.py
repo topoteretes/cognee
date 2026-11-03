@@ -89,6 +89,25 @@ def test_normalize_subqueries_strips_caps_and_falls_back():
     assert fallback == ["Original query"]
 
 
+def test_normalize_subqueries_honours_max_subqueries():
+    nine = [f"subquery {index}" for index in range(9)]
+
+    assert normalize_subqueries("original", nine) == nine[:5]  # default unchanged
+    assert normalize_subqueries("original", nine, max_subqueries=7) == nine[:7]
+    assert normalize_subqueries("original", nine, max_subqueries=1) == nine[:1]
+
+
+@pytest.mark.parametrize("limit", [0, -1, 1.5, True])
+def test_normalize_subqueries_rejects_invalid_limits(limit):
+    with pytest.raises(ValueError, match="positive integer"):
+        normalize_subqueries("original", ["leg"], max_subqueries=limit)
+
+
+def test_normalize_subqueries_ignores_malformed_values():
+    assert normalize_subqueries("original", [None, 42, "  valid  ", "valid"]) == ["valid"]
+    assert normalize_subqueries("original", "not a list") == ["original"]
+
+
 @pytest.mark.asyncio
 async def test_decompose_query_falls_back_to_original_query_on_failure():
     retriever = GraphCompletionDecompositionRetriever()
