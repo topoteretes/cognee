@@ -155,3 +155,47 @@ async def test_forget_everything_skips_sessions_when_session_memory_is_off(cache
 
     assert result["sessions_removed"] == 0
     assert result["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_forget_everything_raises_before_deleting_datasets_when_a_session_delete_fails(
+    cache,
+):
+    """A failed session delete keeps the datasets, so a retry finds the session again.
+
+    The dataset half of the rule reaches another user's session only while the
+    dataset exists; deleting the datasets first would orphan it on failure.
+    """
+    await _seed_session(cache, USER_B, "b_shared")
+    manager = SessionManager(cache)
+    patches = _patches(
+        manager,
+        session_pairs_by_owner={},
+        dataset_pairs={DATASET_SHARED: [(USER_B, "b_shared")]},
+        deletable_datasets=[SimpleNamespace(id=DATASET_SHARED)],
+    )
+    datasets_api = importlib.import_module("cognee.api.v1.datasets.datasets").datasets
+    delete_session_module = importlib.import_module(
+        "cognee.modules.session_lifecycle.delete_session"
+    )
+    failing_rows = AsyncMock(side_effect=RuntimeError("relational store down"))
+
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        stack.enter_context(
+            patch.object(delete_session_module, "_delete_session_rows", failing_rows)
+        )
+        with pytest.raises(RuntimeError, match="relational store down"):
+            await forget_module._forget_everything(SimpleNamespace(id=USER_A))
+        datasets_api.delete_all.assert_not_awaited()
+
+    # The retry still resolves the session through the surviving dataset.
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        result = await forget_module._forget_everything(SimpleNamespace(id=USER_A))
+        datasets_api.delete_all.assert_awaited_once()
+
+    assert result["status"] == "success"
+    assert await _session_counts(cache, USER_B, "b_shared") == (0, 0, 0)

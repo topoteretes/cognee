@@ -293,9 +293,12 @@ async def _forget_everything(user: Any) -> dict:
             user.id,
         )
 
-    await datasets.delete_all(user=user)
-
+    # Also before the data, and not caught: the dataset half of the session
+    # rule finds its sessions only while the datasets exist, so a failure here
+    # must leave them in place for the retry.
     sessions_removed = await _forget_sessions(session_pairs)
+
+    await datasets.delete_all(user=user)
 
     logger.info(
         "forget: deleted all data for user=%s (%d datasets, %d sessions)",
@@ -316,9 +319,8 @@ async def _forget_sessions(session_pairs: list[tuple[UUID, str]]) -> int:
     """Delete each (owner id, session id) pair whole; return how many existed.
 
     Nothing to do without session memory (``CACHING=false``): there is no
-    cache to delete from. A session whose delete fails is logged and skipped,
-    like the per-dataset session invalidation inside ``empty_dataset``; the
-    datasets are already gone, and a retried forget deletes what is left.
+    cache to delete from. Errors propagate: this runs before the datasets are
+    deleted, so a retried forget finds every remaining session again.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
     from cognee.modules.session_lifecycle.delete_session import delete_session
@@ -328,17 +330,8 @@ async def _forget_sessions(session_pairs: list[tuple[UUID, str]]) -> int:
 
     removed = 0
     for owner_id, session_id in session_pairs:
-        try:
-            if await delete_session(owner_id, session_id):
-                removed += 1
-        except Exception as error:
-            logger.warning(
-                "forget: failed to delete session %s of user %s (non-fatal): %s",
-                session_id,
-                owner_id,
-                error,
-                exc_info=True,
-            )
+        if await delete_session(owner_id, session_id):
+            removed += 1
     return removed
 
 
