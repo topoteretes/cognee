@@ -1,4 +1,3 @@
-import importlib.util
 import json
 from functools import lru_cache
 from typing import Any
@@ -10,14 +9,6 @@ try:
     from baml_py import ClientRegistry  # ty:ignore[unresolved-import]
 except ImportError:
     ClientRegistry = None
-
-from cognee.infrastructure.llm.exceptions import InstructorNotInstalledError
-
-
-def instructor_installed() -> bool:
-    """Whether the ``instructor`` extra is installed (checked without importing it)."""
-    return importlib.util.find_spec("instructor") is not None
-
 
 # Module-level constant (not a class attribute, to avoid pydantic field detection).
 _STAGE_NAMES = {"extraction", "summarization", "query"}
@@ -322,9 +313,7 @@ class LLMConfig(BaseSettings):
 
     def model_post_init(self, context, /) -> None:
         """Initialize the BAML registry after the model is created."""
-        # Optional frameworks fail here, at config load, when their extra is missing.
-        if self.structured_output_framework.lower() == "instructor" and not instructor_installed():
-            raise InstructorNotInstalledError()
+        # Check if BAML is selected as structured output framework but not available
         if self.structured_output_framework.lower() == "baml" and ClientRegistry is None:
             raise ImportError(
                 "BAML is selected as structured output framework but not available. "

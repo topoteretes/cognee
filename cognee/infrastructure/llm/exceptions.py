@@ -362,14 +362,14 @@ def is_structured_output_validation_error(error: BaseException) -> bool:
 class InstructorNotInstalledError(CogneeConfigurationError):
     """The legacy instructor LLM client is needed, but the ``instructor`` package is missing.
 
-    Raised at config load when ``STRUCTURED_OUTPUT_FRAMEWORK=instructor`` is configured,
-    and by ``get_llm_client`` for any other path that builds the legacy client.
+    Raised by ``get_llm_client`` when the legacy client is built for a provider whose
+    adapter needs ``instructor``: the ``instructor`` structured-output framework, or any
+    provider except MCP sampling. Transcription never needs it.
     """
 
     def __init__(self) -> None:
         super().__init__(
-            "The instructor structured-output framework is needed "
-            "(STRUCTURED_OUTPUT_FRAMEWORK=instructor, or a legacy LLM client), "
+            "The legacy LLM client (STRUCTURED_OUTPUT_FRAMEWORK=instructor) is needed, "
             "but the instructor package is not installed.",
             "InstructorNotInstalledError",
             remediation=(
