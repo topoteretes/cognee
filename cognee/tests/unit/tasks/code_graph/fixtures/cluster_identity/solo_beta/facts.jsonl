@@ -1,0 +1,2 @@
+{"kind":"module","name":"beta","file":"beta","repo":"beta","props":{"language":"python"},"id":"f03b20231e28b89f52bae93a74ec08e0"}
+{"kind":"symbol","name":"beta/code.send","file":"beta/code.py","line":1,"end_line":2,"repo":"beta","props":{"body_hash":"9f4095a32b20107f","cyclomatic":1,"exported":true,"inner_hash":"b62e446b968274ad","language":"python","orphan_class":"isolated","return_type":"bytes","symbol_kind":"function"},"relations":[{"kind":"declares","target":"beta","target_id":"f03b20231e28b89f52bae93a74ec08e0"}],"id":"d575c3768046ac0831a245760e96fabc"}

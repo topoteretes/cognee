@@ -95,7 +95,9 @@ _SWEEP_CHUNK_SIZE = 2000
 # change is still loaded again by the new mapping instead of being skipped.
 # 1: doc fields, CodeFlow nodes and declaration-view resolution (SDK-1119).
 # 2: versioned declarations on CodeSymbol (body_hash, decl_hash, spans).
-CODE_GRAPH_MAPPING_VERSION = 2
+# 3: repository-relative file paths for the members of a cluster snapshot
+#    (enola 0.4.39 marks the prefixed ones ``repo_prefixed``).
+CODE_GRAPH_MAPPING_VERSION = 3
 
 # The props of a versioned declaration kept on CodeSymbol.declarations.
 _DECLARATION_PROPS = ("body_hash", "decl_hash", "span_start")
