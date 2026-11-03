@@ -171,9 +171,10 @@ async def test_concurrent_overlapping_upserts_do_not_deadlock(collection):
 async def _hold_then_take(adapter, name: str, held: str, wanted: str, both_started):
     """A transaction that locks `held`, lets the other side start, then wants `wanted`.
 
-    The other side locks `wanted` first and then blocks on `held`, half a second before
-    this transaction blocks on `wanted`, so it is the side whose deadlock check fires
-    first and the one Postgres aborts.
+    The other side locks `wanted` first and then blocks on `held`, half a deadlock
+    timeout before this transaction blocks on `wanted`. Postgres checks for a cycle
+    once per wait, when that timeout fires, so the other side is the one that finds
+    the cycle and the one Postgres aborts.
     """
     upsert = text(
         f"INSERT INTO \"{name}\" (id, payload, vector) VALUES (:id, '{{}}', :vector) "
@@ -181,9 +182,16 @@ async def _hold_then_take(adapter, name: str, held: str, wanted: str, both_start
     )
     vector = str([0.0] * 16)
     async with adapter.engine.connect() as conn, conn.begin():
+        deadlock_timeout_ms = int(
+            (
+                await conn.execute(
+                    text("SELECT setting FROM pg_settings WHERE name = 'deadlock_timeout'")
+                )
+            ).scalar_one()
+        )
         await conn.execute(upsert, {"id": held, "vector": vector})
         await both_started.wait()
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(deadlock_timeout_ms / 2000)
         await conn.execute(upsert, {"id": wanted, "vector": vector})
 
 

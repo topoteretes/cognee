@@ -2,7 +2,7 @@
 
 SQLAlchemy's asyncpg dialect raises its own ``DBAPIError``; the asyncpg
 ``DeadlockDetectedError`` is the cause of that error's ``orig``. A retry condition that
-matched the asyncpg class never fired. These tests pin the predicate and the retry on
+matched the asyncpg class never fired. These tests pin the shared predicate and the retry on
 the two writes that still take the collection lock, ``delete_data_points`` and the
 per-table detag of ``remove_belongs_to_set_tags``, with a session that deadlocks once.
 """
@@ -16,17 +16,15 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import Column, MetaData, String, Table, text
 from sqlalchemy.exc import DBAPIError
-from tenacity import RetryError, wait_none
+from tenacity import wait_none
 
 pytest.importorskip("asyncpg")
 pytest.importorskip("pgvector")
 
 from asyncpg import DeadlockDetectedError, UniqueViolationError
 
-from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import (
-    PGVectorAdapter,
-    _is_deadlock,
-)
+from cognee.infrastructure.databases.postgres.deadlock import is_deadlock
+from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 
 
 def _wrapped(cause: Exception) -> DBAPIError:
@@ -81,10 +79,10 @@ def _adapter(errors: list[Exception], executed: list) -> PGVectorAdapter:
 
 
 def test_is_deadlock_matches_only_the_wrapped_deadlock():
-    assert _is_deadlock(_wrapped(DeadlockDetectedError("deadlock detected")))
-    assert not _is_deadlock(_wrapped(UniqueViolationError("duplicate key")))
-    assert not _is_deadlock(DeadlockDetectedError("deadlock detected"))
-    assert not _is_deadlock(RuntimeError("deadlock detected"))
+    assert is_deadlock(_wrapped(DeadlockDetectedError("deadlock detected")))
+    assert not is_deadlock(_wrapped(UniqueViolationError("duplicate key")))
+    assert not is_deadlock(DeadlockDetectedError("deadlock detected"))
+    assert not is_deadlock(RuntimeError("deadlock detected"))
 
 
 @pytest.mark.asyncio
@@ -111,13 +109,17 @@ async def test_delete_data_points_does_not_retry_other_errors():
 
 
 @pytest.mark.asyncio
-async def test_delete_data_points_gives_up_after_three_deadlocks():
+async def test_delete_data_points_gives_up_after_three_deadlocks_with_the_database_error():
     deadlocks = [_wrapped(DeadlockDetectedError("deadlock detected")) for _ in range(3)]
+    last = deadlocks[-1]
     adapter = _adapter(deadlocks, [])
     delete = PGVectorAdapter.delete_data_points.retry_with(wait=wait_none())
 
-    with pytest.raises(RetryError):
+    with pytest.raises(DBAPIError) as raised:
         await delete(adapter, "Entity_name", [uuid4()])
+
+    # The database error itself reaches the caller, not tenacity's RetryError.
+    assert raised.value is last
 
 
 @pytest.mark.asyncio

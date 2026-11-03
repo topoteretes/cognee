@@ -35,6 +35,7 @@ from tenacity import (
 
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
+from cognee.infrastructure.databases.postgres.deadlock import is_deadlock
 from cognee.infrastructure.databases.relational import get_relational_config, get_relational_engine
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 from cognee.infrastructure.engine import DataPoint
@@ -90,16 +91,6 @@ def _row_order(row_id: Any) -> str:
     collection run concurrently, and pgvector's HNSW index takes them concurrently.
     """
     return str(row_id)
-
-
-def _is_deadlock(error: BaseException) -> bool:
-    """Whether Postgres aborted the statement to break a deadlock.
-
-    SQLAlchemy's asyncpg dialect raises its own ``DBAPIError``; the asyncpg
-    ``DeadlockDetectedError`` is the cause of that error's ``orig``. A retry
-    condition must match the error that is raised, not the one underneath.
-    """
-    return isinstance(error, DBAPIError) and isinstance(error.orig.__cause__, DeadlockDetectedError)
 
 
 PgvectorVersion = tuple[int, ...]
@@ -647,9 +638,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         return text(f"(({merged}) {volatile}) IS DISTINCT FROM ({stored} {volatile})")
 
     @retry(
-        retry=retry_if_exception(_is_deadlock),
+        retry=retry_if_exception(is_deadlock),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
+        reraise=True,
     )
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict."""
@@ -847,9 +839,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             await session.commit()
 
     @retry(
-        retry=retry_if_exception(_is_deadlock),
+        retry=retry_if_exception(is_deadlock),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
+        reraise=True,
     )
     async def upsert_raw_vectors(
         self,
@@ -1145,9 +1138,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
 
     @retry(
-        retry=retry_if_exception(_is_deadlock),
+        retry=retry_if_exception(is_deadlock),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
+        reraise=True,
     )
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
         """Delete rows from `collection_name` whose id is in `data_point_ids`.
@@ -1297,9 +1291,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         return
 
     @retry(
-        retry=retry_if_exception(_is_deadlock),
+        retry=retry_if_exception(is_deadlock),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
+        reraise=True,
     )
     async def _remove_tags_from_table(
         self,
