@@ -44,6 +44,7 @@ def _patches(
     has_dataset_data=None,
     session_invalidate=None,
     delete_history=None,
+    retired_decisions=frozenset(),
 ):
     """Patch the delete path. ``data`` is the row ``get_data`` resolves (None for
     the custom-graph-model path); ``row_remaining`` is what the post-delete
@@ -57,6 +58,11 @@ def _patches(
             datasets_module,
             "delete_data_nodes_and_edges",
             AsyncMock(return_value=deleted_elements),
+        ),
+        patch.object(
+            datasets_module,
+            "retire_forgotten_decisions",
+            AsyncMock(return_value=set(retired_decisions)),
         ),
         patch.object(
             datasets_module,
@@ -112,6 +118,28 @@ async def test_receipt_reports_removed_elements_and_verified_absence():
         "data_remaining": False,
         "dataset_deleted": False,
     }
+
+
+@pytest.mark.asyncio
+async def test_a_retired_decision_is_invalidated_in_sessions_but_not_counted_in_the_receipt():
+    dataset_id, data_id, user, dataset, data = _fixture()
+    deleted = DeletedGraphElements(node_ids={"n1"}, edge_ids={"e1"})
+    invalidate = AsyncMock()
+
+    result = await _run(
+        dataset_id,
+        data_id,
+        user,
+        dataset,
+        data,
+        deleted,
+        session_invalidate=invalidate,
+        retired_decisions={"conflict"},
+    )
+
+    invalidated = invalidate.await_args.args[1]
+    assert invalidated.node_ids == {"n1", "conflict"} and invalidated.edge_ids == {"e1"}
+    assert result["deleted_nodes"] == 1
 
 
 @pytest.mark.asyncio
@@ -311,7 +339,7 @@ async def test_receipt_uses_resolved_legacy_id():
         result = await datasets_module.datasets.delete_data(dataset_id, legacy_id, user)
 
     get_data.assert_awaited_once_with(user.id, legacy_id, dataset_id, verify_owner=False)
-    delete_row.assert_awaited_once_with(resolved, dataset_id)
+    delete_row.assert_awaited_once_with([resolved], dataset_id)
     assert result["data_id"] == str(resolved.id)
     assert result["data_record_found"] is True
     assert result["data_remaining"] is False

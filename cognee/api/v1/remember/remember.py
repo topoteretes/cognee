@@ -3,8 +3,10 @@ import hashlib
 import os
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, Literal, Union
+from typing import TYPE_CHECKING, Any, Literal, Union
 from uuid import UUID
+
+from fastapi import UploadFile
 
 try:
     from typing import Unpack
@@ -155,7 +157,14 @@ _ADD_ONLY = frozenset(
     }
 )
 _COGNIFY_ONLY = frozenset(
-    {"graph_model", "extractor", "summary_method", "chunks_per_batch", "config"}
+    {
+        "graph_model",
+        "extractor",
+        "summary_method",
+        "early_chunk_indexing",
+        "chunks_per_batch",
+        "config",
+    }
 )
 _SHARED = frozenset(
     {
@@ -1004,10 +1013,10 @@ class RememberResult:
 
 async def remember(
     data: Union[
-        BinaryIO,
-        list[BinaryIO],
         str,
         list[str],
+        UploadFile,
+        list[UploadFile],
         DataItem,
         list[DataItem],
         "MemoryEntry",
@@ -1047,7 +1056,10 @@ async def remember(
     modes (see ``ImproveConfig``).
 
     Args:
-        data: The data to store (text, file paths, binary streams, etc.).
+        data: The data to store: text, file paths, URLs, ``DataItem``s, typed memory
+            entries, or FastAPI ``UploadFile`` objects as ``POST /api/v1/remember`` hands
+            them in. Plain open file objects (``open(path, "rb")``, ``BytesIO``) are
+            not accepted: pass the file's path instead.
         dataset_name: Target dataset. Defaults to ``"main_dataset"``.
         dataset_id: UUID of an existing dataset to target directly. Takes
             precedence over ``dataset_name``. Typed ``MemoryEntry`` payloads
@@ -1533,6 +1545,13 @@ async def _remember_inner(
             raise ValueError(
                 "branch is not supported while connected to a remote Cognee instance. "
                 "Call cognee.disconnect() to clone the branch locally."
+            )
+        if kwargs.get("early_chunk_indexing") is not None:
+            # Same as extractor: the remote runs its own setting, and
+            # client.remember() would drop this one, as cognify() refuses it.
+            raise ValueError(
+                "early_chunk_indexing is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to choose it locally."
             )
         if session_ids:
             # Same discipline as extractor: POST /remember carries no
@@ -2133,7 +2152,7 @@ async def _remember_inner(
 
         # Session memory: store in session cache, then optionally bridge to graph
         if session_id:
-            operation_context.set_session_id(session_id)
+            operation_context.set_session_ids([session_id])
             await _add_to_session(session_id, data, user, node_set=add_kwargs.get("node_set"))
             result = RememberResult(
                 status="session_stored",
@@ -2268,7 +2287,7 @@ async def _remember_inner(
                 raise after_run_hook_error
 
         if session_ids:
-            operation_context.set_session_id(session_ids[0] if len(session_ids) == 1 else None)
+            operation_context.set_session_ids(session_ids)
 
         if run_in_background:
             # outcome="succeeded" on this row means "accepted and started"

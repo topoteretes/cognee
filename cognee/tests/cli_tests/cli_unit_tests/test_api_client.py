@@ -265,3 +265,10 @@ class TestImproveEndpoint:
             "run_in_background": False,
             "dataset_id": "11111111-1111-1111-1111-111111111111",
         }
+
+    def test_explicit_review_conflicts_false_is_sent(self):
+        client, http = self._client_with_mock({})
+
+        client.improve(dataset_name="docs", review_conflicts=False)
+
+        assert http.post.call_args[1]["json"]["review_conflicts"] is False

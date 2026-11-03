@@ -30,6 +30,7 @@ from cognee.modules.retrieval.utils.merge_results import (
     edge_identity,
     merge_ranked,
 )
+from cognee.modules.retrieval.utils.resolved_context import user_resolution_scope
 from cognee.modules.retrieval.utils.used_graph_elements import (
     extract_from_edges,
     is_edge_list,
@@ -135,6 +136,7 @@ class GraphCompletionRetriever(BaseRetriever):
                     collections.append(f"{subclass.__name__}_{field_name}")
         return collections
 
+    @user_resolution_scope()
     async def get_retrieved_objects(
         self, query: str | None = None, query_batch: list[str] | None = None
     ) -> list[Edge] | list[list[Edge]]:
@@ -176,7 +178,15 @@ class GraphCompletionRetriever(BaseRetriever):
             logger.warning("Empty context was provided to the completion")
             return []
 
-        return triplets
+        from cognee.modules.retrieval.utils.resolved_context import (
+            apply_graph_resolutions,
+            read_user_resolutions,
+        )
+
+        resolutions = await read_user_resolutions(self._unified_engine.graph)
+        if query_batch:
+            return [apply_graph_resolutions(batch, resolutions) for batch in triplets]
+        return apply_graph_resolutions(triplets, resolutions)
 
     async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
         """
@@ -285,8 +295,21 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         if len(queries) == 1:
             triplets = await self.get_triplets(query=queries[0])
-            return [triplets]
-        return await self.get_triplets(query_batch=queries)
+            batches = [triplets]
+        else:
+            batches = await self.get_triplets(query_batch=queries)
+        if not any(batches):
+            return batches
+        # CoT and context-extension retrieval use this entry point for both the
+        # initial query and follow-up questions, bypassing get_retrieved_objects.
+        from cognee.modules.retrieval.utils.resolved_context import (
+            apply_graph_resolutions,
+            read_user_resolutions,
+        )
+
+        self._unified_engine = self._unified_engine or await get_unified_engine()
+        resolutions = await read_user_resolutions(self._unified_engine.graph)
+        return [apply_graph_resolutions(batch, resolutions) for batch in batches]
 
     async def get_context_from_objects(
         self,
@@ -331,7 +354,7 @@ class GraphCompletionRetriever(BaseRetriever):
                 return ""
             return graph_context
 
-        prelude = await self._build_global_context_prelude(query)
+        prelude = await self._build_global_context_prelude(query, triplets)
         if not prelude and not graph_context:
             logger.warning("Empty context was provided to the completion")
             return ""
@@ -341,16 +364,27 @@ class GraphCompletionRetriever(BaseRetriever):
             return prelude
         return f"{prelude}\n\n{graph_context}"
 
-    async def _build_global_context_prelude(self, query: str | None) -> str:
+    async def _build_global_context_prelude(self, query: str | None, retrieved_objects=None) -> str:
         if not query:
             return ""
         if self._unified_engine is None:
             self._unified_engine = await get_unified_engine()
+        from cognee.modules.retrieval.utils.resolved_context import (
+            accepted_facts_context,
+            read_user_resolutions,
+        )
+
+        resolutions = await read_user_resolutions(self._unified_engine.graph)
         root_text = await load_root_text()
         top_summaries = await search_top_global_context_summaries(
             query, self.global_context_index_top_k, self._unified_engine.vector
         )
-        return format_global_context_prelude(root_text, top_summaries)
+        prelude = format_global_context_prelude(root_text, top_summaries)
+        used_ids = self.extract_context_object_ids(retrieved_objects) or {}
+        accepted = accepted_facts_context(
+            resolutions, used_ids.get("node_ids", []), used_ids.get("edge_ids", [])
+        )
+        return "\n\n".join(section for section in (prelude, accepted) if section)
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
         return merge_ranked(
@@ -491,6 +525,7 @@ class GraphCompletionRetriever(BaseRetriever):
         # post-hoc vector lookup.
         return await self.append_references(completions, retrieved_objects)
 
+    @user_resolution_scope()
     async def get_completion(
         self, query: str | None = None, query_batch: list[str] | None = None
     ) -> list[Any]:

@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.6.5"
+version = "1.6.6"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -281,6 +281,10 @@ docling-full = ["docling>=2.115,<3", "transformers>=4.55"]
 # for that (gliner2[local] requires the same range). protobuf + sentencepiece are needed
 # by the DeBERTa tokenizer fallback.
 gliner = ["gliner2[local]>=2.0.0,<3", "torch>=2.1,<3", "protobuf>=5.29.6", "sentencepiece>=0.2.0", "psutil>=5.9"]
+# Remote GLiNER worker transports (COGNEE_GLINER_TRANSPORT, gliner_demo/remote). HTTP needs
+# no extra (httpx is a core dependency); neither needs torch or gliner2.
+gliner-remote-grpc = ["grpcio>=1.60,<2", "protobuf>=5.29.6"]
+gliner-remote-amqp = ["aio-pika>=9.4,<10"]
 rapidocr = ["rapidocr-onnxruntime>=1.3.0,<2"]
 
 [project.urls]
@@ -311,6 +315,7 @@ exclude = [
   "/.github",
   "/deployment",
   "/cognee-mcp",
+  "/cognee-connectors",
   "/cognee-frontend",
   "/examples",
   "/helm",
@@ -348,8 +353,8 @@ constraint-dependencies = [
     "scipy>=1.16.1 ; python_version >= '3.14'",
 ]
 [tool.pytest.ini_options]
-# `pytest` with no path collects only the library test tree; cognee-mcp has its
-# own pyproject and suite. See cognee/tests/README.md for layout and credentials.
+# `pytest` with no path collects only the library test tree; cognee-mcp and
+# cognee-connectors have their own pyproject and suite. See cognee/tests/README.md for layout and credentials.
 testpaths = ["cognee/tests"]
 markers = [
     "deployment: smoke tests against a deployed cognee instance (cognee/tests/deployment/)",

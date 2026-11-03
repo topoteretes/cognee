@@ -144,9 +144,9 @@ async def improve(
     run_in_background: bool = False,
     node_name: list[str] | None = None,
     session_ids: list[str] | None = None,
-    build_global_context_index: bool = False,
+    build_global_context_index: bool | None = None,
     build_truth_subspace: bool = False,
-    review_conflicts: bool = False,
+    review_conflicts: bool | None = None,
     **kwargs: Unpack[ImproveKwargs],
 ) -> ImproveResult:
     """Run the self-improvement loop over a dataset and report what each stage did.
@@ -196,10 +196,14 @@ async def improve(
             ``dataset_name`` — is not re-bridged into this call's dataset;
             those stages then report nothing new. (Distillation is
             per-dataset and unaffected.)
-        build_global_context_index: Opt in to ``global_context_index``.
+        build_global_context_index: Run ``global_context_index``. ``None`` (the
+            default) follows ``IMPROVE_GLOBAL_CONTEXT_INDEX`` (default true: the
+            index is LLM-free and dataset routing reads it); ``False``
+            skips the stage for this call.
         build_truth_subspace: Opt in to ``build_truth_subspace``.
         review_conflicts: Review dated source facts and store their conflicts.
-            Also enabled by ``IMPROVE_REVIEW_CONFLICTS=true``.
+            ``True``/``False`` override ``IMPROVE_REVIEW_CONFLICTS``; ``None``
+            (default) follows it (default true). Skipped without an LLM.
         **kwargs: Additional options — see ``ImproveKwargs``.
 
     Returns:
@@ -281,14 +285,17 @@ async def improve(
 
     kwargs, legacy_memify = _split_legacy_options(node_name, kwargs)
     session_ids = [session_id for session_id in (session_ids or []) if session_id]
+    # The remote path forwards the raw values: a server applies its own env.
+    resolved_global_context_index = _resolve_global_context_index(build_global_context_index)
+    resolved_review_conflicts = _resolve_review_conflicts(review_conflicts)
     _send_improve_telemetry(
         dataset,
         session_ids,
         user=kwargs.get("user", "sdk"),
         run_in_background=run_in_background,
-        build_global_context_index=build_global_context_index,
+        build_global_context_index=resolved_global_context_index,
         build_truth_subspace=build_truth_subspace,
-        review_conflicts=review_conflicts,
+        review_conflicts=resolved_review_conflicts,
     )
 
     with _improve_span(dataset, session_ids) as report:
@@ -315,9 +322,9 @@ async def improve(
                 dataset=dataset,
                 session_ids=session_ids,
                 run_in_background=run_in_background,
-                build_global_context_index=build_global_context_index,
+                build_global_context_index=resolved_global_context_index,
                 build_truth_subspace=build_truth_subspace,
-                review_conflicts=review_conflicts,
+                review_conflicts=resolved_review_conflicts,
                 overrides=kwargs,
                 legacy_memify=legacy_memify,
             )
@@ -418,6 +425,20 @@ def _improve_span(
             raise
 
 
+def _resolve_review_conflicts(review_conflicts: bool | None) -> bool:
+    """An explicit argument wins; None follows IMPROVE_REVIEW_CONFLICTS."""
+    if review_conflicts is None:
+        return get_improve_config().review_conflicts
+    return review_conflicts
+
+
+def _resolve_global_context_index(build_global_context_index: bool | None) -> bool:
+    """An explicit argument wins; None follows IMPROVE_GLOBAL_CONTEXT_INDEX."""
+    if build_global_context_index is None:
+        return get_improve_config().global_context_index
+    return build_global_context_index
+
+
 async def _resolve_inputs(
     operation: Any,
     *,
@@ -443,8 +464,7 @@ async def _resolve_inputs(
         user = await get_default_user()
     operation.set_user(user)
     operation.set_background(run_in_background)
-    if len(session_ids) == 1:
-        operation.set_session_id(session_ids[0])
+    operation.set_session_ids(session_ids)
 
     # The run-log writers INSERT the operation-record columns, so the database
     # must be at the current Alembic head before the first write — same gate
@@ -468,8 +488,6 @@ async def _resolve_inputs(
     feedback_alpha = overrides.get("feedback_alpha")
     if feedback_alpha is None:
         feedback_alpha = config.feedback_alpha
-    # Argument and IMPROVE_REVIEW_CONFLICTS are both opt-ins: either turns the stage on.
-    review_conflicts = review_conflicts or config.review_conflicts
     if legacy_memify is not None:
         from cognee.api.v1.memify.memify import resolve_memify_tasks
 
@@ -632,9 +650,9 @@ async def _improve_remotely(
     dataset: str | UUID,
     *,
     session_ids: list[str],
-    build_global_context_index: bool,
+    build_global_context_index: bool | None,
     build_truth_subspace: bool,
-    review_conflicts: bool,
+    review_conflicts: bool | None,
     run_in_background: bool,
     overrides: dict,
 ) -> ImproveResult:

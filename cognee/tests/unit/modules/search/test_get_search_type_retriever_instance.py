@@ -323,6 +323,7 @@ async def test_hybrid_completion_get_retriever_output_smoke():
     graph = MagicMock()
     graph.is_empty = AsyncMock(return_value=False)
     graph.get_neighborhood = AsyncMock(return_value=([], []))
+    graph.get_filtered_graph_data = AsyncMock(return_value=([], []))
     unified = MagicMock()
     unified.vector = vector
     unified.graph = graph

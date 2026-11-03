@@ -27,7 +27,7 @@ graph_engine_module = importlib.import_module(
 def _row(table_name="orders", row_data=None, foreign_keys=None, primary_key_column="id"):
     return DltRowData(
         table_name=table_name,
-        primary_key_column=primary_key_column,
+        primary_key_columns=[primary_key_column],
         primary_key_value="1",
         row_data=row_data or {},
         content_hash="hash",

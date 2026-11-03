@@ -303,6 +303,7 @@ async def test_delete_data_purges_history_when_it_deletes_the_emptied_dataset(
             "delete_data_nodes_and_edges",
             AsyncMock(return_value=DeletedGraphElements()),
         ),
+        patch.object(datasets_mod, "retire_forgotten_decisions", AsyncMock(return_value=set())),
         patch.object(datasets_mod, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()),
         patch("cognee.modules.data.methods.get_data", AsyncMock(return_value=None)),
         patch("cognee.modules.data.methods.delete_dataset", delete_dataset),
