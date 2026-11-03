@@ -889,7 +889,9 @@ Pass a DataPoint-derived Pydantic model as `graph_model` to `remember()`/`cognif
 
 Constraints: every edge endpoint and `FromIdentity` target needs exactly one entry in `metadata["identity_fields"]`; endpoints resolve by **exact type**, so a subclass instance does not resolve where its base is declared; a row that cannot be resolved is dropped with a warning — it never fails the chunk.
 
-Key files: `cognee/shared/llm_graph_model.py` (the LLM boundary, both directions), `cognee/infrastructure/engine/models/Edge.py`. Example: `examples/guides/custom_graph_model.py`.
+Over HTTP (`POST /remember`, `POST /cognify`, `cognee.serve()`) the model travels as the JSON schema from `graph_model_to_graph_schema`: the prompt model's flat shapes plus each class's `metadata` default and two extension keys, `x-cognee-edge` (the endpoint classes of a row-list field) and `x-cognee-from-identity` (the target class of a reference), which `graph_schema_to_graph_model` turns back into the annotations, so a remote cognify builds the same graph as a local one. The schema-editor DSL (`cognee/modules/graph_models/spec.py`) has no construct for either yet.
+
+Key files: `cognee/shared/llm_graph_model.py` (the LLM boundary, both directions), `cognee/infrastructure/engine/models/Edge.py`. Example: `examples/guides/custom_graph_model.py`. Schema boundary: `cognee/shared/graph_model_utils.py`.
 
 ### LLM-free Graph Extraction (GLiNER demo)
 
