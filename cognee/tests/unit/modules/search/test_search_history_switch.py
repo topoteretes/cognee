@@ -316,6 +316,19 @@ async def test_delete_data_purges_history_when_it_deletes_the_emptied_dataset(
     assert await _row_counts(history_engine) == (0, 0)
 
 
+def _no_sessions():
+    """forget(everything)'s session resolution, stubbed to find none (SDK-1237)."""
+    return [
+        patch(
+            "cognee.modules.data.methods.get_authorized_existing_datasets",
+            AsyncMock(return_value=[]),
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.list_sessions_for_user", AsyncMock(return_value=[])
+        ),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_forget_everything_purges_the_users_own_history_first():
     """The datasets' history goes inside empty_dataset; forget(everything) adds
@@ -334,15 +347,15 @@ async def test_forget_everything_purges_the_users_own_history_first():
             "cognee.modules.search.operations.delete_user_search_history",
             delete_user_history,
         ),
-        patch(
-            "cognee.infrastructure.databases.cache.get_cache_config",
-            return_value=SimpleNamespace(caching=False, usage_logging=False),
-        ),
+        ExitStack() as stack,
     ):
+        for p in _no_sessions():
+            stack.enter_context(p)
         result = await forget_mod._forget_everything(user)
 
     assert result == {
         "datasets_removed": 2,
+        "sessions_removed": 0,
         "search_history_removed": True,
         "history_cleaned": True,
         "status": "success",
@@ -393,8 +406,11 @@ async def test_history_cleanup_failure_fails_forget_everything_before_the_data_g
             "cognee.modules.search.operations.delete_user_search_history",
             AsyncMock(side_effect=RuntimeError("history table missing")),
         ),
+        ExitStack() as stack,
         pytest.raises(RuntimeError, match="history table missing"),
     ):
+        for p in _no_sessions():
+            stack.enter_context(p)
         await forget_mod._forget_everything(user)
 
     fake_datasets.delete_all.assert_not_awaited()

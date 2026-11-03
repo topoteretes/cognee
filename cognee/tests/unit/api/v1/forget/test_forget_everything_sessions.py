@@ -7,6 +7,7 @@ cache is never pruned.
 """
 
 import importlib
+from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -75,8 +76,11 @@ def _patches(manager, session_pairs_by_owner, dataset_pairs, deletable_datasets)
         ),
         patch("cognee.modules.session_lifecycle.list_sessions_for_user", list_for_user),
         patch("cognee.modules.session_lifecycle.list_sessions_for_dataset", list_for_dataset),
-        patch(
-            "cognee.infrastructure.session.get_session_manager.get_session_manager",
+        # The package re-exports the function under its submodule's name, so a
+        # dotted target fails on Python 3.10: patch the submodule object itself.
+        patch.object(
+            importlib.import_module("cognee.infrastructure.session.get_session_manager"),
+            "get_session_manager",
             lambda *_a, **_k: manager,
         ),
         patch(
@@ -118,14 +122,10 @@ async def test_forget_everything_deletes_only_the_callers_and_deletable_datasets
         dataset_pairs={DATASET_SHARED: [(USER_B, "b_shared")]},
         deletable_datasets=[SimpleNamespace(id=DATASET_SHARED)],
     )
-    with patch.object(cache, "prune", prune):
+    with patch.object(cache, "prune", prune), ExitStack() as stack:
         for p in patches:
-            p.start()
-        try:
-            result = await forget_module._forget_everything(SimpleNamespace(id=USER_A))
-        finally:
-            for p in reversed(patches):
-                p.stop()
+            stack.enter_context(p)
+        result = await forget_module._forget_everything(SimpleNamespace(id=USER_A))
 
     assert result["sessions_removed"] == 2
     assert result["datasets_removed"] == 1
@@ -148,13 +148,10 @@ async def test_forget_everything_skips_sessions_when_session_memory_is_off(cache
         dataset_pairs={},
         deletable_datasets=[],
     )
-    for p in patches:
-        p.start()
-    try:
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
         result = await forget_module._forget_everything(SimpleNamespace(id=USER_A))
-    finally:
-        for p in reversed(patches):
-            p.stop()
 
     assert result["sessions_removed"] == 0
     assert result["status"] == "success"
