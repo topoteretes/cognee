@@ -54,7 +54,7 @@ pre-commit install
 - **ollama** - Ollama local models
 - **mistral** - Mistral AI models
 - **groq** - Groq API support
-- **llama-cpp** - Llama.cpp local inference
+- **llama-cpp** - Llama.cpp local inference (legacy instructor framework only, so the extra includes instructor)
 - **huggingface** - HuggingFace transformers
 - **aws** - S3 storage backend
 - **redis** - Redis caching

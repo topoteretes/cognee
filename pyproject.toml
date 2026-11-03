@@ -185,7 +185,9 @@ azure = ["azure-identity>=1.15.0,<2"]
 deepeval = ["deepeval>=3.0.1,<4"]
 posthog = ["posthog>=3.5.0,<4"]
 groq = ["groq>=0.8.0,<1.0.0"]
-llama-cpp = ["llama-cpp-python[server]>=0.3.0,<1.0.0"]
+# The llama.cpp adapter lives on the legacy instructor path (STRUCTURED_OUTPUT_FRAMEWORK=instructor),
+# so the extra carries instructor with it.
+llama-cpp = ["llama-cpp-python[server]>=0.3.0,<1.0.0", "instructor>=1.9.1,<1.15.3"]
 docs = [
     # GHSA-vfmq-68hx-4jfw is fixed in lxml 6.1.0 (see the scraping extra).
     "lxml>=6.1.0,<7",
