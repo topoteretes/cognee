@@ -16,6 +16,7 @@ transports apart.
 from __future__ import annotations
 
 import itertools
+import time
 from collections.abc import Mapping
 from functools import cache
 from typing import Any
@@ -243,6 +244,7 @@ class GrpcWorkerTransport:
 
     async def extract(self, payload: Mapping[str, Any], *, request_id: str) -> WorkerReply:
         call = self._extract_calls[next(self._next)]
+        started = time.monotonic()
         try:
             response = await call(
                 payload_to_request(payload),
@@ -250,9 +252,15 @@ class GrpcWorkerTransport:
                 metadata=(*self._metadata, ("x-request-id", request_id)),
             )
         except grpc.aio.AioRpcError as error:
-            if error.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
-                # The call was sent and not answered in time: the worker may
-                # still be running it, so it is not resent (see the error class).
+            if (
+                error.code() == grpc.StatusCode.DEADLINE_EXCEEDED
+                and time.monotonic() - started >= self._request_timeout
+            ):
+                # This client's own deadline: the call was sent and not answered
+                # in time, so the worker may still be running it and it is not
+                # resent (see the error class). An earlier DEADLINE_EXCEEDED is a
+                # proxy's shorter deadline, not known to have reached a worker:
+                # retried below, like an HTTP 504.
                 raise GlinerWorkerTimeoutError(
                     f"The GLiNER worker at {self.endpoint_label} did not answer within "
                     f"{self._request_timeout:g}s."

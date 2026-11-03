@@ -202,6 +202,18 @@ async def test_a_call_past_the_request_timeout_times_out():
 
 
 @pytest.mark.asyncio
+async def test_an_early_deadline_exceeded_is_a_proxys_and_retryable():
+    worker = FakeWorker()
+    # Answered at once: a proxy's shorter deadline, not this client's.
+    worker.abort = (grpc.StatusCode.DEADLINE_EXCEEDED, "upstream request timeout")
+    async with serve(worker) as endpoint:
+        transport = transport_for(endpoint, request_timeout=5.0)
+        with pytest.raises(GlinerWorkerUnavailableError, match="DEADLINE_EXCEEDED"):
+            await transport.extract(PAYLOAD, request_id="r")
+        await transport.aclose()
+
+
+@pytest.mark.asyncio
 async def test_a_reply_above_the_cap_fails_its_document_like_http_and_amqp():
     async with serve(FakeWorker()) as endpoint:
         transport = transport_for(endpoint, max_response_bytes=64)
