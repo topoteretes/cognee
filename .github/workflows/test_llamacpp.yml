@@ -28,7 +28,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.13.x'
-          extra-dependencies: postgres llama-cpp
+          extra-dependencies: postgres llama-cpp instructor
 
       - name: Install torch dependency
         run: |

@@ -1,6 +1,6 @@
 import re
 
-from cognee.exceptions.exceptions import CogneeValidationError
+from cognee.exceptions.exceptions import CogneeConfigurationError, CogneeValidationError
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -357,3 +357,23 @@ def is_structured_output_validation_error(error: BaseException) -> bool:
             return True
         current = current.__cause__
     return False
+
+
+class InstructorNotInstalledError(CogneeConfigurationError):
+    """The legacy instructor LLM client is needed, but the ``instructor`` package is missing.
+
+    Raised at config load when ``STRUCTURED_OUTPUT_FRAMEWORK=instructor`` is configured,
+    and by ``get_llm_client`` for any other path that builds the legacy client.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The instructor structured-output framework is needed "
+            "(STRUCTURED_OUTPUT_FRAMEWORK=instructor, or a legacy LLM client), "
+            "but the instructor package is not installed.",
+            "InstructorNotInstalledError",
+            remediation=(
+                'Install cognee with the instructor extra: pip install "cognee[instructor]", '
+                "or use the default STRUCTURED_OUTPUT_FRAMEWORK=litellm_native."
+            ),
+        )
