@@ -174,11 +174,15 @@ def _list_edge_inner(annotation: Any) -> type[Edge] | None:
 def _contains_edge_annotation(annotation: Any) -> bool:
     """True when an ``Edge`` class appears anywhere in the annotation."""
     core, _ = _strip_annotated(annotation)
-    if isinstance(core, type):
-        return issubclass(core, Edge)
+    args = get_args(core)
+    if not args:
+        # A bare class is one with no type arguments: on Python 3.10
+        # isinstance(list[X], type) is True, so isinstance alone would stop here
+        # and never look inside the list.
+        return isinstance(core, type) and issubclass(core, Edge)
     return any(
         _contains_edge_annotation(arg)
-        for arg in get_args(core)
+        for arg in args
         if arg is not type(None) and arg is not Ellipsis
     )
 

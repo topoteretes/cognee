@@ -150,11 +150,14 @@ def _datapoint_types_in_tree(graph_model: type[BaseModel]) -> dict[str, type[Dat
 def _datapoint_types_in(annotation) -> list[type[DataPoint]]:
     """Every DataPoint subclass named anywhere in ``annotation``."""
     core, _ = _strip_annotated(annotation)
-    if isinstance(core, type):
-        return [core] if issubclass(core, DataPoint) else []
+    args = get_args(core)
+    if not args:
+        # No type arguments means a bare class: on Python 3.10
+        # isinstance(list[X], type) is True, so that check alone stops at the list.
+        return [core] if isinstance(core, type) and issubclass(core, DataPoint) else []
     return [
         nested
-        for arg in get_args(core)
+        for arg in args
         if arg is not type(None) and arg is not Ellipsis
         for nested in _datapoint_types_in(arg)
     ]
