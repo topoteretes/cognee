@@ -1,0 +1,11 @@
+$ python -m pytest cognee/tests/unit/modules/retrieval/hybrid_decomposition_retriever_test.py cognee/tests/unit/modules/retrieval/hybrid cognee/tests/unit/modules/retrieval/hybrid_retriever_test.py cognee/tests/unit/modules/retrieval/hybrid_batch_test.py cognee/tests/unit/modules/retrieval/graph_completion_decomposition_retriever_test.py cognee/tests/unit/modules/retrieval/retriever_readme_index_test.py cognee/tests/unit/modules/search/test_get_retriever_output_hybrid_decomposition.py cognee/tests/unit/modules/search/test_get_search_type_retriever_instance.py cognee/tests/unit/modules/search/test_hybrid_deferral.py cognee/tests/unit/modules/recall/test_normalize_search_payload.py -q --disable-warnings
+
+<test-venv>/lib/python3.12/site-packages/pytest_asyncio/plugin.py:300: PytestDeprecationWarning: The configuration option "asyncio_default_fixture_loop_scope" is unset.
+The event loop scope for asynchronous fixtures will default to the "fixture" caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to "function" scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: "function", "class", "module", "package", "session"
+
+  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))
+........................................................................ [ 28%]
+........................................................................ [ 56%]
+........................................................................ [ 84%]
+.........................................                                [100%]
+257 passed, 12 warnings in 1.35s
