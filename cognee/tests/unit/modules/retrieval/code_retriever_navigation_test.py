@@ -330,7 +330,7 @@ async def test_capabilities_reports_operations_features_counts_and_limits():
         result["operations"]
     )
     assert {"query_facts", "explore", "impact_analysis", "delta"} <= set(result["operations"])
-    assert result["features"] == {"docs": True, "flows": True}
+    assert result["features"] == {"docs": True, "flows": True, "findings": False}
     assert result["counts"] == {
         "nodes": 15,
         "edges": 13,
@@ -338,6 +338,7 @@ async def test_capabilities_reports_operations_features_counts_and_limits():
         "symbols_with_docs": 6,
         "flows": 3,
         "repositories": 1,
+        "findings": 0,
     }
     assert result["enola_versions"] == ["0.5.1"]
     assert result["limits"]["subgraph"] == {
@@ -355,7 +356,7 @@ async def test_capabilities_never_raises_for_an_empty_graph():
     with _patch_graph([], []):
         result = await CodeRetriever(config={"operation": "capabilities"}).get_retrieved_objects("")
 
-    assert result["features"] == {"docs": False, "flows": False}
+    assert result["features"] == {"docs": False, "flows": False, "findings": False}
     assert set(result["counts"].values()) == {0}
     assert result["enola_versions"] == []
 

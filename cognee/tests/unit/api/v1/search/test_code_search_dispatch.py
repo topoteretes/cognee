@@ -59,6 +59,7 @@ def test_response_search_tool_advertises_all_code_operations():
         "flows",
         "hubs",
         "ask",
+        "findings",
     ]
     code_query_properties = search_tool["parameters"]["properties"]["code_query"]["properties"]
     assert code_query_properties["diagram"]["enum"] == ["mermaid", "dot"]

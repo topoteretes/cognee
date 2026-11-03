@@ -406,7 +406,9 @@ async def _ingest(
 
 async def _stored_rows(engine):
     """The rows the retriever's own graph load returns."""
-    return await engine.get_filtered_graph_data([{"type": [*CODE_NODE_TYPES, "CodeRepository"]}])
+    return await engine.get_filtered_graph_data(
+        [{"type": [*CODE_NODE_TYPES, "CodeRepository", "CodeFinding", "ObservedDeclaration"]}]
+    )
 
 
 async def _run(config, query=""):
@@ -532,7 +534,7 @@ async def test_a_snapshot_without_docs_or_flows_ingests_as_before_and_says_so(
     assert explored_with["edges"] == explored["edges"]
 
     capabilities = await _run({"operation": "capabilities"})
-    assert capabilities["features"] == {"docs": False, "flows": False}
+    assert capabilities["features"] == {"docs": False, "flows": False, "findings": False}
     with pytest.raises(CodeSeedNotFoundError) as unavailable:
         await _run({"operation": "flows"})
     assert (unavailable.value.error_code, unavailable.value.error_param) == (
@@ -564,7 +566,7 @@ async def test_a_flows_json_an_earlier_run_left_behind_is_not_ingested(tmp_path,
     assert (tmp_path / "snapshot" / "flows.json").is_file()
     assert not any(row["type"] == "CodeFlow" for _id, row in nodes)
     capabilities = await _run({"operation": "capabilities"})
-    assert capabilities["features"] == {"docs": False, "flows": False}
+    assert capabilities["features"] == {"docs": False, "flows": False, "findings": False}
     assert capabilities["counts"]["flows"] == 0
 
 
@@ -580,7 +582,7 @@ async def test_capabilities_describe_the_ingested_graph(tmp_path, monkeypatch):
     assert {"capabilities", "search", "neighbors", "subgraph", "flows", "hubs", "ask"} <= set(
         result["operations"]
     )
-    assert result["features"] == {"docs": True, "flows": True}
+    assert result["features"] == {"docs": True, "flows": True, "findings": False}
     # 7 modules, the route and 11 symbols; their 21 edges (7 calls, 12
     # declares, handled_by, has_method). Flow edges and part_of stay out.
     assert result["counts"] == {
@@ -590,6 +592,7 @@ async def test_capabilities_describe_the_ingested_graph(tmp_path, monkeypatch):
         "symbols_with_docs": len(DOCS),
         "flows": 2,
         "repositories": 1,
+        "findings": 0,
     }
     assert result["enola_versions"] == ["dev"]
 

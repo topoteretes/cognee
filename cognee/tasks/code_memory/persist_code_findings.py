@@ -133,6 +133,14 @@ async def persist_code_findings(
         len(repos),
     )
     await link_observed_declarations(await get_graph_engine(), repos, ctx=ctx)
+    # The CODE retriever's parsed snapshot holds the findings: it must not
+    # outlive the ones just written.
+    from cognee.modules.retrieval.code_retriever import invalidate_code_graph_snapshot_cache
+
+    if dataset_id is None:
+        invalidate_code_graph_snapshot_cache()
+    else:
+        invalidate_code_graph_snapshot_cache(dataset_id=UUID(str(dataset_id)))
 
 
 async def _provenance_context(

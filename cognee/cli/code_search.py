@@ -45,6 +45,7 @@ CODE_OPERATIONS = (
     "flows",
     "hubs",
     "ask",
+    "findings",
 )
 _DOT_EXTENSIONS = {".dot", ".gv"}
 _GRAPHVIZ_RENDER_EXTENSIONS = {".svg", ".png", ".pdf"}
