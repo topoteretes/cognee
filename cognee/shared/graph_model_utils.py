@@ -127,6 +127,26 @@ def fields_the_schema_cannot_carry(graph_model: type[BaseModel]) -> list[str]:
     return found
 
 
+def _datapoint_types_in_tree(graph_model: type[BaseModel]) -> dict[str, type[DataPoint]]:
+    """Every DataPoint class in ``graph_model`` and its fields, by class name: the
+    names the schema's ``$defs`` use."""
+    found: dict[str, type[DataPoint]] = {}
+
+    def walk(model: type[BaseModel]) -> None:
+        if model.__name__ in found:
+            return
+        if issubclass(model, DataPoint):
+            found[model.__name__] = model
+        for name, field_info in model.model_fields.items():
+            if name in DataPoint.model_fields:
+                continue
+            for nested in _datapoint_types_in(field_info.annotation):
+                walk(nested)
+
+    walk(graph_model)
+    return found
+
+
 def _datapoint_types_in(annotation) -> list[type[DataPoint]]:
     """Every DataPoint subclass named anywhere in ``annotation``."""
     core, _ = _strip_annotated(annotation)
@@ -149,9 +169,29 @@ def graph_model_to_graph_schema(graph_model: type[BaseModel]) -> dict:
             return return_value
 
     model_for_schema = datapoint_model_to_basemodel(graph_model)
-    return model_for_schema.model_json_schema(
+    schema = model_for_schema.model_json_schema(
         schema_generator=GenerateJsonSchemaWithoutDefaultTitles
     )
+    # The prompt model drops ``metadata`` (the LLM never fills it), so the schema
+    # must carry each class's index and identity fields itself, as the spec
+    # compiler does: without them the regenerated nodes are neither embedded nor
+    # merged. ``graph_schema_to_graph_model`` reads the default back into the class.
+    classes = _datapoint_types_in_tree(graph_model)
+    for name, definition in schema.get("$defs", {}).items():
+        if name in classes:
+            definition["properties"]["metadata"] = _metadata_property(classes[name])
+    if issubclass(graph_model, DataPoint):
+        schema["properties"]["metadata"] = _metadata_property(graph_model)
+    return schema
+
+
+def _metadata_property(model: type[BaseModel]) -> dict:
+    """The ``metadata`` property of a class's schema entry: its declared default."""
+    return {
+        "additionalProperties": True,
+        "default": dict(model.model_fields["metadata"].default),
+        "type": "object",
+    }
 
 
 if __name__ == "__main__":

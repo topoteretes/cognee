@@ -205,3 +205,31 @@ def test_the_detector_names_why_the_schema_loses_them():
     row = rebuilt.model_fields["influences"].annotation
     assert "Edge[" not in str(row)
     assert "InfluencesEdge" in str(row)
+
+
+def _nested_type(model, field):
+    """The DataPoint class inside ``list[X]`` / ``list[X] | None`` on a generated model."""
+    from typing import get_args
+
+    annotation = model.model_fields[field].annotation
+    args = [arg for arg in get_args(annotation) if arg is not type(None)]
+    inner = args[0] if args else annotation
+    return get_args(inner)[0] if get_args(inner) else inner
+
+
+def test_the_schema_carries_index_and_identity_fields():
+    """The prompt model drops ``metadata``, so the schema must add it back, as the spec
+    compiler does: without it the server neither embeds nor merges the nodes."""
+    schema = remote_graph_schema(LanguageGraph)
+
+    assert schema["$defs"]["Language"]["properties"]["metadata"]["default"] == {
+        "index_fields": ["name"],
+        "identity_fields": ["name"],
+    }
+
+    rebuilt = graph_schema_to_graph_model(schema)
+    language = _nested_type(rebuilt, "languages")
+    assert language.model_fields["metadata"].default == {
+        "index_fields": ["name"],
+        "identity_fields": ["name"],
+    }
