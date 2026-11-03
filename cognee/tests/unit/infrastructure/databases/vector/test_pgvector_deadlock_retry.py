@@ -5,6 +5,8 @@ SQLAlchemy's asyncpg dialect raises its own ``DBAPIError``; the asyncpg
 matched the asyncpg class never fired. These tests pin the shared predicate and the retry on
 the two writes that still take the collection lock, ``delete_data_points`` and the
 per-table detag of ``remove_belongs_to_set_tags``, with a session that deadlocks once.
+The sweep itself is one transaction per table: a table that fails is logged and the rest
+are still swept, then the first failure is raised.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import Column, MetaData, String, Table, text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 from tenacity import wait_none
 
 pytest.importorskip("asyncpg")
@@ -72,10 +74,24 @@ def _adapter(errors: list[Exception], executed: list) -> PGVectorAdapter:
     async def get_async_session():
         yield _Session(errors, executed)
 
+    async def get_table_names():
+        return ["Alpha_text", "Beta_text"]
+
     adapter.has_collection = has_collection
     adapter.get_table = get_table
+    adapter.get_table_names = get_table_names
     adapter.get_async_session = get_async_session
     return adapter
+
+
+def _tables_written(executed) -> list[str]:
+    """The tables whose UPDATE ran, in order."""
+    return [
+        table
+        for statement in executed
+        for table in ("Alpha_text", "Beta_text")
+        if str(statement).lstrip().startswith("UPDATE") and f'"{table}"' in str(statement)
+    ]
 
 
 def test_is_deadlock_matches_only_the_wrapped_deadlock():
@@ -134,3 +150,26 @@ async def test_remove_tags_from_table_retries_a_deadlock():
 
     # The retry starts over from the target selection: select, update, delete.
     assert [str(statement) for statement in executed] == ["select", "update", "delete"]
+
+
+@pytest.mark.asyncio
+async def test_remove_belongs_to_set_tags_sweeps_every_table_then_raises_the_first_failure():
+    executed = []
+    failure = _wrapped(UniqueViolationError("duplicate key"))
+    adapter = _adapter([failure], executed)
+
+    with pytest.raises(DBAPIError) as raised:
+        await adapter.remove_belongs_to_set_tags(["set1"])
+
+    assert raised.value is failure
+    assert _tables_written(executed) == ["Beta_text"]
+
+
+@pytest.mark.asyncio
+async def test_remove_belongs_to_set_tags_skips_a_table_without_payload():
+    executed = []
+    adapter = _adapter([ProgrammingError("statement", {}, Exception("undefined column"))], executed)
+
+    await adapter.remove_belongs_to_set_tags(["set1"])
+
+    assert _tables_written(executed) == ["Beta_text"]

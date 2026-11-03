@@ -1224,6 +1224,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if node_ids is not None:
             bind_params["node_ids"] = [str(nid) for nid in node_ids]
 
+        first_error: SQLAlchemyError | None = None
         for table_name in candidate_tables:
             quoted_table = f'"{table_name}"'
             # Can't use a data-modifying CTE (UPDATE … RETURNING then DELETE
@@ -1272,11 +1273,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                   AND payload::jsonb->'belongs_to_set' = '[]'::jsonb
                 """
             )
-            # Run each table in its own transaction, so a PascalCase table that
-            # is not a vector collection (no `payload::jsonb` column, a
-            # ProgrammingError) does not roll back updates already committed
-            # for other tables. Any other failure is raised: a sweep that
-            # silently leaves a tag behind would make forget() lie.
+            # Each table is its own transaction, so one table's failure never
+            # undoes or prevents another's. A PascalCase table that is not a
+            # vector collection has no `payload::jsonb` column (ProgrammingError)
+            # and is skipped. Any other database failure is logged with the
+            # table, the remaining tables are still swept, and the first failure
+            # is raised afterwards: the caller sees it, and the log names every
+            # table that kept the tag.
             try:
                 await self._remove_tags_from_table(
                     table_name, select_targets_sql, update_sql, delete_empties_sql, bind_params
@@ -1287,8 +1290,17 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     table_name,
                     e,
                 )
+            except SQLAlchemyError as e:
+                logger.warning(
+                    "remove_belongs_to_set_tags failed on '%s', its rows keep the tags: %s",
+                    table_name,
+                    e,
+                )
+                if first_error is None:
+                    first_error = e
 
-        return
+        if first_error is not None:
+            raise first_error
 
     @retry(
         retry=retry_if_exception(is_deadlock),
