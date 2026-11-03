@@ -127,10 +127,10 @@ async def persist_code_findings(
     await add_data_points(list(findings), ctx=ctx, graph_only=True)
     repos = {declaration.repo for finding in findings for declaration in finding.cites}
     logger.info(
-        "Stored %d code finding(s) citing %d declaration(s) in %s.",
+        "Stored %d code finding(s) citing %d declaration(s) in %d repositor(y/ies).",
         len(findings),
         sum(len(finding.cites) for finding in findings),
-        ", ".join(sorted(repos)),
+        len(repos),
     )
     await link_observed_declarations(await get_graph_engine(), repos, ctx=ctx)
 

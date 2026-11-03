@@ -285,9 +285,9 @@ async def link_observed_declarations(
         await graph_engine.add_edges(new_edges)
         await _register_edges(new_edges, ctx)
     logger.info(
-        "Code memory join for %s: %d exact, %d moved, %d ambiguous, %d unmatched "
-        "(%d edge(s) written, %d removed).",
-        ", ".join(sorted(repos)),
+        "Code memory join over %d repositor(y/ies): %d exact, %d moved, %d ambiguous, "
+        "%d unmatched (%d edge(s) written, %d removed).",
+        len(repos),
         counts["exact"],
         counts["moved"],
         counts["ambiguous"],
