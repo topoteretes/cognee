@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncGenerator
 from uuid import UUID
 
@@ -67,8 +68,10 @@ async def extract_chunks_from_documents(
             document_token_count += document_chunk.chunk_size
             document_chunk.belongs_to_set = document.belongs_to_set
             if temporal_hints:
-                document_chunk._temporal_hints, temporal_base = hint_lines(
-                    document_chunk.text, temporal_base
+                # dateparser's search is CPU-bound and takes about as long as cutting the
+                # chunks did, so like the chunker it runs on a worker thread, not the loop.
+                document_chunk._temporal_hints, temporal_base = await asyncio.to_thread(
+                    hint_lines, document_chunk.text, temporal_base
                 )
             yield document_chunk
 
