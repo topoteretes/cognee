@@ -437,12 +437,20 @@ async def cognify(
                 "early_chunk_indexing is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose it locally."
             )
+        if ontology_file_path is not None:
+            # POST /cognify takes no ontology path, and the file is on this
+            # machine, not the server's: forwarding would silently drop it.
+            raise ValueError(
+                "ontology_file_path is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to use the ontology locally."
+            )
         return await client.cognify(
             datasets,
             chunk_size=chunk_size,
             chunks_per_batch=chunks_per_batch,
             custom_prompt=custom_prompt,
             run_in_background=run_in_background,
+            graph_model=graph_model,
         )
 
     # After the argument checks and the remote route: a cognify that raises above,

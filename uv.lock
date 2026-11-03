@@ -1379,7 +1379,6 @@ dependencies = [
     { name = "filetype" },
     { name = "gunicorn" },
     { name = "huggingface-hub" },
-    { name = "instructor" },
     { name = "jinja2" },
     { name = "ladybug", version = "0.17.1", source = { registry = "https://pypi.org/simple" }, marker = "('Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin') or ('Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin')" },
     { name = "ladybug", version = "0.19.0", source = { registry = "https://pypi.org/simple" }, marker = "('Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or sys_platform != 'darwin'" },
@@ -1443,6 +1442,7 @@ dev = [
     { name = "coverage" },
     { name = "deptry" },
     { name = "gitpython" },
+    { name = "instructor" },
     { name = "mkdocs-material" },
     { name = "mkdocs-minify-plugin" },
     { name = "mkdocstrings", extra = ["python"] },
@@ -1514,12 +1514,16 @@ groq = [
 huggingface = [
     { name = "transformers" },
 ]
+instructor = [
+    { name = "instructor" },
+]
 langchain = [
     { name = "langchain-core" },
     { name = "langchain-text-splitters" },
     { name = "langsmith" },
 ]
 llama-cpp = [
+    { name = "instructor" },
     { name = "llama-cpp-python", extra = ["server"] },
 ]
 llama-index = [
@@ -1642,7 +1646,9 @@ requires-dist = [
     { name = "grpcio", marker = "extra == 'gliner-remote-grpc'", specifier = ">=1.60,<2" },
     { name = "gunicorn", specifier = ">=20.1.0,<24" },
     { name = "huggingface-hub", specifier = ">=0.34,<1" },
-    { name = "instructor", specifier = ">=1.9.1,<1.15.3" },
+    { name = "instructor", marker = "extra == 'dev'", specifier = ">=1.9.1,<1.15.3" },
+    { name = "instructor", marker = "extra == 'instructor'", specifier = ">=1.9.1,<1.15.3" },
+    { name = "instructor", marker = "extra == 'llama-cpp'", specifier = ">=1.9.1,<1.15.3" },
     { name = "jinja2", specifier = ">=3.1.3,<4" },
     { name = "ladybug", marker = "('Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or sys_platform != 'darwin'", specifier = "==0.19.0" },
     { name = "ladybug", marker = "('Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin') or ('Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin')", specifier = ">=0.17.0,<0.18" },
@@ -1733,7 +1739,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]
-provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "gmail", "google-drive", "google-calendar", "baml", "dev", "debug", "redis", "tracing", "ontology", "docling", "docling-full", "gliner", "gliner-remote-grpc", "gliner-remote-amqp", "rapidocr"]
+provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "gmail", "google-drive", "google-calendar", "baml", "instructor", "dev", "debug", "redis", "tracing", "ontology", "docling", "docling-full", "gliner", "gliner-remote-grpc", "gliner-remote-amqp", "rapidocr"]
 
 [package.metadata.requires-dev]
 dev = [
