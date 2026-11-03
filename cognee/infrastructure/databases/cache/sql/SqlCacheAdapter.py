@@ -33,6 +33,7 @@ from cognee.infrastructure.databases.exceptions.exceptions import (
     SessionQAEntryValidationError,
     SharedLadybugLockRequiresRedisError,
 )
+from cognee.infrastructure.databases.postgres.deadlock import is_deadlock
 from cognee.infrastructure.databases.relational import get_relational_config
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
@@ -63,22 +64,6 @@ _PURGE_LOCK_ID = int.from_bytes(sha256(b"cognee_cache_ttl_sweep").digest()[:8], 
 # most one re-stamp per slack window; rows then expire between (1 - fraction)
 # and 1.0 of the TTL after the session's last write.
 _TTL_REFRESH_FRACTION = 0.05
-
-
-def _is_deadlock_error(error: Exception) -> bool:
-    """Best-effort detection of a Postgres deadlock without importing asyncpg."""
-    if not isinstance(error, DBAPIError):
-        return False
-    orig = getattr(error, "orig", None)
-    seen = set()
-    while orig is not None and id(orig) not in seen:
-        seen.add(id(orig))
-        if type(orig).__name__ == "DeadlockDetectedError":
-            return True
-        if getattr(orig, "sqlstate", None) == "40P01":
-            return True
-        orig = getattr(orig, "__cause__", None)
-    return "deadlock detected" in str(error).lower()
 
 
 class _SqlAdvisoryLockHandle:
@@ -706,7 +691,7 @@ class SqlCacheAdapter(CacheDBInterface):
                     return True
             except DBAPIError as error:
                 attempt += 1
-                if _is_deadlock_error(error) and attempt < _DEADLOCK_ATTEMPTS:
+                if is_deadlock(error) and attempt < _DEADLOCK_ATTEMPTS:
                     await asyncio.sleep(0.05 * (2**attempt))
                     continue
                 raise
@@ -1040,7 +1025,7 @@ class SqlCacheAdapter(CacheDBInterface):
                     return True
             except DBAPIError as error:
                 attempt += 1
-                if _is_deadlock_error(error) and attempt < _DEADLOCK_ATTEMPTS:
+                if is_deadlock(error) and attempt < _DEADLOCK_ATTEMPTS:
                     await asyncio.sleep(0.05 * (2**attempt))
                     continue
                 error_msg = f"Unexpected error while updating session context in SQL cache: {error}"

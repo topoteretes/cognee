@@ -7,16 +7,35 @@ from uuid import UUID
 
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
 from pydantic import BaseModel
-from sqlalchemy import JSON, Column, MetaData, Table, cast, delete, exc, func, select, text
+from sqlalchemy import (
+    JSON,
+    Column,
+    MetaData,
+    Table,
+    TextClause,
+    cast,
+    delete,
+    exc,
+    func,
+    select,
+    text,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
+from cognee.infrastructure.databases.postgres.deadlock import is_deadlock
 from cognee.infrastructure.databases.relational import get_relational_config, get_relational_engine
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 from cognee.infrastructure.engine import DataPoint
@@ -619,9 +638,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         return text(f"(({merged}) {volatile}) IS DISTINCT FROM ({stored} {volatile})")
 
     @retry(
-        retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
+        retry=retry_if_exception(is_deadlock),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
+        reraise=True,
     )
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict."""
@@ -819,9 +839,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             await session.commit()
 
     @retry(
-        retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
+        retry=retry_if_exception(is_deadlock),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
+        reraise=True,
     )
     async def upsert_raw_vectors(
         self,
@@ -1117,9 +1138,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
 
     @retry(
-        retry=retry_if_exception_type(DeadlockDetectedError),
+        retry=retry_if_exception(is_deadlock),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
+        reraise=True,
     )
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
         """Delete rows from `collection_name` whose id is in `data_point_ids`.
@@ -1202,6 +1224,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if node_ids is not None:
             bind_params["node_ids"] = [str(nid) for nid in node_ids]
 
+        first_error: SQLAlchemyError | None = None
         for table_name in candidate_tables:
             quoted_table = f'"{table_name}"'
             # Can't use a data-modifying CTE (UPDATE … RETURNING then DELETE
@@ -1250,33 +1273,69 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                   AND payload::jsonb->'belongs_to_set' = '[]'::jsonb
                 """
             )
-            # Run each table in its own transaction — a failure on one table
-            # (e.g. a PascalCase name that isn't a vector collection and has
-            # no `payload::jsonb` column) must not roll back updates already
-            # committed for other tables.
+            # Each table is its own transaction, so one table's failure never
+            # undoes or prevents another's. A PascalCase table that is not a
+            # vector collection has no `payload::jsonb` column (ProgrammingError)
+            # and is skipped. Any other database failure is logged with the
+            # table, the remaining tables are still swept, and the first failure
+            # is raised afterwards: the caller sees it, and the log names every
+            # table that kept the tag.
             try:
-                async with self._get_write_lock(table_name), self.get_async_session() as session:
-                    target_rows = await session.execute(select_targets_sql, bind_params)
-                    target_ids = [row[0] for row in target_rows.all()]
-                    if not target_ids:
-                        await session.commit()
-                        continue
-
-                    scoped_params: dict[str, Any] = {
-                        "tags": list(tags),
-                        "target_ids": target_ids,
-                    }
-                    await session.execute(update_sql, scoped_params)
-                    await session.execute(delete_empties_sql, {"target_ids": target_ids})
-                    await session.commit()
-            except exc.SQLAlchemyError as e:
+                await self._remove_tags_from_table(
+                    table_name, select_targets_sql, update_sql, delete_empties_sql, bind_params
+                )
+            except ProgrammingError as e:
                 logger.debug(
                     "remove_belongs_to_set_tags skipped '%s': %s",
                     table_name,
                     e,
                 )
+            except SQLAlchemyError as e:
+                logger.warning(
+                    "remove_belongs_to_set_tags failed on '%s', its rows keep the tags: %s",
+                    table_name,
+                    e,
+                )
+                if first_error is None:
+                    first_error = e
 
-        return
+        if first_error is not None:
+            raise first_error
+
+    @retry(
+        retry=retry_if_exception(is_deadlock),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=1, max=6),
+        reraise=True,
+    )
+    async def _remove_tags_from_table(
+        self,
+        table_name: str,
+        select_targets_sql: TextClause,
+        update_sql: TextClause,
+        delete_empties_sql: TextClause,
+        bind_params: dict[str, Any],
+    ) -> None:
+        """One table's detag in one transaction.
+
+        Inserts do not take the collection lock, so the UPDATE can meet a concurrent
+        upsert of the same rows in another order; Postgres aborts one side of that
+        deadlock and the sweep is retried from the target selection.
+        """
+        async with self._get_write_lock(table_name), self.get_async_session() as session:
+            target_rows = await session.execute(select_targets_sql, bind_params)
+            target_ids = [row[0] for row in target_rows.all()]
+            if not target_ids:
+                await session.commit()
+                return
+
+            scoped_params: dict[str, Any] = {
+                "tags": bind_params["tags"],
+                "target_ids": target_ids,
+            }
+            await session.execute(update_sql, scoped_params)
+            await session.execute(delete_empties_sql, {"target_ids": target_ids})
+            await session.commit()
 
     async def prune(self):
         """Drop all vector collection tables and reset cached reflection metadata."""

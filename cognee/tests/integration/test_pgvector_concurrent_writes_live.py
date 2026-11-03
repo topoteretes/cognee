@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import os
 import random
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import pytest
 import pytest_asyncio
@@ -166,3 +166,76 @@ async def test_concurrent_overlapping_upserts_do_not_deadlock(collection):
     assert len(rows) == len(ids)
     expected_tags = sorted(f"set{tag}" for tag in range(writers))
     assert all(sorted(row.payload["belongs_to_set"]) == expected_tags for row in rows)
+
+
+async def _hold_then_take(adapter, name: str, held: str, wanted: str, both_started):
+    """A transaction that locks `held`, lets the other side start, then wants `wanted`.
+
+    The other side locks `wanted` first and then blocks on `held`, half a deadlock
+    timeout before this transaction blocks on `wanted`. Postgres checks for a cycle
+    once per wait, when that timeout fires, so the other side is the one that finds
+    the cycle and the one Postgres aborts.
+    """
+    upsert = text(
+        f"INSERT INTO \"{name}\" (id, payload, vector) VALUES (:id, '{{}}', :vector) "
+        "ON CONFLICT (id) DO UPDATE SET vector = EXCLUDED.vector"
+    )
+    vector = str([0.0] * 16)
+    async with adapter.engine.connect() as conn, conn.begin():
+        deadlock_timeout_ms = int(
+            (
+                await conn.execute(
+                    text("SELECT setting FROM pg_settings WHERE name = 'deadlock_timeout'")
+                )
+            ).scalar_one()
+        )
+        await conn.execute(upsert, {"id": held, "vector": vector})
+        await both_started.wait()
+        await asyncio.sleep(deadlock_timeout_ms / 2000)
+        await conn.execute(upsert, {"id": wanted, "vector": vector})
+
+
+async def test_delete_racing_an_upsert_is_retried(collection):
+    """A delete meets an upsert holding one of its rows; Postgres aborts the delete."""
+    adapter, name = collection
+    first, second = sorted(str(uuid4()) for _ in range(2))
+    await adapter.create_data_points(
+        name, [_Point(id=first, text="a"), _Point(id=second, text="b")]
+    )
+    deadlocks_before = await _deadlocks(adapter)
+    both_started = asyncio.Barrier(2)
+
+    async def delete():
+        await both_started.wait()
+        await adapter.delete_data_points(name, [UUID(first), UUID(second)])
+
+    await asyncio.gather(_hold_then_take(adapter, name, second, first, both_started), delete())
+
+    assert await _deadlocks(adapter) == deadlocks_before + 1
+    assert await adapter.retrieve(name, [first, second]) == []
+
+
+async def test_tag_removal_racing_an_upsert_is_retried(collection):
+    """The detag sweep meets an upsert holding one of its rows; Postgres aborts the sweep."""
+    adapter, name = collection
+    first, second = sorted(str(uuid4()) for _ in range(2))
+    tag = f"set_{uuid4().hex[:8]}"
+    await adapter.create_data_points(
+        name,
+        [
+            _Point(id=first, text="a", belongs_to_set=[tag]),
+            _Point(id=second, text="b", belongs_to_set=[tag]),
+        ],
+    )
+    deadlocks_before = await _deadlocks(adapter)
+    both_started = asyncio.Barrier(2)
+
+    async def sweep():
+        await both_started.wait()
+        await adapter.remove_belongs_to_set_tags([tag])
+
+    await asyncio.gather(_hold_then_take(adapter, name, second, first, both_started), sweep())
+
+    assert await _deadlocks(adapter) == deadlocks_before + 1
+    # The tag was the rows' only one, so the retried sweep removed the rows themselves.
+    assert await adapter.retrieve(name, [first, second]) == []
