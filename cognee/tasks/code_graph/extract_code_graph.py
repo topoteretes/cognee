@@ -12,6 +12,9 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 
 from pydantic import ValidationError
 
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+)
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.pipelines.tasks.task import Task
@@ -862,14 +865,80 @@ def _invalidate_code_graph_snapshot(ctx: Optional["PipelineContext"] = None) -> 
 class _CodeGraphLoadState(list):
     """The data_points passthrough between the load and edges tasks.
 
-    Also carries the pre-write graph state and the node delta computed by
-    add_code_graph_data_points, so the edge diff and the stale sweep in
-    add_code_graph_edges reuse the same single graph read.
+    Also carries the pre-write graph state (see ``_CodeGraphState``) and the
+    node delta computed by add_code_graph_data_points, so the edge diff and
+    the stale sweep in add_code_graph_edges reuse the same single graph read.
+    The fact hashes are not carried: only the node delta reads them.
     """
 
+    existing_node_ids: set | None = None
     existing_edge_keys: set | None = None
     existing_nodes: list | None = None
     node_delta: dict | None = None
+
+
+# The node properties the code graph steps read off the pre-write graph: the
+# sweep and detag match a node by type and repo (name for CodeRepository), the
+# detag reads tags and NodeSet names. fact_hash is kept in existing_hashes.
+_RETAINED_NODE_PROPERTIES = ("type", "name", "repo", "belongs_to_set")
+
+
+class _CodeGraphState:
+    """The pre-write graph, cut down to what the code graph load reads.
+
+    - ``existing_hashes``: ``{node_id: fact_hash}`` of every node, for the
+      node delta.
+    - ``existing_node_ids``: every node id, for a cluster member's
+      ``known_ids`` (an edge's other endpoint may be any node).
+    - ``existing_nodes``: ``(node_id, properties)`` of code-graph and NodeSet
+      nodes only, with ``_RETAINED_NODE_PROPERTIES`` only, for the sweep and
+      detag.
+    - ``existing_edge_keys``: ``(source, target, relationship)`` of edges whose
+      source is a code-graph node. Every use starts there: the typed-edge diff
+      (edges between code nodes), the stale-edge sweep (both endpoints are
+      current code nodes) and the ``belongs_to_set`` detag (from a code node).
+    """
+
+    def __init__(self) -> None:
+        self.existing_hashes: dict[str, Any] = {}
+        self.existing_node_ids: set[str] = set()
+        self.existing_nodes: list[tuple[str, dict]] = []
+        self.existing_edge_keys: set[tuple[str, str, str]] = set()
+
+
+async def _read_code_graph_state(graph_engine, batch_size: int) -> _CodeGraphState:
+    """Read the graph a page at a time, keeping only what the code graph load reads.
+
+    The stream is drained completely before the caller writes anything: the
+    node delta, edge diff and sweep compare against the graph as it was, and
+    the stream has no snapshot across pages, so a page read after a write
+    could see rows this load wrote.
+    """
+    code_types = _code_graph_node_types()
+    retained_types = code_types | {NodeSet.__name__}
+    code_node_ids: set[str] = set()
+    state = _CodeGraphState()
+    async for nodes, edges in graph_engine.stream_graph_data(batch_size=batch_size):
+        for node_id, properties in nodes:
+            node_id = str(node_id)
+            state.existing_node_ids.add(node_id)
+            if not isinstance(properties, dict):
+                continue
+            state.existing_hashes[node_id] = properties.get("fact_hash")
+            node_type = properties.get("type")
+            if node_type not in retained_types:
+                continue
+            if node_type in code_types:
+                code_node_ids.add(node_id)
+            retained = {
+                key: properties[key] for key in _RETAINED_NODE_PROPERTIES if key in properties
+            }
+            state.existing_nodes.append((node_id, retained))
+        for source, target, relationship, _properties in edges:
+            source = str(source)
+            if source in code_node_ids:
+                state.existing_edge_keys.add((source, str(target), relationship))
+    return state
 
 
 _DELTA_SAMPLE_LIMIT = 20
@@ -883,6 +952,8 @@ async def add_code_graph_data_points(
     data_points: list[DataPoint],
     ctx: Optional["PipelineContext"] = None,
     graph_only: bool = True,
+    graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    write_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> list[DataPoint]:
     """Store code graph nodes while allowing a repository path payload.
 
@@ -890,6 +961,12 @@ async def add_code_graph_data_points(
     fact_hash is new or changed are stored; unchanged facts are not touched.
     The pre-read state rides on the returned list so add_code_graph_edges can
     diff edges and sweep without reading the graph again.
+
+    The read streams ``graph_read_batch_size`` rows a page and keeps only what
+    the load reads (see ``_read_code_graph_state``). The write hands
+    ``add_data_points`` ``write_batch_size`` nodes at a time, the repository
+    nodes in the first slice: the other nodes' ``part_of`` edges point at
+    them, and the typed edges are written later, by add_code_graph_edges.
 
     A custom-pipeline payload may be any value, but the storage rollback ledger
     requires a persisted data item id. Preserve the full context when one is
@@ -904,14 +981,14 @@ async def add_code_graph_data_points(
         # extract_code_graph skipped an unchanged snapshot.
         return data_points
 
-    graph_engine = await get_graph_engine()
-    existing_nodes, existing_edges = await graph_engine.get_graph_data()
-    existing_hashes: dict[str, Any] = {
-        str(node_id): properties.get("fact_hash")
-        for node_id, properties in existing_nodes
-        if isinstance(properties, dict)
-    }
+    if write_batch_size < 1:
+        raise ValueError("write_batch_size must be >= 1")
 
+    graph_engine = await get_graph_engine()
+    graph_state = await _read_code_graph_state(graph_engine, graph_read_batch_size)
+    existing_hashes = graph_state.existing_hashes
+
+    repositories: list[DataPoint] = []
     to_write: list[DataPoint] = []
     added: list[str] = []
     updated: list[str] = []
@@ -920,7 +997,7 @@ async def add_code_graph_data_points(
         if isinstance(point, CodeRepository):
             # Repository nodes are always rewritten (they carry the snapshot
             # stamp) and are not counted as content changes.
-            to_write.append(point)
+            repositories.append(point)
             continue
         point_id = str(getattr(point, "id", point))
         fact_hash = getattr(point, "fact_hash", None)
@@ -940,21 +1017,26 @@ async def add_code_graph_data_points(
         unchanged,
     )
 
+    # Repository nodes go first, so they exist before the part_of edges of
+    # every later slice.
+    to_write = repositories + to_write
     storage_ctx = ctx if _pipeline_data_id(ctx) is not None else None
     try:
-        if to_write:
-            await add_data_points(to_write, ctx=storage_ctx, graph_only=graph_only)
+        for start in range(0, len(to_write), write_batch_size):
+            await add_data_points(
+                to_write[start : start + write_batch_size],
+                ctx=storage_ctx,
+                graph_only=graph_only,
+            )
     finally:
         # Storage can fail after a partial graph write. Invalidate even on an
         # exception so no pre-write snapshot survives that ambiguous outcome.
         _invalidate_code_graph_snapshot(ctx)
 
     state = _CodeGraphLoadState(data_points)
-    state.existing_nodes = existing_nodes
-    state.existing_edge_keys = {
-        (str(source), str(target), relationship)
-        for source, target, relationship, _properties in existing_edges
-    }
+    state.existing_node_ids = graph_state.existing_node_ids
+    state.existing_nodes = graph_state.existing_nodes
+    state.existing_edge_keys = graph_state.existing_edge_keys
     state.node_delta = {
         "nodes_added": len(added),
         "nodes_updated": len(updated),
@@ -973,6 +1055,7 @@ async def add_code_graph_edges(
     repo_scope: str | None = None,
     node_set: list[str] | None = None,
     snapshot: ParsedSnapshot | None = None,
+    graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> list[DataPoint]:
     """Insert typed relation edges (calls/imports/...) after add_data_points ran.
 
@@ -1019,15 +1102,15 @@ async def add_code_graph_edges(
 
         # Pre-write graph state: reuse the read add_code_graph_data_points
         # already did (it rides on the passthrough list); direct callers pay
-        # one read here instead.
+        # one streamed read here instead.
         existing_nodes = getattr(data_points, "existing_nodes", None)
+        existing_node_ids = getattr(data_points, "existing_node_ids", None)
         existing_edge_keys = getattr(data_points, "existing_edge_keys", None)
-        if existing_nodes is None or existing_edge_keys is None:
-            existing_nodes, existing_edges = await graph_engine.get_graph_data()
-            existing_edge_keys = {
-                (str(source), str(target), relationship)
-                for source, target, relationship, _properties in existing_edges
-            }
+        if existing_nodes is None or existing_node_ids is None or existing_edge_keys is None:
+            graph_state = await _read_code_graph_state(graph_engine, graph_read_batch_size)
+            existing_nodes = graph_state.existing_nodes
+            existing_node_ids = graph_state.existing_node_ids
+            existing_edge_keys = graph_state.existing_edge_keys
 
         writable_edges = edges
         if repo_scope is not None:
@@ -1036,7 +1119,7 @@ async def add_code_graph_edges(
                 [fact for fact in facts if _fact_repo(fact, fallback_repo) == repo_scope],
                 repo_scope,
             )
-            known_ids = scope_ids | {str(node_id) for node_id, _properties in existing_nodes}
+            known_ids = scope_ids | existing_node_ids
             writable_edges = [
                 edge
                 for edge in edges
@@ -1392,6 +1475,8 @@ def get_code_graph_tasks(
     index_vectors: bool = False,
     repo_scope: str | None = None,
     snapshot: ParsedSnapshot | None = None,
+    graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    write_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> list[Task]:
     """Build the ordered task list for the enola code graph pipeline.
 
@@ -1412,7 +1497,12 @@ def get_code_graph_tasks(
             snapshot=snapshot,
         ),
         # LOAD: persist graph nodes; vector indexing is explicitly opt-in
-        Task(add_code_graph_data_points, graph_only=not index_vectors),
+        Task(
+            add_code_graph_data_points,
+            graph_only=not index_vectors,
+            graph_read_batch_size=graph_read_batch_size,
+            write_batch_size=write_batch_size,
+        ),
         # LOAD: persist the typed relations as explicit graph edges
         Task(
             add_code_graph_edges,
@@ -1420,5 +1510,6 @@ def get_code_graph_tasks(
             snapshot_dir=snapshot_dir,
             repo_scope=repo_scope,
             snapshot=snapshot,
+            graph_read_batch_size=graph_read_batch_size,
         ),
     ]

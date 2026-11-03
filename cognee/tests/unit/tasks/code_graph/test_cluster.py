@@ -30,6 +30,7 @@ from cognee.tasks.code_graph.extract_code_graph import (
     map_facts_to_data_points,
 )
 from cognee.tasks.code_graph.models import CodeRepository
+from cognee.tests.utils.graph_stream import stream_through_get_graph_data
 
 cluster_module = importlib.import_module("cognee.tasks.code_graph.cluster")
 extract_module = importlib.import_module("cognee.tasks.code_graph.extract_code_graph")
@@ -105,6 +106,7 @@ def _write_snapshot(
 def _mock_engine(monkeypatch, nodes=(), edges=()):
     engine = AsyncMock()
     engine.get_graph_data.return_value = (list(nodes), list(edges))
+    stream_through_get_graph_data(engine)
     engine.get_node.return_value = None
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
     monkeypatch.setattr(extract_module, "_invalidate_code_graph_snapshot", lambda ctx=None: None)
@@ -310,13 +312,13 @@ async def test_member_skip_check_reads_its_own_repository_node(monkeypatch, tmp_
     engine.get_node.assert_awaited_once_with(str(fact_node_id("ui", "repository", "ui")))
 
 
-async def _load_member(snapshot_dir, repo_scope, tmp_path):
+async def _load_member(snapshot_dir, repo_scope, tmp_path, **batch_sizes):
     data_points = await extract_code_graph(
         repo_path=tmp_path, snapshot_dir=snapshot_dir, repo_scope=repo_scope
     )
-    state = await add_code_graph_data_points(data_points)
+    state = await add_code_graph_data_points(data_points, **batch_sizes)
     await add_code_graph_edges(
-        state, repo_path=tmp_path, snapshot_dir=snapshot_dir, repo_scope=repo_scope
+        state, repo_path=tmp_path, snapshot_dir=snapshot_dir, repo_scope=repo_scope, **batch_sizes
     )
 
 
@@ -354,6 +356,32 @@ async def test_edge_into_a_member_not_loaded_yet_waits_for_that_member(monkeypat
     ]
     engine = _mock_engine(monkeypatch, nodes=ui_nodes)
     await _load_member(snapshot_dir, "golf", tmp_path)
+
+    written = _written_edges(engine)
+    assert REACHES in written
+    assert {relationship for _source, _target, relationship in written} == {
+        "reaches_route",
+        "handled_by",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("graph_read_batch_size", [1, 2000])
+async def test_member_known_ids_do_not_depend_on_the_read_page_size(
+    monkeypatch, tmp_path, graph_read_batch_size
+):
+    """The other member's nodes count as loaded whatever the stream's page size."""
+    snapshot_dir = _write_snapshot(tmp_path)
+    storage_module = importlib.import_module("cognee.tasks.storage.add_data_points")
+    monkeypatch.setattr(storage_module, "add_data_points", AsyncMock())
+    ui_nodes = [
+        (str(fact_node_id("ui", kind, name)), {"type": "CodeSymbol", "repo": "ui"})
+        for kind, name in (("symbol", "api.fetchRounds"), ("route", "/api/rounds"))
+    ]
+    chunk = ("chunk-1", {"type": "DocumentChunk", "text": "x" * 10_000})
+    engine = _mock_engine(monkeypatch, nodes=[chunk, *ui_nodes])
+
+    await _load_member(snapshot_dir, "golf", tmp_path, graph_read_batch_size=graph_read_batch_size)
 
     written = _written_edges(engine)
     assert REACHES in written
@@ -673,7 +701,7 @@ def route_env(monkeypatch, refresh_env):
     env = refresh_env
     cluster_module._cluster_runs.clear()
     env.extract = AsyncMock(return_value=["point"])
-    env.load = AsyncMock(side_effect=lambda points, ctx=None, graph_only=True: points)
+    env.load = AsyncMock(side_effect=lambda points, **_kwargs: points)
     env.edges = AsyncMock()
     monkeypatch.setattr(extract_module, "extract_code_graph", env.extract)
     monkeypatch.setattr(extract_module, "add_code_graph_data_points", env.load)

@@ -15,6 +15,9 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+)
 from cognee.modules.pipelines.tasks.task import Task, task_summary
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.dlt_utils import metadata_source
@@ -94,6 +97,8 @@ def _stage_code_file(data_item, staging_root, content: str) -> Path:
 async def extract_code_files_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
+    graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    write_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> list:
     """Cognify CODE-route adapter: run the enola pipeline on stored code files.
 
@@ -125,8 +130,16 @@ async def extract_code_files_graph(
             repo_dir = _stage_code_file(data_item, staging_root, content)
 
             data_points = await extract_code_graph(repo_path=repo_dir)
-            state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)
-            await add_code_graph_edges(state, repo_path=repo_dir, ctx=ctx)
+            state = await add_code_graph_data_points(
+                data_points,
+                ctx=ctx,
+                graph_only=True,
+                graph_read_batch_size=graph_read_batch_size,
+                write_batch_size=write_batch_size,
+            )
+            await add_code_graph_edges(
+                state, repo_path=repo_dir, ctx=ctx, graph_read_batch_size=graph_read_batch_size
+            )
 
         logger.info(
             "Code graph extracted for %s (%s).", _original_file_name(data_item), data_item.id

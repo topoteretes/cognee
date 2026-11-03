@@ -26,6 +26,7 @@ from cognee.tasks.code_graph.extract_code_graph import (
     map_facts_to_data_points,
 )
 from cognee.tasks.code_graph.models import CodeRepository, CodeSymbol
+from cognee.tests.utils.graph_stream import stream_through_get_graph_data
 
 graph_engine_module = importlib.import_module(
     "cognee.infrastructure.databases.graph.get_graph_engine"
@@ -68,6 +69,7 @@ def _write_snapshot(tmp_path, facts, snapshot_id=SNAPSHOT_ID):
 def _mock_engine(monkeypatch, nodes=(), edges=(), get_node_return=None):
     engine = AsyncMock()
     engine.get_graph_data.return_value = (list(nodes), list(edges))
+    stream_through_get_graph_data(engine)
     engine.get_node.return_value = get_node_return
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
     monkeypatch.setattr(

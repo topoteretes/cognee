@@ -25,8 +25,10 @@ from cognee.infrastructure.databases.graph.bounded_neighborhood import (
     validate_bounded_neighborhood_args,
 )
 from cognee.infrastructure.databases.graph.graph_db_interface import (
+    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
     GraphDBInterface,
     temporal_anchors_from_rows,
+    validate_graph_stream_batch_size,
 )
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
@@ -130,6 +132,24 @@ def _decode_properties(value: Any) -> dict[str, Any]:
     if not value:
         return {}
     return dict(value) if isinstance(value, dict) else json.loads(value)
+
+
+def _graph_node_row(row: Any) -> tuple[str, dict[str, Any]]:
+    """One ``graph_node`` row mapping as a get_graph_data node."""
+    return (
+        row["id"],
+        {"name": row["name"], "type": row["type"], **_decode_properties(row["properties"])},
+    )
+
+
+def _graph_edge_row(row: Any) -> tuple[str, str, str, dict[str, Any]]:
+    """One ``graph_edge`` row mapping as a get_graph_data edge."""
+    return (
+        row["source_id"],
+        row["target_id"],
+        row["relationship_name"],
+        _decode_properties(row["properties"]),
+    )
 
 
 def _component_sizes(node_ids: list[str], edge_pairs: list[tuple[str, str]]) -> list[int]:
@@ -884,30 +904,89 @@ class PostgresDemoAdapter(GraphDBInterface):
             node_result = await session.execute(
                 text("SELECT id, name, type, properties FROM graph_node")
             )
-            nodes = []
-            for row in node_result.mappings().all():
-                properties = {
-                    "name": row["name"],
-                    "type": row["type"],
-                    **_decode_properties(row["properties"]),
-                }
-                nodes.append((row["id"], properties))
+            nodes = [_graph_node_row(row) for row in node_result.mappings().all()]
             if not nodes:
                 return [], []
 
             edge_result = await session.execute(
                 text("SELECT source_id, target_id, relationship_name, properties FROM graph_edge")
             )
-            edges = [
-                (
-                    row["source_id"],
-                    row["target_id"],
-                    row["relationship_name"],
-                    _decode_properties(row["properties"]),
-                )
-                for row in edge_result.mappings().all()
-            ]
+            edges = [_graph_edge_row(row) for row in edge_result.mappings().all()]
             return nodes, edges
+
+    _STREAM_FIRST_NODE_PAGE = text(
+        "SELECT id, name, type, properties FROM graph_node ORDER BY id LIMIT :batch_size"
+    )
+    _STREAM_NEXT_NODE_PAGE = text(
+        "SELECT id, name, type, properties FROM graph_node "
+        "WHERE id > :last_id ORDER BY id LIMIT :batch_size"
+    )
+    _STREAM_FIRST_EDGE_PAGE = text(
+        "SELECT source_id, target_id, relationship_name, properties FROM graph_edge "
+        "ORDER BY source_id, target_id, relationship_name LIMIT :batch_size"
+    )
+    _STREAM_NEXT_EDGE_PAGE = text(
+        "SELECT source_id, target_id, relationship_name, properties FROM graph_edge "
+        "WHERE (source_id, target_id, relationship_name) > (:source_id, :target_id, :relationship) "
+        "ORDER BY source_id, target_id, relationship_name LIMIT :batch_size"
+    )
+
+    async def stream_graph_data(
+        self, batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE
+    ) -> AsyncIterator[
+        tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]
+    ]:
+        """``get_graph_data`` in pages; see ``GraphDBInterface.stream_graph_data``.
+
+        Keyset pages on the primary keys: ``id`` for nodes, and
+        ``(source_id, target_id, relationship_name)`` for edges, so an edge page
+        holds at most ``batch_size`` edges. Each page is read in its own short
+        session, so a slow consumer never holds a pooled connection.
+        """
+        validate_graph_stream_batch_size(batch_size)
+
+        last_id = None
+        while True:
+            async with self.sessionmaker() as session:
+                if last_id is None:
+                    result = await session.execute(
+                        self._STREAM_FIRST_NODE_PAGE, {"batch_size": batch_size}
+                    )
+                else:
+                    result = await session.execute(
+                        self._STREAM_NEXT_NODE_PAGE,
+                        {"last_id": last_id, "batch_size": batch_size},
+                    )
+                nodes = [_graph_node_row(row) for row in result.mappings().all()]
+            if not nodes:
+                break
+            last_id = nodes[-1][0]
+            yield nodes, []
+        if last_id is None:
+            return
+
+        last_key = None
+        while True:
+            async with self.sessionmaker() as session:
+                if last_key is None:
+                    result = await session.execute(
+                        self._STREAM_FIRST_EDGE_PAGE, {"batch_size": batch_size}
+                    )
+                else:
+                    result = await session.execute(
+                        self._STREAM_NEXT_EDGE_PAGE,
+                        {
+                            "source_id": last_key[0],
+                            "target_id": last_key[1],
+                            "relationship": last_key[2],
+                            "batch_size": batch_size,
+                        },
+                    )
+                edges = [_graph_edge_row(row) for row in result.mappings().all()]
+            if not edges:
+                break
+            last_key = edges[-1][:3]
+            yield [], edges
 
     async def get_id_filtered_graph_data(
         self, target_ids: list[str]

@@ -30,6 +30,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+)
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.enola import (
     ParsedSnapshot,
@@ -534,7 +537,11 @@ def _cluster_run(dataset_id: UUID, run_id: Any) -> _ClusterRun:
     return current
 
 
-async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
+async def load_dataset_cluster(
+    ctx: Optional["PipelineContext"],
+    graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    write_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+) -> bool:
     """Load the whole cluster of the dataset a CODE_REPO item belongs to.
 
     Returns False when the dataset is not a cluster, and the caller then loads
@@ -566,7 +573,12 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
         try:
             snapshot = await snapshot_dataset_code_repos(dataset_id, repos)
             if snapshot is not None:
-                await _load_cluster_members(snapshot, ctx)
+                await _load_cluster_members(
+                    snapshot,
+                    ctx,
+                    graph_read_batch_size=graph_read_batch_size,
+                    write_batch_size=write_batch_size,
+                )
         except Exception as error:
             # An enola or member-load failure: the run's later rows re-raise
             # it rather than load the whole cluster again, failing the same way.
@@ -578,7 +590,12 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
     return run.is_cluster
 
 
-async def _load_cluster_members(snapshot: DatasetCodeSnapshot, ctx: "PipelineContext") -> None:
+async def _load_cluster_members(
+    snapshot: DatasetCodeSnapshot,
+    ctx: "PipelineContext",
+    graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    write_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+) -> None:
     """Load every member of a cluster snapshot, one at a time, each under its own Data row."""
     from cognee.tasks.code_graph.code_repo import code_repo_node_set
     from cognee.tasks.code_graph.extract_code_graph import (
@@ -599,7 +616,13 @@ async def _load_cluster_members(snapshot: DatasetCodeSnapshot, ctx: "PipelineCon
             node_set=node_set,
             snapshot=snapshot.parsed,
         )
-        state = await add_code_graph_data_points(data_points, ctx=member_ctx, graph_only=True)
+        state = await add_code_graph_data_points(
+            data_points,
+            ctx=member_ctx,
+            graph_only=True,
+            graph_read_batch_size=graph_read_batch_size,
+            write_batch_size=write_batch_size,
+        )
         await add_code_graph_edges(
             state,
             repo_path=member.repo_path,
@@ -608,5 +631,6 @@ async def _load_cluster_members(snapshot: DatasetCodeSnapshot, ctx: "PipelineCon
             repo_scope=member.label,
             node_set=node_set,
             snapshot=snapshot.parsed,
+            graph_read_batch_size=graph_read_batch_size,
         )
         logger.info("Code repo graph extracted for %s (%s).", member.repo_path, member.label)

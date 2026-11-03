@@ -25,7 +25,11 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    GraphDBInterface,
+    validate_graph_stream_batch_size,
+)
 from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
 from cognee.infrastructure.databases.turso import (
     configure_engine,
@@ -98,6 +102,22 @@ def _component_sizes(node_ids: list[str], edges: list[tuple[str, str]]) -> list[
         root = find(node_id)
         sizes[root] = sizes.get(root, 0) + 1
     return sorted(sizes.values(), reverse=True)
+
+
+def _graph_node_row(row: Any) -> tuple[str, dict[str, Any]]:
+    """One ``(id, name, type, properties)`` row as a get_graph_data node."""
+    data = {"name": row[1], "type": row[2]}
+    if row[3]:
+        data.update(row[3] if isinstance(row[3], dict) else json.loads(row[3]))
+    return row[0], data
+
+
+def _graph_edge_row(row: Any) -> tuple[str, str, str, dict[str, Any]]:
+    """One ``(source, target, relationship_name, properties)`` row as a get_graph_data edge."""
+    props = {}
+    if row[3]:
+        props = row[3] if isinstance(row[3], dict) else json.loads(row[3])
+    return row[0], row[1], row[2], props
 
 
 class TursoAdapter(GraphDBInterface):
@@ -541,12 +561,7 @@ class TursoAdapter(GraphDBInterface):
             node_result = await session.execute(
                 text("SELECT id, name, type, properties FROM graph_node")
             )
-            nodes = []
-            for row in node_result.fetchall():
-                data = {"name": row[1], "type": row[2]}
-                if row[3]:
-                    data.update(row[3] if isinstance(row[3], dict) else json.loads(row[3]))
-                nodes.append((row[0], data))
+            nodes = [_graph_node_row(row) for row in node_result.fetchall()]
 
             if not nodes:
                 return [], []
@@ -554,14 +569,84 @@ class TursoAdapter(GraphDBInterface):
             edge_result = await session.execute(
                 text("SELECT source_id, target_id, relationship_name, properties FROM graph_edge")
             )
-            edges = []
-            for row in edge_result.fetchall():
-                props = {}
-                if row[3]:
-                    props = row[3] if isinstance(row[3], dict) else json.loads(row[3])
-                edges.append((row[0], row[1], row[2], props))
+            edges = [_graph_edge_row(row) for row in edge_result.fetchall()]
 
             return nodes, edges
+
+    async def stream_graph_data(
+        self, batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE
+    ) -> AsyncIterator[
+        tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]
+    ]:
+        """``get_graph_data`` in pages; see ``GraphDBInterface.stream_graph_data``.
+
+        Keyset pages on the primary keys: ``id`` for nodes, and
+        ``(source_id, target_id, relationship_name)`` for edges (the engine
+        accepts the row-value comparison), so an edge page holds at most
+        ``batch_size`` edges. Each page is read in its own session.
+        """
+        validate_graph_stream_batch_size(batch_size)
+
+        last_id = None
+        while True:
+            async with self._session() as session:
+                if last_id is None:
+                    result = await session.execute(
+                        text(
+                            "SELECT id, name, type, properties FROM graph_node "
+                            "ORDER BY id LIMIT :batch_size"
+                        ),
+                        {"batch_size": batch_size},
+                    )
+                else:
+                    result = await session.execute(
+                        text(
+                            "SELECT id, name, type, properties FROM graph_node "
+                            "WHERE id > :last_id ORDER BY id LIMIT :batch_size"
+                        ),
+                        {"last_id": last_id, "batch_size": batch_size},
+                    )
+                nodes = [_graph_node_row(row) for row in result.fetchall()]
+            if not nodes:
+                break
+            last_id = nodes[-1][0]
+            yield nodes, []
+        if last_id is None:
+            return
+
+        last_key = None
+        while True:
+            async with self._session() as session:
+                if last_key is None:
+                    result = await session.execute(
+                        text(
+                            "SELECT source_id, target_id, relationship_name, properties "
+                            "FROM graph_edge "
+                            "ORDER BY source_id, target_id, relationship_name LIMIT :batch_size"
+                        ),
+                        {"batch_size": batch_size},
+                    )
+                else:
+                    result = await session.execute(
+                        text(
+                            "SELECT source_id, target_id, relationship_name, properties "
+                            "FROM graph_edge "
+                            "WHERE (source_id, target_id, relationship_name) "
+                            "> (:source_id, :target_id, :relationship) "
+                            "ORDER BY source_id, target_id, relationship_name LIMIT :batch_size"
+                        ),
+                        {
+                            "source_id": last_key[0],
+                            "target_id": last_key[1],
+                            "relationship": last_key[2],
+                            "batch_size": batch_size,
+                        },
+                    )
+                edges = [_graph_edge_row(row) for row in result.fetchall()]
+            if not edges:
+                break
+            last_key = edges[-1][:3]
+            yield [], edges
 
     async def get_id_filtered_graph_data(
         self, target_ids: list[str]

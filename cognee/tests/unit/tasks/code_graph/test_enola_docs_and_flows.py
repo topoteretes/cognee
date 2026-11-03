@@ -26,6 +26,7 @@ from cognee.tasks.code_graph.extract_code_graph import (
     map_facts_to_data_points,
 )
 from cognee.tasks.code_graph.models import CodeFlow, CodeGraphEntity, CodeRepository
+from cognee.tests.utils.graph_stream import stream_through_get_graph_data
 
 enola_module = importlib.import_module("cognee.tasks.code_graph.enola")
 graph_engine_module = importlib.import_module(
@@ -221,6 +222,7 @@ def _write_snapshot(tmp_path, facts, flows=None):
 def _mock_engine(monkeypatch, nodes=(), edges=()):
     engine = AsyncMock()
     engine.get_graph_data.return_value = (list(nodes), list(edges))
+    stream_through_get_graph_data(engine)
     engine.get_node.return_value = None
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=engine))
     monkeypatch.setattr(

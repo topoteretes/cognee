@@ -39,6 +39,9 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+)
 from cognee.modules.chunking.external_metadata import decode_external_metadata
 from cognee.modules.engine.models.node_set import validate_node_set_names
 from cognee.shared.logging_utils import get_logger
@@ -428,6 +431,8 @@ async def add_code_repository(
 async def extract_code_repo_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
+    graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    write_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> list:
     """Cognify CODE_REPO-route adapter: one enola run over the whole project.
 
@@ -474,14 +479,28 @@ async def extract_code_repo_graph(
                 "its current location."
             )
 
-        if await load_dataset_cluster(ctx):
+        if await load_dataset_cluster(
+            ctx, graph_read_batch_size=graph_read_batch_size, write_batch_size=write_batch_size
+        ):
             continue
 
         node_set = code_repo_node_set(data_item)
 
         data_points = await extract_code_graph(repo_path=repo_path, node_set=node_set)
-        state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)
-        await add_code_graph_edges(state, repo_path=repo_path, ctx=ctx, node_set=node_set)
+        state = await add_code_graph_data_points(
+            data_points,
+            ctx=ctx,
+            graph_only=True,
+            graph_read_batch_size=graph_read_batch_size,
+            write_batch_size=write_batch_size,
+        )
+        await add_code_graph_edges(
+            state,
+            repo_path=repo_path,
+            ctx=ctx,
+            node_set=node_set,
+            graph_read_batch_size=graph_read_batch_size,
+        )
 
         logger.info("Code repo graph extracted for %s (%s).", repo_path, data_item.id)
 
