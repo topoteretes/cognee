@@ -69,6 +69,43 @@ def _annotation_markers(annotation: Any) -> list:
     return found
 
 
+def _datapoint_types_in(annotation: Any) -> list[type[DataPoint]]:
+    """Every DataPoint subclass named anywhere in ``annotation``'s shape."""
+    core, _ = _strip_annotated(annotation)
+    args = get_args(core)
+    if not args:
+        # No type arguments means a bare class: on Python 3.10
+        # isinstance(list[X], type) is True, so that check alone stops at the list.
+        return [core] if isinstance(core, type) and issubclass(core, DataPoint) else []
+    return [
+        nested
+        for arg in args
+        if arg is not type(None) and arg is not Ellipsis
+        for nested in _datapoint_types_in(arg)
+    ]
+
+
+def rebuild_models(models: list[type[BaseModel]]) -> None:
+    """Rebuild ``models`` after their fields changed, so every validator is current.
+
+    Pydantic reuses a nested model's built schema, so rebuilding a parent before a
+    changed child embeds the stale child. Every model is first marked unbuilt, then
+    rebuilt: a parent built while its child is unbuilt generates the child's schema
+    from the child's fields, and the child's own rebuild does the same.
+    """
+    for model in models:
+        for attr in (
+            "__pydantic_core_schema__",
+            "__pydantic_validator__",
+            "__pydantic_serializer__",
+        ):
+            if attr in model.__dict__:
+                delattr(model, attr)
+        model.__pydantic_complete__ = False
+    for model in models:
+        model.model_rebuild(force=True)
+
+
 def _field_markers(field_info: Any) -> list:
     """Every marker on a field, wherever in the annotation it sits.
 
@@ -303,7 +340,48 @@ def datapoint_model_to_basemodel(
     """
     if not issubclass(model, DataPoint):
         return model
-    return _llm_model_for(model, {}, strip_metadata)
+    return datapoint_models_to_basemodels([model], strip_metadata=strip_metadata)[0]
+
+
+def datapoint_models_to_basemodels(
+    models: list[type[BaseModel]], *, strip_metadata: bool = False
+) -> list[type[BaseModel]]:
+    """``datapoint_model_to_basemodel`` over several models with one shared cache.
+
+    A class reached from two of them is converted once, so a joint JSON schema of the
+    results names it once instead of telling two copies apart by module path.
+    """
+    cache: dict[type[BaseModel], type[BaseModel]] = {}
+    converted = [
+        _llm_model_for(model, cache, strip_metadata) if issubclass(model, DataPoint) else model
+        for model in models
+    ]
+    _close_cycles(cache, strip_metadata)
+    return converted
+
+
+def _close_cycles(cache: dict[type[BaseModel], type[BaseModel]], strip_metadata: bool) -> None:
+    """Point the fields the cycle breaker left at a DataPoint class to its prompt model.
+
+    ``_llm_model_for`` registers a class as its own stand-in before converting its
+    fields, so a field that reaches the class again (``knows: list[Person]`` on
+    ``Person``, or A -> B -> A) was built against the raw DataPoint, infrastructure
+    fields and all. Now that every prompt model exists, those fields are converted
+    once more and the models rebuilt.
+    """
+    closed = False
+    for original, converted in cache.items():
+        for name, field_info in converted.model_fields.items():
+            if not _datapoint_types_in(field_info.annotation):
+                continue
+            field_info.annotation, _ = _llm_field_for(
+                original, name, original.model_fields[name], cache, strip_metadata
+            )
+            closed = True
+    if closed:
+        # Every prompt model, not only the changed ones: a parent built earlier
+        # embedded the stand-in through its child.
+        rebuild_models(list(cache.values()))
 
 
 def _llm_model_for(

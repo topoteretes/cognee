@@ -14,10 +14,9 @@ from cognee.api.v1.serve import state as state_mod
 from cognee.api.v1.serve.cloud_client import CloudClient, remote_graph_schema
 from cognee.infrastructure.engine import DataPoint, Edge, FromIdentity
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.shared.graph_model_utils import (
-    fields_the_schema_cannot_carry,
-    graph_schema_to_graph_model,
-)
+from cognee.shared.graph_model_utils import graph_schema_to_graph_model
+from cognee.shared.llm_graph_model import _edge_field_types, _identity_field_types
+from cognee.tasks.graph.exceptions import InvalidReferenceTypeError
 
 remember_mod = importlib.import_module("cognee.api.v1.remember.remember")
 cognify_mod = importlib.import_module("cognee.api.v1.cognify.cognify")
@@ -51,6 +50,13 @@ class TypedLanguage(DataPoint):
 class ParadigmGraph(DataPoint):
     paradigms: list[Paradigm]
     languages: list[TypedLanguage]
+
+
+class UnfillableGraph(DataPoint):
+    """A single Edge is not a shape the extraction can ask the LLM for."""
+
+    languages: list[Language]
+    successor: Edge[Language, Language] | None = None
 
 
 class _FakeResponse:
@@ -129,17 +135,31 @@ async def test_remember_sends_no_field_for_the_default_model(remote, graph_model
 
 
 @pytest.mark.asyncio
-async def test_remember_refuses_a_model_with_typed_edges_before_any_upload(remote):
-    with pytest.raises(ValueError, match=r"InfluenceGraph\.influences"):
-        await remember_mod.remember("text", graph_model=InfluenceGraph)
+async def test_remember_sends_typed_edges_the_route_rebuilds(remote):
+    await remember_mod.remember("text", graph_model=InfluenceGraph)
 
-    assert remote.calls == []
+    (call,) = remote.calls
+    rebuilt = graph_schema_to_graph_model(json.loads(_form_fields(call["form"])["graph_model"]))
+    source, target, naming = _edge_field_types(rebuilt)["influences"]
+    assert source is target
+    assert source.__name__ == "Language"
+    assert naming == Literal["influenced", "replaced"]
 
 
 @pytest.mark.asyncio
-async def test_remember_refuses_a_model_with_identity_references_before_any_upload(remote):
-    with pytest.raises(ValueError, match=r"TypedLanguage\.follows"):
-        await remember_mod.remember("text", graph_model=ParadigmGraph)
+async def test_remember_sends_identity_references_the_route_rebuilds(remote):
+    await remember_mod.remember("text", graph_model=ParadigmGraph)
+
+    (call,) = remote.calls
+    rebuilt = graph_schema_to_graph_model(json.loads(_form_fields(call["form"])["graph_model"]))
+    typed_language = _nested_type(rebuilt, "languages")
+    assert _identity_field_types(typed_language)["follows"].__name__ == "Paradigm"
+
+
+@pytest.mark.asyncio
+async def test_remember_refuses_a_model_the_extraction_cannot_fill_before_any_upload(remote):
+    with pytest.raises(InvalidReferenceTypeError, match="successor"):
+        await remember_mod.remember("text", graph_model=UnfillableGraph)
 
     assert remote.calls == []
 
@@ -166,11 +186,12 @@ async def test_cognify_sends_no_model_by_default(remote):
 
 
 @pytest.mark.asyncio
-async def test_cognify_refuses_a_model_with_typed_edges(remote):
-    with pytest.raises(ValueError, match=r"InfluenceGraph\.influences"):
-        await cognify_mod.cognify(graph_model=InfluenceGraph)
+async def test_cognify_sends_typed_edges(remote):
+    await cognify_mod.cognify(graph_model=InfluenceGraph)
 
-    assert remote.calls == []
+    (call,) = remote.calls
+    rebuilt = graph_schema_to_graph_model(call["json"]["graph_model"])
+    assert list(_edge_field_types(rebuilt)) == ["influences"]
 
 
 @pytest.mark.asyncio
@@ -188,23 +209,7 @@ def test_schema_round_trip_keeps_a_plain_model():
     rebuilt = graph_schema_to_graph_model(remote_graph_schema(LanguageGraph))
 
     assert rebuilt.__name__ == "LanguageGraph"
-    assert fields_the_schema_cannot_carry(LanguageGraph) == []
-
-
-def test_the_detector_finds_edges_and_references_on_nested_types():
-    assert fields_the_schema_cannot_carry(InfluenceGraph) == ["InfluenceGraph.influences"]
-    assert fields_the_schema_cannot_carry(ParadigmGraph) == ["TypedLanguage.follows"]
-
-
-def test_the_detector_names_why_the_schema_loses_them():
-    """The regenerated model shows what the server would build: the edge rows as a
-    nested DataPoint with string endpoints, the reference as a plain str."""
-    from cognee.shared.graph_model_utils import graph_model_to_graph_schema
-
-    rebuilt = graph_schema_to_graph_model(graph_model_to_graph_schema(InfluenceGraph))
-    row = rebuilt.model_fields["influences"].annotation
-    assert "Edge[" not in str(row)
-    assert "InfluencesEdge" in str(row)
+    assert _edge_field_types(rebuilt) == {}
 
 
 def _nested_type(model, field):

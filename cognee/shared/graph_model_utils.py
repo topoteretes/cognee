@@ -3,27 +3,45 @@
 This is the serialization boundary for custom graph models — what the HTTP API moves
 across the wire. The LLM boundary (what an LLM is asked to answer for a model,
 and how the answer becomes DataPoints again) lives in ``cognee.shared.llm_graph_model``.
+
+The schema is the prompt model's: DataPoint infrastructure dropped, a ``FromIdentity``
+reference narrowed to its identity string, a ``list[Edge[...]]`` field flattened to
+rows. What plain JSON Schema cannot say rides on extension keys, so the receiving side
+rebuilds the declaring class rather than the flattened one:
+
+- ``x-cognee-edge`` on a row-list property names the endpoint classes,
+  ``{"source": "Person", "target": "Person"}``. The relationship rule is the row's own
+  ``relationship_type`` property: an ``enum``, a free string, or absent for the field name.
+- ``x-cognee-from-identity`` on a reference property names the target class.
+
+Both name a class in ``$defs``, so a class the prompt model only ever names as a string
+is written there as well. Each class's ``metadata`` default (index and identity fields)
+is carried the same way, as the spec compiler does. A consumer that ignores the
+extension keys still reads a valid schema of the flat shapes.
 """
 
 import re
 import sys
 import types
-from typing import cast, get_args
+from typing import Annotated, Any, Literal, cast
 
 from datamodel_code_generator import DataModelType, GenerateConfig, InputFileType, generate
 from pydantic import BaseModel
 from pydantic._internal._core_utils import CoreSchemaOrField, is_core_schema
-from pydantic.json_schema import GenerateJsonSchema
+from pydantic.json_schema import GenerateJsonSchema, models_json_schema
 
-from cognee.infrastructure.engine import DataPoint
-from cognee.infrastructure.engine.models.FieldAnnotations import _FromIdentity
-from cognee.shared.exceptions import ExternalSchemaReferenceError
+from cognee.infrastructure.engine import DataPoint, Edge, FromIdentity
+from cognee.shared.exceptions import ExternalSchemaReferenceError, UnresolvedSchemaReferenceError
 from cognee.shared.llm_graph_model import (
-    _contains_edge_annotation,
-    _field_markers,
-    _strip_annotated,
-    datapoint_model_to_basemodel,
+    _datapoint_types_in,
+    _edge_field_types,
+    _identity_field_types,
+    datapoint_models_to_basemodels,
+    rebuild_models,
 )
+
+EDGE_KEY = "x-cognee-edge"
+FROM_IDENTITY_KEY = "x-cognee-from-identity"
 
 
 def _reject_external_refs(node) -> None:
@@ -93,48 +111,114 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
     # Then rebuild the graph model to ensure it properly inherits from the updated DataPoint class
     graph_model.model_rebuild(_types_namespace=namespace)
 
+    _restore_typed_fields(pydantic_json_schema, namespace)
+
     # Return dynamically created Pydantic model class that can be used in cognee for graph creation and querying
     return graph_model
 
 
-def fields_the_schema_cannot_carry(graph_model: type[BaseModel]) -> list[str]:
-    """``Model.field`` names of the typed ``Edge[...]`` and ``FromIdentity`` fields in
-    ``graph_model`` and every DataPoint type it nests.
+def _restore_typed_fields(schema: dict, namespace: dict) -> None:
+    """Put ``Edge[...]`` and ``FromIdentity`` back on the regenerated classes.
 
-    The schema only carries plain JSON types, so ``graph_schema_to_graph_model`` cannot
-    bring these back: an edge row returns as a nested DataPoint with ``source`` and
-    ``target`` strings and a reference as a plain ``str``. On the receiving side they
-    become nodes and attributes, never edges and references.
+    The generator built each extension-marked property as the flat type the schema
+    shows: a row class, a string. Swapping the annotation on the generated ``FieldInfo``
+    and rebuilding gives ``llm_graph_model`` the declaring shape it reads locally.
     """
-    found: list[str] = []
+    defs = schema.get("$defs", {})
+    retyped = False
+    for class_name, entry in {schema["title"]: schema, **defs}.items():
+        for field_name, prop in entry.get("properties", {}).items():
+            if EDGE_KEY in prop:
+                annotation = _edge_annotation(prop, defs, namespace)
+            elif FROM_IDENTITY_KEY in prop:
+                annotation = _identity_annotation(prop, namespace)
+            else:
+                continue
+            _generated_class(namespace, class_name).model_fields[field_name].annotation = annotation
+            retyped = True
+    if retyped:
+        rebuild_models(
+            [
+                value
+                for value in namespace.values()
+                if isinstance(value, type)
+                and issubclass(value, DataPoint)
+                and value is not DataPoint
+            ]
+        )
+
+
+def _edge_annotation(prop: dict, defs: dict, namespace: dict) -> Any:
+    """``list[Edge[Source, Target, Rel]]`` for a row-list property, ``| None`` when nullable.
+
+    ``Rel`` is read off the row: an ``enum`` becomes the ``Literal`` the LLM picks
+    from, a plain string is free-form, and no ``relationship_type`` at all means the
+    edge is named after the field.
+    """
+    endpoints = prop[EDGE_KEY]
+    if not isinstance(endpoints, dict) or not {"source", "target"} <= endpoints.keys():
+        raise UnresolvedSchemaReferenceError(
+            f"{EDGE_KEY} must name a 'source' and a 'target' class, got {endpoints!r}."
+        )
+    source = _generated_class(namespace, endpoints["source"])
+    target = _generated_class(namespace, endpoints["target"])
+    core, nullable = _without_null(prop)
+    items = core.get("items", {})
+    row = defs.get(items["$ref"].rsplit("/", 1)[-1], {}) if "$ref" in items else items
+    rule = row.get("properties", {}).get("relationship_type")
+    if rule is None:
+        edge = Edge[source, target]  # ty: ignore[invalid-type-form] - runtime-built generic
+    elif "enum" in rule:
+        edge = Edge[source, target, Literal[tuple(rule["enum"])]]  # ty: ignore[invalid-type-form] - runtime-built generic
+    else:
+        edge = Edge[source, target, str]  # ty: ignore[invalid-type-form] - runtime-built generic
+    annotation: Any = list[edge]
+    return annotation | None if nullable else annotation
+
+
+def _identity_annotation(prop: dict, namespace: dict) -> Any:
+    """``Annotated[Target, FromIdentity()]`` for a reference property, in the spelling
+    the property's shape shows: a list for an array, ``| None`` when nullable."""
+    target = _generated_class(namespace, prop[FROM_IDENTITY_KEY])
+    core, nullable = _without_null(prop)
+    reference: Any = list[target] if core.get("type") == "array" else target  # ty: ignore[invalid-type-form] - runtime-built alias
+    annotation: Any = Annotated[reference, FromIdentity()]
+    return annotation | None if nullable else annotation
+
+
+def _without_null(prop: dict) -> tuple[dict, bool]:
+    """The property without its ``null`` alternative, and whether it had one."""
+    members = prop.get("anyOf")
+    if not members:
+        return prop, False
+    non_null = [member for member in members if member != {"type": "null"}]
+    if len(non_null) == 1 and len(non_null) < len(members):
+        return non_null[0], True
+    return prop, False
+
+
+def _generated_class(namespace: dict, name: Any) -> type[DataPoint]:
+    """The class the generator made for ``name``, which must be a ``$defs`` entry."""
+    cls = namespace.get(name) if isinstance(name, str) else None
+    if isinstance(cls, type) and issubclass(cls, DataPoint) and cls is not DataPoint:
+        return cls
+    raise UnresolvedSchemaReferenceError(
+        f"graph_model names {name!r} as an edge endpoint or reference target, but its "
+        f"$defs define no such class."
+    )
+
+
+def _datapoint_types_in_tree(graph_model: type[BaseModel]) -> dict[str, type[DataPoint]]:
+    """Every DataPoint class in ``graph_model`` and its fields, by class name: the
+    names the schema's ``$defs`` use. Edge endpoints and FromIdentity targets count,
+    nested anywhere else or not."""
+    found: dict[str, type[DataPoint]] = {}
     seen: set[type] = set()
 
     def walk(model: type[BaseModel]) -> None:
         if model in seen:
             return
         seen.add(model)
-        for name, field_info in model.model_fields.items():
-            if name in DataPoint.model_fields:
-                continue
-            if _contains_edge_annotation(field_info.annotation) or any(
-                isinstance(marker, _FromIdentity) for marker in _field_markers(field_info)
-            ):
-                found.append(f"{model.__name__}.{name}")
-            for nested in _datapoint_types_in(field_info.annotation):
-                walk(nested)
-
-    walk(graph_model)
-    return found
-
-
-def _datapoint_types_in_tree(graph_model: type[BaseModel]) -> dict[str, type[DataPoint]]:
-    """Every DataPoint class in ``graph_model`` and its fields, by class name: the
-    names the schema's ``$defs`` use."""
-    found: dict[str, type[DataPoint]] = {}
-
-    def walk(model: type[BaseModel]) -> None:
-        if model.__name__ in found:
-            return
         if issubclass(model, DataPoint):
             found[model.__name__] = model
         for name, field_info in model.model_fields.items():
@@ -142,25 +226,13 @@ def _datapoint_types_in_tree(graph_model: type[BaseModel]) -> dict[str, type[Dat
                 continue
             for nested in _datapoint_types_in(field_info.annotation):
                 walk(nested)
+        if issubclass(model, DataPoint):
+            for source, target, _ in _edge_field_types(model).values():
+                walk(source)
+                walk(target)
 
     walk(graph_model)
     return found
-
-
-def _datapoint_types_in(annotation) -> list[type[DataPoint]]:
-    """Every DataPoint subclass named anywhere in ``annotation``."""
-    core, _ = _strip_annotated(annotation)
-    args = get_args(core)
-    if not args:
-        # No type arguments means a bare class: on Python 3.10
-        # isinstance(list[X], type) is True, so that check alone stops at the list.
-        return [core] if isinstance(core, type) and issubclass(core, DataPoint) else []
-    return [
-        nested
-        for arg in args
-        if arg is not type(None) and arg is not Ellipsis
-        for nested in _datapoint_types_in(arg)
-    ]
 
 
 def graph_model_to_graph_schema(graph_model: type[BaseModel]) -> dict:
@@ -171,21 +243,34 @@ def graph_model_to_graph_schema(graph_model: type[BaseModel]) -> dict:
                 return False
             return return_value
 
-    model_for_schema = datapoint_model_to_basemodel(graph_model)
-    schema = model_for_schema.model_json_schema(
-        schema_generator=GenerateJsonSchemaWithoutDefaultTitles
-    )
-    # The prompt model drops ``metadata`` (the LLM never fills it), so the schema
-    # must carry each class's index and identity fields itself, as the spec
-    # compiler does: without them the regenerated nodes are neither embedded nor
-    # merged. ``graph_schema_to_graph_model`` reads the default back into the class.
     classes = _datapoint_types_in_tree(graph_model)
-    for name, definition in schema.get("$defs", {}).items():
-        if name in classes:
-            definition["properties"]["metadata"] = _metadata_property(classes[name])
-    if issubclass(graph_model, DataPoint):
-        schema["properties"]["metadata"] = _metadata_property(graph_model)
+    others = [cls for cls in classes.values() if cls is not graph_model]
+    prompt_models = datapoint_models_to_basemodels([graph_model, *others])
+    # One joint schema, so a class the root's prompt model never nests — a FromIdentity
+    # target it names as a string, an edge endpoint — still gets its $defs entry.
+    _, joint = models_json_schema(
+        [(model, "validation") for model in prompt_models],
+        ref_template="#/$defs/{model}",
+        schema_generator=GenerateJsonSchemaWithoutDefaultTitles,
+    )
+    defs = joint["$defs"]
+    schema = defs.pop(graph_model.__name__)
+    if defs:
+        schema["$defs"] = defs
+    for name, model in classes.items():
+        _stamp_declarations(schema if model is graph_model else defs[name], model)
     return schema
+
+
+def _stamp_declarations(entry: dict, model: type[DataPoint]) -> None:
+    """What the prompt model lost and the receiving side must get back: the class's
+    ``metadata`` default, and the endpoints or target of each typed field."""
+    properties = entry["properties"]
+    properties["metadata"] = _metadata_property(model)
+    for field_name, target in _identity_field_types(model).items():
+        properties[field_name][FROM_IDENTITY_KEY] = target.__name__
+    for field_name, (source, target, _) in _edge_field_types(model).items():
+        properties[field_name][EDGE_KEY] = {"source": source.__name__, "target": target.__name__}
 
 
 def _metadata_property(model: type[BaseModel]) -> dict:

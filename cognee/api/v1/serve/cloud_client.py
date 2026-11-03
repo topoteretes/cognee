@@ -29,28 +29,16 @@ def _text_upload_filename(text: str) -> str:
 
 def remote_graph_schema(graph_model: Any) -> dict | None:
     """The ``graph_model`` a remote remember or cognify sends: the model as the JSON
-    schema the server rebuilds with ``graph_schema_to_graph_model``, or None for the
-    server's default ``KnowledgeGraph``.
+    schema the server rebuilds with ``graph_schema_to_graph_model``, typed ``Edge`` and
+    ``FromIdentity`` fields included, or None for the server's default ``KnowledgeGraph``.
 
-    Raises before anything is uploaded for a model the schema cannot carry, so the
-    server never silently builds a different graph than the caller declared.
+    A model the LLM extraction could not fill raises here, before anything is uploaded.
     """
     from cognee.shared.data_models import KnowledgeGraph
-    from cognee.shared.graph_model_utils import (
-        fields_the_schema_cannot_carry,
-        graph_model_to_graph_schema,
-    )
+    from cognee.shared.graph_model_utils import graph_model_to_graph_schema
 
     if graph_model is None or graph_model is KnowledgeGraph:
         return None
-    lost = fields_the_schema_cannot_carry(graph_model)
-    if lost:
-        raise ValueError(
-            f"graph_model {graph_model.__name__} declares typed Edge or FromIdentity fields "
-            f"({', '.join(lost)}) that the JSON schema a remote Cognee instance accepts cannot "
-            "carry: the server would store them as plain nodes and strings instead of edges "
-            "and references. Call cognee.disconnect() to use this model locally."
-        )
     return graph_model_to_graph_schema(graph_model)
 
 
