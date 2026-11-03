@@ -16,6 +16,7 @@ from cognee.api.v1.datasets.dto import DataDTO, DeleteDataReceiptDTO
 from cognee.api.v1.exceptions import DataNotFoundError
 from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.locks import dataset_schema_lock
 from cognee.modules.data.content_hash import normalize_content_hash
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
@@ -1321,7 +1322,8 @@ def get_datasets_router() -> APIRouter:
         if not dataset:
             return JSONResponse(status_code=404, content={"error": "Dataset not found"})
 
-        await _store_dataset_schema(dataset_id, payload.graph_schema, payload.custom_prompt)
+        async with dataset_schema_lock(dataset_id):
+            await _store_dataset_schema(dataset_id, payload.graph_schema, payload.custom_prompt)
         return {"status": "ok"}
 
     @router.patch(
@@ -1371,25 +1373,26 @@ def get_datasets_router() -> APIRouter:
                 content=ErrorResponseDTO(message="Dataset not found").model_dump(),
             )
 
-        stored = await _read_dataset_schema(dataset_id)
-        try:
-            merged = merge_graph_schema(stored["graph_schema"], payload)
-        except GraphSchemaMergeError as error:
-            # The message is composed by merge_graph_schema and only names the offending item.
-            return JSONResponse(
-                status_code=422,
-                content=ErrorResponseDTO(message=str(error)).model_dump(),
-            )
-        except ValidationError as error:
-            return JSONResponse(
-                status_code=422,
-                content=ErrorResponseDTO(
-                    message=f"Merged graph schema is invalid: {format_validation_error(error)}"
-                ).model_dump(),
-            )
+        async with dataset_schema_lock(dataset_id):
+            stored = await _read_dataset_schema(dataset_id)
+            try:
+                merged = merge_graph_schema(stored["graph_schema"], payload)
+            except GraphSchemaMergeError as error:
+                # The message is composed by merge_graph_schema and only names the offending item.
+                return JSONResponse(
+                    status_code=422,
+                    content=ErrorResponseDTO(message=str(error)).model_dump(),
+                )
+            except ValidationError as error:
+                return JSONResponse(
+                    status_code=422,
+                    content=ErrorResponseDTO(
+                        message=f"Merged graph schema is invalid: {format_validation_error(error)}"
+                    ).model_dump(),
+                )
 
-        await _store_dataset_schema(dataset_id, merged, None)
-        return await _read_dataset_schema(dataset_id)
+            await _store_dataset_schema(dataset_id, merged, None)
+            return await _read_dataset_schema(dataset_id)
 
     @router.get(
         "/{dataset_id}/processing-status",
