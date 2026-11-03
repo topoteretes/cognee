@@ -147,11 +147,13 @@ class SessionManager:
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         used_session_context_ids: list | None = None,
+        code_refs: list[dict] | None = None,
     ) -> str | None:
         """
         Add a QA to the session. Returns qa_id, or None if cache unavailable.
         used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
         used_session_context_ids: Optional list of session-context entry ids served to this answer.
+        code_refs: Optional list of the declarations the turn is about (``CodeReference`` dumps).
         """
         session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
@@ -190,6 +192,7 @@ class SessionManager:
                 feedback_score=feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
                 used_session_context_ids=used_session_context_ids,
+                code_refs=code_refs,
             )
             await index_session_qa(
                 user_id=user_id,
@@ -214,6 +217,7 @@ class SessionManager:
         method_params: dict | None = None,
         method_return_value: Any = None,
         error_message: str = "",
+        code_refs: list[dict] | None = None,
     ) -> str | None:
         """
         Append one agent trace step to the session trace payload.
@@ -260,6 +264,7 @@ class SessionManager:
             method_return_value=method_return_value,
             error_message=error_message,
             session_feedback=session_feedback,
+            code_refs=code_refs,
         )
         await record_session_activity(
             user_id, session_id, dataset_id=self.dataset_id, errored=status == "error"

@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
+from cognee.memory.code_refs import CodeReference
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("memory.entries")
@@ -69,6 +70,13 @@ class QAEntry(SessionNodeSetEntry):
     feedback_text: str | None = None
     feedback_score: int | None = None
     used_graph_element_ids: dict | None = None
+    code_refs: list[CodeReference] | None = Field(
+        default=None,
+        description=(
+            "The declarations this turn is about, each at the code version the author "
+            "saw. Stored as given, never inferred from the text."
+        ),
+    )
 
 
 class TraceEntry(SessionNodeSetEntry):
@@ -91,6 +99,13 @@ class TraceEntry(SessionNodeSetEntry):
     memory_context: str = ""
     error_message: str = ""
     generate_feedback_with_llm: bool = False
+    code_refs: list[CodeReference] | None = Field(
+        default=None,
+        description=(
+            "The declarations this step read or changed, each at the code version it "
+            "saw. Stored as given, never inferred from the step."
+        ),
+    )
 
 
 class FeedbackEntry(BaseModel):

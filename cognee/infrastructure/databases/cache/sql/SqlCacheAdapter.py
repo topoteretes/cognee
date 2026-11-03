@@ -360,6 +360,7 @@ class SqlCacheAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        code_refs: list[dict] | None = None,
     ) -> dict:
         """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
@@ -373,6 +374,7 @@ class SqlCacheAdapter(CacheDBInterface):
             used_graph_element_ids=used_graph_element_ids,
             memify_metadata=memify_metadata,
             used_session_context_ids=used_session_context_ids,
+            code_refs=code_refs,
         )
         return entry.model_dump()
 
@@ -387,6 +389,7 @@ class SqlCacheAdapter(CacheDBInterface):
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
+        code_refs: list[dict] | None = None,
     ) -> dict:
         """Serialize one agent-trace step into the normalized cache payload shape."""
         entry = SessionAgentTraceEntry(
@@ -399,6 +402,7 @@ class SqlCacheAdapter(CacheDBInterface):
             method_return_value=method_return_value,
             error_message=error_message,
             session_feedback=session_feedback,
+            code_refs=code_refs,
         )
         return entry.model_dump()
 
@@ -535,6 +539,7 @@ class SqlCacheAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        code_refs: list[dict] | None = None,
     ) -> None:
         """Append one QA entry to the session. Creates the session if it doesn't exist."""
         await self._ensure_initialized()
@@ -549,6 +554,7 @@ class SqlCacheAdapter(CacheDBInterface):
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
                 used_session_context_ids=used_session_context_ids,
+                code_refs=code_refs,
             )
             async with self.sessionmaker() as session, session.begin():
                 await self._lock_session_writes(session, cache_qa_entries, user_id, session_id)
@@ -838,6 +844,7 @@ class SqlCacheAdapter(CacheDBInterface):
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
+        code_refs: list[dict] | None = None,
     ) -> None:
         """Append one trace step to the stored trace list for this session."""
         await self._ensure_initialized()
@@ -852,6 +859,7 @@ class SqlCacheAdapter(CacheDBInterface):
                 method_return_value=method_return_value,
                 error_message=error_message,
                 session_feedback=session_feedback,
+                code_refs=code_refs,
             )
             async with self.sessionmaker() as session, session.begin():
                 await self._lock_session_writes(session, cache_trace_entries, user_id, session_id)
