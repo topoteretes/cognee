@@ -1,6 +1,8 @@
 """Unit tests for TextChunker and TextChunkerWithOverlap behavioral equivalence."""
 
+import asyncio
 import importlib
+import threading
 from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
@@ -17,6 +19,9 @@ from cognee.modules.data.processing.document_types import Document
 # resolves to the function and patch.object has nothing to patch.
 _chunk_by_row = importlib.import_module("cognee.tasks.chunks.chunk_by_row")
 _chunk_by_sentence = importlib.import_module("cognee.tasks.chunks.chunk_by_sentence")
+# The chunker modules themselves, to patch the chunk_by_paragraph each one calls.
+_text_chunker = importlib.import_module("cognee.modules.chunking.TextChunker")
+_overlap_chunker = importlib.import_module("cognee.modules.chunking.text_chunker_with_overlap")
 
 
 @pytest.fixture(autouse=True)
@@ -349,3 +354,64 @@ async def test_external_metadata_does_not_change_chunk_ids(chunker_class, make_t
     assert [chunk.id for chunk in plain] == [chunk.id for chunk in tagged]
     assert all(chunk.external_metadata is None for chunk in plain)
     assert all(chunk.external_metadata == '{"created_at": "2024-01-15"}' for chunk in tagged)
+
+
+@pytest.mark.asyncio
+async def test_chunking_runs_off_the_event_loop(chunker_class, make_text_generator):
+    """Cutting chunks tokenizes every word, so it must not hold the event loop.
+
+    The fake chunk_by_paragraph blocks until the loop has run again. Consumed
+    on the loop thread it would wait for something that cannot happen and time
+    out; consumed on a worker thread the loop keeps turning and releases it.
+    """
+    loop_ran = threading.Event()
+    chunking_threads = []
+
+    def blocking_chunk_by_paragraph(text, max_chunk_size, batch_paragraphs=True):
+        chunking_threads.append(threading.current_thread())
+        assert loop_ran.wait(timeout=5), "chunk_by_paragraph held the event loop"
+        yield {"text": text, "chunk_size": 1, "cut_type": "paragraph_end", "chunk_id": uuid4()}
+
+    document = Document(
+        id=uuid4(),
+        name="test_document",
+        raw_data_location="/test/path",
+        external_metadata=None,
+        mime_type="text/plain",
+    )
+    chunker = chunker_class(document, make_text_generator("Some text."), max_chunk_size=512)
+    with (
+        patch.object(_text_chunker, "chunk_by_paragraph", blocking_chunk_by_paragraph),
+        patch.object(_overlap_chunker, "chunk_by_paragraph", blocking_chunk_by_paragraph),
+    ):
+        reading = asyncio.create_task(collect_chunks(chunker))
+        await asyncio.sleep(0)  # the chunker starts and hands the cutting to a worker
+        loop_ran.set()
+        chunks = await reading
+
+    assert [chunk.text for chunk in chunks] == ["Some text."]
+    assert chunking_threads and chunking_threads[0] is not threading.current_thread()
+
+
+@pytest.mark.asyncio
+async def test_chunking_errors_still_fail_read(chunker_class, make_text_generator):
+    """An error raised while cutting on the worker thread surfaces from read()."""
+
+    def failing_chunk_by_paragraph(text, max_chunk_size, batch_paragraphs=True):
+        raise ValueError("word longer than the chunk size")
+        yield  # a generator, like the real one
+
+    document = Document(
+        id=uuid4(),
+        name="test_document",
+        raw_data_location="/test/path",
+        external_metadata=None,
+        mime_type="text/plain",
+    )
+    chunker = chunker_class(document, make_text_generator("Some text."), max_chunk_size=512)
+    with (
+        patch.object(_text_chunker, "chunk_by_paragraph", failing_chunk_by_paragraph),
+        patch.object(_overlap_chunker, "chunk_by_paragraph", failing_chunk_by_paragraph),
+        pytest.raises(ValueError, match="word longer than the chunk size"),
+    ):
+        await collect_chunks(chunker)

@@ -1,3 +1,4 @@
+import asyncio
 from os.path import basename
 
 from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
@@ -28,11 +29,14 @@ class TextChunker(Chunker):
             return content_chunk_id(document_id, content_hash, occurrence), content_hash
 
         async for content_text in self.get_text():
-            for chunk_data in chunk_by_paragraph(
-                content_text,
-                self.max_chunk_size,
-                batch_paragraphs=True,
-            ):
+            # chunk_by_paragraph counts tokens word by word, so one block of text keeps the
+            # CPU for seconds. The generator runs where it is consumed: on a worker thread,
+            # so the event loop keeps answering health checks and requests meanwhile.
+            chunk_data_list = await asyncio.to_thread(
+                list,
+                chunk_by_paragraph(content_text, self.max_chunk_size, batch_paragraphs=True),
+            )
+            for chunk_data in chunk_data_list:
                 if self.chunk_size + chunk_data["chunk_size"] <= self.max_chunk_size:
                     paragraph_chunks.append(chunk_data)
                     self.chunk_size += chunk_data["chunk_size"]
