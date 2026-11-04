@@ -190,6 +190,13 @@ class CacheDBInterface(ABC):
         Returns True if deleted, False if session did not exist.
         """
 
+    @abstractmethod
+    async def list_session_ids(self, user_id: str) -> list[str]:
+        """
+        Return every session id the user has stored content for (QA entries,
+        agent traces or session context), in no particular order.
+        """
+
     async def get_value(self, key: str) -> str | None:
         """
         Retrieve a raw string value stored under the given key, or None if absent/expired.

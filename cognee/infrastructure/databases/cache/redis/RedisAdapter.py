@@ -18,6 +18,11 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("RedisAdapter")
 
 
+def _escape_glob(text: str) -> str:
+    """Escape Redis MATCH pattern characters so ``text`` matches only itself."""
+    return "".join("\\" + char if char in "*?[]\\" else char for char in text)
+
+
 class RedisAdapter(CacheDBInterface):
     """Redis-backed cache adapter for session QA, trace storage, and coordination."""
 
@@ -493,6 +498,33 @@ class RedisAdapter(CacheDBInterface):
             error_msg = f"Unexpected error while deleting session from Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
+
+    async def list_session_ids(self, user_id: str) -> list[str]:
+        """Every session id with a QA, trace or session-context key for the user."""
+        prefixes = [
+            key_for(user_id, "")
+            for key_for in (self._session_key, self._agent_trace_key, self._session_context_key)
+        ]
+        session_ids: set[str] = set()
+        try:
+            # SCAN walks the whole keyspace whatever MATCH says, so one walk for all three kinds.
+            match = "*:" + _escape_glob(f"{user_id}:") + "*"
+            async for key in self.async_redis.scan_iter(match=match):
+                key = key.decode() if isinstance(key, bytes) else key
+                for prefix in prefixes:
+                    if key.startswith(prefix):
+                        session_ids.add(key[len(prefix) :])
+                        break
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while listing sessions: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while listing sessions from Redis: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        session_ids.discard("")
+        return list(session_ids)
 
     async def get_value(self, key: str) -> str | None:
         """Retrieve a raw string value stored under the given key, or None if absent."""

@@ -806,6 +806,23 @@ class SqlCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from error
 
+    async def list_session_ids(self, user_id: str) -> list[str]:
+        """Every session id with QA, trace or session-context rows for the user."""
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session:
+                session_ids: set[str] = set()
+                for table in (cache_qa_entries, cache_trace_entries, cache_session_context):
+                    rows = await session.execute(
+                        select(table.c.session_id).where(table.c.user_id == user_id).distinct()
+                    )
+                    session_ids.update(rows.scalars())
+                return list(session_ids)
+        except Exception as error:
+            error_msg = f"Unexpected error while listing sessions from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
     # --------------------------------------------------------------------- #
     # Agent traces
     # --------------------------------------------------------------------- #

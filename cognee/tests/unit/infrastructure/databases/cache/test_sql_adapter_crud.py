@@ -314,6 +314,21 @@ async def test_delete_session_does_not_touch_other_sessions(adapter):
     assert len(await adapter.get_all_qa_entries("u2", "s1")) == 1
 
 
+@pytest.mark.asyncio
+async def test_list_session_ids_lists_only_the_users_sessions(adapter):
+    """QA, trace and context rows all count; other users' sessions do not."""
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    await adapter.append_agent_trace_step(
+        "u1", "s2", trace_id="t1", origin_function="f", status="success"
+    )
+    await adapter.create_session_context_entry("u1", "s3", {"id": "c1", "kind": "context"})
+    await adapter.create_qa_entry("u1", "s1", "Q2", "C", "A", qa_id="id2")
+    await adapter.create_qa_entry("u2", "s4", "Q", "C", "A", qa_id="id3")
+
+    assert sorted(await adapter.list_session_ids("u1")) == ["s1", "s2", "s3"]
+    assert await adapter.list_session_ids("nobody") == []
+
+
 # --------------------------------------------------------------------------- #
 # Agent traces
 # --------------------------------------------------------------------------- #

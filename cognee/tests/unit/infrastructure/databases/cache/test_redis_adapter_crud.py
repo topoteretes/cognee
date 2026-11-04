@@ -1,6 +1,7 @@
 """Unit tests for RedisAdapter CRUD operations."""
 
 import asyncio
+import re
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -72,6 +73,23 @@ class _InMemoryRedisList:
         self.data.clear()
         self.ttls.clear()
         self.expire_calls.clear()
+
+    async def scan_iter(self, match: str):
+        """Redis MATCH with backslash escapes and ``*`` (all the adapter uses)."""
+        pattern, escaped = "", False
+        for char in match:
+            if escaped:
+                pattern += re.escape(char)
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == "*":
+                pattern += ".*"
+            else:
+                pattern += re.escape(char)
+        for key in list(self.data):
+            if re.fullmatch(pattern, key):
+                yield key.encode()
 
 
 @pytest.fixture
@@ -605,6 +623,22 @@ async def test_delete_session(adapter):
     assert ok is True
     assert await adapter.get_all_qa_entries("u1", "s1") == []
     assert await adapter.get_agent_trace_session("u1", "s1") == []
+
+
+@pytest.mark.asyncio
+async def test_list_session_ids_lists_only_the_users_sessions(adapter):
+    """QA, trace and context keys all count; another user's, even a prefix-alike, does not."""
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    await adapter.append_agent_trace_step(
+        "u1", "s:2", trace_id="t1", origin_function="f", status="success"
+    )
+    await adapter.create_session_context_entry("u1", "s3", {"id": "c1", "kind": "context"})
+    await adapter.create_qa_entry("u10", "s4", "Q", "C", "A", qa_id="id2")
+    await adapter.create_qa_entry("u*", "s5", "Q", "C", "A", qa_id="id3")
+
+    assert sorted(await adapter.list_session_ids("u1")) == ["s1", "s3", "s:2"]
+    # A glob character in the user id matches only itself.
+    assert await adapter.list_session_ids("u*") == ["s5"]
 
 
 @pytest.mark.asyncio

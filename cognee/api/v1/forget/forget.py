@@ -253,10 +253,13 @@ async def _forget_everything(user: Any) -> dict:
     - Sessions: the same rule as datasets. Every session the user owns, plus
       every session attributed to a dataset the user may delete, whoever ran
       it, goes entirely (cache content, Q&A vectors, dashboard and usage
-      rows, via ``delete_session``). Other users' sessions on datasets the
-      user cannot delete, the cache's shared key/value rows (locks) and the
-      usage logs are never touched: the cache is shared by every user and is
-      never pruned here.
+      rows, via ``delete_sessions``). The user's own sessions are read from
+      the cache as well as from ``session_records``, whose rows are written
+      best-effort; another user's session is found only through its row,
+      since its dataset attribution lives there. Other users' sessions on
+      datasets the user cannot delete, the cache's shared key/value rows
+      (locks) and the usage logs are never touched: the cache is shared by
+      every user and is never pruned here.
     - Search history (queries/results rows): yes — every user's rows on each
       deleted dataset, shared ones included (inside datasets.empty_dataset),
       plus every row this user owns, including rows saved without a dataset
@@ -264,23 +267,33 @@ async def _forget_everything(user: Any) -> dict:
       access control off). Other users' rows without a dataset stay
     """
     from cognee.api.v1.datasets.datasets import datasets
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
     from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.search.operations import delete_user_search_history
     from cognee.modules.session_lifecycle import (
-        list_sessions_for_dataset,
+        list_sessions_for_datasets,
         list_sessions_for_user,
     )
+    from cognee.modules.session_lifecycle.delete_session import delete_sessions
 
     user_datasets = await datasets.list_datasets(user=user)
     count = len(user_datasets)
 
-    # Resolve the sessions before the datasets go: the dataset half of the
-    # rule needs the rows that delete_all is about to remove.
-    deletable_datasets = await get_authorized_existing_datasets([], "delete", user)
-    session_pairs = list(await list_sessions_for_user(user.id))
-    for dataset in deletable_datasets:
-        session_pairs.extend(await list_sessions_for_dataset(dataset.id))
-    session_pairs = list(dict.fromkeys(session_pairs))
+    # Resolve the sessions before anything is deleted; nothing to list
+    # without session memory (CACHING=false).
+    session_manager = get_session_manager()
+    session_pairs: list[tuple[UUID, str]] = []
+    if session_manager.is_available:
+        deletable_datasets = await get_authorized_existing_datasets([], "delete", user)
+        session_pairs.extend(await list_sessions_for_user(user.id))
+        session_pairs.extend(
+            (user.id, session_id)
+            for session_id in await session_manager.list_session_ids(user_id=str(user.id))
+        )
+        session_pairs.extend(
+            await list_sessions_for_datasets([dataset.id for dataset in deletable_datasets])
+        )
+        session_pairs = list(dict.fromkeys(session_pairs))
 
     # Before the data, and not caught, as in empty_dataset: if it fails,
     # nothing is deleted yet and the forget can be retried.
@@ -296,7 +309,7 @@ async def _forget_everything(user: Any) -> dict:
     # Also before the data, and not caught: the dataset half of the session
     # rule finds its sessions only while the datasets exist, so a failure here
     # must leave them in place for the retry.
-    sessions_removed = await _forget_sessions(session_pairs)
+    sessions_removed = await delete_sessions(session_pairs) if session_pairs else 0
 
     await datasets.delete_all(user=user)
 
@@ -313,26 +326,6 @@ async def _forget_everything(user: Any) -> dict:
         "history_cleaned": True,
         "status": "success",
     }
-
-
-async def _forget_sessions(session_pairs: list[tuple[UUID, str]]) -> int:
-    """Delete each (owner id, session id) pair whole; return how many existed.
-
-    Nothing to do without session memory (``CACHING=false``): there is no
-    cache to delete from. Errors propagate: this runs before the datasets are
-    deleted, so a retried forget finds every remaining session again.
-    """
-    from cognee.infrastructure.session.get_session_manager import get_session_manager
-    from cognee.modules.session_lifecycle.delete_session import delete_session
-
-    if not session_pairs or not get_session_manager().is_available:
-        return 0
-
-    removed = 0
-    for owner_id, session_id in session_pairs:
-        if await delete_session(owner_id, session_id):
-            removed += 1
-    return removed
 
 
 async def _forget_dataset(dataset_ref: str | UUID, user: Any) -> dict:

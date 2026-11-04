@@ -943,11 +943,33 @@ class SessionManager:
         Returns True if deleted, False if session did not exist or cache unavailable.
         """
         session_id = self.resolve_session_id(session_id)
-        self._validate_session_params(user_id=user_id, session_id=session_id)
-        if not self.is_available:
-            logger.debug("SessionManager: cache unavailable, skipping delete_session")
-            return False
+        return (await self.delete_sessions([(user_id, session_id)]))[0]
 
+    async def delete_sessions(self, sessions: list[tuple[str, str]]) -> list[bool]:
+        """
+        Delete each (user id, session id) pair whole: cache content and Q&A vectors.
+
+        Returns one flag per pair, True if the session existed in the cache;
+        all False when the cache is unavailable. The Q&A vectors of every pair
+        go in one tag-removal call against the current vector store.
+        """
+        for user_id, session_id in sessions:
+            self._validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping delete_sessions")
+            return [False] * len(sessions)
+
+        existed = [
+            await self._delete_session_cache(user_id=user_id, session_id=session_id)
+            for user_id, session_id in sessions
+        ]
+        # Unconditionally: cache entries expire (session TTL) while their Q&A
+        # vectors, which hold the question and answer text, do not.
+        await delete_session_qa_vectors(sessions)
+        return existed
+
+    async def _delete_session_cache(self, *, user_id: str, session_id: str) -> bool:
+        """Delete one session's cache content; True if any of it existed."""
         # One-release cleanup for graph snapshots written by the removed
         # graph-to-session sync feature.
         graph_key = f"graph_knowledge:{user_id}:{session_id}"
@@ -977,11 +999,17 @@ class SessionManager:
         except Exception:
             logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
 
-        deleted = await self._cache.delete_session(
-            user_id=user_id,
-            session_id=session_id,
-        )
-        # Unconditionally: cache entries expire (session TTL) while their Q&A
-        # vectors, which hold the question and answer text, do not.
-        await delete_session_qa_vectors(user_id=user_id, session_id=session_id)
-        return deleted
+        return await self._cache.delete_session(user_id=user_id, session_id=session_id)
+
+    async def list_session_ids(self, *, user_id: str) -> list[str]:
+        """
+        Every session id the user has content for in the cache.
+
+        Reads the cache itself, not the ``session_records`` dashboard rows,
+        which are written best-effort. Raises on cache errors: a caller that
+        deletes what this lists must not read a failure as "no sessions".
+        """
+        self._validate_session_params(user_id=user_id)
+        if not self.is_available:
+            return []
+        return await self._cache.list_session_ids(user_id)

@@ -60,8 +60,8 @@ def _patches(manager, session_pairs_by_owner, dataset_pairs, deletable_datasets)
     async def list_for_user(user_id):
         return session_pairs_by_owner.get(user_id, [])
 
-    async def list_for_dataset(dataset_id):
-        return dataset_pairs.get(dataset_id, [])
+    async def list_for_datasets(dataset_ids):
+        return [pair for dataset_id in dataset_ids for pair in dataset_pairs.get(dataset_id, [])]
 
     return [
         patch.object(datasets_api, "list_datasets", AsyncMock(return_value=deletable_datasets)),
@@ -75,7 +75,7 @@ def _patches(manager, session_pairs_by_owner, dataset_pairs, deletable_datasets)
             AsyncMock(return_value={"queries_deleted": 0, "results_deleted": 0}),
         ),
         patch("cognee.modules.session_lifecycle.list_sessions_for_user", list_for_user),
-        patch("cognee.modules.session_lifecycle.list_sessions_for_dataset", list_for_dataset),
+        patch("cognee.modules.session_lifecycle.list_sessions_for_datasets", list_for_datasets),
         # The package re-exports the function under its submodule's name, so a
         # dotted target fails on Python 3.10: patch the submodule object itself.
         patch.object(
@@ -93,7 +93,7 @@ def _patches(manager, session_pairs_by_owner, dataset_pairs, deletable_datasets)
         ),
         patch(
             "cognee.modules.session_lifecycle.delete_session._delete_session_rows",
-            AsyncMock(return_value=0),
+            AsyncMock(return_value=set()),
         ),
         patch(
             "cognee.modules.session_lifecycle.delete_session.delete_session_qa_vectors",
@@ -199,3 +199,63 @@ async def test_forget_everything_raises_before_deleting_datasets_when_a_session_
 
     assert result["status"] == "success"
     assert await _session_counts(cache, USER_B, "b_shared") == (0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_forget_everything_deletes_the_callers_sessions_that_have_no_dashboard_row(cache):
+    """session_records is written best-effort, and legacy sessions have no row at all:
+    the caller's own sessions are read from the cache too, so none survives."""
+    await _seed_session(cache, USER_A, "a_no_row")
+    await _seed_session(cache, USER_B, "b_no_row")
+    manager = SessionManager(cache)
+    patches = _patches(
+        manager,
+        session_pairs_by_owner={},
+        dataset_pairs={},
+        deletable_datasets=[],
+    )
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        result = await forget_module._forget_everything(SimpleNamespace(id=USER_A))
+
+    assert result["sessions_removed"] == 1
+    assert await _session_counts(cache, USER_A, "a_no_row") == (0, 0, 0)
+    # Another user's session is reached only through its dataset row, never the cache listing.
+    assert await _session_counts(cache, USER_B, "b_no_row") == (1, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_forget_everything_deletes_every_session_in_one_batch(cache):
+    """Each store is detagged once for all sessions, not once per session."""
+    for session_id in ("a1", "a2", "a3"):
+        await _seed_session(cache, USER_A, session_id)
+    await _seed_session(cache, USER_B, "b_shared")
+    manager = SessionManager(cache)
+    patches = _patches(
+        manager,
+        session_pairs_by_owner={USER_A: [(USER_A, "a1")]},
+        dataset_pairs={DATASET_SHARED: [(USER_B, "b_shared")]},
+        deletable_datasets=[SimpleNamespace(id=DATASET_SHARED)],
+    )
+    global_detag = AsyncMock()
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        stack.enter_context(
+            patch(
+                "cognee.infrastructure.session.session_manager.delete_session_qa_vectors",
+                global_detag,
+            )
+        )
+        result = await forget_module._forget_everything(SimpleNamespace(id=USER_A))
+
+    assert result["sessions_removed"] == 4
+    global_detag.assert_awaited_once()
+    detagged = set(global_detag.await_args.args[0])
+    assert detagged == {
+        (str(USER_A), "a1"),
+        (str(USER_A), "a2"),
+        (str(USER_A), "a3"),
+        (str(USER_B), "b_shared"),
+    }
