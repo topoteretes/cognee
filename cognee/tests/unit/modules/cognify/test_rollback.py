@@ -496,6 +496,180 @@ async def test_graph_provenance_rollback_keeps_completed_documents(monkeypatch):
     assert reset_session.committed is True
 
 
+def _entry(run_info_cls, pipeline_run_id, dataset_id, data_id, **fields):
+    return {
+        "run_info": run_info_cls(
+            pipeline_run_id=pipeline_run_id,
+            dataset_id=dataset_id,
+            dataset_name="some-dataset",
+            **fields,
+        ),
+        "data_id": data_id,
+    }
+
+
+def _stamped_record(data_id, dataset_id):
+    return SimpleNamespace(
+        id=data_id,
+        pipeline_status={
+            "cognify_pipeline": {str(dataset_id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED}
+        },
+    )
+
+
+def _install_ledger_path(monkeypatch, engine, graph_deletes, call_log):
+    async def _delete_from_graph_and_vector(nodes, edges, *_args, **_kwargs):
+        call_log.append("graph_delete")
+        graph_deletes.append((nodes, edges))
+
+    async def _no_legacy(_rows):
+        return []
+
+    async def _get_unified_engine():
+        return SimpleNamespace(supports_graph_provenance_delete=lambda: False)
+
+    monkeypatch.setattr(rollback_module, "get_unified_engine", _get_unified_engine)
+    monkeypatch.setattr(rollback_module, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(rollback_module, "multi_user_support_possible", lambda: False)
+    monkeypatch.setattr(rollback_module, "has_nodes_in_legacy_ledger", _no_legacy)
+    monkeypatch.setattr(rollback_module, "has_edges_in_legacy_ledger", _no_legacy)
+    monkeypatch.setattr(
+        rollback_module, "delete_from_graph_and_vector", _delete_from_graph_and_vector
+    )
+    monkeypatch.setattr(rollback_module.orm_attributes, "flag_modified", lambda *_args: None)
+
+
+@pytest.mark.asyncio
+async def test_ledger_rollback_does_not_keep_a_stamped_item_this_run_errored(monkeypatch):
+    """A stamp alone is not proof this run finished the item (an earlier run may
+    have stamped it; the non-incremental path reprocesses it and never stamps).
+    Stamped but reported errored by this run: its rows go and its stamp is cleared."""
+    pipeline_run_id, dataset_id, data_id = uuid4(), uuid4(), uuid4()
+    node = SimpleNamespace(id=uuid4(), slug="n-stale", data_id=data_id)
+    edge = SimpleNamespace(id=uuid4(), slug="e-stale", data_id=data_id)
+    record = _stamped_record(data_id, dataset_id)
+
+    call_log, graph_deletes = [], []
+    session_discovery = _FakeSession(
+        [
+            _FakeExecuteResult([node]),
+            _FakeExecuteResult([edge]),
+            _FakeExecuteResult([record]),  # completed-status lookup: stamped
+            _FakeExecuteResult([]),  # shared node slugs
+            _FakeExecuteResult([]),  # shared edge slugs
+        ]
+    )
+    session_mutation = _FakeSession(
+        [_FakeExecuteResult(), _FakeExecuteResult(), _FakeExecuteResult([record])],
+        call_log=call_log,
+    )
+    _install_ledger_path(
+        monkeypatch, _FakeEngine([session_discovery, session_mutation]), graph_deletes, call_log
+    )
+
+    await rollback_module.cognify_rollback_handler(
+        pipeline_run_id=pipeline_run_id,
+        dataset=SimpleNamespace(id=dataset_id),
+        data_ingestion_info=[
+            _entry(PipelineRunErrored, pipeline_run_id, dataset_id, data_id, payload="boom")
+        ],
+    )
+
+    assert call_log == ["graph_delete", "relational_delete", "relational_delete"]
+    assert graph_deletes == [([node], [edge])]
+    assert str(dataset_id) not in record.pipeline_status["cognify_pipeline"]
+    assert session_mutation.committed is True
+
+
+@pytest.mark.asyncio
+async def test_ledger_rollback_keeps_a_stamped_item_this_run_completed(monkeypatch):
+    """Stamped and reported completed by this run: nothing of it is removed."""
+    pipeline_run_id, dataset_id, data_id = uuid4(), uuid4(), uuid4()
+    node = SimpleNamespace(id=uuid4(), slug="n-done", data_id=data_id)
+    edge = SimpleNamespace(id=uuid4(), slug="e-done", data_id=data_id)
+    record = _stamped_record(data_id, dataset_id)
+
+    call_log, graph_deletes = [], []
+    session_discovery = _FakeSession(
+        [_FakeExecuteResult([node]), _FakeExecuteResult([edge]), _FakeExecuteResult([record])]
+    )
+    session_mutation = _FakeSession([], call_log=call_log)
+    _install_ledger_path(
+        monkeypatch, _FakeEngine([session_discovery, session_mutation]), graph_deletes, call_log
+    )
+
+    await rollback_module.cognify_rollback_handler(
+        pipeline_run_id=pipeline_run_id,
+        dataset=SimpleNamespace(id=dataset_id),
+        data_ingestion_info=[_entry(PipelineRunCompleted, pipeline_run_id, dataset_id, data_id)],
+    )
+
+    assert call_log == []
+    assert graph_deletes == []
+    assert record.pipeline_status["cognify_pipeline"][str(dataset_id)] == (
+        DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+    )
+    assert session_mutation.committed is True
+
+
+@pytest.mark.asyncio
+async def test_graph_provenance_rollback_does_not_keep_a_stamped_item_this_run_errored(
+    monkeypatch,
+):
+    """Same rule on the graph-provenance path: stamped but errored in this run is
+    handed to the unified rollback as not kept, and its stamp is cleared."""
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
+
+    pipeline_run_id, dataset_id, data_id = uuid4(), uuid4(), uuid4()
+    record = _stamped_record(data_id, dataset_id)
+    rollback_calls = []
+
+    class _FakeGraph:
+        async def find_node_source_refs_by_pipeline_run(self, _run):
+            return {"n-stale": [make_source_ref_key(dataset_id, data_id)]}
+
+        async def find_edge_source_refs_by_pipeline_run(self, _run):
+            return {}
+
+    async def _rollback(run, *, keep_data_ids=None):
+        rollback_calls.append((run, keep_data_ids))
+
+    fake_unified = SimpleNamespace(
+        supports_graph_provenance_delete=lambda: True,
+        graph=_FakeGraph(),
+        rollback_by_pipeline_run_id=_rollback,
+    )
+    lookup_session = _FakeSession([_FakeExecuteResult([record])])
+    reset_session = _FakeSession([_FakeExecuteResult([record])])
+
+    async def _get_unified_engine():
+        return fake_unified
+
+    async def _stores_provenance_in_graph(_graph):
+        return True
+
+    monkeypatch.setattr(rollback_module, "get_unified_engine", _get_unified_engine)
+    monkeypatch.setattr(rollback_module, "stores_provenance_in_graph", _stores_provenance_in_graph)
+    monkeypatch.setattr(
+        rollback_module,
+        "get_relational_engine",
+        lambda: _FakeEngine([lookup_session, reset_session]),
+    )
+    monkeypatch.setattr(rollback_module.orm_attributes, "flag_modified", lambda *_args: None)
+
+    await rollback_module.cognify_rollback_handler(
+        pipeline_run_id=pipeline_run_id,
+        dataset=SimpleNamespace(id=dataset_id),
+        data_ingestion_info=[
+            _entry(PipelineRunErrored, pipeline_run_id, dataset_id, data_id, payload="boom")
+        ],
+    )
+
+    assert rollback_calls == [(str(pipeline_run_id), set())]
+    assert str(dataset_id) not in record.pipeline_status["cognify_pipeline"]
+    assert reset_session.committed is True
+
+
 def test_without_kept_refs_drops_only_the_kept_documents_refs():
     from cognee.infrastructure.databases.provenance import make_source_ref_key
     from cognee.infrastructure.databases.unified.unified_store_engine import _without_kept_refs
