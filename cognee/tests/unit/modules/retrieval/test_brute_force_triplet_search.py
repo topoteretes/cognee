@@ -175,6 +175,62 @@ async def test_other_search_paths_keep_existing_vector_retrieval(mode):
     if mode != "unsupported":
         engine.score_by_ids.assert_not_awaited()
 
+    # Only the typed-scope fallback drops the NodeSet filter from the vector search.
+    searched_names = [call.kwargs["node_name"] for call in engine.search.await_args_list]
+    if mode in ("unsupported", "unscoped"):
+        assert searched_names == [None] * len(searched_names)
+    else:
+        assert ["table"] in searched_names
+
+
+@pytest.mark.asyncio
+async def test_typed_scope_fallback_scans_unfiltered_and_scopes_through_projection():
+    """An engine without ``score_by_ids`` still scores every node of a typed scope.
+
+    The vector ``node_name`` filter means NodeSet membership, which an Entity scope
+    never has: forwarding it matches nothing and every scoped node is penalised.
+    The fallback scans unfiltered and leaves the scoping to the graph projection.
+    """
+    graph = CogneeGraph()
+    first, second = Node("first"), Node("second")
+    graph.add_node(first)
+    graph.add_node(second)
+    graph.add_edge(Edge(first, second, {"relationship_type": "has_value"}))
+    engine = AsyncMock()
+    engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
+    engine.score_by_ids = MethodType(VectorDBInterface.score_by_ids, object())
+
+    async def search(collection_name, **kwargs):
+        if collection_name == "Entity_name":
+            return [MockScoredResult("first", 0.2), MockScoredResult("outside", 0.1)]
+        return []
+
+    engine.search = AsyncMock(side_effect=search)
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=graph,
+        ) as project,
+    ):
+        results = await brute_force_triplet_search(
+            query="query", node_type=SchemaTable, node_name=["table"], feedback_influence=0.0
+        )
+
+    for call in engine.search.await_args_list:
+        assert call.kwargs["node_name"] is None
+        assert call.kwargs["limit"] is None
+    project.assert_awaited_once()
+    assert project.await_args.kwargs["node_type"] is SchemaTable
+    assert project.await_args.kwargs["node_name"] == ["table"]
+    assert results == graph.edges
+    assert first.attributes["vector_distance"] == [0.2]
+    assert second.attributes["vector_distance"] == [6.5]
+    assert "outside" not in graph.nodes
+
 
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_empty_query():

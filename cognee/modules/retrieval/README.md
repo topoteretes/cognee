@@ -59,8 +59,11 @@ scores only its node and edge-type vectors, without an additional candidate cuto
 Unembedded graph members keep the usual missing-distance penalty. Neptune uses
 exact `CosineDistance` through `neptune.algo.vectors.distance.byEmbedding`, rather
 than its ANN top-k search. NodeSet, unscoped, vector-seeded neighbourhood searches
-and supplied memory fragments retain their existing paths. Community vector
-adapters without ID scoring also retain their existing path.
+and supplied memory fragments retain their existing paths. A vector adapter
+without `score_by_ids` scans its collections unfiltered for such a scope and maps
+the distances onto the projected scope, so it ranks the same triplets, only slower;
+the vector `node_name` filter means NodeSet membership and is never applied to a
+typed scope, because it would match nothing and penalise every scoped node.
 
 ## Adding a retriever
 
