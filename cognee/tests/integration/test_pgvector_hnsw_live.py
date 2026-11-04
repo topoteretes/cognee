@@ -147,6 +147,35 @@ async def test_collections_get_an_index_the_search_uses(dimensions, cleanup):
     assert f'Index Scan using "{hnsw_index_name(collection)}"' in plan_text, plan_text
 
 
+async def test_a_deferred_index_is_built_after_the_load(monkeypatch, cleanup):
+    from cognee.infrastructure.databases.vector.config import get_vectordb_config
+
+    monkeypatch.setenv("PGVECTOR_DEFER_HNSW_INDEX", "true")
+    get_vectordb_config.cache_clear()
+    try:
+        adapter = _adapter(2048)
+    finally:
+        monkeypatch.delenv("PGVECTOR_DEFER_HNSW_INDEX")
+        get_vectordb_config.cache_clear()
+    collection = f"HnswDeferred_{uuid4().hex[:8]}_text"
+    cleanup.append((adapter, f'DROP TABLE IF EXISTS "{collection}"'))
+
+    await _fill(adapter, collection, 120)
+    assert await _index_names(adapter, collection) == []
+    # Unindexed, the collection is still searched, by an exact scan.
+    results = await adapter.search(
+        collection, query_vector=adapter.embedding_engine.vector("point 7"), limit=5
+    )
+    assert results[0].score == pytest.approx(0, abs=1e-3)
+
+    built = await adapter.compact()
+    assert collection in built["hnsw_index_built"]
+    assert built["hnsw_index_failed"] == []
+    assert await _index_names(adapter, collection) == [hnsw_index_name(collection)]
+    # Built once: the next run's compaction finds nothing left to index.
+    assert collection not in (await adapter.compact()).get("hnsw_index_built", [])
+
+
 async def test_a_search_without_limit_returns_every_row(cleanup):
     adapter = _adapter(8)
     collection = f"HnswLive_{uuid4().hex[:8]}_text"

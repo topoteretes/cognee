@@ -165,12 +165,13 @@ class _Engine:
         self.log.append("COMMIT")
 
 
-def _adapter_with(engine):
+def _adapter_with(engine, defer_hnsw_index=False):
     from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 
     adapter = PGVectorAdapter.__new__(PGVectorAdapter)
     adapter.engine = engine
     adapter._pgvector_version_cache = None
+    adapter._defer_hnsw_index = defer_hnsw_index
     return adapter
 
 
@@ -206,3 +207,54 @@ async def test_migration_runs_a_serial_build_with_raised_memory():
     engine = _Engine()
     await pgvector_hnsw_indexes.migrate(SimpleNamespace(vector_engine=_adapter_with(engine)))
     _assert_serial_build_in_raised_memory(_build_transaction(engine.log))
+
+
+@pytest.mark.asyncio
+async def test_compact_builds_nothing_unless_indexes_are_deferred():
+    # Indexes built with the table: the end-of-run hook does not touch the database.
+    engine = _Engine()
+    assert await _adapter_with(engine).compact() == {}
+    assert engine.log == []
+
+
+@pytest.mark.asyncio
+async def test_deferred_indexes_are_built_at_compaction():
+    engine = _Engine()
+    result = await _adapter_with(engine, defer_hnsw_index=True).compact()
+    assert result == {"hnsw_index_built": ["Entity_name"], "hnsw_index_failed": []}
+    # Only collections without an HNSW index are listed, so an indexed store costs one
+    # catalog query and no build.
+    listing = engine.log[0]
+    assert "pg_attribute" in listing and "NOT EXISTS" in listing and "'hnsw'" in listing
+    _assert_serial_build_in_raised_memory(_build_transaction(engine.log))
+
+
+@pytest.mark.asyncio
+async def test_compact_of_one_collection_builds_only_that_one():
+    engine = _Engine()
+    adapter = _adapter_with(engine, defer_hnsw_index=True)
+    assert await adapter.compact("Other_name") == {}
+    assert "BEGIN" not in engine.log
+
+
+@pytest.mark.asyncio
+async def test_compact_never_raises():
+    # The hook runs after the run is recorded complete; a failure must not surface as
+    # a failed cognify.
+    from sqlalchemy.exc import OperationalError
+
+    class _Broken(_Engine):
+        @asynccontextmanager
+        async def connect(self):
+            raise OperationalError("SELECT", {}, Exception("connection lost"))
+            yield
+
+    assert await _adapter_with(_Broken(), defer_hnsw_index=True).compact() == {}
+
+
+def test_deferral_is_read_from_the_environment(monkeypatch):
+    from cognee.infrastructure.databases.vector.config import VectorConfig
+
+    assert VectorConfig().pgvector_defer_hnsw_index is False
+    monkeypatch.setenv("PGVECTOR_DEFER_HNSW_INDEX", "true")
+    assert VectorConfig().pgvector_defer_hnsw_index is True

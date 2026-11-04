@@ -110,6 +110,20 @@ WHERE n.nspname = current_schema()
   AND t.typname = 'vector'
   AND NOT a.attisdropped
 """
+# The same collections, limited to those with no HNSW index yet: what a deferred build
+# (``PGVectorAdapter.compact``) still has to index.
+_UNINDEXED_VECTOR_COLLECTIONS_SQL = (
+    _VECTOR_COLLECTIONS_SQL
+    + """
+  AND NOT EXISTS (
+    SELECT 1
+    FROM pg_index i
+    JOIN pg_class ic ON ic.oid = i.indexrelid
+    JOIN pg_am am ON am.oid = ic.relam
+    WHERE i.indrelid = c.oid AND am.amname = 'hnsw'
+  )
+"""
+)
 # An HNSW build is much slower once its graph outgrows maintenance_work_mem (12k
 # 3072-dimensional rows on a 1 CU Neon compute: 22.6 s at its 67 MB default, 12.4 s at
 # 256 MB). Raised for the build's own transaction only, and never lowered.
@@ -269,6 +283,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         relational_db = get_relational_engine()
         relational_config = get_relational_config()
         vector_config = get_vectordb_config()
+        # PGVECTOR_DEFER_HNSW_INDEX: collections are created without their HNSW index,
+        # and ``compact`` (run at the end of every cognify run) builds the missing ones.
+        self._defer_hnsw_index: bool = bool(vector_config.pgvector_defer_hnsw_index)
 
         # Resolve effective pool_args for any new PGVector engine we create:
         # 1. Explicit VECTOR_POOL_ARGS always wins.
@@ -568,11 +585,19 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                             )
                         # Same transaction as the table: if the index fails, the table
                         # rolls back with it and the retry starts over, instead of the
-                        # retry finding the table and leaving it unindexed.
-                        index_statement = hnsw_index_statement(
-                            collection_name,
-                            vector_size,
-                            await self._pgvector_version(connection),
+                        # retry finding the table and leaving it unindexed. Deferred, the
+                        # table is created empty of it and ``compact`` builds it once the
+                        # run's rows are in: an index built with the table is updated by
+                        # every insert (cognee 1.6.6, a 3 MB book, 3072 dimensions on Neon:
+                        # storage 316 s with the index, 196 s plus a 30 s build deferred).
+                        index_statement = (
+                            None
+                            if self._defer_hnsw_index
+                            else hnsw_index_statement(
+                                collection_name,
+                                vector_size,
+                                await self._pgvector_version(connection),
+                            )
                         )
                         if index_statement is not None:
                             await connection.execute(text(index_statement))
@@ -1350,6 +1375,48 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self._metadata.clear()
         await self.delete_database()
 
+    async def compact(self, collection_name: str | None = None) -> dict:
+        """Build the HNSW indexes ``create_collection`` deferred (``PGVECTOR_DEFER_HNSW_INDEX``).
+
+        Called once at the end of every cognify run (see ``compact_vector_store``), after
+        the run is recorded complete. One build over the loaded rows replaces the index
+        update every insert would otherwise pay. Until it ends, the dataset's new
+        collections are searched by an exact scan, and its writes to a table wait for
+        that table's build (``CREATE INDEX`` holds a lock that blocks writes, not reads).
+
+        Only collections without an HNSW index are built, so a store that has them all
+        costs one catalog query. A no-op when indexes are not deferred. Never raises: a
+        failed build is logged, and the collection stays searchable by a full scan and is
+        retried at the end of the next run.
+        """
+        if not self._defer_hnsw_index:
+            return {}
+        try:
+            async with self.engine.connect() as connection:
+                collections = (
+                    await connection.execute(text(_UNINDEXED_VECTOR_COLLECTIONS_SQL))
+                ).all()
+                pgvector_version = await self._pgvector_version(connection)
+        except SQLAlchemyError as error:
+            logger.warning(
+                "Could not list the collections missing an HNSW index (%s): %s",
+                type(error).__name__,
+                error,
+            )
+            return {}
+        if collection_name is not None:
+            collections = [row for row in collections if row[0] == collection_name]
+        if not collections:
+            return {}
+        indexed, failed = await self._build_hnsw_indexes(collections, pgvector_version)
+        if indexed or failed:
+            logger.info(
+                "Deferred HNSW build: %d collection(s) indexed, %d failed",
+                len(indexed),
+                len(failed),
+            )
+        return {"hnsw_index_built": indexed, "hnsw_index_failed": failed}
+
     async def run_migrations(self):
         """Build the HNSW index of any collection that is missing it.
 
@@ -1365,6 +1432,17 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             collections = (await connection.execute(text(_VECTOR_COLLECTIONS_SQL))).all()
             pgvector_version = await self._pgvector_version(connection)
 
+        indexed, failed = await self._build_hnsw_indexes(collections, pgvector_version)
+        return {"hnsw_index_checked": indexed, "hnsw_index_failed": failed}
+
+    async def _build_hnsw_indexes(
+        self, collections, pgvector_version: PgvectorVersion | None
+    ) -> tuple[list[str], list[str]]:
+        """Build the index of each ``(table_name, dimensions)``, one transaction each.
+
+        Returns the tables indexed and the tables whose build failed; a failure is
+        logged and the rest are still built.
+        """
         indexed, failed = [], []
         for table_name, dimensions in collections:
             statement = hnsw_index_statement(table_name, dimensions, pgvector_version)
@@ -1386,9 +1464,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 failed.append(table_name)
                 logger.warning(
                     "Could not build the HNSW index on %s (%s); it stays searchable by a "
-                    "full scan and is retried on the next cognee version change: %s",
+                    "full scan and is retried later: %s",
                     table_name,
                     type(error).__name__,
                     error,
                 )
-        return {"hnsw_index_checked": indexed, "hnsw_index_failed": failed}
+        return indexed, failed

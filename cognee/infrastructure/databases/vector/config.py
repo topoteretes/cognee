@@ -23,6 +23,9 @@ class VectorConfig(BaseSettings):
     - vector_db_name: The name of the vector database.
     - vector_db_key: The key for accessing the vector database.
     - vector_db_provider: The provider for the vector database.
+    - pgvector_defer_hnsw_index: Create pgvector collections without their HNSW index and
+      build the missing indexes once at the end of each cognify run (see
+      ``PGVectorAdapter.compact``).
     """
 
     vector_db_url: str = ""
@@ -36,6 +39,8 @@ class VectorConfig(BaseSettings):
     vector_db_host: str = ""
     vector_db_subprocess_enabled: bool = True
     vector_pool_args: str | None = None
+    # PGVector: build HNSW indexes after each cognify run instead of with the table.
+    pgvector_defer_hnsw_index: bool = False
 
     model_config = SettingsConfigDict(extra="allow")
 
