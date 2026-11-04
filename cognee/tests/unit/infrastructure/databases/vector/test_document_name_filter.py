@@ -34,6 +34,9 @@ except ModuleNotFoundError:
     HAS_PGVECTOR = False
 
 try:
+    # The adapter imports pyturso lazily, so the runtime itself decides availability.
+    import turso
+
     from cognee.infrastructure.databases.vector.turso.TursoVectorAdapter import TursoVectorAdapter
 
     HAS_TURSO = True
