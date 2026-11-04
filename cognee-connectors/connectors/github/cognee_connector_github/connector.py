@@ -270,6 +270,10 @@ class GithubConnector(Connector):
             # the installation id, the immutable identity on the credential —
             # an account login is display data GitHub lets an org rename.
             dataset_name=dataset_name_for(self.provider, credential.provider_account_id),
+            # A label for the host: the items are repositories. cognee's
+            # remember() ignores content_type="code"; the host passes
+            # codegraph_config={"treat_as_repository": True, "include_documents":
+            # False, "repo_credentials": credential} instead (see cognee_host/sync.py).
             content_type="code",
             items=[app_auth.clone_url(name) for name in full_names],
             # The full names, positionally matching ``items`` — what a picker

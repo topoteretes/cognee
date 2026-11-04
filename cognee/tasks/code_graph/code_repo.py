@@ -424,11 +424,26 @@ async def resolve_declared_repositories(
     items = data if isinstance(data, list) else [data]
     non_specs = [item for item in items if not isinstance(item, (str, Path))]
     if non_specs or not items:
-        raise IngestionError(
-            message="codegraph_config treat_as_repository expects repository paths or git "
+        raise ValueError(
+            "codegraph_config treat_as_repository expects repository paths or git "
             "URLs as data (a single spec or a list of them); got "
             f"{', '.join(sorted({type(item).__name__ for item in non_specs})) or 'nothing'}. "
             "Drop treat_as_repository to ingest file uploads or text normally."
+        )
+    # A string that is neither a git remote nor a directory (a note, a file
+    # path) is a caller mistake, not a repository that failed to resolve.
+    not_a_repository = next(
+        (
+            item
+            for item in items
+            if not is_remote_repo(item) and not Path(item).expanduser().is_dir()
+        ),
+        None,
+    )
+    if not_a_repository is not None:
+        raise ValueError(
+            f"codegraph_config treat_as_repository: {str(not_a_repository)[:120]!r} is not a "
+            "repository path or git URL. Drop treat_as_repository to ingest it normally."
         )
 
     # Local specs are read from this machine's filesystem, so they take the
@@ -500,7 +515,7 @@ async def extract_code_repo_graph(
     down so every code node -- CodeRepository included -- carries it too.
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
-    from cognee.tasks.code_graph.cluster import load_dataset_cluster
+    from cognee.tasks.code_graph.cluster import cluster_member_error, load_dataset_cluster
     from cognee.tasks.code_graph.extract_code_graph import (
         add_code_graph_data_points,
         add_code_graph_edges,
@@ -526,6 +541,12 @@ async def extract_code_repo_graph(
             )
 
         if await load_dataset_cluster(ctx, index_vectors=index_vectors):
+            # Loaded as a cluster member. A member whose load failed under
+            # per-item isolation is errored here, by its own row, so the row is
+            # not stamped and the others are.
+            member_error = cluster_member_error(ctx, data_item.id)
+            if member_error is not None:
+                raise member_error
             continue
 
         node_set = code_repo_node_set(data_item)

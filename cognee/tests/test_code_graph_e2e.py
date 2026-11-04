@@ -517,10 +517,11 @@ async def main():
 
         second_repo_path = _copy_fixture(os.path.join(scratch_root, "second"), name="second_repo")
         result = await _remember_repo(second_repo_path)
-        # The cognify run covers the dataset: the first repository is reported
-        # too, skipped as already built, next to the one this call stored.
-        _assert_repository_items(result, 2)
-        (second_data_id,) = [item["id"] for item in result.items if item["id"] != first_data_id]
+        # The result describes this call: the first repository, rebuilt as a
+        # cluster member but not stored by this call, is not listed.
+        _assert_repository_items(result, 1)
+        second_data_id = result.items[0]["id"]
+        assert second_data_id != first_data_id
 
         data_rows = await datasets.list_data(remember_dataset.id, user=user)
         assert {str(row.id) for row in data_rows} == {first_data_id, second_data_id}, (

@@ -43,6 +43,13 @@ def executor(monkeypatch):
         add_module, "resolve_dlt_sources", AsyncMock(side_effect=lambda data, **kw: (data, None))
     )
     monkeypatch.setattr(add_module, "refuse_changed_existing_documents", AsyncMock())
+    # add() resolves directories and repository URLs ahead of the run; a real
+    # resolve would clone the URL. The run's own resolve is stubbed with it.
+    monkeypatch.setattr(
+        add_module,
+        "resolve_data_directories",
+        AsyncMock(side_effect=lambda data, **kw: data if isinstance(data, list) else [data]),
+    )
     run = AsyncMock(return_value=None)
     monkeypatch.setattr(add_module, "get_pipeline_executor", lambda **kwargs: run)
     return run
@@ -65,12 +72,10 @@ async def test_the_branch_reaches_run_tasks_and_the_add_task(executor):
 
 
 @pytest.mark.asyncio
-async def test_the_branch_reaches_the_early_resolve_of_a_codegraph_config_add(
-    executor, monkeypatch
-):
-    # A codegraph_config add resolves (and clones) before the pipeline runs; the
-    # pipeline's own resolve then passes the items through, so this call is the
-    # only one that can clone the branch.
+async def test_the_branch_reaches_the_early_resolve_of_an_add(executor, monkeypatch):
+    # add() resolves (and clones) before the pipeline runs, with the call's
+    # repository options; the pipeline's own resolve then passes the items
+    # through, so this call is the only one that can clone the branch.
     early = AsyncMock(return_value=["resolved"])
     monkeypatch.setattr(add_module, "resolve_data_directories", early)
 

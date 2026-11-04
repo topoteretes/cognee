@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, WithJsonSchema
 
 from cognee import __version__ as cognee_version
+from cognee.api.codegraph_config_field import parse_codegraph_config_field
 from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
 from cognee.exceptions import CogneeApiError
 from cognee.memory import FeedbackEntry, QAEntry, SkillRunEntry, TraceEntry
@@ -16,7 +17,7 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
-from cognee.tasks.code_graph.config import requests_codegraph_options, validate_codegraph_config
+from cognee.tasks.code_graph.config import requests_codegraph_options
 from cognee.tasks.ingestion.data_item import (
     pair_labels_with_data,
     parse_external_metadata,
@@ -106,35 +107,6 @@ async def _import_cogx_archives(
             status_code=409,
             content={"error": "An error occurred during COGX archive import."},
         )
-
-
-def _parse_codegraph_config(snake_case: str | None, camel_case: str | None) -> dict:
-    """The validated ``codegraph_config`` of a request, from either spelling of the field.
-
-    An empty value (Swagger UI submits untouched fields as "") is no config. The
-    JSON must be an object; it is validated like the SDK argument, and every
-    failure is a 400 naming the problem.
-    """
-    if snake_case and camel_case and snake_case.strip() != camel_case.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="codegraph_config and codegraphConfig are the same field; send one of them.",
-        )
-    raw = (snake_case or camel_case or "").strip()
-    if not raw:
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as error:
-        raise HTTPException(
-            status_code=400, detail=f"codegraph_config is not valid JSON: {error}"
-        ) from error
-    if not isinstance(parsed, dict):
-        raise HTTPException(status_code=400, detail="codegraph_config must be a JSON object.")
-    try:
-        return dict(validate_codegraph_config(parsed))
-    except (TypeError, ValueError) as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 def get_remember_router() -> APIRouter:
@@ -414,8 +386,11 @@ def get_remember_router() -> APIRouter:
         ## Error Codes
         - **400 Bad Request**: Neither datasetId nor datasetName provided, unsupported
           content_type, invalid graph_model JSON/schema, an invalid codegraph_config
-          (not a JSON object, an unknown key, a flag that is not a boolean), or
-          codegraph_config / index_vectors with session_id or content_type
+          (not a JSON object, an unknown key, a flag that is not a boolean),
+          codegraph_config / index_vectors with session_id or content_type, a file
+          upload with the removed content_type="code", or a server-local repository
+          path with treat_as_repository (or content_type="code") while
+          ACCEPT_LOCAL_FILE_PATH=false
         - **409 Conflict**: Error during processing
         """
         # Swagger UI submits an untouched file list as one blank part; treat it
@@ -440,14 +415,25 @@ def get_remember_router() -> APIRouter:
 
         # content_type='code' was removed (SDK-793): a repository in raw_data is
         # ordinary data. Clients still sending it keep working: the value is
-        # ignored and the request is normal ingestion.
-        if content_type == "code":
+        # ignored and the request is normal ingestion. Its request contract
+        # stays: the payload is raw_data repository specs, never uploads.
+        legacy_code_content_type = content_type == "code"
+        if legacy_code_content_type:
             logger.warning(
                 "POST /remember: content_type='code' is deprecated and ignored; the request "
                 "is normal ingestion. Send repository specs in raw_data without it, with "
                 "codegraph_config for the repository options."
             )
             content_type = None
+            if data:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "content_type='code' does not accept file uploads — pass repository "
+                        "paths or git URLs via 'raw_data'. To ingest individual code "
+                        "files, upload them under their real filename without content_type."
+                    ),
+                )
 
         # String inputs join the uploads as one item list, uploads first. Drop
         # empty entries — Swagger UI submits untouched array items as "". The
@@ -530,7 +516,7 @@ def get_remember_router() -> APIRouter:
                 ),
             )
 
-        parsed_codegraph_config = _parse_codegraph_config(codegraph_config, codegraphConfig)
+        parsed_codegraph_config = parse_codegraph_config_field(codegraph_config, codegraphConfig)
         if index_vectors:
             # The deprecated spelling folds into the dict; an explicit key wins.
             logger.warning(
@@ -548,6 +534,29 @@ def get_remember_router() -> APIRouter:
                     "ingestion — remove session_id and content_type to use it."
                 ),
             )
+
+        # Local paths are read from the server's own filesystem. That is the
+        # intended setup for a local server sharing the caller's checkout, but
+        # a server that disables local file ingestion must not hand out a
+        # read-any-directory primitive through this route either. Checked here
+        # for the calls whose raw_data entries are repository specs by
+        # contract, so the refusal stays a 400 as it always was.
+        if legacy_code_content_type or parsed_codegraph_config.get("treat_as_repository"):
+            from cognee.tasks.code_graph.resolve_repo import is_remote_repo
+            from cognee.tasks.ingestion.save_data_item_to_storage import (
+                settings as save_data_settings,
+            )
+
+            if not save_data_settings.accept_local_file_path and any(
+                not is_remote_repo(spec) for spec in raw_items
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Local repository paths are disabled on this server "
+                        "(ACCEPT_LOCAL_FILE_PATH=false) — pass a git URL instead."
+                    ),
+                )
 
         # After the field-specific checks above, so a misused field is
         # reported as such rather than as "nothing to ingest".

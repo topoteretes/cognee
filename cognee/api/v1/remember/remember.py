@@ -3,6 +3,7 @@ import hashlib
 import os
 import time
 import warnings
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Union
 from uuid import UUID
@@ -290,6 +291,41 @@ async def _attach_item_identity(result: "RememberResult") -> None:
 def _all_code_repositories(items: list[dict]) -> bool:
     """Whether every item of a finished remember is a code repository (and there is one)."""
     return bool(items) and all(item.get("kind") == CODE_REPOSITORY_ITEM_KIND for item in items)
+
+
+def _all_repository_specs(data, codegraph_config: Mapping[str, object]) -> bool:
+    """Whether every input of a permanent remember is a code repository, before add() runs.
+
+    The same detection add() applies: a declared call (``treat_as_repository``),
+    a GitHub/GitLab repository URL (``code_repo_clone_url``) or a local directory
+    with a project marker (``detect_code_project``). Such a call builds through
+    the LLM-free enola route only, so its preflight needs no LLM and resolves no
+    graph extractor. Anything else (text, files, an undetected directory) is
+    read as a document call, which gates on the resolved extractor as before.
+    """
+    if codegraph_config.get("treat_as_repository"):
+        return True
+    items = data if isinstance(data, list) else [data]
+    if not items:
+        return False
+
+    from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+    from cognee.tasks.code_graph.code_repo import detect_code_project
+    from cognee.tasks.code_graph.resolve_repo import code_repo_clone_url
+
+    for item in items:
+        if not isinstance(item, (str, Path)):
+            return False
+        spec = str(item)
+        if code_repo_clone_url(spec) is not None:
+            continue
+        try:
+            path = resolve_local_path(spec, must_exist=True)
+        except (OSError, ValueError):
+            return False
+        if not (path.is_dir() and detect_code_project(path)):
+            return False
+    return True
 
 
 PRESORT_FOLDERS_ENV = "PRESORT_FOLDERS_ENABLED"
@@ -934,6 +970,8 @@ class RememberResult:
         self.improve_skipped: str | None = None
         self._task: asyncio.Task | None = None
         self._started_at: float = time.monotonic()
+        # Ids of the items the run built (not skipped as already completed).
+        self._built_ids: set[str] = set()
 
     @property
     def session_id(self) -> str | None:
@@ -1058,12 +1096,15 @@ class RememberResult:
             return self._task.done()
         return self.status != "running"
 
-    def _resolve(self, cognify_result):
+    def _resolve(self, cognify_result, data_ids: set[str] | None = None):
         """Extract fields from the cognify() return value.
 
         Called once when the pipeline finishes. Sets status, dataset_id,
         pipeline_run_id, elapsed_seconds, item info, and stores the raw
-        result.
+        result. ``data_ids`` are the ids add() stored for this call: the
+        cognify run covers the whole dataset, so its per-item results are cut
+        to them, and ``items`` describes this call's data, not the dataset's
+        untouched rows. Without them (add() reported no ids) every result is kept.
         """
         self.raw_result = cognify_result
         self.elapsed_seconds = time.monotonic() - self._started_at
@@ -1127,16 +1168,19 @@ class RememberResult:
                 for entry, (status, entry_data_ids) in zip(
                     ingestion_info, iter_ingestion_entries(ingestion_info)
                 ):
+                    ids = [str(data_id) for data_id in entry_data_ids]
+                    if data_ids is not None and not any(data_id in data_ids for data_id in ids):
+                        continue
+                    item = {"pipeline_run_id": self.pipeline_run_id}
                     if status == "PipelineRunErrored":
                         item_run_info = entry.get("run_info") if isinstance(entry, dict) else None
-                        error = getattr(item_run_info, "error_message", None) or "errored"
-                        self.items.extend(
-                            {"id": str(data_id), "status": "errored", "error": error}
-                            for data_id in entry_data_ids
-                        )
-                        continue
-                    processed += 1
-                    self.items.extend({"id": str(data_id)} for data_id in entry_data_ids)
+                        item["status"] = "errored"
+                        item["error"] = getattr(item_run_info, "error_message", None) or "errored"
+                    else:
+                        processed += 1
+                        if status == "PipelineRunCompleted":
+                            self._built_ids.update(ids)
+                    self.items.extend({"id": data_id, **item} for data_id in ids)
                 self.items_processed = processed
 
     def _fail(self, exc: BaseException):
@@ -1721,7 +1765,6 @@ async def _remember_inner(
             "repo_credentials) is only supported for normal ingestion, not with "
             "session_id or content_type."
         )
-    treat_as_repository = bool(codegraph_config.get("treat_as_repository"))
 
     client = get_remote_client()
     if client is not None:
@@ -1794,12 +1837,11 @@ async def _remember_inner(
     # Like the extractor below, a misspelled summary_method raises before
     # add() stores anything, not in cognify() after it.
     resolve_summary_method(kwargs.get("summary_method"), cognify_config)
-    if treat_as_repository:
-        # Every item is a repository: cognify runs enola only, with no LLM and
-        # no graph extractor, so none is resolved. A keyless install without
-        # gliner2 would otherwise fail the extractor gate for a run that never
-        # uses it. (A detected repository takes the same LLM-free route; cognify
-        # reads that off the stored rows, which do not exist yet here.)
+    if _all_repository_specs(data, codegraph_config):
+        # Every item is a repository, declared or detected: cognify runs enola
+        # only, with no LLM and no graph extractor, so none is resolved. A
+        # keyless install without gliner2 would otherwise fail the extractor
+        # gate (or log its notice) for a run that never uses it.
         validate_provider_config(needs_llm=False)
     else:
         validate_provider_config(
@@ -2139,13 +2181,18 @@ async def _remember_inner(
 
         # Permanent memory: add + cognify (+ optional improve)
         async def _run():
-            await add(
+            add_result = await add(
                 data=data,
                 dataset_name=dataset_name,
                 dataset_id=dataset_id,
                 **shared_kwargs,
                 **add_kwargs,
             )
+            # The ids this call stored (or found already present): the cognify
+            # run below covers the dataset, and the result describes this call.
+            call_data_ids = {
+                str(data_id) for data_id in (getattr(add_result, "data_ids", None) or [])
+            }
 
             datasets_arg = [dataset_name] if dataset_id is None else [dataset_id]
 
@@ -2177,24 +2224,27 @@ async def _remember_inner(
                 after_run_hook_error = error
                 cognify_result = error.run_info
 
-            result._resolve(cognify_result)
+            result._resolve(cognify_result, data_ids=call_data_ids or None)
             await _attach_item_identity(result)
 
-            repositories = [
-                item for item in result.items if item.get("kind") == CODE_REPOSITORY_ITEM_KIND
+            built_repositories = [
+                item
+                for item in result.items
+                if item.get("kind") == CODE_REPOSITORY_ITEM_KIND and item["id"] in result._built_ids
             ]
-            if repositories:
+            if built_repositories:
                 from cognee import __version__ as cognee_version
                 from cognee.shared.utils import send_telemetry
 
                 # The event the removed code content type sent, now for every
-                # remember that stored a repository, detected or declared.
+                # remember that built a repository, detected or declared (an
+                # unchanged repository skipped by incremental loading sends none).
                 send_telemetry(
                     "cognee.remember.code_graph",
                     user,
                     additional_properties={
                         "dataset_name": result.dataset_name,
-                        "repository_count": len(repositories),
+                        "repository_count": len(built_repositories),
                         "index_vectors": bool(codegraph_config.get("index_vectors")),
                         "run_in_background": run_in_background,
                         "cognee_version": cognee_version,

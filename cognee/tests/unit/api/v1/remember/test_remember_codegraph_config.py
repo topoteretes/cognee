@@ -226,6 +226,44 @@ async def test_a_plain_call_still_gates_on_the_resolved_extractor(permanent_pipe
     monkeypatch.setattr(preflight_module, "validate_provider_config", validate)
     monkeypatch.setattr(cognify_config_module, "resolve_extractor", Mock(return_value="llm"))
 
-    await _remember("https://github.com/acme/api", codegraph_config={"include_documents": False})
+    # A note is a document call, whatever the config says about repositories.
+    await _remember("a plain note", codegraph_config={"include_documents": False})
 
     validate.assert_called_once_with(needs_llm=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "data",
+    ["https://github.com/acme/api", ["https://gitlab.com/group/api", "https://github.com/o/r"]],
+)
+async def test_detected_repository_urls_need_no_llm_either(permanent_pipeline, monkeypatch, data):
+    """The preflight reads what the items are, not only the treat_as_repository flag."""
+    validate = Mock()
+    resolve = Mock(side_effect=AssertionError("the extractor must not be resolved"))
+    monkeypatch.setattr(preflight_module, "validate_provider_config", validate)
+    monkeypatch.setattr(cognify_config_module, "resolve_extractor", resolve)
+
+    await _remember(data)
+
+    validate.assert_called_once_with(needs_llm=False)
+
+
+@pytest.mark.asyncio
+async def test_a_detected_project_directory_needs_no_llm(permanent_pipeline, monkeypatch, tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'")
+    validate = Mock()
+    monkeypatch.setattr(preflight_module, "validate_provider_config", validate)
+    monkeypatch.setattr(
+        cognify_config_module, "resolve_extractor", Mock(side_effect=AssertionError("resolved"))
+    )
+
+    await _remember(str(tmp_path))
+
+    validate.assert_called_once_with(needs_llm=False)
+
+    # Without a project marker the directory is documents: the extractor gates.
+    (tmp_path / "pyproject.toml").unlink()
+    monkeypatch.setattr(cognify_config_module, "resolve_extractor", Mock(return_value="llm"))
+    await _remember(str(tmp_path))
+    assert validate.call_args.kwargs == {"needs_llm": True}

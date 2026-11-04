@@ -71,6 +71,12 @@ async def _cognify(
             AsyncMock(return_value=items),
         ),
         patch.object(cognify_module, "get_pipeline_executor", return_value=pipeline),
+        # The GLiNER task list imports gliner2, which a keyless test host may lack;
+        # what matters here is which list is wired, not what it does.
+        patch(
+            "cognee.tasks.graph.gliner_demo.tasks.get_gliner_demo_tasks",
+            AsyncMock(return_value=[]),
+        ),
     ):
         try:
             await cognify_module.cognify(
@@ -91,7 +97,7 @@ async def test_code_only_dataset_never_resolves_or_installs_the_extractor():
     kwargs = run.pipeline.await_args.kwargs
     assert kwargs["needs_llm"] is False
     assert kwargs["skip_connection_test"] is True
-    assert kwargs["extras"] == {"graph_extractor": None}
+    assert kwargs["extras"]["graph_extractor"] is None
 
 
 @pytest.mark.parametrize(
@@ -126,7 +132,7 @@ async def test_mixed_dataset_still_resolves_the_extractor_and_probes():
     runtime.assert_awaited_once()
     kwargs = run.pipeline.await_args.kwargs
     assert kwargs["skip_connection_test"] is False
-    assert kwargs["extras"] == {"graph_extractor": "gliner_demo"}
+    assert kwargs["extras"]["graph_extractor"] == "gliner_demo"
 
 
 @pytest.mark.asyncio

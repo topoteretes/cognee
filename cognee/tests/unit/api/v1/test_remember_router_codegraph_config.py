@@ -213,18 +213,43 @@ def test_the_removed_code_content_type_is_ignored(client, fake_remember, caplog)
     assert "content_type='code' is deprecated" in caplog.text
 
 
-def test_the_removed_code_content_type_accepts_uploads_and_a_session(client, fake_remember):
-    # Plain ingestion: what the same request without content_type does.
+def test_the_removed_code_content_type_still_rejects_uploads(client, fake_remember):
+    # The old request contract stays: the payload is raw_data repository specs.
     response = client.post(
         "/remember",
-        data={"datasetName": "ds", "content_type": "code", "session_id": "s1"},
+        data={"datasetName": "ds", "content_type": "code", "raw_data": [REPO_URL]},
         files=[("data", ("main.py", b"print('hi')", "text/plain"))],
     )
 
+    assert response.status_code == 400
+    assert "does not accept file uploads" in response.json()["detail"]
+    assert not fake_remember
+
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        {"content_type": "code"},
+        {"codegraph_config": '{"treat_as_repository": true}'},
+    ],
+)
+def test_server_local_repository_paths_are_a_400_when_local_paths_are_disabled(
+    client, fake_remember, monkeypatch, form
+):
+    storage_module = importlib.import_module("cognee.tasks.ingestion.save_data_item_to_storage")
+    monkeypatch.setattr(storage_module.settings, "accept_local_file_path", False)
+
+    response = client.post(
+        "/remember", data={"datasetName": "ds", "raw_data": ["/srv/some/repo"], **form}
+    )
+
+    assert response.status_code == 400
+    assert "ACCEPT_LOCAL_FILE_PATH" in response.json()["detail"]
+    assert not fake_remember
+
+    # A git URL is unaffected: nothing is read from the server's filesystem.
+    response = client.post("/remember", data={"datasetName": "ds", "raw_data": [REPO_URL], **form})
     assert response.status_code == 200, response.text
-    [upload] = fake_remember["data"]
-    assert upload.filename == "main.py"
-    assert fake_remember["kwargs"]["session_id"] == "s1"
 
 
 def test_unknown_content_type_still_rejected(client, fake_remember):

@@ -75,12 +75,15 @@ def env(monkeypatch):
     )
     user = SimpleNamespace(id=uuid4())
     dataset = SimpleNamespace(id=DATASET_ID, name="my_code")
+    # The rows add() stored, by id: system_metadata as the Data row carries it.
+    rows: dict = {}
     monkeypatch.setattr(
         remember_module,
         "resolve_authorized_user_datasets",
         AsyncMock(return_value=(user, [dataset])),
     )
-    add = AsyncMock()
+    # add() reports the ids it stored; the fixture hands back every row it minted.
+    add = AsyncMock(side_effect=lambda **_kwargs: SimpleNamespace(data_ids=list(rows)))
     cognify = AsyncMock(return_value=_run([]))
     monkeypatch.setattr("cognee.api.v1.add.add", add)
     monkeypatch.setattr("cognee.api.v1.cognify.cognify", cognify)
@@ -88,9 +91,6 @@ def env(monkeypatch):
     monkeypatch.setattr(importlib.import_module("cognee.api.v1.improve"), "improve", improve)
     telemetry = Mock()
     monkeypatch.setattr("cognee.shared.utils.send_telemetry", telemetry)
-
-    # The rows add() stored, by id: system_metadata as the Data row carries it.
-    rows: dict = {}
 
     class _Session:
         async def __aenter__(self):
@@ -148,6 +148,7 @@ async def test_a_remembered_repository_is_one_item_with_its_identity(env):
     assert result.items == [
         {
             "id": str(repo_id),
+            "pipeline_run_id": result.pipeline_run_id,
             "kind": "code_repository",
             "source": "https://github.com/org/repo",
             "path": REPO_DIR,
@@ -208,36 +209,26 @@ async def test_an_unchanged_repository_is_still_reported_and_skips_improve(env):
 
 
 @pytest.mark.asyncio
-async def test_an_errored_run_names_the_failed_repository_next_to_the_built_one(env):
-    good_id, bad_id = env.repo_row(path="/srv/repos/good"), env.repo_row(path="/srv/repos/bad")
-    env.cognify.return_value = _run(
-        [_completed_entry(good_id), _errored_entry(bad_id, "enola crashed")],
-        status="PipelineRunErrored",
-        error_message="enola crashed",
-    )
+async def test_the_result_describes_this_call_not_the_datasets_other_rows(env):
+    """The cognify run covers the dataset; items are cut to the rows add() stored."""
+    mine, other = env.repo_row(path="/srv/repos/mine"), uuid4()
+    env.add.side_effect = lambda **_kwargs: SimpleNamespace(data_ids=[mine])
+    env.cognify.return_value = _run([_completed_entry(mine), _already_completed_entry(other)])
 
-    result = await remember(
-        ["/srv/repos/good", "/srv/repos/bad"],
-        dataset_name="my_code",
-        codegraph_config=CODE_ONLY,
-        raise_on_error=False,
-    )
+    result = await remember("/srv/repos/mine", dataset_name="my_code", codegraph_config=CODE_ONLY)
 
-    assert result.status == "errored"
-    assert result.error == "enola crashed"
+    assert [item["id"] for item in result.items] == [str(mine)]
     assert result.items_processed == 1
-    good, bad = result.items
-    assert good == {
-        "id": str(good_id),
-        "kind": "code_repository",
-        "source": "/srv/repos/good",
-        "path": "/srv/repos/good",
-    }
-    assert bad["status"] == "errored" and bad["error"] == "enola crashed"
-    assert bad["kind"] == "code_repository" and bad["id"] == str(bad_id)
-    # The HTTP router and the GitHub sync read raise_on_error=False as "report it".
-    assert env.cognify.await_args.kwargs["raise_on_error"] is False
-    env.improve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_no_op_re_remember_sends_no_code_graph_event(env):
+    repo_id = env.repo_row()
+    env.cognify.return_value = _run([_already_completed_entry(repo_id)])
+
+    await remember(REPO_DIR, dataset_name="my_code", codegraph_config=CODE_ONLY)
+
+    assert "cognee.remember.code_graph" not in [c.args[0] for c in env.telemetry.call_args_list]
 
 
 @pytest.mark.asyncio
@@ -264,6 +255,7 @@ async def test_run_in_background_returns_running_then_completes(env):
     assert result.status == "completed"
     assert result.items[0] == {
         "id": str(repo_id),
+        "pipeline_run_id": result.pipeline_run_id,
         "kind": "code_repository",
         "source": REPO_DIR,
         "path": REPO_DIR,

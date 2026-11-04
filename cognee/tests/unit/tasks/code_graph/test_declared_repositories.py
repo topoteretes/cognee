@@ -139,11 +139,23 @@ async def test_a_declared_directory_needs_no_project_marker(cloned, tmp_path):
 @pytest.mark.asyncio
 async def test_a_non_spec_item_raises_instead_of_being_stored_as_text(cloned):
     # The declaration says every item is a repository; an upload among them is
-    # a mistake, and storing it silently is what the old route refused to do.
-    with pytest.raises(IngestionError, match="treat_as_repository expects repository paths"):
+    # a mistake (a ValueError, a 400 over HTTP), and storing it silently is
+    # what the old route refused to do.
+    with pytest.raises(ValueError, match="treat_as_repository expects repository paths"):
         await resolve_data_directories(
             [SimpleNamespace(file=b"", filename="notes.txt")], treat_as_repository=True
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("item", ["just some text, not a repo", "/nonexistent/dir/xyz"])
+async def test_a_string_that_is_no_repository_is_a_value_error(cloned, item):
+    # Neither a git remote nor a directory: a caller mistake, not a clone that
+    # failed, so it is refused before anything is cloned.
+    with pytest.raises(ValueError, match="is not a repository path or git URL"):
+        await resolve_data_directories([item], treat_as_repository=True)
+
+    assert cloned == []
 
 
 @pytest.mark.asyncio

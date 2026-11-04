@@ -174,7 +174,7 @@ async def sync_repositories(
         else:
             await report_sync_progress(
                 phase="finalizing",
-                completed=len(items),
+                completed=min(len(items), len(repo_full_names)),
                 total=len(repo_full_names),
                 unit="repositories",
                 counts={"processed": processed, "failed": failed},

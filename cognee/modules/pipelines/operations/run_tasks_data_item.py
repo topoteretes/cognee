@@ -295,7 +295,12 @@ async def run_tasks_data_item_incremental(
             **_source_fields(data_point, data_item),
         }
 
-        if os.getenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true").lower() == "true":
+        # A run that asked for per-item isolation (cognify with raise_on_error=False
+        # or in the background: ctx.extras["isolate_item_failures"]) records the
+        # failure on this item and lets the other items finish, as
+        # RAISE_INCREMENTAL_LOADING_ERRORS=false does for every run.
+        isolated = ctx is not None and bool((ctx.extras or {}).get("isolate_item_failures"))
+        if not isolated and os.getenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true").lower() == "true":
             raise
 
 

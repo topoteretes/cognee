@@ -222,24 +222,20 @@ def test_remember_forwards_the_codegraph_config_with_repo_specs(client):
 
 
 @pytest.mark.parametrize(
-    ("form", "files"),
-    [
-        ({"raw_data": [REPO_URL], "session_id": "s1"}, None),
-        ({"raw_data": [REPO_URL]}, {"data": ("notes.txt", b"hello", "text/plain")}),
-    ],
+    "form",
+    [{"raw_data": [REPO_URL], "session_id": "s1"}, {"raw_data": [REPO_URL, "/srv/other/repo"]}],
 )
-def test_remember_ignores_the_removed_code_content_type(client, form, files):
+def test_remember_ignores_the_removed_code_content_type(client, form):
     # The old request shape keeps working and is plain ingestion: remember()
-    # gets exactly what the same request without content_type sends it.
+    # gets exactly what the same request without content_type sends it. (Its
+    # old contract also stays: a file upload with it is a 400.)
     calls = []
     for extra in ({}, {"content_type": "code"}):
         with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
             mock_remember.return_value = remember_completed()
 
             response = client.post(
-                "/api/v1/remember",
-                data={"datasetName": "test_dataset", **form, **extra},
-                files=files,
+                "/api/v1/remember", data={"datasetName": "test_dataset", **form, **extra}
             )
 
             assert response.status_code == 200, response.text

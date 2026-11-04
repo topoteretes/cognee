@@ -350,8 +350,12 @@ class ConnectorDescriptor:
 
     # ---- Ingestion -----------------------------------------------------
 
-    #: cognee ingestion mode — ``"code"`` for repositories, ``None`` for
-    #: ordinary documents.
+    #: What the connector's items are — ``"code"`` for repositories, ``None``
+    #: for ordinary documents. A label for the host, not a ``remember()``
+    #: argument: cognee ignores ``content_type="code"`` (a repository is
+    #: ordinary data), so a host that syncs a ``"code"`` connector passes
+    #: ``codegraph_config={"treat_as_repository": True, "include_documents":
+    #: False, "repo_credentials": <scope credential>}`` to ``remember()``.
     content_type: str | None = None
 
     #: Poll interval for a provider with no webhooks. Required for an

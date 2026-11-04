@@ -161,8 +161,10 @@ async def add(
                  would not recognise on its own -- a Bitbucket or self-hosted forge URL
                  without ``.git``, an ssh remote -- is cloned instead of scraped as a web
                  page, and a source tree without a build manifest is one repository
-                 instead of a flat file list. ``index_vectors`` is read by cognify() and
-                 ignored here. Validated before anything is written; not supported while
+                 instead of a flat file list. ``index_vectors`` is cognify()'s key; add()
+                 reads it only to keep the first-run embedding probe on for an add made of
+                 repositories alone (such an add embeds nothing, so the probe is otherwise
+                 skipped). Validated before anything is written; not supported while
                  connected to a remote instance.
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
@@ -378,40 +380,6 @@ async def add(
         ),
     ]
 
-    # The pipeline runner resolves directories and repository URLs itself, but
-    # with the defaults: no credentials, documents included, only detected
-    # shapes. A call that sets any repository option runs the same resolver
-    # here first, with the options; the runner then sees already-resolved
-    # items and passes them through.
-    include_documents = codegraph_config.get("include_documents", True)
-    treat_as_repository = bool(codegraph_config.get("treat_as_repository"))
-    if codegraph_config.get("repo_credentials") or not include_documents or treat_as_repository:
-        from cognee.infrastructure.locks import dataset_lock
-
-        # Resolving a repository resets the manifest row's pipeline stamps (a
-        # read-modify-write of pipeline_status). The runner does that under the
-        # dataset lock; running it here, before the pipeline, needs the same lock
-        # or a concurrent cognify of the dataset can lose a stamp.
-        async with dataset_lock(authorized_dataset.id):
-            data = await resolve_data_directories(
-                data,
-                include_subdirectories=True,
-                user=user,
-                dataset_id=authorized_dataset.id,
-                credentials=codegraph_config.get("repo_credentials"),
-                include_documents=include_documents,
-                treat_as_repository=treat_as_repository,
-                branch=branch,
-            )
-        # An add made of code repository manifests alone stores small JSON rows
-        # and embeds nothing, so the first-run embedding probe has no use here;
-        # cognify probes when it embeds (index_vectors). Keyless installs would
-        # otherwise fetch the local embedding model for a run that never uses it.
-        if data and all(
-            is_code_repo_sourced(getattr(item, "system_metadata", None)) for item in data
-        ):
-            skip_connection_test = True
-
     # Expand DLT resources (and auto-detected CSV/connection strings) into
     # standard DataItems before the pipeline sees them. orphan_cleanup (when
     # not None) deletes dlt rows no longer present in the source; it is
@@ -433,6 +401,39 @@ async def add(
     # disguise: refuse the whole request now, before the pipeline writes the
     # items ahead of it one by one, and point at update().
     await refuse_changed_existing_documents(data, user, authorized_dataset)
+
+    # Directories and repository URLs are resolved here, with this call's
+    # repository options, under the same condition the pipeline runner resolves
+    # them (it resolves again, which passes resolved items through): what the
+    # call ingests has to be known before the run starts, because an add made
+    # of code repository manifests alone stores small JSON rows and embeds
+    # nothing, so its first-run embedding probe is skipped unless the call
+    # indexes vectors. A keyless install would otherwise fetch the local
+    # embedding model for a run that never uses it.
+    if data_cache or incremental_loading:
+        from cognee.infrastructure.locks import dataset_lock
+
+        # Resolving a repository resets the manifest row's pipeline stamps (a
+        # read-modify-write of pipeline_status). The runner does that under the
+        # dataset lock; running it here, before the pipeline, needs the same lock
+        # or a concurrent cognify of the dataset can lose a stamp.
+        async with dataset_lock(authorized_dataset.id):
+            data = await resolve_data_directories(
+                data,
+                include_subdirectories=True,
+                user=user,
+                dataset_id=authorized_dataset.id,
+                credentials=codegraph_config.get("repo_credentials"),
+                include_documents=codegraph_config.get("include_documents", True),
+                treat_as_repository=bool(codegraph_config.get("treat_as_repository")),
+                branch=branch,
+            )
+        if (
+            data
+            and not codegraph_config.get("index_vectors")
+            and all(is_code_repo_sourced(getattr(item, "system_metadata", None)) for item in data)
+        ):
+            skip_connection_test = True
 
     # Background runs must not depend on caller/request-scoped stream lifetimes.
     # Materialize stream-like inputs into owned in-memory buffers up front.
