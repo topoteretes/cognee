@@ -1,6 +1,5 @@
 import asyncio
 import warnings
-from functools import partial
 from typing import Literal, cast
 from uuid import UUID
 
@@ -357,16 +356,6 @@ async def cognify(
                  argument wins over the EARLY_CHUNK_INDEXING setting (on by default).
                  Raises while connected to a remote instance.
 
-    Failure isolation:
-        With ``raise_on_error=False`` or ``run_in_background=True`` the run isolates
-        item failures: every item is attempted, an item that fails is recorded on
-        the run's per-item results (``data_ingestion_info``, with its error) instead
-        of stopping the run, the items that completed keep their graph and their
-        completion stamp, only the failed items' writes are rolled back, and the
-        run ends errored. The default ``raise_on_error=True`` keeps the whole-run
-        failure: the first failing item stops the run, everything it wrote is rolled
-        back, and ``CognifyFailedError`` is raised.
-
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
             - **Blocking mode**: Dictionary mapping dataset_id -> PipelineRunInfo with:
@@ -703,18 +692,6 @@ async def cognify(
         )
         skip_connection_test = code_only and not index_vectors
 
-        # Per-item failure isolation for the callers that read the run instead
-        # of catching an exception (the HTTP routes, the GitHub sync, a
-        # background remember): a failed item is recorded on the run and the
-        # others finish; the rollback keeps the items that completed, as the
-        # indexing run's does. The default keeps the whole-run failure.
-        isolate_item_failures = not raise_on_error or run_in_background
-        rollback_handler = (
-            partial(cognify_rollback_handler, keep_completed_data=True)
-            if isolate_item_failures
-            else cognify_rollback_handler
-        )
-
         try:
             # One executor call drives both runs (see
             # cognee.modules.cognify.memory_pipelines): blocking mode still
@@ -733,14 +710,11 @@ async def cognify(
                 data_per_batch=data_per_batch,
                 needs_llm=needs_llm,
                 skip_connection_test=skip_connection_test,
-                rollback_handler=rollback_handler,
+                rollback_handler=cognify_rollback_handler,
                 llm_config=llm_config,
                 embedding_config=embedding_config,
                 data_cache=data_cache,
-                extras={
-                    "graph_extractor": resolved_extractor,
-                    "isolate_item_failures": isolate_item_failures,
-                },
+                extras={"graph_extractor": resolved_extractor},
                 # Reconcile the structure document sources describe, also when an
                 # item failed: one bad page must not freeze the tree of the rest.
                 after_items_ran=reconcile_document_structure,

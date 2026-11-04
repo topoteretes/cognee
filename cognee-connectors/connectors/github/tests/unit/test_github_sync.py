@@ -173,17 +173,16 @@ async def test_sync_reports_live_work_without_inventing_file_progress(mocks):
 @needs_sync_progress
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "items,state",
-    [
-        ([{"status": "errored"}], "failed"),
-        ([{"status": "errored"}, {}], "partial"),
-    ],
+    "items",
+    [[{"status": "errored"}], [{"status": "errored"}, {}]],
+    ids=["only_failures", "a_completed_item_too"],
 )
-async def test_handled_repo_failures_are_not_reported_successful(mocks, items, state):
+async def test_an_errored_run_is_reported_failed(mocks, items):
+    """One failed build fails the run, whatever the run reports for the other items."""
     mocks.remember.return_value = SimpleNamespace(status="errored", items=items, error="secret")
     await sync_module.sync_repositories(_credential(), ["acme/api", "acme/web"])
     progress = mocks.observations[-1]
-    assert progress.state == state
+    assert progress.state == "failed"
     assert progress.counts["failed"] == 1
     assert progress.reason == "processing_error"
     assert "secret" not in progress.model_dump_json()

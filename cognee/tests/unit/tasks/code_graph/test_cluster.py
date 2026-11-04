@@ -677,39 +677,8 @@ async def test_route_leaves_a_single_repository_to_the_caller(route_env):
 
 
 @pytest.mark.asyncio
-async def test_isolated_run_loads_the_other_members_when_one_fails(route_env, monkeypatch):
-    """Under per-item isolation a member's load failure is the member's own: the
-    others still load, its stamp is dropped, and its error waits for its row."""
-    env = route_env
-    reset = AsyncMock()
-    monkeypatch.setattr(
-        importlib.import_module("cognee.modules.data.methods.publish_updated_data"),
-        "reset_data_pipeline_status",
-        reset,
-    )
-    env.edges.side_effect = [RuntimeError("golf write failed"), None]
-    ctx = PipelineContext(
-        user=env.user,
-        data_item=env.ui_row,
-        dataset=env.dataset,
-        pipeline_run_id=uuid4(),
-        extras={"isolate_item_failures": True},
-    )
-
-    assert await load_dataset_cluster(ctx) is True
-
-    assert [call.kwargs["repo_scope"] for call in env.extract.await_args_list] == ["golf", "ui"]
-    error = cluster_module.cluster_member_error(ctx, env.golf_row.id)
-    assert isinstance(error, RuntimeError) and str(error) == "golf write failed"
-    assert cluster_module.cluster_member_error(ctx, env.ui_row.id) is None
-    assert [call.args[0] for call in reset.await_args_list] == [env.golf_row.id]
-    # The dataset's other rows in the run see the same verdict, not a reload.
-    assert await load_dataset_cluster(ctx) is True
-    env.snapshot_mock.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_a_run_without_isolation_fails_on_the_first_member(route_env):
+async def test_a_member_load_failure_fails_the_run(route_env):
+    """The first member whose load fails raises out of the load; the rest are not loaded."""
     env = route_env
     env.edges.side_effect = RuntimeError("golf write failed")
     ctx = PipelineContext(
@@ -720,47 +689,3 @@ async def test_a_run_without_isolation_fails_on_the_first_member(route_env):
         await load_dataset_cluster(ctx)
 
     assert [call.kwargs["repo_scope"] for call in env.extract.await_args_list] == ["golf"]
-
-
-@pytest.mark.asyncio
-async def test_the_failed_members_own_row_raises_its_error(route_env, monkeypatch):
-    """The CODE_REPO route errors exactly the row whose load failed."""
-    from cognee.tasks.code_graph.code_repo import extract_code_repo_graph
-
-    env = route_env
-    monkeypatch.setattr(
-        importlib.import_module("cognee.modules.data.methods.publish_updated_data"),
-        "reset_data_pipeline_status",
-        AsyncMock(),
-    )
-    env.edges.side_effect = [RuntimeError("golf write failed"), None]
-    run_id = uuid4()
-    manifest = json.dumps({"repo_path": str(env.golf)})
-    for row in (env.ui_row, env.golf_row):
-        row.raw_data_location = "manifest.json"
-
-    class _Open:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        async def __aenter__(self):
-            return SimpleNamespace(read=lambda: manifest)
-
-        async def __aexit__(self, *_exc):
-            return False
-
-    monkeypatch.setattr("cognee.infrastructure.files.utils.open_data_file.open_data_file", _Open)
-
-    def _ctx(row):
-        return PipelineContext(
-            user=env.user,
-            data_item=row,
-            dataset=env.dataset,
-            pipeline_run_id=run_id,
-            extras={"isolate_item_failures": True},
-        )
-
-    # The ui row (loaded fine) completes; the golf row raises its own failure.
-    assert await extract_code_repo_graph([env.ui_row], ctx=_ctx(env.ui_row)) == [env.ui_row]
-    with pytest.raises(RuntimeError, match="golf write failed"):
-        await extract_code_repo_graph([env.golf_row], ctx=_ctx(env.golf_row))

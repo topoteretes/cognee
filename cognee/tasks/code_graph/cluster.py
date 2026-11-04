@@ -319,10 +319,6 @@ class _ClusterRun:
     # The enola or member-load failure that ended this run's cluster load,
     # re-raised for the run's later rows so the load is not repeated per row.
     error: Exception | None = field(default=None, repr=False)
-    # Under per-item isolation: the load failure of each member that failed,
-    # by its Data row id, raised by that row's own task so only that row is
-    # errored (see load_dataset_cluster).
-    member_errors: dict[Any, Exception] = field(default_factory=dict, repr=False)
 
 
 _cluster_runs: dict[str, _ClusterRun] = {}
@@ -353,15 +349,10 @@ async def load_dataset_cluster(
     ``index_vectors`` is the run's ``codegraph_config`` setting: with it every
     member's code facts are embedded as well.
 
-    Failures: enola failing on the cluster fails every member, since no member
-    has a snapshot to load from. One member's load failing is the member's
-    own: under the run's per-item isolation (``ctx.extras["isolate_item_failures"]``,
-    a cognify with ``raise_on_error=False`` or in the background) the other
-    members still load, the failed member's completion stamp is dropped so the
-    next cognify rebuilds it, and its error is kept for its own row's task
-    (:func:`cluster_member_error`), which raises it so only that row is errored.
-    Without isolation the first member failure is the run's, as an enola
-    failure is.
+    Failures are the run's: enola failing on the cluster fails every member,
+    since no member has a snapshot to load from, and the first member whose
+    load fails raises out of the load, so the run ends errored and its rollback
+    unstamps the rows for the next cognify to rebuild.
     """
     dataset_id = getattr(getattr(ctx, "dataset", None), "id", None)
     if ctx is None or dataset_id is None:
@@ -385,12 +376,7 @@ async def load_dataset_cluster(
         try:
             snapshot = await snapshot_dataset_code_repos(dataset_id, repos)
             if snapshot is not None:
-                run.member_errors = await _load_cluster_members(
-                    snapshot,
-                    ctx,
-                    index_vectors=index_vectors,
-                    isolate_failures=bool((ctx.extras or {}).get("isolate_item_failures")),
-                )
+                await _load_cluster_members(snapshot, ctx, index_vectors=index_vectors)
         except Exception as error:
             # An enola or member-load failure: the run's later rows re-raise
             # it rather than load the whole cluster again, failing the same way.
@@ -402,30 +388,10 @@ async def load_dataset_cluster(
     return run.is_cluster
 
 
-def cluster_member_error(ctx: Optional["PipelineContext"], data_id: Any) -> Exception | None:
-    """The load failure recorded for ``data_id`` by this run's cluster load, if any."""
-    dataset_id = getattr(getattr(ctx, "dataset", None), "id", None)
-    if ctx is None or dataset_id is None:
-        return None
-    run = _cluster_runs.get(str(dataset_id))
-    if run is None or run.run_id != str(getattr(ctx, "pipeline_run_id", None)):
-        return None
-    return run.member_errors.get(data_id)
-
-
 async def _load_cluster_members(
-    snapshot: DatasetCodeSnapshot,
-    ctx: "PipelineContext",
-    index_vectors: bool = False,
-    isolate_failures: bool = False,
-) -> dict[Any, Exception]:
-    """Load every member of a cluster snapshot, one at a time, each under its own Data row.
-
-    Returns the failures by member Data row id. With ``isolate_failures`` a
-    member's failure is recorded (its stamp dropped, so the next cognify
-    rebuilds it) and the next member loads; without it the first failure
-    raises, as before.
-    """
+    snapshot: DatasetCodeSnapshot, ctx: "PipelineContext", index_vectors: bool = False
+) -> None:
+    """Load every member of a cluster snapshot, one at a time, each under its own Data row."""
     from cognee.tasks.code_graph.code_repo import code_repo_node_set
     from cognee.tasks.code_graph.extract_code_graph import (
         add_code_graph_data_points,
@@ -433,45 +399,28 @@ async def _load_cluster_members(
         extract_code_graph,
     )
 
-    failures: dict[Any, Exception] = {}
     for member in snapshot.members:
         member_ctx = replace(ctx, data_item=member.data)
         # Each row's own add()/remember() tag, exactly as the per-repo
         # route reads it, so a member's code nodes carry its node_set.
         node_set = code_repo_node_set(member.data)
-        try:
-            data_points = await extract_code_graph(
-                repo_path=member.repo_path,
-                snapshot_dir=snapshot.snapshot_dir,
-                repo_scope=member.label,
-                node_set=node_set,
-                snapshot=snapshot.parsed,
-            )
-            state = await add_code_graph_data_points(
-                data_points, ctx=member_ctx, graph_only=not index_vectors
-            )
-            await add_code_graph_edges(
-                state,
-                repo_path=member.repo_path,
-                snapshot_dir=snapshot.snapshot_dir,
-                ctx=member_ctx,
-                repo_scope=member.label,
-                node_set=node_set,
-                snapshot=snapshot.parsed,
-            )
-        except Exception as error:
-            if not isolate_failures:
-                raise
-            logger.exception(
-                "Code repo graph load failed for %s (%s); the other members still load.",
-                member.repo_path,
-                member.label,
-            )
-            failures[member.data.id] = error
-            # Its row's own task raises this error when the row is in the run;
-            # a row rebuilt from an earlier run is not, so its stamp is dropped
-            # here for the next cognify to rebuild it.
-            await _mark_rows_for_rebuild(ctx.dataset.id, [member.data])
-            continue
+        data_points = await extract_code_graph(
+            repo_path=member.repo_path,
+            snapshot_dir=snapshot.snapshot_dir,
+            repo_scope=member.label,
+            node_set=node_set,
+            snapshot=snapshot.parsed,
+        )
+        state = await add_code_graph_data_points(
+            data_points, ctx=member_ctx, graph_only=not index_vectors
+        )
+        await add_code_graph_edges(
+            state,
+            repo_path=member.repo_path,
+            snapshot_dir=snapshot.snapshot_dir,
+            ctx=member_ctx,
+            repo_scope=member.label,
+            node_set=node_set,
+            snapshot=snapshot.parsed,
+        )
         logger.info("Code repo graph extracted for %s (%s).", member.repo_path, member.label)
-    return failures

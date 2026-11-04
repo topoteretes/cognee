@@ -515,7 +515,7 @@ async def extract_code_repo_graph(
     down so every code node -- CodeRepository included -- carries it too.
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
-    from cognee.tasks.code_graph.cluster import cluster_member_error, load_dataset_cluster
+    from cognee.tasks.code_graph.cluster import load_dataset_cluster
     from cognee.tasks.code_graph.extract_code_graph import (
         add_code_graph_data_points,
         add_code_graph_edges,
@@ -541,12 +541,6 @@ async def extract_code_repo_graph(
             )
 
         if await load_dataset_cluster(ctx, index_vectors=index_vectors):
-            # Loaded as a cluster member. A member whose load failed under
-            # per-item isolation is errored here, by its own row, so the row is
-            # not stamped and the others are.
-            member_error = cluster_member_error(ctx, data_item.id)
-            if member_error is not None:
-                raise member_error
             continue
 
         node_set = code_repo_node_set(data_item)

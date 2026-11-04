@@ -891,8 +891,8 @@ class RememberResult:
             ``content_hash``, ``token_count`` where the run reports them) for
             each data item in the pipeline run. A code repository's item also
             carries ``kind="code_repository"``, ``source`` (its credential-free
-            URL or path) and ``path``; an item whose build failed carries
-            ``status="errored"`` and ``error``.
+            URL or path) and ``path``; on a run reported errored, the item
+            whose build failed carries ``status="errored"`` and ``error``.
         raw_result: The original cognify() return value (dict of
             dataset_id -> PipelineRunInfo) for advanced inspection.
         improve: The ``ImproveResult`` of the automatic ``improve()`` that
@@ -1160,8 +1160,8 @@ class RememberResult:
             # PipelineRunCompleted carries no `payload` — per-item results live
             # in data_ingestion_info as {"run_info": ..., "data_id": ...} dicts.
             # An errored run (raise_on_error=False, background mode) reports its
-            # per-item results too: a failed item is listed with its error, so
-            # one failing repository names itself next to the ones that built.
+            # per-item results too: the item that failed the run is listed with
+            # its error, so the result names the repository that did not build.
             ingestion_info = getattr(run_info, "data_ingestion_info", None)
             if ingestion_info and isinstance(ingestion_info, list):
                 processed = 0
@@ -1314,9 +1314,10 @@ async def remember(
             ``index_vectors=`` / ``repo_credentials=`` spellings fold into it
             with a ``FutureWarning``. Each repository is one Data row of the
             dataset and one result item (``kind="code_repository"``, ``source``,
-            ``id`` for ``forget(data_id=...)``, ``status`` / ``error`` when its
-            build failed). A remember whose items are all code repositories
-            runs no automatic ``improve()``: the stages have nothing to enrich.
+            ``id`` for ``forget(data_id=...)``, ``status`` / ``error`` when a
+            run reported errored names it). A remember whose items are all code
+            repositories runs no automatic ``improve()``: the stages have
+            nothing to enrich.
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.

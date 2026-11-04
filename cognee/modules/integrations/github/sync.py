@@ -95,13 +95,16 @@ async def sync_repositories(
 
     One blocking ``remember`` over every clone URL — callers are already off
     the request path (the post-install hook and webhook handling both run
-    detached), so there is nothing to hand off to. ``raise_on_error=False``
-    reports a repository whose build failed as an errored item of the result
-    (``kind="code_repository"``, ``source``, ``error``) and the run as errored;
-    cognify rolls that run's writes back, so the repositories it had built
-    are rebuilt by the next sync. A clone that fails (auth, a deleted
-    repository) raises out of ``add()`` before anything is stored, and the
-    sync ends failed.
+    detached), so there is nothing to hand off to. One repository whose build
+    fails fails the cognify run: ``remember`` raises the build's own error
+    (``raise_on_error=False`` gives the original exception, not
+    ``CognifyFailedError``), ``track_sync`` reports the sync failed with it and
+    re-raises, and the next sync retries (cognify's rollback leaves the run's
+    rows unstamped). A clone that fails (auth, a deleted repository) raises out
+    of ``add()`` before anything is stored, and the sync ends failed the same
+    way. A run reported errored instead of raised (a deployment with
+    ``RAISE_INCREMENTAL_LOADING_ERRORS=false``) is reported failed too, with
+    the per-item counts the run gives.
 
     The minted token lives ~1 hour and repos are cloned one after the other,
     so a very large installation can outlive the token mid-batch; the next
@@ -152,8 +155,8 @@ async def sync_repositories(
                 # embeddings for an installation's whole prose, on every webhook.
                 "include_documents": False,
             },
-            # Report a repository whose build failed as an errored item of the
-            # result instead of raising.
+            # A failed build raises its own error (track_sync reports it), not
+            # CognifyFailedError; a run reported errored lands on the result.
             raise_on_error=False,
         )
         if getattr(result, "status", None) == "errored":
@@ -166,8 +169,10 @@ async def sync_repositories(
         failed = sum(item.get("status") == "errored" for item in items)
         processed = sum(item.get("status") != "errored" for item in items)
         if getattr(result, "status", None) == "errored":
+            # The run failed as a whole, whatever it reports per item: the next
+            # sync retries it.
             await reporter.finish(
-                "partial" if processed else "failed",
+                "failed",
                 counts={"processed": processed, "failed": failed},
                 reason="processing_error",
             )
