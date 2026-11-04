@@ -310,18 +310,25 @@ async def _find_plugin_agent(user: User, plugin_key: str) -> User | None:
 
     ``create_agent`` derives the agent's internal email deterministically, so
     matching on it among the user's child agents is the lookup — no extra
-    mapping table needed. Both forms resolve: the tagged one this route mints
-    (``<plugin_key>+plugin.<parent_id>@cognee.agent``) and the plain one agents
-    provisioned before the tag carry, so a re-provision never creates a second
-    agent for a plugin.
+    mapping table needed. The tagged form this route mints
+    (``<plugin_key>+plugin.<parent_id>@cognee.agent``) wins. The plain form
+    (``<plugin_key>+<parent_id>@cognee.agent``) is what agents provisioned
+    before the tag carry, but also what a custom agent the user named after
+    a plugin carries, so it resolves only under a :data:`BUILTIN_PLUGINS`
+    key — the only keys that could provision back then — exactly as
+    :func:`cognee.modules.integrations.agent_identity.plugin_key_from_agent_email`
+    reads it. A custom agent named ``hermes-agent`` is never the plugin.
     """
-    internal_emails = {
-        plugin_agent_email(plugin_key, user.id),
-        agent_email(plugin_key, user.id),
-    }
-    for agent in await list_agents(user.id):
-        if agent.user.email in internal_emails:
+    agents = await list_agents(user.id)
+    tagged = plugin_agent_email(plugin_key, user.id)
+    for agent in agents:
+        if agent.user.email == tagged:
             return agent.user
+    if plugin_key in BUILTIN_PLUGINS:
+        legacy = agent_email(plugin_key, user.id)
+        for agent in agents:
+            if agent.user.email == legacy:
+                return agent.user
     return None
 
 
@@ -662,29 +669,37 @@ def get_integrations_router():
             label = (body.label or "").strip() or None
             connection_type = body.connection_type or default_connection_type(plugin_key)
 
-            created = True
-            try:
-                # Every key goes through add_plugin_agent_key below.
-                agent_user, _ = await create_agent(
-                    plugin_key, user, issue_api_key=False, plugin_identity=True
-                )
-            except (UserAlreadyExists, IntegrityError):
-                # Already provisioned — same agent, one more key.
-                # IntegrityError covers the concurrent-first-provision race:
-                # fastapi-users' create is check-then-insert, so two
-                # simultaneous calls can both pass the email check and the
-                # loser hits the unique-email constraint instead of
-                # UserAlreadyExists. Same recovery: resolve the agent and add.
-                created = False
-                agent_user = await _find_plugin_agent(user, plugin_key)
-                if agent_user is None:
-                    # The deterministic agent email exists but isn't among
-                    # this user's child agents — a state we can't repair
-                    # here without risking a key handout to the wrong owner.
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"Plugin agent for {plugin_key!r} exists but could not be resolved.",
+            # Resolve before creating: an agent provisioned before this route
+            # tagged its emails carries the plain form, which never collides
+            # with the tagged one, so creating first would mint a second
+            # agent for the plugin and split its keys, sessions and grants.
+            agent_user = await _find_plugin_agent(user, plugin_key)
+            created = agent_user is None
+            if created:
+                try:
+                    # Every key goes through add_plugin_agent_key below.
+                    agent_user, _ = await create_agent(
+                        plugin_key, user, issue_api_key=False, plugin_identity=True
                     )
+                except (UserAlreadyExists, IntegrityError):
+                    # The concurrent-first-provision race: fastapi-users'
+                    # create is check-then-insert, so two simultaneous calls
+                    # can both pass the lookup and the email check, and the
+                    # loser hits UserAlreadyExists or the unique-email
+                    # constraint. Same recovery: resolve the winner's agent
+                    # and add a key to it.
+                    created = False
+                    agent_user = await _find_plugin_agent(user, plugin_key)
+                    if agent_user is None:
+                        # The deterministic agent email exists but isn't among
+                        # this user's child agents — a state we can't repair
+                        # here without risking a key handout to the wrong owner.
+                        raise HTTPException(
+                            status_code=409,
+                            detail=(
+                                f"Plugin agent for {plugin_key!r} exists but could not be resolved."
+                            ),
+                        )
 
             new_key = await _add_plugin_key(agent_user.id, plugin_key)
 

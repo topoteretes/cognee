@@ -2,9 +2,10 @@
 
 Agent plugins (claude-code, codex, ...) are not OAuth providers — each
 connected plugin gets its own agent sub-user, with one API key per machine. These tests
-exercise the router's provisioning logic (idempotent get-or-create, one
-added key per provision, any well-formed key provisions and a malformed one
-is a 422 (SDK-646), disconnect-revokes-keys) with
+exercise the router's provisioning logic (idempotent get-or-create that
+resolves an existing agent — tagged or pre-tag plain email — before creating
+one, one added key per provision, any well-formed key provisions and a
+malformed one is a 422 (SDK-646), disconnect-revokes-keys) with
 the DB-facing collaborators mocked at module level, the same way
 test_get_integrations_router.py mocks the OAuth credential layer. The
 throttled UserApiKey.last_used_at write that provisioned keys rely on for
@@ -76,6 +77,15 @@ def client():
     app.include_router(get_integrations_router(), prefix="/api/v1/integrations")
     app.dependency_overrides[get_authenticated_user] = lambda: _FakeUser()
     yield TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def no_child_agents():
+    """Provisioning resolves the user's child agents before creating one; by
+    default there are none. Tests with existing agents patch ``list_agents``
+    again inside their own block, which takes precedence while it is active."""
+    with patch.object(_router_module, "list_agents", new=AsyncMock(return_value=[])):
+        yield
 
 
 @pytest.mark.parametrize(
@@ -275,11 +285,7 @@ def test_second_provision_adds_a_key_to_the_same_agent_and_revokes_nothing(clien
     # the claude-code agent by its deterministic email, not the first child.
     codex_agent_id = uuid4()
     with (
-        patch.object(
-            _router_module,
-            "create_agent",
-            new=AsyncMock(side_effect=UserAlreadyExists()),
-        ),
+        patch.object(_router_module, "create_agent", new=AsyncMock()) as create_agent,
         patch.object(
             _router_module,
             "list_agents",
@@ -307,19 +313,21 @@ def test_second_provision_adds_a_key_to_the_same_agent_and_revokes_nothing(clien
     assert body["agentId"] == str(AGENT_ID)
     assert body["apiKey"] == "added-key"
 
-    # One key added to the claude-code agent (never the codex one), none revoked.
+    # One key added to the claude-code agent (never the codex one), none revoked,
+    # and no second agent created.
     add_key.assert_awaited_once_with(AGENT_ID, "claude-code")
+    create_agent.assert_not_awaited()
     delete_key.assert_not_awaited()
     revoke_keys.assert_not_awaited()
 
 
 def test_reprovision_finds_an_agent_provisioned_before_the_email_tag(client):
     """An agent minted before the provision route tagged its emails carries the
-    plain form; a re-provision must resolve it, never create a second agent."""
+    plain form, which never collides with the tagged email a create would
+    mint. The route must resolve it before creating, or an upgrade leaves the
+    user with two agents for one plugin: keys, sessions and grants split."""
     with (
-        patch.object(
-            _router_module, "create_agent", new=AsyncMock(side_effect=UserAlreadyExists())
-        ),
+        patch.object(_router_module, "create_agent", new=AsyncMock()) as create_agent,
         patch.object(
             _router_module,
             "list_agents",
@@ -342,6 +350,93 @@ def test_reprovision_finds_an_agent_provisioned_before_the_email_tag(client):
     assert response.json()["created"] is False
     assert response.json()["agentId"] == str(AGENT_ID)
     add_key.assert_awaited_once_with(AGENT_ID, "claude-code")
+    create_agent.assert_not_awaited()
+
+
+def test_reprovision_prefers_the_tagged_agent_when_both_forms_exist(client):
+    """Both a plain-email and a tagged agent under one built-in key: the
+    tagged one is the one this route minted, so it wins — never whichever
+    child happens to be listed first."""
+    legacy_id = uuid4()
+    with (
+        patch.object(_router_module, "create_agent", new=AsyncMock()) as create_agent,
+        patch.object(
+            _router_module,
+            "list_agents",
+            new=AsyncMock(
+                return_value=[
+                    _fake_agent_info("claude-code", legacy_id, tagged=False),
+                    _fake_agent_info("claude-code", AGENT_ID),
+                ]
+            ),
+        ),
+        patch.object(
+            _router_module,
+            "add_plugin_agent_key",
+            new=AsyncMock(return_value=SimpleNamespace(id=KEY_ID, api_key="added-key")),
+        ) as add_key,
+        patch.object(
+            _router_module, "get_principal_all_configuration", new=AsyncMock(return_value=[])
+        ),
+        patch.object(_router_module, "store_principal_configuration", new=AsyncMock()),
+        patch.object(_router_module, "register_agent_connection", new=AsyncMock()),
+        patch.object(
+            _router_module, "revoke_plugin_agent_keys", new=AsyncMock(return_value=1)
+        ) as revoke_keys,
+        patch.object(_router_module, "deactivate_agent_connection", new=AsyncMock()),
+    ):
+        provision = client.post("/api/v1/integrations/plugins/claude-code/provision")
+        disconnect = client.delete("/api/v1/integrations/plugins/claude-code")
+
+    assert provision.json()["agentId"] == str(AGENT_ID)
+    add_key.assert_awaited_once_with(AGENT_ID, "claude-code")
+    create_agent.assert_not_awaited()
+    assert disconnect.json() == {"disconnected": True}
+    revoke_keys.assert_awaited_once_with(AGENT_ID)
+
+
+def test_custom_agent_named_after_a_plugin_is_never_the_plugin(client):
+    """A custom agent the user created as ``hermes-agent`` carries the plain
+    email form. Only built-in keys could provision before the tag, so under
+    any other key the plain form is a custom agent: provisioning creates the
+    plugin's own agent, and disconnecting the plugin before it exists revokes
+    nothing — least of all the custom agent's keys."""
+    custom_agent_id = uuid4()
+    plugin_agent = _fake_agent_user("hermes-agent")
+    with (
+        patch.object(
+            _router_module, "create_agent", new=AsyncMock(return_value=(plugin_agent, None))
+        ) as create_agent,
+        patch.object(
+            _router_module,
+            "list_agents",
+            new=AsyncMock(
+                return_value=[_fake_agent_info("hermes-agent", custom_agent_id, tagged=False)]
+            ),
+        ),
+        patch.object(
+            _router_module,
+            "add_plugin_agent_key",
+            new=AsyncMock(return_value=SimpleNamespace(id=KEY_ID, api_key="raw-key")),
+        ) as add_key,
+        patch.object(
+            _router_module, "get_principal_all_configuration", new=AsyncMock(return_value=[])
+        ),
+        patch.object(_router_module, "store_principal_configuration", new=AsyncMock()),
+        patch.object(_router_module, "register_agent_connection", new=AsyncMock()),
+        patch.object(_router_module, "revoke_plugin_agent_keys", new=AsyncMock()) as revoke_keys,
+        patch.object(_router_module, "deactivate_agent_connection", new=AsyncMock()),
+    ):
+        disconnect = client.delete("/api/v1/integrations/plugins/hermes-agent")
+        provision = client.post("/api/v1/integrations/plugins/hermes-agent/provision")
+
+    assert disconnect.json() == {"disconnected": False}
+    revoke_keys.assert_not_awaited()
+    assert provision.status_code == 200
+    assert provision.json()["created"] is True
+    assert provision.json()["agentId"] == str(AGENT_ID)
+    create_agent.assert_awaited_once()
+    add_key.assert_awaited_once_with(AGENT_ID, "hermes-agent")
 
 
 def test_provision_race_integrity_error_takes_the_add_path(client):
@@ -357,7 +452,8 @@ def test_provision_race_integrity_error_takes_the_add_path(client):
         patch.object(
             _router_module,
             "list_agents",
-            new=AsyncMock(return_value=[_fake_agent_info()]),
+            # Nothing to resolve before the create; the winner's agent after it.
+            new=AsyncMock(side_effect=[[], [_fake_agent_info()]]),
         ),
         patch.object(
             _router_module,
