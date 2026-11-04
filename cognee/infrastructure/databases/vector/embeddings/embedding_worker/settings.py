@@ -72,7 +72,7 @@ class EmbeddingWorkerSettings(BaseSettings):
         if not self.endpoint:
             raise EmbeddingWorkerConfigError(
                 "EMBEDDING_PROVIDER=embedding_worker needs the worker's broker URL.",
-                remediation=f"Set {ENV_PREFIX}ENDPOINT to amqp(s)://user:pass@host:5672/.",
+                remediation=f"Set {ENV_PREFIX}ENDPOINT to amqp(s)://user:pass@host:5672/%2f.",
             )
         if not self.endpoint.startswith(("amqp://", "amqps://")):
             raise EmbeddingWorkerConfigError(

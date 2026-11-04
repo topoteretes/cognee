@@ -2,7 +2,7 @@
 
 Reply mapping and decoding are unit-tested here. The broker tests need a
 RabbitMQ and run when ``COGNEE_EMBEDDING_WORKER_AMQP_TEST_URL`` is set (e.g.
-``amqp://guest:guest@localhost:5672/``); a fake worker on a private queue answers
+``amqp://guest:guest@localhost:5672/%2f``); a fake worker on a private queue answers
 them. The RPC core is shared with the remote GLiNER client, whose broker tests
 cover it too (``test_gliner_remote_amqp.py``).
 """
@@ -34,6 +34,7 @@ from cognee.infrastructure.databases.vector.embeddings.embedding_worker import (
 )
 from cognee.infrastructure.databases.vector.embeddings.embedding_worker.amqp import (  # noqa: E402
     AmqpEmbeddingTransport,
+    info_reply_to_result,
     reply_to_result,
 )
 from cognee.infrastructure.databases.vector.embeddings.embedding_worker.protocol import (  # noqa: E402
@@ -74,9 +75,72 @@ def success_body(payload: dict, *, model: str = "fake/model", dimensions: int = 
     ).encode()
 
 
+def info_body(*, model: str = "fake/model", dimensions: int = DIMS, **changes) -> bytes:
+    """The worker's ``GET /v1/info`` body, as its RabbitMQ ``type=info`` reply."""
+    data = {
+        "status": "ready",
+        "model": model,
+        "dimensions": dimensions,
+        "max_input_tokens": 64,
+        "matryoshka": False,
+        "asymmetric": True,
+        "tokenizer": "fake",
+        "pooling": "cls",
+        "precision": "fp32",
+        "limits": {"max_inputs": 8, "max_text_chars": 10000, "max_input_tokens": 64},
+        "batching": {"max_batch_size": 32, "max_batch_tokens": 8192},
+        "features": ["input_type", "truncate", "base64", "openai", "info"],
+        "device": None,
+    }
+    data.update(changes)
+    return json.dumps(data).encode()
+
+
 # --------------------------------------------------------------------------- #
 # Reply mapping
 # --------------------------------------------------------------------------- #
+
+
+def test_info_reply_is_the_v1_info_body():
+    info = info_reply_to_result(info_body(), "label")
+    assert (info.model, info.dimensions, info.max_input_tokens, info.max_inputs) == (
+        "fake/model",
+        DIMS,
+        64,
+        8,
+    )
+    assert info.raw["features"][-1] == "info"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"not json",
+        b"[]",
+        info_body(dimensions=0),
+        info_body(dimensions="3"),
+        info_body(model=""),
+        info_body(max_input_tokens=None),
+        info_body(limits={}),
+        info_body(limits={"max_inputs": True}),
+    ],
+)
+def test_malformed_info_is_a_runtime_error(body):
+    with pytest.raises(EmbeddingWorkerRuntimeError, match="info"):
+        info_reply_to_result(body, "label")
+
+
+@pytest.mark.parametrize(
+    ("code", "error"),
+    [
+        ("invalid_request", EmbeddingWorkerRejectedError),  # a worker that predates info
+        ("unavailable", EmbeddingWorkerUnavailableError),
+    ],
+)
+def test_info_error_replies_map_to_their_class(code, error):
+    body = json.dumps({"error": {"code": code, "message": "details"}}).encode()
+    with pytest.raises(error, match="details"):
+        info_reply_to_result(body, "label")
 
 
 def test_success_reply_is_the_v1_embed_body_with_base64_vectors():
@@ -159,8 +223,11 @@ async def test_a_refused_connection_is_unavailable():
 
 
 @contextlib.asynccontextmanager
-async def fake_worker(queue: str, respond):
-    """Consume ``queue`` and answer each request with ``respond(message) -> [bodies]``."""
+async def fake_worker(queue: str, respond, *, info: bytes | None = None):
+    """Consume ``queue`` and answer each request with ``respond(message) -> [bodies]``;
+    ``type=info`` messages get ``info`` (default: :func:`info_body`). Only the
+    embed requests are recorded."""
+    info = info if info is not None else info_body()
     connection = await aio_pika.connect(BROKER_URL)
     channel = await connection.channel()
     # Durable: RabbitMQ 4 refuses transient non-exclusive queues, and an exclusive
@@ -170,8 +237,12 @@ async def fake_worker(queue: str, respond):
 
     async def on_message(message):
         async with message.process():
-            seen.append(message)
-            for body in respond(message):
+            if message.type == "info":
+                bodies = [info]
+            else:
+                seen.append(message)
+                bodies = respond(message)
+            for body in bodies:
                 await channel.default_exchange.publish(
                     aio_pika.Message(body=body, correlation_id=message.correlation_id),
                     routing_key=message.reply_to,
@@ -216,6 +287,39 @@ async def test_request_properties_and_reply_routing():
     assert message.content_type == "application/json"
     assert message.expiration is not None
     assert reply.vectors == [vector_for(text) for text in PAYLOAD["inputs"]]
+    assert message.type is None  # an embed request carries no type
+
+
+@needs_broker
+@pytest.mark.asyncio
+async def test_info_is_a_typed_message_answered_with_the_info_body():
+    queue = private_queue()
+    received: list = []
+    connection = await aio_pika.connect(BROKER_URL)
+    channel = await connection.channel()
+    declared = await channel.declare_queue(queue, durable=True, auto_delete=True)
+
+    async def on_message(message):
+        async with message.process():
+            received.append(message)
+            await channel.default_exchange.publish(
+                aio_pika.Message(body=info_body(), correlation_id=message.correlation_id),
+                routing_key=message.reply_to,
+            )
+
+    await declared.consume(on_message)
+    try:
+        transport = transport_for(queue)
+        info = await transport.info(request_id="info-1")
+        await transport.aclose()
+    finally:
+        await connection.close()
+    [message] = received
+    assert message.type == "info"
+    assert json.loads(message.body) == {}
+    assert message.headers["x-request-id"] == "info-1"
+    assert message.reply_to.startswith("amq.rabbitmq.reply-to")
+    assert info.dimensions == DIMS and info.max_inputs == 8
 
 
 @needs_broker
@@ -317,7 +421,8 @@ async def test_wrong_credentials_are_unauthorized():
 @pytest.mark.asyncio
 async def test_the_engine_splits_over_long_inputs_through_the_broker(monkeypatch):
     """The settings-built, shared transport end to end, with a worker whose model
-    accepts at most 20 characters per input."""
+    accepts at most 20 characters per input. EMBEDDING_DIMENSIONS is unset: the
+    size comes from the worker's info."""
     monkeypatch.setattr(engine_module, "resolve_embedding_tokenizer", lambda **_: object())
     monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
 
@@ -332,7 +437,7 @@ async def test_the_engine_splits_over_long_inputs_through_the_broker(monkeypatch
     async with fake_worker(queue, limited) as seen:
         engine = EmbeddingWorkerEmbeddingEngine(
             model="fake/model",
-            dimensions=DIMS,
+            dimensions=None,
             batch_size=8,
             settings=EmbeddingWorkerSettings(endpoint=BROKER_URL, amqp_queue=queue),
         )
@@ -341,7 +446,33 @@ async def test_the_engine_splits_over_long_inputs_through_the_broker(monkeypatch
         finally:
             await close_embedding_worker_transports()
 
+    assert engine.get_vector_size() == DIMS
     assert result[0] == vector_for("short")
-    assert result[1] == vector_for("a" * 20)  # two 20-character parts, averaged
+    # Two 20-character parts, averaged and scaled back to unit length.
+    expected = np.asarray(vector_for("a" * 20))
+    assert result[1] == pytest.approx((expected / np.linalg.norm(expected)).tolist())
     assert result.tokens == 7 * 3  # three successful requests
     assert len(seen) == 5  # the batch, its halves, and the two parts of the long text
+
+
+@needs_broker
+@pytest.mark.asyncio
+async def test_a_worker_without_info_support_falls_back_to_the_config(monkeypatch):
+    """An older worker parses the info message as an embed request and answers
+    invalid_request: the engine uses EMBEDDING_DIMENSIONS and goes on."""
+    monkeypatch.setattr(engine_module, "resolve_embedding_tokenizer", lambda **_: object())
+    monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
+    old = json.dumps({"error": {"code": "invalid_request", "message": "inputs: missing"}})
+    queue = private_queue()
+    async with fake_worker(queue, answer, info=old.encode()):
+        engine = EmbeddingWorkerEmbeddingEngine(
+            model="fake/model",
+            dimensions=DIMS,
+            settings=EmbeddingWorkerSettings(endpoint=BROKER_URL, amqp_queue=queue),
+        )
+        try:
+            result = await engine.embed_text(["x"])
+        finally:
+            await close_embedding_worker_transports()
+    assert engine.worker_info is None
+    assert result[0] == vector_for("x")

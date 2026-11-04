@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 import cognee.infrastructure.databases.vector.embeddings.EmbeddingWorkerEmbeddingEngine as engine_module
@@ -106,7 +108,7 @@ def build(provider="embedding_worker", **overrides):
 
 
 def test_the_provider_selects_the_engine(monkeypatch):
-    monkeypatch.setenv(PREFIX + "ENDPOINT", "amqp://guest:guest@broker:5672/")
+    monkeypatch.setenv(PREFIX + "ENDPOINT", "amqp://guest:guest@broker:5672/%2f")
     engine = build(embedding_input_type="query")
     assert isinstance(engine, EmbeddingWorkerEmbeddingEngine)
     assert engine.get_vector_size() == 384
@@ -119,3 +121,36 @@ def test_the_provider_selects_the_engine(monkeypatch):
 def test_the_engine_fails_fast_without_an_endpoint():
     with pytest.raises(EmbeddingWorkerConfigError, match=PREFIX + "ENDPOINT"):
         build()
+
+
+def test_without_embedding_dimensions_the_engine_waits_for_the_worker(monkeypatch):
+    monkeypatch.setenv(PREFIX + "ENDPOINT", "amqp://guest:guest@broker:5672/%2f")
+    engine = build(embedding_dimensions=None)
+    assert engine.dimensions is None and engine.configured_dimensions is None
+
+
+def test_the_config_leaves_the_size_unset_for_the_worker(monkeypatch):
+    from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+
+    monkeypatch.delenv("EMBEDDING_DIMENSIONS", raising=False)
+    worker = EmbeddingConfig(
+        embedding_provider="embedding_worker", embedding_model="BAAI/bge-small-en-v1.5"
+    )
+    assert worker.embedding_dimensions is None  # not the 3072 fallback
+    explicit = EmbeddingConfig(embedding_provider="embedding_worker", embedding_dimensions=384)
+    assert explicit.embedding_dimensions == 384
+    other = EmbeddingConfig(embedding_provider="openai_compatible", embedding_model="unknown/x")
+    assert other.embedding_dimensions is not None
+
+
+def test_a_missing_aio_pika_fails_when_the_engine_is_built(monkeypatch):
+    monkeypatch.setenv(PREFIX + "ENDPOINT", "amqp://guest:guest@broker:5672/%2f")
+    amqp_module = "cognee.infrastructure.databases.vector.embeddings.embedding_worker.amqp"
+    monkeypatch.delitem(sys.modules, amqp_module, raising=False)
+    # `from . import amqp` would otherwise find the already imported submodule here.
+    monkeypatch.delattr(sys.modules[amqp_module.rsplit(".", 1)[0]], "amqp", raising=False)
+    monkeypatch.delitem(sys.modules, "cognee.infrastructure.remote_worker.amqp_rpc", raising=False)
+    monkeypatch.setitem(sys.modules, "aio_pika", None)  # import aio_pika -> ImportError
+    with pytest.raises(EmbeddingWorkerConfigError, match="aio-pika") as raised:
+        build()
+    assert "remote-worker-amqp" in raised.value.remediation

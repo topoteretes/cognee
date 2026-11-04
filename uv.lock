@@ -1567,6 +1567,9 @@ rapidocr = [
 redis = [
     { name = "redis" },
 ]
+remote-worker-amqp = [
+    { name = "aio-pika" },
+]
 scraping = [
     { name = "apscheduler" },
     { name = "beautifulsoup4" },
@@ -1598,6 +1601,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aio-pika", marker = "extra == 'gliner-remote-amqp'", specifier = ">=9.4,<10" },
+    { name = "aio-pika", marker = "extra == 'remote-worker-amqp'", specifier = ">=9.4,<10" },
     { name = "aiofiles", specifier = ">=23.2.1" },
     { name = "aiohttp", specifier = ">=3.13.5,<4.0.0" },
     { name = "aiolimiter", specifier = ">=1.2.1" },
@@ -1739,7 +1743,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]
-provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "gmail", "google-drive", "google-calendar", "baml", "instructor", "dev", "debug", "redis", "tracing", "ontology", "docling", "docling-full", "gliner", "gliner-remote-grpc", "gliner-remote-amqp", "rapidocr"]
+provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "gmail", "google-drive", "google-calendar", "baml", "instructor", "dev", "debug", "redis", "tracing", "ontology", "docling", "docling-full", "gliner", "gliner-remote-grpc", "gliner-remote-amqp", "remote-worker-amqp", "rapidocr"]
 
 [package.metadata.requires-dev]
 dev = [

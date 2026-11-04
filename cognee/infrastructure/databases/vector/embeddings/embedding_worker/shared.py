@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from cognee.shared.logging_utils import get_logger
 
 from .errors import EmbeddingWorkerConfigError
-from .protocol import EmbeddingWorkerTransport
+from .protocol import EmbeddingWorkerTransport, WorkerInfo
 from .settings import EmbeddingWorkerSettings
 
 logger = get_logger("embedding_worker")
@@ -36,6 +36,10 @@ class SharedWorker:
     # share its outcome, a failure included, instead of each probing in turn.
     probe: asyncio.Future[None] | None = None
     ready_until: float = 0.0
+    # The worker's model info from the last readiness probe; None before the
+    # first probe, or when the worker predates info (see info_unsupported).
+    info: WorkerInfo | None = None
+    info_unsupported: bool = False
 
 
 @dataclass
@@ -49,8 +53,22 @@ class _LoopWorkers:
 _shared: dict[asyncio.AbstractEventLoop, _LoopWorkers] = {}
 
 
+def load_transport_module(settings: EmbeddingWorkerSettings) -> None:
+    """Import the module of the transport ``settings.transport`` names.
+
+    The engine calls it when it is built, so a missing aio-pika is an
+    :class:`EmbeddingWorkerConfigError` then rather than on the first embedding.
+    """
+    settings.require_amqp_endpoint()
+    if settings.transport == "amqp":
+        from . import amqp  # raises EmbeddingWorkerConfigError without aio-pika
+
+        return
+    raise EmbeddingWorkerConfigError(f"Unknown embedding worker transport {settings.transport!r}.")
+
+
 def build_transport(settings: EmbeddingWorkerSettings) -> EmbeddingWorkerTransport:
-    """Create the transport ``settings.transport`` names; aio-pika is imported lazily."""
+    """Create the transport ``settings.transport`` names."""
     endpoint = settings.require_amqp_endpoint()
     if settings.transport == "amqp":
         from .amqp import AmqpEmbeddingTransport
