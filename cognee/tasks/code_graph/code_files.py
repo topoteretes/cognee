@@ -97,24 +97,21 @@ def _stage_code_file(data_item, staging_root, content: str) -> Path:
 async def extract_code_files_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
+    code_graph_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
     graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-    write_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> list:
     """Cognify CODE-route adapter: run the enola pipeline on stored code files.
 
     Each Data record's raw content is staged into a temporary directory under
     its original file name (enola detects languages by extension and only
-    accepts directories), then the standard code graph tasks run on it:
-    extract_code_graph -> add_code_graph_data_points -> add_code_graph_edges.
-    graph_only always: SearchType.CODE uses graph indexes, and the CODE route
-    must stay free of embedding calls like the rest of the enola pipeline.
+    accepts directories), then ``load_code_graph`` runs on it, batching by
+    ``code_graph_batch_size`` (named apart from a pipeline ``Task``'s own
+    ``batch_size``). graph_only always: SearchType.CODE uses graph indexes,
+    and the CODE route must stay free of embedding calls like the rest of the
+    enola pipeline.
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
-    from cognee.tasks.code_graph.extract_code_graph import (
-        add_code_graph_data_points,
-        add_code_graph_edges,
-        extract_code_graph,
-    )
+    from cognee.tasks.code_graph.extract_code_graph import load_code_graph
 
     for data_item in data_documents:
         if not is_code_sourced(data_item):
@@ -129,20 +126,11 @@ async def extract_code_files_graph(
         with tempfile.TemporaryDirectory(prefix="cognee_code_") as staging_root:
             repo_dir = _stage_code_file(data_item, staging_root, content)
 
-            data_points = await extract_code_graph(repo_path=repo_dir)
-            state = await add_code_graph_data_points(
-                data_points,
-                ctx=ctx,
-                graph_only=True,
-                graph_read_batch_size=graph_read_batch_size,
-                write_batch_size=write_batch_size,
-            )
-            await add_code_graph_edges(
-                state,
+            await load_code_graph(
                 repo_path=repo_dir,
                 ctx=ctx,
+                batch_size=code_graph_batch_size,
                 graph_read_batch_size=graph_read_batch_size,
-                write_batch_size=write_batch_size,
             )
 
         logger.info(
@@ -152,6 +140,9 @@ async def extract_code_files_graph(
     return data_documents
 
 
-def get_code_file_tasks() -> list[Task]:
-    """The cognify CODE-route task list: one adapter task, no LLM stages."""
-    return [Task(extract_code_files_graph, needs_llm=False)]
+def get_code_file_tasks(batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE) -> list[Task]:
+    """The cognify CODE-route task list: one adapter task, no LLM stages.
+
+    ``batch_size`` is the code graph's (see ``load_code_graph``).
+    """
+    return [Task(extract_code_files_graph, needs_llm=False, code_graph_batch_size=batch_size)]

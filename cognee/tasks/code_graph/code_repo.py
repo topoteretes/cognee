@@ -431,10 +431,14 @@ async def add_code_repository(
 async def extract_code_repo_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
+    code_graph_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
     graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-    write_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> list:
     """Cognify CODE_REPO-route adapter: one enola run over the whole project.
+
+    ``code_graph_batch_size`` is ``load_code_graph``'s ``batch_size``
+    (``cognify(codegraph_config={"batch_size": ...})``), named apart from the
+    ``batch_size`` a pipeline ``Task`` takes for itself.
 
     Reads the stored manifest for the repo path and runs the standard code
     graph tasks on the ORIGINAL directory (enola writes its .enola snapshot
@@ -455,11 +459,7 @@ async def extract_code_repo_graph(
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
     from cognee.tasks.code_graph.cluster import load_dataset_cluster
-    from cognee.tasks.code_graph.extract_code_graph import (
-        add_code_graph_data_points,
-        add_code_graph_edges,
-        extract_code_graph,
-    )
+    from cognee.tasks.code_graph.extract_code_graph import load_code_graph
 
     for data_item in data_documents:
         if not is_code_repo_sourced(data_item):
@@ -480,27 +480,16 @@ async def extract_code_repo_graph(
             )
 
         if await load_dataset_cluster(
-            ctx, graph_read_batch_size=graph_read_batch_size, write_batch_size=write_batch_size
+            ctx, batch_size=code_graph_batch_size, graph_read_batch_size=graph_read_batch_size
         ):
             continue
 
-        node_set = code_repo_node_set(data_item)
-
-        data_points = await extract_code_graph(repo_path=repo_path, node_set=node_set)
-        state = await add_code_graph_data_points(
-            data_points,
-            ctx=ctx,
-            graph_only=True,
-            graph_read_batch_size=graph_read_batch_size,
-            write_batch_size=write_batch_size,
-        )
-        await add_code_graph_edges(
-            state,
+        await load_code_graph(
             repo_path=repo_path,
             ctx=ctx,
-            node_set=node_set,
+            node_set=code_repo_node_set(data_item),
+            batch_size=code_graph_batch_size,
             graph_read_batch_size=graph_read_batch_size,
-            write_batch_size=write_batch_size,
         )
 
         logger.info("Code repo graph extracted for %s (%s).", repo_path, data_item.id)
@@ -508,8 +497,11 @@ async def extract_code_repo_graph(
     return data_documents
 
 
-def get_code_repo_tasks() -> list:
-    """The cognify CODE_REPO-route task list: one adapter task, no LLM stages."""
+def get_code_repo_tasks(batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE) -> list:
+    """The cognify CODE_REPO-route task list: one adapter task, no LLM stages.
+
+    ``batch_size`` is the code graph's (see ``load_code_graph``).
+    """
     from cognee.modules.pipelines.tasks.task import Task
 
-    return [Task(extract_code_repo_graph, needs_llm=False)]
+    return [Task(extract_code_repo_graph, needs_llm=False, code_graph_batch_size=batch_size)]

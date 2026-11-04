@@ -9,11 +9,12 @@ import pytest
 from cognee.tasks.code_graph.enola import snapshot_identity
 from cognee.tasks.code_graph.extract_code_graph import (
     CODE_GRAPH_MAPPING_VERSION,
+    _CodeGraphLoad,
+    _read_code_graph_state,
     add_code_graph_data_points,
-    add_code_graph_edges,
-    extract_code_graph,
     fact_node_id,
 )
+from cognee.tests.utils.code_graph_load import extracted_points, load_with_node_writes_mocked
 from cognee.tests.utils.graph_stream import stream_through_get_graph_data
 
 graph_engine_module = importlib.import_module(
@@ -79,7 +80,7 @@ async def test_extract_skips_when_stored_snapshot_id_matches(tmp_path, monkeypat
         "last_mapping_version": CODE_GRAPH_MAPPING_VERSION,
     }
 
-    data_points = await extract_code_graph(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
+    data_points = await extracted_points(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
 
     assert data_points == []
     engine.get_node.assert_awaited_once_with(REPO_NODE_ID)
@@ -98,7 +99,7 @@ async def test_extract_reads_marker_from_json_properties_blob(tmp_path, monkeypa
         )
     }
 
-    data_points = await extract_code_graph(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
+    data_points = await extracted_points(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
 
     assert data_points == []
 
@@ -109,21 +110,30 @@ async def test_extract_loads_when_snapshot_id_differs_or_lookup_fails(tmp_path, 
     engine = _mock_engine(monkeypatch)
     engine.get_node.return_value = {"last_snapshot_id": "sha256:older"}
 
-    data_points = await extract_code_graph(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
+    data_points = await extracted_points(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
     assert len(data_points) == 3  # repository + two symbols
 
     # A broken lookup must never block ingestion.
     engine.get_node.side_effect = RuntimeError("graph down")
-    data_points = await extract_code_graph(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
+    data_points = await extracted_points(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
     assert len(data_points) == 3
 
 
 @pytest.mark.asyncio
 async def test_skipped_snapshot_short_circuits_downstream_tasks(tmp_path, monkeypatch):
+    """An unchanged snapshot streams nothing: the graph is neither read nor written."""
+    _write_snapshot(tmp_path, FACTS)
     engine = _mock_engine(monkeypatch)
+    engine.get_node.return_value = {
+        "last_snapshot_id": SNAPSHOT_ID,
+        "last_mapping_version": CODE_GRAPH_MAPPING_VERSION,
+    }
 
-    assert await add_code_graph_data_points([]) == []
-    assert await add_code_graph_edges([], snapshot_dir=tmp_path) == []
+    write = await load_with_node_writes_mocked(
+        monkeypatch, repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path
+    )
+
+    write.assert_not_awaited()
     engine.add_edges.assert_not_awaited()
     engine.get_graph_data.assert_not_awaited()
     engine.add_nodes.assert_not_awaited()
@@ -166,8 +176,8 @@ async def test_sweep_removes_stale_nodes_and_edges_and_stamps_snapshot(tmp_path,
     # ("code"), so the tag is current, not stale -- isolating this test's
     # concern (does the stale-node/edge SWEEP leave a non-code-target edge
     # alone) from the separate node_set detag pass that also runs here.
-    await add_code_graph_edges(
-        ["sentinel"], repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path, node_set=["code"]
+    await load_with_node_writes_mocked(
+        monkeypatch, repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path, node_set=["code"]
     )
 
     deleted_nodes = [
@@ -197,7 +207,9 @@ async def test_sweep_failure_prevents_snapshot_stamp(tmp_path, monkeypatch):
     )
 
     with pytest.raises(RuntimeError):
-        await add_code_graph_edges(["sentinel"], repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
+        await load_with_node_writes_mocked(
+            monkeypatch, repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path
+        )
 
     engine.add_nodes.assert_not_awaited()
 
@@ -219,21 +231,21 @@ async def test_delta_write_skips_unchanged_facts(tmp_path, monkeypatch):
         (str(by_name["app/api.handler"].id), {"fact_hash": "sha256:outdated"}),
     ]
     engine = _mock_engine(monkeypatch, existing_nodes, [])
+    load = _CodeGraphLoad(graph_state=await _read_code_graph_state(engine, 2000))
 
-    result = await add_code_graph_data_points(data_points)
+    await add_code_graph_data_points(data_points, load)
 
     written = add_data_points_mock.await_args.args[0]
     written_names = sorted(getattr(p, "name", "?") for p in written)
     # Repository always rewritten (carries the stamp); Database skipped.
     assert written_names == ["app/api.handler", REPO]
-    assert result.node_delta == {
-        "nodes_added": 0,
-        "nodes_updated": 1,
-        "nodes_unchanged": 1,
-        "samples_added": [],
-        "samples_updated": ["app/api.handler"],
-    }
-    assert list(result) == list(data_points)
+    assert (
+        load.nodes_added,
+        load.nodes_updated,
+        load.nodes_unchanged,
+        load.samples_added,
+        load.samples_updated,
+    ) == (0, 1, 1, [], ["app/api.handler"])
     engine.get_graph_data.assert_awaited_once()
 
 
@@ -260,7 +272,9 @@ async def test_delta_write_adds_only_missing_edges_and_stamps_delta(tmp_path, mo
         code_retriever_module, "invalidate_code_graph_snapshot_cache", lambda **kwargs: None
     )
 
-    await add_code_graph_edges(["sentinel"], repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
+    await load_with_node_writes_mocked(
+        monkeypatch, repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path
+    )
 
     engine.add_edges.assert_not_awaited()
     engine.delete_nodes.assert_not_awaited()

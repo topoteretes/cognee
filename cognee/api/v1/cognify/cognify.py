@@ -5,6 +5,9 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+)
 from cognee.infrastructure.databases.vector.compact_vector_store import compact_vector_store
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.engine import DataPoint
@@ -47,6 +50,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME
 from cognee.tasks.code_graph.code_files import get_code_file_tasks
 from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
+from cognee.tasks.code_graph.config import CodeGraphConfig, validate_codegraph_config
 from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
@@ -156,6 +160,7 @@ async def cognify(
     chunk_attachment: Literal["direct", "all"] | None = None,
     extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
     ontology_file_path: str | None = None,
+    codegraph_config: CodeGraphConfig | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
     early_chunk_indexing: bool | None = None,
     **kwargs,
@@ -270,6 +275,12 @@ async def cognify(
                  generic KnowledgeGraph, so a custom graph_model raises. Raises with
                  dry_run=True or while connected to a remote instance — neither path
                  can honour it yet.
+        codegraph_config: Options for the code files and code repositories this
+                 run builds (CODE and CODE_REPO routes), as a ``CodeGraphConfig``.
+                 cognify() reads ``batch_size``: nodes per snapshot batch and per
+                 graph write (default 2000). A larger value holds more of the
+                 snapshot in memory at once and makes fewer writes. Not supported
+                 while connected to a remote instance.
         summary_method: How the standard pipeline writes each chunk's summary. "llm"
                  makes one LLM call per chunk; "from_extraction" joins the chunk's
                  extracted types and relation texts with no LLM call, and a chunk
@@ -377,6 +388,8 @@ async def cognify(
         )
     drop_deprecated_temporal_cognify(kwargs)
 
+    codegraph = validate_codegraph_config(codegraph_config)
+    code_graph_batch_size = codegraph.get("batch_size", DEFAULT_GRAPH_STREAM_BATCH_SIZE)
     cognify_config = get_cognify_config()
     # The extractor decision is made once, here, before any branch. Branches
     # that cannot honour it raise below instead of silently running something
@@ -424,6 +437,13 @@ async def cognify(
             raise ValueError(
                 "extractor is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the extractor locally."
+            )
+        if codegraph:
+            # client.cognify() has no codegraph_config field; the remote would
+            # silently use its own batch size, so an explicit choice has to raise.
+            raise ValueError(
+                "codegraph_config is not supported by cognify() while connected to a "
+                "remote Cognee instance. Call cognee.disconnect() to cognify locally."
             )
         if summary_method is not None:
             # Same as extractor: client.cognify() has no summary_method field.
@@ -581,8 +601,8 @@ async def cognify(
             CognifyRoute.DLT_SOURCE: await get_dlt_tasks(
                 chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
             ),
-            CognifyRoute.CODE: get_code_file_tasks(),
-            CognifyRoute.CODE_REPO: get_code_repo_tasks(),
+            CognifyRoute.CODE: get_code_file_tasks(batch_size=code_graph_batch_size),
+            CognifyRoute.CODE_REPO: get_code_repo_tasks(batch_size=code_graph_batch_size),
         }
 
         def resolve_cognify_tasks(data_item):

@@ -36,6 +36,7 @@ from cognee.tasks.code_graph.models import (
     CodeLintFinding,
     ExternalDependency,
 )
+from cognee.tests.utils.code_graph_load import extracted_points, load_with_node_writes_mocked
 from cognee.tests.utils.graph_stream import stream_through_get_graph_data
 
 enola_module = importlib.import_module("cognee.tasks.code_graph.enola")
@@ -198,7 +199,7 @@ async def test_add_code_graph_edges_stamps_receipt_projection(tmp_path, monkeypa
         code_retriever_module, "invalidate_code_graph_snapshot_cache", lambda **kwargs: None
     )
 
-    await add_code_graph_edges(["sentinel"], repo_path="/repos/shop", snapshot_dir=tmp_path)
+    await load_with_node_writes_mocked(monkeypatch, repo_path="/repos/shop", snapshot_dir=tmp_path)
 
     stamped = engine.add_nodes.await_args.args[0]
     assert [node.name for node in stamped] == [REPO]

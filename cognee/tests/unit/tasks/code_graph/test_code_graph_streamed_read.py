@@ -1,11 +1,11 @@
 """The code graph load reads the graph as a stream and keeps only what it reads.
 
-``add_code_graph_data_points`` used to hold ``get_graph_data()`` whole, chunk
-text included, for the rest of the load. It now drains ``stream_graph_data``
-into a trimmed state: every id and fact_hash, the code-graph and NodeSet nodes
-with the four properties the sweep and detag read, and the edges that start
-at a code-graph node. The page size must not change any outcome, and neither
-must slicing the node write.
+The load used to hold ``get_graph_data()`` whole, chunk text included, for
+its whole run. It now drains ``stream_graph_data`` into a trimmed state: every
+id and fact_hash, the code-graph and NodeSet nodes with the four properties
+the sweep and detag read, and the edges that start at a code-graph node. The
+page size must not change any outcome, and neither must the snapshot batch
+size, which slices the node write.
 """
 
 import importlib
@@ -16,12 +16,10 @@ import pytest
 
 from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 from cognee.tasks.code_graph.extract_code_graph import (
-    add_code_graph_data_points,
-    add_code_graph_edges,
+    _read_code_graph_state,
     fact_node_id,
-    map_facts_to_data_points,
+    load_code_graph,
 )
-from cognee.tasks.code_graph.models import CodeRepository
 from cognee.tests.utils.graph_stream import stream_through_get_graph_data
 
 graph_engine_module = importlib.import_module(
@@ -133,23 +131,13 @@ async def _load(tmp_path, monkeypatch, **batch_sizes):
     write = AsyncMock()
     monkeypatch.setattr(add_data_points_module, "add_data_points", write)
     snapshot_dir = _write_snapshot(tmp_path)
-    data_points = map_facts_to_data_points(FACTS, repo_path=REPO_PATH, node_set=["new-team"])
 
-    read_batch = {
-        key: value for key, value in batch_sizes.items() if key == "graph_read_batch_size"
-    }
-    state = await add_code_graph_data_points(data_points, **batch_sizes)
-    await add_code_graph_edges(
-        state,
-        repo_path=REPO_PATH,
-        snapshot_dir=snapshot_dir,
-        node_set=["new-team"],
-        **read_batch,
+    await load_code_graph(
+        repo_path=REPO_PATH, snapshot_dir=snapshot_dir, node_set=["new-team"], **batch_sizes
     )
 
     stamped = engine.add_nodes.await_args.args[0][0].last_delta
     return {
-        "state": state,
         "written_slices": [
             [str(point.id) for point in call.args[0]] for call in write.await_args_list
         ],
@@ -181,7 +169,6 @@ async def test_read_page_size_changes_no_outcome(tmp_path, monkeypatch):
 
     for key in ("edges_added", "nodes_deleted", "edges_deleted", "tags_removed", "delta"):
         assert one_row_pages[key] == default[key], key
-    assert one_row_pages["state"].node_delta == default["state"].node_delta
 
     # The outcome itself, so equality is not two empty results.
     assert default["nodes_deleted"] == [STALE_ID]
@@ -202,8 +189,8 @@ async def test_read_page_size_changes_no_outcome(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_state_keeps_no_chunk_content_or_chunk_edges(tmp_path, monkeypatch):
-    state = (await _load(tmp_path, monkeypatch, graph_read_batch_size=2))["state"]
+async def test_state_keeps_no_chunk_content_or_chunk_edges(monkeypatch):
+    state = await _read_code_graph_state(_mock_engine(monkeypatch), 2)
 
     kept_types = {properties.get("type") for _node_id, properties in state.existing_nodes}
     assert kept_types == {"CodeRepository", "CodeSymbol", "NodeSet"}
@@ -225,7 +212,7 @@ async def test_state_keeps_no_chunk_content_or_chunk_edges(tmp_path, monkeypatch
 @pytest.mark.asyncio
 async def test_node_write_is_sliced_repository_first(tmp_path, monkeypatch):
     default = await _load(tmp_path, monkeypatch)
-    sliced = await _load(tmp_path, monkeypatch, write_batch_size=1)
+    sliced = await _load(tmp_path, monkeypatch, batch_size=1)
 
     assert len(default["written_slices"]) == 1
     assert [len(batch) for batch in sliced["written_slices"]] == [1, 1, 1, 1]
@@ -237,11 +224,11 @@ async def test_node_write_is_sliced_repository_first(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_non_positive_write_batch_size_raises_before_reading(monkeypatch):
+@pytest.mark.parametrize("sizes", [{"batch_size": 0}, {"graph_read_batch_size": 0}])
+async def test_non_positive_batch_size_raises_before_reading(tmp_path, monkeypatch, sizes):
     engine = _mock_engine(monkeypatch)
-    data_points = map_facts_to_data_points(FACTS, repo_path=REPO_PATH)
-    assert isinstance(data_points[0], CodeRepository)
 
-    with pytest.raises(ValueError, match="write_batch_size"):
-        await add_code_graph_data_points(data_points, write_batch_size=0)
+    with pytest.raises(ValueError, match="batch_size must be >= 1"):
+        await load_code_graph(repo_path=REPO_PATH, snapshot_dir=_write_snapshot(tmp_path), **sizes)
     engine.get_graph_data.assert_not_awaited()
+    engine.get_node.assert_not_awaited()

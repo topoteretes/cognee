@@ -11,10 +11,10 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 from cognee.tasks.code_graph.enola import parse_enola_snapshot
 from cognee.tasks.code_graph.extract_code_graph import (
+    _CodeGraphLoad,
+    _CodeGraphState,
     add_code_graph_data_points,
-    add_code_graph_edges,
     build_code_graph_edges,
-    extract_code_graph,
     fact_node_id,
     get_code_graph_tasks,
     map_facts_to_data_points,
@@ -30,6 +30,7 @@ from cognee.tasks.code_graph.models import (
     ExternalDependency,
     StorageResource,
 )
+from cognee.tests.utils.code_graph_load import extracted_points, load_with_node_writes_mocked
 from cognee.tests.utils.graph_stream import stream_through_get_graph_data
 
 # importlib.import_module returns the real submodule even though the package
@@ -65,8 +66,8 @@ def test_code_graph_tasks_default_to_graph_only_with_vector_opt_in():
     default_tasks = get_code_graph_tasks("/tmp/shop", snapshot_dir=FIXTURES_DIR)
     vector_tasks = get_code_graph_tasks("/tmp/shop", snapshot_dir=FIXTURES_DIR, index_vectors=True)
 
-    assert default_tasks[1].default_params["kwargs"]["graph_only"] is True
-    assert vector_tasks[1].default_params["kwargs"]["graph_only"] is False
+    assert default_tasks[0].default_params["kwargs"]["graph_only"] is True
+    assert vector_tasks[0].default_params["kwargs"]["graph_only"] is False
 
 
 def test_symbol_kind_and_common_fields_are_mapped():
@@ -104,8 +105,8 @@ def test_symbol_kind_and_common_fields_are_mapped():
 
 @pytest.mark.asyncio
 async def test_extract_code_graph_ids_are_deterministic_across_runs():
-    first_run = await extract_code_graph(snapshot_dir=FIXTURES_DIR, repo_path="/tmp/shop")
-    second_run = await extract_code_graph(snapshot_dir=FIXTURES_DIR, repo_path="/tmp/shop")
+    first_run = await extracted_points(snapshot_dir=FIXTURES_DIR, repo_path="/tmp/shop")
+    second_run = await extracted_points(snapshot_dir=FIXTURES_DIR, repo_path="/tmp/shop")
 
     first_ids = sorted(str(data_point.id) for data_point in first_run)
     second_ids = sorted(str(data_point.id) for data_point in second_run)
@@ -557,7 +558,7 @@ async def test_extract_code_graph_accepts_repo_path_as_positional_payload(monkey
 
     monkeypatch.setattr(extract_module, "run_enola_generate", fake_run_enola_generate)
 
-    data_points = await extract_code_graph("/tmp/shop")
+    data_points = await extracted_points("/tmp/shop")
 
     assert received["repo_path"] == "/tmp/shop"
     assert len(data_points) == 17
@@ -566,36 +567,26 @@ async def test_extract_code_graph_accepts_repo_path_as_positional_payload(monkey
 @pytest.mark.asyncio
 async def test_extract_code_graph_without_repo_path_or_snapshot_dir_raises():
     with pytest.raises(ValueError):
-        await extract_code_graph()
+        await extracted_points()
 
 
 @pytest.mark.asyncio
 async def test_add_code_graph_data_points_invalidates_cached_indexes(monkeypatch):
     add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
     code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
-    graph_engine_module = importlib.import_module(
-        "cognee.infrastructure.databases.graph.get_graph_engine"
-    )
     add_data_points_mock = AsyncMock(return_value=["stored"])
     invalidate_mock = MagicMock()
-    graph_engine = AsyncMock()
-    graph_engine.get_graph_data.return_value = ([], [])
-    stream_through_get_graph_data(graph_engine)
     monkeypatch.setattr(add_data_points_module, "add_data_points", add_data_points_mock)
     monkeypatch.setattr(
         code_retriever_module, "invalidate_code_graph_snapshot_cache", invalidate_mock
     )
-    monkeypatch.setattr(
-        graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph_engine)
-    )
+    load = _CodeGraphLoad(graph_state=_CodeGraphState())
 
-    result = await add_code_graph_data_points(["node"])
+    result = await add_code_graph_data_points(["node"], load)
 
-    # Passthrough of the full fact set (not add_data_points' return), so the
-    # edges task sees every fact and the carried pre-read state.
-    assert list(result) == ["node"]
-    assert result.node_delta["nodes_added"] == 1
-    assert result.existing_edge_keys == set()
+    # The batch is stored; its delta adds up on the load for the edge step.
+    assert result is None
+    assert load.nodes_added == 1
     add_data_points_mock.assert_awaited_once_with(["node"], ctx=None, graph_only=True)
     invalidate_mock.assert_called_once_with()
 
@@ -618,16 +609,15 @@ async def test_add_code_graph_edges_writes_edges_and_passes_data_points_through(
         code_retriever_module, "invalidate_code_graph_snapshot_cache", invalidate_mock
     )
 
-    data_points = ["sentinel"]
-    result = await add_code_graph_edges(data_points, snapshot_dir=FIXTURES_DIR)
+    await load_with_node_writes_mocked(monkeypatch, snapshot_dir=FIXTURES_DIR)
 
-    assert result is data_points
     graph_engine.add_edges.assert_awaited_once()
     (edges,) = graph_engine.add_edges.await_args.args
     expected_edges, _skipped = build_code_graph_edges(_fixture_facts())
     assert len(edges) == 9
     assert [edge[:3] for edge in edges] == [edge[:3] for edge in expected_edges]
-    invalidate_mock.assert_called_once_with()
+    # Once after the node batch, once after the edge step.
+    assert invalidate_mock.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -653,9 +643,7 @@ async def test_add_code_graph_edges_registers_edges_in_rollback_ledger(monkeypat
         pipeline_run_id=uuid4(),
     )
 
-    # Empty data_points now signals "extract skipped an unchanged snapshot",
-    # so pass a sentinel to exercise the ledger path.
-    await add_code_graph_edges(["sentinel"], snapshot_dir=FIXTURES_DIR, ctx=ctx)
+    await load_with_node_writes_mocked(monkeypatch, snapshot_dir=FIXTURES_DIR, ctx=ctx)
 
     upsert_edges_mock.assert_awaited_once()
     call = upsert_edges_mock.await_args
@@ -753,8 +741,8 @@ async def test_public_code_graph_pipeline_accepts_repo_path_payload_with_access_
         pipeline_name="code_graph_pipeline",
     )
 
-    assert len(result) == 1
-    assert len(result[0]) == 17
+    # One task, load_code_graph, which passes the pipeline payload through.
+    assert result == [[repo_path]]
     # One bulk node load, then the incremental-skip stamp on the repository node.
     assert graph_engine.add_nodes.await_count == 2
     stamped = graph_engine.add_nodes.await_args_list[-1].args[0]

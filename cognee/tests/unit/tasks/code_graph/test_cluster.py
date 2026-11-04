@@ -23,13 +23,12 @@ from cognee.tasks.code_graph.cluster import (
 )
 from cognee.tasks.code_graph.extract_code_graph import (
     CODE_GRAPH_MAPPING_VERSION,
-    add_code_graph_data_points,
-    add_code_graph_edges,
-    extract_code_graph,
     fact_node_id,
+    load_code_graph,
     map_facts_to_data_points,
 )
 from cognee.tasks.code_graph.models import CodeRepository
+from cognee.tests.utils.code_graph_load import extracted_points, load_with_node_writes_mocked
 from cognee.tests.utils.graph_stream import stream_through_get_graph_data
 
 cluster_module = importlib.import_module("cognee.tasks.code_graph.cluster")
@@ -308,17 +307,13 @@ async def test_member_skip_check_reads_its_own_repository_node(monkeypatch, tmp_
         "last_mapping_version": CODE_GRAPH_MAPPING_VERSION,
     }
 
-    assert await extract_code_graph(snapshot_dir=snapshot_dir, repo_scope="ui") == []
+    assert await extracted_points(snapshot_dir=snapshot_dir, repo_scope="ui") == []
     engine.get_node.assert_awaited_once_with(str(fact_node_id("ui", "repository", "ui")))
 
 
 async def _load_member(snapshot_dir, repo_scope, tmp_path, **batch_sizes):
-    data_points = await extract_code_graph(
-        repo_path=tmp_path, snapshot_dir=snapshot_dir, repo_scope=repo_scope
-    )
-    state = await add_code_graph_data_points(data_points, **batch_sizes)
-    await add_code_graph_edges(
-        state, repo_path=tmp_path, snapshot_dir=snapshot_dir, repo_scope=repo_scope, **batch_sizes
+    await load_code_graph(
+        repo_path=tmp_path, snapshot_dir=snapshot_dir, repo_scope=repo_scope, **batch_sizes
     )
 
 
@@ -437,16 +432,8 @@ async def test_member_load_keeps_the_other_members_node_set_tags(monkeypatch, tm
     ]
     engine = _mock_engine(monkeypatch, nodes=nodes, edges=edges)
 
-    data_points = await extract_code_graph(
+    await load_code_graph(
         repo_path=tmp_path, snapshot_dir=snapshot_dir, repo_scope="golf", node_set=["team-golf"]
-    )
-    state = await add_code_graph_data_points(data_points)
-    await add_code_graph_edges(
-        state,
-        repo_path=tmp_path,
-        snapshot_dir=snapshot_dir,
-        repo_scope="golf",
-        node_set=["team-golf"],
     )
 
     detagged = {
@@ -523,7 +510,7 @@ async def test_refresh_runs_each_member_over_its_own_row_from_one_snapshot(refre
     assert {str(_task_kwargs(call)["snapshot_dir"]) for call in calls} == {
         str(env.snapshot.snapshot_dir)
     }
-    assert [_task_kwargs(call, 2)["repo_scope"] for call in calls] == ["golf", "ui"]
+    assert [_task_kwargs(call)["repo_scope"] for call in calls] == ["golf", "ui"]
     assert [call.args[0] for call in env.mark.await_args_list] == [env.golf_row.id, env.ui_row.id]
 
 
@@ -564,9 +551,9 @@ async def test_refresh_applies_index_vectors_only_to_the_rows_this_call_stored(r
 
     assert [(run.label, run.index_vectors) for run in runs] == [("golf", False), ("ui", True)]
     golf_call, ui_call = env.pipeline.await_args_list
-    assert _task_kwargs(golf_call, 1)["graph_only"] is True
+    assert _task_kwargs(golf_call)["graph_only"] is True
     assert golf_call.kwargs["skip_connection_test"] is True
-    assert _task_kwargs(ui_call, 1)["graph_only"] is False
+    assert _task_kwargs(ui_call)["graph_only"] is False
     assert ui_call.kwargs["skip_connection_test"] is False
 
 
@@ -700,12 +687,9 @@ async def test_delete_marking_never_raises(delete_env):
 def route_env(monkeypatch, refresh_env):
     env = refresh_env
     cluster_module._cluster_runs.clear()
-    env.extract = AsyncMock(return_value=["point"])
-    env.load = AsyncMock(side_effect=lambda points, **_kwargs: points)
-    env.edges = AsyncMock()
-    monkeypatch.setattr(extract_module, "extract_code_graph", env.extract)
-    monkeypatch.setattr(extract_module, "add_code_graph_data_points", env.load)
-    monkeypatch.setattr(extract_module, "add_code_graph_edges", env.edges)
+    # One driver loads a member: its extract, node and edge steps are one call.
+    env.load = env.extract = env.edges = AsyncMock()
+    monkeypatch.setattr(extract_module, "load_code_graph", env.load)
     return env
 
 

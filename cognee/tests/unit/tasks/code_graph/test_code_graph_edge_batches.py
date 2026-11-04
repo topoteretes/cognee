@@ -1,9 +1,9 @@
 """The typed edges are resolved and written in batches, never held all at once.
 
 ``iter_code_graph_edges`` yields each edge as it resolves; add_code_graph_edges
-writes the new ones ``write_batch_size`` at a time and records each batch in
-the rollback ledger right after its write. The batch size changes neither
-which edges are written nor what the sweep removes.
+writes the new ones ``batch_size`` at a time and records each batch in the
+rollback ledger right after its write. The batch size changes neither which
+edges are written nor what the sweep removes.
 """
 
 import importlib
@@ -15,11 +15,13 @@ from uuid import uuid4
 import pytest
 
 from cognee.tasks.code_graph.extract_code_graph import (
-    add_code_graph_edges,
+    _resolve_fallback_repo,
+    _scan_snapshot,
     build_code_graph_edges,
     fact_node_id,
     iter_code_graph_edges,
 )
+from cognee.tests.utils.code_graph_load import load_with_node_writes_mocked
 from cognee.tests.utils.graph_stream import stream_through_get_graph_data
 
 graph_engine_module = importlib.import_module(
@@ -87,7 +89,9 @@ def _ctx():
 def test_iterator_yields_what_the_list_holds_and_returns_the_skips():
     edges, skipped = build_code_graph_edges(FACTS, repo_path=REPO_PATH)
 
-    resolver = iter_code_graph_edges(FACTS, repo_path=REPO_PATH)
+    scan = _scan_snapshot(FACTS, _resolve_fallback_repo(FACTS, REPO_PATH))
+    edge_keys = set()
+    resolver = iter_code_graph_edges(scan, FACTS, edge_keys)
     streamed = []
     while True:
         try:
@@ -98,26 +102,28 @@ def test_iterator_yields_what_the_list_holds_and_returns_the_skips():
 
     assert [edge[:3] for edge in streamed] == [edge[:3] for edge in edges]
     assert len(edges) == EDGE_COUNT
+    # The one key set: the resolver deduplicates on it, the sweep reads it.
+    assert edge_keys == {(str(edge[0]), str(edge[1]), edge[2]) for edge in edges}
     assert streamed_skipped == skipped == len(NAMES)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("write_batch_size", "expected_sizes"),
+    ("batch_size", "expected_sizes"),
     [(1, [1] * 12), (5, [5, 5, 2]), (6, [6, 6]), (12, [12]), (2000, [12])],
 )
-async def test_new_edges_are_written_in_batches_of_the_write_batch_size(
-    tmp_path, monkeypatch, write_batch_size, expected_sizes
+async def test_new_edges_are_written_in_batches_of_the_batch_size(
+    tmp_path, monkeypatch, batch_size, expected_sizes
 ):
     engine = _mock_engine(monkeypatch)
     snapshot_dir = _write_snapshot(tmp_path)
     unbatched, _skipped = build_code_graph_edges(FACTS, repo_path=REPO_PATH)
 
-    await add_code_graph_edges(
-        ["sentinel"],
+    await load_with_node_writes_mocked(
+        monkeypatch,
         repo_path=REPO_PATH,
         snapshot_dir=snapshot_dir,
-        write_batch_size=write_batch_size,
+        batch_size=batch_size,
     )
 
     batches = _written(engine)
@@ -138,11 +144,11 @@ async def test_edges_already_in_the_graph_are_not_written_and_stale_ones_are_swe
     nodes = [(_id(name), {"type": "CodeSymbol", "name": name, "repo": REPO}) for name in NAMES]
     engine = _mock_engine(monkeypatch, nodes, [(*present, {}), (*stale, {})])
 
-    await add_code_graph_edges(
-        ["sentinel"],
+    await load_with_node_writes_mocked(
+        monkeypatch,
         repo_path=REPO_PATH,
         snapshot_dir=_write_snapshot(tmp_path),
-        write_batch_size=5,
+        batch_size=5,
     )
 
     written = [key for batch in _written(engine) for key in batch]
@@ -164,12 +170,12 @@ async def test_every_written_batch_is_recorded_in_the_ledger(tmp_path, monkeypat
     monkeypatch.setattr(graph_methods_module, "upsert_edges", ledger)
     ctx = _ctx()
 
-    await add_code_graph_edges(
-        ["sentinel"],
+    await load_with_node_writes_mocked(
+        monkeypatch,
         repo_path=REPO_PATH,
         snapshot_dir=_write_snapshot(tmp_path),
         ctx=ctx,
-        write_batch_size=5,
+        batch_size=5,
     )
 
     assert [call.args[0] for call in ledger.await_args_list] == [
@@ -191,12 +197,12 @@ async def test_a_failed_batch_keeps_the_written_batches_in_the_ledger_and_raises
     monkeypatch.setattr(graph_methods_module, "upsert_edges", ledger)
 
     with pytest.raises(RuntimeError, match="graph write failed"):
-        await add_code_graph_edges(
-            ["sentinel"],
+        await load_with_node_writes_mocked(
+            monkeypatch,
             repo_path=REPO_PATH,
             snapshot_dir=_write_snapshot(tmp_path),
             ctx=_ctx(),
-            write_batch_size=5,
+            batch_size=5,
         )
 
     assert ledger.await_count == 1
@@ -207,17 +213,15 @@ async def test_a_failed_batch_keeps_the_written_batches_in_the_ledger_and_raises
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("write_batch_size", [0, -1])
-async def test_non_positive_write_batch_size_raises_before_reading(
-    tmp_path, monkeypatch, write_batch_size
-):
+@pytest.mark.parametrize("batch_size", [0, -1])
+async def test_non_positive_batch_size_raises_before_reading(tmp_path, monkeypatch, batch_size):
     engine = _mock_engine(monkeypatch)
 
-    with pytest.raises(ValueError, match="write_batch_size"):
-        await add_code_graph_edges(
-            ["sentinel"],
+    with pytest.raises(ValueError, match="batch_size"):
+        await load_with_node_writes_mocked(
+            monkeypatch,
             repo_path=REPO_PATH,
             snapshot_dir=_write_snapshot(tmp_path),
-            write_batch_size=write_batch_size,
+            batch_size=batch_size,
         )
     engine.get_graph_data.assert_not_awaited()

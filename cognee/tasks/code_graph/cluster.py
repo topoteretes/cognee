@@ -539,8 +539,8 @@ def _cluster_run(dataset_id: UUID, run_id: Any) -> _ClusterRun:
 
 async def load_dataset_cluster(
     ctx: Optional["PipelineContext"],
+    batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
     graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-    write_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> bool:
     """Load the whole cluster of the dataset a CODE_REPO item belongs to.
 
@@ -576,8 +576,8 @@ async def load_dataset_cluster(
                 await _load_cluster_members(
                     snapshot,
                     ctx,
+                    batch_size=batch_size,
                     graph_read_batch_size=graph_read_batch_size,
-                    write_batch_size=write_batch_size,
                 )
         except Exception as error:
             # An enola or member-load failure: the run's later rows re-raise
@@ -593,45 +593,30 @@ async def load_dataset_cluster(
 async def _load_cluster_members(
     snapshot: DatasetCodeSnapshot,
     ctx: "PipelineContext",
+    batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
     graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-    write_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> None:
-    """Load every member of a cluster snapshot, one at a time, each under its own Data row."""
+    """Load every member of a cluster snapshot, one at a time, each under its own Data row.
+
+    The cluster snapshot is parsed once and held for all its members
+    (``snapshot.parsed``), its edges resolved once: the one case where the
+    facts are not streamed from facts.jsonl. Each member's load still writes
+    in batches of ``batch_size``.
+    """
     from cognee.tasks.code_graph.code_repo import code_repo_node_set
-    from cognee.tasks.code_graph.extract_code_graph import (
-        add_code_graph_data_points,
-        add_code_graph_edges,
-        extract_code_graph,
-    )
+    from cognee.tasks.code_graph.extract_code_graph import load_code_graph
 
     for member in snapshot.members:
         member_ctx = replace(ctx, data_item=member.data)
         # Each row's own add()/remember() tag, exactly as the per-repo
         # route reads it, so a member's code nodes carry its node_set.
-        node_set = code_repo_node_set(member.data)
-        data_points = await extract_code_graph(
+        await load_code_graph(
             repo_path=member.repo_path,
-            snapshot_dir=snapshot.snapshot_dir,
-            repo_scope=member.label,
-            node_set=node_set,
-            snapshot=snapshot.parsed,
-        )
-        state = await add_code_graph_data_points(
-            data_points,
-            ctx=member_ctx,
-            graph_only=True,
-            graph_read_batch_size=graph_read_batch_size,
-            write_batch_size=write_batch_size,
-        )
-        await add_code_graph_edges(
-            state,
-            repo_path=member.repo_path,
-            snapshot_dir=snapshot.snapshot_dir,
             ctx=member_ctx,
             repo_scope=member.label,
-            node_set=node_set,
+            node_set=code_repo_node_set(member.data),
             snapshot=snapshot.parsed,
+            batch_size=batch_size,
             graph_read_batch_size=graph_read_batch_size,
-            write_batch_size=write_batch_size,
         )
         logger.info("Code repo graph extracted for %s (%s).", member.repo_path, member.label)
