@@ -666,18 +666,21 @@ class LanceDBAdapter(VectorDBInterface):
     ) -> None:
         """Upsert caller-provided vectors without invoking the embedding engine.
 
-        A DataPoint schema is stored in the same shape ``create_data_points`` gives it
-        (``get_data_point_schema``: ``id`` and ``belongs_to_set`` columns, nested models
-        and ``metadata`` dropped), so a row copied from another store is indistinguishable
-        from one ingested here; a plain BaseModel payload (system-owned state such as
-        truth centroids) is stored as declared. A conflicting id takes the new payload
-        and the new vector, except ``belongs_to_set``, which is unioned with the stored
-        row's as in ``create_data_points``.
+        With no ``payload_schema`` the rows are ``IndexSchema`` rows, the shape of every
+        ``<Type>_<field>`` collection ``index_data_points`` writes, so a row read from one
+        of those is stored here as it was. A DataPoint schema is stored in the same shape
+        ``create_data_points`` gives it (``get_data_point_schema``: ``id`` and
+        ``belongs_to_set`` columns, nested models and ``metadata`` dropped), so a row
+        copied from another store is indistinguishable from one ingested here; a plain
+        BaseModel payload (system-owned state such as truth centroids) is stored as
+        declared. A conflicting id takes the new payload and the new vector, except
+        ``belongs_to_set``, which is unioned with the stored row's as in
+        ``create_data_points``.
         """
         if not points:
             return
         if payload_schema is None:
-            raise ValueError("payload_schema is required for LanceDB raw vector upserts")
+            payload_schema = IndexSchema
 
         vector_size = self.embedding_engine.get_vector_size()
         payload_model = (
@@ -711,23 +714,43 @@ class LanceDBAdapter(VectorDBInterface):
         # create_data_points does: when_matched_update_all replaces the whole
         # payload, so a stored row's own belongs_to_set survives only if it is
         # unioned into the incoming payload here.
-        async with self.VECTOR_DB_LOCK:
-            stored_tags = await self._stored_belongs_to_set(collection, collection_name, list(rows))
-            raw_points = []
-            for row_id, properties in properties_by_id.items():
-                prior = stored_tags.get(row_id)
-                if prior:
-                    incoming = properties.get("belongs_to_set") or []
-                    properties["belongs_to_set"] = list(dict.fromkeys(list(prior) + list(incoming)))
-                raw_points.append(
-                    LanceDataPoint(id=row_id, vector=rows[row_id]["vector"], payload=properties)
+        raw_points: list = []
+        try:
+            async with self.VECTOR_DB_LOCK:
+                stored_tags = await self._stored_belongs_to_set(
+                    collection, collection_name, list(rows)
                 )
+                for row_id, properties in properties_by_id.items():
+                    prior = stored_tags.get(row_id)
+                    if prior:
+                        incoming = properties.get("belongs_to_set") or []
+                        properties["belongs_to_set"] = list(
+                            dict.fromkeys(list(prior) + list(incoming))
+                        )
+                    raw_points.append(
+                        LanceDataPoint(id=row_id, vector=rows[row_id]["vector"], payload=properties)
+                    )
 
-            await (
-                collection.merge_insert("id")
-                .when_matched_update_all()
-                .when_not_matched_insert_all()
-                .execute(self._records_for_write(raw_points))
+                await (
+                    collection.merge_insert("id")
+                    .when_matched_update_all()
+                    .when_not_matched_insert_all()
+                    .execute(self._records_for_write(raw_points))
+                )
+        except (ValueError, OSError, RuntimeError) as e:
+            # The same two schema-drift errors create_data_points recovers from: a
+            # table created with an older payload shape is rebuilt to the current
+            # one, its rows kept, and the points are written into the new table.
+            err = str(e)
+            if "not found in target schema" not in err and "contained null values" not in err:
+                raise
+            logger.warning(
+                "Schema mismatch detected for collection '%s', migrating table: %s",
+                collection_name,
+                e,
+            )
+            await self._migrate_collection_schema(
+                collection_name, collection, payload_schema, raw_points
             )
 
     # ------------------------------------------------------------------

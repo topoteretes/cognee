@@ -164,9 +164,11 @@ class VectorDBInterface(Protocol):
         and leaves the store untouched; the same id twice in one call is written once,
         last point wins, with the two ``belongs_to_set`` lists unioned.
         The payload is stored in the shape an ingested row of ``payload_schema`` has
-        (for a DataPoint that includes its ``id``); LanceDB requires the schema to shape
-        the table. Adapters that do not support raw vector writes should raise
-        NotImplementedError.
+        (for a DataPoint that includes its ``id``). With no ``payload_schema`` the rows
+        are the adapter's index rows (``IndexSchema``, the shape of every
+        ``<Type>_<field>`` collection ``index_data_points`` writes), so a row read from
+        one of those lands in another as it was. Adapters that do not support raw vector
+        writes should raise NotImplementedError.
         """
         raise NotImplementedError("upsert_raw_vectors is not implemented for this adapter")
 

@@ -58,8 +58,12 @@ async def test_unscoped_recall_is_routed_to_the_dataset_holding_the_answer(
             for row in await engine.retrieve(DATASET_ROUTE_COLLECTION, row_ids)
         }
         assert set(rows) == set(row_ids), f"routing rows missing for {dataset_id}: {rows.keys()}"
-        assert all(payload["dataset_id"] == str(dataset_id) for payload in rows.values())
-        assert rows[row_ids[0]]["is_root"] is True
+        # Each row is the dataset's own index row, copied as stored: the root
+        # names no single document, a bucket carries the document it summarizes.
+        assert rows[row_ids[0]]["document_id"] is None
+        assert [rows[row_id]["document_id"] for row_id in row_ids[1:]] == [
+            str(document_id) for document_id in documents[dataset_id]
+        ]
 
     # A query quoting one of B's documents routes to B alone.
     target = second[0]
@@ -97,7 +101,7 @@ async def test_unscoped_recall_is_routed_to_the_dataset_holding_the_answer(
     root_id, *kept_buckets = dataset_route_ids(dataset_b, kept)
     assert await stored(dataset_b, documents[dataset_b]) == {root_id, *kept_buckets}
     [root_row] = await engine.retrieve(DATASET_ROUTE_COLLECTION, [root_id])
-    assert root_row.payload["is_root"] is True
+    assert root_row.payload["document_id"] is None
     assert names[gone] not in root_row.payload["text"]
     assert all(names[document_id] in root_row.payload["text"] for document_id in kept)
     # The row mirrors the root the dataset's own index now holds.
