@@ -500,6 +500,7 @@ async def extract_code_repo_graph(
             ctx=ctx,
             node_set=node_set,
             graph_read_batch_size=graph_read_batch_size,
+            write_batch_size=write_batch_size,
         )
 
         logger.info("Code repo graph extracted for %s (%s).", repo_path, data_item.id)

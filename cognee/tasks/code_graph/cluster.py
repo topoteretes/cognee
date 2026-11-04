@@ -632,5 +632,6 @@ async def _load_cluster_members(
             node_set=node_set,
             snapshot=snapshot.parsed,
             graph_read_batch_size=graph_read_batch_size,
+            write_batch_size=write_batch_size,
         )
         logger.info("Code repo graph extracted for %s (%s).", member.repo_path, member.label)

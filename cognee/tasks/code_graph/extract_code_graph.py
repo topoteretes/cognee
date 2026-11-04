@@ -4,7 +4,7 @@ import hashlib
 import json
 import posixpath
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Generator, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -424,7 +424,36 @@ def build_code_graph_edges(
     facts: list[dict],
     repo_path: str | Path | None = None,
 ) -> tuple[list[tuple], int]:
-    """Resolve typed relations between facts into explicit graph edge tuples.
+    """Every edge of ``iter_code_graph_edges`` as one list; returns (edges, skipped_count)."""
+    edges: list[tuple] = []
+    skipped = _drain(iter_code_graph_edges(facts, repo_path), edges.append)
+    return edges, skipped
+
+
+def _drain(edges: Generator[tuple, None, int], consume: Callable[[tuple], None]) -> int:
+    """Hand every edge of a resolver generator to ``consume``; return its skipped count."""
+    while True:
+        try:
+            consume(next(edges))
+        except StopIteration as stop:
+            return stop.value
+
+
+def _resolved(edges: list[tuple]) -> Generator[tuple, None, int]:
+    """Edges already resolved (a cluster's shared list), in the resolver's shape."""
+    yield from edges
+    return 0
+
+
+def iter_code_graph_edges(
+    facts: list[dict],
+    repo_path: str | Path | None = None,
+) -> Generator[tuple, None, int]:
+    """Resolve typed relations between facts into graph edge tuples, one at a time.
+
+    Yields each edge once (duplicates are dropped as they resolve) and returns
+    the number of relations skipped, so a caller can write the edges in
+    batches instead of holding them all.
 
     A relation carrying the writer's ``target_id`` (enola >= 0.4.10) resolves
     to that fact directly — it is enola's own unambiguous answer. Otherwise
@@ -434,7 +463,6 @@ def build_code_graph_edges(
     symbol's name, repo and file is a view of that symbol, not a rival: the
     name means the symbol. repo_path must be the same value given to
     map_facts_to_data_points so that edge endpoint ids match the node ids.
-    Returns (edges, skipped_count).
     """
     fallback_repo = _resolve_fallback_repo(facts, repo_path)
 
@@ -471,7 +499,7 @@ def build_code_graph_edges(
             if isinstance(module_path, str) and module_path:
                 module_path_repos.setdefault(module_path, set()).add(repo)
 
-    edges: list[tuple] = []
+    resolved: list[tuple] = []
     seen_edges = set()
     skipped = 0
 
@@ -515,7 +543,7 @@ def build_code_graph_edges(
         if edge_key in seen_edges:
             return
         seen_edges.add(edge_key)
-        edges.append(
+        resolved.append(
             (
                 source_id,
                 target_id,
@@ -591,8 +619,12 @@ def build_code_graph_edges(
                 (target_repo, target_kind, resolved_target_name),
                 relationship_name,
             )
+            yield from resolved
+            resolved.clear()
 
     skipped += _add_client_route_edges(valid_facts, enola_id_index, fact_index, _add_edge)
+    yield from resolved
+    resolved.clear()
 
     # Enola's query graph connects a dependency import to the modules which
     # contain each side. Materialize the same bridge so Cognee traversals can
@@ -651,6 +683,8 @@ def build_code_graph_edges(
                 (target_repo, "module", target_fact["name"]),
                 "imports",
             )
+            yield from resolved
+            resolved.clear()
 
     # Enola derives type membership from qualified symbol names. Persisting the
     # edge makes type-level impact analysis include method/function callers.
@@ -675,8 +709,10 @@ def build_code_graph_edges(
             (source_repo, "symbol", fact["name"]),
             "has_method",
         )
+        yield from resolved
+        resolved.clear()
 
-    return edges, skipped
+    return skipped
 
 
 async def extract_code_graph(
@@ -1056,6 +1092,7 @@ async def add_code_graph_edges(
     node_set: list[str] | None = None,
     snapshot: ParsedSnapshot | None = None,
     graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+    write_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> list[DataPoint]:
     """Insert typed relation edges (calls/imports/...) after add_data_points ran.
 
@@ -1071,8 +1108,16 @@ async def add_code_graph_edges(
     that repository are written, and only when the other endpoint is already
     in the graph: an edge into a member loaded later is written by that
     member's load, so the members can load in any order, one at a time.
+
+    The edges are resolved and written ``write_batch_size`` new edges at a
+    time, so the load never holds them all; only their keys are kept, for the
+    stale sweep. The graph state they are diffed against is read whole first.
+    A cluster's edges were resolved once for all members and are only batched.
     """
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
+
+    if write_batch_size < 1:
+        raise ValueError("write_batch_size must be >= 1")
 
     if not data_points:
         # extract_code_graph skipped an unchanged snapshot; nothing to add,
@@ -1085,17 +1130,16 @@ async def add_code_graph_edges(
         snapshot_dir = snapshot.snapshot_dir
         facts, receipt = snapshot.facts, snapshot.receipt
         if snapshot.edges is not None:
-            edges, skipped = snapshot.edges, 0
+            edges = _resolved(snapshot.edges)
         else:
-            edges, skipped = build_code_graph_edges(facts, repo_path=repo_path)
+            edges = iter_code_graph_edges(facts, repo_path=repo_path)
     else:
         if snapshot_dir is None:
             if repo_path is None:
                 raise ValueError("add_code_graph_edges requires repo_path or snapshot_dir.")
             snapshot_dir = Path(repo_path) / ".enola"
         facts, receipt = parse_enola_snapshot(snapshot_dir)
-        edges, skipped = build_code_graph_edges(facts, repo_path=repo_path)
-    logger.info("Resolved %d code graph edge(s), skipped %d.", len(edges), skipped)
+        edges = iter_code_graph_edges(facts, repo_path=repo_path)
 
     try:
         graph_engine = await get_graph_engine()
@@ -1112,7 +1156,8 @@ async def add_code_graph_edges(
             existing_node_ids = graph_state.existing_node_ids
             existing_edge_keys = graph_state.existing_edge_keys
 
-        writable_edges = edges
+        scope_ids: set[str] = set()
+        known_ids: set[str] = set()
         if repo_scope is not None:
             fallback_repo = _resolve_fallback_repo(facts, repo_path)
             scope_ids = _current_code_node_ids(
@@ -1120,57 +1165,79 @@ async def add_code_graph_edges(
                 repo_scope,
             )
             known_ids = scope_ids | existing_node_ids
-            writable_edges = [
-                edge
-                for edge in edges
-                if (str(edge[0]) in scope_ids or str(edge[1]) in scope_ids)
-                and str(edge[0]) in known_ids
-                and str(edge[1]) in known_ids
-            ]
 
-        # Delta writes: only edges the graph does not already have.
-        new_edges = [
-            edge
-            for edge in writable_edges
-            if (str(edge[0]), str(edge[1]), edge[2]) not in existing_edge_keys
-        ]
-        logger.info(
-            "Code graph edge delta: %d new, %d already present.",
-            len(new_edges),
-            len(edges) - len(new_edges),
+        # Register the edges added by this run in the relational rollback
+        # ledger (when a pipeline context with a persisted data item is
+        # available) so pipeline rollback can clean them up. Custom pipelines
+        # may use arbitrary payloads, such as the repository path used by the
+        # code graph example.
+        data_id = _pipeline_data_id(ctx)
+        ledger_ctx = (
+            ctx
+            if ctx is not None
+            and getattr(ctx, "user", None) is not None
+            and getattr(ctx, "dataset", None) is not None
+            and data_id is not None
+            and getattr(ctx, "pipeline_run_id", None) is not None
+            else None
         )
-        if new_edges:
-            await graph_engine.add_edges(new_edges)
 
-            # Register the edges added by this run in the relational rollback
-            # ledger (when a pipeline context with a persisted data item is
-            # available) so pipeline rollback can clean them up. Custom
-            # pipelines may use arbitrary payloads, such as the repository
-            # path used by the code graph example.
-            data_id = _pipeline_data_id(ctx)
-            if (
-                ctx is not None
-                and getattr(ctx, "user", None) is not None
-                and getattr(ctx, "dataset", None) is not None
-                and data_id is not None
-                and getattr(ctx, "pipeline_run_id", None) is not None
-            ):
+        async def write(batch: list[tuple]) -> None:
+            await graph_engine.add_edges(batch)
+            if ledger_ctx is not None:
                 from cognee.modules.graph.methods import upsert_edges
 
+                # Per batch, right after its write: a failure later in the
+                # run leaves every batch already written in the ledger.
                 await upsert_edges(
-                    new_edges,
-                    tenant_id=ctx.user.tenant_id,
-                    user_id=ctx.user.id,
-                    dataset_id=ctx.dataset.id,
+                    batch,
+                    tenant_id=ledger_ctx.user.tenant_id,
+                    user_id=ledger_ctx.user.id,
+                    dataset_id=ledger_ctx.dataset.id,
                     data_id=data_id,
-                    pipeline_run_id=ctx.pipeline_run_id,
+                    pipeline_run_id=ledger_ctx.pipeline_run_id,
                 )
+
+        # Delta writes: only edges the graph does not already have, written a
+        # batch at a time as they resolve. Every key is kept for the sweep.
+        current_edge_keys: set[tuple[str, str, str]] = set()
+        batch: list[tuple] = []
+        new_count = 0
+        while True:
+            try:
+                edge = next(edges)
+            except StopIteration as stop:
+                skipped = stop.value
+                break
+            key = (str(edge[0]), str(edge[1]), edge[2])
+            current_edge_keys.add(key)
+            if repo_scope is not None and not (
+                (key[0] in scope_ids or key[1] in scope_ids)
+                and key[0] in known_ids
+                and key[1] in known_ids
+            ):
+                continue
+            if key in existing_edge_keys:
+                continue
+            batch.append(edge)
+            new_count += 1
+            if len(batch) == write_batch_size:
+                await write(batch)
+                batch = []
+        if batch:
+            await write(batch)
+        logger.info("Resolved %d code graph edge(s), skipped %d.", len(current_edge_keys), skipped)
+        logger.info(
+            "Code graph edge delta: %d new, %d already present.",
+            new_count,
+            len(current_edge_keys) - new_count,
+        )
 
         # Insert-then-sweep: with the current snapshot fully merged, remove
         # what previous ingestions derived that this snapshot no longer does.
         # Runs even with zero edges — a shrunken repo still needs its sweep.
         nodes_removed, edges_removed, samples_removed = await _sweep_stale_code_graph(
-            graph_engine, facts, edges, repo_path, existing_nodes, existing_edge_keys
+            graph_engine, facts, current_edge_keys, repo_path, existing_nodes, existing_edge_keys
         )
 
         # Retag: strip node_set names this repo carried before but not anymore.
@@ -1192,7 +1259,7 @@ async def add_code_graph_edges(
         node_delta = getattr(data_points, "node_delta", None) or {}
         delta = {
             **node_delta,
-            "edges_added": len(new_edges),
+            "edges_added": new_count,
             "edges_removed": edges_removed,
             "nodes_removed": nodes_removed,
             "samples_removed": samples_removed,
@@ -1243,7 +1310,7 @@ def _is_repo_code_node(properties: Any, snapshot_repos: set, code_types: set) ->
 async def _sweep_stale_code_graph(
     graph_engine,
     facts: list[dict],
-    current_edges: list[tuple],
+    current_edge_keys: set[tuple[str, str, str]],
     repo_path: str | Path | None,
     existing_nodes: list[tuple],
     existing_edge_keys: set,
@@ -1281,19 +1348,16 @@ async def _sweep_stale_code_graph(
             await graph_engine.delete_nodes(stale_node_ids[start : start + _SWEEP_CHUNK_SIZE])
         logger.info("Swept %d stale code graph node(s).", len(stale_node_ids))
 
-    expected_edge_keys = {
-        (str(source_id), str(target_id), relationship_name)
-        for source_id, target_id, relationship_name, _properties in current_edges
-    }
     # Structural containment edges written by add_data_points from the
     # DataPoint part_of field.
+    part_of_keys = set()
     for fact in facts:
         kind = fact.get("kind")
         name = fact.get("name")
         if not _is_mappable_fact(kind, name):
             continue
         repo = _fact_repo(fact, fallback_repo)
-        expected_edge_keys.add(
+        part_of_keys.add(
             (
                 str(fact_node_id(repo, kind, name)),
                 str(fact_node_id(repo, "repository", repo)),
@@ -1306,7 +1370,8 @@ async def _sweep_stale_code_graph(
         for source, target, relationship in existing_edge_keys
         if source in current_ids
         and target in current_ids
-        and (source, target, relationship) not in expected_edge_keys
+        and (source, target, relationship) not in current_edge_keys
+        and (source, target, relationship) not in part_of_keys
     ]
     if stale_edges:
         for start in range(0, len(stale_edges), _SWEEP_CHUNK_SIZE):
@@ -1511,5 +1576,6 @@ def get_code_graph_tasks(
             repo_scope=repo_scope,
             snapshot=snapshot,
             graph_read_batch_size=graph_read_batch_size,
+            write_batch_size=write_batch_size,
         ),
     ]

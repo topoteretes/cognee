@@ -138,7 +138,11 @@ async def extract_code_files_graph(
                 write_batch_size=write_batch_size,
             )
             await add_code_graph_edges(
-                state, repo_path=repo_dir, ctx=ctx, graph_read_batch_size=graph_read_batch_size
+                state,
+                repo_path=repo_dir,
+                ctx=ctx,
+                graph_read_batch_size=graph_read_batch_size,
+                write_batch_size=write_batch_size,
             )
 
         logger.info(
