@@ -91,6 +91,7 @@ from cognee.modules.integrations.plugin_status import (
     coerce_provisioned_at,
     identity_plugin_statuses,
     legacy_plugin_statuses,
+    load_plugin_agents,
     merge_plugin_statuses,
     registry_plugin_statuses,
 )
@@ -202,8 +203,9 @@ class IntegrationSyncResultDTO(OutDTO):
 class PluginProvisionRequestDTO(InDTO):
     """The plugin's self-description (SDK-646). Optional: older plugins send nothing.
 
-    ``connection_type`` defaults to the key with dashes turned into
-    underscores, which is what every integration declares.
+    ``connection_type`` defaults to the key with its ``-`` and ``.``
+    turned into ``_`` (a connection type is one ``[a-z0-9_]`` word), which
+    is what every integration declares.
     """
 
     label: str | None = Field(default=None, max_length=PLUGIN_LABEL_MAX_LENGTH)
@@ -561,9 +563,20 @@ def get_integrations_router():
                     )
                 )
 
+            # The identity and registry sources share one read of the
+            # caller's plugin agents; if it fails, both degrade to "no child
+            # agents" and the registry still reports the caller's own blob.
+            plugin_agents = []
+            try:
+                plugin_agents = await load_plugin_agents(user.id)
+            except Exception:
+                logger.exception(
+                    "integrations status: plugin agent lookup failed for user %s", user.id
+                )
+
             plugin_rows: dict[str, PluginStatusRow] = {}
             try:
-                plugin_rows = await identity_plugin_statuses(user.id)
+                plugin_rows = await identity_plugin_statuses(user.id, plugin_agents)
             except Exception:
                 logger.exception(
                     "integrations status: identity plugin lookup failed for user %s", user.id
@@ -591,7 +604,7 @@ def get_integrations_router():
                 # Takes the caller's id, not visible_ids: the registry source
                 # resolves child agents itself so it can distrust their
                 # agent-writable connection blobs (see registry_plugin_statuses).
-                registry_rows = await registry_plugin_statuses(user.id)
+                registry_rows = await registry_plugin_statuses(user.id, plugin_agents)
                 plugin_rows = merge_plugin_statuses(plugin_rows, registry_rows)
             except Exception:
                 logger.exception(
@@ -659,8 +672,8 @@ def get_integrations_router():
         ## Request Body (optional)
         - **label** (str): Display name of the plugin, at most 64 characters.
         - **connection_type** (str): Connection type the plugin registers with
-          (``claude_code``, ``hermes_agent``); defaults to the key with dashes
-          turned into underscores.
+          (``claude_code``, ``hermes_agent``); defaults to the key with its
+          ``-`` and ``.`` turned into ``_``.
         """
         with new_span("cognee.integrations.plugins.provision") as span:
             span.set_attribute("cognee.integrations.plugin", plugin_key)

@@ -25,6 +25,12 @@ Same key from several sources merges: ``connected`` is the OR — unless the
 base row is identity-sourced, whose key-existence check is authoritative —
 ``last_active_at`` the max, and the more authoritative row keeps
 ``agent_id``/``provisioned_at``/``source``.
+
+The identity and registry sources both read the caller's plugin agents and
+their ``AGENT_CONFIG_NAME`` blobs. :func:`load_plugin_agents` reads them once,
+in two queries however many plugins the user has (any plugin can register
+now, so their number is the user's, not the server's), and the status
+endpoint hands that one result to both sources.
 """
 
 from __future__ import annotations
@@ -36,7 +42,11 @@ from uuid import UUID
 from sqlalchemy import case, func, or_, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.agents.registry import AGENT_CONFIG_NAME, list_persisted_agent_connections
+from cognee.modules.agents.registry import (
+    AGENT_CONFIG_NAME,
+    list_persisted_agent_connections,
+    persisted_agent_connections_from_configs,
+)
 from cognee.modules.integrations.agent_identity import plugin_key_from_agent_email
 from cognee.modules.integrations.plugins import (
     BUILTIN_PLUGINS,
@@ -47,7 +57,7 @@ from cognee.modules.integrations.plugins import (
 from cognee.modules.session_lifecycle.models import SessionRecord
 from cognee.modules.session_lifecycle.visibility import child_agent_emails
 from cognee.modules.users.methods.get_principal_configuration import (
-    get_principal_all_configuration,
+    get_principals_all_configuration,
 )
 from cognee.modules.users.models.UserApiKey import UserApiKey
 
@@ -150,7 +160,45 @@ def _escape_like_prefix(prefix: str) -> str:
     return f"{escaped}%"
 
 
-async def identity_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
+@dataclass(frozen=True)
+class PluginAgent:
+    """A child agent that is a plugin identity, with its configuration records.
+
+    ``plugin_key`` is derived from the agent's server-assigned email, never
+    from the records: a child agent can rewrite its own blob through the
+    public configuration endpoint, so a config-claimed key could impersonate
+    another plugin. ``configs`` are the agent's principal-configuration
+    records (``AGENT_CONFIG_NAME`` among them), as stored.
+    """
+
+    agent_id: UUID
+    plugin_key: str
+    configs: list[dict]
+
+
+async def load_plugin_agents(user_id: UUID) -> list[PluginAgent]:
+    """The caller's plugin agents with their configuration records, in two queries.
+
+    One query lists the child agents' emails, one reads every plugin
+    agent's configuration records (``owner_id IN (...)``), so the cost does
+    not grow by a query per provisioned plugin. Child agents whose email
+    carries no plugin key (custom agents) are left out.
+    """
+    key_by_agent: dict[UUID, str] = {}
+    for agent_id, email in (await child_agent_emails(user_id)).items():
+        plugin_key = plugin_key_from_agent_email(email, user_id)
+        if plugin_key is not None:
+            key_by_agent[agent_id] = plugin_key
+    configs_by_agent = await get_principals_all_configuration(key_by_agent)
+    return [
+        PluginAgent(agent_id, plugin_key, configs_by_agent.get(agent_id, []))
+        for agent_id, plugin_key in key_by_agent.items()
+    ]
+
+
+async def identity_plugin_statuses(
+    user_id: UUID, agents: list[PluginAgent] | None = None
+) -> dict[str, PluginStatusRow]:
     """Statuses of plugins provisioned with their own agent identity.
 
     A child agent counts as a plugin identity iff its principal
@@ -167,19 +215,23 @@ async def identity_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
     is the max of the key's throttled ``last_used_at`` and the agent's
     latest session activity, so pure-recall plugins that never open
     sessions still report "last seen".
+
+    ``agents`` is the :func:`load_plugin_agents` result when the caller
+    already holds it (the status endpoint shares one with the registry
+    source); loaded here otherwise.
     """
+    if agents is None:
+        agents = await load_plugin_agents(user_id)
     plugin_agents: dict[UUID, PluginStatusRow] = {}
-    for agent_id, email in (await child_agent_emails(user_id)).items():
-        plugin_key = plugin_key_from_agent_email(email, user_id)
-        if plugin_key is None:
-            continue
-        for config in await get_principal_all_configuration(agent_id):
+    for agent in agents:
+        agent_id = agent.agent_id
+        for config in agent.configs:
             if config.get("name") != AGENT_CONFIG_NAME:
                 continue
             plugin_entry = (config.get("configuration") or {}).get("plugin")
             if isinstance(plugin_entry, dict) and plugin_entry:
                 plugin_agents[agent_id] = PluginStatusRow(
-                    key=plugin_key,
+                    key=agent.plugin_key,
                     agent_id=agent_id,
                     provisioned_at=coerce_provisioned_at(plugin_entry.get("provisioned_at")),
                     label=coerce_plugin_label(plugin_entry.get("label")),
@@ -291,7 +343,9 @@ async def legacy_plugin_statuses(
     }
 
 
-async def registry_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
+async def registry_plugin_statuses(
+    user_id: UUID, agents: list[PluginAgent] | None = None
+) -> dict[str, PluginStatusRow]:
     """Statuses from the agent-connection registry.
 
     Persisted connections live in principal-configuration blobs, which
@@ -312,7 +366,13 @@ async def registry_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
       connections still appear on ``/agents/connections``).
 
     Only active connections are consulted, so a row here means connected.
+
+    ``agents`` is the :func:`load_plugin_agents` result when the caller
+    already holds it; loaded here otherwise. The child agents' connections
+    are parsed from the records it carries, so no query runs per agent.
     """
+    if agents is None:
+        agents = await load_plugin_agents(user_id)
     statuses: dict[str, PluginStatusRow] = {}
 
     def _add(plugin_key: str | None, connection) -> None:
@@ -332,12 +392,11 @@ async def registry_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
             connection,
         )
 
-    for agent_id, email in (await child_agent_emails(user_id)).items():
-        email_key = plugin_key_from_agent_email(email, user_id)
-        if email_key is None:
-            continue
-        for connection in await list_persisted_agent_connections([agent_id], active_only=True):
-            _add(email_key, connection)
+    for agent in agents:
+        for connection in persisted_agent_connections_from_configs(
+            agent.agent_id, agent.configs, active_only=True
+        ):
+            _add(agent.plugin_key, connection)
 
     return statuses
 

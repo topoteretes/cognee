@@ -67,5 +67,8 @@ def default_connection_type(plugin_key: str) -> str:
     Every integration declares its key with dashes turned into underscores
     (``claude-code`` → ``claude_code``, ``hermes-agent`` → ``hermes_agent``),
     so a plugin version that predates the self-description gets the same type.
+    A ``.`` becomes ``_`` too, since :data:`CONNECTION_TYPE_PATTERN` allows
+    no dot; ``foo.bar`` and ``foo-bar`` therefore share a default type, which
+    is harmless because status rows are bucketed by the key, never the type.
     """
     return plugin_key.replace("-", "_").replace(".", "_")
