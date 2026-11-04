@@ -364,6 +364,8 @@ async def test_chunking_runs_off_the_event_loop(chunker_class, make_text_generat
     The fake chunk_by_paragraph blocks until the loop has run again. Consumed
     on the loop thread it would wait for something that cannot happen and time
     out; consumed on a worker thread the loop keeps turning and releases it.
+    A large file arrives as several text blocks (TextDocument reads 1 MB at a
+    time), so two blocks go in, and each one must be cut off the loop.
     """
     loop_ran = threading.Event()
     chunking_threads = []
@@ -371,7 +373,13 @@ async def test_chunking_runs_off_the_event_loop(chunker_class, make_text_generat
     def blocking_chunk_by_paragraph(text, max_chunk_size, batch_paragraphs=True):
         chunking_threads.append(threading.current_thread())
         assert loop_ran.wait(timeout=5), "chunk_by_paragraph held the event loop"
-        yield {"text": text, "chunk_size": 1, "cut_type": "paragraph_end", "chunk_id": uuid4()}
+        # Each block fills a chunk, so the chunker yields one chunk per block.
+        yield {
+            "text": text,
+            "chunk_size": max_chunk_size,
+            "cut_type": "paragraph_end",
+            "chunk_id": uuid4(),
+        }
 
     document = Document(
         id=uuid4(),
@@ -380,7 +388,9 @@ async def test_chunking_runs_off_the_event_loop(chunker_class, make_text_generat
         external_metadata=None,
         mime_type="text/plain",
     )
-    chunker = chunker_class(document, make_text_generator("Some text."), max_chunk_size=512)
+    chunker = chunker_class(
+        document, make_text_generator("Some text.", "More text."), max_chunk_size=512
+    )
     with (
         patch.object(_text_chunker, "chunk_by_paragraph", blocking_chunk_by_paragraph),
         patch.object(_overlap_chunker, "chunk_by_paragraph", blocking_chunk_by_paragraph),
@@ -390,8 +400,9 @@ async def test_chunking_runs_off_the_event_loop(chunker_class, make_text_generat
         loop_ran.set()
         chunks = await reading
 
-    assert [chunk.text for chunk in chunks] == ["Some text."]
-    assert chunking_threads and chunking_threads[0] is not threading.current_thread()
+    assert [chunk.text for chunk in chunks] == ["Some text.", "More text."]
+    assert len(chunking_threads) == 2
+    assert all(thread is not threading.current_thread() for thread in chunking_threads)
 
 
 @pytest.mark.asyncio
