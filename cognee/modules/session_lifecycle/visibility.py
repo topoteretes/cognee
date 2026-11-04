@@ -21,9 +21,10 @@ async def child_agent_emails(user_id: UUID) -> dict[UUID, str]:
     """Return ``{agent user id: internal email}`` of this user's child agents.
 
     The email is the deterministic identity ``create_agent`` derives
-    (``<name>+<parent_id>@cognee.agent``) — server-assigned, unlike the
-    agent-writable principal-configuration blob, so callers can trust it
-    for attribution.
+    (``<name>+<parent_id>@cognee.agent``, or ``<name>+plugin.<parent_id>@cognee.agent``
+    for an agent the plugin provision route minted) — server-assigned,
+    unlike the agent-writable principal-configuration blob, so callers can
+    trust it for attribution.
     """
     engine = get_relational_engine()
     async with engine.get_async_session() as session:

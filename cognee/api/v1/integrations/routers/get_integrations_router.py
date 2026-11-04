@@ -63,6 +63,7 @@ from cognee.modules.agents.registry import (
     deactivate_agent_connection,
     register_agent_connection,
 )
+from cognee.modules.integrations.agent_identity import agent_email, plugin_agent_email
 from cognee.modules.integrations.base import OAuthIntegration
 from cognee.modules.integrations.connect import complete_installation
 from cognee.modules.integrations.credentials import (
@@ -93,7 +94,15 @@ from cognee.modules.integrations.plugin_status import (
     merge_plugin_statuses,
     registry_plugin_statuses,
 )
-from cognee.modules.integrations.plugins import KNOWN_PLUGINS, get_plugin
+from cognee.modules.integrations.plugins import (
+    BUILTIN_PLUGINS,
+    CONNECTION_TYPE_PATTERN,
+    PLUGIN_KEY_MAX_LENGTH,
+    PLUGIN_KEY_PATTERN,
+    PLUGIN_LABEL_MAX_LENGTH,
+    default_connection_type,
+    is_plugin_key,
+)
 from cognee.modules.integrations.registry import get_integration, supported_integrations
 from cognee.modules.observability import new_span
 from cognee.modules.session_lifecycle.visibility import visible_user_ids
@@ -129,16 +138,6 @@ def _spawn_background(coro, *, description: str) -> None:
     task = register_background_task(asyncio.create_task(_guarded()))
     _BACKGROUND_INTEGRATION_TASKS.add(task)
     task.add_done_callback(_BACKGROUND_INTEGRATION_TASKS.discard)
-
-
-# Plugin keys with a native AgentConnectionType; anything else registers as
-# a generic "sdk" connection in the agent-connection registry.
-_PLUGIN_CONNECTION_TYPES: dict[str, str] = {
-    "claude-code": "claude_code",
-    "opencode": "opencode",
-    "mcp": "mcp",
-    "api": "api",
-}
 
 
 class AuthorizeUrlDTO(OutDTO):
@@ -200,6 +199,17 @@ class IntegrationSyncResultDTO(OutDTO):
     accepted: bool
 
 
+class PluginProvisionRequestDTO(InDTO):
+    """The plugin's self-description (SDK-646). Optional: older plugins send nothing.
+
+    ``connection_type`` defaults to the key with dashes turned into
+    underscores, which is what every integration declares.
+    """
+
+    label: str | None = Field(default=None, max_length=PLUGIN_LABEL_MAX_LENGTH)
+    connection_type: str | None = Field(default=None, pattern=CONNECTION_TYPE_PATTERN.pattern)
+
+
 class PluginProvisionDTO(OutDTO):
     plugin_key: str
     agent_id: UUID
@@ -243,6 +253,10 @@ class PluginStatusItemDTO(OutDTO):
     last_active_at: datetime | None = None
     session_count: int = 0
     source: str | None = None
+    # Display name the plugin declared when it provisioned, else the built-in
+    # card's, else none; and the connection type it declared, if any.
+    label: str | None = None
+    connection_type: str | None = None
 
 
 class IntegrationsStatusDTO(OutDTO):
@@ -274,11 +288,17 @@ async def _credential_or_404(user: User, integration: OAuthIntegration, account_
     return credential
 
 
-def _plugin_or_404(plugin_key: str) -> dict:
-    try:
-        return get_plugin(plugin_key)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Unknown plugin: {plugin_key!r}")
+def _validate_plugin_key(plugin_key: str) -> None:
+    """A plugin names itself; the only check is the key grammar (SDK-646)."""
+    if not is_plugin_key(plugin_key):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Invalid plugin key {plugin_key!r}: a lowercase slug of letters and digits "
+                f"joined by '-', '.' or '_', at most {PLUGIN_KEY_MAX_LENGTH} characters "
+                f"({PLUGIN_KEY_PATTERN.pattern})."
+            ),
+        )
 
 
 def _plugin_session_name(plugin_key: str) -> str:
@@ -288,18 +308,26 @@ def _plugin_session_name(plugin_key: str) -> str:
 async def _find_plugin_agent(user: User, plugin_key: str) -> User | None:
     """Resolve the agent sub-user provisioned for ``(user, plugin_key)``.
 
-    ``create_agent`` derives the agent's internal email deterministically
-    (``<plugin_key>+<parent_id>@cognee.agent``), so matching on it among the
-    user's child agents is the lookup — no extra mapping table needed.
+    ``create_agent`` derives the agent's internal email deterministically, so
+    matching on it among the user's child agents is the lookup — no extra
+    mapping table needed. Both forms resolve: the tagged one this route mints
+    (``<plugin_key>+plugin.<parent_id>@cognee.agent``) and the plain one agents
+    provisioned before the tag carry, so a re-provision never creates a second
+    agent for a plugin.
     """
-    internal_email = f"{plugin_key}+{user.id}@cognee.agent"
+    internal_emails = {
+        plugin_agent_email(plugin_key, user.id),
+        agent_email(plugin_key, user.id),
+    }
     for agent in await list_agents(user.id):
-        if agent.user.email == internal_email:
+        if agent.user.email in internal_emails:
             return agent.user
     return None
 
 
-async def _record_plugin_on_agent(agent_user_id: UUID, plugin_key: str) -> None:
+async def _record_plugin_on_agent(
+    agent_user_id: UUID, plugin_key: str, label: str | None, connection_type: str
+) -> None:
     """Mark the agent as a plugin identity in its principal configuration.
 
     Stored under the same ``AGENT_CONFIG_NAME`` blob the agent-connection
@@ -307,7 +335,9 @@ async def _record_plugin_on_agent(agent_user_id: UUID, plugin_key: str) -> None:
     ``provisioned_at`` sticks across re-provisions (another machine's key isn't a new
     install) — but only if it still parses as a datetime: the blob is
     agent-writable, so a tampered value is repaired here rather than
-    preserved.
+    preserved. The plugin's self-description (``label``, ``connection_type``)
+    is what the status page shows for it; each provision rewrites it, so an
+    updated plugin can rename itself.
     """
     all_configs = await get_principal_all_configuration(agent_user_id)
     existing_config = {}
@@ -327,7 +357,12 @@ async def _record_plugin_on_agent(agent_user_id: UUID, plugin_key: str) -> None:
         name=AGENT_CONFIG_NAME,
         configuration={
             **existing_config,
-            "plugin": {"key": plugin_key, "provisioned_at": provisioned_at},
+            "plugin": {
+                "key": plugin_key,
+                "provisioned_at": provisioned_at,
+                "label": label,
+                "connection_type": connection_type,
+            },
         },
     )
 
@@ -477,11 +512,14 @@ def get_integrations_router():
     async def integrations_status(
         user: User = Depends(get_authenticated_user),
     ) -> IntegrationsStatusDTO:
-        """Aggregate connection status: every OAuth provider + every known plugin.
+        """Aggregate connection status: every OAuth provider + every plugin.
 
         One call powers the whole integrations page. Every registered
-        provider and every known plugin appears, connected or not, with
-        display fields only — never token material. Each status source
+        provider and every built-in plugin card appears, connected or not,
+        followed by every other plugin that has provisioned an identity or
+        registered a connection for this user (a plugin names itself, so a
+        new integration needs no server change, SDK-646). Display fields
+        only — never token material. Each status source
         (credentials, identity plugins, legacy prefixes, agent registry) is
         fetched independently and degrades to its empty default on failure:
         a broken source logs server-side and blanks its section rather than
@@ -554,8 +592,10 @@ def get_integrations_router():
                 )
 
             plugins = []
-            for plugin_key in KNOWN_PLUGINS:
+            discovered = sorted(key for key in plugin_rows if key not in BUILTIN_PLUGINS)
+            for plugin_key in [*BUILTIN_PLUGINS, *discovered]:
                 row = plugin_rows.get(plugin_key) or PluginStatusRow(key=plugin_key)
+                builtin = BUILTIN_PLUGINS.get(plugin_key)
                 plugins.append(
                     PluginStatusItemDTO(
                         key=plugin_key,
@@ -565,6 +605,8 @@ def get_integrations_router():
                         last_active_at=row.last_active_at,
                         session_count=row.session_count,
                         source=row.source,
+                        label=row.label or (builtin["label"] if builtin else None),
+                        connection_type=row.connection_type,
                     )
                 )
 
@@ -581,9 +623,16 @@ def get_integrations_router():
         openapi_extra={"x-cognee-additive-plugin-keys": True},
     )
     async def provision_plugin(
-        plugin_key: str, user: User = Depends(get_authenticated_user)
+        plugin_key: str,
+        body: PluginProvisionRequestDTO | None = None,
+        user: User = Depends(get_authenticated_user),
     ) -> PluginProvisionDTO:
         """Provision a dedicated agent identity for a plugin, and add a key for it.
+
+        Any well-formed plugin key may provision: the plugin names itself
+        and describes itself in the body (its display ``label`` and
+        ``connection_type``), so the server keeps no list of plugins
+        (SDK-646). A malformed key is a 422.
 
         Idempotent get-or-create: the first call creates an agent sub-user
         for ``(user, plugin_key)``; every later call returns the same agent.
@@ -597,16 +646,28 @@ def get_integrations_router():
         way, or every key through ``DELETE /plugins/{plugin_key}``.
 
         ## Path Parameters
-        - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
+        - **plugin_key** (str): The plugin's key, a lowercase slug such as
+          ``claude-code`` or ``hermes-agent`` (see GET /api/v1/integrations/status).
+
+        ## Request Body (optional)
+        - **label** (str): Display name of the plugin, at most 64 characters.
+        - **connection_type** (str): Connection type the plugin registers with
+          (``claude_code``, ``hermes_agent``); defaults to the key with dashes
+          turned into underscores.
         """
         with new_span("cognee.integrations.plugins.provision") as span:
             span.set_attribute("cognee.integrations.plugin", plugin_key)
-            _plugin_or_404(plugin_key)
+            _validate_plugin_key(plugin_key)
+            body = body or PluginProvisionRequestDTO()
+            label = (body.label or "").strip() or None
+            connection_type = body.connection_type or default_connection_type(plugin_key)
 
             created = True
             try:
                 # Every key goes through add_plugin_agent_key below.
-                agent_user, _ = await create_agent(plugin_key, user, issue_api_key=False)
+                agent_user, _ = await create_agent(
+                    plugin_key, user, issue_api_key=False, plugin_identity=True
+                )
             except (UserAlreadyExists, IntegrityError):
                 # Already provisioned — same agent, one more key.
                 # IntegrityError covers the concurrent-first-provision race:
@@ -627,13 +688,13 @@ def get_integrations_router():
 
             new_key = await _add_plugin_key(agent_user.id, plugin_key)
 
-            await _record_plugin_on_agent(agent_user.id, plugin_key)
+            await _record_plugin_on_agent(agent_user.id, plugin_key, label, connection_type)
 
             # Register in the agent-connection registry so /agents/connections
             # (and the status endpoint) see the plugin before its first traffic.
             await register_agent_connection(
                 agent_session_name=_plugin_session_name(plugin_key),
-                connection_type=_PLUGIN_CONNECTION_TYPES.get(plugin_key, "sdk"),
+                connection_type=connection_type,
                 source="api",
                 user_id=agent_user.id,
                 # The parent's tenant, not the agent object's: create_agent
@@ -665,9 +726,9 @@ def get_integrations_router():
         An agent caller is a 403: only the agent's owner manages its keys.
 
         ## Path Parameters
-        - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
+        - **plugin_key** (str): The plugin's key (see GET /api/v1/integrations/status).
         """
-        _plugin_or_404(plugin_key)
+        _validate_plugin_key(plugin_key)
         _reject_agent_caller(user)
         agent_user = await _find_plugin_agent(user, plugin_key)
         if agent_user is None:
@@ -697,12 +758,12 @@ def get_integrations_router():
         agent caller is a 403.
 
         ## Path Parameters
-        - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
+        - **plugin_key** (str): The plugin's key (see GET /api/v1/integrations/status).
         - **key_id** (UUID): Id of the key (see GET /plugins/{plugin_key}/keys).
         """
         with new_span("cognee.integrations.plugins.revoke_key") as span:
             span.set_attribute("cognee.integrations.plugin", plugin_key)
-            _plugin_or_404(plugin_key)
+            _validate_plugin_key(plugin_key)
             _reject_agent_caller(user)
             agent_user = await _find_plugin_agent(user, plugin_key)
             if agent_user is None:
@@ -725,11 +786,11 @@ def get_integrations_router():
         the same identity with a fresh key.
 
         ## Path Parameters
-        - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
+        - **plugin_key** (str): The plugin's key (see GET /api/v1/integrations/status).
         """
         with new_span("cognee.integrations.plugins.disconnect") as span:
             span.set_attribute("cognee.integrations.plugin", plugin_key)
-            _plugin_or_404(plugin_key)
+            _validate_plugin_key(plugin_key)
 
             agent_user = await _find_plugin_agent(user, plugin_key)
             if agent_user is None:

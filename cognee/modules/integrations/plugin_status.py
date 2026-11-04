@@ -3,19 +3,23 @@
 The status endpoint answers "which plugins are connected?" from, in order
 of authority:
 
-* **identity** — the caller's agent sub-users that carry a ``plugin_key``
-  in their principal configuration (written by the provision endpoint).
+* **identity** — the caller's agent sub-users that carry a ``plugin``
+  entry in their principal configuration (written by the provision
+  endpoint, with the plugin's self-declared label and connection type).
   Connected means an API key currently exists for that agent (revocation
   deletes the row, so existence == active); activity joins the key's
   throttled ``last_used_at`` with the agent's session records.
 * **sessions-legacy** — pre-migration installs that still authenticate
   with the shared tenant key. Inferred from the legacy session-id prefixes
-  in :data:`KNOWN_PLUGINS`, only for plugins with no provisioned identity.
+  in :data:`BUILTIN_PLUGINS`, only for plugins with no provisioned identity.
 * **registry** — the agent-connection registry
-  (:func:`list_persisted_agent_connections`), bucketed onto plugin keys by
-  connection type, so e.g. MCP clients registered before first traffic
-  show up. Connections stored in child-agent blobs (agent-writable) are
-  pinned to the agent's email-derived identity rather than trusted.
+  (:func:`list_persisted_agent_connections`), bucketed onto the plugin key
+  each connection names in ``metadata.plugin_key`` (any well-formed key, so
+  a new integration needs no server change, SDK-646), or for connections
+  that predate that field onto the frozen connection-type map, so e.g. MCP
+  clients registered before first traffic show up. Connections stored in
+  child-agent blobs (agent-writable) are pinned to the agent's
+  email-derived identity rather than trusted.
 
 Same key from several sources merges: ``connected`` is the OR — unless the
 base row is identity-sourced, whose key-existence check is authoritative —
@@ -34,7 +38,12 @@ from sqlalchemy import case, func, or_, select
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.agents.registry import AGENT_CONFIG_NAME, list_persisted_agent_connections
 from cognee.modules.integrations.agent_identity import plugin_key_from_agent_email
-from cognee.modules.integrations.plugins import KNOWN_PLUGINS
+from cognee.modules.integrations.plugins import (
+    BUILTIN_PLUGINS,
+    PLUGIN_LABEL_MAX_LENGTH,
+    is_connection_type,
+    is_plugin_key,
+)
 from cognee.modules.session_lifecycle.models import SessionRecord
 from cognee.modules.session_lifecycle.visibility import child_agent_emails
 from cognee.modules.users.methods.get_principal_configuration import (
@@ -46,9 +55,11 @@ SOURCE_IDENTITY = "identity"
 SOURCE_SESSIONS_LEGACY = "sessions-legacy"
 SOURCE_REGISTRY = "registry"
 
-# AgentConnectionType -> KNOWN_PLUGINS key (reverse of the provision
-# endpoint's plugin -> connection-type map, plus the generic "sdk" bucket,
-# which lands on the "api" card alongside direct API usage).
+# AgentConnectionType -> plugin key for connections that carry no
+# ``metadata.plugin_key`` (plugin versions from before they named
+# themselves, and bare MCP/SDK clients), plus the generic "sdk" bucket,
+# which lands on the "api" card alongside direct API usage. Frozen: a
+# plugin that wants its own card names itself.
 _CONNECTION_TYPE_PLUGIN_KEYS: dict[str, str] = {
     "claude_code": "claude-code",
     "opencode": "opencode",
@@ -69,6 +80,9 @@ class PluginStatusRow:
     last_active_at: datetime | None = None
     session_count: int = 0
     source: str | None = None
+    # The plugin's self-description from its provision call, when it gave one.
+    label: str | None = None
+    connection_type: str | None = None
 
 
 def as_utc(value: datetime | None) -> datetime | None:
@@ -108,6 +122,23 @@ def coerce_provisioned_at(value) -> datetime | None:
     return None
 
 
+def coerce_plugin_label(value) -> str | None:
+    """The plugin's display label from its ``plugin`` entry, or ``None``.
+
+    Agent-writable like ``provisioned_at``: anything but a non-blank string
+    within :data:`PLUGIN_LABEL_MAX_LENGTH` reads as absent.
+    """
+    if not isinstance(value, str):
+        return None
+    label = value.strip()
+    return label if label and len(label) <= PLUGIN_LABEL_MAX_LENGTH else None
+
+
+def coerce_connection_type(value) -> str | None:
+    """The plugin's declared connection type from its ``plugin`` entry, or ``None``."""
+    return value if is_connection_type(value) else None
+
+
 def _escape_like_prefix(prefix: str) -> str:
     r"""Build a LIKE pattern matching ids that start with ``prefix`` literally.
 
@@ -125,10 +156,11 @@ async def identity_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
     A child agent counts as a plugin identity iff its principal
     configuration carries the ``plugin`` entry the provision endpoint
     writes. The plugin *key*, however, is derived from the agent's
-    server-assigned deterministic email
-    (``<plugin_key>+<parent_id>@cognee.agent`` — the same identity the
-    provision endpoint resolves by), never from that configuration blob: a
-    child agent can rewrite its own blob through the public configuration
+    server-assigned deterministic email (``<plugin_key>+plugin.<parent_id>@cognee.agent``
+    for any key, or the plain form of agents provisioned before the tag
+    under one of the built-in keys — the same identity the provision
+    endpoint resolves by), never from that configuration blob: a child
+    agent can rewrite its own blob through the public configuration
     endpoint, so a config-claimed key could impersonate another plugin.
     ``connected`` means the agent currently holds an API key
     (disconnect deletes keys, so existence == active); ``last_active_at``
@@ -136,7 +168,7 @@ async def identity_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
     latest session activity, so pure-recall plugins that never open
     sessions still report "last seen".
     """
-    plugin_agents: dict[UUID, tuple[str, datetime | None]] = {}
+    plugin_agents: dict[UUID, PluginStatusRow] = {}
     for agent_id, email in (await child_agent_emails(user_id)).items():
         plugin_key = plugin_key_from_agent_email(email, user_id)
         if plugin_key is None:
@@ -146,9 +178,13 @@ async def identity_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
                 continue
             plugin_entry = (config.get("configuration") or {}).get("plugin")
             if isinstance(plugin_entry, dict) and plugin_entry:
-                plugin_agents[agent_id] = (
-                    plugin_key,
-                    coerce_provisioned_at(plugin_entry.get("provisioned_at")),
+                plugin_agents[agent_id] = PluginStatusRow(
+                    key=plugin_key,
+                    agent_id=agent_id,
+                    provisioned_at=coerce_provisioned_at(plugin_entry.get("provisioned_at")),
+                    label=coerce_plugin_label(plugin_entry.get("label")),
+                    connection_type=coerce_connection_type(plugin_entry.get("connection_type")),
+                    source=SOURCE_IDENTITY,
                 )
             break
 
@@ -185,21 +221,16 @@ async def identity_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
     sessions_by_agent = {row.user_id: row for row in session_rows}
 
     statuses: dict[str, PluginStatusRow] = {}
-    for agent_id, (plugin_key, provisioned_at) in plugin_agents.items():
+    for agent_id, row in plugin_agents.items():
         key_row = keys_by_agent.get(agent_id)
         session_row = sessions_by_agent.get(agent_id)
-        statuses[plugin_key] = PluginStatusRow(
-            key=plugin_key,
-            connected=bool(key_row and key_row.key_count),
-            agent_id=agent_id,
-            provisioned_at=provisioned_at,
-            last_active_at=_max_datetime(
-                key_row.last_used_at if key_row else None,
-                session_row.last_activity_at if session_row else None,
-            ),
-            session_count=int(session_row.session_count) if session_row else 0,
-            source=SOURCE_IDENTITY,
+        row.connected = bool(key_row and key_row.key_count)
+        row.last_active_at = _max_datetime(
+            key_row.last_used_at if key_row else None,
+            session_row.last_activity_at if session_row else None,
         )
+        row.session_count = int(session_row.session_count) if session_row else 0
+        statuses[row.key] = row
     return statuses
 
 
@@ -218,7 +249,7 @@ async def legacy_plugin_statuses(
     exclude = exclude_keys or set()
     prefixes = {
         key: spec["session_prefix"]
-        for key, spec in KNOWN_PLUGINS.items()
+        for key, spec in BUILTIN_PLUGINS.items()
         if spec.get("session_prefix") and key not in exclude
     }
     if not prefixes or not visible_user_ids:
@@ -268,9 +299,11 @@ async def registry_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
 
     * The caller's own blob is written only by the caller, so a
       connection's claimed ``metadata.plugin_key`` (set by the provision
-      endpoint) or its connection type is trusted as-is — this is what
-      lets e.g. shared-key MCP clients registered before first traffic
-      show up.
+      endpoint, and by every plugin on ``POST /agents/register``) is
+      trusted as-is whenever it is a well-formed key; a connection without
+      one is bucketed by its connection type through the frozen map — this
+      is what lets e.g. shared-key MCP clients registered before first
+      traffic show up.
     * A child agent's blob is agent-writable (the public configuration
       endpoint), so every connection found there is pinned to the plugin
       key derived from that agent's server-assigned email. A blob claiming
@@ -283,7 +316,7 @@ async def registry_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
     statuses: dict[str, PluginStatusRow] = {}
 
     def _add(plugin_key: str | None, connection) -> None:
-        if plugin_key not in KNOWN_PLUGINS:
+        if plugin_key is None or not is_plugin_key(plugin_key):
             return
         row = statuses.setdefault(
             plugin_key, PluginStatusRow(key=plugin_key, connected=True, source=SOURCE_REGISTRY)
@@ -291,9 +324,11 @@ async def registry_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
         row.last_active_at = _max_datetime(row.last_active_at, connection.last_active_at)
 
     for connection in await list_persisted_agent_connections([user_id], active_only=True):
+        claimed_key = (connection.metadata or {}).get("plugin_key")
         _add(
-            (connection.metadata or {}).get("plugin_key")
-            or _CONNECTION_TYPE_PLUGIN_KEYS.get(connection.type),
+            claimed_key
+            if is_plugin_key(claimed_key)
+            else _CONNECTION_TYPE_PLUGIN_KEYS.get(connection.type),
             connection,
         )
 
@@ -319,8 +354,8 @@ def merge_plugin_statuses(
     back to connected. ``last_active_at`` is the max, ``session_count``
     the max (identity and legacy counts never coexist for a key, so max
     never double-counts), and the base row keeps its
-    ``agent_id``/``provisioned_at``/``source`` — identity rows win those
-    fields over registry echoes of the same plugin.
+    ``agent_id``/``provisioned_at``/``source``/``label``/``connection_type``
+    — identity rows win those fields over registry echoes of the same plugin.
     """
     merged = dict(base)
     for key, row in extra.items():
@@ -336,4 +371,8 @@ def merge_plugin_statuses(
             existing.agent_id = row.agent_id
         if existing.provisioned_at is None:
             existing.provisioned_at = row.provisioned_at
+        if existing.label is None:
+            existing.label = row.label
+        if existing.connection_type is None:
+            existing.connection_type = row.connection_type
     return merged
