@@ -9,6 +9,7 @@ from cognee.infrastructure.databases.relational.with_async_session import with_a
 from cognee.modules.engine.utils import generate_edge_id
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.modules.graph.models.Edge import Edge
+from cognee.modules.graph.utils.coerce_graph_uuid import coerce_graph_uuid
 
 UPSERT_BATCH_SIZE = 1000
 
@@ -43,8 +44,8 @@ async def upsert_edges(
         # ``'str' object has no attribute 'hex'`` there (GH #6537). Callers such as
         # review_conflicts and the RDF ingest build edges from string ids, so convert
         # here rather than in every caller.
-        source_node_id = UUID(str(edge[0]))
-        destination_node_id = UUID(str(edge[1]))
+        source_node_id = coerce_graph_uuid(edge[0], "source_node_id")
+        destination_node_id = coerce_graph_uuid(edge[1], "destination_node_id")
 
         edge_text = (
             edge[3]["edge_text"] if edge[2] == "contains" and "edge_text" in edge[3] else edge[2]

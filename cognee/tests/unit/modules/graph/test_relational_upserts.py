@@ -96,6 +96,19 @@ async def test_upsert_edges_accepts_string_node_ids_on_sqlite():
     assert (stored[0].source_node_id, stored[0].destination_node_id) == (source_id, target_id)
 
 
+@pytest.mark.asyncio
+async def test_upsert_edges_names_the_field_of_a_malformed_node_id():
+    with pytest.raises(ValueError, match="destination_node_id must be a UUID: 'not-a-uuid'"):
+        await upsert_edges(
+            [(uuid4(), "not-a-uuid", "about", {})],
+            tenant_id=uuid4(),
+            user_id=uuid4(),
+            dataset_id=uuid4(),
+            data_id=uuid4(),
+            session=AsyncMock(),
+        )
+
+
 def test_sanitize_relational_payload_strips_null_bytes_recursively():
     payload = {
         "ti\x00tle": "hel\x00lo",
