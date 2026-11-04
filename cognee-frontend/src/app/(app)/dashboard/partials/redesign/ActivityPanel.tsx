@@ -1,8 +1,7 @@
 "use client";
 
 import React from "react";
-import type { SessionRow } from "@/modules/sessions/getSessions";
-import type { PipelineRun } from "@/ui/elements/AgentActivityTerminal";
+import type { PipelineRun, SessionRow } from "@/modules/sessions/getSessions";
 import type { Agent, Dataset } from "@/ui/layout/FilterContext";
 import { AsciiFrame } from "./AsciiFrame";
 import { FONT, T } from "./mono";
@@ -11,12 +10,25 @@ import { FONT, T } from "./mono";
  *  usage and is a Cognee Cloud feature. Renders a text-only notice instead
  *  of syncing the real log. */
 
+/**
+ * Mirrors the real panel's props exactly, requiredness included.
+ *
+ * The stub ignores every value, so it is tempting to mark them all optional —
+ * but that makes the public type-check gate strictly weaker than the private
+ * one: a call site that forgot a required prop would fail locally and pass the
+ * sync, which is the wrong way round for a gate whose job is to catch drift.
+ * Keep this in step with the real ActivityPanelProps.
+ */
 interface ActivityPanelProps {
   runs: PipelineRun[];
   sessions: SessionRow[];
   agents: Agent[];
   datasets: Dataset[];
-  onViewFullLog?: () => void;
+  loading: boolean;
+  error: boolean;
+  partial: boolean;
+  onViewFullLog: () => void;
+  onOpenSession: (sessionId: string) => void;
 }
 
 export function ActivityPanel(_props: ActivityPanelProps): React.ReactElement {

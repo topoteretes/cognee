@@ -100,6 +100,7 @@ _STRUCTURAL_RELATIONS: frozenset = frozenset(
         "is_a",
         "part_of",
         "is_part_of",
+        "is_table_of",
         "has_relationship",
         "made_from",
         "summarized_in",

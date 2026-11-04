@@ -119,7 +119,7 @@ def test_find_uv_finds_uv_installed_in_this_environment(tmp_path, monkeypatch):
         assert install.find_uv() == str(uv)
 
 
-def _install(tmp_path, present, installed_after=True):
+def _install(tmp_path, present, installed_after=True, installer="pip"):
     """Run install_gliner_runtime with the environment faked.
 
     ``present`` is the set of modules importable before the install; returns the
@@ -145,7 +145,9 @@ def _install(tmp_path, present, installed_after=True):
         patch.object(sys, "prefix", str(tmp_path)),
         patch.object(install, "_installed", side_effect=lambda module: module in present),
         patch.object(install, "gliner_runtime_installed", side_effect=runtime_installed),
-        patch.object(install, "installer_command", return_value=("pip", ["pip", "install"])),
+        patch.object(
+            install, "installer_command", return_value=(installer, [installer, "install"])
+        ),
         patch.object(install, "_run", side_effect=run),
         patch.object(install, "_import_runtime", side_effect=verify),
         patch.object(install, "installed_pins", return_value=["numpy==2.2.0"]),
@@ -192,6 +194,23 @@ def test_missing_torch_comes_from_the_cpu_index_then_the_extra_with_installed_pi
     assert command[-1] == "gliner2[local]<3,>=2.0.0"
     assert constraints == ["numpy==2.2.0"]
     assert "step 2 of 2" in step
+
+
+def test_uv_takes_torch_from_the_cpu_index_and_its_dependencies_from_pypi(tmp_path):
+    """uv searches the CPU index first and falls through to PyPI per package, so a torch
+    dependency the CPU index cannot serve (its files carry no upload date, which the
+    repo's exclude-newer setting filters) still resolves while torch stays the CPU build."""
+    (torch_step, _), outcome = _install(tmp_path, present=set(), installer="uv")
+    assert outcome.installer == "uv"
+    assert torch_step[0] == [
+        "uv",
+        "install",
+        "--index",
+        "https://mirror.example/cpu",
+        "--index-strategy",
+        "unsafe-first-match",
+        "torch<3,>=2.1",
+    ]
 
 
 def test_an_installed_torch_cpu_or_gpu_is_kept(tmp_path):

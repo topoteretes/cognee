@@ -5,11 +5,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cognee.modules.cognify.config import get_cognify_config, resolve_summary_method
+from cognee.modules.cognify.config import (
+    CognifyConfig,
+    get_cognify_config,
+    resolve_summary_method,
+)
 
 cognify_module = importlib.import_module("cognee.api.v1.cognify.cognify")
 remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 serve_state_module = importlib.import_module("cognee.api.v1.serve.state")
+
+
+def test_the_default_summary_method_needs_no_llm(monkeypatch):
+    """A fresh config summarizes from the extraction unless SUMMARY_METHOD says otherwise."""
+    monkeypatch.delenv("SUMMARY_METHOD", raising=False)
+    assert CognifyConfig().summary_method == "from_extraction"
+    monkeypatch.setenv("SUMMARY_METHOD", "llm")
+    assert CognifyConfig().summary_method == "llm"
 
 
 def _config(summary_method):

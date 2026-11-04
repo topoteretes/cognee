@@ -54,7 +54,9 @@ def sampled_chunks_from(text: str, args) -> list[str]:
 def _patch_chunker_tokenizer(tokenizer_model: str = CHUNKER_TOKENIZER_MODEL) -> None:
     """Point cognee's chunker at a local tokenizer so it needs no embedding model."""
     encoding = tiktoken.encoding_for_model(tokenizer_model)
-    tokenizer = SimpleNamespace(count_tokens=lambda text: len(encoding.encode(text)))
+    tokenizer = SimpleNamespace(
+        count_tokens=lambda text: len(encoding.encode(text, disallowed_special=()))
+    )
     engine = SimpleNamespace(tokenizer=tokenizer)
     chunk_by_sentence = importlib.import_module("cognee.tasks.chunks.chunk_by_sentence")
     chunk_by_sentence.get_embedding_engine = lambda: engine

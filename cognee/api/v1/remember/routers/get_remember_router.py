@@ -577,16 +577,15 @@ def get_remember_router() -> APIRouter:
             ontology_keys = [key for key in (ontology_key or []) if key]
             if ontology_keys:
                 ontology_service = OntologyService()
-                ontology_contents = ontology_service.get_ontology_contents(ontology_keys, user)
-
-                from io import StringIO
+                # File objects keep the upload's filename and content type so the
+                # resolver can pick the right RDF parser (Turtle, JSON-LD, ...).
+                ontology_streams = ontology_service.get_ontology_files(ontology_keys, user)
 
                 from cognee.modules.ontology.ontology_config import Config
                 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
                     RDFLibOntologyResolver,
                 )
 
-                ontology_streams = [StringIO(content) for content in ontology_contents]
                 config_to_use: Config = {
                     "ontology_config": {
                         "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_streams)
@@ -675,8 +674,8 @@ def get_remember_router() -> APIRouter:
         self_improvement: bool | None = Field(
             default=None,
             description=(
-                "Forwarded to remember for compatibility. Typed session entries do not "
-                "run automatic graph improvement, regardless of this value. "
+                "Accepted for compatibility and ignored: no typed entry, skill_run "
+                "included, runs automatic graph improvement. "
                 "This does not control explicit skill_improvement."
             ),
         )
@@ -705,6 +704,9 @@ def get_remember_router() -> APIRouter:
         - **dataset_name** (str): Name of the target dataset. Defaults to 'main_dataset'.
         - **entry** (Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry]): Typed memory
           entry (qa, trace, feedback, or skill_run) to store, dispatched by its type field.
+        - **self_improvement** (Optional[bool]): Accepted for compatibility and ignored: no typed
+          entry, skill_run included, runs automatic graph improvement. This does not control
+          explicit skill_improvement.
         - **session_id** (Optional[str]): Required for qa/trace/feedback entries; optional for
           skill_run entries.
         - **skill_improvement** (Optional[dict]): Skill improvement details forwarded to

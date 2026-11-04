@@ -1,7 +1,8 @@
 from time import perf_counter
-from typing import Any, BinaryIO, Literal
+from typing import Any, Literal
 from uuid import UUID
 
+from fastapi import UploadFile
 from pydantic import BaseModel
 
 from cognee.api.v1.add import add
@@ -32,7 +33,7 @@ logger = get_logger("update")
 
 async def update(
     data_id: UUID,
-    data: BinaryIO | list[BinaryIO] | str | list[str],
+    data: str | list[str] | UploadFile | list[UploadFile],
     dataset_id: UUID,
     user: User = None,
     node_set: list[str] | None = None,
@@ -69,7 +70,10 @@ async def update(
             * Absolute paths: "/path/to/document.pdf"
             * File URLs: "file:///path/to/document.pdf" or "file://relative/path.txt"
             * S3 paths: "s3://bucket-name/path/to/file.pdf"
-        - **Binary file objects**: File handles/streams (BinaryIO)
+        - **File uploads**: FastAPI ``UploadFile`` objects, which is what
+          ``PATCH /api/v1/update`` hands in for its multipart ``data`` field. Plain open
+          file objects (``open(path, "rb")``, ``BytesIO``) are not accepted: pass the
+          file's path instead.
 
     Supported File Formats:
         - Text files (.txt, .md, .csv)
@@ -89,13 +93,20 @@ async def update(
             - Absolute file path: "/path/to/document.pdf"
             - File URL: "file:///absolute/path/to/document.pdf" or "file://relative/path.txt"
             - S3 path: "s3://my-bucket/documents/file.pdf"
-            - Binary file object: open("file.txt", "rb")
+            - File upload: a FastAPI UploadFile, as PATCH /api/v1/update receives it
         dataset_id: UUID of the dataset holding the document (required).
         user: User object for authentication and permissions. Uses default user if None.
               Default user: "default_user@example.com" (created automatically on first use).
               Users can only access datasets they have permissions for.
         node_set: Optional list of node identifiers used to organize and filter data points
                  in the knowledge graph. Not an access-control mechanism.
+                 update() is a PATCH for document metadata: node_set, and the label,
+                 external_metadata and node_set of a DataItem, keep their stored values
+                 when not passed; an explicit empty value (node_set=[], label="",
+                 external_metadata={}) clears them; a value replaces them (the call's
+                 and the item's node_set together, as on add). Passing any of them runs
+                 the full rebuild, since the chunk-level path does not touch document
+                 metadata.
         vector_db_config: Optional configuration for vector database (for custom setups).
                  Chunk-level incremental updates do not support per-call config
                  forwarding: when provided, the update runs full ingestion
@@ -342,6 +353,7 @@ async def update(
         chunk_size=fallback_chunk_size,
         # An errored run is reported as a failed result, not raised: the
         # caller gets the document id and the error to retry this one update.
+        # So is a failed step after the completed run (``after_run_error``).
         raise_on_error=False,
     )
 
@@ -357,6 +369,7 @@ async def update(
         error=UpdateError(error_class=errored.error_class, message=errored.error_message)
         if errored
         else None,
+        after_run_error=getattr(run, "after_run_error", None),
     ).model_dump()
 
 
@@ -388,7 +401,8 @@ def _full_rebuild_reason(
     data_item_changes_metadata = isinstance(data, DataItem) and (
         data.label is not None or data.external_metadata is not None or data.node_set is not None
     )
-    if node_set or data_item_changes_metadata:
+    # node_set=[] is a request to clear the stored node set, so it counts as a change.
+    if node_set is not None or data_item_changes_metadata:
         return (
             RefusalReason.UNSUPPORTED_METADATA,
             "chunk-level update does not reconcile node_set or document metadata",

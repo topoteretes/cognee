@@ -124,7 +124,9 @@ def test_golden_drive_shaped_row_builds_the_same_item_as_before():
     assert item.data == "# Q3 Plan\n\nShip the thing."
     assert item.label == "Q3 Plan"
     assert item.data_id == data_id
-    assert item.node_set is None
+    # [] (no node sets), not None (unknown): ingests the same as before for a new
+    # document, and clears a re-synced one's stored node sets, as before SDK-750.
+    assert item.node_set == []
     assert item.system_metadata == {
         "source": "google_drive",
         "title": "Q3 Plan",
@@ -140,7 +142,7 @@ def test_golden_gmail_shaped_row_builds_the_same_item_as_before():
     item = _build_document_data_item(row, uuid5(NAMESPACE_OID, "msg1"), "gmail")
 
     assert item.data == "# Re: standup\n\nRunning late."
-    assert item.node_set is None
+    assert item.node_set == []
     assert item.system_metadata == {
         "source": "gmail",
         "title": "Re: standup",
@@ -170,7 +172,10 @@ def _node_set(value=None, **variants):
 
 class TestRowNodeSet:
     def test_absent_column_means_no_node_set(self):
-        assert _node_set(None) is None
+        assert _node_set(None) == []
+
+    def test_empty_list_means_no_node_set(self):
+        assert _node_set([]) == []
 
     def test_json_column_comes_back_as_a_list(self):
         assert _node_set(["notion:a", "notion:b"]) == ["notion:a", "notion:b"]

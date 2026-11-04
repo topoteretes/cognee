@@ -409,3 +409,72 @@ def test_remote_payload_restores_improve_skipped():
     assert result.improve_skipped == "insufficient_credits"
     assert result.improve is None
     assert result.to_dict()["improve_skipped"] == "insufficient_credits"
+
+
+def _failed_step_stack(monkeypatch, dataset_id, *, raises):
+    """add + a cognify whose step after the run failed, either raised (the default
+    raise_on_error) or returned on the run (raise_on_error=False), + a fake improve."""
+    from cognee.modules.pipelines.exceptions import AfterRunHookError
+    from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
+
+    completed = PipelineRunCompleted(
+        pipeline_run_id=uuid4(),
+        dataset_id=dataset_id,
+        dataset_name="ds",
+        after_run_error="RuntimeError: compaction",
+    )
+    failure = AfterRunHookError([(dataset_id, "ds", RuntimeError("compaction"))])
+    failure.run_info = {dataset_id: completed}
+
+    async def fake_add(*args, **kwargs):
+        return None
+
+    async def fake_cognify(*args, **kwargs):
+        if raises:
+            raise failure
+        return {dataset_id: completed}
+
+    improve_calls = []
+
+    async def fake_improve(**kwargs):
+        improve_calls.append(kwargs)
+        return _completed_improve()
+
+    monkeypatch.setattr("cognee.api.v1.add.add", fake_add)
+    monkeypatch.setattr("cognee.api.v1.cognify.cognify", fake_cognify)
+    monkeypatch.setattr(improve_pkg, "improve", fake_improve)
+    return completed, failure, improve_calls
+
+
+@pytest.mark.asyncio
+async def test_a_failed_step_after_cognify_is_raised_after_improve(monkeypatch):
+    """The data is stored and cognified, so the automatic improve still runs; then
+    the error is raised."""
+    from cognee.modules.pipelines.exceptions import AfterRunHookError
+
+    dataset_id = uuid4()
+    _completed, failure, improve_calls = _failed_step_stack(monkeypatch, dataset_id, raises=True)
+
+    with pytest.raises(AfterRunHookError) as raised:
+        await remember_module.remember(
+            "note", dataset_id=dataset_id, user=SimpleNamespace(id=uuid4())
+        )
+
+    assert raised.value is failure
+    assert len(improve_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failed_step_after_cognify_is_reported_without_raise_on_error(monkeypatch):
+    dataset_id = uuid4()
+    completed, _failure, improve_calls = _failed_step_stack(monkeypatch, dataset_id, raises=False)
+
+    result = await remember_module.remember(
+        "note", dataset_id=dataset_id, user=SimpleNamespace(id=uuid4()), raise_on_error=False
+    )
+
+    assert result.status == "completed"
+    assert result.pipeline_run_id == str(completed.pipeline_run_id)
+    assert result.after_run_error == "RuntimeError: compaction"
+    assert result.to_dict()["after_run_error"] == result.after_run_error
+    assert len(improve_calls) == 1

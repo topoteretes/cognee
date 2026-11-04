@@ -776,13 +776,16 @@ async def test_cognee_client_direct_remember_qa_passes_a_qa_entry(monkeypatch):
 
 
 def _lock_held_result(session_id):
-    """What cognee returns (not raises) when another improve holds the dataset lock."""
+    """What an older cognee server returns (not raises) when another improve holds the lock."""
     from cognee.modules.improve.registry import stage_names
-    from cognee.modules.improve.result import REASON_LOCK_HELD, ImproveResult
 
-    result = ImproveResult.all_skipped(stage_names(), REASON_LOCK_HELD, session_ids=[session_id])
-    assert result.status == "skipped" and result.lock_held
-    return result.model_dump(mode="json")
+    return {
+        "status": "skipped",
+        "session_ids": [session_id],
+        "stages": [
+            {"stage": name, "status": "skipped", "reason": "lock_held"} for name in stage_names()
+        ],
+    }
 
 
 def _persisted_result():

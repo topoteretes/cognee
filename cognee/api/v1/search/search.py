@@ -346,7 +346,7 @@ async def search(
                     ) from error
 
             operation_context.set_user(user)
-            operation_context.set_session_id(session_id)
+            operation_context.set_session_ids([session_id])
 
             await set_session_user_context_variable(user)
 

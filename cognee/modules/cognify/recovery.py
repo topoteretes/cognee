@@ -20,6 +20,7 @@ from cognee.modules.pipelines.methods import get_unterminated_pipeline_runs
 from cognee.modules.pipelines.methods.get_pipeline_run import get_latest_pipeline_run
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
+from cognee.modules.pipelines.operations.run_sessions import get_run_session_ids
 from cognee.modules.pipelines.operations.run_tasks_with_telemetry import (
     PIPELINE_RUN_ERRORED,
     pipeline_run_telemetry_properties,
@@ -27,6 +28,7 @@ from cognee.modules.pipelines.operations.run_tasks_with_telemetry import (
 from cognee.modules.pipelines.run_ownership import claim_run_ownership
 from cognee.modules.users.methods import get_user
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME
 from cognee.shared.utils import send_telemetry
 
 logger = get_logger("cognify.recovery")
@@ -40,7 +42,10 @@ RECOVERY_POLL_SECONDS = 60
 # run_tasks applies when a run errors inline). A pipeline without an entry has
 # nothing to roll back at error time either, so at startup it is only closed.
 ROLLBACK_HANDLERS = {
-    "cognify_pipeline": cognify_rollback_handler,
+    COGNIFY_PIPELINE_NAME: cognify_rollback_handler,
+    # The indexing run stores its chunks under its own run id; the same handler
+    # undoes them and clears its stamps (pipeline_name selects the stamp slot).
+    INDEXING_PIPELINE_NAME: cognify_rollback_handler,
 }
 
 
@@ -68,6 +73,8 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
     """
     try:
         recovery_candidates = await get_unterminated_pipeline_runs()
+        # One lookup for every candidate's sessions, not one per closed run.
+        sessions_by_row = await get_run_session_ids(run.id for run in recovery_candidates)
     except Exception:
         logger.exception("Failed to load pipeline runs for startup recovery.")
         return
@@ -115,8 +122,11 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
                                 pipeline_run_id=current.pipeline_run_id,
                                 dataset=dataset,
                                 keep_completed_data=True,
+                                pipeline_name=current.pipeline_name,
                             )
-                        await _close_as_abandoned(current, dataset)
+                        await _close_as_abandoned(
+                            current, dataset, sessions_by_row.get(current.id, [])
+                        )
                     ownership.closed = True
                     logger.info("Recovery closed run %s as abandoned", current.pipeline_run_id)
                     _send_abandoned_run_telemetry(current, await _run_principal(current))
@@ -143,8 +153,11 @@ async def pipeline_recovery_service():
             await task
 
 
-async def _close_as_abandoned(pipeline_run, dataset) -> None:
-    """Write the ERRORED row for ``pipeline_run``, carrying the STARTED row's metadata."""
+async def _close_as_abandoned(pipeline_run, dataset, session_ids: list[str]) -> None:
+    """Write the ERRORED row for ``pipeline_run``, carrying the STARTED row's metadata.
+
+    ``session_ids`` are the STARTED row's, read in one batch by the caller.
+    """
     await log_pipeline_run_error(
         pipeline_run_id=pipeline_run.pipeline_run_id,
         pipeline_id=pipeline_run.pipeline_id,
@@ -156,6 +169,7 @@ async def _close_as_abandoned(pipeline_run, dataset) -> None:
         started_at=getattr(pipeline_run, "started_at", None),
         origin=getattr(pipeline_run, "origin", None),
         parent_operation_id=getattr(pipeline_run, "parent_operation_id", None),
+        session_ids=tuple(session_ids),
     )
 
 

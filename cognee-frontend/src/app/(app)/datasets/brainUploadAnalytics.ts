@@ -1,4 +1,5 @@
 import { trackEvent } from "@/modules/analytics";
+import { joinDistinct } from "@/utils/joinDistinct";
 
 // Analytics for the brains-list upload flow (useBrainsData). Page-local, not
 // a shared module — the "Brains" pageName and event names are specific to
@@ -19,7 +20,7 @@ export function trackUploadStarted(target: UploadTarget & { fileTypes: string[] 
       dataset_id: target.datasetId,
       file_count: String(target.fileCount),
       total_bytes: String(target.totalBytes),
-      file_types: target.fileTypes.join(","),
+      file_types: joinDistinct(target.fileTypes),
     },
   });
 }
@@ -34,7 +35,7 @@ export function trackUploadFailed(
       dataset_id: target.datasetId,
       file_count: String(target.fileCount),
       total_bytes: String(target.totalBytes),
-      file_types: target.fileTypes.join(","),
+      file_types: joinDistinct(target.fileTypes),
       duration_ms: String(target.durationMs),
       error_name: target.errorName,
       error_message: target.errorMessage,

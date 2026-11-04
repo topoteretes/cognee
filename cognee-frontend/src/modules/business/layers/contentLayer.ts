@@ -23,7 +23,7 @@ const contentLayer: BusinessLayer = {
   label: "Content",
   defaultEnabled: true,
   useData(ctx: BusinessLayerContext): BusinessLayerResult {
-    const { data, isLoading, error } = useBrainGraph(ctx.cogniInstance, ctx.activeDatasetId);
+    const { data, isLoading, error } = useBrainGraph(ctx.cogniInstance, ctx.activeDatasetId, ctx.graphPushActive);
     return { data: data ?? null, isLoading, error: error ?? null };
   },
 };

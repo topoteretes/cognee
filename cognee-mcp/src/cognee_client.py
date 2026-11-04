@@ -749,8 +749,6 @@ class CogneeClient:
             with redirect_stdout(sys.stderr):
                 ontology_config = None
                 if ontology_keys:
-                    from io import StringIO
-
                     from cognee.api.v1.ontologies.ontologies import OntologyService
                     from cognee.modules.engine.operations.setup import setup
                     from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
@@ -767,11 +765,12 @@ class CogneeClient:
                     # remember() is careful to initialise before resolving a user.
                     await setup()
                     user = await get_default_user()
-                    contents = OntologyService().get_ontology_contents(ontology_keys, user)
+                    # Same loader as the REST cognify/remember routers: the stored
+                    # upload keeps its detected format, filename and content type,
+                    # so Turtle/JSON-LD ontologies are parsed with the right parser.
+                    ontology_files = OntologyService().get_ontology_files(ontology_keys, user)
                     ontology_config = {
-                        "ontology_resolver": RDFLibOntologyResolver(
-                            ontology_file=[StringIO(content) for content in contents]
-                        )
+                        "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_files)
                     }
 
                 tmp_dir = None
