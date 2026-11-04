@@ -65,7 +65,7 @@ pre-commit install
 - **docling-full** - Full docling install with torch-based ML models (adds PDF/image conversion through docling)
 - **codegraph** - Compatibility alias; code graph extraction and Enola are included by default
 - **gliner** - GLiNER demo runtime (gliner2 + torch from PyPI — the CUDA build on Linux, for GPU hosts). Optional: without it the first GLiNER cognify installs CPU-only torch plus this extra itself (see "LLM-free Graph Extraction")
-- **gliner-remote-grpc** / **gliner-remote-amqp** - gRPC (grpcio) / RabbitMQ (aio-pika) transports to a remote GLiNER worker; the HTTP transport needs no extra (see "Remote worker" under "LLM-free Graph Extraction"); `gliner-remote-amqp` is also what `EMBEDDING_PROVIDER=embedding_worker` needs (`docs/embedding-worker.md`)
+- **gliner-remote-grpc** / **gliner-remote-amqp** - gRPC (grpcio) / RabbitMQ (aio-pika) transports to a remote GLiNER worker; the HTTP transport needs no extra (see "Remote worker" under "LLM-free Graph Extraction"); `remote-worker-amqp` is the same RabbitMQ dependency under a neutral name, for the GLiNER client and `EMBEDDING_PROVIDER=embedding_worker` alike (`docs/embedding-worker.md`)
 - **evals** - Evaluation tools
 - **deepeval** - DeepEval testing framework
 - **posthog** - PostHog analytics
@@ -649,23 +649,26 @@ AWS_SECRET_ACCESS_KEY="your_secret_key"
 # AWS_SESSION_TOKEN="your_session_token"
 ```
 
-#### Embedding worker over RabbitMQ (requires gliner-remote-amqp extra)
+#### Embedding worker over RabbitMQ (requires remote-worker-amqp extra, alias gliner-remote-amqp)
 ```bash
 EMBEDDING_PROVIDER="embedding_worker"
-EMBEDDING_MODEL="BAAI/bge-small-en-v1.5"   # informational
-EMBEDDING_DIMENSIONS=384                   # required; checked against every reply
-EMBEDDING_MAX_COMPLETION_TOKENS=512        # the worker's max_input_tokens (not readable over AMQP)
-COGNEE_EMBEDDING_WORKER_ENDPOINT="amqp://guest:guest@localhost:5672/"
+EMBEDDING_MODEL="BAAI/bge-small-en-v1.5"   # informational; picks the chunking tokenizer
+# EMBEDDING_DIMENSIONS=384                 # optional: taken from the worker's info when unset
+COGNEE_EMBEDDING_WORKER_ENDPOINT="amqp://guest:guest@localhost:5672/%2f"
 ```
 `EmbeddingWorkerEmbeddingEngine` sends `/v1/embed` requests to an
 [embedding worker](https://github.com/topoteretes/embedding-worker) queue with the
 remote GLiNER client's RabbitMQ RPC (`cognee/infrastructure/remote_worker/`, shared):
 direct reply-to, publisher confirms, readiness = a consumer on the queue (cached 30 s),
-`unavailable` retried 8 times, timeouts not resent, fatal errors (exhausted outage,
-credentials, `COGNEE_EMBEDDING_WORKER_EXPECTED_MODEL`, `EMBEDDING_DIMENSIONS` mismatch)
-latched, `input_too_long` split and pooled. Sends `input_type: "document"` unless
-`EMBEDDING_INPUT_TYPE=query`. Settings (`COGNEE_EMBEDDING_WORKER_*`, same names as the
-Rust SDK) and failure behaviour: `docs/embedding-worker.md`.
+followed by a `type=info` request for the worker's model info (vector size,
+`max_input_tokens`, `limits.max_inputs`; an older worker without it falls back to the
+config), `unavailable` retried 8 times, timeouts not resent, fatal errors (exhausted
+outage, credentials, `COGNEE_EMBEDDING_WORKER_EXPECTED_MODEL`, `EMBEDDING_DIMENSIONS`
+mismatch) latched, `input_too_long` split and averaged (L2-normalized). Sends
+`input_type: "document"` unless `EMBEDDING_INPUT_TYPE=query`, which embeds documents
+as queries too. Both SDKs read a bare trailing `/` in the broker URL as the default
+vhost `/`. Settings (`COGNEE_EMBEDDING_WORKER_*`, same names as the Rust SDK) and
+failure behaviour: `docs/embedding-worker.md`.
 
 #### LLM Rate Limiting
 ```bash

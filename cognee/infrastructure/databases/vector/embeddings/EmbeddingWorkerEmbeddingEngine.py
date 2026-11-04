@@ -7,16 +7,19 @@ remote GLiNER client sends extraction (see ``embedding_worker/`` and
 
 - Readiness is checked before the first request and then every
   :data:`READINESS_TTL_SECS`; for RabbitMQ it means at least one consumer on the
-  queue. The worker publishes no limits over RabbitMQ, so the vector size
-  (EMBEDDING_DIMENSIONS) and input limit (EMBEDDING_MAX_COMPLETION_TOKENS) come
-  from the config and every reply is checked against them.
+  queue. Each readiness probe then asks the worker for its model info (a message
+  with AMQP ``type=info``), cached with the readiness answer. The info supplies
+  the vector size when EMBEDDING_DIMENSIONS is unset (and is checked against it
+  when set), the token limit inputs are sized by and the most inputs one request
+  may carry. A worker that predates info answers ``invalid_request``: the engine
+  warns once and falls back to the config.
 - "Unavailable" (no broker, no queue, no consumer, an unrouted or nacked
   request, the worker's ``unavailable``) is retried with :class:`RetryPolicy`
   (8 attempts, 0.5-8 s jittered). A request the broker took but nobody answered
   in COGNEE_EMBEDDING_WORKER_REQUEST_TIMEOUT_SECS is not resent: readiness is
   re-checked, then the call fails.
-- ``input_too_long`` splits the request and mean-pools the parts of an input,
-  as the other engines do on a provider's context-length error.
+- ``input_too_long`` splits the request; a single over-long text is split into
+  two overlapping parts whose vectors are averaged and L2-normalized.
 - Fatal errors (the outage outliving its retries, refused credentials, the
   wrong model or vector size) are latched, so later calls fail at once instead
   of each waiting out its own retries. A latched outage is released by the
@@ -26,6 +29,7 @@ remote GLiNER client sends extraction (see ``embedding_worker/`` and
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import math
 import os
 import time
@@ -51,12 +55,14 @@ from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
+from .embedding_worker import shared as shared_module
 from .embedding_worker.errors import (
     EmbeddingWorkerConfigError,
     EmbeddingWorkerDimensionsMismatchError,
     EmbeddingWorkerError,
     EmbeddingWorkerInputTooLongError,
     EmbeddingWorkerModelMismatchError,
+    EmbeddingWorkerRejectedError,
     EmbeddingWorkerTimeoutError,
     EmbeddingWorkerUnavailableError,
 )
@@ -64,6 +70,7 @@ from .embedding_worker.protocol import (
     EmbeddingWorkerTransport,
     EmbedReply,
     InputType,
+    WorkerInfo,
     embed_request,
 )
 from .embedding_worker.settings import EmbeddingWorkerSettings, get_embedding_worker_settings
@@ -74,6 +81,9 @@ observe = get_observe()
 
 READINESS_TTL_SECS = 30.0
 DEFAULT_RETRY = RetryPolicy()
+#: The most inputs per request when the worker's ``limits.max_inputs`` is not yet
+#: known: the worker's default EMBEDDING_WORKER_MAX_INPUTS.
+MAX_INPUTS_WITHOUT_INFO = 256
 
 T = TypeVar("T")
 
@@ -85,10 +95,7 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
     keeps its own budget and readiness cache.
     """
 
-    input_limit_source = (
-        "EMBEDDING_MAX_COMPLETION_TOKENS; the worker's max_input_tokens cannot be read "
-        "over RabbitMQ"
-    )
+    input_limit_source = "the embedding worker's max_input_tokens"
 
     def __init__(
         self,
@@ -107,27 +114,53 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
     ):
         settings = settings or get_embedding_worker_settings()
         if transport is None:
-            settings.require_amqp_endpoint()
-        if not dimensions:
+            # Imported now, not on the first embedding, so a missing aio-pika is
+            # a configuration error when the engine is built.
+            shared_module.load_transport_module(settings)
+        if dimensions is not None and dimensions <= 0:
             raise EmbeddingWorkerConfigError(
-                "EMBEDDING_PROVIDER=embedding_worker needs EMBEDDING_DIMENSIONS.",
-                remediation="Set EMBEDDING_DIMENSIONS to the vector size of the worker's model.",
+                f"EMBEDDING_DIMENSIONS must be a positive vector size, got {dimensions}.",
+                remediation="Unset EMBEDDING_DIMENSIONS to use the worker's, or set its model's.",
+            )
+        if batch_size > MAX_INPUTS_WITHOUT_INFO:
+            raise EmbeddingWorkerConfigError(
+                f"EMBEDDING_BATCH_SIZE={batch_size} is more inputs per request than an "
+                f"embedding worker accepts by default ({MAX_INPUTS_WITHOUT_INFO}).",
+                remediation=(
+                    f"Set EMBEDDING_BATCH_SIZE to {MAX_INPUTS_WITHOUT_INFO} or less; the engine "
+                    "lowers it further to the worker's limits.max_inputs."
+                ),
+            )
+        self.mock = os.getenv("MOCK_EMBEDDING", "false").lower() in ("true", "1", "yes")
+        if self.mock and dimensions is None:
+            raise EmbeddingWorkerConfigError(
+                "MOCK_EMBEDDING with EMBEDDING_PROVIDER=embedding_worker needs "
+                "EMBEDDING_DIMENSIONS: mock vectors never ask the worker for its size.",
+                remediation="Set EMBEDDING_DIMENSIONS.",
             )
         self.settings = settings
         # Informational: the worker serves one model and ignores any name sent.
         self.model = model or "embedding_worker"
-        self.dimensions = dimensions
+        #: EMBEDDING_DIMENSIONS, or None to take the worker's size from its info.
+        self.configured_dimensions = dimensions
+        #: The vector size in use: the configured one, else the worker's once known.
+        self.dimensions: int | None = dimensions
         self.batch_size = batch_size
         # Call sites do not say whether they embed documents or queries, so one
         # type serves both: "query" only when EMBEDDING_INPUT_TYPE says so.
         self.input_type: InputType = (
             "query" if (input_type or "").strip().lower() == "query" else "document"
         )
+        if self.input_type == "query":
+            logger.warning(
+                "EMBEDDING_INPUT_TYPE=query: the embedding worker embeds every text as a "
+                "query, documents included, because cognee's call sites do not tell the two "
+                "apart. Unset it unless the model is symmetric or that is intended."
+            )
         self.tokenizer = resolve_embedding_tokenizer(
             provider="embedding_worker", model=model, huggingface_tokenizer=huggingface_tokenizer
         )
         init_input_limit(self, max_completion_tokens)
-        self.mock = os.getenv("MOCK_EMBEDDING", "false").lower() in ("true", "1", "yes")
 
         self._retry = retry
         self._sleep = sleep
@@ -140,6 +173,8 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
         self._failure: Exception | None = None
         #: The model the worker reported, once it has.
         self.served_model: str | None = None
+        #: The worker's model info from the last readiness probe, if it reports one.
+        self.worker_info: WorkerInfo | None = None
 
     # ------------------------------------------------------------------ public
 
@@ -149,7 +184,7 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
 
         Blank texts are sent as a placeholder and get a zero vector, as in every
         engine (the worker rejects blank inputs). Texts are sent in requests of at
-        most EMBEDDING_BATCH_SIZE inputs.
+        most :meth:`get_batch_size` inputs.
         """
         original_texts = text if isinstance(text, list) else [text]
         sanitized = sanitize_embedding_text_inputs(original_texts)
@@ -162,13 +197,14 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
         if not sanitized:
             return EmbeddingResult(vectors=[], tokens=0)
 
-        groups = [
-            sanitized[start : start + self.batch_size]
-            for start in range(0, len(sanitized), self.batch_size)
-        ]
         try:
             await self._raise_if_failed()
             await self._ready()
+            batch_size = self.get_batch_size()
+            groups = [
+                sanitized[start : start + batch_size]
+                for start in range(0, len(sanitized), batch_size)
+            ]
             results = await _gather_or_cancel([self._embed_splitting(group) for group in groups])
         except (EmbeddingWorkerError, EmbeddingWorkerConfigError) as error:
             self._latch(error)
@@ -180,16 +216,60 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
         )
 
     def get_vector_size(self) -> int:
+        """EMBEDDING_DIMENSIONS, else the worker's ``dimensions``.
+
+        With EMBEDDING_DIMENSIONS unset and the worker not asked yet (cognee asks
+        for the size before it embeds anything when it creates a collection),
+        the info is fetched here, synchronously: on a thread of its own, with its
+        own short-lived broker connection and the usual retries, because this
+        method is sync and is called from inside the event loop. That blocks the
+        caller (and its loop) for one round trip, or up to the retry budget
+        (16-32 s) when no worker is up, and happens at most once per process
+        unless it fails. Use :meth:`resolve_vector_size` from async code.
+        """
+        if self.dimensions is not None:
+            return self.dimensions
+        return self._learn_dimensions_blocking()
+
+    async def resolve_vector_size(self) -> int:
+        """:meth:`get_vector_size` without blocking: asks the worker on this loop."""
+        if self.dimensions is None:
+            await self._ensure_ready()
         return self.dimensions
 
     def get_batch_size(self) -> int:
+        """EMBEDDING_BATCH_SIZE, lowered to the worker's ``limits.max_inputs`` once known."""
+        info = self.worker_info
+        if info is not None:
+            return min(self.batch_size, info.max_inputs)
         return self.batch_size
 
     async def input_limit(self) -> int | None:
-        """The configured EMBEDDING_MAX_COMPLETION_TOKENS: RabbitMQ has no readiness
-        endpoint that reports the worker's ``max_input_tokens``. None when unset
-        (the default cap applies, with a warning to set it); an input over the
-        worker's limit is still split on ``input_too_long``."""
+        """The tokens one input may have: the worker's ``max_input_tokens``, lowered to
+        EMBEDDING_MAX_COMPLETION_TOKENS when that is set and smaller. A configured
+        value above the worker's is a misconfiguration: warned about, and the
+        worker's limit applies. Without info (MOCK_EMBEDDING, or a worker that
+        predates it) the configured value stands, None when unset; an input over
+        the worker's limit is still split on ``input_too_long``."""
+        if self.mock:
+            return self.input_cap
+        await self._ensure_ready()
+        info = self.worker_info
+        if info is None:
+            return self.input_cap
+        worker_limit = info.max_input_tokens
+        if self.input_cap is None or self.input_cap == worker_limit:
+            return worker_limit
+        if self.input_cap > worker_limit:
+            logger.warning(
+                "EMBEDDING_MAX_COMPLETION_TOKENS=%s exceeds the %s tokens the embedding "
+                "worker's model %r accepts; inputs are limited to %s tokens.",
+                self.input_cap,
+                worker_limit,
+                info.model,
+                worker_limit,
+            )
+            return worker_limit
         return self.input_cap
 
     # ------------------------------------------------------------- internals
@@ -199,17 +279,22 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
 
     async def _embed_splitting(self, texts: list[str]) -> tuple[list[list[float]], int]:
         """Embed ``texts``; on ``input_too_long`` split the request in halves, and a
-        single over-long text into overlapping thirds whose vectors are averaged,
-        as the OpenAI-compatible engine does."""
+        single over-long text ``s`` into the overlapping parts ``s[:2t]`` and ``s[t:]``
+        (``t = len(s) // 3`` characters), recursing while a part is still too long.
+        The parts' vectors are averaged and L2-normalized, so the result is a unit
+        vector like every other the worker returns. The Rust SDK splits the same way.
+        """
         try:
             reply = await self._request(texts)
             return reply.vectors, reply.prompt_tokens
         except EmbeddingWorkerInputTooLongError as error:
             if len(texts) > 1:
                 middle = math.ceil(len(texts) / 2)
-                (left, left_tokens), (right, right_tokens) = await asyncio.gather(
-                    self._embed_splitting(texts[:middle]),
-                    self._embed_splitting(texts[middle:]),
+                (left, left_tokens), (right, right_tokens) = await _gather_or_cancel(
+                    [
+                        self._embed_splitting(texts[:middle]),
+                        self._embed_splitting(texts[middle:]),
+                    ]
                 )
                 return left + right, left_tokens + right_tokens
             whole = texts[0]
@@ -220,12 +305,13 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
             left_part, right_part = sanitize_embedding_text_inputs(
                 [whole[: third * 2], whole[third:]]
             )
-            ([left_vector], left_tokens), ([right_vector], right_tokens) = await asyncio.gather(
-                self._embed_splitting([left_part]),
-                self._embed_splitting([right_part]),
+            ([left_vector], left_tokens), ([right_vector], right_tokens) = await _gather_or_cancel(
+                [
+                    self._embed_splitting([left_part]),
+                    self._embed_splitting([right_part]),
+                ]
             )
-            pooled = (np.array(left_vector) + np.array(right_vector)) / 2
-            return [pooled.tolist()], left_tokens + right_tokens
+            return [pool_vectors(left_vector, right_vector)], left_tokens + right_tokens
 
     async def _request(self, texts: list[str]) -> EmbedReply:
         worker = await self._worker()
@@ -253,24 +339,71 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
         return reply
 
     def _check_reply(self, reply: EmbedReply, endpoint: str) -> None:
+        self._check_model(reply.model, endpoint)
+        self._check_dimensions(reply.dimensions, reply.model)
+
+    def _check_model(self, model: str, endpoint: str) -> None:
         expected = self.settings.expected_model
-        if expected is not None and reply.model != expected:
-            raise EmbeddingWorkerModelMismatchError(expected, reply.model)
-        if reply.dimensions != self.dimensions:
-            raise EmbeddingWorkerDimensionsMismatchError(
-                self.dimensions, reply.dimensions, reply.model
-            )
+        if expected is not None and model != expected:
+            raise EmbeddingWorkerModelMismatchError(expected, model)
         if self.served_model is None:
-            self.served_model = reply.model
-            logger.info("Embedding worker %s serves %s", endpoint, reply.model)
-        elif reply.model != self.served_model:
+            self.served_model = model
+            logger.info("Embedding worker %s serves %s", endpoint, model)
+        elif model != self.served_model:
             logger.warning(
                 "Embedding worker replicas at %s serve different models: %s and %s",
                 endpoint,
                 self.served_model,
-                reply.model,
+                model,
             )
-            self.served_model = reply.model
+            self.served_model = model
+
+    def _check_dimensions(self, served: int, model: str) -> None:
+        if self.dimensions is None or served == self.dimensions:
+            return
+        source = (
+            "EMBEDDING_DIMENSIONS"
+            if self.configured_dimensions is not None
+            else "the vector size first learned from the worker"
+        )
+        raise EmbeddingWorkerDimensionsMismatchError(self.dimensions, served, model, source)
+
+    def _apply_info(self, worker: SharedWorker) -> None:
+        """Check the worker's info against the config and adopt what the config leaves open."""
+        info = worker.info
+        if info is None:
+            if worker.info_unsupported and self.dimensions is None:
+                raise EmbeddingWorkerConfigError(
+                    f"The embedding worker on {worker.transport.endpoint_label} does not report "
+                    "its model info (it predates it), so its vector size is unknown.",
+                    remediation=(
+                        "Set EMBEDDING_DIMENSIONS to the worker model's vector size, or upgrade "
+                        "the worker."
+                    ),
+                )
+            self.worker_info = None
+            return
+        self._check_model(info.model, worker.transport.endpoint_label)
+        self._check_dimensions(info.dimensions, info.model)
+        if self.dimensions is None:
+            self.dimensions = info.dimensions
+            logger.info(
+                "Embedding worker %s: using its %s-dimensional vectors (EMBEDDING_DIMENSIONS "
+                "is unset)",
+                worker.transport.endpoint_label,
+                info.dimensions,
+            )
+        if info.max_inputs < self.batch_size and (
+            self.worker_info is None or self.worker_info.max_inputs != info.max_inputs
+        ):
+            logger.info(
+                "Embedding worker %s accepts %s inputs per request; sending that many instead "
+                "of EMBEDDING_BATCH_SIZE=%s",
+                worker.transport.endpoint_label,
+                info.max_inputs,
+                self.batch_size,
+            )
+        self.worker_info = info
 
     async def _raise_if_failed(self) -> None:
         failure = self._failure
@@ -285,6 +418,8 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
             await worker.transport.readiness()
         except EmbeddingWorkerUnavailableError:
             raise failure from None
+        # The worker that came back may be another one: refresh its info too.
+        worker.info = await self._fetch_info(worker)
         worker.ready_until = self._clock() + READINESS_TTL_SECS
         self._failure = None
         logger.info("Embedding worker %s is available again", worker.transport.endpoint_label)
@@ -297,11 +432,23 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
                 getattr(error, "message", error),
             )
 
+    async def _ensure_ready(self) -> None:
+        """Readiness and info, as before a request: a latched failure, or a new
+        fatal one, is raised (and latched)."""
+        try:
+            await self._raise_if_failed()
+            await self._ready()
+        except (EmbeddingWorkerError, EmbeddingWorkerConfigError) as error:
+            self._latch(error)
+            raise
+
     async def _ready(self, *, fresh: bool = False) -> None:
-        """Probe readiness when the cached answer expired, or ``fresh`` asks for it."""
+        """Probe readiness (and fetch info) when the cached answer expired, or
+        ``fresh`` asks for it; then check the info against this engine."""
         worker = await self._worker()
         if fresh or self._clock() >= worker.ready_until:
             await self._probe(worker)
+        self._apply_info(worker)
 
     async def _probe(self, worker: SharedWorker) -> None:
         if worker.probe is None:
@@ -319,10 +466,65 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
         await asyncio.shield(worker.probe)
 
     async def _run_probe(self, worker: SharedWorker) -> None:
-        await self._with_retries(
-            worker.transport.readiness, worker.transport.endpoint_label, "readiness"
-        )
+        label = worker.transport.endpoint_label
+        await self._with_retries(worker.transport.readiness, label, "readiness")
+        worker.info = await self._fetch_info(worker)
         worker.ready_until = self._clock() + READINESS_TTL_SECS
+
+    async def _fetch_info(self, worker: SharedWorker) -> WorkerInfo | None:
+        """The worker's model info, or None from a worker that predates it."""
+        request_id = uuid.uuid4().hex
+
+        async def send() -> WorkerInfo:
+            async with worker.budget:
+                return await worker.transport.info(request_id=request_id)
+
+        label = worker.transport.endpoint_label
+        try:
+            info = await self._with_retries(send, label, f"info {request_id}")
+        except EmbeddingWorkerRejectedError as error:
+            # An older worker reads the info message as an invalid embed request.
+            if not worker.info_unsupported:
+                logger.warning(
+                    "Embedding worker %s does not report its model info (%s); the vector size, "
+                    "input limit and batch size come from the EMBEDDING_* config.",
+                    label,
+                    error.message,
+                )
+            worker.info_unsupported = True
+            return None
+        worker.info_unsupported = False
+        return info
+
+    def _learn_dimensions_blocking(self) -> int:
+        """Fetch the worker's info from sync code; see :meth:`get_vector_size`."""
+        if self._failure is not None and not isinstance(
+            self._failure, EmbeddingWorkerUnavailableError
+        ):
+            raise self._failure
+        logger.info(
+            "EMBEDDING_DIMENSIONS is unset; asking the embedding worker for its vector size"
+        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(asyncio.run, self._learn_dimensions_on_own_loop()).result()
+        return self.dimensions
+
+    async def _learn_dimensions_on_own_loop(self) -> None:
+        # The shared transport belongs to the caller's loop, so this loop gets its own.
+        own = self._own_worker is None
+        transport = (
+            shared_module.build_transport(self.settings) if own else self._own_worker.transport
+        )
+        worker = SharedWorker(transport, asyncio.Semaphore(1))
+        try:
+            await self._run_probe(worker)
+            self._apply_info(worker)
+        except (EmbeddingWorkerError, EmbeddingWorkerConfigError) as error:
+            self._latch(error)
+            raise
+        finally:
+            if own:
+                await transport.aclose()
 
     async def _with_retries(self, call: Callable[[], Awaitable[T]], endpoint: str, what: str) -> T:
         last = self._retry.attempts - 1
@@ -344,6 +546,15 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
                 )
                 await self._sleep(delay)
         raise AssertionError("unreachable")  # the loop returns or raises
+
+
+def pool_vectors(left: list[float], right: list[float]) -> list[float]:
+    """The mean of two vectors, scaled back to unit length (a zero mean stays zero)."""
+    mean = (np.asarray(left, dtype=np.float64) + np.asarray(right, dtype=np.float64)) / 2
+    norm = float(np.linalg.norm(mean))
+    if norm > 0:
+        mean /= norm
+    return mean.tolist()
 
 
 async def _gather_or_cancel(coroutines: Sequence[Coroutine[Any, Any, T]]) -> list[T]:

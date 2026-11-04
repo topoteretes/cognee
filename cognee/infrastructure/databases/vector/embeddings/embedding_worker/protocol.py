@@ -1,9 +1,11 @@
-"""What a transport does, and the embedding worker's ``/v1/embed`` wire contract.
+"""What a transport does, and the embedding worker's wire contract.
 
-A transport sends one request and answers readiness; retries, the request
-budget, readiness caching, model and size checks, splitting over-long inputs and
-failure scope live in the engine. Requests are the worker's ``POST /v1/embed``
-JSON body, which RabbitMQ sends as is (see the worker's ``docs/api.md``).
+A transport sends one request, asks for the worker's model info and answers
+readiness; retries, the request budget, readiness and info caching, model and
+size checks, splitting over-long inputs and failure scope live in the engine.
+Requests are the worker's ``POST /v1/embed`` JSON body, which RabbitMQ sends as
+is; the info reply is the worker's ``GET /v1/info`` body (see the worker's
+``docs/api.md`` and ``docs/rabbitmq.md``).
 """
 
 from __future__ import annotations
@@ -31,6 +33,22 @@ class EmbedReply:
     elapsed_ms: float | None
 
 
+@dataclass(frozen=True)
+class WorkerInfo:
+    """What the worker reports about its model (``GET /v1/info``, RabbitMQ ``type=info``).
+
+    Only the fields the client acts on are typed; ``raw`` keeps the whole reply.
+    """
+
+    model: str
+    dimensions: int
+    #: Tokens one input may have (``max_input_tokens``).
+    max_input_tokens: int
+    #: Inputs one request may carry (``limits.max_inputs``).
+    max_inputs: int
+    raw: dict[str, Any]
+
+
 class EmbeddingWorkerTransport(Protocol):
     #: "amqp" (the only transport so far).
     name: str
@@ -39,6 +57,11 @@ class EmbeddingWorkerTransport(Protocol):
 
     async def embed(self, payload: dict[str, Any], *, request_id: str) -> EmbedReply:
         """Send one request. Raises an :class:`EmbeddingWorkerError` subclass on failure."""
+        ...
+
+    async def info(self, *, request_id: str) -> WorkerInfo:
+        """Ask the worker for its model info once. A worker that predates info answers
+        ``invalid_request``, raised as :class:`EmbeddingWorkerRejectedError`."""
         ...
 
     async def readiness(self) -> None:
@@ -98,6 +121,45 @@ def parse_embed_reply(body: bytes, expected_inputs: int) -> EmbedReply:
         prompt_tokens=prompt_tokens,
         elapsed_ms=float(elapsed_ms) if elapsed_ms is not None else None,
     )
+
+
+def parse_info_reply(body: bytes) -> WorkerInfo:
+    """Parse the info JSON; anything malformed is a runtime fault of the worker."""
+    try:
+        data = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise EmbeddingWorkerRuntimeError(
+            f"The embedding worker sent invalid info JSON: {error}"
+        ) from error
+    if not isinstance(data, dict):
+        raise EmbeddingWorkerRuntimeError("The embedding worker's info is not a JSON object.")
+    model = data.get("model")
+    dimensions = data.get("dimensions")
+    max_input_tokens = data.get("max_input_tokens")
+    limits = data.get("limits")
+    max_inputs = limits.get("max_inputs") if isinstance(limits, dict) else None
+    if (
+        not isinstance(model, str)
+        or not model
+        or not _is_positive_int(dimensions)
+        or not _is_positive_int(max_input_tokens)
+        or not _is_positive_int(max_inputs)
+    ):
+        raise EmbeddingWorkerRuntimeError(
+            "The embedding worker's info lacks a valid `model`, `dimensions`, "
+            "`max_input_tokens` or `limits.max_inputs`."
+        )
+    return WorkerInfo(
+        model=model,
+        dimensions=dimensions,
+        max_input_tokens=max_input_tokens,
+        max_inputs=max_inputs,
+        raw=data,
+    )
+
+
+def _is_positive_int(value: Any) -> bool:
+    return _is_int(value) and value > 0
 
 
 def _is_int(value: Any) -> bool:

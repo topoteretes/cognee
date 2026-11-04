@@ -2,8 +2,9 @@
 
 Batching, blank inputs, input type, token accounting, the retry and failure
 scope rules shared with the remote GLiNER client (unavailable retried, timeouts
-not resent, fatal errors latched), the model and vector-size checks, and
-splitting on ``input_too_long``. The RabbitMQ transport is tested in
+not resent, fatal errors latched), the worker's model info (vector size, input
+limit, batch size, and the fallback for workers without it), the model and
+vector-size checks, and splitting on ``input_too_long``. The RabbitMQ transport is tested in
 ``test_embedding_worker_amqp.py``; settings and factory wiring in
 ``test_embedding_worker_settings.py``.
 """
@@ -11,6 +12,8 @@ splitting on ``input_too_long``. The RabbitMQ transport is tested in
 from __future__ import annotations
 
 import asyncio
+import logging
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -33,15 +36,37 @@ from cognee.infrastructure.databases.vector.embeddings.embedding_worker import (
     EmbeddingWorkerUnauthorizedError,
     EmbeddingWorkerUnavailableError,
 )
-from cognee.infrastructure.databases.vector.embeddings.embedding_worker.protocol import EmbedReply
+from cognee.infrastructure.databases.vector.embeddings.embedding_worker.protocol import (
+    EmbedReply,
+    WorkerInfo,
+)
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingWorkerEmbeddingEngine import (
     READINESS_TTL_SECS,
     EmbeddingWorkerEmbeddingEngine,
+    _gather_or_cancel,
+    pool_vectors,
 )
 from cognee.infrastructure.remote_worker.retry import RetryPolicy
 
 DIMS = 4
 MODEL = "BAAI/bge-small-en-v1.5"
+WORKER_MAX_INPUT_TOKENS = 512
+
+
+def worker_info(
+    *,
+    model: str = MODEL,
+    dimensions: int = DIMS,
+    max_input_tokens: int = WORKER_MAX_INPUT_TOKENS,
+    max_inputs: int = 256,
+) -> WorkerInfo:
+    return WorkerInfo(
+        model=model,
+        dimensions=dimensions,
+        max_input_tokens=max_input_tokens,
+        max_inputs=max_inputs,
+        raw={"status": "ready", "model": model},
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -72,11 +97,14 @@ class FakeTransport:
         self,
         respond: Callable[[dict], Any] = reply_for,
         ready: Callable[[], None] = lambda: None,
+        info: Callable[[], Any] = worker_info,
     ):
         self.respond = respond
         self.ready = ready
+        self.info_outcome = info
         self.requests: list[tuple[dict, str]] = []
         self.probes = 0
+        self.info_requests = 0
         self.in_flight = 0
         self.max_in_flight = 0
 
@@ -89,6 +117,14 @@ class FakeTransport:
             outcome = self.respond(payload)
         finally:
             self.in_flight -= 1
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    async def info(self, *, request_id: str) -> WorkerInfo:
+        self.info_requests += 1
+        await asyncio.sleep(0)
+        outcome = self.info_outcome()
         if isinstance(outcome, BaseException):
             raise outcome
         return outcome
@@ -126,7 +162,7 @@ def make_engine(
     *,
     batch_size: int = 2,
     input_type: str | None = None,
-    dimensions: int = DIMS,
+    dimensions: int | None = DIMS,
     max_completion_tokens: int | None = None,
     clock: Callable[[], float] | None = None,
     sleeps: list[float] | None = None,
@@ -221,15 +257,220 @@ async def test_requests_share_the_concurrency_budget():
     assert transport.max_in_flight <= 2
 
 
-def test_dimensions_are_required():
+def test_non_positive_dimensions_are_a_config_error():
     with pytest.raises(EmbeddingWorkerConfigError, match="EMBEDDING_DIMENSIONS"):
         make_engine(FakeTransport(), dimensions=0)
 
 
+def test_a_batch_size_over_the_workers_default_limit_is_refused():
+    with pytest.raises(EmbeddingWorkerConfigError, match="EMBEDDING_BATCH_SIZE=257"):
+        make_engine(FakeTransport(), batch_size=257)
+    assert make_engine(FakeTransport(), batch_size=256).get_batch_size() == 256
+
+
+def test_query_input_type_warns_that_documents_are_embedded_as_queries(caplog):
+    with caplog.at_level(logging.WARNING):
+        make_engine(FakeTransport(), input_type="query")
+    assert "documents included" in caplog.text
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        make_engine(FakeTransport())
+    assert "documents included" not in caplog.text
+
+
+def test_mock_embedding_needs_configured_dimensions(monkeypatch):
+    monkeypatch.setenv("MOCK_EMBEDDING", "true")
+    with pytest.raises(EmbeddingWorkerConfigError, match="MOCK_EMBEDDING"):
+        make_engine(FakeTransport(), dimensions=None)
+
+
+# --------------------------------------------------------------------------- #
+# The worker's model info
+# --------------------------------------------------------------------------- #
+
+
 @pytest.mark.asyncio
-async def test_input_limit_comes_from_the_config():
-    assert await make_engine(FakeTransport(), max_completion_tokens=512).input_limit() == 512
-    assert await make_engine(FakeTransport()).input_limit() is None
+async def test_info_is_fetched_after_readiness_and_cached_with_it():
+    clock = Clock()
+    transport = FakeTransport()
+    engine = make_engine(transport, clock=clock)
+    await engine.embed_text(["a"])
+    await engine.embed_text(["b"])
+    assert (transport.probes, transport.info_requests) == (1, 1)
+    assert engine.worker_info == worker_info()
+    clock.now += READINESS_TTL_SECS
+    await engine.embed_text(["c"])
+    assert (transport.probes, transport.info_requests) == (2, 2)
+
+
+@pytest.mark.asyncio
+async def test_unavailable_info_is_retried():
+    sleeps: list[float] = []
+    answers = [EmbeddingWorkerUnavailableError("loading")]
+    transport = FakeTransport(info=lambda: answers.pop(0) if answers else worker_info())
+    engine = make_engine(transport, sleeps=sleeps)
+    await engine.embed_text(["a"])
+    assert transport.info_requests == 2 and len(sleeps) == 1
+
+
+@pytest.mark.asyncio
+async def test_dimensions_come_from_the_worker_when_unset():
+    transport = FakeTransport()
+    engine = make_engine(transport, dimensions=None)
+    assert engine.dimensions is None
+    result = await engine.embed_text(["hello", " "])
+    assert engine.get_vector_size() == DIMS
+    assert result[1] == [0.0] * DIMS
+
+
+@pytest.mark.asyncio
+async def test_resolve_vector_size_asks_the_worker_on_the_loop():
+    transport = FakeTransport()
+    engine = make_engine(transport, dimensions=None)
+    assert await engine.resolve_vector_size() == DIMS
+    assert transport.info_requests == 1 and transport.requests == []
+
+
+def test_get_vector_size_before_first_contact_fetches_info_synchronously():
+    transport = FakeTransport()
+    engine = make_engine(transport, dimensions=None)
+    assert engine.get_vector_size() == DIMS
+    assert engine.get_vector_size() == DIMS
+    assert transport.info_requests == 1  # learned once
+
+
+@pytest.mark.asyncio
+async def test_get_vector_size_works_from_inside_a_running_loop():
+    # The way vector adapters call it: sync, from async code.
+    transport = FakeTransport()
+    engine = make_engine(transport, dimensions=None)
+    assert engine.get_vector_size() == DIMS
+    assert (await engine.embed_text(["x"]))[0] == vector_for("x")
+
+
+def test_get_vector_size_with_a_configured_size_never_asks():
+    transport = FakeTransport()
+    assert make_engine(transport).get_vector_size() == DIMS
+    assert transport.info_requests == 0 and transport.probes == 0
+
+
+def test_get_vector_size_against_a_dead_worker_raises_and_latches():
+    transport = FakeTransport(ready=lambda: EmbeddingWorkerUnavailableError("down"))
+    engine = make_engine(transport, dimensions=None)
+    with pytest.raises(EmbeddingWorkerUnavailableError):
+        engine.get_vector_size()
+    assert isinstance(engine._failure, EmbeddingWorkerUnavailableError)
+
+
+@pytest.mark.asyncio
+async def test_configured_dimensions_that_differ_from_the_info_are_fatal():
+    transport = FakeTransport(info=lambda: worker_info(dimensions=384))
+    engine = make_engine(transport, dimensions=768)
+    with pytest.raises(EmbeddingWorkerDimensionsMismatchError) as raised:
+        await engine.embed_text(["x"])
+    message = raised.value.message
+    assert "384" in message and "768" in message and "EMBEDDING_DIMENSIONS" in message
+    with pytest.raises(EmbeddingWorkerDimensionsMismatchError):
+        await engine.embed_text(["y"])
+    assert transport.requests == [] and transport.probes == 1  # latched, nothing sent
+
+
+@pytest.mark.asyncio
+async def test_a_worker_whose_size_changes_after_it_was_learned_is_fatal():
+    clock = Clock()
+    info = {"value": worker_info()}
+    transport = FakeTransport(info=lambda: info["value"])
+    engine = make_engine(transport, dimensions=None, clock=clock)
+    await engine.embed_text(["x"])
+    info["value"] = worker_info(dimensions=DIMS * 2)
+    clock.now += READINESS_TTL_SECS
+    with pytest.raises(EmbeddingWorkerDimensionsMismatchError, match="first learned"):
+        await engine.embed_text(["y"])
+
+
+@pytest.mark.asyncio
+async def test_the_expected_model_is_checked_against_the_info():
+    transport = FakeTransport(info=lambda: worker_info(model="other/model"))
+    engine = make_engine(transport, expected_model=MODEL)
+    with pytest.raises(EmbeddingWorkerModelMismatchError, match="other/model"):
+        await engine.embed_text(["x"])
+    with pytest.raises(EmbeddingWorkerModelMismatchError):
+        await engine.embed_text(["x"])
+    assert transport.requests == []
+
+
+@pytest.mark.asyncio
+async def test_requests_carry_at_most_the_workers_max_inputs():
+    transport = FakeTransport(info=lambda: worker_info(max_inputs=2))
+    engine = make_engine(transport, batch_size=3)
+    assert engine.get_batch_size() == 3  # before info
+    await engine.embed_text(["a", "b", "c", "d", "e"])
+    assert [len(payload["inputs"]) for payload, _ in transport.requests] == [2, 2, 1]
+    assert engine.get_batch_size() == 2
+
+
+@pytest.mark.asyncio
+async def test_a_smaller_batch_size_is_kept():
+    transport = FakeTransport(info=lambda: worker_info(max_inputs=200))
+    engine = make_engine(transport, batch_size=3)
+    await engine.embed_text(["a"])
+    assert engine.get_batch_size() == 3
+
+
+@pytest.mark.parametrize(
+    ("configured", "worker", "expected"),
+    [
+        (None, 512, 512),  # unset: the worker's
+        (256, 512, 256),  # smaller config lowers it
+        (512, 512, 512),
+        (8192, 512, 512),  # larger config: warned, the worker's
+    ],
+)
+@pytest.mark.asyncio
+async def test_input_limit_is_the_workers_lowered_by_the_config(
+    configured, worker, expected, caplog
+):
+    transport = FakeTransport(info=lambda: worker_info(max_input_tokens=worker))
+    engine = make_engine(transport, max_completion_tokens=configured)
+    with caplog.at_level(logging.WARNING):
+        assert await engine.input_limit() == expected
+    assert ("exceeds the 512 tokens" in caplog.text) == (configured == 8192)
+
+
+@pytest.mark.asyncio
+async def test_input_limit_without_info_is_the_config():
+    unsupported = EmbeddingWorkerRejectedError("unknown message")
+    assert (
+        await make_engine(
+            FakeTransport(info=lambda: unsupported), max_completion_tokens=512
+        ).input_limit()
+        == 512
+    )
+    assert await make_engine(FakeTransport(info=lambda: unsupported)).input_limit() is None
+
+
+@pytest.mark.asyncio
+async def test_a_worker_without_info_falls_back_to_the_config_and_warns_once(caplog):
+    clock = Clock()
+    transport = FakeTransport(info=lambda: EmbeddingWorkerRejectedError("invalid_request"))
+    engine = make_engine(transport, batch_size=3, clock=clock)
+    with caplog.at_level(logging.WARNING):
+        await engine.embed_text(["a", "b", "c", "d"])
+        clock.now += READINESS_TTL_SECS
+        await engine.embed_text(["e"])
+    assert caplog.text.count("does not report its model info") == 1
+    assert transport.info_requests == 2  # asked again with every readiness probe
+    assert engine.worker_info is None and engine.get_batch_size() == 3
+    assert [len(payload["inputs"]) for payload, _ in transport.requests] == [3, 1, 1]
+
+
+@pytest.mark.asyncio
+async def test_a_worker_without_info_needs_configured_dimensions():
+    transport = FakeTransport(info=lambda: EmbeddingWorkerRejectedError("invalid_request"))
+    engine = make_engine(transport, dimensions=None)
+    with pytest.raises(EmbeddingWorkerConfigError, match="EMBEDDING_DIMENSIONS"):
+        await engine.embed_text(["x"])
+    assert transport.requests == []
 
 
 def test_errors_are_embedding_exceptions():
@@ -406,8 +647,8 @@ async def test_input_too_long_splits_the_request_and_pools_the_long_text():
     result = await engine.embed_text(["short", long_text])
 
     assert result[0] == vector_for("short")
-    # The two overlapping 8-character parts, averaged.
-    assert result[1] == [8.0, 1.0, 0.0, 0.0]
+    # The two overlapping 8-character parts, averaged and L2-normalized.
+    assert result[1] == pytest.approx([8 / math.sqrt(65), 1 / math.sqrt(65), 0.0, 0.0])
     sent = [payload["inputs"] for payload, _ in transport.requests]
     assert sent[0] == ["short", long_text]  # rejected as a whole
     assert ["short"] in sent and ["abcdefgh"] in sent and ["efghijkl"] in sent
@@ -419,3 +660,74 @@ async def test_an_input_too_short_to_split_fails():
     transport = FakeTransport(lambda _payload: EmbeddingWorkerInputTooLongError("too long"))
     with pytest.raises(EmbeddingContextWindowTooSmallError):
         await make_engine(transport).embed_text(["ab"])
+
+
+@pytest.mark.asyncio
+async def test_a_text_is_split_into_its_first_two_thirds_and_its_last_two_thirds():
+    transport = FakeTransport(too_long_over(6))
+    text = "abcdefghi"  # t = 3: "abcdef" and "defghi"
+    await make_engine(transport).embed_text([text])
+    sent = [payload["inputs"] for payload, _ in transport.requests]
+    assert sent == [[text], ["abcdef"], ["defghi"]] or sent == [[text], ["defghi"], ["abcdef"]]
+
+
+@pytest.mark.asyncio
+async def test_parts_still_too_long_are_split_again_and_the_result_is_a_unit_vector():
+    transport = FakeTransport(too_long_over(4))
+    [vector] = await make_engine(transport).embed_text(["abcdefghijkl"])
+    assert math.isclose(sum(x * x for x in vector), 1.0, rel_tol=1e-9)
+    # 12 -> 8 + 8; each 8 -> 4 (fits) + 6; each 6 -> 4 + 4: 1 + 2 * (1 + 1 + 1 + 2) requests.
+    assert len(transport.requests) == 11
+    fitted = [
+        payload["inputs"][0] for payload, _ in transport.requests if len(payload["inputs"][0]) <= 4
+    ]
+    assert len(fitted) == 6
+
+
+def test_pooled_vectors_are_unit_length():
+    pooled = pool_vectors([1.0, 0.0], [0.0, 1.0])
+    assert pooled == pytest.approx([math.sqrt(0.5), math.sqrt(0.5)])
+    assert pool_vectors([0.0, 0.0], [0.0, 0.0]) == [0.0, 0.0]
+
+
+@pytest.mark.asyncio
+async def test_a_failing_half_cancels_its_sibling():
+    sibling_cancelled = asyncio.Event()
+
+    async def slow() -> int:
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            sibling_cancelled.set()
+            raise
+        return 1
+
+    async def fails() -> int:
+        await asyncio.sleep(0)
+        raise EmbeddingWorkerRuntimeError("boom")
+
+    with pytest.raises(EmbeddingWorkerRuntimeError):
+        await asyncio.wait_for(_gather_or_cancel([slow(), fails()]), timeout=2)
+    assert sibling_cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_a_failing_part_of_a_split_text_stops_the_other_part():
+    started: list[str] = []
+    release = asyncio.Event()
+
+    class SlowRight(FakeTransport):
+        async def embed(self, payload: dict, *, request_id: str) -> EmbedReply:
+            [text] = payload["inputs"]
+            started.append(text)
+            if len(text) > 8:
+                raise EmbeddingWorkerInputTooLongError("too long")
+            if text.startswith("a"):
+                raise EmbeddingWorkerRuntimeError("left part failed")
+            await release.wait()  # the right part would hang without cancellation
+            return reply_for(payload)
+
+    engine = make_engine(SlowRight())
+    with pytest.raises(EmbeddingWorkerRuntimeError, match="left part failed"):
+        await asyncio.wait_for(engine.embed_text(["abcdefghijkl"]), timeout=2)
+    assert "efghijkl" in started

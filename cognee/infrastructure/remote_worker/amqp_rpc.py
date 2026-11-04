@@ -1,9 +1,11 @@
 """RabbitMQ RPC to a model worker's queue with direct reply-to.
 
-Needs aio-pika (the ``gliner-remote-amqp`` extra). One session per client: a
-connection, a channel in publisher-confirm mode, and a no-ack consumer on the
-``amq.rabbitmq.reply-to`` pseudo-queue that routes replies by correlation id.
-It is created lazily and rebuilt after the connection or channel drops.
+Needs aio-pika (the ``remote-worker-amqp`` extra, alias ``gliner-remote-amqp``).
+One session per client: a connection, a channel in publisher-confirm mode, and a
+no-ack consumer on the ``amq.rabbitmq.reply-to`` pseudo-queue that routes replies
+by correlation id. It is created lazily and rebuilt after the connection or
+channel drops; a connection that is not kept (its setup failed, or its channel
+closed under it) is closed.
 
 Each call publishes a JSON body to the default exchange as a transient,
 ``mandatory`` message with its own correlation id, an ``x-request-id`` header and
@@ -33,7 +35,11 @@ from typing import Any
 import aio_pika
 import aiormq
 
+from cognee.shared.logging_utils import get_logger
+
 from .urls import redact_url
+
+logger = get_logger("remote_worker.amqp_rpc")
 
 REPLY_TO = "amq.rabbitmq.reply-to"
 
@@ -72,8 +78,12 @@ class AmqpRpcClient:
         self._session: _Session | None = None
         self._session_lock = asyncio.Lock()
 
-    async def call(self, body: bytes, *, request_id: str) -> bytes:
-        """Publish one request and return the body of its reply."""
+    async def call(self, body: bytes, *, request_id: str, message_type: str | None = None) -> bytes:
+        """Publish one request and return the body of its reply.
+
+        ``message_type`` is the AMQP ``type`` property; workers that serve more than
+        one kind of message (the embedding worker's ``info``) dispatch on it.
+        """
         session = await self._get_session()
         correlation_id = uuid.uuid4().hex
         future: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
@@ -87,6 +97,7 @@ class AmqpRpcClient:
             # nobody waits for its reply any more.
             expiration=self._request_timeout,
             headers={"x-request-id": request_id},
+            type=message_type,
             delivery_mode=aio_pika.DeliveryMode.NOT_PERSISTENT,
         )
         published = False
@@ -169,12 +180,17 @@ class AmqpRpcClient:
         async with self._session_lock:
             if self._session is not None and self._session.usable:
                 return self._session
-            if self._session is not None:
-                self._session.fail_pending("The broker connection dropped.")
+            stale, self._session = self._session, None
+            if stale is not None:
+                stale.fail_pending("The broker connection dropped.")
+                # The channel may have closed while the connection stayed open
+                # (a channel-level error): close it, or every rebuild leaks one.
+                await _close_quietly(stale.connection)
             self._session = await self._connect()
             return self._session
 
     async def _connect(self) -> _Session:
+        connection = None
         try:
             async with _timeout(self._connect_timeout):
                 connection = await aio_pika.connect(self._url, timeout=self._connect_timeout)
@@ -182,13 +198,19 @@ class AmqpRpcClient:
                 session = _Session(connection, channel, self._errors.unavailable)
                 reply_queue = await channel.get_queue(REPLY_TO, ensure=False)
                 await reply_queue.consume(session.on_reply, no_ack=True)
-        except (TimeoutError, asyncio.TimeoutError) as error:
-            raise self._errors.unavailable(
-                f"Cannot connect to the broker for {self.endpoint_label} within "
-                f"{self._connect_timeout:g}s."
-            ) from error
-        except (aiormq.exceptions.AMQPError, ConnectionError, OSError) as error:
-            raise self._connection_error(error) from error
+        except BaseException as error:
+            # Connected, but the channel or the reply consumer failed (or the
+            # deadline or a cancellation hit): the connection is not kept, so close it.
+            if connection is not None:
+                await _close_quietly(connection)
+            if isinstance(error, (TimeoutError, asyncio.TimeoutError)):
+                raise self._errors.unavailable(
+                    f"Cannot connect to the broker for {self.endpoint_label} within "
+                    f"{self._connect_timeout:g}s."
+                ) from error
+            if isinstance(error, (aiormq.exceptions.AMQPError, ConnectionError, OSError)):
+                raise self._connection_error(error) from error
+            raise
 
         def dropped(*_args: Any) -> None:
             session.fail_pending(f"The broker connection for {self.endpoint_label} dropped.")
@@ -262,3 +284,12 @@ class _Timeout310:
         if self._expired and exc_type is asyncio.CancelledError:
             raise asyncio.TimeoutError()
         return False
+
+
+async def _close_quietly(connection: Any) -> None:
+    """Close a connection this client gives up on; failing to close it is not an error."""
+    try:
+        if not connection.is_closed:
+            await connection.close()
+    except Exception:  # best effort: the caller's own outcome matters more
+        logger.debug("Closing an abandoned broker connection failed", exc_info=True)

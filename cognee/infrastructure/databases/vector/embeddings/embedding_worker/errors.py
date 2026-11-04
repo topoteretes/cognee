@@ -127,7 +127,8 @@ class EmbeddingWorkerRuntimeError(EmbeddingWorkerError):
 
 
 class EmbeddingWorkerModelMismatchError(EmbeddingWorkerError):
-    """The worker serves a different model than COGNEE_EMBEDDING_WORKER_EXPECTED_MODEL."""
+    """The worker serves a different model than COGNEE_EMBEDDING_WORKER_EXPECTED_MODEL
+    (from its model info, or from an embedding reply)."""
 
     fatal = True
 
@@ -147,17 +148,20 @@ class EmbeddingWorkerModelMismatchError(EmbeddingWorkerError):
 
 
 class EmbeddingWorkerDimensionsMismatchError(EmbeddingWorkerError):
-    """The worker's vectors do not have EMBEDDING_DIMENSIONS components, so they
-    would not fit the vector index."""
+    """The worker's vectors do not have EMBEDDING_DIMENSIONS components (or, with it
+    unset, the size the engine first learned from the worker), so they would not
+    fit the vector index."""
 
     fatal = True
 
-    def __init__(self, expected: int, served: int, model: str):
+    def __init__(
+        self, expected: int, served: int, model: str, source: str = "EMBEDDING_DIMENSIONS"
+    ):
         self.expected = expected
         self.served = served
         super().__init__(
             f"The embedding worker's model {model!r} returns {served}-dimensional vectors, "
-            f"but EMBEDDING_DIMENSIONS is {expected}; they would not fit the vector index.",
+            f"but {source} is {expected}; they would not fit the vector index.",
             "EmbeddingWorkerDimensionsMismatchError",
             remediation=(
                 f"Set EMBEDDING_DIMENSIONS={served} (and rebuild existing vector collections), "
