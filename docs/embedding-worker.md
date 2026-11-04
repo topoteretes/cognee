@@ -102,12 +102,24 @@ The engine also uses these existing embedding settings:
 
 ## Model info
 
-After each readiness check (before the first request, then at most every
-30 s) the engine asks the worker for its model info: a message with the AMQP
-`type` property `info` and body `{}`, sent like an embed request. The reply is
-the worker's `GET /v1/info` JSON (`model`, `dimensions`, `max_input_tokens`,
-`limits.max_inputs`, and more). It is cached with the readiness answer and is
-retried like any request when the worker answers `unavailable`.
+After the first successful readiness check the engine asks the worker for its
+model info: a message with the AMQP `type` property `info` and body `{}`, sent
+like an embed request. The reply is the worker's `GET /v1/info` JSON (`model`,
+`dimensions`, `max_input_tokens`, `limits.max_inputs`, and more). It is retried
+like any request when the worker answers `unavailable`.
+
+Once a worker has answered, the info is kept for the life of the process (per
+event loop and endpoint) and is not asked for again on the 30 s readiness
+re-checks: an info message waits in the same queue as the embed requests, so
+refreshing it on every check would stall readiness whenever there is a backlog.
+A worker replaced by one serving another model or size is still caught, by the
+model and `dimensions` check on every reply. The one exception is a latched
+outage (below): when it is released, the info is fetched again, because the
+worker that came back may be a different one.
+
+A malformed info reply, or an info request that is still `unavailable` after
+the retries, fails the readiness check like an unreachable worker (the
+latter is latched as an outage).
 
 | Info field | Used for |
 |---|---|
@@ -118,7 +130,8 @@ retried like any request when the worker answers `unavailable`.
 
 A worker that predates info parses the message as an embed request and
 answers `invalid_request`. The engine then logs one warning and uses the
-config, as it did before info existed.
+config, as it did before info existed. Such a worker is asked again on later
+readiness checks (without another warning), so an upgraded worker is picked up.
 
 ### The vector size before the first contact
 
@@ -182,8 +195,8 @@ Token usage comes from `usage.prompt_tokens`.
 | Missing or malformed settings, `http`/`grpc`, `EMBEDDING_BATCH_SIZE` over 256, or aio-pika not installed | `EmbeddingWorkerConfigError` when the engine is built (the RabbitMQ transport module is imported then). |
 
 Readiness is a passive declare of the queue that requires at least one
-consumer, followed by the info request. It runs before the first request and
-is cached for 30 s. Concurrent
+consumer; the first successful check is followed by the info request. It runs
+before the first request and is cached for 30 s. Concurrent
 callers share one probe. Each event loop and endpoint has one broker
 connection, and the connection closes when the loop shuts down.
 
@@ -204,6 +217,7 @@ split-and-average rules. These differences remain:
 | Query vs. document | No per-call distinction: every text is sent as `document`, or every text as `query` with `EMBEDDING_INPUT_TYPE=query`. | Each call says whether it embeds documents or a query. |
 | An outage that exhausted its retries | Latched: later calls fail after one readiness check without retries, until a check finds a worker again. | Not latched: each call retries on its own. |
 | `*_TIMEOUT_SECS` | Fractional seconds accepted (e.g. `2.5`). | Whole seconds. |
+| Model info after an outage | Fetched again when a latched outage is released, since the worker that came back may be another one. | Kept once fetched (there is no latch to release); a swapped worker is caught by the per-reply checks only. |
 
 ## Tests
 

@@ -7,8 +7,9 @@ remote GLiNER client sends extraction (see ``embedding_worker/`` and
 
 - Readiness is checked before the first request and then every
   :data:`READINESS_TTL_SECS`; for RabbitMQ it means at least one consumer on the
-  queue. Each readiness probe then asks the worker for its model info (a message
-  with AMQP ``type=info``), cached with the readiness answer. The info supplies
+  queue. The first successful probe then asks the worker for its model info (a
+  message with AMQP ``type=info``); once a worker has answered with one it is
+  kept, and fetched again only when a latched outage is released. The info supplies
   the vector size when EMBEDDING_DIMENSIONS is unset (and is checked against it
   when set), the token limit inputs are sized by and the most inputs one request
   may carry. A worker that predates info answers ``invalid_request``: the engine
@@ -173,7 +174,8 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
         self._failure: Exception | None = None
         #: The model the worker reported, once it has.
         self.served_model: str | None = None
-        #: The worker's model info from the last readiness probe, if it reports one.
+        #: The worker's model info, fetched once after the first readiness probe, if it
+        #: reports one.
         self.worker_info: WorkerInfo | None = None
 
     # ------------------------------------------------------------------ public
@@ -468,7 +470,14 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
     async def _run_probe(self, worker: SharedWorker) -> None:
         label = worker.transport.endpoint_label
         await self._with_retries(worker.transport.readiness, label, "readiness")
-        worker.info = await self._fetch_info(worker)
+        if worker.info is None:
+            # Asked until the worker answers with one, then kept: an info message
+            # queues behind the embed backlog, so asking on every probe would
+            # stall readiness under load. A swapped worker is still caught by the
+            # per-reply checks. A worker that predates info is asked again on
+            # later probes (warned about once). A malformed reply, or an outage
+            # outliving the retries, fails the probe.
+            worker.info = await self._fetch_info(worker)
         worker.ready_until = self._clock() + READINESS_TTL_SECS
 
     async def _fetch_info(self, worker: SharedWorker) -> WorkerInfo | None:

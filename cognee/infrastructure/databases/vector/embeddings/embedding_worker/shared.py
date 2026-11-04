@@ -36,8 +36,9 @@ class SharedWorker:
     # share its outcome, a failure included, instead of each probing in turn.
     probe: asyncio.Future[None] | None = None
     ready_until: float = 0.0
-    # The worker's model info from the last readiness probe; None before the
-    # first probe, or when the worker predates info (see info_unsupported).
+    # The worker's model info, fetched after the first successful readiness probe
+    # and kept (re-fetched only when a latched outage is released); None before
+    # that, or when the worker predates info (see info_unsupported).
     info: WorkerInfo | None = None
     info_unsupported: bool = False
 
