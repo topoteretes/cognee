@@ -5,6 +5,7 @@ import pytest
 
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
 from cognee.modules.graph.models.EdgeType import EdgeType
@@ -13,6 +14,7 @@ from cognee.modules.retrieval.utils.brute_force_triplet_search import (
     format_triplets,
     get_memory_fragment,
 )
+from cognee.tasks.schema.models import SchemaColumn
 
 
 class MockScoredResult:
@@ -22,6 +24,35 @@ class MockScoredResult:
         self.id = id
         self.score = score
         self.payload = payload or {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("node_type", [None, NodeSet, SchemaColumn])
+async def test_typed_anchor_names_are_not_vector_nodeset_filters(node_type):
+    vector = AsyncMock()
+    vector.embedding_engine.embed_text.return_value = [[0.1, 0.2, 0.3]]
+    vector.search.return_value = [MockScoredResult("anchor", 0.1)]
+    module = "cognee.modules.retrieval.utils.brute_force_triplet_search"
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=vector,
+        ),
+        patch(f"{module}._get_top_triplet_importances", new_callable=AsyncMock) as project,
+    ):
+        await brute_force_triplet_search(
+            query="all countries",
+            node_type=node_type,
+            node_name=["customer:country"],
+            collections=["SchemaColumn_name"],
+        )
+    call = next(
+        c
+        for c in vector.search.call_args_list
+        if c.kwargs["collection_name"] == "SchemaColumn_name"
+    )
+    assert call.kwargs["node_name"] == (None if node_type is SchemaColumn else ["customer:country"])
+    assert project.call_args.args[3:5] == (node_type, ["customer:country"])
 
 
 @pytest.mark.asyncio

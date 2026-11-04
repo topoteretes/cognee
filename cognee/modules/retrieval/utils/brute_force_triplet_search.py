@@ -7,6 +7,7 @@ from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.chunking.models.DltRow import DltRow
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
@@ -330,7 +331,9 @@ async def brute_force_triplet_search(
                 query_batch=query_batch if query_list_length else None,
                 collections=collections,
                 wide_search_limit=wide_search_limit,
-                node_name=node_name,
+                # Vector payloads filter NodeSet membership, not arbitrary
+                # typed anchor names. The graph projection handles those.
+                node_name=(node_name if node_type is None or node_type is NodeSet else None),
                 node_name_filter_operator=node_name_filter_operator,
             )
 
