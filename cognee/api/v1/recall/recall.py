@@ -447,6 +447,7 @@ async def recall(
     # still records the type recall chose, not the deferred one.
     only_context: bool = False,
     session_id: str | None = None,
+    session_history: bool = True,
     context_profile: str = "qa",
     wide_search_top_k: int | None = None,
     triplet_distance_penalty: float | None = None,
@@ -488,6 +489,10 @@ async def recall(
         top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
             automatically. If False, fall back to HYBRID_COMPLETION.
+        session_history: If False, the graph search runs without
+            ``session_id``, so its prompt carries no conversation history; the
+            session still tags the recall's activity row. Session-backed
+            scopes (``session``, ``trace``, ``session_context``) still use it.
         response_model: Pydantic model class for structured completion output.
             Forwarded to the retriever, which validates the LLM answer against
             it; each result then carries the validated payload as a dict in its
@@ -648,6 +653,7 @@ async def recall(
                 node_name=node_name,
                 only_context=only_context,
                 session_id=session_id,
+                session_history=session_history,
                 context_profile=context_profile,
                 verbose=verbose,
                 include_references=include_references,
@@ -788,6 +794,17 @@ async def recall(
                     if not search_dataset_ids:
                         raise DatasetNotFoundError(message="No datasets found.")
 
+                # Name the dataset on the recall's activity row when exactly one
+                # is searched, as search() does; several have no single dataset
+                # to name. Without it every graph recall reported no dataset.
+                if (
+                    current_operation is not None
+                    and search_dataset_ids
+                    and len(search_dataset_ids) == 1
+                    and isinstance(search_dataset_ids[0], UUID)
+                ):
+                    current_operation.set_dataset(search_dataset_ids[0])
+
                 from cognee.modules.recall.config import get_recall_config
 
                 # Warm-up short-circuit. Config errors fail open (skip the
@@ -902,7 +919,7 @@ async def recall(
                         node_name=node_name,
                         node_name_filter_operator=node_name_filter_operator,
                         only_context=search_only_context,
-                        session_id=session_id,
+                        session_id=session_id if session_history else None,
                         wide_search_top_k=wide_search_top_k,
                         triplet_distance_penalty=triplet_distance_penalty,
                         feedback_influence=feedback_influence,

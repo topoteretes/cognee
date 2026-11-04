@@ -321,6 +321,8 @@ class CloudClient:
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("session_id"):
             payload["session_id"] = kwargs["session_id"]
+        if kwargs.get("session_history") is False:
+            payload["session_history"] = False
         if kwargs.get("scope") is not None:
             payload["scope"] = kwargs["scope"]
         if kwargs.get("context_profile") is not None:

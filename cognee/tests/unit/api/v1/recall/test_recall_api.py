@@ -466,3 +466,137 @@ async def test_cloud_client_recall_payload_includes_context_profile(monkeypatch)
     )
 
     assert fake.last_json.get("context_profile") == "agent"
+
+
+async def _recall_graph_stamping_dataset(monkeypatch, api_recall_mod, dataset_ids):
+    """Run a graph recall over dataset_ids and return the dataset its operation was stamped with."""
+
+    class _FakeOperation:
+        dataset_id = None
+
+        def set_user(self, user):
+            pass
+
+        def set_dataset(self, dataset_id):
+            self.dataset_id = dataset_id
+
+    operation = _FakeOperation()
+
+    async def dummy_set_session_user_context_variable(_user):
+        return None
+
+    async def dummy_authorized_search(**kwargs):
+        return []
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    search_methods = importlib.import_module("cognee.modules.search.methods.search")
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+    monkeypatch.setattr(search_methods, "authorized_search", dummy_authorized_search)
+    monkeypatch.setattr(
+        api_recall_mod, "set_session_user_context_variable", dummy_set_session_user_context_variable
+    )
+    monkeypatch.setattr(api_recall_mod, "get_current_operation", lambda: operation)
+
+    await api_recall_mod.recall(
+        query_text="q",
+        query_type=SearchType.CHUNKS,
+        dataset_ids=dataset_ids,
+        auto_route=False,
+        user=_make_user(),
+    )
+    return operation.dataset_id
+
+
+@pytest.mark.asyncio
+async def test_recall_stamps_the_one_dataset_it_searches(monkeypatch, api_recall_mod):
+    dataset_id = uuid4()
+
+    stamped = await _recall_graph_stamping_dataset(monkeypatch, api_recall_mod, [dataset_id])
+
+    assert stamped == dataset_id
+
+
+@pytest.mark.asyncio
+async def test_recall_over_several_datasets_stamps_none(monkeypatch, api_recall_mod):
+    stamped = await _recall_graph_stamping_dataset(monkeypatch, api_recall_mod, [uuid4(), uuid4()])
+
+    assert stamped is None
+
+
+async def _graph_recall_with_session(monkeypatch, api_recall_mod, **kwargs):
+    """Run a graph-only recall with a session; return (search session_id, stamped sessions)."""
+    import contextlib
+
+    captured = {}
+
+    @contextlib.asynccontextmanager
+    async def fake_record_operation(operation_name, user=None, session_ids=(), **_kwargs):
+        captured["stamped_sessions"] = list(session_ids)
+        yield types.SimpleNamespace(set_user=lambda _u: None, set_dataset=lambda _d: None)
+
+    async def dummy_set_session_user_context_variable(_user):
+        return None
+
+    async def dummy_authorized_search(**search_kwargs):
+        captured["search_session_id"] = search_kwargs.get("session_id")
+        return []
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    search_methods = importlib.import_module("cognee.modules.search.methods.search")
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+    monkeypatch.setattr(search_methods, "authorized_search", dummy_authorized_search)
+    monkeypatch.setattr(api_recall_mod, "record_operation", fake_record_operation)
+    monkeypatch.setattr(
+        api_recall_mod, "set_session_user_context_variable", dummy_set_session_user_context_variable
+    )
+
+    await api_recall_mod.recall(
+        query_text="q",
+        query_type=SearchType.CHUNKS,
+        dataset_ids=[uuid4()],
+        scope=["graph"],
+        session_id="s1",
+        auto_route=False,
+        user=_make_user(),
+        **kwargs,
+    )
+    return captured["search_session_id"], captured["stamped_sessions"]
+
+
+@pytest.mark.asyncio
+async def test_recall_without_session_history_keeps_the_session_out_of_the_search(
+    monkeypatch, api_recall_mod
+):
+    search_session_id, stamped = await _graph_recall_with_session(
+        monkeypatch, api_recall_mod, session_history=False
+    )
+
+    assert search_session_id is None
+    assert stamped == ["s1"]
+
+
+@pytest.mark.asyncio
+async def test_recall_passes_the_session_to_the_search_by_default(monkeypatch, api_recall_mod):
+    search_session_id, stamped = await _graph_recall_with_session(monkeypatch, api_recall_mod)
+
+    assert search_session_id == "s1"
+    assert stamped == ["s1"]
+
+
+@pytest.mark.asyncio
+async def test_cloud_client_recall_forwards_session_history_only_when_off(monkeypatch):
+    from cognee.api.v1.serve.cloud_client import CloudClient
+
+    client = CloudClient("http://example", "key")
+    fake = _FakeRecallSession()
+
+    async def fake_get_session():
+        return fake
+
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+
+    await client.recall("q", None, session_id="s", session_history=False)
+    assert fake.last_json.get("session_history") is False
+
+    await client.recall("q", None, session_id="s")
+    assert "session_history" not in fake.last_json

@@ -94,6 +94,13 @@ class RecallPayloadDTO(InDTO):
             "Pinning search_type leaves the graph as the only source."
         ),
     )
+    session_history: bool = Field(
+        default=True,
+        description=(
+            "False runs the graph search without session_id, so its prompt carries no "
+            "conversation history; the session still tags the recall's activity row."
+        ),
+    )
     scope: str | list[str] | None = Field(
         default=None,
         examples=[None],
@@ -250,6 +257,8 @@ def get_recall_router() -> APIRouter:
           (`text/event-stream`). Defaults to content negotiation on `Accept`.
         - **session_id** (Optional[str]): Session whose cached QA and trace entries
           should be searched
+        - **session_history** (bool): False keeps the conversation history out of the
+          graph search's prompt; the session still tags the activity row (default: true)
         - **scope** (Optional[str | List[str]]): Memory sources to include: "graph",
           "session", "session_first", "trace", "session_context", "tools", "code",
           "all", "auto", or a list of these (default: "auto" — session first when
@@ -311,6 +320,7 @@ def get_recall_router() -> APIRouter:
                 verbose=payload.verbose,
                 only_context=payload.only_context,
                 session_id=payload.session_id,
+                session_history=payload.session_history,
                 scope=payload.scope,
                 context_profile=payload.context_profile,
                 include_references=payload.include_references,
