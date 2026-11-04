@@ -187,6 +187,47 @@ def test_an_extension_naming_an_undefined_class_raises(schema):
         graph_schema_to_graph_model(broken)
 
 
+@pytest.mark.parametrize(
+    "label, mutate, match",
+    [
+        (
+            "edge key on a string property",
+            lambda s: s["$defs"]["Person"]["properties"]["name"].__setitem__(
+                EDGE_KEY, {"source": "Person", "target": "Person"}
+            ),
+            "array of edge rows",
+        ),
+        (
+            "reference key on an object property",
+            lambda s: s["properties"]["people"].__setitem__(FROM_IDENTITY_KEY, "Role"),
+            "string or an array of strings",
+        ),
+        (
+            "enum with non-string values",
+            lambda s: s["$defs"]["TiesEdge"]["properties"]["relationship_type"].__setitem__(
+                "enum", [["friends_with"], 3]
+            ),
+            "non-empty list of strings",
+        ),
+        (
+            "typed field the generator renames",
+            lambda s: s["$defs"]["Person"]["properties"].__setitem__(
+                "class", {"type": "string", FROM_IDENTITY_KEY: "Role"}
+            ),
+            "Person.class",
+        ),
+    ],
+)
+def test_a_malformed_extension_is_refused_with_the_typed_error(schema, label, mutate, match):
+    """The schema is caller input: a malformed key must be a validation error the
+    routes turn into a 400, never a bare TypeError or KeyError."""
+    broken = json.loads(json.dumps(schema))
+    mutate(broken)
+
+    with pytest.raises(UnresolvedSchemaReferenceError, match=match):
+        graph_schema_to_graph_model(broken)
+
+
 def test_a_schema_without_the_keys_is_rebuilt_flat(schema):
     """A hand-written schema (the spec compiler's, today) keeps the old behaviour."""
     flat = json.loads(json.dumps(schema))

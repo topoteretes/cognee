@@ -134,7 +134,14 @@ def _restore_typed_fields(schema: dict, namespace: dict) -> None:
                 annotation = _identity_annotation(prop, namespace)
             else:
                 continue
-            _generated_class(namespace, class_name).model_fields[field_name].annotation = annotation
+            model = _generated_class(namespace, class_name)
+            if field_name not in model.model_fields:
+                raise UnresolvedSchemaReferenceError(
+                    f"graph_model marks {class_name}.{field_name} as a typed field, but the "
+                    f"generated class has no field of that name (a reserved or invalid name "
+                    f"is renamed by the generator). Rename the field."
+                )
+            model.model_fields[field_name].annotation = annotation
             retyped = True
     if retyped:
         rebuild_models(
@@ -163,13 +170,22 @@ def _edge_annotation(prop: dict, defs: dict, namespace: dict) -> Any:
     source = _generated_class(namespace, endpoints["source"])
     target = _generated_class(namespace, endpoints["target"])
     core, nullable = _without_null(prop)
+    if core.get("type") != "array":
+        raise UnresolvedSchemaReferenceError(
+            f"{EDGE_KEY} belongs on an array of edge rows, not on a {core.get('type')!r} property."
+        )
     items = core.get("items", {})
     row = defs.get(items["$ref"].rsplit("/", 1)[-1], {}) if "$ref" in items else items
     rule = row.get("properties", {}).get("relationship_type")
     if rule is None:
         edge = Edge[source, target]  # ty: ignore[invalid-type-form] - runtime-built generic
     elif "enum" in rule:
-        edge = Edge[source, target, Literal[tuple(rule["enum"])]]  # ty: ignore[invalid-type-form] - runtime-built generic
+        names = rule["enum"]
+        if not names or not all(isinstance(name, str) for name in names):
+            raise UnresolvedSchemaReferenceError(
+                f"relationship_type enum must be a non-empty list of strings, got {names!r}."
+            )
+        edge = Edge[source, target, Literal[tuple(names)]]  # ty: ignore[invalid-type-form] - runtime-built generic
     else:
         edge = Edge[source, target, str]  # ty: ignore[invalid-type-form] - runtime-built generic
     annotation: Any = list[edge]
@@ -181,7 +197,14 @@ def _identity_annotation(prop: dict, namespace: dict) -> Any:
     the property's shape shows: a list for an array, ``| None`` when nullable."""
     target = _generated_class(namespace, prop[FROM_IDENTITY_KEY])
     core, nullable = _without_null(prop)
-    reference: Any = list[target] if core.get("type") == "array" else target  # ty: ignore[invalid-type-form] - runtime-built alias
+    many = core.get("type") == "array"
+    identity_shape = core.get("items", {}).get("type") if many else core.get("type")
+    if identity_shape != "string":
+        raise UnresolvedSchemaReferenceError(
+            f"{FROM_IDENTITY_KEY} belongs on a string or an array of strings (the identity "
+            f"values the LLM answers), not on a {core.get('type')!r} property."
+        )
+    reference: Any = list[target] if many else target  # ty: ignore[invalid-type-form] - runtime-built alias
     annotation: Any = Annotated[reference, FromIdentity()]
     return annotation | None if nullable else annotation
 
