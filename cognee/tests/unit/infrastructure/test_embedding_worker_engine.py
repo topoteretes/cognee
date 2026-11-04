@@ -59,12 +59,25 @@ def worker_info(
     dimensions: int = DIMS,
     max_input_tokens: int = WORKER_MAX_INPUT_TOKENS,
     max_inputs: int = 256,
+    special_tokens: int | None = 2,
+    max_text_tokens: dict[str, int] | None = None,
+    tokenizer: str | None = None,
 ) -> WorkerInfo:
+    """A BGE-like worker: 2 special tokens, and by default text budgets of
+    ``max_input_tokens - 2`` for documents and 8 fewer for queries (their prefix)."""
+    if max_text_tokens is None and special_tokens is not None:
+        max_text_tokens = {
+            "document": max_input_tokens - special_tokens,
+            "query": max_input_tokens - special_tokens - 8,
+        }
     return WorkerInfo(
         model=model,
         dimensions=dimensions,
         max_input_tokens=max_input_tokens,
         max_inputs=max_inputs,
+        special_tokens=special_tokens,
+        max_text_tokens=max_text_tokens,
+        tokenizer=tokenizer,
         raw={"status": "ready", "model": model},
     )
 
@@ -262,10 +275,23 @@ def test_non_positive_dimensions_are_a_config_error():
         make_engine(FakeTransport(), dimensions=0)
 
 
-def test_a_batch_size_over_the_workers_default_limit_is_refused():
+@pytest.mark.asyncio
+async def test_a_batch_size_over_256_is_clamped_by_the_info():
+    transport = FakeTransport(info=lambda: worker_info(max_inputs=300))
+    engine = make_engine(transport, batch_size=1000)
+    await engine.embed_text(["a"])
+    assert engine.get_batch_size() == 300
+
+
+@pytest.mark.asyncio
+async def test_a_batch_size_over_256_is_refused_by_a_worker_without_info():
+    transport = FakeTransport(info=lambda: EmbeddingWorkerRejectedError("invalid_request"))
+    engine = make_engine(transport, batch_size=257)
     with pytest.raises(EmbeddingWorkerConfigError, match="EMBEDDING_BATCH_SIZE=257"):
-        make_engine(FakeTransport(), batch_size=257)
-    assert make_engine(FakeTransport(), batch_size=256).get_batch_size() == 256
+        await engine.embed_text(["a"])
+    assert transport.requests == []
+    ok = FakeTransport(info=lambda: EmbeddingWorkerRejectedError("invalid_request"))
+    await make_engine(ok, batch_size=256).embed_text(["a"])
 
 
 def test_query_input_type_warns_that_documents_are_embedded_as_queries(caplog):
@@ -463,23 +489,56 @@ async def test_a_smaller_batch_size_is_kept():
 
 
 @pytest.mark.parametrize(
-    ("configured", "worker", "expected"),
+    ("configured", "expected"),
     [
-        (None, 512, 512),  # unset: the worker's
-        (256, 512, 256),  # smaller config lowers it
-        (512, 512, 512),
-        (8192, 512, 512),  # larger config: warned, the worker's
+        (None, 510),  # unset: the worker's document text budget
+        (256, 256),  # smaller config lowers it
+        (510, 510),
+        (512, 510),  # larger config: warned, the worker's
+        (8192, 510),
     ],
 )
 @pytest.mark.asyncio
-async def test_input_limit_is_the_workers_lowered_by_the_config(
-    configured, worker, expected, caplog
+async def test_input_limit_is_the_workers_text_budget_lowered_by_the_config(
+    configured, expected, caplog
 ):
-    transport = FakeTransport(info=lambda: worker_info(max_input_tokens=worker))
+    transport = FakeTransport(
+        info=lambda: worker_info(
+            max_input_tokens=512, max_text_tokens={"document": 510, "query": 502}
+        )
+    )
     engine = make_engine(transport, max_completion_tokens=configured)
     with caplog.at_level(logging.WARNING):
         assert await engine.input_limit() == expected
-    assert ("exceeds the 512 tokens" in caplog.text) == (configured == 8192)
+    assert ("exceeds the 510 tokens of text" in caplog.text) == (configured in (512, 8192))
+
+
+@pytest.mark.asyncio
+async def test_input_limit_follows_the_input_type_sent():
+    transport = FakeTransport(
+        info=lambda: worker_info(
+            max_input_tokens=512, max_text_tokens={"document": 510, "query": 502}
+        )
+    )
+    assert await make_engine(transport, input_type="query").input_limit() == 502
+
+
+@pytest.mark.asyncio
+async def test_without_max_text_tokens_the_special_tokens_are_taken_out():
+    transport = FakeTransport(
+        info=lambda: worker_info(max_input_tokens=512, special_tokens=2, max_text_tokens={})
+    )
+    assert await make_engine(transport).input_limit() == 510
+
+
+@pytest.mark.asyncio
+async def test_without_either_field_the_raw_limit_is_used_with_one_warning(caplog):
+    transport = FakeTransport(info=lambda: worker_info(max_input_tokens=512, special_tokens=None))
+    engine = make_engine(transport)
+    with caplog.at_level(logging.WARNING):
+        assert await engine.input_limit() == 512
+        assert await engine.input_limit() == 512
+    assert caplog.text.count("neither max_text_tokens nor special_tokens") == 1
 
 
 @pytest.mark.asyncio
@@ -672,32 +731,85 @@ async def test_concurrent_calls_share_one_readiness_probe():
 # --------------------------------------------------------------------------- #
 
 
-def too_long_over(limit: int) -> Callable[[dict], Any]:
-    """A worker whose model accepts inputs of at most ``limit`` characters."""
+def too_long_over(limit: int, *, lists_inputs: bool = True) -> Callable[[dict], Any]:
+    """A worker whose model accepts inputs of at most ``limit`` characters. It lists
+    every offending input, as the current worker does, unless ``lists_inputs`` is
+    off (an older worker)."""
 
     def respond(payload: dict) -> Any:
-        if any(len(text) > limit for text in payload["inputs"]):
-            return EmbeddingWorkerInputTooLongError("input 0 has too many tokens")
+        listed = [i for i, text in enumerate(payload["inputs"]) if len(text) > limit]
+        if listed:
+            return EmbeddingWorkerInputTooLongError(
+                f"input {listed[0]} has too many tokens",
+                indices=listed if lists_inputs else None,
+            )
         return reply_for(payload)
 
     return respond
 
 
 @pytest.mark.asyncio
-async def test_input_too_long_splits_the_request_and_pools_the_long_text():
+async def test_input_too_long_resends_once_with_only_the_listed_inputs_split():
     transport = FakeTransport(too_long_over(10))
     engine = make_engine(transport, batch_size=4)
     long_text = "abcdefghijkl"  # 12 characters: thirds of 4, parts of 8
 
-    result = await engine.embed_text(["short", long_text])
+    result = await engine.embed_text(["short", long_text, "tiny"])
 
-    assert result[0] == vector_for("short")
+    assert result[0] == vector_for("short") and result[2] == vector_for("tiny")
     # The two overlapping 8-character parts, averaged and L2-normalized.
     assert result[1] == pytest.approx([8 / math.sqrt(65), 1 / math.sqrt(65), 0.0, 0.0])
     sent = [payload["inputs"] for payload, _ in transport.requests]
-    assert sent[0] == ["short", long_text]  # rejected as a whole
-    assert ["short"] in sent and ["abcdefgh"] in sent and ["efghijkl"] in sent
-    assert result.tokens == 1 + 1 + 1
+    assert sent == [
+        ["short", long_text, "tiny"],  # rejected, listing input 1
+        ["short", "abcdefgh", "efghijkl", "tiny"],  # one round trip
+    ]
+    assert result.tokens == 4  # only the accepted request counts
+
+
+@pytest.mark.asyncio
+async def test_several_listed_inputs_are_split_in_the_same_round_trip():
+    transport = FakeTransport(too_long_over(10))
+    engine = make_engine(transport, batch_size=8)
+    result = await engine.embed_text(["abcdefghijkl", "ok", "mnopqrstuvwx"])
+    sent = [payload["inputs"] for payload, _ in transport.requests]
+    assert len(sent) == 2
+    assert sent[1] == ["abcdefgh", "efghijkl", "ok", "mnopqrst", "qrstuvwx"]
+    assert all(math.isclose(sum(x * x for x in result[i]), 1.0) for i in (0, 2))
+
+
+@pytest.mark.asyncio
+async def test_a_resent_batch_over_the_request_limit_goes_out_in_parallel_requests():
+    transport = FakeTransport(too_long_over(10))
+    engine = make_engine(transport, batch_size=2)
+    await engine.embed_text(["abcdefghijkl", "ok"])
+    sent = [payload["inputs"] for payload, _ in transport.requests]
+    assert sent[0] == ["abcdefghijkl", "ok"]
+    assert sorted(sent[1:]) == sorted([["abcdefgh", "efghijkl"], ["ok"]])
+
+
+@pytest.mark.asyncio
+async def test_an_older_worker_that_lists_nothing_gets_the_batch_bisected():
+    transport = FakeTransport(too_long_over(10, lists_inputs=False))
+    engine = make_engine(transport, batch_size=4)
+    result = await engine.embed_text(["short", "abcdefghijkl"])
+    assert result[0] == vector_for("short")
+    assert result[1] == pytest.approx([8 / math.sqrt(65), 1 / math.sqrt(65), 0.0, 0.0])
+    sent = [payload["inputs"] for payload, _ in transport.requests]
+    assert sent[0] == ["short", "abcdefghijkl"]
+    assert ["short"] in sent and ["abcdefgh", "efghijkl"] in sent
+
+
+@pytest.mark.asyncio
+async def test_listed_indices_outside_the_request_fall_back_to_bisection():
+    answers = [EmbeddingWorkerInputTooLongError("too long", indices=[7])]
+    transport = FakeTransport(lambda payload: answers.pop(0) if answers else reply_for(payload))
+    result = await make_engine(transport, batch_size=4).embed_text(["a", "b"])
+    assert list(result) == [vector_for("a"), vector_for("b")]
+    assert [payload["inputs"] for payload, _ in transport.requests][1:] in (
+        [["a"], ["b"]],
+        [["b"], ["a"]],
+    )
 
 
 @pytest.mark.asyncio
@@ -713,20 +825,18 @@ async def test_a_text_is_split_into_its_first_two_thirds_and_its_last_two_thirds
     text = "abcdefghi"  # t = 3: "abcdef" and "defghi"
     await make_engine(transport).embed_text([text])
     sent = [payload["inputs"] for payload, _ in transport.requests]
-    assert sent == [[text], ["abcdef"], ["defghi"]] or sent == [[text], ["defghi"], ["abcdef"]]
+    assert sent == [[text], ["abcdef", "defghi"]]
 
 
 @pytest.mark.asyncio
 async def test_parts_still_too_long_are_split_again_and_the_result_is_a_unit_vector():
     transport = FakeTransport(too_long_over(4))
-    [vector] = await make_engine(transport).embed_text(["abcdefghijkl"])
+    [vector] = await make_engine(transport, batch_size=8).embed_text(["abcdefghijkl"])
     assert math.isclose(sum(x * x for x in vector), 1.0, rel_tol=1e-9)
-    # 12 -> 8 + 8; each 8 -> 4 (fits) + 6; each 6 -> 4 + 4: 1 + 2 * (1 + 1 + 1 + 2) requests.
-    assert len(transport.requests) == 11
-    fitted = [
-        payload["inputs"][0] for payload, _ in transport.requests if len(payload["inputs"][0]) <= 4
-    ]
-    assert len(fitted) == 6
+    # One round trip per level: 12 -> 8 + 8 -> 4, 6, 4, 6 -> six parts of 4.
+    sent = [payload["inputs"] for payload, _ in transport.requests]
+    assert [len(batch) for batch in sent] == [1, 2, 4, 6]
+    assert all(len(text) <= 4 for text in sent[-1])
 
 
 def test_pooled_vectors_are_unit_length():
@@ -772,7 +882,76 @@ async def test_a_failing_part_of_a_split_text_stops_the_other_part():
             await release.wait()  # the right part would hang without cancellation
             return reply_for(payload)
 
-    engine = make_engine(SlowRight())
+    engine = make_engine(SlowRight(), batch_size=1)  # the two parts go in separate requests
     with pytest.raises(EmbeddingWorkerRuntimeError, match="left part failed"):
         await asyncio.wait_for(engine.embed_text(["abcdefghijkl"]), timeout=2)
     assert "efghijkl" in started
+
+
+# --------------------------------------------------------------------------- #
+# Chunk tokenizer
+# --------------------------------------------------------------------------- #
+
+
+class FakeHFTokenizer:
+    loaded: list[str] = []
+
+    def __init__(self, model: str, max_completion_tokens: int):
+        if model == "broken/repo":
+            raise OSError("404")
+        FakeHFTokenizer.loaded.append(model)
+        self.model = model
+
+
+@pytest.fixture
+def hf_tokenizers(monkeypatch):
+    FakeHFTokenizer.loaded = []
+    monkeypatch.setattr(engine_module, "HuggingFaceTokenizer", FakeHFTokenizer)
+    return FakeHFTokenizer.loaded
+
+
+@pytest.mark.asyncio
+async def test_chunks_are_counted_with_the_workers_tokenizer(hf_tokenizers):
+    transport = FakeTransport(info=lambda: worker_info(tokenizer="BAAI/bge-small-en-v1.5"))
+    engine = make_engine(transport)
+    await engine.input_limit()
+    assert isinstance(engine.tokenizer, FakeHFTokenizer)
+    assert engine.tokenizer.model == "BAAI/bge-small-en-v1.5"
+    await engine.embed_text(["x"])
+    assert hf_tokenizers == ["BAAI/bge-small-en-v1.5"]  # loaded once
+
+
+@pytest.mark.asyncio
+async def test_huggingface_tokenizer_overrides_the_workers(hf_tokenizers):
+    transport = FakeTransport(info=lambda: worker_info(tokenizer="BAAI/bge-small-en-v1.5"))
+    engine = EmbeddingWorkerEmbeddingEngine(
+        model=MODEL,
+        dimensions=DIMS,
+        huggingface_tokenizer="my/tokenizer",
+        settings=EmbeddingWorkerSettings(endpoint="amqp://broker"),
+        transport=transport,
+    )
+    before = engine.tokenizer
+    await engine.input_limit()
+    assert engine.tokenizer is before and hf_tokenizers == []
+
+
+@pytest.mark.asyncio
+async def test_a_worker_tokenizer_that_cannot_load_keeps_the_current_one(hf_tokenizers, caplog):
+    clock = Clock()
+    transport = FakeTransport(info=lambda: worker_info(tokenizer="broken/repo"))
+    engine = make_engine(transport, clock=clock)
+    before = engine.tokenizer
+    with caplog.at_level(logging.WARNING):
+        await engine.input_limit()
+        clock.now += READINESS_TTL_SECS
+        await engine.embed_text(["x"])
+    assert engine.tokenizer is before
+    assert caplog.text.count("Could not load the embedding worker's tokenizer") == 1
+
+
+def test_the_sync_vector_size_path_adopts_the_workers_tokenizer_too(hf_tokenizers):
+    transport = FakeTransport(info=lambda: worker_info(tokenizer="BAAI/bge-small-en-v1.5"))
+    engine = make_engine(transport, dimensions=None)
+    assert engine.get_vector_size() == DIMS
+    assert hf_tokenizers == ["BAAI/bge-small-en-v1.5"]

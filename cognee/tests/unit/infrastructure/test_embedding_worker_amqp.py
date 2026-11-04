@@ -45,6 +45,9 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingWorkerEmbeddingE
 )
 
 BROKER_URL = os.environ.get("COGNEE_EMBEDDING_WORKER_AMQP_TEST_URL")
+# A user that may log in but has no permissions on the vhost, e.g. after
+# ``rabbitmqctl add_user limited secret; rabbitmqctl set_permissions -p / limited "^$" "^$" "^$"``.
+RESTRICTED_URL = os.environ.get("COGNEE_EMBEDDING_WORKER_AMQP_TEST_RESTRICTED_URL")
 needs_broker = pytest.mark.skipif(
     not BROKER_URL, reason="COGNEE_EMBEDDING_WORKER_AMQP_TEST_URL is not set"
 )
@@ -101,6 +104,56 @@ def info_body(*, model: str = "fake/model", dimensions: int = DIMS, **changes) -
 # --------------------------------------------------------------------------- #
 
 
+def test_info_optional_fields_default_and_new_budgets_are_read():
+    minimal = json.dumps({"model": "m", "dimensions": 3, "max_input_tokens": 512}).encode()
+    info = info_reply_to_result(minimal, "label")
+    assert info.max_inputs == 256
+    assert info.special_tokens is None and info.max_text_tokens is None and info.tokenizer is None
+    full = info_body(
+        special_tokens=2,
+        max_text_tokens={"document": 510, "query": 502},
+        tokenizer="BAAI/bge-small-en-v1.5",
+    )
+    info = info_reply_to_result(full, "label")
+    assert info.special_tokens == 2
+    assert info.max_text_tokens == {"document": 510, "query": 502}
+    assert info.tokenizer == "BAAI/bge-small-en-v1.5"
+
+
+def test_input_too_long_lists_every_offending_input():
+    body = json.dumps(
+        {
+            "error": {
+                "code": "input_too_long",
+                "message": "input 1 has 530 tokens",
+                "inputs": [
+                    {"index": 4, "chars": 250000, "tokens": None},
+                    {"index": 1, "chars": 2410, "tokens": 530},
+                ],
+                "max_input_tokens": 512,
+                "max_text_chars": 200000,
+            }
+        }
+    ).encode()
+    with pytest.raises(EmbeddingWorkerInputTooLongError) as raised:
+        reply_to_result(body, "label", 5)
+    assert raised.value.indices == [1, 4]
+    assert raised.value.max_input_tokens == 512 and raised.value.max_text_chars == 200000
+
+
+@pytest.mark.parametrize(
+    "inputs",
+    [None, [], [{"chars": 3}], [{"index": "1"}], [{"index": -1}], "1"],
+)
+def test_input_too_long_without_a_usable_list_has_no_indices(inputs):
+    error = {"code": "input_too_long", "message": "input 0 has too many tokens"}
+    if inputs is not None:
+        error["inputs"] = inputs
+    with pytest.raises(EmbeddingWorkerInputTooLongError) as raised:
+        reply_to_result(json.dumps({"error": error}).encode(), "label", 2)
+    assert raised.value.indices is None
+
+
 def test_info_reply_is_the_v1_info_body():
     info = info_reply_to_result(info_body(), "label")
     assert (info.model, info.dimensions, info.max_input_tokens, info.max_inputs) == (
@@ -121,8 +174,15 @@ def test_info_reply_is_the_v1_info_body():
         info_body(dimensions="3"),
         info_body(model=""),
         info_body(max_input_tokens=None),
-        info_body(limits={}),
+        json.dumps({"model": "m", "dimensions": 3}).encode(),
+        info_body(limits=[]),
         info_body(limits={"max_inputs": True}),
+        info_body(limits={"max_inputs": 0}),
+        info_body(special_tokens=-1),
+        info_body(special_tokens="2"),
+        info_body(max_text_tokens={"document": 0}),
+        info_body(max_text_tokens=[510]),
+        info_body(tokenizer=5),
     ],
 )
 def test_malformed_info_is_a_runtime_error(body):
@@ -451,8 +511,11 @@ async def test_the_engine_splits_over_long_inputs_through_the_broker(monkeypatch
     # Two 20-character parts, averaged and scaled back to unit length.
     expected = np.asarray(vector_for("a" * 20))
     assert result[1] == pytest.approx((expected / np.linalg.norm(expected)).tolist())
-    assert result.tokens == 7 * 3  # three successful requests
-    assert len(seen) == 5  # the batch, its halves, and the two parts of the long text
+    assert result.tokens == 7 * 2  # two successful requests
+    # An older worker lists nothing: the batch, its halves, then the long text's
+    # two parts in one request.
+    assert [json.loads(message.body)["inputs"] for message in seen][-1] == ["a" * 20, "a" * 20]
+    assert len(seen) == 4
 
 
 @needs_broker
@@ -476,3 +539,68 @@ async def test_a_worker_without_info_support_falls_back_to_the_config(monkeypatc
             await close_embedding_worker_transports()
     assert engine.worker_info is None
     assert result[0] == vector_for("x")
+
+
+@needs_broker
+@pytest.mark.skipif(
+    not RESTRICTED_URL, reason="COGNEE_EMBEDDING_WORKER_AMQP_TEST_RESTRICTED_URL is not set"
+)
+@pytest.mark.asyncio
+async def test_access_refused_on_the_queue_is_unauthorized_not_unavailable():
+    queue = private_queue()
+    async with fake_worker(queue, answer):
+        transport = AmqpEmbeddingTransport(
+            RESTRICTED_URL, queue=queue, connect_timeout=5, request_timeout=5
+        )
+        with pytest.raises(EmbeddingWorkerUnauthorizedError, match="ACCESS_REFUSED"):
+            await transport.readiness()  # passive declare: configure access refused
+        with pytest.raises(EmbeddingWorkerUnauthorizedError, match="ACCESS_REFUSED"):
+            await transport.embed(PAYLOAD, request_id="r")  # publish: write access refused
+        await transport.aclose()
+
+
+@needs_broker
+@pytest.mark.asyncio
+async def test_the_engine_splits_exactly_the_listed_inputs_in_one_round_trip(monkeypatch):
+    """A worker that lists its over-long inputs, as the current one does."""
+    monkeypatch.setattr(engine_module, "resolve_embedding_tokenizer", lambda **_: object())
+    monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
+
+    def limited(message) -> list[bytes]:
+        payload = json.loads(message.body)
+        listed = [
+            {"index": i, "chars": len(text), "tokens": len(text)}
+            for i, text in enumerate(payload["inputs"])
+            if len(text) > 20
+        ]
+        if listed:
+            error = {
+                "code": "input_too_long",
+                "message": f"input {listed[0]['index']} has too many tokens",
+                "inputs": listed,
+                "max_input_tokens": 20,
+                "max_text_chars": 1000,
+            }
+            return [json.dumps({"error": error}).encode()]
+        return [success_body(payload)]
+
+    queue = private_queue()
+    async with fake_worker(queue, limited) as seen:
+        engine = EmbeddingWorkerEmbeddingEngine(
+            model="fake/model",
+            dimensions=DIMS,
+            batch_size=8,
+            settings=EmbeddingWorkerSettings(endpoint=BROKER_URL, amqp_queue=queue),
+        )
+        try:
+            result = await engine.embed_text(["short", "a" * 30, "b" * 30])
+        finally:
+            await close_embedding_worker_transports()
+
+    assert [json.loads(message.body)["inputs"] for message in seen] == [
+        ["short", "a" * 30, "b" * 30],
+        ["short", "a" * 20, "a" * 20, "b" * 20, "b" * 20],
+    ]
+    assert result[0] == vector_for("short")
+    expected = np.asarray(vector_for("a" * 20))
+    assert result[1] == pytest.approx((expected / np.linalg.norm(expected)).tolist())

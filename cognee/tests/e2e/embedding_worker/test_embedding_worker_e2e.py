@@ -124,10 +124,11 @@ async def test_info_sets_the_input_limit_and_batch_size():
     limit = await engine.input_limit()
     info = engine.worker_info
     assert info is not None and info.max_input_tokens > 0 and info.max_inputs > 0
+    # The tokens of text that fit a document, special tokens and prefix taken out.
+    budget = info.max_text_tokens["document"]
+    assert budget < info.max_input_tokens
     configured = engine.input_cap
-    assert limit == (
-        min(configured, info.max_input_tokens) if configured else info.max_input_tokens
-    )
+    assert limit == (min(configured, budget) if configured else budget)
     assert engine.get_batch_size() == min(256, info.max_inputs)
     await close_embedding_worker_transports()
 
@@ -191,6 +192,103 @@ async def test_an_over_long_input_is_split_and_averaged_into_a_unit_vector():
     # The pooled vector still means what the text says.
     [alice, rust, bananas] = list(await engine.embed_text(DOCUMENTS))
     assert min(cosine(pooled, alice), cosine(pooled, rust), cosine(pooled, bananas)) > 0.3
+    await close_embedding_worker_transports()
+
+
+@pytest.mark.asyncio
+async def test_only_the_listed_inputs_are_split_in_one_round_trip():
+    """The worker lists every over-long input; the engine splits exactly those and
+    sends the batch again once, instead of bisecting it."""
+    from cognee.infrastructure.databases.vector.embeddings.embedding_worker.shared import (
+        build_transport,
+    )
+
+    probe = fresh_engine()
+    transport = CountingTransport(build_transport(probe.settings))
+    engine = fresh_engine(transport=transport, batch_size=64)
+    await engine.input_limit()
+    # The worker's own budget (EMBEDDING_MAX_COMPLETION_TOKENS may be lower).
+    limit = engine.worker_info.max_text_tokens["document"]
+    # Over the limit, but under twice it: one split makes it fit.
+    over = " ".join(DOCUMENTS[0].split() * 50)
+    while engine.tokenizer.count_tokens(over) > int(limit * 1.3):
+        over = over.rsplit(" ", 1)[0]
+    assert engine.tokenizer.count_tokens(over) > limit
+    result = await engine.embed_text([DOCUMENTS[1], over, DOCUMENTS[2]])
+    assert transport.embeds == [3, 4]  # rejected once, then the long text's two parts
+    assert all(abs(norm(vector) - 1.0) < 1e-5 for vector in result)
+    await transport.aclose()
+
+
+class CountingTransport:
+    """The settings-built transport, counting the embed requests sent through it."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.name = inner.name
+        self.endpoint_label = inner.endpoint_label
+        self.embeds: list[int] = []
+
+    async def embed(self, payload, *, request_id):
+        self.embeds.append(len(payload["inputs"]))
+        return await self.inner.embed(payload, request_id=request_id)
+
+    async def info(self, *, request_id):
+        return await self.inner.info(request_id=request_id)
+
+    async def readiness(self):
+        await self.inner.readiness()
+
+    async def aclose(self):
+        await self.inner.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_sized_to_the_input_limit_embeds_in_one_request():
+    """cognee counts chunk tokens without special tokens; input_limit() leaves room
+    for them, so a chunk of exactly that many tokens is never rejected and split."""
+    from cognee.infrastructure.databases.vector.embeddings.embedding_worker.shared import (
+        build_transport,
+    )
+    from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
+
+    probe = fresh_engine()
+    transport = CountingTransport(build_transport(probe.settings))
+    engine = fresh_engine(transport=transport)
+    limit = await engine.input_limit()
+    info = engine.worker_info
+    assert limit < info.max_input_tokens  # the special tokens are taken out
+    tokenizer = engine.tokenizer
+    assert isinstance(tokenizer, HuggingFaceTokenizer)
+
+    words = ("alpha beta gamma delta epsilon zeta eta theta " * 2000).split()
+    low, high = 1, len(words)
+    while low < high:  # the most words that fit the limit
+        middle = (low + high + 1) // 2
+        if tokenizer.count_tokens(" ".join(words[:middle])) <= limit:
+            low = middle
+        else:
+            high = middle - 1
+    chunk = " ".join(words[:low])
+    assert tokenizer.count_tokens(chunk) == limit
+
+    result = await engine.embed_text([chunk])
+    assert transport.embeds == [1]  # one request, not rejected and split
+    assert result.tokens <= info.max_input_tokens
+    assert abs(norm(result[0]) - 1.0) < 1e-5
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
+async def test_chunks_are_counted_with_the_workers_tokenizer():
+    from cognee.infrastructure.databases.vector.embeddings.embedding_worker import (
+        close_embedding_worker_transports,
+    )
+
+    engine = fresh_engine(model="not-a-hub-model")
+    await engine.input_limit()
+    assert engine.worker_info.tokenizer
+    assert getattr(engine.tokenizer, "model", None) == engine.worker_info.tokenizer
     await close_embedding_worker_transports()
 
 

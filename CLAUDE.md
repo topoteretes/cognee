@@ -666,10 +666,11 @@ COGNEE_EMBEDDING_WORKER_ENDPOINT="amqp://guest:guest@localhost:5672/%2f"
 remote GLiNER client's RabbitMQ RPC (`cognee/infrastructure/remote_worker/`, shared):
 direct reply-to, publisher confirms, readiness = a consumer on the queue (cached 30 s),
 then (once, and again after a released outage) a `type=info` request for the worker's model info (vector size,
-`max_input_tokens`, `limits.max_inputs`; an older worker without it falls back to the
+`max_text_tokens` = the chunk token budget without special tokens, `tokenizer` = the
+chunk tokenizer unless `HUGGINGFACE_TOKENIZER` is set, `limits.max_inputs`; an older worker without it falls back to the
 config), `unavailable` retried 8 times, timeouts not resent, fatal errors (exhausted
 outage, credentials, `COGNEE_EMBEDDING_WORKER_EXPECTED_MODEL`, `EMBEDDING_DIMENSIONS`
-mismatch) latched, `input_too_long` split and averaged (L2-normalized). Sends
+mismatch) latched, `input_too_long` recovered in one round trip (only the inputs the worker lists are split, then averaged and L2-normalized), queue-level `ACCESS_REFUSED` fatal, reconnects single-flight. Sends
 `input_type: "document"` unless `EMBEDDING_INPUT_TYPE=query`, which embeds documents
 as queries too. Both SDKs read a bare trailing `/` in the broker URL as the default
 vhost `/`. Settings (`COGNEE_EMBEDDING_WORKER_*`, same names as the Rust SDK) and

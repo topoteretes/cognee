@@ -14,7 +14,7 @@ import base64
 import binascii
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 import numpy as np
@@ -33,6 +33,10 @@ class EmbedReply:
     elapsed_ms: float | None
 
 
+#: Inputs per request when the worker's info does not say (its default MAX_INPUTS).
+DEFAULT_MAX_INPUTS = 256
+
+
 @dataclass(frozen=True)
 class WorkerInfo:
     """What the worker reports about its model (``GET /v1/info``, RabbitMQ ``type=info``).
@@ -42,11 +46,18 @@ class WorkerInfo:
 
     model: str
     dimensions: int
-    #: Tokens one input may have (``max_input_tokens``).
+    #: Tokens one input may have, special tokens and prefix included (``max_input_tokens``).
     max_input_tokens: int
-    #: Inputs one request may carry (``limits.max_inputs``).
-    max_inputs: int
-    raw: dict[str, Any]
+    #: Inputs one request may carry (``limits.max_inputs``; 256 when not stated).
+    max_inputs: int = DEFAULT_MAX_INPUTS
+    #: Tokens the tokenizer adds to every input (``special_tokens``), when stated.
+    special_tokens: int | None = None
+    #: Tokens of text that fit per input type, special tokens and prefix taken out
+    #: (``max_text_tokens``: ``{"document": N, "query": M}``), when stated.
+    max_text_tokens: dict[str, int] | None = None
+    #: The Hugging Face tokenizer the worker counts with (``tokenizer``), when stated.
+    tokenizer: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 class EmbeddingWorkerTransport(Protocol):
@@ -124,7 +135,12 @@ def parse_embed_reply(body: bytes, expected_inputs: int) -> EmbedReply:
 
 
 def parse_info_reply(body: bytes) -> WorkerInfo:
-    """Parse the info JSON; anything malformed is a runtime fault of the worker."""
+    """Parse the info JSON; anything malformed is a runtime fault of the worker.
+
+    Required: ``model``, ``dimensions``, ``max_input_tokens``. Optional (absent
+    or null means "not stated"; any other wrong type is malformed):
+    ``limits.max_inputs``, ``special_tokens``, ``max_text_tokens``, ``tokenizer``.
+    """
     try:
         data = json.loads(body)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -136,24 +152,50 @@ def parse_info_reply(body: bytes) -> WorkerInfo:
     model = data.get("model")
     dimensions = data.get("dimensions")
     max_input_tokens = data.get("max_input_tokens")
-    limits = data.get("limits")
-    max_inputs = limits.get("max_inputs") if isinstance(limits, dict) else None
     if (
         not isinstance(model, str)
         or not model
         or not _is_positive_int(dimensions)
         or not _is_positive_int(max_input_tokens)
-        or not _is_positive_int(max_inputs)
     ):
         raise EmbeddingWorkerRuntimeError(
-            "The embedding worker's info lacks a valid `model`, `dimensions`, "
-            "`max_input_tokens` or `limits.max_inputs`."
+            "The embedding worker's info lacks a valid `model`, `dimensions` or `max_input_tokens`."
         )
+
+    def malformed(name: str) -> EmbeddingWorkerRuntimeError:
+        return EmbeddingWorkerRuntimeError(f"The embedding worker's info has a malformed `{name}`.")
+
+    limits = data.get("limits")
+    if limits is not None and not isinstance(limits, dict):
+        raise malformed("limits")
+    max_inputs = (limits or {}).get("max_inputs")
+    if max_inputs is None:
+        max_inputs = DEFAULT_MAX_INPUTS
+    elif not _is_positive_int(max_inputs):
+        raise malformed("limits.max_inputs")
+    special_tokens = data.get("special_tokens")
+    if special_tokens is not None and not (_is_int(special_tokens) and special_tokens >= 0):
+        raise malformed("special_tokens")
+    max_text_tokens = data.get("max_text_tokens")
+    if max_text_tokens is not None and not (
+        isinstance(max_text_tokens, dict)
+        and all(
+            isinstance(key, str) and _is_positive_int(value)
+            for key, value in max_text_tokens.items()
+        )
+    ):
+        raise malformed("max_text_tokens")
+    tokenizer = data.get("tokenizer")
+    if tokenizer is not None and not isinstance(tokenizer, str):
+        raise malformed("tokenizer")
     return WorkerInfo(
         model=model,
         dimensions=dimensions,
         max_input_tokens=max_input_tokens,
         max_inputs=max_inputs,
+        special_tokens=special_tokens,
+        max_text_tokens=dict(max_text_tokens) if max_text_tokens is not None else None,
+        tokenizer=tokenizer or None,
         raw=data,
     )
 
