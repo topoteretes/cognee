@@ -52,6 +52,40 @@ class EmbeddingDimensionMismatchError(CogneeValidationError):
         )
 
 
+class StoredVectorWidthMismatchError(CogneeValidationError):
+    """A table's vectors are not the configured embedding width, so its schema cannot be migrated.
+
+    A payload schema migration keeps every vector; a width change is a re-embedding.
+    """
+
+    def __init__(
+        self,
+        collection_name: str,
+        stored_dimensions: int | None,
+        configured_dimensions: int,
+        name: str = "StoredVectorWidthMismatchError",
+        status_code: int = status.HTTP_409_CONFLICT,
+    ):
+        self.collection_name = collection_name
+        self.stored_dimensions = stored_dimensions
+        self.configured_dimensions = configured_dimensions
+        super().__init__(
+            message=(
+                f"LanceDB collection '{collection_name}' holds {stored_dimensions}-dimensional "
+                f"vectors, but the configured embedding model produces {configured_dimensions}. "
+                "A schema migration keeps the stored vectors, so it cannot bring this table to "
+                "the current model."
+            ),
+            name=name,
+            status_code=status_code,
+            remediation=(
+                "Set EMBEDDING_MODEL back to the model that built this store to keep using it, "
+                "or delete the dataset (forget(dataset=...) / cognee-cli forget) and ingest it "
+                "again with the current model."
+            ),
+        )
+
+
 class CollectionNotFoundError(CogneeValidationError):
     """
     Represents an error that occurs when a requested collection cannot be found.
