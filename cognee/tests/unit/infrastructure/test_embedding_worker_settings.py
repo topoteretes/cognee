@@ -107,7 +107,22 @@ def build(provider="embedding_worker", **overrides):
     return create_embedding_engine.__wrapped__(**arguments)
 
 
-def test_the_provider_selects_the_engine(monkeypatch):
+@pytest.fixture
+def no_transport_import(monkeypatch):
+    """Build engines without importing the AMQP transport.
+
+    The engine imports it when built, to fail fast without aio-pika; tests of
+    engine selection and settings must not need the optional extra (CI's
+    unit jobs do not install it). The import itself is tested below.
+    """
+    from cognee.infrastructure.databases.vector.embeddings.embedding_worker import shared
+
+    monkeypatch.setattr(
+        shared, "load_transport_module", lambda settings: settings.require_amqp_endpoint()
+    )
+
+
+def test_the_provider_selects_the_engine(monkeypatch, no_transport_import):
     monkeypatch.setenv(PREFIX + "ENDPOINT", "amqp://guest:guest@broker:5672/%2f")
     engine = build(embedding_input_type="query")
     assert isinstance(engine, EmbeddingWorkerEmbeddingEngine)
@@ -123,7 +138,9 @@ def test_the_engine_fails_fast_without_an_endpoint():
         build()
 
 
-def test_without_embedding_dimensions_the_engine_waits_for_the_worker(monkeypatch):
+def test_without_embedding_dimensions_the_engine_waits_for_the_worker(
+    monkeypatch, no_transport_import
+):
     monkeypatch.setenv(PREFIX + "ENDPOINT", "amqp://guest:guest@broker:5672/%2f")
     engine = build(embedding_dimensions=None)
     assert engine.dimensions is None and engine.configured_dimensions is None
