@@ -214,8 +214,10 @@ async def test_declared_local_specs_honour_the_allowed_local_roots(monkeypatch, 
     # SDK callers reach this path with arbitrary paths.
     from cognee.tasks.code_graph.resolve_repo import CodeRepositoryError
 
-    allowed = tmp_path / "allowed"
-    outside = tmp_path / "outside"
+    # Resolved paths: the containment check compares realpaths, and a runner's
+    # temp directory may be a symlink (macOS /var -> /private/var).
+    allowed = (tmp_path / "allowed").resolve()
+    outside = (tmp_path / "outside").resolve()
     allowed.mkdir()
     outside.mkdir()
     monkeypatch.setenv("COGNEE_ALLOWED_LOCAL_FILE_ROOTS", str(allowed))

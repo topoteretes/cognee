@@ -156,9 +156,10 @@ async def _pending_routes(
     a run whose rows could not be read does.
 
     The routes decide what the run needs before it starts: a run of code files and
-    code-repo manifests alone runs the deterministic enola lists, so it needs no
-    graph extractor (and no GLiNER runtime on a keyless install), no LLM probe, and
-    no embedding probe unless it indexes vectors. Any error while looking
+    code-repo manifests alone (or with nothing pending) runs no standard task, so
+    it still validates the extractor argument but needs no GLiNER runtime or task
+    list on a keyless install, no LLM probe, and no embedding probe unless it
+    indexes vectors. Any error while looking
     (permissions, a tombstoned DLT row, ...) answers None, and the caller keeps the
     checks for every wired route. An item added between this read and the run
     meets its route's tasks without the skipped checks; the extractor then raises
@@ -553,13 +554,18 @@ async def cognify(
         await run_migrations_and_block(datasets, user)
 
         # What the run's pending items need, read before any provider or
-        # runtime check. A run of code files and code repositories alone runs
-        # enola only: it resolves no graph extractor and installs no GLiNER
-        # runtime (a keyless code-only remember must not pull in torch), needs
-        # no LLM probe, and no embedding probe unless it indexes vectors. The
-        # skip is this call's: a later run that needs a provider still probes it.
+        # runtime check. Standard work is pending unless the pending items are
+        # known and none takes the standard route: a run of code files and
+        # code repositories alone runs enola only, and a run with nothing
+        # pending (an unchanged repository re-remembered) runs nothing. Such a
+        # run still validates its arguments -- the extractor is resolved and
+        # its conflicts raise -- but installs no GLiNER runtime (a keyless
+        # code-only remember must not pull in torch), wires no GLiNER task
+        # list (building it imports gliner2), needs no LLM probe, and no
+        # embedding probe unless it indexes vectors. The skip is this call's:
+        # a later run that needs a provider still probes it.
         pending_routes = await _pending_routes(datasets, user, incremental_loading)
-        code_only = pending_routes is not None and pending_routes <= _CODE_ROUTES
+        standard_pending = pending_routes is None or bool(pending_routes - _CODE_ROUTES)
 
         resolved_resolver = get_configured_ontology_resolver(
             config, ontology_file_path=ontology_file_path
@@ -585,14 +591,15 @@ async def cognify(
                 summary_method=resolved_summary_method,
             )
 
-        # The extractor decision is made once, here. Branches that cannot
+        # The extractor decision is made once, here, for every call: the
+        # argument is validated whatever is pending. Branches that cannot
         # honour it raise below instead of silently running something other
         # than what the caller selected. After the argument checks and the
         # remote route: a cognify that raises above, or runs remotely, must not
         # install anything locally. Awaited, so the pipeline below never
         # starts before the GLiNER runtime is importable.
-        resolved_extractor = None if code_only else resolve_extractor(extractor, cognify_config)
-        if resolved_extractor is not None:
+        resolved_extractor = resolve_extractor(extractor, cognify_config)
+        if standard_pending:
             await ensure_extractor_runtime(resolved_extractor, cognify_config)
 
         if resolved_extractor == GLINER_DEMO_EXTRACTOR:
@@ -609,6 +616,11 @@ async def cognify(
                     f"{', '.join(sorted(kwargs))}"
                 )
 
+        # The extractor the run's standard tasks use: none when no standard task
+        # runs (code only, nothing pending). The GLiNER list imports gliner2 as
+        # it is built, which a keyless run without standard work must not need.
+        wired_extractor = resolved_extractor if standard_pending else None
+        if wired_extractor == GLINER_DEMO_EXTRACTOR:
             from cognee.tasks.graph.gliner_demo.tasks import get_gliner_demo_tasks
 
             tasks = await get_gliner_demo_tasks(
@@ -695,7 +707,7 @@ async def cognify(
         needs_llm = pipeline_needs_llm(
             task for route in used_routes for task in tasks_by_route[route]
         )
-        skip_connection_test = code_only and not index_vectors
+        skip_connection_test = not standard_pending and not index_vectors
 
         try:
             # One executor call drives both runs (see
@@ -719,7 +731,7 @@ async def cognify(
                 llm_config=llm_config,
                 embedding_config=embedding_config,
                 data_cache=data_cache,
-                extras={"graph_extractor": resolved_extractor},
+                extras={"graph_extractor": wired_extractor},
                 # Reconcile the structure document sources describe, also when an
                 # item failed: one bad page must not freeze the tree of the rest.
                 after_items_ran=reconcile_document_structure,

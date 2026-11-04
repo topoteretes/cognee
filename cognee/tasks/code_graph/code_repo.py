@@ -387,19 +387,23 @@ async def resolve_code_repository_url(
     )
 
 
-def _is_local_directory(spec) -> bool:
-    """Whether a local repository spec names an existing directory.
+def _names_no_directory(spec) -> bool:
+    """Whether a local repository spec names nothing a repository could be: no such
+    path, or a file.
 
     Read through the containment check every local path takes
     (``resolve_local_path``: realpath, then the allowed roots when
     ``COGNEE_ALLOWED_LOCAL_FILE_ROOTS`` is set), so a declared spec is never
-    looked up on the filesystem outside them; a path outside the roots raises.
+    looked up on the filesystem outside them. A path outside the roots is not
+    judged here: ``resolve_repo_source`` refuses it with the containment error.
     """
     from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 
     try:
-        return resolve_local_path(spec, must_exist=True).is_dir()
+        return not resolve_local_path(spec, must_exist=True).is_dir()
     except FileNotFoundError:
+        return True
+    except ValueError:
         return False
 
 
@@ -449,7 +453,7 @@ async def resolve_declared_repositories(
     # A string that is neither a git remote nor a directory (a note, a file
     # path) is a caller mistake, not a repository that failed to resolve.
     not_a_repository = next(
-        (item for item in items if not is_remote_repo(item) and not _is_local_directory(item)),
+        (item for item in items if not is_remote_repo(item) and _names_no_directory(item)),
         None,
     )
     if not_a_repository is not None:

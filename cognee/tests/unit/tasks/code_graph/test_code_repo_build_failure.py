@@ -18,7 +18,6 @@ Keyless by design, against the embedded stores in a temporary root.
 """
 
 import importlib
-import os
 import pathlib
 import shutil
 
@@ -39,15 +38,23 @@ extract_module = importlib.import_module("cognee.tasks.code_graph.extract_code_g
 
 @pytest.fixture(scope="module")
 def roots(tmp_path_factory):
-    """Fresh embedded stores for this module, keyless."""
+    """Fresh embedded stores for this module, keyless; both undone afterwards so
+    the tests that follow in the process see their own key and roots again."""
+    from cognee.base_config import get_base_config
     from cognee.infrastructure.llm.config import get_llm_config
 
+    base_config = get_base_config()
+    previous_roots = (base_config.data_root_directory, base_config.system_root_directory)
     root = tmp_path_factory.mktemp("code_repo_build_failure")
-    os.environ["LLM_API_KEY"] = ""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("LLM_API_KEY", "")
+        get_llm_config.cache_clear()
+        cognee.config.data_root_directory(str(root / "data"))
+        cognee.config.system_root_directory(str(root / "system"))
+        yield root
     get_llm_config.cache_clear()
-    cognee.config.data_root_directory(str(root / "data"))
-    cognee.config.system_root_directory(str(root / "system"))
-    return root
+    cognee.config.data_root_directory(previous_roots[0])
+    cognee.config.system_root_directory(previous_roots[1])
 
 
 @pytest.fixture
