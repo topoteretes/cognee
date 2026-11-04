@@ -46,7 +46,13 @@ CODE_REPO = _item(source="code_repo", extension="json")
 
 
 async def _cognify(
-    items, *, incremental_loading=True, runtime=None, extractor="gliner_demo", **cognify_kwargs
+    items,
+    *,
+    incremental_loading=True,
+    runtime=None,
+    extractor="gliner_demo",
+    datasets=(DATASET,),
+    **cognify_kwargs,
 ):
     """Run cognify keyless (gliner_demo resolved, runtime missing) over ``items``."""
     if runtime is None:
@@ -64,7 +70,7 @@ async def _cognify(
         ),
         patch(
             "cognee.modules.data.methods.get_authorized_existing_datasets",
-            AsyncMock(return_value=[DATASET]),
+            AsyncMock(return_value=list(datasets)),
         ),
         patch(
             "cognee.modules.data.methods.get_dataset_data",
@@ -121,6 +127,21 @@ async def test_completed_items_count_only_without_incremental_loading(
     assert run.resolve.call_count == int(needs_runtime)
     assert run.runtime.await_count == int(needs_runtime)
     assert run.pipeline.await_count == int(not needs_runtime)
+
+
+@pytest.mark.asyncio
+async def test_no_target_dataset_keeps_every_check():
+    """With no dataset to read (an empty install, a dataset that does not exist
+    yet) the pending routes are unknown, not empty: the extractor is resolved and
+    its runtime checked, exactly as when the rows could not be read."""
+    runtime = AsyncMock()
+    run = await _cognify([], runtime=runtime, datasets=())
+
+    run.resolve.assert_called_once()
+    runtime.assert_awaited_once()
+    kwargs = run.pipeline.await_args.kwargs
+    assert kwargs["skip_connection_test"] is False
+    assert kwargs["extras"]["graph_extractor"] == "gliner_demo"
 
 
 @pytest.mark.asyncio

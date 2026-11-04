@@ -149,9 +149,11 @@ async def _pending_routes(
 
     Reads the same rows the pipeline will: the user's existing writable datasets
     among ``datasets`` (all of them when None) and their data, minus the items
-    incremental loading skips as already completed. A requested dataset that does
-    not exist yet would be created empty, so it adds no items. An empty set means
-    nothing is pending (an unchanged repository re-remembered).
+    incremental loading skips as already completed. An empty set means nothing is
+    pending in the target datasets (an unchanged repository re-remembered). No
+    target dataset at all (none requested exists yet, or the user has none)
+    answers None: the run has no rows to read, so it keeps every check, exactly as
+    a run whose rows could not be read does.
 
     The routes decide what the run needs before it starts: a run of code files and
     code-repo manifests alone runs the deterministic enola lists, so it needs no
@@ -174,6 +176,8 @@ async def _pending_routes(
             user = await get_default_user()
         requested = [datasets] if isinstance(datasets, (str, UUID)) else datasets
         target_datasets = await get_authorized_existing_datasets(requested, "write", user)
+        if not target_datasets:
+            return None
 
         routes: set[CognifyRoute] = set()
         for dataset in target_datasets:
@@ -185,8 +189,9 @@ async def _pending_routes(
                         continue
                 routes.add(cognify_route_for(data_item))
         return routes
-    except Exception as error:  # noqa: BLE001 - any doubt keeps every check
-        logger.debug("Could not read the pending items' routes: %s", error)
+    except Exception as error:
+        # Any doubt keeps every check.
+        logger.debug("Could not read the pending items' routes: %s", error, exc_info=True)
         return None
 
 
