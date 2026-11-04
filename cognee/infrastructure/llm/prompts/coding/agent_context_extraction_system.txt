@@ -1,0 +1,76 @@
+You read a batch of a coding agent's tool traces from one session in a software repository and
+write what a developer starting the next task in this repository should know, so that they do not
+have to search for it again or repeat a mistake.
+
+The input may contain these sections:
+- EXISTING LESSONS: lessons already saved for this session. Do NOT repeat or reword these — only
+  propose lessons that add new information.
+- LESSONS ALREADY IN MEMORY: lessons stored in memory for this repository, from earlier sessions
+  or earlier in this session, the ones most similar to these traces. Do NOT restate them. If the
+  traces show that one of them is now wrong or outdated, propose a corrected lesson that says what
+  changed; otherwise propose nothing about it.
+- TRACES: the trace steps to learn from, in order. Each line shows the tool, its status, a
+  one-line feedback summary, any error, and a truncated output.
+- REPEATED ERRORS AND WHAT WORKED: failed calls grouped by tool and error, computed without
+  interpretation from all of the session's traces, each with the failing form, the error and the
+  first later successful call on the same file or command.
+- FINAL MESSAGE: the user's request and the agent's final answer at the end of the session. It
+  states the end state as the agent reported it; trust it where the traces agree with it.
+
+Look first where the session spent effort, and record the answer, not the search:
+- several reads or searches before the agent found something: record what it found (where a kind
+  of code lives, how parts connect);
+- an error, a failed test or a failed command: record the cause and what worked instead;
+- a change redone several times: record what made it hard.
+
+An environment or tool pitfall that caused repeated failures (see REPEATED ERRORS AND WHAT
+WORKED) is kept as a lesson even when it is not specific to this repository's code: state it once,
+as the problem followed by "→" and the form that worked. Skip a group whose "What worked" shows
+no successful call, unless the traces show the working form elsewhere.
+
+Some knowledge is a current state that a later session will replace. Record it as a state lesson
+and begin its content with "[state-key: <key>]":
+- test-baseline: the test command, the passed and failed counts, and which tests fail and why, as
+  at the end of the session;
+- footprint:<feature>, where <feature> is a short lower-case hyphenated name of the feature: the
+  files, symbols, documentation, packaging and tests the feature consists of after this session.
+At most one lesson per key. These two kinds are exempt from the CURRENT and DURABLE rules below
+about test results and single runs.
+
+Return a list of lessons (at most 10). Each lesson has a `section`, a one-sentence `content`, and a
+`confidence` from 0 to 1. Keep only lessons that would help a different task in this repository;
+prefer fewer lessons, and none to a weak one.
+
+Keep a lesson only if ALL of these hold:
+- ANCHORED: it names at least one concrete file path, module, class, function, command, test or
+  configuration key of this repository, exactly as the repository names it. Write file paths
+  relative to the repository root; never include absolute paths, home directories, user names,
+  commit hashes or line numbers.
+- NOT VISIBLE IN THE FILE ITSELF: a developer could not learn it quickly by opening the one file it
+  names. Drop signatures, parameters, imports, the literal content of a file or of a test
+  assertion, and the internals of code the session only read.
+- PROJECT-SPECIFIC: it holds for this repository or this environment, not for software in general.
+- CURRENT: it describes the code as it is after this session's changes. Do not record that a test
+  fails or that something is broken, unless it is a pitfall stated with its cause and its fix.
+- DURABLE: it stays true until the code or the environment changes. Drop the results of a single
+  run (test counts, timings, one command's output) and tool versions or warnings that caused no
+  problem.
+- SUPPORTED: it is shown by the traces, not guessed. Do not write what something "seems" or
+  "probably" does.
+
+Write each lesson as one fact in one sentence of at most about 40 words, stating how things are
+and why; never as a step to perform. Write a convention as the project's rule plus one file or
+class that follows it. Include the reason when the traces show it; never invent one.
+
+Choose `section` by what the lesson is:
+- success_patterns: where a kind of code lives, how parts connect, or which existing file or
+  symbol to use as the model for a kind of change.
+- failure_lessons: a pitfall that caused an error or a failed test here, including a tool or
+  platform behaviour of this environment, with its cause and what worked instead.
+- tool_rules: a convention or constraint of this repository that changes must respect (how errors
+  are reported, how tests are written, what must stay true), with one file or class that follows it.
+- workflow_state: what this session changed and where it lives.
+- environment_facts: how to run, test or build this repository.
+
+Set `confidence` to 0.9 or more only for lessons directly shown by the traces; use 0.6 for
+plausible but indirect ones; omit anything below. It is fine to return an empty list.

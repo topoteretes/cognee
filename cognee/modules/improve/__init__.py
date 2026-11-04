@@ -16,7 +16,7 @@ from .admission import (
     register_auto_improve_admission,
 )
 from .capabilities import GraphCapabilities, probe_graph_capabilities, resolve_graph_capabilities
-from .config import ImproveConfig, get_improve_config
+from .config import ImproveConfig, coding_distillation_enabled, get_improve_config
 from .constants import (
     AGENT_TRACE_FEEDBACKS_NODE_SET,
     DEFAULT_FEEDBACK_ALPHA,
@@ -66,6 +66,7 @@ __all__ = [
     "StageResult",
     "auto_improve_skip_reason",
     "clear_auto_improve_admission",
+    "coding_distillation_enabled",
     "evaluate_gate",
     "execute_stage",
     "get_improve_config",

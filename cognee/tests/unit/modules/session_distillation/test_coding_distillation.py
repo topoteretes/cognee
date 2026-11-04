@@ -1,0 +1,489 @@
+"""Unit tests for the coding distillation path (DISTILLATION_MODE=coding, SDK-1335).
+
+Covers the mode switch on prompts and models, the pinned turns in curator batches, the
+writer input (state key, recased glossary, STYLE line), the evidence rules, the typed
+lesson document, the pitfall session count and the State-Key replacement on publish.
+The default path is asserted unchanged where the two diverge.
+"""
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import pytest
+
+from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.session.session_context_models import SessionContextEntry
+from cognee.modules.session_distillation import distill as distill_module
+from cognee.modules.session_distillation import lesson_store
+from cognee.modules.session_distillation.distill import (
+    CURATOR_PROMPT_FILE,
+    WRITER_PROMPT_FILE,
+    apply_evidence_rules,
+    build_curator_batches,
+    build_writer_input,
+    candidate_state_key,
+    curate_batch,
+    distillation_prompt_file,
+    keep_state_key_update,
+    lesson_metadata,
+    publish_distilled_lessons,
+    recase_glossary,
+    write_or_reject,
+)
+from cognee.modules.session_distillation.lesson_store import (
+    mentioned_files,
+    render_coding_lesson_document,
+    seen_in_sessions,
+)
+from cognee.modules.session_distillation.models import (
+    CODING_WRITER_STYLE_LINE,
+    CodingCuratorBatchOutput,
+    CodingProposedLesson,
+    CodingWrittenLesson,
+    CuratorBatchOutput,
+    WrittenLesson,
+)
+
+USER = SimpleNamespace(id=uuid4())
+DATASET = SimpleNamespace(id=uuid4(), name="repo", owner_id=USER.id)
+
+
+def _entry(content, section="success_patterns", source_trace_ids=(), entry_id=None):
+    return SessionContextEntry(
+        id=entry_id or f"e-{uuid4().hex[:6]}",
+        section=section,
+        context_profile="agent",
+        content=content,
+        confidence=0.9,
+        created_at="2026-11-03T10:00:00+00:00",
+        source_trace_ids=list(source_trace_ids),
+    )
+
+
+def _written(lesson_type="other", state_key="", statement="MarkTaskCommand lives in cli/tasks.py."):
+    return CodingWrittenLesson(
+        accept=True, statement=statement, lesson_type=lesson_type, state_key=state_key
+    )
+
+
+# -- Mode switch ------------------------------------------------------------------
+
+
+def test_prompt_files_follow_the_mode_and_the_coding_copies_exist():
+    for name in (CURATOR_PROMPT_FILE, WRITER_PROMPT_FILE, "agent_context_extraction_system.txt"):
+        assert distillation_prompt_file(name, False) == name
+        coding = distillation_prompt_file(name, True)
+        assert coding == f"coding/{name}"
+        assert read_query_prompt(coding)
+        assert read_query_prompt(coding) != read_query_prompt(name)
+
+
+@pytest.mark.asyncio
+async def test_curator_and_writer_use_the_coding_models_only_in_coding_mode(monkeypatch):
+    seen = []
+
+    async def fake(*, text_input, system_prompt, response_model):
+        seen.append((system_prompt, response_model))
+        return (
+            response_model(lessons=[])
+            if "lessons" in response_model.model_fields
+            else (response_model(accept=False, reason="not_durable"))
+        )
+
+    monkeypatch.setattr(distill_module.LLMGateway, "acreate_structured_output", fake)
+    lesson = CodingProposedLesson(working_statement="x")
+
+    await curate_batch("batch")
+    await curate_batch("batch", coding=True)
+    await write_or_reject(lesson, [], [], [])
+    await write_or_reject(lesson, [], [], [], coding=True)
+
+    assert [model for _prompt, model in seen] == [
+        CuratorBatchOutput,
+        CodingCuratorBatchOutput,
+        WrittenLesson,
+        CodingWrittenLesson,
+    ]
+    assert seen[0][0] != seen[1][0] and seen[2][0] != seen[3][0]
+
+
+def test_base_models_did_not_gain_coding_fields():
+    assert (
+        "state_key"
+        not in CuratorBatchOutput.model_json_schema()["$defs"]["ProposedLesson"]["properties"]
+    )
+    assert "lesson_type" not in WrittenLesson.model_fields
+
+
+# -- Curator batches ----------------------------------------------------------------
+
+
+def test_pinned_turns_open_every_batch_of_six_candidates():
+    qa_rows = [{"question": "Add tests", "answer": "Added.", "time": "2026-11-03T09:00:00"}]
+    entries = [_entry(f"candidate {index}", entry_id=f"c{index}") for index in range(13)]
+
+    batches = build_curator_batches(qa_rows, entries, pin_turns=True)
+
+    assert len(batches) == 3
+    for batch in batches:
+        assert batch.text.startswith("User: Add tests\nAssistant: Added.")
+    assert [len(batch.entry_ids) for batch in batches] == [6, 6, 1]
+    assert batches[0].entry_ids == [f"c{index}" for index in range(6)]
+
+
+def test_default_batches_keep_the_turn_in_one_block():
+    qa_rows = [{"question": "Add tests", "answer": "Added.", "time": "2026-11-03T09:00:00"}]
+    entries = [_entry(f"candidate {index}") for index in range(7)]
+
+    batches = build_curator_batches(qa_rows, entries)
+
+    assert len(batches) == 2
+    assert sum(batch.text.count("User: Add tests") for batch in batches) == 1
+
+
+# -- Writer input -------------------------------------------------------------------
+
+
+def test_recase_glossary_uses_the_sessions_own_spelling():
+    glossary = ["marktaskcommand", "cli/tasks.py", "unknownname"]
+    texts = ["MarkTaskCommand is registered in cli/tasks.py"]
+    assert recase_glossary(glossary, texts) == ["MarkTaskCommand", "cli/tasks.py", "unknownname"]
+
+
+def test_coding_writer_input_has_state_key_recased_glossary_and_style_line_last():
+    lesson = CodingProposedLesson(working_statement="MarkTaskCommand parses flags.", state_key="")
+    members = [_entry("[state-key: test-baseline] pytest -q: 12 passed")]
+    text = build_writer_input(lesson, members, ["older"], ["marktaskcommand"], coding=True)
+
+    assert "PROPOSED STATE KEY" not in text
+    assert "- MarkTaskCommand" in text and "- marktaskcommand" not in text
+    assert text.endswith(CODING_WRITER_STYLE_LINE)
+
+    keyed = CodingProposedLesson(working_statement="Suite passes.", state_key="test-baseline")
+    assert "PROPOSED STATE KEY:\ntest-baseline" in build_writer_input(
+        keyed, [], [], [], coding=True
+    )
+
+
+def test_default_writer_input_is_unchanged():
+    lesson = CodingProposedLesson(working_statement="x", state_key="test-baseline")
+    text = build_writer_input(lesson, [], [], ["marktaskcommand"])
+    assert "STYLE" not in text and "PROPOSED STATE KEY" not in text
+    assert "- marktaskcommand" in text
+
+
+# -- Evidence rules -----------------------------------------------------------------
+
+
+class TestEvidenceRules:
+    def test_repeated_error_member_makes_a_keyed_pitfall(self):
+        member = _entry(
+            "[state-key: pitfall:Edit:no-changes-to-make:py] Edit failed → Bash python",
+            section="failure_lessons",
+            source_trace_ids=["t1"],
+        )
+        lesson = apply_evidence_rules(_written("location"), [member])
+        assert lesson.lesson_type == "pitfall"
+        assert lesson.state_key == "pitfall:Edit:no-changes-to-make:py"
+
+    def test_pitfall_without_a_failed_trace_becomes_a_change(self):
+        lesson = apply_evidence_rules(_written("pitfall"), [_entry("plain candidate")])
+        assert lesson.lesson_type == "change"
+        assert lesson.state_key == ""
+
+    def test_pitfall_backed_by_a_live_failure_candidate_stays_a_pitfall_without_key(self):
+        member = _entry("Bash failed: exit 1", section="failure_lessons", source_trace_ids=["t9"])
+        lesson = apply_evidence_rules(_written("pitfall"), [member])
+        assert lesson.lesson_type == "pitfall" and lesson.state_key == ""
+
+    def test_state_keeps_its_key_and_other_types_lose_it(self):
+        assert (
+            apply_evidence_rules(_written("state", "test-baseline"), []).state_key
+            == "test-baseline"
+        )
+        assert apply_evidence_rules(_written("location", "footprint:x"), []).state_key == ""
+
+    def test_echoed_state_key_prefix_is_stripped_from_the_statement(self):
+        lesson = apply_evidence_rules(
+            _written("state", "test-baseline", "[state-key: test-baseline] pytest -q passes."), []
+        )
+        assert lesson.statement == "pytest -q passes."
+
+    def test_rejections_pass_through(self):
+        rejected = CodingWrittenLesson(accept=False, reason="not_durable", lesson_type="pitfall")
+        assert apply_evidence_rules(rejected, []) is rejected
+
+    def test_already_known_never_rejects_a_state_key_update(self):
+        proposed = CodingProposedLesson(
+            working_statement="[state-key: test-baseline] pytest -q: 41 passed.",
+            state_key="test-baseline",
+        )
+        known = CodingWrittenLesson(accept=False, reason="already_known")
+        kept = keep_state_key_update(proposed, known)
+        assert kept.accept and kept.lesson_type == "state"
+        assert kept.state_key == "test-baseline"
+        assert kept.statement == "pytest -q: 41 passed."
+
+        plain = CodingProposedLesson(working_statement="Routes live in api/.")
+        assert keep_state_key_update(plain, known) is known
+        unsupported = CodingWrittenLesson(accept=False, reason="unsupported")
+        assert keep_state_key_update(proposed, unsupported) is unsupported
+
+    def test_candidate_state_key_parsing(self):
+        assert (
+            candidate_state_key("[state-key: footprint:auth-flow] files...")
+            == "footprint:auth-flow"
+        )
+        assert candidate_state_key("no key here") == ""
+
+
+# -- Documents ------------------------------------------------------------------------
+
+
+def test_coding_document_has_headers_title_and_pitfall_count():
+    text = render_coding_lesson_document(
+        "Edit on .py files fails on identical strings → rewrite with a script.",
+        session_id="s-1",
+        lesson_type="pitfall",
+        state_key="pitfall:Edit:no-changes-to-make:py",
+        seen_in_sessions=2,
+    )
+    assert text == (
+        "Lesson-Type: pitfall\n"
+        "State-Key: pitfall:Edit:no-changes-to-make:py\n"
+        "# Session learning (session s-1)\n\n"
+        "Edit on .py files fails on identical strings → rewrite with a script. (seen in 2 sessions)\n"
+    )
+
+
+def test_non_pitfall_documents_carry_no_count_and_no_key_without_one():
+    text = render_coding_lesson_document(
+        "Routes live in api/routes/.", session_id="s-1", lesson_type="location", seen_in_sessions=3
+    )
+    assert (
+        text
+        == "Lesson-Type: location\n# Session learning (session s-1)\n\nRoutes live in api/routes/.\n"
+    )
+
+
+def test_seen_in_sessions_counts_other_sessions_only():
+    rows = [
+        SimpleNamespace(external_metadata={"session_id": "other", "seen_in_sessions": 1}),
+        SimpleNamespace(external_metadata={"session_id": "s-1", "seen_in_sessions": 7}),
+    ]
+    assert seen_in_sessions([], "s-1") == 1
+    assert seen_in_sessions(rows, "s-1") == 2
+    assert seen_in_sessions(rows, "s-2") == 8
+
+
+def test_mentioned_files_keep_original_casing():
+    statement = "README.md and src/Parser.py are read by run_tests.sh (e.g. v1.2.3 is not a file)."
+    assert mentioned_files(statement) == ["README.md", "src/Parser.py", "run_tests.sh"]
+
+
+def test_lesson_metadata_reads_the_plugins_qa_context():
+    scope = SimpleNamespace(session_id="s-1")
+    qa_context = {"date": "2026-11-03", "end_commit": "abc123", "branch": "dev", "cwd": "/x"}
+    metadata = lesson_metadata(_written("location"), scope, qa_context, None)
+    assert metadata == {
+        "lesson_type": "location",
+        "state_key": "",
+        "session_id": "s-1",
+        "session_date": "2026-11-03",
+        "git_commit": "abc123",
+        "git_branch": "dev",
+        "files": ["cli/tasks.py"],
+    }
+    bare = lesson_metadata(_written("pitfall", "pitfall:Bash:x:cat"), scope, {}, 2)
+    assert bare["session_date"] == "" and bare["git_commit"] == "" and bare["seen_in_sessions"] == 2
+
+
+# -- Publish ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def publish_env(monkeypatch):
+    """Fake add/cognify/node-set/lesson-store; returns what publish did."""
+    calls = SimpleNamespace(added=None, deleted=[], existing=[])
+
+    async def fake_add(data, **kwargs):
+        calls.added = data
+        calls.add_kwargs = kwargs
+
+    async def fake_cognify(**kwargs):
+        return None
+
+    import cognee.api.v1.add as add_module
+    import cognee.api.v1.cognify as cognify_module
+
+    monkeypatch.setattr(add_module, "add", fake_add)
+    monkeypatch.setattr(cognify_module, "cognify", fake_cognify)
+    monkeypatch.setattr(
+        distill_module, "_lesson_node_set", AsyncMock(return_value=["session_learnings"])
+    )
+
+    async def fake_find(dataset_id, state_key):
+        return [row for row in calls.existing if row.external_metadata["state_key"] == state_key]
+
+    async def fake_delete(*, dataset_id, data_id, user, delete_dataset_if_empty):
+        calls.deleted.append(data_id)
+        return {"status": "success"}
+
+    monkeypatch.setattr(distill_module, "find_lessons_by_state_key", fake_find)
+    monkeypatch.setattr(lesson_store, "find_lessons_by_state_key", fake_find)
+    from cognee.api.v1.datasets.datasets import datasets as datasets_api
+
+    monkeypatch.setattr(datasets_api, "delete_data", staticmethod(fake_delete))
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_publish_stores_typed_items_and_replaces_the_older_state_key(publish_env):
+    scope = SimpleNamespace(session_id="s-2", user=USER, user_id=str(USER.id), dataset=DATASET)
+    older = SimpleNamespace(
+        id=uuid4(),
+        external_metadata={
+            "state_key": "test-baseline",
+            "session_id": "s-1",
+            "seen_in_sessions": 0,
+        },
+    )
+    older_pitfall = SimpleNamespace(
+        id=uuid4(),
+        external_metadata={
+            "state_key": "pitfall:Edit:no-changes-to-make:py",
+            "session_id": "s-1",
+            "seen_in_sessions": 1,
+        },
+    )
+    publish_env.existing = [older, older_pitfall]
+    accepted = [
+        _written("state", "test-baseline", "pytest -q: 40 passed, 0 failed."),
+        _written("pitfall", "pitfall:Edit:no-changes-to-make:py", "Edit fails → script."),
+        _written("location", "", "Routes live in api/routes.py."),
+    ]
+
+    documents = await publish_distilled_lessons(
+        scope, accepted, qa_context={"date": "2026-11-03", "end_commit": "abc", "branch": "dev"}
+    )
+
+    items = publish_env.added
+    assert [item.external_metadata["lesson_type"] for item in items] == [
+        "state",
+        "pitfall",
+        "location",
+    ]
+    assert items[1].external_metadata["seen_in_sessions"] == 2
+    assert "(seen in 2 sessions)" in items[1].data
+    assert documents[0].startswith("Lesson-Type: state\nState-Key: test-baseline\n")
+    assert all(item.literal_text for item in items)
+    assert publish_env.add_kwargs["node_set"] == ["session_learnings"]
+    assert sorted(publish_env.deleted) == sorted([older.id, older_pitfall.id])
+
+
+@pytest.mark.asyncio
+async def test_publish_keeps_the_same_sessions_identical_lesson(publish_env):
+    scope = SimpleNamespace(session_id="s-1", user=USER, user_id=str(USER.id), dataset=DATASET)
+    lesson = _written("state", "test-baseline", "pytest -q passes.")
+    await publish_distilled_lessons(scope, [lesson], qa_context={})
+    (item,) = publish_env.added
+    publish_env.existing = [
+        SimpleNamespace(id=item.data_id, external_metadata=item.external_metadata)
+    ]
+
+    await publish_distilled_lessons(scope, [lesson], qa_context={})
+
+    assert publish_env.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_default_publish_adds_plain_documents(publish_env):
+    scope = SimpleNamespace(session_id="s-1", user=USER, user_id=str(USER.id), dataset=DATASET)
+    lesson = WrittenLesson(accept=True, statement="Plain lesson.", why_learned="while testing")
+
+    documents = await publish_distilled_lessons(scope, [lesson])
+
+    assert documents == ["# Session learning (session s-1)\n\nPlain lesson. (while testing.)\n"]
+    assert publish_env.added == documents
+    assert publish_env.deleted == []
+
+
+# -- distill_session in coding mode ------------------------------------------------------
+
+
+class _CodingSessionManager:
+    def __init__(self, entries, qa_rows):
+        self.store = [entry.model_dump() for entry in entries]
+        self.qa_rows = qa_rows
+        self.session_reads = []
+
+    async def get_session_context_entries(self, **kwargs):
+        return list(self.store)
+
+    async def get_session(self, *, last_n=None, since=None, **kwargs):
+        self.session_reads.append({"last_n": last_n, "since": since})
+        rows = self.qa_rows[-last_n:] if last_n else self.qa_rows
+        return [SimpleNamespace(model_dump=lambda row=row: dict(row)) for row in rows]
+
+    async def update_session_context_entry(self, *, entry_id, merge, **kwargs):
+        for row in self.store:
+            if row.get("id") == entry_id:
+                row.update(merge)
+                return True
+        return False
+
+    async def create_session_context_entry(self, *, entry_dump, **kwargs):
+        self.store.append(dict(entry_dump))
+        return True
+
+
+@pytest.mark.asyncio
+async def test_distill_session_in_coding_mode_judges_the_latest_turn(monkeypatch):
+    entries = [_entry("Routes live in api/routes.py.", entry_id="c1")]
+    qa_rows = [
+        {"question": "old", "answer": "old", "time": "2026-11-03T08:00:00", "context": ""},
+        {
+            "question": "Add a route",
+            "answer": "Added.",
+            "time": "2026-11-03T09:00:00",
+            "context": '{"date": "2026-11-03", "end_commit": "abc"}',
+        },
+    ]
+    manager = _CodingSessionManager(entries, qa_rows)
+    monkeypatch.setattr(distill_module, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(distill_module, "coding_distillation_enabled", lambda: True)
+
+    async def fake_datasets(requested, permission_type, user):
+        return [DATASET]
+
+    monkeypatch.setattr(distill_module, "get_authorized_existing_datasets", fake_datasets)
+    seen = {}
+
+    async def fake_propose(qa_rows, context_entries, *, coding=False):
+        seen["propose"] = (qa_rows, coding)
+        return distill_module.CuratorRun(
+            proposed=[CodingProposedLesson(working_statement="x", member_entry_ids=["c1"])],
+            failed_batches=0,
+            curated_entry_ids={"c1"},
+        )
+
+    async def fake_accept(scope, proposed, context_entries, *, coding=False):
+        seen["accept"] = coding
+        return [_written("location")], 0
+
+    async def fake_publish(scope, accepted, *, qa_context=None):
+        seen["qa_context"] = qa_context
+        return ["doc"]
+
+    monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
+    monkeypatch.setattr(distill_module, "accept_proposed_lessons", fake_accept)
+    monkeypatch.setattr(distill_module, "publish_distilled_lessons", fake_publish)
+
+    result = await distill_module.distill_session("s-1", dataset=DATASET.name, user=USER)
+
+    assert result.status == "completed"
+    assert manager.session_reads == [{"last_n": 1, "since": None}]
+    assert [row["question"] for row in seen["propose"][0]] == ["Add a route"]
+    assert seen["propose"][1] is True and seen["accept"] is True
+    assert seen["qa_context"] == {"date": "2026-11-03", "end_commit": "abc"}

@@ -16,9 +16,16 @@ processed once is processed. A batch whose curator call failed seals nothing, so
 entries come back next run; the run still finishes by RAISING after publishing what
 survived, so the failure is reported. A run cut short by an exhausted LLM budget, in the
 curator or the writer phase, seals nothing and re-raises, so improve can stop.
+
+With ``DISTILLATION_MODE=coding`` (SDK-1335) the same flow runs with the coding
+prompts under ``prompts/coding/``, the typed ``Coding*`` models, the unit's request and
+final answer pinned to every curator batch, the writer's compact STYLE line, evidence
+rules on the lesson type, and typed lesson documents with ``State-Key`` replacement
+(``lesson_store``). Unset, nothing here reads differently.
 """
 
 import asyncio
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
@@ -29,6 +36,7 @@ from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.session.coding_unit_extraction import parse_qa_context
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_context_builder import (
     clamped_net_helpfulness,
@@ -48,7 +56,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
 )
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.models import Dataset
-from cognee.modules.improve.config import get_improve_config
+from cognee.modules.improve.config import coding_distillation_enabled, get_improve_config
 from cognee.modules.improve.constants import SESSION_LEARNINGS_NODE_SET
 from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.truth_subspace.constants import truth_session_node_set
@@ -57,7 +65,17 @@ from cognee.modules.users.models import User
 from cognee.shared.async_utils import gather_with_concurrency_limit
 from cognee.shared.logging_utils import get_logger
 
+from .lesson_store import (
+    LessonDocument,
+    delete_superseded_lessons,
+    find_lessons_by_state_key,
+    lesson_data_id,
+    mentioned_files,
+    render_coding_lesson_document,
+    seen_in_sessions,
+)
 from .models import (
+    CODING_WRITER_STYLE_LINE,
     CURATOR_BLOCKS_PER_BATCH,
     CURATOR_CONCURRENCY,
     GLOSSARY_ENTITIES_PER_LESSON,
@@ -66,7 +84,10 @@ from .models import (
     MAX_QA_FEEDBACK_CHARS,
     MAX_QA_QUESTION_CHARS,
     NOVELTY_LESSONS_PER_LESSON,
+    PITFALL_STATE_KEY_PREFIX,
     WRITER_CONCURRENCY,
+    CodingCuratorBatchOutput,
+    CodingWrittenLesson,
     CuratorBatchOutput,
     DistillationResult,
     ProposedLesson,
@@ -104,6 +125,25 @@ class CuratorRun:
 
 CURATOR_PROMPT_FILE = "session_distillation_curator_system.txt"
 WRITER_PROMPT_FILE = "session_distillation_writer_system.txt"
+CODING_PROMPT_DIR = "coding"
+
+# A candidate or statement that opens with this names a state key (coding mode).
+STATE_KEY_RE = re.compile(r"^\s*\[state-key:\s*([^\]]+?)\s*\]\s*")
+
+
+def distillation_prompt_file(name: str, coding: bool) -> str:
+    """The prompt file for the mode: the coding copy lives under ``prompts/coding/``."""
+    return f"{CODING_PROMPT_DIR}/{name}" if coding else name
+
+
+def candidate_state_key(content: str) -> str:
+    match = STATE_KEY_RE.match(content or "")
+    return match.group(1) if match else ""
+
+
+def strip_state_key(text: str) -> str:
+    return STATE_KEY_RE.sub("", text or "", count=1).strip()
+
 
 # Node set marking distillate documents in the graph: used to tag them on write and to
 # scope the novelty search to previously persisted lessons.
@@ -206,6 +246,18 @@ async def load_distillable_context_entries(
     ]
 
 
+async def load_latest_qa_row(scope: SessionDistillationScope) -> list[dict]:
+    """The session's newest QA turn as a one-row list: a coding unit's request and answer."""
+    session_manager = get_session_manager()
+    raw_qa = await session_manager.get_session(
+        user_id=scope.user_id, session_id=scope.session_id, formatted=False, last_n=1
+    )
+    return [
+        entry.model_dump() if hasattr(entry, "model_dump") else dict(entry)
+        for entry in (raw_qa if isinstance(raw_qa, list) else [])
+    ]
+
+
 async def load_session_qa_rows(
     scope: SessionDistillationScope, since: datetime | None
 ) -> list[dict]:
@@ -271,8 +323,15 @@ def select_curator_inputs(
 def build_curator_batches(
     qa_rows: list[dict],
     context_entries: list[SessionContextEntry],
+    *,
+    pin_turns: bool = False,
 ) -> list[CuratorBatch]:
-    """Pack the session timeline into coarse, size-safe chronological batches."""
+    """Pack the session timeline into coarse, size-safe chronological batches.
+
+    With ``pin_turns`` (coding mode) the turns are not part of the timeline: every
+    batch opens with all of them, so each curator call judges its candidates against
+    the unit's request and final answer, and the candidates alone fill the batches.
+    """
     timeline: list[tuple[str, str, str | None]] = []
     for row in qa_rows:
         question = " ".join((row.get("question") or "").split())[:MAX_QA_QUESTION_CHARS]
@@ -292,19 +351,25 @@ def build_curator_batches(
 
     timeline.sort(key=lambda item: item[0])
 
+    pinned: list[str] = []
+    if pin_turns:
+        pinned = [block for _timestamp, block, entry_id in timeline if entry_id is None]
+        timeline = [item for item in timeline if item[2] is not None]
+
     batches: list[CuratorBatch] = []
     for index in range(0, len(timeline), CURATOR_BLOCKS_PER_BATCH):
         chunk = timeline[index : index + CURATOR_BLOCKS_PER_BATCH]
+        blocks = pinned + [block for _timestamp, block, _entry_id in chunk]
         batches.append(
             CuratorBatch(
-                text="\n\n".join(block for _timestamp, block, _entry_id in chunk),
+                text="\n\n".join(blocks),
                 entry_ids=[entry_id for _timestamp, _block, entry_id in chunk if entry_id],
             )
         )
     return batches
 
 
-async def curate_batch(batch_text: str) -> list[ProposedLesson] | None:
+async def curate_batch(batch_text: str, *, coding: bool = False) -> list[ProposedLesson] | None:
     """One curator call over one batch slice.
 
     ``None`` means the call FAILED (missing prompt, LLM error) — distinct from
@@ -313,15 +378,16 @@ async def curate_batch(batch_text: str) -> list[ProposedLesson] | None:
     exhausted LLM budget is raised, not swallowed: every later call would fail
     the same way, and improve stops the run on it.
     """
-    system_prompt = read_query_prompt(CURATOR_PROMPT_FILE)
+    prompt_file = distillation_prompt_file(CURATOR_PROMPT_FILE, coding)
+    system_prompt = read_query_prompt(prompt_file)
     if not system_prompt:
-        logger.warning("Distillation curator prompt not found: %s", CURATOR_PROMPT_FILE)
+        logger.warning("Distillation curator prompt not found: %s", prompt_file)
         return None
     try:
         result = await LLMGateway.acreate_structured_output(
             text_input=batch_text,
             system_prompt=system_prompt,
-            response_model=CuratorBatchOutput,
+            response_model=CodingCuratorBatchOutput if coding else CuratorBatchOutput,
         )
         return list(result.lessons)
     except LLMPaymentRequiredError:
@@ -334,6 +400,8 @@ async def curate_batch(batch_text: str) -> list[ProposedLesson] | None:
 async def propose_lessons(
     qa_rows: list[dict],
     context_entries: list[SessionContextEntry],
+    *,
+    coding: bool = False,
 ) -> CuratorRun:
     """Pack session inputs into curator batches, then flatten proposed lessons.
 
@@ -343,7 +411,7 @@ async def propose_lessons(
     exhausted budget the remaining batches are skipped, not called, and
     ``budget_exhausted`` is set.
     """
-    batches = build_curator_batches(qa_rows, context_entries)
+    batches = build_curator_batches(qa_rows, context_entries, pin_turns=coding)
     if not batches:
         return CuratorRun(proposed=[], failed_batches=0, curated_entry_ids=set())
 
@@ -354,7 +422,7 @@ async def propose_lessons(
         if budget_exhausted:
             return None
         try:
-            return await curate_batch(batch.text)
+            return await curate_batch(batch.text, coding=coding)
         except LLMPaymentRequiredError:
             budget_exhausted = True
             return None
@@ -423,13 +491,33 @@ async def search_payload_texts(
     return texts
 
 
+def recase_glossary(glossary: list[str], texts: list[str]) -> list[str]:
+    """Glossary names as the session's own text spells them, where it spells them.
+
+    The graph stores entity names in lower case (``marktaskcommand``); the lesson must
+    name symbols as the repository does (``MarkTaskCommand``). A case-insensitive match
+    in the proposed statement or its member candidates supplies the casing.
+    """
+    corpus = "\n".join(texts)
+    recased = []
+    for name in glossary:
+        match = re.search(re.escape(name), corpus, re.IGNORECASE) if name else None
+        recased.append(match.group(0) if match else name)
+    return recased
+
+
 def build_writer_input(
     lesson: ProposedLesson,
     members: list[SessionContextEntry],
     prior_lessons: list[str],
     glossary: list[str],
+    *,
+    coding: bool = False,
 ) -> str:
     sections = [f"PROPOSED LESSON:\n{lesson.working_statement}"]
+    state_key = getattr(lesson, "state_key", "") if coding else ""
+    if state_key:
+        sections.append(f"PROPOSED STATE KEY:\n{state_key}")
     if members:
         sections.append(
             "MEMBER ENTRIES:\n" + "\n".join(f"- {member.content}" for member in members)
@@ -438,8 +526,14 @@ def build_writer_input(
         sections.append(
             "SIMILAR EXISTING LESSONS:\n" + "\n".join(f"- {prior}" for prior in prior_lessons)
         )
+    if coding and glossary:
+        glossary = recase_glossary(
+            glossary, [lesson.working_statement, *(member.content for member in members)]
+        )
     if glossary:
         sections.append("ENTITY GLOSSARY:\n" + "\n".join(f"- {name}" for name in glossary))
+    if coding:
+        sections.append(CODING_WRITER_STYLE_LINE)
     return "\n\n".join(sections)
 
 
@@ -448,6 +542,8 @@ async def write_or_reject(
     members: list[SessionContextEntry],
     prior_lessons: list[str],
     glossary: list[str],
+    *,
+    coding: bool = False,
 ) -> WrittenLesson | None:
     """One writer/rejecter call for one proposed lesson.
 
@@ -455,17 +551,18 @@ async def write_or_reject(
     a ``WrittenLesson`` with ``accept=False``. The caller counts failures so a
     writer outage is never mistaken for "every lesson rejected".
     """
-    system_prompt = read_query_prompt(WRITER_PROMPT_FILE)
+    prompt_file = distillation_prompt_file(WRITER_PROMPT_FILE, coding)
+    system_prompt = read_query_prompt(prompt_file)
     if not system_prompt:
-        logger.warning("Distillation writer prompt not found: %s", WRITER_PROMPT_FILE)
+        logger.warning("Distillation writer prompt not found: %s", prompt_file)
         return None
 
-    text_input = build_writer_input(lesson, members, prior_lessons, glossary)
+    text_input = build_writer_input(lesson, members, prior_lessons, glossary, coding=coding)
     try:
         return await LLMGateway.acreate_structured_output(
             text_input=text_input,
             system_prompt=system_prompt,
-            response_model=WrittenLesson,
+            response_model=CodingWrittenLesson if coding else WrittenLesson,
         )
     except LLMPaymentRequiredError:
         raise
@@ -474,10 +571,74 @@ async def write_or_reject(
         return None
 
 
+def is_failed_trace_candidate(entry: SessionContextEntry) -> bool:
+    """A ``failure_lessons`` candidate built from an errored trace (it links the trace)."""
+    return entry.section == "failure_lessons" and bool(entry.source_trace_ids)
+
+
+def keep_state_key_update(
+    proposed: ProposedLesson, written: CodingWrittenLesson
+) -> CodingWrittenLesson:
+    """``already_known`` never applies to a state-key update (coding mode).
+
+    A state lesson replaces the earlier lesson with its key, so a changed state is new
+    by definition. When the writer still rejects one as known, the curator's working
+    statement is written as the state lesson instead of dropping the update.
+    """
+    state_key = str(getattr(proposed, "state_key", "") or "").strip()
+    if written.accept or written.reason != "already_known" or not state_key:
+        return written
+    logger.info(
+        "Coding distillation: keeping state-key update '%s' the writer called known", state_key
+    )
+    return CodingWrittenLesson(
+        accept=True,
+        statement=strip_state_key(proposed.working_statement),
+        lesson_type="state",
+        state_key=state_key,
+    )
+
+
+def apply_evidence_rules(
+    lesson: CodingWrittenLesson, members: list[SessionContextEntry]
+) -> CodingWrittenLesson:
+    """Make the lesson type match its evidence (coding mode).
+
+    A lesson backed by a repeated-error candidate (one carrying a ``pitfall:`` state
+    key) is a pitfall with that key, whatever the writer typed; a ``pitfall`` with no
+    failed-trace candidate behind it is a ``change``. Only state and pitfall lessons
+    keep a state key, and a key the writer echoed into the statement is stripped.
+    """
+    if not lesson.accept:
+        return lesson
+    pitfall_keys = [
+        key
+        for key in (candidate_state_key(member.content) for member in members)
+        if key.startswith(PITFALL_STATE_KEY_PREFIX)
+    ]
+    lesson_type = lesson.lesson_type
+    state_key = lesson.state_key.strip()
+    if pitfall_keys:
+        lesson_type, state_key = "pitfall", pitfall_keys[0]
+    elif lesson_type == "pitfall" and not any(is_failed_trace_candidate(m) for m in members):
+        lesson_type, state_key = "change", ""
+    if lesson_type not in ("state", "pitfall"):
+        state_key = ""
+    return lesson.model_copy(
+        update={
+            "lesson_type": lesson_type,
+            "state_key": state_key,
+            "statement": strip_state_key(lesson.statement),
+        }
+    )
+
+
 async def evaluate_proposed_lesson(
     vector_engine,
     lesson: ProposedLesson,
     entries_by_id: dict,
+    *,
+    coding: bool = False,
 ) -> WrittenLesson | None:
     members = [
         entries_by_id[entry_id] for entry_id in lesson.member_entry_ids if entry_id in entries_by_id
@@ -497,13 +658,18 @@ async def evaluate_proposed_lesson(
             query_text=lesson.working_statement,
         ),
     )
-    return await write_or_reject(lesson, members, prior_lessons, glossary)
+    written = await write_or_reject(lesson, members, prior_lessons, glossary, coding=coding)
+    if coding and isinstance(written, CodingWrittenLesson):
+        return apply_evidence_rules(keep_state_key_update(lesson, written), members)
+    return written
 
 
 async def accept_proposed_lessons(
     scope: SessionDistillationScope,
     proposed: list[ProposedLesson],
     context_entries: list[SessionContextEntry],
+    *,
+    coding: bool = False,
 ) -> tuple[list[WrittenLesson], int]:
     """Returns ``(accepted lessons, failed writer calls)`` — see write_or_reject.
 
@@ -518,7 +684,9 @@ async def accept_proposed_lessons(
         if budget_exhausted:
             return None
         try:
-            return await evaluate_proposed_lesson(vector_engine, lesson, entries_by_id)
+            return await evaluate_proposed_lesson(
+                vector_engine, lesson, entries_by_id, coding=coding
+            )
         except LLMPaymentRequiredError:
             budget_exhausted = True
             return None
@@ -562,27 +730,109 @@ def render_lesson_document(
     return f"# Session learning (session {session_id})\n\n{body}\n"
 
 
-async def publish_distilled_lessons(
+def lesson_metadata(lesson: CodingWrittenLesson, scope, qa_context: dict, seen: int | None) -> dict:
+    """The ``Data.external_metadata`` of one coding lesson (SDK-1336 reads it from the listing)."""
+    metadata = {
+        "lesson_type": lesson.lesson_type,
+        "state_key": lesson.state_key,
+        "session_id": scope.session_id,
+        "session_date": str(qa_context.get("date") or ""),
+        "git_commit": str(qa_context.get("end_commit") or qa_context.get("start_commit") or ""),
+        "git_branch": str(qa_context.get("branch") or ""),
+        "files": mentioned_files(lesson.statement),
+    }
+    if seen is not None:
+        metadata["seen_in_sessions"] = seen
+    return metadata
+
+
+async def build_coding_lesson_documents(
     scope: SessionDistillationScope,
-    accepted: list[WrittenLesson],
-) -> list[str]:
-    documents = [render_lesson_document(lesson, session_id=scope.session_id) for lesson in accepted]
+    accepted: list[CodingWrittenLesson],
+    qa_context: dict,
+) -> list[LessonDocument]:
+    documents = []
+    for lesson in accepted:
+        seen = None
+        if lesson.lesson_type == "pitfall" and lesson.state_key:
+            rows = await find_lessons_by_state_key(scope.dataset.id, lesson.state_key)
+            seen = seen_in_sessions(rows, scope.session_id)
+        text = render_coding_lesson_document(
+            lesson.statement,
+            session_id=scope.session_id,
+            lesson_type=lesson.lesson_type,
+            state_key=lesson.state_key,
+            seen_in_sessions=seen,
+        )
+        documents.append(
+            LessonDocument(
+                text=text,
+                metadata=lesson_metadata(lesson, scope, qa_context, seen),
+                data_id=lesson_data_id(scope.dataset.id, text),
+            )
+        )
+    return documents
 
-    # Imported lazily to avoid a circular import through the cognee package root.
-    from cognee.api.v1.add import add
-    from cognee.api.v1.cognify import cognify
 
+async def _lesson_node_set(scope: SessionDistillationScope) -> list[str]:
     # Lessons inherit the session's pinned node set, like the Q&A and trace
     # bridges do, so a node_name-scoped recall also sees what the session taught.
     session_node_set = await get_session_node_set(
         get_session_manager(), scope.user_id, scope.session_id
     )
-    node_set = bridge_node_set(
+    return bridge_node_set(
         [*DISTILLATE_NODE_SET, truth_session_node_set(scope.session_id)], session_node_set
     )
-    await add(documents, dataset_id=scope.dataset.id, user=scope.user, node_set=node_set)
+
+
+async def publish_distilled_lessons(
+    scope: SessionDistillationScope,
+    accepted: list[WrittenLesson],
+    *,
+    qa_context: dict | None = None,
+) -> list[str]:
+    """Store the accepted lessons as documents; ``qa_context`` given means coding mode.
+
+    Coding lessons are added as ``DataItem``s with their metadata and a deterministic
+    id, and once they are in the graph every older lesson of the dataset with one of
+    their state keys is deleted, so a state key always names its newest lesson.
+    """
+    # Imported lazily to avoid a circular import through the cognee package root.
+    from cognee.api.v1.add import add
+    from cognee.api.v1.cognify import cognify
+
+    node_set = await _lesson_node_set(scope)
+    if qa_context is None:
+        documents = [
+            render_lesson_document(lesson, session_id=scope.session_id) for lesson in accepted
+        ]
+        await add(documents, dataset_id=scope.dataset.id, user=scope.user, node_set=node_set)
+        await cognify(datasets=[scope.dataset.id], user=scope.user)
+        return documents
+
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    if not all(isinstance(lesson, CodingWrittenLesson) for lesson in accepted):
+        raise TypeError("coding distillation publishes CodingWrittenLesson items only")
+    coding_lessons = [lesson for lesson in accepted if isinstance(lesson, CodingWrittenLesson)]
+    lessons = await build_coding_lesson_documents(scope, coding_lessons, qa_context)
+    items = [
+        DataItem(
+            data=lesson.text,
+            external_metadata=lesson.metadata,
+            data_id=lesson.data_id,
+            literal_text=True,
+        )
+        for lesson in lessons
+    ]
+    await add(items, dataset_id=scope.dataset.id, user=scope.user, node_set=node_set)
     await cognify(datasets=[scope.dataset.id], user=scope.user)
-    return documents
+    for state_key in sorted({lesson.metadata["state_key"] for lesson in lessons} - {""}):
+        keep = {lesson.data_id for lesson in lessons if lesson.metadata["state_key"] == state_key}
+        await delete_superseded_lessons(
+            dataset_id=scope.dataset.id, state_key=state_key, keep=keep, user=scope.user
+        )
+    return [lesson.text for lesson in lessons]
 
 
 async def select_undistilled_entries(
@@ -647,7 +897,14 @@ async def distill_session(
 
     if max_batches is None:
         max_batches = get_improve_config().distill_max_batches_per_run
-    qa_rows = await load_session_qa_rows(scope, earliest_entry_time(new_entries))
+    coding = coding_distillation_enabled()
+    if coding:
+        # A coding unit is judged against its own request and final answer only.
+        qa_rows = await load_latest_qa_row(scope)
+        qa_context = parse_qa_context(qa_rows[-1].get("context") if qa_rows else "")
+    else:
+        qa_rows = await load_session_qa_rows(scope, earliest_entry_time(new_entries))
+        qa_context = None
     qa_rows, curated_entries = select_curator_inputs(qa_rows, new_entries, max_batches)
     uncurated = len(new_entries) - len(curated_entries)
     if uncurated:
@@ -660,7 +917,7 @@ async def distill_session(
             max_batches,
             uncurated,
         )
-    run = await propose_lessons(qa_rows, curated_entries)
+    run = await propose_lessons(qa_rows, curated_entries, coding=coding)
     if run.budget_exhausted:
         # Nothing was written for the completed batches either, and every later
         # call would fail the same way: seal nothing, let improve stop the run.
@@ -678,7 +935,7 @@ async def distill_session(
     writer_failures = 0
     if run.proposed:
         accepted, writer_failures = await accept_proposed_lessons(
-            scope, run.proposed, curated_entries
+            scope, run.proposed, curated_entries, coding=coding
         )
 
     documents: list[str] = []
@@ -688,7 +945,7 @@ async def distill_session(
         # are date-free, so a re-run re-accepting the same lesson dedups in add()
         # instead of duplicating.
         try:
-            documents = await publish_distilled_lessons(scope, accepted)
+            documents = await publish_distilled_lessons(scope, accepted, qa_context=qa_context)
         except AfterRunHookError as error:
             # The lessons landed; only the step after their cognify failed. The
             # watermark still moves below, so the curator and writer calls are not

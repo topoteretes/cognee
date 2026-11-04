@@ -65,6 +65,41 @@ class CuratorBatchOutput(BaseModel):
     lessons: list[ProposedLesson] = Field(default_factory=list)
 
 
+# -- Coding distillation (DISTILLATION_MODE=coding, SDK-1335) ----------------
+#
+# Subclasses rather than optional fields on the base models: the base schema is
+# what the default-mode LLM calls send, and it must not change with the mode.
+
+LessonType = Literal["location", "pitfall", "convention", "constraint", "change", "state", "other"]
+LESSON_TYPES = ("location", "pitfall", "convention", "constraint", "change", "state", "other")
+TEST_BASELINE_STATE_KEY = "test-baseline"
+FOOTPRINT_STATE_KEY_PREFIX = "footprint:"
+PITFALL_STATE_KEY_PREFIX = "pitfall:"
+# The writer's compact style, appended to its input in coding mode.
+CODING_WRITER_STYLE_LINE = (
+    "STYLE: compact — statement at most 25 words, one sentence (or 'problem → working form' "
+    "for a pitfall), name the file/symbol/command, no explanation of how it was learned"
+)
+
+
+class CodingProposedLesson(ProposedLesson):
+    """A proposed lesson that may carry a state key (``test-baseline``, ``footprint:<feature>``)."""
+
+    state_key: str = Field(
+        default="",
+        description=(
+            "Only for a current-state lesson: 'test-baseline' or 'footprint:<feature>'. "
+            "Empty otherwise."
+        ),
+    )
+
+
+class CodingCuratorBatchOutput(BaseModel):
+    """Proposed coding lessons from one curator batch call."""
+
+    lessons: list[CodingProposedLesson] = Field(default_factory=list)
+
+
 # -- Writer/rejecter output (one call per proposed lesson) -------------------
 
 
@@ -87,6 +122,24 @@ class WrittenLesson(BaseModel):
     why_learned: str = Field(
         default="",
         description="One sentence naming the situation it was learned in.",
+    )
+
+
+class CodingWrittenLesson(WrittenLesson):
+    """A written coding lesson: typed, and keyed when it is a state or a pitfall."""
+
+    lesson_type: LessonType = Field(
+        default="other",
+        description=(
+            "What the lesson is: location, pitfall, convention, constraint, change, state or other."
+        ),
+    )
+    state_key: str = Field(
+        default="",
+        description=(
+            "Only for lesson_type 'state': 'test-baseline' or 'footprint:<feature>'. "
+            "Empty for every other type."
+        ),
     )
 
 

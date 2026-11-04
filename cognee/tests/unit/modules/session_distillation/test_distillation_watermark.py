@@ -149,7 +149,7 @@ async def test_watermark_is_scoped_to_the_target_dataset(monkeypatch, datasets):
 
     proposed = []
 
-    async def fake_propose(qa_rows, context_entries):
+    async def fake_propose(qa_rows, context_entries, **_kwargs):
         proposed.append([entry.id for entry in context_entries])
         return _curator_run(context_entries)
 
@@ -186,7 +186,7 @@ async def test_new_gated_entry_after_the_watermark_triggers_a_run(monkeypatch, d
 
     seen = []
 
-    async def fake_propose(qa_rows, context_entries):
+    async def fake_propose(qa_rows, context_entries, **_kwargs):
         seen.append(sorted(entry.id for entry in context_entries))
         return _curator_run(context_entries)
 
@@ -211,7 +211,7 @@ async def test_no_proposed_lessons_advances_watermark_so_next_run_is_free(monkey
     _install_manager(monkeypatch, manager)
     calls = 0
 
-    async def fake_propose(qa_rows, context_entries):
+    async def fake_propose(qa_rows, context_entries, **_kwargs):
         nonlocal calls
         calls += 1
         return _curator_run(context_entries)
@@ -232,10 +232,10 @@ async def test_no_accepted_lessons_advances_watermark(monkeypatch, datasets):
     manager = FakeSessionManager(rows)
     _install_manager(monkeypatch, manager)
 
-    async def fake_propose(qa_rows, context_entries):
+    async def fake_propose(qa_rows, context_entries, **_kwargs):
         return _curator_run(context_entries, [ProposedLesson(working_statement="Something.")])
 
-    async def fake_accept(scope, proposed, context_entries):
+    async def fake_accept(scope, proposed, context_entries, **_kwargs):
         return [], 0
 
     monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
@@ -256,13 +256,13 @@ async def test_completed_run_advances_watermark_after_publish(monkeypatch, datas
     _install_manager(monkeypatch, manager)
     order = []
 
-    async def fake_propose(qa_rows, context_entries):
+    async def fake_propose(qa_rows, context_entries, **_kwargs):
         return _curator_run(context_entries, [ProposedLesson(working_statement="Something.")])
 
-    async def fake_accept(scope, proposed, context_entries):
+    async def fake_accept(scope, proposed, context_entries, **_kwargs):
         return [WrittenLesson(accept=True, statement="Keep reports concise.")], 0
 
-    async def fake_publish(scope, accepted):
+    async def fake_publish(scope, accepted, **_kwargs):
         order.append(("publish", len(manager.store)))
         return ["doc"]
 
@@ -287,13 +287,13 @@ async def test_failed_publish_leaves_watermark_untouched(monkeypatch, datasets):
     manager = FakeSessionManager(rows)
     _install_manager(monkeypatch, manager)
 
-    async def fake_propose(qa_rows, context_entries):
+    async def fake_propose(qa_rows, context_entries, **_kwargs):
         return _curator_run(context_entries, [ProposedLesson(working_statement="Something.")])
 
-    async def fake_accept(scope, proposed, context_entries):
+    async def fake_accept(scope, proposed, context_entries, **_kwargs):
         return [WrittenLesson(accept=True, statement="Keep reports concise.")], 0
 
-    async def failing_publish(scope, accepted):
+    async def failing_publish(scope, accepted, **_kwargs):
         raise RuntimeError("cognify exploded")
 
     monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
@@ -340,7 +340,7 @@ async def test_failed_curator_calls_leave_the_watermark_untouched(monkeypatch, d
     manager = FakeSessionManager(rows)
     _install_manager(monkeypatch, manager)
 
-    async def fake_propose(qa_rows, context_entries):
+    async def fake_propose(qa_rows, context_entries, **_kwargs):
         return _curator_run(context_entries, failed_batches=2, curated=[])
 
     monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
@@ -361,7 +361,7 @@ async def test_partial_failure_publishes_survivors_and_seals_only_completed_batc
     _install_manager(monkeypatch, manager)
     published = []
 
-    async def fake_propose(qa_rows, context_entries):
+    async def fake_propose(qa_rows, context_entries, **_kwargs):
         done = [entry for entry in context_entries if entry.id == done_row["id"]]
         return _curator_run(
             context_entries,
@@ -370,10 +370,10 @@ async def test_partial_failure_publishes_survivors_and_seals_only_completed_batc
             curated=done,
         )
 
-    async def fake_accept(scope, proposed, context_entries):
+    async def fake_accept(scope, proposed, context_entries, **_kwargs):
         return [WrittenLesson(accept=True, statement="Keep reports concise.")], 0
 
-    async def fake_publish(scope, accepted):
+    async def fake_publish(scope, accepted, **_kwargs):
         published.append(len(accepted))
         return ["doc"]
 
@@ -393,7 +393,7 @@ async def test_partial_failure_publishes_survivors_and_seals_only_completed_batc
 
     seen = []
 
-    async def fake_propose_again(qa_rows, context_entries):
+    async def fake_propose_again(qa_rows, context_entries, **_kwargs):
         seen.extend(entry.id for entry in context_entries)
         return _curator_run(context_entries)
 
@@ -413,7 +413,7 @@ async def test_partial_failure_seals_nothing_when_publish_fails(monkeypatch, dat
     manager = FakeSessionManager([done_row, lost_row])
     _install_manager(monkeypatch, manager)
 
-    async def fake_propose(qa_rows, context_entries):
+    async def fake_propose(qa_rows, context_entries, **_kwargs):
         done = [entry for entry in context_entries if entry.id == done_row["id"]]
         return _curator_run(
             context_entries,
@@ -422,10 +422,10 @@ async def test_partial_failure_seals_nothing_when_publish_fails(monkeypatch, dat
             curated=done,
         )
 
-    async def fake_accept(scope, proposed, context_entries):
+    async def fake_accept(scope, proposed, context_entries, **_kwargs):
         return [WrittenLesson(accept=True, statement="Keep reports concise.")], 0
 
-    async def failing_publish(scope, accepted):
+    async def failing_publish(scope, accepted, **_kwargs):
         raise RuntimeError("cognify down")
 
     monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
@@ -446,10 +446,10 @@ async def test_exhausted_budget_in_the_writer_phase_seals_nothing(monkeypatch, d
     manager = FakeSessionManager(rows)
     _install_manager(monkeypatch, manager)
 
-    async def fake_propose(qa_rows, context_entries):
+    async def fake_propose(qa_rows, context_entries, **_kwargs):
         return _curator_run(context_entries, [ProposedLesson(working_statement="Something.")])
 
-    async def broke_accept(scope, proposed, context_entries):
+    async def broke_accept(scope, proposed, context_entries, **_kwargs):
         raise LLMPaymentRequiredError("402")
 
     monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
@@ -478,7 +478,7 @@ async def test_accept_proposed_lessons_raises_on_exhausted_budget_and_skips_the_
 
     calls = []
 
-    async def broke(vector_engine, lesson, entries_by_id):
+    async def broke(vector_engine, lesson, entries_by_id, **_kwargs):
         calls.append(lesson.working_statement)
         raise LLMPaymentRequiredError("402")
 
@@ -549,7 +549,7 @@ async def test_partial_seal_keeps_earlier_seals(monkeypatch, datasets):
     _install_manager(monkeypatch, manager)
     await save_distilled_entry_ids(manager, str(USER.id), "s-1", str(DATASET_A.id), [old_row["id"]])
 
-    async def fake_propose(qa_rows, context_entries):
+    async def fake_propose(qa_rows, context_entries, **_kwargs):
         done = [entry for entry in context_entries if entry.id == done_row["id"]]
         return _curator_run(context_entries, failed_batches=1, curated=done)
 
@@ -572,10 +572,10 @@ async def test_failed_writer_calls_seal_the_curated_entries(monkeypatch, dataset
     manager = FakeSessionManager(rows)
     _install_manager(monkeypatch, manager)
 
-    async def fake_propose(qa_rows, context_entries):
+    async def fake_propose(qa_rows, context_entries, **_kwargs):
         return _curator_run(context_entries, [ProposedLesson(working_statement="Something.")])
 
-    async def fake_accept(scope, proposed, context_entries):
+    async def fake_accept(scope, proposed, context_entries, **_kwargs):
         return [], 1  # the writer call failed, nothing was rejected
 
     monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
@@ -778,10 +778,10 @@ async def test_capped_run_curates_the_most_relevant_and_seals_the_rest(monkeypat
     curator_inputs = _record_curator_calls(monkeypatch, lessons_per_call=2)
     published: list[int] = []
 
-    async def accept_all(scope, proposed, context_entries):
+    async def accept_all(scope, proposed, context_entries, **_kwargs):
         return [WrittenLesson(accept=True, statement=p.working_statement) for p in proposed], 0
 
-    async def fake_publish(scope, accepted):
+    async def fake_publish(scope, accepted, **_kwargs):
         published.append(len(accepted))
         return [lesson.statement for lesson in accepted]
 
@@ -819,13 +819,13 @@ async def test_a_failed_step_after_the_lessons_cognify_is_raised_after_the_water
     _install_manager(monkeypatch, manager)
     failure = AfterRunHookError([(DATASET_A.id, DATASET_A.name, RuntimeError("compaction"))])
 
-    async def fake_propose(qa_rows, context_entries):
+    async def fake_propose(qa_rows, context_entries, **_kwargs):
         return _curator_run(context_entries, [ProposedLesson(working_statement="Something.")])
 
-    async def fake_accept(scope, proposed, context_entries):
+    async def fake_accept(scope, proposed, context_entries, **_kwargs):
         return [WrittenLesson(accept=True, statement="Keep reports concise.")], 0
 
-    async def failing_step_publish(scope, accepted):
+    async def failing_step_publish(scope, accepted, **_kwargs):
         raise failure
 
     monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
