@@ -122,8 +122,10 @@ async def cognify_rollback_handler(
     removed. Startup recovery uses that: the run is closed hours later, and a
     later run may already have trusted those completed documents and skipped
     them, so deleting them would leave the dataset with holes nothing refills.
-    The inline failure path keeps the default, whole-run rollback: there the
-    redo is immediate.
+    An inline cognify with ``raise_on_error=True`` keeps the default, whole-run
+    rollback: the redo is immediate. An isolating caller (``raise_on_error=False``
+    or a background run) keeps the completed items too, so one failed item does
+    not take the others with it.
 
     ``pipeline_name`` is the pipeline whose per-item completion stamps the run
     set (``run_tasks`` passes it): the cognify pipeline by default, or the
