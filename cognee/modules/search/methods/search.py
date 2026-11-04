@@ -106,7 +106,9 @@ async def search(
         system_prompt: Inline system prompt; overrides ``system_prompt_path``.
         top_k: Maximum retrieved objects per dataset (default 15). Hybrid caps
             its per-lane ``top_k`` unless overridden via ``retriever_specific_config``.
-        node_type: ``DataPoint`` subclass used to filter nodes (default ``NodeSet``).
+        node_type: What ``node_name`` names (default ``NodeSet``): node-set tags, source
+            documents for a ``Document`` subclass, else graph nodes of that type. See
+            ``node_name_scope`` for which search types honour each.
             A custom type forces hybrid to defer to graph completion.
         node_name: Restrict retrieval to these node names (e.g. node-set tags),
             combined with ``node_name_filter_operator`` (``"OR"``/``"AND"``).

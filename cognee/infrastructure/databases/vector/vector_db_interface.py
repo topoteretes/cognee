@@ -214,6 +214,7 @@ class VectorDBInterface(Protocol):
         include_payload: bool = False,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
+        document_name: list[str] | None = None,
     ):
         """
         Perform a search in the specified collection using either a text query or a vector
@@ -240,6 +241,11 @@ class VectorDBInterface(Protocol):
               like the RAG_COMPLETION search type, but not needed when search also contains graph data.
             - node_name (Optional[List[str]]): An optional list of names of nodes. Search results are filtered
               based on these, and only data which has at least one of the names in its "belongs_to_set" field is returned.
+            - node_name_filter_operator (str): "OR" keeps rows tagged with any of the names, "AND" rows
+              tagged with all of them.
+            - document_name (Optional[List[str]]): Source document names; only rows whose
+              "document_name" field is one of them are returned (chunk rows carry it). Combined
+              with the node_name filter when both are given.
         """
         raise NotImplementedError
 

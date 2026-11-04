@@ -9,6 +9,7 @@ from cognee.modules.retrieval.utils.conflict_context import (
     public_chunk_payload,
     render_chunk_context,
 )
+from cognee.modules.retrieval.utils.document_filter import document_filter
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ChunksRetriever")
@@ -36,6 +37,7 @@ class ChunksRetriever(BaseRetriever):
         top_k: int | None = 5,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
+        document_name: list[str] | None = None,
     ):
         """
         Initializes the chunk retriever.
@@ -50,10 +52,13 @@ class ChunksRetriever(BaseRetriever):
               node set filtering.
             - node_name_filter_operator (str): Logical operator used when applying
               multiple node_name filters, such as "OR" or "AND". Defaults to "OR".
+            - document_name (Optional[List[str]]): Source document names; only chunks
+              cut from one of those documents are returned. Defaults to None.
         """
         self.top_k = top_k
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
+        self.document_name = document_name
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
@@ -136,6 +141,7 @@ class ChunksRetriever(BaseRetriever):
                 include_payload=True,
                 node_name=self.node_name,
                 node_name_filter_operator=self.node_name_filter_operator,
+                **document_filter(self.document_name),
             )
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found in vector database")

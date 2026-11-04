@@ -13,6 +13,7 @@ from cognee.modules.retrieval.utils.conflict_context import (
     attach_chunk_conflicts,
     render_chunk_context,
 )
+from cognee.modules.retrieval.utils.document_filter import document_filter
 from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
 from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
 from cognee.modules.retrieval.utils.references import append_chunk_evidence
@@ -106,8 +107,13 @@ class CompletionRetriever(BaseRetriever):
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
         wide_search_top_k: int | None = 100,
+        document_name: list[str] | None = None,
     ):
-        """Initialize retriever with optional custom prompt paths."""
+        """Initialize retriever with optional custom prompt paths.
+
+        ``node_name`` filters chunks by node-set tag; ``document_name`` by the source
+        document they were cut from.
+        """
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 1
@@ -118,6 +124,7 @@ class CompletionRetriever(BaseRetriever):
         self.include_references = include_references
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
+        self.document_name = document_name
 
     async def get_retrieved_objects(self, query: str) -> Any:
         vector_engine = await get_vector_engine_async()
@@ -142,6 +149,7 @@ class CompletionRetriever(BaseRetriever):
                 include_payload=True,
                 node_name=self.node_name,
                 node_name_filter_operator=self.node_name_filter_operator,
+                **document_filter(self.document_name),
             )
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found")

@@ -106,6 +106,11 @@ class IndexSchema(DataPoint):
     belongs_to_set: list[str] = []
 
 
+def _sql_string_list(values: list[str]) -> str:
+    """``values`` as comma-separated single-quoted SQL literals, quotes doubled."""
+    return ", ".join("'" + value.replace("'", "''") + "'" for value in values)
+
+
 class LanceDBAdapter(VectorDBInterface):
     """Vector-database adapter backed by LanceDB; implements the VectorDBInterface contract."""
 
@@ -1386,6 +1391,7 @@ class LanceDBAdapter(VectorDBInterface):
         include_payload: bool = False,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
+        document_name: list[str] | None = None,
     ):
         with new_span("cognee.db.vector.search") as otel_span:
             otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
@@ -1414,39 +1420,23 @@ class LanceDBAdapter(VectorDBInterface):
                 ["id", "payload", "_distance"] if include_payload else ["id", "_distance"]
             )
 
+            filters = []
             if node_name:
                 # Escape quotes to make this input safer, since it's coming from the user
                 # At the time of writing this, no specific binding instructions found on LanceDB docs
-                escaped_node_names = [name.replace("'", "''") for name in node_name]
-                literal_node_names = (
-                    "[" + ", ".join(f"'{name}'" for name in escaped_node_names) + "]"
-                )
+                literal_node_names = "[" + _sql_string_list(node_name) + "]"
 
                 if node_name_filter_operator == "AND":
-                    node_name_filter_string = (
-                        f"array_has_all(payload.belongs_to_set, {literal_node_names})"
-                    )
+                    filters.append(f"array_has_all(payload.belongs_to_set, {literal_node_names})")
                 else:
-                    node_name_filter_string = (
-                        f"array_has_any(payload.belongs_to_set, {literal_node_names})"
-                    )
+                    filters.append(f"array_has_any(payload.belongs_to_set, {literal_node_names})")
+            if document_name:
+                filters.append(f"payload.document_name IN ({_sql_string_list(document_name)})")
 
-                result_values = (
-                    await collection.vector_search(query_vector)
-                    .distance_type("cosine")
-                    .where(node_name_filter_string)
-                    .select(select_columns)
-                    .limit(limit)
-                    .to_list()
-                )
-            else:
-                result_values = (
-                    await collection.vector_search(query_vector)
-                    .distance_type("cosine")
-                    .select(select_columns)
-                    .limit(limit)
-                    .to_list()
-                )
+            query = collection.vector_search(query_vector).distance_type("cosine")
+            if filters:
+                query = query.where(" AND ".join(filters))
+            result_values = await query.select(select_columns).limit(limit).to_list()
 
             if not result_values:
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)

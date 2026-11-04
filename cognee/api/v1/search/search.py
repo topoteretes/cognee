@@ -161,12 +161,23 @@ async def search(
         top_k: Maximum number of results to return (1-N)
               Higher values provide more comprehensive but potentially noisy results.
 
-        node_type: Filter results to specific entity types (for advanced filtering).
+        node_type: What the names in node_name are. NodeSet (the default) means node-set
+                   tags; a Document class (TextDocument, PdfDocument, ...) means source
+                   documents; any other DataPoint type means graph nodes of that type.
 
-        node_name: Filter results to specific named entities (for targeted search).
+        node_name: Names to scope the search to, read according to node_type. Node-set
+                   tags are honoured by CHUNKS, RAG_COMPLETION, HYBRID_COMPLETION, TEMPORAL,
+                   CODING_RULES and the graph-completion family; document names by CHUNKS and
+                   RAG_COMPLETION (only that document's chunks) and the graph-completion
+                   family (the document node and its neighbours; HYBRID_COMPLETION defers to
+                   GRAPH_COMPLETION); other graph types by the graph-completion family only.
+                   A search type that cannot apply the filter raises QueryValidationError,
+                   and FEELING_LUCKY picks only among the types that can.
 
         node_name_filter_operator: Operator determining how to filter based on node names.
-                                    Possible values: AND, OR (default is OR, i.e. disjunction)
+                                    Possible values: AND, OR (default is OR, i.e. disjunction).
+                                    AND over several document names is refused: a chunk
+                                    belongs to one document.
 
         session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
 

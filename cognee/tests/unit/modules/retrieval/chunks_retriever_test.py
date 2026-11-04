@@ -260,3 +260,25 @@ async def test_get_completion_from_context_none_payload_still_returns_score():
     )
 
     assert completion == [{"score": 0.42}]
+
+
+@pytest.mark.asyncio
+async def test_document_filter_reaches_the_vector_search(mock_vector_engine):
+    mock_vector_engine.search.return_value = []
+    retriever = ChunksRetriever(top_k=5, document_name=["doc_a"])
+
+    with patch(
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=_make_unified_mock(mock_vector_engine),
+    ):
+        await retriever.get_retrieved_objects("test query")
+
+    mock_vector_engine.search.assert_awaited_once_with(
+        "DocumentChunk_text",
+        "test query",
+        limit=5,
+        include_payload=True,
+        node_name=None,
+        node_name_filter_operator="OR",
+        document_name=["doc_a"],
+    )

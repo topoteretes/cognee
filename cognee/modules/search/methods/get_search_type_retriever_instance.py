@@ -40,6 +40,12 @@ from cognee.modules.retrieval.skills_retriever import SkillsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
 from cognee.modules.search.exceptions import SearchTypeDisabledError, UnsupportedSearchTypeError
+from cognee.modules.search.methods.node_name_scope import (
+    NodeNameScope,
+    lucky_search_types,
+    node_name_scope,
+    reject_unsupported_node_name,
+)
 from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.types import SearchType
 from cognee.modules.search.types.SearchType import DEPRECATED_SEARCH_TYPES
@@ -117,6 +123,11 @@ async def get_search_type_retriever_instance(
     node_type = kwargs.get("node_type", NodeSet)
     node_name = kwargs.get("node_name")
     node_name_filter_operator = kwargs.get("node_name_filter_operator", "OR")
+    # Chunk searches filter the vector rows: node-set names go to belongs_to_set,
+    # document names to document_name. Graph retrievers take node_type + node_name as is.
+    scope = node_name_scope(node_type, node_name)
+    chunk_node_set_names = node_name if scope is NodeNameScope.NODE_SET else None
+    chunk_document_names = node_name if scope is NodeNameScope.DOCUMENT else None
     wide_search_top_k = kwargs.get("wide_search_top_k")
     triplet_distance_penalty = kwargs.get("triplet_distance_penalty")
     feedback_influence = kwargs.get(
@@ -149,8 +160,9 @@ async def get_search_type_retriever_instance(
             ChunksRetriever,
             {
                 "top_k": top_k,
-                "node_name": node_name,
+                "node_name": chunk_node_set_names,
                 "node_name_filter_operator": node_name_filter_operator,
+                "document_name": chunk_document_names,
             },
         ),
         # No top_k: BROAD reads the whole dataset (SDK-324).
@@ -180,8 +192,9 @@ async def get_search_type_retriever_instance(
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
                 "include_references": include_references,
-                "node_name": node_name,
+                "node_name": chunk_node_set_names,
                 "node_name_filter_operator": node_name_filter_operator,
+                "document_name": chunk_document_names,
                 "wide_search_top_k": wide_search_top_k,
             },
         ),
@@ -445,9 +458,12 @@ async def get_search_type_retriever_instance(
             include_references=include_references,
         )
 
-    # If the query type is FEELING_LUCKY, select the search type intelligently
+    # If the query type is FEELING_LUCKY, select the search type intelligently,
+    # among the types that honour the node_name filter when one is set.
     if query_type is SearchType.FEELING_LUCKY:
-        query_type = await select_search_type(query_text)
+        query_type = await select_search_type(
+            query_text, allowed_search_types=lucky_search_types(node_type, node_name)
+        )
 
     if query_type in CYPHER_SEARCH_TYPES and not cypher_queries_allowed():
         logger.warning(CYPHER_DISABLED_LOG_MESSAGE.format(search_type=query_type.value))
@@ -474,6 +490,10 @@ async def get_search_type_retriever_instance(
         # Check if retriever info is found for the given query type
         if not retriever_info:
             raise UnsupportedSearchTypeError(str(query_type))
+
+        # A filter the retriever would drop or mis-apply is an error, not a silent
+        # unscoped (or empty) result.
+        reject_unsupported_node_name(query_type, node_type, node_name, node_name_filter_operator)
 
         # If it exists unpack the retriever class and its initialization arguments
         retriever_cls, retriever_args = retriever_info

@@ -972,8 +972,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         include_payload: bool = False,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
+        document_name: list[str] | None = None,
     ) -> list[ScoredResult]:
-        """Run a cosine-distance similarity search, optionally filtered by NodeSet tag."""
+        """Run a cosine-distance similarity search, filtered by NodeSet tag and/or document."""
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
 
@@ -1016,6 +1017,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             use_index = (
                 indexed_type is not None
                 and not node_name
+                and not document_name
                 and not exact_scan_required
                 and limit <= _HNSW_MAX_EF_SEARCH
             )
@@ -1025,35 +1027,27 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 # hnsw.ef_search rows, before any node-set filter is applied. Searches
                 # that must be exact keep the full scan.
                 await session.execute(text("SET LOCAL enable_indexscan = off"))
-            if node_name:
-                if node_name_filter_operator == "AND":
-                    filter_operator = "?&"
-                else:
-                    filter_operator = "?|"
-
+            query = select(
+                *select_columns,
+                PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
+            )
+            if node_name or document_name:
                 from sqlalchemy import bindparam, cast
                 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TEXT
 
-                target = bindparam("target", value=node_name, type_=ARRAY(TEXT()))
-                query = (
-                    select(
-                        *select_columns,
-                        PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
-                            "similarity"
-                        ),
+                payload = cast(PGVectorDataPoint.c.payload, JSONB)
+                if node_name:
+                    filter_operator = "?&" if node_name_filter_operator == "AND" else "?|"
+                    target = bindparam("target", value=node_name, type_=ARRAY(TEXT()))
+                    query = query.where(
+                        payload.op("->")("belongs_to_set").op(filter_operator)(target)
                     )
-                    .where(
-                        cast(PGVectorDataPoint.c.payload, JSONB)
-                        .op("->")("belongs_to_set")
-                        .op(filter_operator)(target)
+                if document_name:
+                    query = query.where(
+                        payload.op("->>", return_type=TEXT())("document_name").in_(document_name)
                     )
-                    .order_by("similarity")
-                )
+                query = query.order_by("similarity")
             else:
-                query = select(
-                    *select_columns,
-                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
-                )
                 if use_index:
                     # Order by the indexed expression so the HNSW index serves the scan.
                     # The planner underestimates a full scan of TOASTed vectors and picks
