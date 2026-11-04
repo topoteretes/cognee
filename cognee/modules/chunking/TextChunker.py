@@ -1,6 +1,6 @@
-import asyncio
 from os.path import basename
 
+from cognee.infrastructure.utils.run_cpu_bound import run_cpu_bound
 from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.chunking.Chunker import Chunker
 from cognee.shared.logging_utils import get_logger
@@ -30,9 +30,9 @@ class TextChunker(Chunker):
 
         async for content_text in self.get_text():
             # chunk_by_paragraph counts tokens word by word, so one block of text keeps the
-            # CPU for seconds. The generator runs where it is consumed: on a worker thread,
-            # so the event loop keeps answering health checks and requests meanwhile.
-            chunk_data_list = await asyncio.to_thread(
+            # CPU for seconds. The generator runs where it is consumed: on the shared CPU
+            # worker, so the event loop keeps answering health checks and requests meanwhile.
+            chunk_data_list = await run_cpu_bound(
                 list,
                 chunk_by_paragraph(content_text, self.max_chunk_size, batch_paragraphs=True),
             )

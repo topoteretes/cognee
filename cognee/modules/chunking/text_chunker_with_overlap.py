@@ -1,8 +1,8 @@
-import asyncio
 from collections.abc import Callable
 from os.path import basename
 from uuid import NAMESPACE_OID, uuid5
 
+from cognee.infrastructure.utils.run_cpu_bound import run_cpu_bound
 from cognee.modules.chunking.Chunker import Chunker
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.chunks import chunk_by_paragraph
@@ -122,9 +122,9 @@ class TextChunkerWithOverlap(Chunker):
 
     async def read(self):
         async for content_text in self.get_text():
-            # Same as TextChunker: get_chunk_data counts tokens word by word, so its
-            # generator is consumed on a worker thread and the event loop stays free.
-            chunk_data_list = await asyncio.to_thread(list, self.get_chunk_data(content_text))
+            # Same as TextChunker: the default get_chunk_data counts tokens word by word, and
+            # its generator is consumed on the shared CPU worker, so the event loop stays free.
+            chunk_data_list = await run_cpu_bound(list, self.get_chunk_data(content_text))
             for chunk_data in chunk_data_list:
                 if not self._accumulation_overflows(chunk_data):
                     self._accumulate_chunk_data(chunk_data)

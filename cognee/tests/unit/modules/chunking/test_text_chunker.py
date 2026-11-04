@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.context_global_variables import embedding_config
 from cognee.infrastructure.llm.tokenizer.TikToken.adapter import TikTokenTokenizer
 from cognee.modules.chunking.text_chunker_with_overlap import TextChunkerWithOverlap
 from cognee.modules.chunking.TextChunker import TextChunker
@@ -391,6 +392,41 @@ async def test_chunking_runs_off_the_event_loop(chunker_class, make_text_generat
 
     assert [chunk.text for chunk in chunks] == ["Some text."]
     assert chunking_threads and chunking_threads[0] is not threading.current_thread()
+
+
+@pytest.mark.asyncio
+async def test_chunking_sees_the_callers_embedding_config(chunker_class, make_text_generator):
+    """Token counts come from the context-scoped embedding config, so the worker must see it.
+
+    A worker that ran outside the caller's context would read the process-wide config
+    instead and cut chunks to another tokenizer's counts, with no error.
+    """
+    seen_configs = []
+
+    def recording_chunk_by_paragraph(text, max_chunk_size, batch_paragraphs=True):
+        seen_configs.append(embedding_config.get())
+        yield {"text": text, "chunk_size": 1, "cut_type": "paragraph_end", "chunk_id": uuid4()}
+
+    document = Document(
+        id=uuid4(),
+        name="test_document",
+        raw_data_location="/test/path",
+        external_metadata=None,
+        mime_type="text/plain",
+    )
+    chunker = chunker_class(document, make_text_generator("Some text."), max_chunk_size=512)
+    callers_config = object()
+    token = embedding_config.set(callers_config)
+    try:
+        with (
+            patch.object(_text_chunker, "chunk_by_paragraph", recording_chunk_by_paragraph),
+            patch.object(_overlap_chunker, "chunk_by_paragraph", recording_chunk_by_paragraph),
+        ):
+            await collect_chunks(chunker)
+    finally:
+        embedding_config.reset(token)
+
+    assert seen_configs == [callers_config]
 
 
 @pytest.mark.asyncio
