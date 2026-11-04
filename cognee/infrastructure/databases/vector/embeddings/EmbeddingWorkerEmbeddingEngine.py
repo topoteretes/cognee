@@ -19,8 +19,10 @@ remote GLiNER client sends extraction (see ``embedding_worker/`` and
   (8 attempts, 0.5-8 s jittered). A request the broker took but nobody answered
   in COGNEE_EMBEDDING_WORKER_REQUEST_TIMEOUT_SECS is not resent: readiness is
   re-checked, then the call fails.
-- ``input_too_long`` splits the request; a single over-long text is split into
-  two overlapping parts whose vectors are averaged and L2-normalized.
+- ``input_too_long`` lists every offending input: exactly those are split into
+  two overlapping parts and the request is sent again once; the parts' vectors
+  are averaged and L2-normalized. (An older worker that does not list them gets
+  the request bisected.)
 - Fatal errors (the outage outliving its retries, refused credentials, the
   wrong model or vector size) are latched, so later calls fail at once instead
   of each waiting out its own retries. A latched outage is released by the
@@ -50,6 +52,7 @@ from cognee.infrastructure.databases.vector.embeddings.utils import (
     handle_embedding_response,
     sanitize_embedding_text_inputs,
 )
+from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.infrastructure.remote_worker.retry import RetryPolicy
 from cognee.modules.observability.get_observe import get_observe
@@ -82,8 +85,8 @@ observe = get_observe()
 
 READINESS_TTL_SECS = 30.0
 DEFAULT_RETRY = RetryPolicy()
-#: The most inputs per request when the worker's ``limits.max_inputs`` is not yet
-#: known: the worker's default EMBEDDING_WORKER_MAX_INPUTS.
+#: The most inputs per request a worker without info accepts by default
+#: (EMBEDDING_WORKER_MAX_INPUTS).
 MAX_INPUTS_WITHOUT_INFO = 256
 
 T = TypeVar("T")
@@ -96,7 +99,7 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
     keeps its own budget and readiness cache.
     """
 
-    input_limit_source = "the embedding worker's max_input_tokens"
+    input_limit_source = "the embedding worker's max_text_tokens"
 
     def __init__(
         self,
@@ -122,15 +125,6 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
             raise EmbeddingWorkerConfigError(
                 f"EMBEDDING_DIMENSIONS must be a positive vector size, got {dimensions}.",
                 remediation="Unset EMBEDDING_DIMENSIONS to use the worker's, or set its model's.",
-            )
-        if batch_size > MAX_INPUTS_WITHOUT_INFO:
-            raise EmbeddingWorkerConfigError(
-                f"EMBEDDING_BATCH_SIZE={batch_size} is more inputs per request than an "
-                f"embedding worker accepts by default ({MAX_INPUTS_WITHOUT_INFO}).",
-                remediation=(
-                    f"Set EMBEDDING_BATCH_SIZE to {MAX_INPUTS_WITHOUT_INFO} or less; the engine "
-                    "lowers it further to the worker's limits.max_inputs."
-                ),
             )
         self.mock = os.getenv("MOCK_EMBEDDING", "false").lower() in ("true", "1", "yes")
         if self.mock and dimensions is None:
@@ -162,6 +156,16 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
             provider="embedding_worker", model=model, huggingface_tokenizer=huggingface_tokenizer
         )
         init_input_limit(self, max_completion_tokens)
+        # Chunks are counted with the worker's own tokenizer (its info's
+        # ``tokenizer``, a Hugging Face id) unless HUGGINGFACE_TOKENIZER says otherwise.
+        self._explicit_tokenizer = huggingface_tokenizer or None
+        self._tokenizer_id: str | None = (
+            (huggingface_tokenizer or model)
+            if isinstance(self.tokenizer, HuggingFaceTokenizer)
+            else None
+        )
+        self._tokenizers_failed: set[str] = set()
+        self._warned_no_text_budget = False
 
         self._retry = retry
         self._sleep = sleep
@@ -247,25 +251,30 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
         return self.batch_size
 
     async def input_limit(self) -> int | None:
-        """The tokens one input may have: the worker's ``max_input_tokens``, lowered to
-        EMBEDDING_MAX_COMPLETION_TOKENS when that is set and smaller. A configured
-        value above the worker's is a misconfiguration: warned about, and the
-        worker's limit applies. Without info (MOCK_EMBEDDING, or a worker that
-        predates it) the configured value stands, None when unset; an input over
-        the worker's limit is still split on ``input_too_long``."""
+        """The tokens of text one input may have, counted as cognee counts chunks
+        (without special tokens): the worker's ``max_text_tokens`` for the input
+        type sent, lowered to EMBEDDING_MAX_COMPLETION_TOKENS when that is set and
+        smaller. A configured value above the worker's is a misconfiguration:
+        warned about, and the worker's budget applies.
+
+        A worker whose info has no ``max_text_tokens`` gives ``max_input_tokens``
+        minus its ``special_tokens``, or, without those either, ``max_input_tokens``
+        with a one-time warning (a chunk of that size may then be rejected and
+        split). Without info (MOCK_EMBEDDING, or a worker that predates it) the
+        configured value stands, None when unset."""
         if self.mock:
             return self.input_cap
         await self._ensure_ready()
         info = self.worker_info
         if info is None:
             return self.input_cap
-        worker_limit = info.max_input_tokens
+        worker_limit = self._text_budget(info)
         if self.input_cap is None or self.input_cap == worker_limit:
             return worker_limit
         if self.input_cap > worker_limit:
             logger.warning(
-                "EMBEDDING_MAX_COMPLETION_TOKENS=%s exceeds the %s tokens the embedding "
-                "worker's model %r accepts; inputs are limited to %s tokens.",
+                "EMBEDDING_MAX_COMPLETION_TOKENS=%s exceeds the %s tokens of text the embedding "
+                "worker's model %r accepts per input; inputs are limited to %s tokens.",
                 self.input_cap,
                 worker_limit,
                 info.model,
@@ -274,46 +283,93 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
             return worker_limit
         return self.input_cap
 
+    def _text_budget(self, info: WorkerInfo) -> int:
+        """Tokens of text per input, special tokens and prefix taken out."""
+        if info.max_text_tokens and self.input_type in info.max_text_tokens:
+            return info.max_text_tokens[self.input_type]
+        if info.special_tokens is not None:
+            return max(1, info.max_input_tokens - info.special_tokens)
+        if not self._warned_no_text_budget:
+            self._warned_no_text_budget = True
+            logger.warning(
+                "The embedding worker's info states neither max_text_tokens nor special_tokens "
+                "(an older worker); chunks are sized to its max_input_tokens=%s, so a chunk "
+                "of that size may overflow by the special tokens and be split.",
+                info.max_input_tokens,
+            )
+        return info.max_input_tokens
+
     # ------------------------------------------------------------- internals
 
     async def _worker(self) -> SharedWorker:
         return self._own_worker or await shared_worker(self.settings)
 
     async def _embed_splitting(self, texts: list[str]) -> tuple[list[list[float]], int]:
-        """Embed ``texts``; on ``input_too_long`` split the request in halves, and a
-        single over-long text ``s`` into the overlapping parts ``s[:2t]`` and ``s[t:]``
-        (``t = len(s) // 3`` characters), recursing while a part is still too long.
-        The parts' vectors are averaged and L2-normalized, so the result is a unit
-        vector like every other the worker returns. The Rust SDK splits the same way.
+        """Embed ``texts``, recovering from ``input_too_long``.
+
+        The worker lists every input that does not fit. Exactly those are split
+        into the overlapping parts ``s[:2t]`` and ``s[t:]`` (``t = len(s) // 3``
+        characters) and the request is sent once more with each listed input
+        replaced by its two parts (in several requests, sent together, if it no
+        longer fits one). A part that is still too long is listed again and split
+        again. The parts' vectors are averaged and L2-normalized, so the result is
+        a unit vector like every other the worker returns. The Rust SDK splits
+        the same way. An older worker that lists nothing gets the request
+        bisected instead.
         """
         try:
             reply = await self._request(texts)
             return reply.vectors, reply.prompt_tokens
         except EmbeddingWorkerInputTooLongError as error:
-            if len(texts) > 1:
-                middle = math.ceil(len(texts) / 2)
-                (left, left_tokens), (right, right_tokens) = await _gather_or_cancel(
-                    [
-                        self._embed_splitting(texts[:middle]),
-                        self._embed_splitting(texts[middle:]),
-                    ]
-                )
-                return left + right, left_tokens + right_tokens
-            whole = texts[0]
-            third = len(whole) // 3
-            if third == 0:
-                raise EmbeddingContextWindowTooSmallError() from error
-            # Overlapping parts (two thirds each) keep the context across the cut.
-            left_part, right_part = sanitize_embedding_text_inputs(
-                [whole[: third * 2], whole[third:]]
-            )
-            ([left_vector], left_tokens), ([right_vector], right_tokens) = await _gather_or_cancel(
+            indices = error.indices
+            if indices is not None and all(index < len(texts) for index in indices):
+                return await self._split_listed(texts, set(indices), error)
+            if len(texts) == 1:
+                return await self._split_listed(texts, {0}, error)
+            middle = math.ceil(len(texts) / 2)
+            (left, left_tokens), (right, right_tokens) = await _gather_or_cancel(
                 [
-                    self._embed_splitting([left_part]),
-                    self._embed_splitting([right_part]),
+                    self._embed_splitting(texts[:middle]),
+                    self._embed_splitting(texts[middle:]),
                 ]
             )
-            return [pool_vectors(left_vector, right_vector)], left_tokens + right_tokens
+            return left + right, left_tokens + right_tokens
+
+    async def _split_listed(
+        self, texts: list[str], listed: set[int], error: Exception
+    ) -> tuple[list[list[float]], int]:
+        """Send ``texts`` again with each listed one replaced by its two parts; pool them."""
+        expanded: list[str] = []
+        layout: list[tuple[int, bool]] = []  # (position in expanded, split)
+        for index, text in enumerate(texts):
+            layout.append((len(expanded), index in listed))
+            if index in listed:
+                expanded.extend(split_text(text, error))
+            else:
+                expanded.append(text)
+        vectors, tokens = await self._embed_in_requests(expanded)
+        pooled = [
+            pool_vectors(vectors[at], vectors[at + 1]) if split else vectors[at]
+            for at, split in layout
+        ]
+        return pooled, tokens
+
+    async def _embed_in_requests(self, texts: list[str]) -> tuple[list[list[float]], int]:
+        """``texts`` in as few requests as the worker accepts, sent together; a
+        failing request cancels the others."""
+        size = max(1, self.get_batch_size())
+        if len(texts) <= size:
+            return await self._embed_splitting(texts)
+        results = await _gather_or_cancel(
+            [
+                self._embed_splitting(texts[start : start + size])
+                for start in range(0, len(texts), size)
+            ]
+        )
+        return (
+            [vector for group, _ in results for vector in group],
+            sum(tokens for _, tokens in results),
+        )
 
     async def _request(self, texts: list[str]) -> EmbedReply:
         worker = await self._worker()
@@ -374,6 +430,13 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
         """Check the worker's info against the config and adopt what the config leaves open."""
         info = worker.info
         if info is None:
+            if worker.info_unsupported and self.batch_size > MAX_INPUTS_WITHOUT_INFO:
+                raise EmbeddingWorkerConfigError(
+                    f"EMBEDDING_BATCH_SIZE={self.batch_size} is more inputs per request than an "
+                    f"embedding worker accepts by default ({MAX_INPUTS_WITHOUT_INFO}), and the "
+                    f"worker on {worker.transport.endpoint_label} does not report its limit.",
+                    remediation=f"Set EMBEDDING_BATCH_SIZE to {MAX_INPUTS_WITHOUT_INFO} or less.",
+                )
             if worker.info_unsupported and self.dimensions is None:
                 raise EmbeddingWorkerConfigError(
                     f"The embedding worker on {worker.transport.endpoint_label} does not report "
@@ -451,6 +514,44 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
         if fresh or self._clock() >= worker.ready_until:
             await self._probe(worker)
         self._apply_info(worker)
+        repo = self._worker_tokenizer_to_load()
+        if repo is not None:
+            # Loading may download tokenizer.json: off the event loop.
+            await asyncio.to_thread(self._load_worker_tokenizer, repo)
+
+    def _worker_tokenizer_to_load(self) -> str | None:
+        """The worker's tokenizer, when chunks should switch to it."""
+        info = self.worker_info
+        if self._explicit_tokenizer or info is None or not info.tokenizer:
+            return None
+        if info.tokenizer == self._tokenizer_id or info.tokenizer in self._tokenizers_failed:
+            return None
+        return info.tokenizer
+
+    def _load_worker_tokenizer(self, repo: str) -> None:
+        """Count chunks with the worker's Hugging Face tokenizer (without special
+        tokens, as cognee's chunkers count); keep the current one if it cannot load."""
+        if repo == self._tokenizer_id:
+            return
+        try:
+            tokenizer = HuggingFaceTokenizer(
+                model=repo, max_completion_tokens=self.max_completion_tokens
+            )
+        except Exception as error:
+            self._tokenizers_failed.add(repo)
+            logger.warning(
+                "Could not load the embedding worker's tokenizer %r (%s); chunks are still "
+                "counted with %s. Set HUGGINGFACE_TOKENIZER to a tokenizer matching the "
+                "worker's model.",
+                repo,
+                error,
+                type(self.tokenizer).__name__,
+                exc_info=True,
+            )
+            return
+        self.tokenizer = tokenizer
+        self._tokenizer_id = repo
+        logger.info("Counting chunk tokens with the embedding worker's tokenizer %r", repo)
 
     async def _probe(self, worker: SharedWorker) -> None:
         if worker.probe is None:
@@ -528,6 +629,9 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
         try:
             await self._run_probe(worker)
             self._apply_info(worker)
+            repo = self._worker_tokenizer_to_load()
+            if repo is not None:
+                self._load_worker_tokenizer(repo)
         except (EmbeddingWorkerError, EmbeddingWorkerConfigError) as error:
             self._latch(error)
             raise
@@ -555,6 +659,16 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
                 )
                 await self._sleep(delay)
         raise AssertionError("unreachable")  # the loop returns or raises
+
+
+def split_text(text: str, error: Exception | None = None) -> list[str]:
+    """``text`` as the overlapping parts ``text[:2t]`` and ``text[t:]``, ``t = len(text) // 3``
+    characters (each two thirds of it, so the context across the cut is kept). A
+    text too short to split raises :class:`EmbeddingContextWindowTooSmallError`."""
+    third = len(text) // 3
+    if third == 0:
+        raise EmbeddingContextWindowTooSmallError() from error
+    return sanitize_embedding_text_inputs([text[: third * 2], text[third:]])
 
 
 def pool_vectors(left: list[float], right: list[float]) -> list[float]:

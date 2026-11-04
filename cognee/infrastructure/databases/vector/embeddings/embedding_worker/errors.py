@@ -89,11 +89,26 @@ class EmbeddingWorkerRejectedError(EmbeddingWorkerError):
 
 
 class EmbeddingWorkerInputTooLongError(EmbeddingWorkerRejectedError):
-    """An input has more tokens than the worker's model accepts (``input_too_long``).
+    """Inputs have more tokens (or characters) than the worker accepts (``input_too_long``).
 
-    The engine reacts by splitting the request and pooling the parts, as the other
-    engines do for a provider's context-length error; it only escapes when an
-    input cannot be split further."""
+    ``indices`` lists every offending input of the request, when the worker says
+    (its ``inputs``: ``[{"index", "chars", "tokens"}]``); None from an older
+    worker. The engine splits exactly those inputs and sends the request again,
+    pooling each one's parts; it only escapes when an input cannot be split
+    further."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        indices: list[int] | None = None,
+        max_input_tokens: int | None = None,
+        max_text_chars: int | None = None,
+    ):
+        self.indices = indices
+        self.max_input_tokens = max_input_tokens
+        self.max_text_chars = max_text_chars
+        super().__init__(message)
 
 
 class EmbeddingWorkerTimeoutError(EmbeddingWorkerError):

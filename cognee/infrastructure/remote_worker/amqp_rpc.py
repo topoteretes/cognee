@@ -76,7 +76,9 @@ class AmqpRpcClient:
         # "GLiNER worker", "embedding worker": how messages name the other side.
         self._worker_name = worker_name
         self._session: _Session | None = None
-        self._session_lock = asyncio.Lock()
+        # The (re)connect in flight, if any: every caller that needs a session
+        # while it runs shares its outcome instead of queueing for its own.
+        self._connecting: asyncio.Future[_Session] | None = None
 
     async def call(self, body: bytes, *, request_id: str, message_type: str | None = None) -> bytes:
         """Publish one request and return the body of its reply.
@@ -167,6 +169,10 @@ class AmqpRpcClient:
         return consumers
 
     async def aclose(self) -> None:
+        connecting, self._connecting = self._connecting, None
+        if connecting is not None and not connecting.done():
+            # Its _connect closes what it opened when cancelled.
+            connecting.cancel()
         session, self._session = self._session, None
         if session is not None:
             session.fail_pending(f"The {self._worker_name} transport was closed.")
@@ -174,20 +180,39 @@ class AmqpRpcClient:
                 await session.connection.close()
 
     async def _get_session(self) -> _Session:
+        """The live session, or the outcome of the one (re)connect in flight.
+
+        Single-flight: the first caller to find no usable session starts a
+        connect and every caller arriving while it runs awaits the same one, so
+        N callers cost one connect timeout, not N in a row. Each waiter is
+        shielded from the others' cancellation.
+        """
         session = self._session
         if session is not None and session.usable:
             return session
-        async with self._session_lock:
-            if self._session is not None and self._session.usable:
-                return self._session
+        if self._connecting is None:
             stale, self._session = self._session, None
-            if stale is not None:
-                stale.fail_pending("The broker connection dropped.")
-                # The channel may have closed while the connection stayed open
-                # (a channel-level error): close it, or every rebuild leaks one.
-                await _close_quietly(stale.connection)
-            self._session = await self._connect()
-            return self._session
+            connecting = asyncio.ensure_future(self._reconnect(stale))
+            self._connecting = connecting
+
+            def finished(done: asyncio.Future) -> None:
+                if self._connecting is done:
+                    self._connecting = None
+                if not done.cancelled():
+                    done.exception()  # retrieved even when every waiter was cancelled
+
+            connecting.add_done_callback(finished)
+        return await asyncio.shield(self._connecting)
+
+    async def _reconnect(self, stale: _Session | None) -> _Session:
+        if stale is not None:
+            stale.fail_pending("The broker connection dropped.")
+            # The channel may have closed while the connection stayed open (a
+            # channel-level error): close it, or every rebuild leaks one.
+            await _close_quietly(stale.connection)
+        session = await self._connect()
+        self._session = session
+        return session
 
     async def _connect(self) -> _Session:
         connection = None
@@ -223,6 +248,13 @@ class AmqpRpcClient:
         if isinstance(error, aiormq.exceptions.ProbableAuthenticationError):
             return self._errors.unauthorized(
                 f"The broker for {self.endpoint_label} refused the credentials in the URL."
+            )
+        if isinstance(error, aiormq.exceptions.ChannelAccessRefused):
+            # ACCESS_REFUSED (403) on a declare or publish: the user may log in but
+            # lacks permission on the vhost, queue or exchange. Retrying cannot fix it.
+            return self._errors.unauthorized(
+                f"The broker for {self.endpoint_label} refused access for the user in the URL "
+                f"({error}); check the user's permissions on the vhost and queue."
             )
         return self._errors.unavailable(
             f"Cannot reach the broker for {self.endpoint_label} ({type(error).__name__})."

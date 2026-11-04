@@ -72,18 +72,19 @@ The engine also uses these existing embedding settings:
   reply's `dimensions`; a mismatch is fatal and names both values. With a
   worker that predates info, it is required (a configuration error on first
   contact otherwise).
-- `EMBEDDING_BATCH_SIZE` (default 32) is the most inputs per request. It may
-  not exceed 256, the worker's default `EMBEDDING_WORKER_MAX_INPUTS`
-  (a configuration error when the engine is built). Once the worker's info is
-  known, requests carry at most `min(EMBEDDING_BATCH_SIZE, limits.max_inputs)`
-  inputs.
-- `EMBEDDING_MAX_COMPLETION_TOKENS` is optional. The token limit chunks are
-  sized by is the worker's `max_input_tokens`, lowered to this value when it is
-  set and smaller. A larger value is a misconfiguration: it is logged as a
-  warning and the worker's limit applies. Without info (an older worker), the
-  configured value is used as before: if it is unset, the default cap of 4096
-  applies and a warning is logged. An input that is still too long is split
-  (see below).
+- `EMBEDDING_BATCH_SIZE` (default 32) is the most inputs per request. With
+  the worker's info, requests carry at most
+  `min(EMBEDDING_BATCH_SIZE, limits.max_inputs)` inputs (`max_inputs` is 256
+  when the info does not state it). A worker without info cannot say its
+  limit, so there a value over 256 (the worker's default
+  `EMBEDDING_WORKER_MAX_INPUTS`) is a configuration error on first contact.
+- `EMBEDDING_MAX_COMPLETION_TOKENS` is optional. Chunks are sized to the
+  worker's token budget (see "Token budget" below), lowered to this value when
+  it is set and smaller. A larger value is a misconfiguration: it is logged as
+  a warning and the worker's budget applies. Without info (an older worker),
+  the configured value is used as before: if it is unset, the default cap of
+  4096 applies and a warning is logged. An input that is still too long is
+  split (see below).
 - `EMBEDDING_INPUT_TYPE=query` sends `input_type: "query"` for **every** text,
   documents included: cognee's call sites do not say whether they embed a
   document or a query, so one type is used for both, and a warning is logged
@@ -92,8 +93,13 @@ The engine also uses these existing embedding settings:
   with query prefixes (BGE, E5), queries are embedded as documents, as they are
   on the OpenAI-compatible route. Do not set `query` unless that is what you
   want for your documents.
-- `HUGGINGFACE_TOKENIZER` overrides the tokenizer that sizes chunks. This is
-  useful when `EMBEDDING_MODEL` is not a Hugging Face repo id.
+- `HUGGINGFACE_TOKENIZER` overrides the tokenizer that sizes chunks. Unset,
+  chunks are counted with the worker's tokenizer (its info's `tokenizer`, a
+  Hugging Face id) once the info is known, so `EMBEDDING_MODEL` need not be a
+  Hugging Face repo id. Until then, and with a worker that does not state its
+  tokenizer, the tokenizer resolved from `EMBEDDING_MODEL` is used. If the
+  worker's tokenizer cannot be loaded, a warning is logged and the current one
+  is kept.
 - `EMBEDDING_ENCODING_FORMAT` does not apply. Vectors always travel as base64
   little-endian float32.
 - `MOCK_EMBEDDING` and the `EMBEDDING_RATE_LIMIT_*` settings work as they do
@@ -125,8 +131,34 @@ latter is latched as an outage).
 |---|---|
 | `model` | Checked against `COGNEE_EMBEDDING_WORKER_EXPECTED_MODEL` (fatal on mismatch). |
 | `dimensions` | The vector size when `EMBEDDING_DIMENSIONS` is unset; checked against it when set (fatal on mismatch). A worker whose size changes after the engine adopted it is a mismatch too. |
-| `max_input_tokens` | `input_limit()`: the token limit chunks are sized by (see `EMBEDDING_MAX_COMPLETION_TOKENS`). |
+| `max_text_tokens`, `special_tokens`, `max_input_tokens` | `input_limit()`, the token budget chunks are sized by (see "Token budget"). |
+| `tokenizer` | Counting chunk tokens, unless `HUGGINGFACE_TOKENIZER` is set. |
 | `limits.max_inputs` | Caps the inputs per request. |
+
+`model`, `dimensions` and `max_input_tokens` are required; an info without
+them, or with a field of the wrong type, is malformed. The others are
+optional: `limits.max_inputs` defaults to 256, and `special_tokens`,
+`max_text_tokens` and `tokenizer` are used when present.
+
+### Token budget
+
+Cognee counts chunk tokens without special tokens (`[CLS]`, `[SEP]`, ...) and
+without the worker's input-type prefix, while the worker's `max_input_tokens`
+counts everything. A chunk sized to `max_input_tokens` would overflow by the
+special tokens, be rejected and need splitting: with bge-small, a 512-token
+chunk is 514 tokens to the worker and cost three requests. So `input_limit()`
+is, in order of preference:
+
+1. `max_text_tokens[input_type]` (BGE: 510 for documents, 502 for queries;
+   pplx-embed: 2048), the tokens of text that fit once special tokens and
+   prefix are taken out;
+2. without it, `max_input_tokens - special_tokens`;
+3. without either (an older worker), `max_input_tokens`, with a one-time
+   warning that such a chunk may still be split.
+
+`EMBEDDING_MAX_COMPLETION_TOKENS` lowers the result when it is smaller. A
+chunk of exactly `input_limit()` tokens, counted with the worker's tokenizer,
+embeds in one request.
 
 A worker that predates info parses the message as an embed request and
 answers `invalid_request`. The engine then logs one warning and uses the
@@ -154,7 +186,6 @@ has answered, so:
   which case the call raises `EmbeddingWorkerUnavailableError` and the outage is
   latched as below. This happens at most once per process when it succeeds.
 
-## Wire protocol
 ## Wire protocol
 
 Each embed request is the worker's `POST /v1/embed` body, with no AMQP `type`:
@@ -185,20 +216,43 @@ Token usage comes from `usage.prompt_tokens`.
 |---|---|
 | No broker, no queue, no consumer on the queue, a request the broker does not route or nacks, a broker under an alarm, or the worker's `unavailable` | Retried 7 times (8 attempts) with jittered backoff from 0.5 s to 8 s, 16–32 s in all. If every attempt fails, the error is **latched**: later calls fail at once after one readiness check without retries. The first check that finds a consumer releases the latch. |
 | The broker accepted the request and no reply came within the request timeout | Not resent, because the worker may still be running it. Readiness is checked again: if the worker is gone, the call fails as unavailable. Otherwise it fails with `EmbeddingWorkerTimeoutError`. |
-| `input_too_long` | A batch is split in halves. A single text `s` is split into the overlapping parts `s[:2t]` and `s[t:]`, where `t = len(s) // 3` characters; a part that is still too long is split again. The parts' vectors are averaged and L2-normalized, so the result is a unit vector like every vector the worker returns. When one part fails, the other is cancelled. A text too short to split (fewer than 3 characters) raises `EmbeddingContextWindowTooSmallError`. |
+| `input_too_long` | Recovered in one round trip (see "Over-long inputs" below). A text too short to split (fewer than 3 characters) raises `EmbeddingContextWindowTooSmallError`. |
 | `invalid_request` | `EmbeddingWorkerRejectedError`. Fails that call. Not retried. |
 | `internal`, an unknown code, or a malformed reply | `EmbeddingWorkerRuntimeError`. Fails that call. Not retried. |
-| The broker refuses the credentials | `EmbeddingWorkerUnauthorizedError`. Fatal and latched. |
+| The broker refuses the credentials, or refuses access (`ACCESS_REFUSED`) when the queue is declared or a request is published: the user lacks permissions on the vhost or queue | `EmbeddingWorkerUnauthorizedError`. Fatal and latched; not retried. |
 | The info's or a reply's `model` differs from `EXPECTED_MODEL` | `EmbeddingWorkerModelMismatchError`. Fatal and latched. |
 | The info's or a reply's `dimensions` differs from `EMBEDDING_DIMENSIONS` (or from the size adopted from the worker) | `EmbeddingWorkerDimensionsMismatchError`, naming both values. Fatal and latched. |
 | The worker answers the info request with `invalid_request` (it predates info) | One warning; the config is used. With `EMBEDDING_DIMENSIONS` unset, `EmbeddingWorkerConfigError`, fatal and latched. |
-| Missing or malformed settings, `http`/`grpc`, `EMBEDDING_BATCH_SIZE` over 256, or aio-pika not installed | `EmbeddingWorkerConfigError` when the engine is built (the RabbitMQ transport module is imported then). |
+| Missing or malformed settings, `http`/`grpc`, or aio-pika not installed | `EmbeddingWorkerConfigError` when the engine is built (the RabbitMQ transport module is imported then). |
+| `EMBEDDING_BATCH_SIZE` over 256 with a worker that has no info | `EmbeddingWorkerConfigError` on first contact. Fatal and latched. |
+
+### Over-long inputs
+
+The worker's `input_too_long` error lists every offending input
+(`inputs: [{"index", "chars", "tokens"}]`, `tokens` null for an input over the
+character limit). The engine splits exactly those inputs, each text `s` into
+the overlapping parts `s[:2t]` and `s[t:]` with `t = len(s) // 3` characters,
+and sends the request again once, with each listed input replaced by its two
+parts. If that no longer fits one request (`limits.max_inputs`), it goes out as
+several requests at once; when one fails, the others are cancelled. A part
+that is still too long is listed again in the next reply and split again. The
+two parts' vectors are averaged and L2-normalized, so every result is a unit
+vector like those the worker returns. Only the accepted requests count
+towards the token usage.
+
+A worker that does not list the inputs (it predates the list) gets the batch
+bisected instead, until each over-long text is alone in its request and split
+as above.
+
+### Connection and readiness
 
 Readiness is a passive declare of the queue that requires at least one
 consumer; the first successful check is followed by the info request. It runs
 before the first request and is cached for 30 s. Concurrent
 callers share one probe. Each event loop and endpoint has one broker
-connection, and the connection closes when the loop shuts down.
+connection, and the connection closes when the loop shuts down. When it has
+dropped, the callers that need it share one reconnect (and its outcome)
+instead of each waiting for a connect of its own in turn.
 
 The worker delivers at least once. Replies are matched by `correlation_id`, and
 a duplicate reply is dropped.
@@ -223,7 +277,9 @@ split-and-average rules. These differences remain:
 
 - Unit tests: `cognee/tests/unit/infrastructure/test_embedding_worker_*.py`.
   The broker tests in `test_embedding_worker_amqp.py` run only when
-  `COGNEE_EMBEDDING_WORKER_AMQP_TEST_URL` is set.
+  `COGNEE_EMBEDDING_WORKER_AMQP_TEST_URL` is set; the `ACCESS_REFUSED` one also
+  needs `COGNEE_EMBEDDING_WORKER_AMQP_TEST_RESTRICTED_URL`, a user without
+  permissions on the vhost.
 - End to end, against a broker and a real worker: `cognee/tests/e2e/embedding_worker/`
   (see its docstring). It is skipped unless `EMBEDDING_PROVIDER=embedding_worker`
   and `COGNEE_EMBEDDING_WORKER_ENDPOINT` are set.

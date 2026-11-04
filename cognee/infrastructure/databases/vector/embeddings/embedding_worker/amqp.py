@@ -60,10 +60,37 @@ def _raise_error_reply(body: bytes, endpoint_label: str) -> None:
     except (UnicodeDecodeError, json.JSONDecodeError):
         return
     if isinstance(data, dict) and isinstance(data.get("error"), dict):
-        code = data["error"].get("code")
-        message = data["error"].get("message") or ""
-        error_class = _ERROR_CODES.get(code, EmbeddingWorkerRuntimeError)
-        raise error_class(f"The embedding worker on {endpoint_label} answered {code}: {message}")
+        error = data["error"]
+        code = error.get("code")
+        message = f"The embedding worker on {endpoint_label} answered {code}: {error.get('message') or ''}"
+        if code == "input_too_long":
+            raise EmbeddingWorkerInputTooLongError(
+                message,
+                indices=_overlong_indices(error.get("inputs")),
+                max_input_tokens=_positive_int_or_none(error.get("max_input_tokens")),
+                max_text_chars=_positive_int_or_none(error.get("max_text_chars")),
+            )
+        raise _ERROR_CODES.get(code, EmbeddingWorkerRuntimeError)(message)
+
+
+def _overlong_indices(inputs: Any) -> list[int] | None:
+    """The indices in an ``input_too_long`` error's ``inputs``; None when absent or
+    malformed (an older worker), so the engine falls back to bisecting."""
+    if not isinstance(inputs, list) or not inputs:
+        return None
+    indices = []
+    for item in inputs:
+        index = item.get("index") if isinstance(item, dict) else None
+        if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+            return None
+        indices.append(index)
+    return sorted(set(indices))
+
+
+def _positive_int_or_none(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
 
 
 def reply_to_result(body: bytes, endpoint_label: str, expected_inputs: int) -> EmbedReply:
