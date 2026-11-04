@@ -50,6 +50,18 @@ Optional hooks: `extract_context_object_ids` (which nodes/edges fed a session an
 turn), `append_references` / `get_context_evidence` (`include_references=True`), and the
 class flags `supports_session_turn_preparation` / `supports_prompt_preview`.
 
+### Explicit typed graph scopes
+
+For `GRAPH_COMPLETION` with an explicit non-`NodeSet` `node_type` and `node_name`,
+triplet retrieval projects that graph scope before scoring vectors. On LanceDB
+(including subprocess mode), PGVector, Turso and Neptune Analytics, `score_by_ids`
+scores only its node and edge-type vectors, without an additional candidate cutoff.
+Unembedded graph members keep the usual missing-distance penalty. Neptune uses
+exact `CosineDistance` through `neptune.algo.vectors.distance.byEmbedding`, rather
+than its ANN top-k search. NodeSet, unscoped, vector-seeded neighbourhood searches
+and supplied memory fragments retain their existing paths. Community vector
+adapters without ID scoring also retain their existing path.
+
 ## Adding a retriever
 
 1. Subclass `BaseRetriever` (or `GraphCompletionRetriever` for a graph variant) in

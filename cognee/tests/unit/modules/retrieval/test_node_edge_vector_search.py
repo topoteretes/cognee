@@ -1,8 +1,10 @@
+from types import MethodType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 
 
@@ -13,6 +15,102 @@ class MockScoredResult:
         self.id = id
         self.score = score
         self.payload = payload or {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch", [False, True])
+async def test_id_scoring_reuses_embeddings_and_preserves_query_shapes(batch):
+    engine = AsyncMock()
+    vectors = [[1.0, 0.0], [0.0, 1.0]] if batch else [[1.0, 0.0]]
+    engine.embedding_engine.embed_text.return_value = vectors
+
+    async def score(collection_name, data_point_ids, query_vector):
+        if collection_name == "Missing_text":
+            raise CollectionNotFoundError("missing")
+        return [
+            MockScoredResult(point_id, query_vector[0] + index)
+            for index, point_id in enumerate(data_point_ids)
+        ]
+
+    engine.score_by_ids.side_effect = score
+    search = NodeEdgeVectorSearch(vector_engine=engine)
+    queries = ["first", "second"] if batch else ["first"]
+    await search.embed_and_retrieve_distances(
+        query=None if batch else queries[0],
+        query_batch=queries if batch else None,
+        collections=["Entity_name", search.edge_collection, "Missing_text", "Unrequested_text"],
+        ids_by_collection={
+            "Entity_name": ["far", "near"],
+            search.edge_collection: ["edge-type"],
+            "Missing_text": ["missing"],
+        },
+    )
+    engine.embedding_engine.embed_text.assert_awaited_once_with(queries)
+    engine.search.assert_not_awaited()
+    engine.batch_search.assert_not_awaited()
+    for call in engine.score_by_ids.call_args_list:
+        assert call.kwargs["collection_name"] != "Unrequested_text"
+        assert (
+            call.kwargs["data_point_ids"]
+            == {
+                "Entity_name": ["far", "near"],
+                search.edge_collection: ["edge-type"],
+                "Missing_text": ["missing"],
+            }[call.kwargs["collection_name"]]
+        )
+    nodes = search.node_distances["Entity_name"]
+    edges = search.edge_distances
+    if batch:
+        assert search.query_list_length == 2
+        assert [[row.id for row in rows] for rows in nodes] == [["far", "near"]] * 2
+        assert [[row.score for row in rows] for rows in nodes] == [[1.0, 2.0], [0.0, 1.0]]
+        assert [[row.id for row in rows] for rows in edges] == [["edge-type"]] * 2
+        assert search.node_distances["Missing_text"] == [[], []]
+        assert search.node_distances["Unrequested_text"] == [[], []]
+    else:
+        assert [row.id for row in nodes] == ["far", "near"]
+        assert [row.score for row in nodes] == [1.0, 2.0]
+        assert [row.id for row in edges] == ["edge-type"]
+        assert search.node_distances["Missing_text"] == []
+        assert search.node_distances["Unrequested_text"] == []
+
+
+@pytest.mark.asyncio
+async def test_optional_id_scoring_is_detected_before_search():
+    inherited = MethodType(VectorDBInterface.score_by_ids, object())
+    for engine in [SimpleNamespace(), SimpleNamespace(score_by_ids=inherited)]:
+        assert not await NodeEdgeVectorSearch(vector_engine=engine).supports_id_scoring()
+    assert await NodeEdgeVectorSearch(vector_engine=AsyncMock()).supports_id_scoring()
+
+
+@pytest.mark.asyncio
+async def test_optional_id_scoring_detection_survives_engine_leases():
+    from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
+
+    class Adapter:
+        score_by_ids = VectorDBInterface.score_by_ids
+
+    @closing_lru_cache(maxsize=1)
+    def cached():
+        return Adapter()
+
+    try:
+        assert not await NodeEdgeVectorSearch(vector_engine=cached()).supports_id_scoring()
+    finally:
+        cached.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_id_scoring_failure_does_not_retry_as_a_global_search():
+    engine = AsyncMock()
+    engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
+    engine.score_by_ids.side_effect = RuntimeError("store unavailable")
+    search = NodeEdgeVectorSearch(vector_engine=engine)
+    with pytest.raises(RuntimeError, match="store unavailable"):
+        await search.embed_and_retrieve_distances(
+            query="test", collections=["Entity_name"], ids_by_collection={"Entity_name": ["id"]}
+        )
+    engine.search.assert_not_awaited()
 
 
 @pytest.mark.asyncio

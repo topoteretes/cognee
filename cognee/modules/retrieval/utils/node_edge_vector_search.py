@@ -4,6 +4,7 @@ from typing import Any
 
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.modules.observability import COGNEE_VECTOR_COLLECTION, new_span
 from cognee.shared.logging_utils import ERROR, get_logger
 
@@ -33,6 +34,17 @@ class NodeEdgeVectorSearch:
                 raise RuntimeError("Initialization error") from e
         return self.vector_engine
 
+    async def supports_id_scoring(self) -> bool:
+        engine = await self._get_vector_engine()
+        # Engine leases wrap bound methods, but preserve the adapter's __class__.
+        if getattr(engine.__class__, "score_by_ids", None) is VectorDBInterface.score_by_ids:
+            return False
+        score_by_ids = getattr(engine, "score_by_ids", None)
+        return (
+            callable(score_by_ids)
+            and getattr(score_by_ids, "__func__", None) is not VectorDBInterface.score_by_ids
+        )
+
     async def embed_and_retrieve_distances(
         self,
         query: str | None = None,
@@ -41,8 +53,9 @@ class NodeEdgeVectorSearch:
         wide_search_limit: int | None = None,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
+        ids_by_collection: dict[str, list[str]] | None = None,
     ):
-        """Embeds query/queries and retrieves vector distances from all collections."""
+        """Embed queries and retrieve distances, optionally restricted to exact graph IDs."""
         if query is not None and query_batch is not None:
             raise ValueError("Cannot provide both 'query' and 'query_batch'; use exactly one.")
         if query is None and query_batch is None:
@@ -61,7 +74,12 @@ class NodeEdgeVectorSearch:
 
             start_time = time.time()
 
-            if query_batch is not None:
+            if ids_by_collection is not None:
+                self.query_list_length = len(query_batch) if query_batch is not None else None
+                search_results = await self._run_id_search(
+                    collections, query, query_batch, ids_by_collection
+                )
+            elif query_batch is not None:
                 self.query_list_length = len(query_batch)
                 span.set_attribute("cognee.vector.batch_size", len(query_batch))
                 search_results = await self._run_batch_search(collections, query_batch)
@@ -82,6 +100,40 @@ class NodeEdgeVectorSearch:
             span.set_attribute("cognee.vector.duration_ms", round(elapsed_time * 1000, 1))
 
             self.set_distances_from_results(collections, search_results, self.query_list_length)
+
+    async def _run_id_search(
+        self,
+        collections: list[str],
+        query: str | None,
+        query_batch: list[str] | None,
+        ids_by_collection: dict[str, list[str]],
+    ) -> list[list[Any]]:
+        engine = await self._get_vector_engine()
+        if query_batch is None:
+            await self._embed_query(query)
+            query_vectors = [self.query_vector]
+        else:
+            self.query_vector = None
+            query_vectors = await engine.embedding_engine.embed_text(query_batch)
+
+        async def score_collection(collection):
+            ids = ids_by_collection.get(collection, [])
+            results = []
+            for vector in query_vectors:
+                try:
+                    scores = (
+                        await engine.score_by_ids(
+                            collection_name=collection, data_point_ids=ids, query_vector=vector
+                        )
+                        if ids
+                        else []
+                    )
+                except CollectionNotFoundError:
+                    scores = []
+                results.append(scores)
+            return results if query_batch is not None else results[0]
+
+        return await asyncio.gather(*(score_collection(collection) for collection in collections))
 
     def has_results(self) -> bool:
         """Checks if any collections returned results."""
