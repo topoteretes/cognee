@@ -44,6 +44,7 @@ from cognee.context_global_variables import (
     set_database_global_context_variables,
 )
 from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.locks import (
     acquire_improve_lock_many,
@@ -124,27 +125,41 @@ async def _recorded_datasets(sessions: list[Session]) -> dict[Session, UUID]:
     return recorded
 
 
-async def _session_vector_datasets(sessions: list[Session]) -> dict[UUID, list[Session]]:
+async def _readable_datasets(user_id: UUID) -> list[Dataset]:
+    """The datasets ``user_id`` can read; none for a user that no longer exists.
+
+    ``session_records`` has no foreign key to ``users`` and deleting a user
+    leaves their rows, so a deleted user's session can still be found
+    through its dataset.
+    """
+    try:
+        owner = await get_user(user_id)
+    except EntityNotFoundError:
+        return []
+    return await get_all_user_permission_datasets(owner, "read")
+
+
+async def _session_vector_datasets(sessions: list[Session]) -> dict[UUID, set[Session]]:
     """The datasets whose vector stores may hold the sessions' Q&A vectors, with their sessions.
 
     For each session: every dataset its owner can read, which covers every
     dataset a recall of theirs searched, plus the dataset recorded on the
-    session row, in case read access has since been revoked. A dataset id
-    parsed from the client's session id is never trusted: it names a dataset
-    only if it is readable. Each owner's datasets are resolved once.
+    session row, in case read access has since been revoked or the owner
+    is gone. A dataset id parsed from the client's session id is never
+    trusted: it names a dataset only if it is readable. Each owner's
+    datasets are resolved once.
     """
-    targets: dict[UUID, list[Session]] = {}
+    targets: dict[UUID, set[Session]] = {}
     for user_id, session_ids in _by_owner(sessions).items():
-        readable = await get_all_user_permission_datasets(await get_user(user_id), "read")
-        for dataset in readable:
-            targets.setdefault(dataset.id, []).extend(
+        for dataset in await _readable_datasets(user_id):
+            targets.setdefault(dataset.id, set()).update(
                 (user_id, session_id) for session_id in session_ids
             )
     recorded = await _recorded_datasets(sessions)
     existing = await _existing_datasets(set(recorded.values()))
     for session, dataset_id in recorded.items():
-        if dataset_id in existing and session not in targets.get(dataset_id, []):
-            targets.setdefault(dataset_id, []).append(session)
+        if dataset_id in existing:
+            targets.setdefault(dataset_id, set()).add(session)
     return targets
 
 
@@ -208,7 +223,7 @@ async def delete_sessions(sessions: Iterable[Session]) -> int:
                 # The store resolves under the dataset's owner whoever enters
                 # (no permission check is asked for), so any session owner will do.
                 async with set_database_global_context_variables(
-                    dataset_id, dataset_sessions[0][0]
+                    dataset_id, next(iter(dataset_sessions))[0]
                 ):
                     await delete_session_qa_vectors(
                         (str(user_id), session_id) for user_id, session_id in dataset_sessions

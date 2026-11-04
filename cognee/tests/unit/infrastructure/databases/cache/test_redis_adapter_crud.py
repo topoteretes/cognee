@@ -74,7 +74,7 @@ class _InMemoryRedisList:
         self.ttls.clear()
         self.expire_calls.clear()
 
-    async def scan_iter(self, match: str):
+    async def scan_iter(self, match: str, count: int | None = None):
         """Redis MATCH with backslash escapes and ``*`` (all the adapter uses)."""
         pattern, escaped = "", False
         for char in match:

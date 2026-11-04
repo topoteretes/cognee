@@ -259,3 +259,59 @@ async def test_forget_everything_deletes_every_session_in_one_batch(cache):
         (str(USER_A), "a3"),
         (str(USER_B), "b_shared"),
     }
+
+
+@pytest.mark.asyncio
+async def test_forget_everything_deletes_a_session_whose_owner_no_longer_exists(cache):
+    """A deleted user leaves their session_records rows (no foreign key). Their session on a
+    deletable dataset still goes whole, and the missing owner never aborts the forget."""
+    from contextlib import asynccontextmanager
+
+    from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+
+    await _seed_session(cache, USER_A, "a_own")
+    await _seed_session(cache, USER_B, "b_shared")
+    manager = SessionManager(cache)
+    patches = _patches(
+        manager,
+        session_pairs_by_owner={USER_A: [(USER_A, "a_own")]},
+        dataset_pairs={DATASET_SHARED: [(USER_B, "b_shared")]},
+        deletable_datasets=[SimpleNamespace(id=DATASET_SHARED)],
+    )
+    user_a = SimpleNamespace(id=USER_A)
+
+    async def get_user(user_id):
+        if user_id == USER_B:
+            raise EntityNotFoundError(message=f"Could not find user: {user_id}")
+        return user_a
+
+    entered = []
+
+    @asynccontextmanager
+    async def dataset_context(dataset_id, user_id):
+        entered.append(dataset_id)
+        yield
+
+    dataset_detag = AsyncMock()
+    module = "cognee.modules.session_lifecycle.delete_session"
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        for target, value in {
+            "backend_access_control_enabled": lambda: True,
+            "get_user": get_user,
+            "get_all_user_permission_datasets": AsyncMock(return_value=[]),
+            "_recorded_datasets": AsyncMock(return_value={(USER_B, "b_shared"): DATASET_SHARED}),
+            "_existing_datasets": AsyncMock(return_value={DATASET_SHARED}),
+            "set_database_global_context_variables": dataset_context,
+            "delete_session_qa_vectors": dataset_detag,
+        }.items():
+            stack.enter_context(patch(f"{module}.{target}", value))
+        result = await forget_module._forget_everything(user_a)
+
+    assert result["status"] == "success"
+    assert result["sessions_removed"] == 2
+    assert await _session_counts(cache, USER_B, "b_shared") == (0, 0, 0)
+    # The recorded dataset's store is still detagged for the deleted owner's session.
+    assert entered == [DATASET_SHARED]
+    assert set(dataset_detag.await_args.args[0]) == {(str(USER_B), "b_shared")}

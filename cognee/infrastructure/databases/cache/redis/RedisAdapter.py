@@ -507,9 +507,10 @@ class RedisAdapter(CacheDBInterface):
         ]
         session_ids: set[str] = set()
         try:
-            # SCAN walks the whole keyspace whatever MATCH says, so one walk for all three kinds.
+            # SCAN walks the whole keyspace whatever MATCH says, so one walk for all three
+            # kinds; count is keys per round trip (default 10), not a cap on the result.
             match = "*:" + _escape_glob(f"{user_id}:") + "*"
-            async for key in self.async_redis.scan_iter(match=match):
+            async for key in self.async_redis.scan_iter(match=match, count=1000):
                 key = key.decode() if isinstance(key, bytes) else key
                 for prefix in prefixes:
                     if key.startswith(prefix):
