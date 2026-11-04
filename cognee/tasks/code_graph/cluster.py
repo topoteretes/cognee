@@ -540,7 +540,6 @@ def _cluster_run(dataset_id: UUID, run_id: Any) -> _ClusterRun:
 async def load_dataset_cluster(
     ctx: Optional["PipelineContext"],
     batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-    graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> bool:
     """Load the whole cluster of the dataset a CODE_REPO item belongs to.
 
@@ -577,7 +576,6 @@ async def load_dataset_cluster(
                     snapshot,
                     ctx,
                     batch_size=batch_size,
-                    graph_read_batch_size=graph_read_batch_size,
                 )
         except Exception as error:
             # An enola or member-load failure: the run's later rows re-raise
@@ -594,7 +592,6 @@ async def _load_cluster_members(
     snapshot: DatasetCodeSnapshot,
     ctx: "PipelineContext",
     batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-    graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> None:
     """Load every member of a cluster snapshot, one at a time, each under its own Data row.
 
@@ -617,6 +614,5 @@ async def _load_cluster_members(
             node_set=code_repo_node_set(member.data),
             snapshot=snapshot.parsed,
             batch_size=batch_size,
-            graph_read_batch_size=graph_read_batch_size,
         )
         logger.info("Code repo graph extracted for %s (%s).", member.repo_path, member.label)

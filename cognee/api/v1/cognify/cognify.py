@@ -50,7 +50,11 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME
 from cognee.tasks.code_graph.code_files import get_code_file_tasks
 from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
-from cognee.tasks.code_graph.config import CodeGraphConfig, validate_codegraph_config
+from cognee.tasks.code_graph.config import (
+    CodeGraphConfig,
+    requests_codegraph_options,
+    validate_codegraph_config,
+)
 from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
@@ -279,8 +283,9 @@ async def cognify(
                  run builds (CODE and CODE_REPO routes), as a ``CodeGraphConfig``.
                  cognify() reads ``batch_size``: nodes per snapshot batch and per
                  graph write (default 2000). A larger value holds more of the
-                 snapshot in memory at once and makes fewer writes. Not supported
-                 while connected to a remote instance.
+                 snapshot in memory at once and makes fewer writes. A batch_size
+                 other than the default is not supported while connected to a
+                 remote instance.
         summary_method: How the standard pipeline writes each chunk's summary. "llm"
                  makes one LLM call per chunk; "from_extraction" joins the chunk's
                  extracted types and relation texts with no LLM call, and a chunk
@@ -438,9 +443,9 @@ async def cognify(
                 "extractor is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the extractor locally."
             )
-        if codegraph:
+        if requests_codegraph_options(codegraph):
             # client.cognify() has no codegraph_config field; the remote would
-            # silently use its own batch size, so an explicit choice has to raise.
+            # silently use its own batch size, so a non-default one has to raise.
             raise ValueError(
                 "codegraph_config is not supported by cognify() while connected to a "
                 "remote Cognee instance. Call cognee.disconnect() to cognify locally."

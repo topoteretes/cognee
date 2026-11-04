@@ -98,7 +98,6 @@ async def extract_code_files_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
     code_graph_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-    graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> list:
     """Cognify CODE-route adapter: run the enola pipeline on stored code files.
 
@@ -130,7 +129,6 @@ async def extract_code_files_graph(
                 repo_path=repo_dir,
                 ctx=ctx,
                 batch_size=code_graph_batch_size,
-                graph_read_batch_size=graph_read_batch_size,
             )
 
         logger.info(

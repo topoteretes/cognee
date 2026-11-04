@@ -432,7 +432,6 @@ async def extract_code_repo_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
     code_graph_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-    graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> list:
     """Cognify CODE_REPO-route adapter: one enola run over the whole project.
 
@@ -479,9 +478,7 @@ async def extract_code_repo_graph(
                 "its current location."
             )
 
-        if await load_dataset_cluster(
-            ctx, batch_size=code_graph_batch_size, graph_read_batch_size=graph_read_batch_size
-        ):
+        if await load_dataset_cluster(ctx, batch_size=code_graph_batch_size):
             continue
 
         await load_code_graph(
@@ -489,7 +486,6 @@ async def extract_code_repo_graph(
             ctx=ctx,
             node_set=code_repo_node_set(data_item),
             batch_size=code_graph_batch_size,
-            graph_read_batch_size=graph_read_batch_size,
         )
 
         logger.info("Code repo graph extracted for %s (%s).", repo_path, data_item.id)

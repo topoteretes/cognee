@@ -231,7 +231,7 @@ async def test_delta_write_skips_unchanged_facts(tmp_path, monkeypatch):
         (str(by_name["app/api.handler"].id), {"fact_hash": "sha256:outdated"}),
     ]
     engine = _mock_engine(monkeypatch, existing_nodes, [])
-    load = _CodeGraphLoad(graph_state=await _read_code_graph_state(engine, 2000))
+    load = _CodeGraphLoad(graph_state=await _read_code_graph_state(engine))
 
     await add_code_graph_data_points(data_points, load)
 

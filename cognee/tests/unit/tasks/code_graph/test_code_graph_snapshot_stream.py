@@ -117,8 +117,10 @@ async def test_batches_of_batch_size_then_one_end_marker(tmp_path, monkeypatch, 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("batch_size", [0, -1])
 async def test_a_non_positive_batch_size_raises_before_anything_runs(tmp_path, batch_size):
+    # Validated once, at the load's boundary: before the snapshot is even opened
+    # (tmp_path holds none, which would raise EnolaSnapshotError instead).
     with pytest.raises(ValueError, match="batch_size must be >= 1"):
-        await _stream(snapshot_dir=tmp_path, batch_size=batch_size)
+        await load_code_graph(snapshot_dir=tmp_path, batch_size=batch_size)
 
 
 @pytest.mark.asyncio
@@ -157,12 +159,19 @@ async def test_the_graph_is_read_once_and_the_edge_step_runs_once_after_the_last
     async def add_nodes(nodes):
         events.append(("stamp", [node.name for node in nodes]))
 
-    async def read(stream_engine, batch_size):
-        events.append(("read", batch_size))
-        return await original_read(stream_engine, batch_size)
+    async def read(stream_engine):
+        events.append(("read", len(events)))
+        return await original_read(stream_engine)
+
+    async def edge_step(end, load, **kwargs):
+        # The node delta is done: no fact hash is held through the edge step.
+        events.append(("hashes at the edge step", len(load.graph_state.existing_hashes)))
+        return await original_edge_step(end, load, **kwargs)
 
     original_read = extract_module._read_code_graph_state
+    original_edge_step = extract_module.add_code_graph_edges
     monkeypatch.setattr(extract_module, "_read_code_graph_state", read)
+    monkeypatch.setattr(extract_module, "add_code_graph_edges", edge_step)
     monkeypatch.setattr(storage_module, "add_data_points", write)
     engine.add_edges.side_effect = add_edges
     engine.add_nodes.side_effect = add_nodes
@@ -171,14 +180,14 @@ async def test_the_graph_is_read_once_and_the_edge_step_runs_once_after_the_last
         repo_path=REPO_PATH,
         snapshot_dir=_write_snapshot(tmp_path),
         batch_size=2,
-        graph_read_batch_size=7,
     )
 
     assert events == [
-        ("read", 7),
+        ("read", 0),
         ("write", 2),
         ("write", 2),
         ("write", 2),
+        ("hashes at the edge step", 0),
         ("edges", 2),
         ("edges", 2),
         ("edges", 1),

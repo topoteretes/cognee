@@ -311,10 +311,8 @@ async def test_member_skip_check_reads_its_own_repository_node(monkeypatch, tmp_
     engine.get_node.assert_awaited_once_with(str(fact_node_id("ui", "repository", "ui")))
 
 
-async def _load_member(snapshot_dir, repo_scope, tmp_path, **batch_sizes):
-    await load_code_graph(
-        repo_path=tmp_path, snapshot_dir=snapshot_dir, repo_scope=repo_scope, **batch_sizes
-    )
+async def _load_member(snapshot_dir, repo_scope, tmp_path):
+    await load_code_graph(repo_path=tmp_path, snapshot_dir=snapshot_dir, repo_scope=repo_scope)
 
 
 def _written_edges(engine):
@@ -361,9 +359,9 @@ async def test_edge_into_a_member_not_loaded_yet_waits_for_that_member(monkeypat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("graph_read_batch_size", [1, 2000])
+@pytest.mark.parametrize("page_size", [1, 2000])
 async def test_member_known_ids_do_not_depend_on_the_read_page_size(
-    monkeypatch, tmp_path, graph_read_batch_size
+    monkeypatch, tmp_path, page_size
 ):
     """The other member's nodes count as loaded whatever the stream's page size."""
     snapshot_dir = _write_snapshot(tmp_path)
@@ -376,7 +374,8 @@ async def test_member_known_ids_do_not_depend_on_the_read_page_size(
     chunk = ("chunk-1", {"type": "DocumentChunk", "text": "x" * 10_000})
     engine = _mock_engine(monkeypatch, nodes=[chunk, *ui_nodes])
 
-    await _load_member(snapshot_dir, "golf", tmp_path, graph_read_batch_size=graph_read_batch_size)
+    monkeypatch.setattr(extract_module, "DEFAULT_GRAPH_STREAM_BATCH_SIZE", page_size)
+    await _load_member(snapshot_dir, "golf", tmp_path)
 
     written = _written_edges(engine)
     assert REACHES in written

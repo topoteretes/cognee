@@ -84,3 +84,31 @@ async def test_cognify_rejects_a_bad_batch_size_before_touching_anything(monkeyp
 
     with pytest.raises(ValueError, match="must be >= 1"):
         await cognify_module.cognify(codegraph_config={"batch_size": 0})
+
+
+def test_only_a_non_default_batch_size_requests_options():
+    from cognee.tasks.code_graph.config import requests_codegraph_options
+
+    assert requests_codegraph_options(None) is False
+    assert requests_codegraph_options({}) is False
+    assert requests_codegraph_options({"batch_size": DEFAULT_GRAPH_STREAM_BATCH_SIZE}) is False
+    assert requests_codegraph_options({"batch_size": 1}) is True
+
+
+@pytest.mark.asyncio
+async def test_a_remote_instance_rejects_only_a_non_default_batch_size(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    cognify_module = importlib.import_module("cognee.api.v1.cognify.cognify")
+    client = MagicMock()
+    client.cognify = AsyncMock(return_value={"remote": True})
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: client)
+
+    # Restating the default asks for nothing the remote would not do anyway.
+    result = await cognify_module.cognify(codegraph_config={"batch_size": 2000})
+    assert result == {"remote": True}
+
+    with pytest.raises(ValueError, match="codegraph_config is not supported"):
+        await cognify_module.cognify(codegraph_config={"batch_size": 1})
+    client.cognify.assert_awaited_once()

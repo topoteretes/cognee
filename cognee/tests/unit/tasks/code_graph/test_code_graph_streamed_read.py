@@ -26,6 +26,7 @@ graph_engine_module = importlib.import_module(
     "cognee.infrastructure.databases.graph.get_graph_engine"
 )
 code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
+extract_module = importlib.import_module("cognee.tasks.code_graph.extract_code_graph")
 add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
 
 REPO = "demo_repo"
@@ -165,7 +166,8 @@ async def _load(tmp_path, monkeypatch, **batch_sizes):
 @pytest.mark.asyncio
 async def test_read_page_size_changes_no_outcome(tmp_path, monkeypatch):
     default = await _load(tmp_path, monkeypatch)
-    one_row_pages = await _load(tmp_path, monkeypatch, graph_read_batch_size=1)
+    monkeypatch.setattr(extract_module, "DEFAULT_GRAPH_STREAM_BATCH_SIZE", 1)
+    one_row_pages = await _load(tmp_path, monkeypatch)
 
     for key in ("edges_added", "nodes_deleted", "edges_deleted", "tags_removed", "delta"):
         assert one_row_pages[key] == default[key], key
@@ -190,7 +192,8 @@ async def test_read_page_size_changes_no_outcome(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_state_keeps_no_chunk_content_or_chunk_edges(monkeypatch):
-    state = await _read_code_graph_state(_mock_engine(monkeypatch), 2)
+    monkeypatch.setattr(extract_module, "DEFAULT_GRAPH_STREAM_BATCH_SIZE", 2)
+    state = await _read_code_graph_state(_mock_engine(monkeypatch))
 
     kept_types = {properties.get("type") for _node_id, properties in state.existing_nodes}
     assert kept_types == {"CodeRepository", "CodeSymbol", "NodeSet"}
@@ -224,11 +227,13 @@ async def test_node_write_is_sliced_repository_first(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("sizes", [{"batch_size": 0}, {"graph_read_batch_size": 0}])
-async def test_non_positive_batch_size_raises_before_reading(tmp_path, monkeypatch, sizes):
+@pytest.mark.parametrize("batch_size", [0, -1])
+async def test_non_positive_batch_size_raises_before_reading(tmp_path, monkeypatch, batch_size):
     engine = _mock_engine(monkeypatch)
 
     with pytest.raises(ValueError, match="batch_size must be >= 1"):
-        await load_code_graph(repo_path=REPO_PATH, snapshot_dir=_write_snapshot(tmp_path), **sizes)
+        await load_code_graph(
+            repo_path=REPO_PATH, snapshot_dir=_write_snapshot(tmp_path), batch_size=batch_size
+        )
     engine.get_graph_data.assert_not_awaited()
     engine.get_node.assert_not_awaited()

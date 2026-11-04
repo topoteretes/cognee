@@ -326,9 +326,12 @@ class EnolaSnapshot:
     are small. ``iter_facts`` then reads facts.jsonl again, line by line, on
     every call: the facts in snapshot order, then the synthesized ones, the
     order ``parse_enola_snapshot`` returns them in.
+
+    ``keep`` collects the facts of that first read, for a caller that holds
+    them anyway (``parse_enola_snapshot``), so facts.jsonl is read once.
     """
 
-    def __init__(self, snapshot_dir: str | Path) -> None:
+    def __init__(self, snapshot_dir: str | Path, keep: list | None = None) -> None:
         self.snapshot_dir = Path(snapshot_dir)
         self._facts_path = self.snapshot_dir / "facts.jsonl"
         if not self._facts_path.is_file():
@@ -338,6 +341,8 @@ class EnolaSnapshot:
         repos: set[str] = set()
         for fact in _read_fact_lines(self._facts_path, warn=True):
             line_count += 1
+            if keep is not None:
+                keep.append(fact)
             repo = fact.get("repo")
             if isinstance(repo, str) and repo:
                 repos.add(repo)
@@ -347,8 +352,8 @@ class EnolaSnapshot:
 
         insight_facts = _synthesize_insight_facts(self.snapshot_dir)
         flow_facts = _synthesize_flow_facts(self.snapshot_dir, repos, self.receipt)
-        self._synthesized = insight_facts + flow_facts
-        self.fact_count = line_count + len(self._synthesized)
+        self.synthesized = insight_facts + flow_facts
+        self.fact_count = line_count + len(self.synthesized)
         logger.info(
             "Parsed %d fact(s) (%d from insights.json, %d from flows.json) from %s",
             self.fact_count,
@@ -360,7 +365,7 @@ class EnolaSnapshot:
     def iter_facts(self) -> Iterator[dict]:
         """Read every fact again, facts.jsonl line by line, then the synthesized ones."""
         yield from _read_fact_lines(self._facts_path, warn=False)
-        yield from self._synthesized
+        yield from self.synthesized
 
 
 def parse_enola_snapshot(
@@ -372,8 +377,9 @@ def parse_enola_snapshot(
     unparseable receipt.json is not fatal. Findings from insights.json and
     flows from flows.json follow as synthesized facts. Returns (facts, receipt).
     """
-    snapshot = EnolaSnapshot(snapshot_dir)
-    return list(snapshot.iter_facts()), snapshot.receipt
+    facts: list = []
+    snapshot = EnolaSnapshot(snapshot_dir, keep=facts)
+    return facts + snapshot.synthesized, snapshot.receipt
 
 
 def _read_fact_lines(facts_path: Path, warn: bool) -> Iterator[dict]:

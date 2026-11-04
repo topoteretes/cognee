@@ -1,6 +1,11 @@
 """Per-call options for the code graph routes (CODE and CODE_REPO)."""
 
+from collections.abc import Mapping
 from typing import TypedDict, cast
+
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    DEFAULT_GRAPH_STREAM_BATCH_SIZE,
+)
 
 
 class CodeGraphConfig(TypedDict, total=False):
@@ -47,3 +52,16 @@ def validate_codegraph_config(codegraph_config: CodeGraphConfig | None) -> CodeG
         if value < 1:
             raise ValueError(f"codegraph_config[{key!r}] must be >= 1, got {value}.")
     return cast(CodeGraphConfig, config)
+
+
+def requests_codegraph_options(codegraph_config: Mapping[str, object] | None) -> bool:
+    """Whether the config asks for anything beyond the defaults.
+
+    The default is ``batch_size=2000`` (``DEFAULT_GRAPH_STREAM_BATCH_SIZE``),
+    so a config that only restates it changes nothing and must not trip the
+    checks that reject codegraph options on other paths.
+    """
+    config = codegraph_config or {}
+    return config.get("batch_size", DEFAULT_GRAPH_STREAM_BATCH_SIZE) != (
+        DEFAULT_GRAPH_STREAM_BATCH_SIZE
+    )

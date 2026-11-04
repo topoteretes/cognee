@@ -850,10 +850,9 @@ async def extract_code_graph(
     the cluster's snapshot and repo_path the member's directory): the skip
     check reads that member's repository node and only its facts are mapped.
     ``snapshot`` is that snapshot already parsed (a cluster load parses it
-    once for all its members); it stands in for snapshot_dir.
+    once for all its members); it stands in for snapshot_dir. ``batch_size``
+    is validated by ``load_code_graph``.
     """
-    if batch_size < 1:
-        raise ValueError("batch_size must be >= 1")
     # When used as the first pipeline task, the pipeline payload arrives as the
     # first positional argument; accept a repo path there, ignore anything else.
     if repo_path is None and isinstance(data, (str, Path)):
@@ -1041,8 +1040,10 @@ class _CodeGraphState:
         self.existing_edge_keys: set[tuple[str, str, str]] = set()
 
 
-async def _read_code_graph_state(graph_engine, batch_size: int) -> _CodeGraphState:
+async def _read_code_graph_state(graph_engine) -> _CodeGraphState:
     """Read the graph a page at a time, keeping only what the code graph load reads.
+
+    Pages are ``DEFAULT_GRAPH_STREAM_BATCH_SIZE`` rows.
 
     The stream is drained completely before the caller writes anything: the
     node delta, edge diff and sweep compare against the graph as it was, and
@@ -1053,7 +1054,9 @@ async def _read_code_graph_state(graph_engine, batch_size: int) -> _CodeGraphSta
     retained_types = code_types | {NodeSet.__name__}
     code_node_ids: set[str] = set()
     state = _CodeGraphState()
-    async for nodes, edges in graph_engine.stream_graph_data(batch_size=batch_size):
+    async for nodes, edges in graph_engine.stream_graph_data(
+        batch_size=DEFAULT_GRAPH_STREAM_BATCH_SIZE
+    ):
         for node_id, properties in nodes:
             node_id = str(node_id)
             state.existing_node_ids.add(node_id)
@@ -1107,16 +1110,14 @@ async def load_code_graph(
     snapshot: ParsedSnapshot | None = None,
     graph_only: bool = True,
     batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
-    graph_read_batch_size: int = DEFAULT_GRAPH_STREAM_BATCH_SIZE,
 ) -> Any:
     """Load one repository's code graph: the one driver of the code graph steps.
 
     ``extract_code_graph`` streams the snapshot's DataPoints ``batch_size`` at
     a time; each batch is stored by ``add_code_graph_data_points``, and the
     ``_SnapshotEnd`` after the last one runs ``add_code_graph_edges`` once.
-    Before the first write the graph is read once (a stream of
-    ``graph_read_batch_size`` rows a page), and every step compares against
-    that read: nothing this load writes can show up in it. An unchanged
+    Before the first write the graph is read once, and every step compares
+    against that read: nothing this load writes can show up in it. An unchanged
     snapshot yields nothing, so nothing is read or written. A larger
     ``batch_size`` holds more of the snapshot at once and makes fewer writes.
 
@@ -1126,8 +1127,6 @@ async def load_code_graph(
 
     if batch_size < 1:
         raise ValueError("batch_size must be >= 1")
-    if graph_read_batch_size < 1:
-        raise ValueError("graph_read_batch_size must be >= 1")
 
     load: _CodeGraphLoad | None = None
     async for item in extract_code_graph(
@@ -1142,10 +1141,11 @@ async def load_code_graph(
     ):
         if load is None:
             graph_engine = await get_graph_engine()
-            load = _CodeGraphLoad(
-                graph_state=await _read_code_graph_state(graph_engine, graph_read_batch_size)
-            )
+            load = _CodeGraphLoad(graph_state=await _read_code_graph_state(graph_engine))
         if isinstance(item, _SnapshotEnd):
+            # The fact hashes are read by the node delta only: none is alive
+            # through the edge step.
+            load.graph_state.existing_hashes.clear()
             await add_code_graph_edges(
                 item, load, ctx=ctx, node_set=node_set, batch_size=batch_size
             )
@@ -1238,9 +1238,6 @@ async def add_code_graph_edges(
     edges were resolved once for all members and are only batched.
     """
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
-
-    if batch_size < 1:
-        raise ValueError("batch_size must be >= 1")
 
     repo_scope = end.repo_scope
     graph_state = load.graph_state
