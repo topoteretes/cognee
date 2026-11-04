@@ -665,7 +665,7 @@ COGNEE_EMBEDDING_WORKER_ENDPOINT="amqp://guest:guest@localhost:5672/%2f"
 [embedding worker](https://github.com/topoteretes/embedding-worker) queue with the
 remote GLiNER client's RabbitMQ RPC (`cognee/infrastructure/remote_worker/`, shared):
 direct reply-to, publisher confirms, readiness = a consumer on the queue (cached 30 s),
-followed by a `type=info` request for the worker's model info (vector size,
+then (once, and again after a released outage) a `type=info` request for the worker's model info (vector size,
 `max_input_tokens`, `limits.max_inputs`; an older worker without it falls back to the
 config), `unavailable` retried 8 times, timeouts not resent, fatal errors (exhausted
 outage, credentials, `COGNEE_EMBEDDING_WORKER_EXPECTED_MODEL`, `EMBEDDING_DIMENSIONS`

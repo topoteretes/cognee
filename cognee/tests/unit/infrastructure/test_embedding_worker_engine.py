@@ -290,7 +290,7 @@ def test_mock_embedding_needs_configured_dimensions(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_info_is_fetched_after_readiness_and_cached_with_it():
+async def test_info_is_fetched_once_after_the_first_probe_and_kept():
     clock = Clock()
     transport = FakeTransport()
     engine = make_engine(transport, clock=clock)
@@ -298,9 +298,54 @@ async def test_info_is_fetched_after_readiness_and_cached_with_it():
     await engine.embed_text(["b"])
     assert (transport.probes, transport.info_requests) == (1, 1)
     assert engine.worker_info == worker_info()
-    clock.now += READINESS_TTL_SECS
-    await engine.embed_text(["c"])
+    for _ in range(3):  # later probes do not ask again: info would queue behind the backlog
+        clock.now += READINESS_TTL_SECS
+        await engine.embed_text(["c"])
+    assert (transport.probes, transport.info_requests) == (4, 1)
+
+
+@pytest.mark.asyncio
+async def test_info_is_fetched_again_when_a_latched_outage_is_released():
+    state: dict[str, Any] = {"ready": None, "info": worker_info()}
+    transport = FakeTransport(ready=lambda: state["ready"], info=lambda: state["info"])
+    engine = make_engine(transport, dimensions=None, max_completion_tokens=None)
+    await engine.embed_text(["a"])
+    assert transport.info_requests == 1
+
+    state["ready"] = EmbeddingWorkerUnavailableError("no consumer")
+    with pytest.raises(EmbeddingWorkerUnavailableError):
+        await engine._ready(fresh=True)  # the outage outlives its retries
+    engine._latch(EmbeddingWorkerUnavailableError("no consumer"))
+
+    # Another worker comes back, with other limits: its info is asked for.
+    state["ready"] = None
+    state["info"] = worker_info(max_inputs=1)
+    await engine.embed_text(["b", "c"])
+    assert transport.info_requests == 2
+    assert engine.get_batch_size() == 1
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_info_reply_fails_readiness():
+    answers: list[Any] = [EmbeddingWorkerRuntimeError("info lacks dimensions")]
+    transport = FakeTransport(info=lambda: answers.pop(0) if answers else worker_info())
+    engine = make_engine(transport)
+    with pytest.raises(EmbeddingWorkerRuntimeError, match="info"):
+        await engine.embed_text(["x"])
+    assert transport.requests == []
+    # Not latched and not cached as ready: the next call probes and asks again.
+    assert (await engine.embed_text(["y"]))[0] == vector_for("y")
     assert (transport.probes, transport.info_requests) == (2, 2)
+
+
+@pytest.mark.asyncio
+async def test_an_info_outage_that_outlives_its_retries_fails_readiness_and_is_latched():
+    transport = FakeTransport(info=lambda: EmbeddingWorkerUnavailableError("loading"))
+    engine = make_engine(transport)
+    with pytest.raises(EmbeddingWorkerUnavailableError):
+        await engine.embed_text(["x"])
+    assert transport.info_requests == 3 and transport.requests == []
+    assert isinstance(engine._failure, EmbeddingWorkerUnavailableError)
 
 
 @pytest.mark.asyncio
@@ -377,15 +422,15 @@ async def test_configured_dimensions_that_differ_from_the_info_are_fatal():
 
 @pytest.mark.asyncio
 async def test_a_worker_whose_size_changes_after_it_was_learned_is_fatal():
-    clock = Clock()
-    info = {"value": worker_info()}
-    transport = FakeTransport(info=lambda: info["value"])
-    engine = make_engine(transport, dimensions=None, clock=clock)
+    # The info is not asked for again; the swapped worker's replies give it away.
+    state = {"dimensions": DIMS}
+    transport = FakeTransport(lambda payload: reply_for(payload, dimensions=state["dimensions"]))
+    engine = make_engine(transport, dimensions=None)
     await engine.embed_text(["x"])
-    info["value"] = worker_info(dimensions=DIMS * 2)
-    clock.now += READINESS_TTL_SECS
+    state["dimensions"] = DIMS * 2
     with pytest.raises(EmbeddingWorkerDimensionsMismatchError, match="first learned"):
         await engine.embed_text(["y"])
+    assert transport.info_requests == 1
 
 
 @pytest.mark.asyncio
@@ -459,7 +504,7 @@ async def test_a_worker_without_info_falls_back_to_the_config_and_warns_once(cap
         clock.now += READINESS_TTL_SECS
         await engine.embed_text(["e"])
     assert caplog.text.count("does not report its model info") == 1
-    assert transport.info_requests == 2  # asked again with every readiness probe
+    assert transport.info_requests == 2  # no info cached: asked again on the next probe
     assert engine.worker_info is None and engine.get_batch_size() == 3
     assert [len(payload["inputs"]) for payload, _ in transport.requests] == [3, 1, 1]
 
