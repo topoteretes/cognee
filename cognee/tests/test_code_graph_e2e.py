@@ -9,7 +9,11 @@ relation edges into a real graph store, reading them back through the CODE
 retriever with dataset scoping, idempotent re-ingestion, and teardown.
 
 Verifies:
-- remember(content_type="code") ingests the repo and reports a completed run
+- remember(<repo dir>, codegraph_config={"include_documents": False}) stores
+  the repo as one code_repo row, cognify's CODE_REPO route builds it under
+  cognify_pipeline, the result reports a completed run with one
+  kind="code_repository" item carrying the row's id, and no automatic improve
+  runs (SDK-793)
 - the graph holds ONLY the typed enola models (CodeRepository, CodeModule,
   CodeSymbol, ...) — no generic Node / Entity / DocumentChunk / TextSummary
 - known files, symbols, modules, dependencies and typed relations
@@ -17,9 +21,14 @@ Verifies:
 - SearchType.CODE known-answer queries (query_facts, find_path,
   impact_analysis) through both search() and recall()
 - re-ingesting the unchanged repo is a no-op (same node/edge counts, same
-  snapshot id)
+  snapshot id, same data id); a changed repo refreshes its row and graph
 - every remembered repository is one Data row whose id the result carries, and
-  forget(data_id=...) removes exactly that repository's graph (SDK-783)
+  forget(data_id=...) removes exactly that repository's graph (SDK-783); a
+  second repository in the dataset is built from one cluster snapshot
+- the deprecated code_graph_pipeline status name still reports the build
+- with codegraph_config={"treat_as_repository": True}, a directory with no
+  project marker and no .git is still ONE code_repo item
+- remember(<repo>, content_type="code") warns and still builds the graph
 - add(<project dir>) + cognify() routes the repo down the CODE_REPO route and
   produces the same typed graph
 - forget(everything=True) leaves no datasets or graph state behind
@@ -35,16 +44,19 @@ import os
 import pathlib
 import shutil
 import tempfile
+import warnings
 from uuid import UUID
 
 import cognee
 from cognee import SearchType
-from cognee.api.v1.datasets.datasets import datasets
+from cognee.api.v1.datasets.datasets import datasets, get_processing_status_with_legacy_alias
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.llm.config import get_llm_config
 from cognee.modules.data.methods.get_dataset_processing_status import (
     get_dataset_processing_status,
 )
+from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.retrieval.code_retriever import CODE_NODE_TYPES
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -60,6 +72,15 @@ FIXTURE_DIR = TESTS_DIR / "test_data" / "code_repo_fixture"
 
 REMEMBER_DATASET = "code_graph_e2e_remember"
 COGNIFY_DATASET = "code_graph_e2e_cognify"
+MIXED_DATASET = "code_graph_e2e_mixed"
+LEGACY_DATASET = "code_graph_e2e_legacy"
+
+# What makes a directory a code project on its own; the markerless step strips them.
+PROJECT_MARKERS = ("pyproject.toml", ".git")
+# Only the code graph: the fixture's README would otherwise go to the LLM
+# pipeline whenever an LLM key happens to be configured.
+CODE_ONLY = {"include_documents": False}
+DECLARED_CODE_ONLY = {"treat_as_repository": True, "include_documents": False}
 
 # --- Known answers, pinned to the fixture + ENOLA_PINNED_VERSION ------------
 # If enola is bumped and these change, update them deliberately. Last
@@ -350,10 +371,33 @@ def _single_code_payload(result, dataset_name: str):
     return payload
 
 
+def _assert_repository_items(result, expected: int) -> None:
+    """Every item of a repository remember is a code_repository with a data id."""
+    assert result.status == "completed", (
+        f"remember() did not complete: {result.status} {result.error}"
+    )
+    assert result.items_processed == expected, result.items
+    assert [item["kind"] for item in result.items] == ["code_repository"] * expected, result.items
+    assert all(
+        item.get("id") and item.get("source") and item.get("path") for item in result.items
+    ), result.items
+    assert result.pipeline_run_id, "remember() reported no pipeline_run_id"
+    # An all-repository remember runs no automatic improve: nothing to enrich.
+    assert result.improve is None and result.improve_error is None, (
+        result.improve,
+        result.improve_error,
+    )
+
+
 # --- Scenario ----------------------------------------------------------------
 
 
 async def main():
+    # Keyless by design: an LLM key (a .env one included, which overrides the
+    # shell) would send the fixture's README to the LLM pipeline in step 4.
+    os.environ["LLM_API_KEY"] = ""
+    get_llm_config.cache_clear()
+
     data_directory_path = str((TESTS_DIR / ".data_storage" / "test_code_graph_e2e").resolve())
     cognee_directory_path = str((TESTS_DIR / ".cognee_system" / "test_code_graph_e2e").resolve())
     cognee.config.data_root_directory(data_directory_path)
@@ -365,24 +409,32 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
+    async def _remember_repo(path, dataset_name=REMEMBER_DATASET, **kwargs):
+        # include_documents=False keeps the README out, so the run is LLM-free
+        # (and items_processed == 1) even with an LLM key in the environment.
+        kwargs.setdefault("codegraph_config", CODE_ONLY)
+        data = [str(p) for p in path] if isinstance(path, list) else str(path)
+        return await cognee.remember(data, dataset_name=dataset_name, **kwargs)
+
+    async def _dataset_rows(dataset_name):
+        user = await get_default_user()
+        dataset = next(
+            ds for ds in await datasets.list_datasets(user=user) if ds.name == dataset_name
+        )
+        return dataset, await datasets.list_data(dataset.id, user=user)
+
     try:
         logger.info("enola pinned version: %s", ENOLA_PINNED_VERSION)
 
-        # --- 1. remember(content_type="code") ---------------------------------
+        # --- 1. remember(<repo dir>, codegraph_config=CODE_ONLY) --------------
+        # No COGNEE_SKIP_CONNECTION_TEST: a keyless code-only remember needs
+        # neither the GLiNER runtime nor a provider probe (SDK-793).
         repo_path = _copy_fixture(os.path.join(scratch_root, "remember"))
-        result = await cognee.remember(
-            str(repo_path), dataset_name=REMEMBER_DATASET, content_type="code"
-        )
-        assert result.status == "completed", (
-            f"remember() did not complete: {result.status} {result.error}"
-        )
-        assert result.items_processed == 1 and result.items[0]["kind"] == "code_repository", (
-            result.items
-        )
-        assert result.pipeline_run_id, "remember() reported no pipeline_run_id"
+        result = await _remember_repo(repo_path)
+        _assert_repository_items(result, 1)
         assert (repo_path / ".enola" / "facts.jsonl").is_file(), "enola snapshot was not written"
-        first_data_id = result.items[0].get("id")
-        assert first_data_id, f"remember() returned no data id for the repository: {result.items}"
+        first_data_id = result.items[0]["id"]
+        assert os.path.realpath(result.items[0]["path"]) == os.path.realpath(repo_path)
 
         nodes, edges = await _graph_snapshot()
         _assert_typed_code_graph(nodes, edges, repo_name=repo_path.name)
@@ -396,10 +448,11 @@ async def main():
         await _assert_code_search(REMEMBER_DATASET)
 
         # --- 3. Re-ingest the unchanged repo: must be a no-op -----------------
-        result = await cognee.remember(
-            str(repo_path), dataset_name=REMEMBER_DATASET, content_type="code"
+        result = await _remember_repo(repo_path)
+        _assert_repository_items(result, 1)
+        assert result.items[0]["id"] == first_data_id, (
+            "Re-remembering the same repository minted a new data id"
         )
-        assert result.status == "completed", result.error
         nodes, edges = await _graph_snapshot()
         _assert_typed_code_graph(nodes, edges, repo_name=repo_path.name)
         second_counts = (len(nodes), len(edges))
@@ -412,9 +465,6 @@ async def main():
         assert second_snapshot_id == first_snapshot_id, (
             "Snapshot id changed although the repository did not"
         )
-        assert result.items[0].get("id") == first_data_id, (
-            "Re-remembering the same repository minted a new data id"
-        )
         await _assert_code_search(REMEMBER_DATASET)
 
         # --- 3b. One Data row per repo; forget(data_id) drops only it (SDK-783)
@@ -426,11 +476,9 @@ async def main():
         # A changed repository refreshes its row in place: same id, new manifest.
         (repo_data_row,) = await datasets.list_data(remember_dataset.id, user=user)
         (repo_path / "inventory" / "audit.py").write_text("def audit():\n    return True\n")
-        result = await cognee.remember(
-            str(repo_path), dataset_name=REMEMBER_DATASET, content_type="code"
-        )
-        assert result.status == "completed", result.error
-        assert result.items[0].get("id") == first_data_id, "A changed repo minted a new data id"
+        result = await _remember_repo(repo_path)
+        _assert_repository_items(result, 1)
+        assert result.items[0]["id"] == first_data_id, "A changed repo minted a new data id"
         (refreshed_row,) = await datasets.list_data(remember_dataset.id, user=user)
         assert refreshed_row.content_hash != repo_data_row.content_hash, (
             "Re-remembering a changed repository kept its old manifest"
@@ -445,52 +493,52 @@ async def main():
             "The changed repository refreshed its row but not its graph"
         )
 
-        # An unchanged repository whose re-sync fails keeps its stamps: its graph
-        # is still built, so a later cognify() of the dataset must not pick the
-        # row up again (it would rerun enola, or fail when the clone is gone).
-        import cognee.modules.run_custom_pipeline as custom_pipeline_module
+        # An unchanged, already-built repository is skipped by incremental
+        # loading: re-remembering it keeps its cognify stamp and never reaches
+        # the CODE_REPO task (a broken extractor here must not be called).
+        import cognee.tasks.code_graph.code_repo as code_repo_module
 
-        real_run_custom_pipeline = custom_pipeline_module.run_custom_pipeline
+        real_extract_code_repo_graph = code_repo_module.extract_code_repo_graph
 
-        async def _failing_code_graph_run(*_args, **_kwargs):
+        async def _failing_code_repo_graph(*_args, **_kwargs):
             raise RuntimeError("simulated code graph failure")
 
-        custom_pipeline_module.run_custom_pipeline = _failing_code_graph_run
+        code_repo_module.extract_code_repo_graph = _failing_code_repo_graph
         try:
-            result = await cognee.remember(
-                str(repo_path),
-                dataset_name=REMEMBER_DATASET,
-                content_type="code",
-                raise_on_error=False,
-            )
+            result = await _remember_repo(repo_path, raise_on_error=False)
         finally:
-            custom_pipeline_module.run_custom_pipeline = real_run_custom_pipeline
-        assert result.status == "errored", result
-        assert result.items[0].get("id") == first_data_id, result.items
+            code_repo_module.extract_code_repo_graph = real_extract_code_repo_graph
+        _assert_repository_items(result, 1)
+        assert result.items[0]["id"] == first_data_id, result.items
         processing = await get_dataset_processing_status(remember_dataset.id)
         assert processing["pending"] == 0, (
-            f"A failed re-sync of an unchanged repository dropped its cognify stamp: {processing}"
+            f"Re-remembering an unchanged repository dropped its cognify stamp: {processing}"
         )
 
         second_repo_path = _copy_fixture(os.path.join(scratch_root, "second"), name="second_repo")
-        result = await cognee.remember(
-            str(second_repo_path), dataset_name=REMEMBER_DATASET, content_type="code"
-        )
-        assert result.status == "completed", result.error
-        second_data_id = result.items[0].get("id")
+        result = await _remember_repo(second_repo_path)
+        # The cognify run covers the dataset: the first repository is reported
+        # too, skipped as already built, next to the one this call stored.
+        _assert_repository_items(result, 2)
+        (second_data_id,) = [item["id"] for item in result.items if item["id"] != first_data_id]
 
         data_rows = await datasets.list_data(remember_dataset.id, user=user)
         assert {str(row.id) for row in data_rows} == {first_data_id, second_data_id}, (
             f"Expected one Data row per remembered repository, got {[row.name for row in data_rows]}"
         )
         assert all(_system_metadata(row).get("source") == "code_repo" for row in data_rows)
-        # Stamped as cognified (a later cognify() of the dataset has nothing to
-        # redo) and in the code graph pipeline's own per-item slot.
-        for pipeline_name in ("cognify_pipeline", "code_graph_pipeline"):
-            processing = await get_dataset_processing_status(remember_dataset.id, pipeline_name)
-            assert processing["pending"] == 0, (
-                f"Repositories left pending for {pipeline_name}: {processing}"
-            )
+        # Stamped as cognified: a later cognify() of the dataset has nothing to
+        # redo. The deprecated code_graph_pipeline name reports the same build.
+        processing = await get_dataset_processing_status(remember_dataset.id)
+        assert processing["pending"] == 0, f"Repositories left pending: {processing}"
+        legacy = await get_processing_status_with_legacy_alias(
+            remember_dataset.id, "code_graph_pipeline"
+        )
+        assert legacy["pending"] == 0, f"The code_graph_pipeline alias disagrees: {legacy}"
+        statuses = await datasets.get_status([remember_dataset.id], ["code_graph_pipeline"])
+        assert statuses == {
+            str(remember_dataset.id): PipelineRunStatus.DATASET_PROCESSING_COMPLETED
+        }, statuses
 
         # Two repositories in one dataset are one enola cluster: both come from
         # the same snapshot, and each keeps the path it was remembered from.
@@ -548,14 +596,63 @@ async def main():
         processing = await get_dataset_processing_status(remember_dataset.id)
         assert processing["pending"] == 0, processing
 
+        # --- 3c. A declared repository with no project marker ------------------
+        # Without treat_as_repository such a directory (a package subdirectory, a
+        # tree copied without .git) would be split into per-file items.
+        markerless_repo_path = _copy_fixture(
+            os.path.join(scratch_root, "markerless"), name="markerless_repo"
+        )
+        for marker in PROJECT_MARKERS:
+            marker_path = markerless_repo_path / marker
+            if marker_path.is_dir():
+                shutil.rmtree(marker_path)
+            elif marker_path.exists():
+                marker_path.unlink()
+        result = await _remember_repo(
+            markerless_repo_path, dataset_name=MIXED_DATASET, codegraph_config=DECLARED_CODE_ONLY
+        )
+        _assert_repository_items(result, 1)
+        mixed_dataset, mixed_rows = await _dataset_rows(MIXED_DATASET)
+        assert [str(row.id) for row in mixed_rows] == [result.items[0]["id"]], (
+            f"Expected only the declared repository stored, got {[row.name for row in mixed_rows]}"
+        )
+        assert [_system_metadata(row).get("source") for row in mixed_rows] == ["code_repo"], (
+            f"Expected one code_repo item, got {[row.name for row in mixed_rows]}"
+        )
+        processing = await get_dataset_processing_status(mixed_dataset.id)
+        assert processing["pending"] == 0, f"The repository was not built: {processing}"
+        async with set_database_global_context_variables(mixed_dataset.id, user.id):
+            nodes, edges = await _graph_snapshot()
+        _assert_typed_code_graph(nodes, edges, repo_name=markerless_repo_path.name)
+
+        # --- 3d. The removed content_type="code" warns and still builds --------
+        legacy_repo_path = _copy_fixture(os.path.join(scratch_root, "legacy"), name="legacy_repo")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = await _remember_repo(
+                legacy_repo_path, dataset_name=LEGACY_DATASET, content_type="code"
+            )
+        assert any(
+            issubclass(w.category, FutureWarning) and "treat_as_repository" in str(w.message)
+            for w in caught
+        ), [str(w.message) for w in caught]
+        _assert_repository_items(result, 1)
+        legacy_dataset, _legacy_rows = await _dataset_rows(LEGACY_DATASET)
+        async with set_database_global_context_variables(legacy_dataset.id, user.id):
+            nodes, edges = await _graph_snapshot()
+        _assert_typed_code_graph(nodes, edges, repo_name=legacy_repo_path.name)
+
         # --- 4. add(<project dir>) + cognify(): the CODE_REPO route -----------
-        # cognify() probes the embedding provider on a dataset's first run even
-        # when every item routes to an LLM-free task list. Skip it via the
-        # documented switch — set only NOW so the remember()/cognify() steps
-        # above still prove that the code route is keyless on its own.
-        os.environ["COGNEE_SKIP_CONNECTION_TEST"] = "true"
+        # A plain add() of a repository directory probes the embedding provider
+        # on a dataset's first run (nothing says its items are repositories
+        # until they are resolved). add()'s own switch keeps this step
+        # independent of provider configuration without changing the keyless
+        # defaults mid-run (COGNEE_SKIP_CONNECTION_TEST would); the steps above
+        # prove the code-only remember needs no probe on its own.
         cognify_repo_path = _copy_fixture(os.path.join(scratch_root, "cognify"))
-        await cognee.add(str(cognify_repo_path), dataset_name=COGNIFY_DATASET)
+        await cognee.add(
+            str(cognify_repo_path), dataset_name=COGNIFY_DATASET, skip_connection_test=True
+        )
 
         cognify_dataset = next(
             ds for ds in await datasets.list_datasets(user=user) if ds.name == COGNIFY_DATASET
@@ -585,7 +682,9 @@ async def main():
         # Re-adding the changed project reaches ingestion's content check, so the
         # next cognify() rebuilds its graph instead of skipping it as done.
         (cognify_repo_path / "inventory" / "audit.py").write_text("def audit():\n    return True\n")
-        await cognee.add(str(cognify_repo_path), dataset_name=COGNIFY_DATASET)
+        await cognee.add(
+            str(cognify_repo_path), dataset_name=COGNIFY_DATASET, skip_connection_test=True
+        )
         await cognee.cognify(datasets=[COGNIFY_DATASET])
         async with set_database_global_context_variables(cognify_dataset.id, user.id):
             nodes, _edges = await _graph_snapshot()

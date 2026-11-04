@@ -5,10 +5,10 @@ GitHub/GitLab repository URL — and joins the uploads as a single list, uploads
 first. The router does no interpretation of its own: the strings reach add()
 exactly as an SDK caller would pass them, and labels/external_metadata pair
 with the combined list. Empty entries (Swagger UI submits untouched array items
-as "") are dropped. A request with neither uploads nor raw_data is a 400. With
-content_type="code" the raw_data entries are the repository specs; remember
-rejects raw_data together with content_type="skills" or "cogx-archive" because
-those paths never run string inputs through add().
+as "") are dropped. A request with neither uploads nor raw_data is a 400.
+remember rejects raw_data together with content_type="skills" or "cogx-archive"
+because those paths never run string inputs through add(); the removed
+content_type="code" is ignored, so its raw_data entries are plain ingestion.
 """
 
 import importlib
@@ -199,7 +199,7 @@ def test_remember_combines_uploads_and_raw_data_uploads_first(client):
         assert sent[1] == REPO_URL
 
 
-def test_remember_code_content_type_takes_repo_specs_from_raw_data(client):
+def test_remember_forwards_the_codegraph_config_with_repo_specs(client):
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         mock_remember.return_value = remember_completed()
 
@@ -207,14 +207,50 @@ def test_remember_code_content_type_takes_repo_specs_from_raw_data(client):
             "/api/v1/remember",
             data={
                 "datasetName": "test_dataset",
-                "content_type": "code",
                 "raw_data": [REPO_URL, "", "/srv/other/repo"],
+                "codegraph_config": '{"treat_as_repository": true, "include_documents": false}',
             },
         )
 
         assert response.status_code == 200, response.text
         assert mock_remember.call_args.args[0] == [REPO_URL, "/srv/other/repo"]
-        assert mock_remember.call_args.kwargs["content_type"] == "code"
+        assert mock_remember.call_args.kwargs["codegraph_config"] == {
+            "treat_as_repository": True,
+            "include_documents": False,
+        }
+        assert mock_remember.call_args.kwargs["content_type"] is None
+
+
+@pytest.mark.parametrize(
+    ("form", "files"),
+    [
+        ({"raw_data": [REPO_URL], "session_id": "s1"}, None),
+        ({"raw_data": [REPO_URL]}, {"data": ("notes.txt", b"hello", "text/plain")}),
+    ],
+)
+def test_remember_ignores_the_removed_code_content_type(client, form, files):
+    # The old request shape keeps working and is plain ingestion: remember()
+    # gets exactly what the same request without content_type sends it.
+    calls = []
+    for extra in ({}, {"content_type": "code"}):
+        with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
+            mock_remember.return_value = remember_completed()
+
+            response = client.post(
+                "/api/v1/remember",
+                data={"datasetName": "test_dataset", **form, **extra},
+                files=files,
+            )
+
+            assert response.status_code == 200, response.text
+            calls.append(mock_remember.call_args)
+
+    plain, legacy = calls
+    assert legacy.kwargs["content_type"] is None
+    assert repr(legacy.args) == repr(plain.args)
+    assert legacy.kwargs.keys() == plain.kwargs.keys()
+    for key in plain.kwargs:
+        assert repr(legacy.kwargs[key]) == repr(plain.kwargs[key]), key
 
 
 @pytest.mark.parametrize("content_type", ["skills", "cogx-archive"])

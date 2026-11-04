@@ -1,6 +1,6 @@
 import asyncio
 import warnings
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -47,6 +47,11 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME
 from cognee.tasks.code_graph.code_files import get_code_file_tasks
 from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
+from cognee.tasks.code_graph.config import (
+    CodeGraphConfig,
+    requests_codegraph_options,
+    validate_codegraph_config,
+)
 from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
@@ -134,6 +139,57 @@ def raise_if_cognify_errored(result) -> None:
         )
 
 
+_CODE_ROUTES = frozenset({CognifyRoute.CODE, CognifyRoute.CODE_REPO})
+
+
+async def _pending_routes(
+    datasets, user: User | None, incremental_loading: bool
+) -> set[CognifyRoute] | None:
+    """The cognify routes the items this run will process take, or None when unknown.
+
+    Reads the same rows the pipeline will: the user's existing writable datasets
+    among ``datasets`` (all of them when None) and their data, minus the items
+    incremental loading skips as already completed. A requested dataset that does
+    not exist yet would be created empty, so it adds no items. An empty set means
+    nothing is pending (an unchanged repository re-remembered).
+
+    The routes decide what the run needs before it starts: a run of code files and
+    code-repo manifests alone runs the deterministic enola lists, so it needs no
+    graph extractor (and no GLiNER runtime on a keyless install), no LLM probe, and
+    no embedding probe unless it indexes vectors. Any error while looking
+    (permissions, a tombstoned DLT row, ...) answers None, and the caller keeps the
+    checks for every wired route. An item added between this read and the run
+    meets its route's tasks without the skipped checks; the extractor then raises
+    its own not-installed error.
+    """
+    try:
+        from cognee.modules.data.methods import (
+            get_authorized_existing_datasets,
+            get_dataset_data,
+        )
+        from cognee.modules.pipelines.models import is_data_item_completed
+        from cognee.modules.users.methods import get_default_user
+
+        if user is None:
+            user = await get_default_user()
+        requested = [datasets] if isinstance(datasets, (str, UUID)) else datasets
+        target_datasets = await get_authorized_existing_datasets(requested, "write", user)
+
+        routes: set[CognifyRoute] = set()
+        for dataset in target_datasets:
+            dataset_id = cast(UUID, dataset.id)
+            for data_item in await get_dataset_data(dataset_id=dataset_id):
+                if incremental_loading:
+                    status = (data_item.pipeline_status or {}).get(COGNIFY_PIPELINE_NAME) or {}
+                    if is_data_item_completed(status.get(str(dataset_id))):
+                        continue
+                routes.add(cognify_route_for(data_item))
+        return routes
+    except Exception as error:  # noqa: BLE001 - any doubt keeps every check
+        logger.debug("Could not read the pending items' routes: %s", error)
+        return None
+
+
 async def cognify(
     datasets: str | list[str] | list[UUID] | None = None,
     user: User = None,
@@ -156,6 +212,7 @@ async def cognify(
     chunk_attachment: Literal["direct", "all"] | None = None,
     extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
     ontology_file_path: str | None = None,
+    codegraph_config: CodeGraphConfig | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
     early_chunk_indexing: bool | None = None,
     **kwargs,
@@ -269,7 +326,20 @@ async def cognify(
                  extraction or summaries; embeddings still run. It produces the
                  generic KnowledgeGraph, so a custom graph_model raises. Raises with
                  dry_run=True or while connected to a remote instance — neither path
-                 can honour it yet.
+                 can honour it yet. Not read by a run whose pending items are all
+                 code files or code repositories: those run the LLM-free enola
+                 lists, so such a run resolves no extractor and installs no
+                 runtime.
+        codegraph_config: Options for the code files and code repositories this
+                 run builds (CODE and CODE_REPO routes), as a ``CodeGraphConfig``.
+                 cognify() reads ``index_vectors``: also embed the code facts, so
+                 completion search types can reach the code. Off by default:
+                 SearchType.CODE reads the graph only. It applies only to items the
+                 run actually builds — an unchanged, already-built item is skipped
+                 by incremental loading and keeps its previous vectors (or none).
+                 ``repo_credentials``, ``include_documents`` and
+                 ``treat_as_repository`` are read by add() and ignored here. Not
+                 supported while connected to a remote instance.
         summary_method: How the standard pipeline writes each chunk's summary. "llm"
                  makes one LLM call per chunk; "from_extraction" joins the chunk's
                  extracted types and relation texts with no LLM call, and a chunk
@@ -377,14 +447,15 @@ async def cognify(
         )
     drop_deprecated_temporal_cognify(kwargs)
 
+    codegraph = validate_codegraph_config(codegraph_config)
+    index_vectors = bool(codegraph.get("index_vectors"))
     cognify_config = get_cognify_config()
-    # The extractor decision is made once, here, before any branch. Branches
-    # that cannot honour it raise below instead of silently running something
-    # other than what the caller selected.
-    resolved_extractor = resolve_extractor(extractor, cognify_config)
     resolved_summary_method = resolve_summary_method(summary_method, cognify_config)
 
-    if dry_run and resolved_extractor == GLINER_DEMO_EXTRACTOR:
+    # The extractor is resolved once per run, below, after the pending items'
+    # routes are known: a code-only run never uses it. A dry run estimates the
+    # LLM pipeline, so it has to know the extractor up front.
+    if dry_run and resolve_extractor(extractor, cognify_config) == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
             "dry_run estimates the LLM extraction pipeline only; it has no cost model "
             "for the gliner_demo extractor."
@@ -425,6 +496,14 @@ async def cognify(
                 "extractor is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the extractor locally."
             )
+        if requests_codegraph_options(codegraph):
+            # client.cognify() has no codegraph_config field; the remote would
+            # silently build graph-only, so an explicit option has to raise.
+            raise ValueError(
+                "codegraph_config is not supported by cognify() while connected to a "
+                "remote Cognee instance. Use remember(..., codegraph_config=...) or call "
+                "cognee.disconnect() to cognify locally."
+            )
         if summary_method is not None:
             # Same as extractor: client.cognify() has no summary_method field.
             raise ValueError(
@@ -453,11 +532,6 @@ async def cognify(
             graph_model=graph_model,
         )
 
-    # After the argument checks and the remote route: a cognify that raises above,
-    # or runs remotely, must not install anything locally. Awaited, so the pipeline
-    # below never starts before the GLiNER runtime is importable.
-    await ensure_extractor_runtime(resolved_extractor, cognify_config)
-
     import time as _time
 
     _cognify_start_ns = _time.monotonic_ns()
@@ -472,6 +546,15 @@ async def cognify(
         from cognee.modules.migrations.startup import run_migrations_and_block
 
         await run_migrations_and_block(datasets, user)
+
+        # What the run's pending items need, read before any provider or
+        # runtime check. A run of code files and code repositories alone runs
+        # enola only: it resolves no graph extractor and installs no GLiNER
+        # runtime (a keyless code-only remember must not pull in torch), needs
+        # no LLM probe, and no embedding probe unless it indexes vectors. The
+        # skip is this call's: a later run that needs a provider still probes it.
+        pending_routes = await _pending_routes(datasets, user, incremental_loading)
+        code_only = pending_routes is not None and pending_routes <= _CODE_ROUTES
 
         resolved_resolver = get_configured_ontology_resolver(
             config, ontology_file_path=ontology_file_path
@@ -496,6 +579,16 @@ async def cognify(
                 custom_prompt=custom_prompt,
                 summary_method=resolved_summary_method,
             )
+
+        # The extractor decision is made once, here. Branches that cannot
+        # honour it raise below instead of silently running something other
+        # than what the caller selected. After the argument checks and the
+        # remote route: a cognify that raises above, or runs remotely, must not
+        # install anything locally. Awaited, so the pipeline below never
+        # starts before the GLiNER runtime is importable.
+        resolved_extractor = None if code_only else resolve_extractor(extractor, cognify_config)
+        if resolved_extractor is not None:
+            await ensure_extractor_runtime(resolved_extractor, cognify_config)
 
         if resolved_extractor == GLINER_DEMO_EXTRACTOR:
             if graph_model is not KnowledgeGraph:
@@ -581,20 +674,23 @@ async def cognify(
             CognifyRoute.DLT_SOURCE: await get_dlt_tasks(
                 chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
             ),
-            CognifyRoute.CODE: get_code_file_tasks(),
-            CognifyRoute.CODE_REPO: get_code_repo_tasks(),
+            CognifyRoute.CODE: get_code_file_tasks(index_vectors=index_vectors),
+            CognifyRoute.CODE_REPO: get_code_repo_tasks(index_vectors=index_vectors),
         }
 
         def resolve_cognify_tasks(data_item):
             return tasks_by_route[cognify_route_for(data_item)]
 
         # run_pipeline derives needs_llm itself for a task list, but this call
-        # passes a resolver — so pass the union over every wired route: the
-        # tasks that can actually run are the authority on whether the LLM
-        # connection probe is needed.
+        # passes a resolver — so derive it from the routes the pending items
+        # take (every wired route when they could not be read): the tasks that
+        # can actually run are the authority on whether the LLM connection
+        # probe is needed.
+        used_routes = tasks_by_route.keys() if pending_routes is None else pending_routes
         needs_llm = pipeline_needs_llm(
-            task for route_tasks in tasks_by_route.values() for task in route_tasks
+            task for route in used_routes for task in tasks_by_route[route]
         )
+        skip_connection_test = code_only and not index_vectors
 
         try:
             # One executor call drives both runs (see
@@ -613,6 +709,7 @@ async def cognify(
                 incremental_loading=incremental_loading,
                 data_per_batch=data_per_batch,
                 needs_llm=needs_llm,
+                skip_connection_test=skip_connection_test,
                 rollback_handler=cognify_rollback_handler,
                 llm_config=llm_config,
                 embedding_config=embedding_config,

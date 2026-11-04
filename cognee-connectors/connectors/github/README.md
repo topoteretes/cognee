@@ -3,8 +3,9 @@
 GitHub connector for [cognee](https://github.com/topoteretes/cognee): connects a GitHub org
 (or user account) through a **GitHub App installation** and indexes the repositories the
 installation covers into cognee's code graph. There is no DLT source and no document
-ingestion: a sync is cognee's code route, `remember(content_type="code")`, over the
-installation's clone URLs, authenticated with an hour-lived installation token minted on
+ingestion: a sync is one `remember(<clone URLs>, codegraph_config={"treat_as_repository": True,
+"include_documents": False, "repo_credentials": token})` over the installation's clone URLs,
+authenticated with an hour-lived installation token minted on
 demand from the app's private key. Nothing durable is stored per installation. Webhooks
 keep the graph current: a push to a repository's default branch re-indexes that repository,
 repositories added to the installation are indexed, and an uninstall revokes the stored
@@ -77,8 +78,11 @@ repositories = await app_auth.list_installation_repository_records(token)
 await cognee.remember(
     [app_auth.clone_url(repo["full_name"]) for repo in repositories],
     dataset_name="github_12345",
-    content_type="code",
-    repo_credentials=token,  # out of band: the clone URLs carry no secret
+    codegraph_config={
+        "treat_as_repository": True,  # every URL is a repository: clone it, never sniff it
+        "include_documents": False,  # the code graph only, no README extraction
+        "repo_credentials": token,  # out of band: the clone URLs carry no secret
+    },
     raise_on_error=False,
 )
 print(await cognee.recall("", query_type="CODE", code_query={"operation": "architecture"}))

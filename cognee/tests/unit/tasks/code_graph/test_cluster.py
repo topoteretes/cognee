@@ -17,7 +17,6 @@ from cognee.tasks.code_graph.cluster import (
     code_repo_path,
     load_dataset_cluster,
     mark_dataset_code_repos_for_rebuild,
-    refresh_dataset_code_graph,
     resolve_member_labels,
     snapshot_dataset_code_repos,
 )
@@ -37,7 +36,6 @@ graph_engine_module = importlib.import_module(
     "cognee.infrastructure.databases.graph.get_graph_engine"
 )
 data_methods_module = importlib.import_module("cognee.modules.data.methods")
-pipeline_module = importlib.import_module("cognee.modules.run_custom_pipeline")
 code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
 
 SNAPSHOT_ID = "sha256:c1u5te4"
@@ -441,6 +439,7 @@ async def test_member_load_keeps_the_other_members_node_set_tags(monkeypatch, tm
 
 @pytest.fixture
 def refresh_env(monkeypatch, tmp_path):
+    """A two-member dataset with its cluster snapshot and row lookup stubbed."""
     golf, ui = _repos(tmp_path, "golf", "ui")
     golf_row, ui_row = _row(golf), _row(ui)
     snapshot = DatasetCodeSnapshot(
@@ -454,10 +453,6 @@ def refresh_env(monkeypatch, tmp_path):
     monkeypatch.setattr(cluster_module, "snapshot_dataset_code_repos", snapshot_mock)
     rows_mock = AsyncMock(return_value=[golf_row, ui_row])
     monkeypatch.setattr(cluster_module, "dataset_code_repo_rows", rows_mock)
-    pipeline_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr(pipeline_module, "run_custom_pipeline", pipeline_mock)
-    mark_mock = AsyncMock()
-    monkeypatch.setattr(data_methods_module, "mark_data_processed", mark_mock)
     return SimpleNamespace(
         dataset=SimpleNamespace(id=uuid4()),
         user=SimpleNamespace(id=uuid4()),
@@ -467,158 +462,7 @@ def refresh_env(monkeypatch, tmp_path):
         ui_row=ui_row,
         snapshot=snapshot,
         snapshot_mock=snapshot_mock,
-        pipeline=pipeline_mock,
-        mark=mark_mock,
     )
-
-
-def _task_kwargs(call, index=0):
-    return call.kwargs["tasks"][index].default_params["kwargs"]
-
-
-@pytest.mark.asyncio
-async def test_refresh_runs_each_member_over_its_own_row_from_one_snapshot(refresh_env):
-    env = refresh_env
-
-    runs = await refresh_dataset_code_graph(
-        env.dataset, env.user, known_repos=[(env.ui_row, env.ui)]
-    )
-
-    # The repository the caller just stored comes first (planned by directory,
-    # before its row exists); the dataset's other row joins it.
-    env.snapshot_mock.assert_awaited_once()
-    assert env.snapshot_mock.await_args.args[1] == [(None, env.ui), (env.golf_row, env.golf)]
-    assert [(run.label, run.error) for run in runs] == [("golf", None), ("ui", None)]
-    calls = env.pipeline.await_args_list
-    assert [call.kwargs["data"] for call in calls] == [[env.golf_row], [env.ui_row]]
-    assert [_task_kwargs(call)["repo_scope"] for call in calls] == ["golf", "ui"]
-    assert {str(_task_kwargs(call)["snapshot_dir"]) for call in calls} == {
-        str(env.snapshot.snapshot_dir)
-    }
-    assert [_task_kwargs(call, 2)["repo_scope"] for call in calls] == ["golf", "ui"]
-    assert [call.args[0] for call in env.mark.await_args_list] == [env.golf_row.id, env.ui_row.id]
-
-
-@pytest.mark.asyncio
-async def test_refresh_keeps_going_when_one_member_fails(refresh_env):
-    env = refresh_env
-    env.pipeline.side_effect = [RuntimeError("enola crashed"), None]
-
-    runs = await refresh_dataset_code_graph(env.dataset, env.user)
-
-    assert [str(run.error) if run.error else None for run in runs] == ["enola crashed", None]
-    env.mark.assert_awaited_once()
-    assert env.mark.await_args.args[0] == env.ui_row.id
-
-
-@pytest.mark.asyncio
-async def test_refresh_without_a_cluster_runs_each_repository_unscoped(refresh_env):
-    env = refresh_env
-    env.snapshot_mock.return_value = None
-
-    runs = await refresh_dataset_code_graph(env.dataset, env.user)
-
-    assert [run.label for run in runs] == [None, None]
-    for call in env.pipeline.await_args_list:
-        assert _task_kwargs(call)["repo_scope"] is None
-        assert _task_kwargs(call)["snapshot_dir"] is None
-
-
-@pytest.mark.asyncio
-async def test_refresh_applies_index_vectors_only_to_the_rows_this_call_stored(refresh_env):
-    """index_vectors is this call's setting: the dataset's other repositories
-    are rebuilt graph-only, never embedded (or key-checked) on another call's behalf."""
-    env = refresh_env
-
-    runs = await refresh_dataset_code_graph(
-        env.dataset, env.user, known_repos=[(env.ui_row, env.ui)], index_vectors=True
-    )
-
-    assert [(run.label, run.index_vectors) for run in runs] == [("golf", False), ("ui", True)]
-    golf_call, ui_call = env.pipeline.await_args_list
-    assert _task_kwargs(golf_call, 1)["graph_only"] is True
-    assert golf_call.kwargs["skip_connection_test"] is True
-    assert _task_kwargs(ui_call, 1)["graph_only"] is False
-    assert ui_call.kwargs["skip_connection_test"] is False
-
-
-@pytest.mark.asyncio
-async def test_refresh_of_a_large_dataset_builds_only_the_new_rows_inline(refresh_env, monkeypatch):
-    """Past CLUSTER_INLINE_REBUILD_LIMIT existing repositories, remember() builds
-    the new rows now and marks the rest for the next cognify(), as delete does."""
-    env = refresh_env
-    existing = [_row(env.golf.parent / f"svc{i}") for i in range(6)]
-    monkeypatch.setattr(
-        cluster_module, "dataset_code_repo_rows", AsyncMock(return_value=existing + [env.ui_row])
-    )
-    reset = AsyncMock()
-    publish_module = importlib.import_module("cognee.modules.data.methods.publish_updated_data")
-    monkeypatch.setattr(publish_module, "reset_data_pipeline_status", reset)
-    env.snapshot_mock.return_value = None  # one new repository: no cluster to snapshot
-
-    runs = await refresh_dataset_code_graph(
-        env.dataset, env.user, known_repos=[(env.ui_row, env.ui)]
-    )
-
-    assert env.snapshot_mock.await_args.args[1] == [(None, env.ui)]
-    assert [run.data for run in runs] == [env.ui_row]
-    assert [call.kwargs["data"] for call in env.pipeline.await_args_list] == [[env.ui_row]]
-    assert sorted(call.args[0] for call in reset.await_args_list) == sorted(r.id for r in existing)
-    assert all(call.args[1] == env.dataset.id for call in reset.await_args_list)
-
-
-@pytest.mark.asyncio
-async def test_refresh_within_the_limit_rebuilds_every_repository(refresh_env, monkeypatch):
-    env = refresh_env
-    reset = AsyncMock()
-    publish_module = importlib.import_module("cognee.modules.data.methods.publish_updated_data")
-    monkeypatch.setattr(publish_module, "reset_data_pipeline_status", reset)
-
-    await refresh_dataset_code_graph(env.dataset, env.user, known_repos=[(env.ui_row, env.ui)])
-
-    assert env.snapshot_mock.await_args.args[1] == [(None, env.ui), (env.golf_row, env.golf)]
-    reset.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_refresh_leaves_out_a_repository_whose_directory_is_gone(refresh_env, monkeypatch):
-    """A stale row (its clone directory removed) is skipped with a warning, not
-    run: one such row must not fail every later remember() into the dataset."""
-    env = refresh_env
-    gone_row = _row(env.golf.parent / "gone")
-    monkeypatch.setattr(
-        cluster_module, "dataset_code_repo_rows", AsyncMock(return_value=[gone_row, env.ui_row])
-    )
-    env.snapshot_mock.return_value = None  # one directory left: not a cluster
-
-    runs = await refresh_dataset_code_graph(
-        env.dataset, env.user, known_repos=[(env.ui_row, env.ui)]
-    )
-
-    assert [(run.data, run.error) for run in runs] == [(env.ui_row, None)]
-    assert [call.kwargs["data"] for call in env.pipeline.await_args_list] == [[env.ui_row]]
-
-
-@pytest.mark.asyncio
-async def test_refresh_binds_planned_members_to_the_rows_stored_for_them(refresh_env):
-    """plan_dataset_refresh runs before the rows exist: a member planned by
-    directory is loaded under the row the caller stored for that directory."""
-    env = refresh_env
-    planned = DatasetCodeSnapshot(
-        snapshot_dir=env.snapshot.snapshot_dir,
-        members=[
-            ClusterMember(data=env.golf_row, repo_path=env.golf, label="golf"),
-            ClusterMember(data=None, repo_path=env.ui, label="ui"),
-        ],
-    )
-    plan = cluster_module.RefreshPlan(snapshot=planned, existing=[(env.golf_row, env.golf)])
-
-    runs = await refresh_dataset_code_graph(
-        env.dataset, env.user, known_repos=[(env.ui_row, env.ui)], plan=plan
-    )
-
-    env.snapshot_mock.assert_not_awaited()  # the plan's snapshot is used, none is taken
-    assert [(run.label, run.data) for run in runs] == [("golf", env.golf_row), ("ui", env.ui_row)]
 
 
 @pytest.fixture
@@ -644,7 +488,6 @@ async def test_delete_marks_the_remaining_repositories_for_the_next_cognify(dele
     await mark_dataset_code_repos_for_rebuild(env.dataset)
 
     env.snapshot_mock.assert_not_awaited()
-    env.pipeline.assert_not_awaited()
     assert env.invalidated == [env.dataset.id]
     assert [call.args[:2] for call in env.reset.await_args_list] == [
         (env.golf_row.id, env.dataset.id),

@@ -48,7 +48,9 @@ Subcommands:
             default=None,
             help=(
                 "Optional pipeline names to check: add_pipeline, indexing_pipeline, "
-                "cognify_pipeline, code_graph_pipeline (defaults to: cognify_pipeline)"
+                "cognify_pipeline (code repositories are built under it; defaults to: "
+                "cognify_pipeline). code_graph_pipeline is a deprecated alias for the "
+                "dataset's latest code_graph_pipeline or cognify_pipeline run"
             ),
         )
 

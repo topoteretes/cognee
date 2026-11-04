@@ -50,7 +50,8 @@ Documentation = "https://docs.cognee.ai"
 github = "cognee_connector_github:CONNECTOR"
 
 # No "cognee.sources" entry point: the package ships no DLT source. A sync is
-# `remember(content_type="code")` over the installation's repositories.
+# `remember(<clone URLs>, codegraph_config={"treat_as_repository": True, ...})`
+# over the installation's repositories.
 
 [project.entry-points."cognee.integrations"]
 github = "cognee_connector_github.cognee_host:register"

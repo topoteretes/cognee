@@ -198,7 +198,8 @@ def clone_url(full_name: str) -> str:
     """The credential-free https clone URL for a repository.
 
     Deliberately carries no token: auth travels out-of-band (as the sync
-    scope's ``credential``, or ``repo_credentials`` on cognee's code route),
+    scope's ``credential``, or ``codegraph_config["repo_credentials"]`` on
+    cognee's remember()),
     so no URL-derived string — clone slugs, result items, logs, git error
     output — can ever leak a secret.
     """

@@ -107,10 +107,14 @@ async def test_default_sync_covers_every_installation_repo(mocks):
         ],
         dataset_name="github_acme_org",
         user=mocks.owner,
-        content_type="code",
-        repo_credentials="tok123",
+        codegraph_config={
+            "repo_credentials": "tok123",
+            "treat_as_repository": True,
+            "include_documents": False,  # code graphs only, no README extraction
+        },
         raise_on_error=False,
     )
+    assert "content_type" not in mocks.remember.await_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -121,7 +125,8 @@ async def test_explicit_repo_list_skips_the_listing_call(mocks):
     mocks.remember.assert_awaited_once()
     (urls,) = mocks.remember.await_args.args
     assert urls == ["https://github.com/acme/api.git"]
-    assert mocks.remember.await_args.kwargs["repo_credentials"] == "tok123"
+    config = mocks.remember.await_args.kwargs["codegraph_config"]
+    assert config["repo_credentials"] == "tok123"
 
 
 @pytest.mark.asyncio

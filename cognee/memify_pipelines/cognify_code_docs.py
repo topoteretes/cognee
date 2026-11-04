@@ -140,8 +140,8 @@ async def cognify_code_docs_pipeline(
 ):
     """Store the dataset's repositories' docstrings as chunks linked to their code graph.
 
-    Run it once the code graph is in the dataset (``remember(..., content_type="code")``,
-    an add() of a repository, or get_code_graph_tasks). Embed-only unless
+    Run it once the code graph is in the dataset (``remember(<repo>)`` / ``add(<repo>)``
+    + ``cognify()``, or get_code_graph_tasks). Embed-only unless
     ``extract_entities``. ``data=[{}]`` seeds the extraction without projecting the
     dataset's graph, as the other graph-reading memify pipelines do; the task reads
     the code graph itself. Returns the memify runner's result.

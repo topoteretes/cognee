@@ -1,20 +1,25 @@
 """Sync a GitHub installation's repositories into the code graph.
 
-Thin orchestration over the existing ``remember(content_type="code")`` path:
-mint a fresh installation token, resolve which repositories to index, and
-hand authenticated clone URLs to the code-graph pipeline. All the heavy
-lifting — clone reuse, snapshot-identity skip on unchanged repos, per-repo
-failure isolation (``raise_on_error=False``) — already lives in
-``resolve_repo_source`` and ``remember``, which is what makes re-running this
-on every webhook cheap and idempotent.
+Thin orchestration: mint a fresh installation token, resolve which
+repositories to index, and ``remember`` the clone URLs in one call with the
+token as ``codegraph_config["repo_credentials"]``. ``add()`` clones each one
+and stores it as one ``code_repo`` row (with its ``repo_url``), cognify builds
+them on the CODE_REPO route, and ``remember`` skips its automatic improve
+for an all-repository call. Clone reuse lives in ``resolve_repo_source`` and
+incremental loading skips an unchanged repository, which is what makes
+re-running this on every webhook cheap and idempotent.
 
-The indexed graph is searchable via ``SearchType.CODE`` (the code route
-produces no chunks or embeddings by design); ``index_vectors`` stays off.
+The token reaches git only through environment config; the URL and
+everything stored from it stay credential-free.
+
+The code graph is searchable via ``SearchType.CODE``; code facts are not
+embedded (``index_vectors`` stays off) and the repositories' documents are
+not ingested (``include_documents`` off), so a sync makes no LLM or
+embedding calls however many repositories it covers.
 
 One dataset per installation (``github_<org>``), not per repository —
-``remember`` already accepts a list of repo specs targeting one dataset, and
-per-repo datasets would mean one isolated database per repo under backend
-access control.
+``remember`` takes the whole list for one dataset, and per-repo datasets
+would mean one isolated database per repo under backend access control.
 """
 
 import logging
@@ -48,9 +53,10 @@ def clone_url(full_name: str) -> str:
     """The credential-free https clone URL for a repository.
 
     Deliberately carries no token: auth travels out-of-band as
-    ``repo_credentials`` (injected into git via environment config by
-    ``resolve_repo_source``), so no URL-derived string — clone slugs, result
-    items, logs, git error output — can ever leak a secret.
+    ``codegraph_config["repo_credentials"]`` (injected into git via
+    environment config by ``resolve_repo_source``), so no URL-derived string —
+    clone slugs, stored rows, result items, logs, git error output — can ever
+    leak a secret.
     """
     return f"https://github.com/{full_name}.git"
 
@@ -87,14 +93,19 @@ async def sync_repositories(
 ) -> None:
     """Index ``repo_full_names`` (default: every repo the installation covers).
 
-    Runs the code-graph pipeline to completion — callers are already off the
-    request path (the post-install hook and webhook handling both run
-    detached), so there is nothing to hand off to.
+    One blocking ``remember`` over every clone URL — callers are already off
+    the request path (the post-install hook and webhook handling both run
+    detached), so there is nothing to hand off to. ``raise_on_error=False``
+    reports a repository whose build failed as an errored item of the result
+    (``kind="code_repository"``, ``source``, ``error``) and the run as errored;
+    cognify rolls that run's writes back, so the repositories it had built
+    are rebuilt by the next sync. A clone that fails (auth, a deleted
+    repository) raises out of ``add()`` before anything is stored, and the
+    sync ends failed.
 
-    The minted token lives ~1 hour and repos are cloned sequentially as the
-    pipeline reaches them, so a very large installation can outlive the
-    token mid-batch; the affected repos surface as per-repo errors and the
-    next webhook (or manual re-sync) picks them up with a fresh token.
+    The minted token lives ~1 hour and repos are cloned one after the other,
+    so a very large installation can outlive the token mid-batch; the next
+    webhook (or manual re-sync) picks the rest up with a fresh token.
     """
     # Imported here, not at module top: this module is imported at API
     # startup (via the adapter registration), and cognee's package root is
@@ -132,10 +143,17 @@ async def sync_repositories(
             [clone_url(full_name) for full_name in repo_full_names],
             dataset_name=dataset_name_for_account(account_login),
             user=owner,
-            content_type="code",
-            repo_credentials=token,
-            # Report a repo that fails (clone, auth, pipeline) as an errored item
-            # and keep syncing the rest, instead of aborting the whole batch.
+            codegraph_config={
+                "repo_credentials": token,
+                # Every URL is a repository: clone it, never sniff it.
+                "treat_as_repository": True,
+                # The code graph is the point of the sync: indexing every
+                # repository's README and docs would mean LLM extraction and
+                # embeddings for an installation's whole prose, on every webhook.
+                "include_documents": False,
+            },
+            # Report a repository whose build failed as an errored item of the
+            # result instead of raising.
             raise_on_error=False,
         )
         if getattr(result, "status", None) == "errored":

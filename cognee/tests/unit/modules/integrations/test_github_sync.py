@@ -1,9 +1,13 @@
 """Unit tests for cognee.modules.integrations.github.sync.
 
 Token minting, repo listing, and remember() are mocked — what's under test
-is the orchestration: one dataset per installation, authenticated clone
-URLs handed to the code path, and the full-installation default when no
-explicit repo list is given.
+is the orchestration: one dataset per installation, one remember() over the
+credential-free clone URLs with the installation token in
+``codegraph_config["repo_credentials"]``, declared repositories
+(``treat_as_repository``) and code-graph-only ingestion
+(``include_documents=False``), the per-repository progress read off the
+result's items, and the full-installation default when no explicit repo list
+is given.
 """
 
 import asyncio
@@ -95,10 +99,14 @@ async def test_default_sync_covers_every_installation_repo(mocks):
         ],
         dataset_name="github_acme_org",
         user=mocks.owner,
-        content_type="code",
-        repo_credentials="tok123",
+        codegraph_config={
+            "repo_credentials": "tok123",
+            "treat_as_repository": True,
+            "include_documents": False,  # code graphs only, no README extraction
+        },
         raise_on_error=False,
     )
+    assert "content_type" not in mocks.remember.await_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -109,7 +117,8 @@ async def test_explicit_repo_list_skips_the_listing_call(mocks):
     mocks.remember.assert_awaited_once()
     (urls,) = mocks.remember.await_args.args
     assert urls == ["https://github.com/acme/api.git"]
-    assert mocks.remember.await_args.kwargs["repo_credentials"] == "tok123"
+    config = mocks.remember.await_args.kwargs["codegraph_config"]
+    assert config["repo_credentials"] == "tok123"
 
 
 @pytest.mark.asyncio
