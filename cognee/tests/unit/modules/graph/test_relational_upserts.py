@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import create_engine, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import Session
 
 from cognee.infrastructure.engine import DataPoint
@@ -71,6 +72,28 @@ def test_edge_uuid_columns_keep_numeric_looking_values_as_text_in_sqlite():
     assert "CHAR(32)" in table_sql
     assert storage_type == "text"
     assert stored_edge.id == NUMERIC_LOOKING_UUID
+
+
+@pytest.mark.asyncio
+async def test_upsert_edges_accepts_string_node_ids_on_sqlite():
+    """review_conflicts and the RDF ingest build edges from ``str(node.id)``; SQLite has
+    no native UUID type, so the Uuid bind processor needs real UUIDs (GH #6537)."""
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Edge.__table__.create)
+
+    source_id, target_id = uuid4(), uuid4()
+    ids = {"tenant_id": uuid4(), "user_id": uuid4(), "data_id": uuid4(), "dataset_id": uuid4()}
+    async with AsyncSession(engine) as session:
+        await upsert_edges([(str(source_id), str(target_id), "about", {})], session=session, **ids)
+        # The same edge with UUID ids maps to the same ledger row.
+        await upsert_edges([(source_id, target_id, "about", {})], session=session, **ids)
+        await session.commit()
+        stored = (await session.scalars(select(Edge))).all()
+    await engine.dispose()
+
+    assert len(stored) == 1
+    assert (stored[0].source_node_id, stored[0].destination_node_id) == (source_id, target_id)
 
 
 def test_sanitize_relational_payload_strips_null_bytes_recursively():
