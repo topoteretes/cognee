@@ -65,7 +65,7 @@ pre-commit install
 - **docling-full** - Full docling install with torch-based ML models (adds PDF/image conversion through docling)
 - **codegraph** - Compatibility alias; code graph extraction and Enola are included by default
 - **gliner** - GLiNER demo runtime (gliner2 + torch from PyPI — the CUDA build on Linux, for GPU hosts). Optional: without it the first GLiNER cognify installs CPU-only torch plus this extra itself (see "LLM-free Graph Extraction")
-- **gliner-remote-grpc** / **gliner-remote-amqp** - gRPC (grpcio) / RabbitMQ (aio-pika) transports to a remote GLiNER worker; the HTTP transport needs no extra (see "Remote worker" under "LLM-free Graph Extraction")
+- **gliner-remote-grpc** / **gliner-remote-amqp** - gRPC (grpcio) / RabbitMQ (aio-pika) transports to a remote GLiNER worker; the HTTP transport needs no extra (see "Remote worker" under "LLM-free Graph Extraction"); `gliner-remote-amqp` is also what `EMBEDDING_PROVIDER=embedding_worker` needs (`docs/embedding-worker.md`)
 - **evals** - Evaluation tools
 - **deepeval** - DeepEval testing framework
 - **posthog** - PostHog analytics
@@ -653,6 +653,24 @@ AWS_SECRET_ACCESS_KEY="your_secret_key"
 # Optional for temporary credentials:
 # AWS_SESSION_TOKEN="your_session_token"
 ```
+
+#### Embedding worker over RabbitMQ (requires gliner-remote-amqp extra)
+```bash
+EMBEDDING_PROVIDER="embedding_worker"
+EMBEDDING_MODEL="BAAI/bge-small-en-v1.5"   # informational
+EMBEDDING_DIMENSIONS=384                   # required; checked against every reply
+EMBEDDING_MAX_COMPLETION_TOKENS=512        # the worker's max_input_tokens (not readable over AMQP)
+COGNEE_EMBEDDING_WORKER_ENDPOINT="amqp://guest:guest@localhost:5672/"
+```
+`EmbeddingWorkerEmbeddingEngine` sends `/v1/embed` requests to an
+[embedding worker](https://github.com/topoteretes/embedding-worker) queue with the
+remote GLiNER client's RabbitMQ RPC (`cognee/infrastructure/remote_worker/`, shared):
+direct reply-to, publisher confirms, readiness = a consumer on the queue (cached 30 s),
+`unavailable` retried 8 times, timeouts not resent, fatal errors (exhausted outage,
+credentials, `COGNEE_EMBEDDING_WORKER_EXPECTED_MODEL`, `EMBEDDING_DIMENSIONS` mismatch)
+latched, `input_too_long` split and pooled. Sends `input_type: "document"` unless
+`EMBEDDING_INPUT_TYPE=query`. Settings (`COGNEE_EMBEDDING_WORKER_*`, same names as the
+Rust SDK) and failure behaviour: `docs/embedding-worker.md`.
 
 #### LLM Rate Limiting
 ```bash
