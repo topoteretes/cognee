@@ -92,29 +92,48 @@ def extend_centroids_with_learning_vectors(
     if updated_at is None:
         updated_at = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-    slots = [
-        {
+    # Key the working set by the centroid's *own* slot so identity is preserved.
+    # ``centroid_id(dataset_id, slot)`` is the vector-store point id, so renumbering
+    # a slot silently overwrites/orphans persisted points. Slots outside ``[0, k)``
+    # can never be reloaded (``load_centroids`` reads ``range(k)``), so they are
+    # dropped rather than folded into a live slot.
+    slots: dict[int, dict] = {}
+    for centroid in sorted(existing_centroids, key=lambda centroid: centroid.slot):
+        slot_index = int(centroid.slot)
+        if slot_index < 0 or slot_index >= k or slot_index in slots or len(slots) >= k:
+            continue
+        slots[slot_index] = {
             "centroid": list(centroid.centroid),
             "count": int(centroid.count),
             "learning_ids": list(centroid.learning_ids),
         }
-        for centroid in sorted(existing_centroids, key=lambda centroid: centroid.slot)[:k]
-    ]
-    seen_learning_ids = {learning_id for slot in slots for learning_id in slot["learning_ids"]}
+    seen_learning_ids = {
+        learning_id for slot in slots.values() for learning_id in slot["learning_ids"]
+    }
+
+    def _next_free_slot() -> int:
+        # Fill the lowest free slot first: reuses gaps left by dropped centroids
+        # and keeps the happy-path assignment (0, 1, 2, …) unchanged.
+        for candidate in range(k):
+            if candidate not in slots:
+                return candidate
+        return -1  # unreachable: only called while len(slots) < k
 
     for new_learning_id, vector in learning_vectors:
         if new_learning_id in seen_learning_ids:
             continue
         normalized_vector = normalize(vector)
         if len(slots) < k:
-            slots.append(
-                {"centroid": normalized_vector, "count": 1, "learning_ids": [new_learning_id]}
-            )
+            slots[_next_free_slot()] = {
+                "centroid": normalized_vector,
+                "count": 1,
+                "learning_ids": [new_learning_id],
+            }
             seen_learning_ids.add(new_learning_id)
             continue
 
         nearest_slot = max(
-            range(len(slots)),
+            slots,
             key=lambda index: cosine(normalized_vector, slots[index]["centroid"]),
         )
         slot = slots[nearest_slot]
@@ -133,7 +152,7 @@ def extend_centroids_with_learning_vectors(
             centroid=list(slot["centroid"]),
             learning_ids=list(slot["learning_ids"]),
         )
-        for slot_index, slot in enumerate(slots)
+        for slot_index, slot in sorted(slots.items())
     ]
 
 
