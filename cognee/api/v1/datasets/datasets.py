@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import AsyncExitStack
 from uuid import UUID
 
 from cognee.api.v1.datasets.dto import CopyDataReceiptDTO, DataDTO, DeleteDataReceiptDTO
@@ -652,6 +653,8 @@ class datasets:
         target_dataset_id: UUID,
         user: User | None = None,
         review_conflicts: bool = False,
+        expected_source_fingerprint: str | None = None,
+        preview: bool = False,
     ) -> dict:
         """Copy one cognified document from ``dataset_id`` into ``target_dataset_id``.
 
@@ -659,10 +662,10 @@ class datasets:
         vectors and its confirmed edge evidence, plus a ``Data`` row of its own, without
         any LLM or embedding call (see ``copy_data_to_dataset.py``). Elements the
         destination already holds merge by id. The caller needs ``read`` on the source
-        dataset and ``write`` on the destination. The source is read first, without a
-        lock; the destination is then locked like a pipeline run while it is written.
-        A write that fails on a first copy is taken back out, so the destination is
-        left as it was.
+        dataset and ``write`` on the destination. The source is read under its lock,
+        then both locks are acquired in stable order for a version check and write.
+        A failed first copy is cleaned up; if storage is unavailable, its receipt
+        remains incomplete and retry resumes cleanup before writing.
 
         ``review_conflicts=True`` runs cognee's conflict review over the destination
         once the copy is in (``improve(review_conflicts=True)`` with the index build
@@ -674,7 +677,14 @@ class datasets:
         Returns the ``CopyDataReceiptDTO`` dict: the destination's ``data_id`` (its row
         keeps the source id as ``legacy_id``, so ``forget()`` there accepts either),
         the counts written and the conflict-review stage result when requested.
-        Copying the same document again reuses that row and rewrites the same elements.
+        Copying the same version again returns its receipt without rewriting shared
+        elements. A changed source or independently ingested identical content is
+        refused: forget the old copy explicitly before replacing it.
+
+        ``preview=True`` returns a source fingerprint, counts, and a complete content
+        assessment context without copying. Pass ``expected_source_fingerprint`` to
+        bind a subsequent copy to that exact preview. Unknown/different embedding
+        models are refused even when their dimensions match.
 
         Raises:
             UnauthorizedDataAccessError: a dataset is missing or the user lacks the
@@ -685,7 +695,7 @@ class datasets:
                 embedding width than the configured model.
         """
         async with record_operation(
-            "copy_data", user=user, dataset_id=target_dataset_id
+            "preview_copy" if preview else "copy_data", user=user, dataset_id=target_dataset_id
         ) as operation_context:
             from cognee.modules.data.methods import (
                 get_data,
@@ -704,15 +714,80 @@ class datasets:
             source = await _authorized_dataset_or_raise(user, dataset_id, "read")
             target = await _authorized_dataset_or_raise(user, target_dataset_id, "write")
 
-            # Access was granted through the source dataset's ACL above, so row
-            # ownership is not re-checked (same rule as delete_data).
-            data = await get_data(user.id, data_id, source.id, verify_owner=False)
-            if data is None:
-                raise UnauthorizedDataAccessError(
-                    f"Data {data_id} not accessible in dataset {dataset_id}."
+            from cognee.modules.data.methods.copy_safety import (
+                fingerprint,
+                source_revision,
+                validate_destination_embedding,
+            )
+
+            # Read under the source lock only. The destination remains available
+            # during graph/vector I/O. At handoff acquire both locks in UUID order,
+            # then reject any source mutation rather than writing a mixed snapshot.
+            async with dataset_lock(source.id):
+                data = await get_data(user.id, data_id, source.id, verify_owner=False)
+                if data is None:
+                    raise UnauthorizedDataAccessError(
+                        f"Data {data_id} not accessible in dataset {dataset_id}."
+                    )
+                if not data.content_hash:
+                    raise CogneeValidationError(
+                        "Copying requires a document content hash. Re-ingest legacy data first.",
+                        status_code=409,
+                    )
+                revision = await source_revision(source.id, data.id)
+                snapshot = await read_document_snapshot(source, data)
+                digest = fingerprint(data, snapshot)
+            if expected_source_fingerprint is not None and expected_source_fingerprint != digest:
+                raise CogneeValidationError(
+                    "The approved source changed. Review the document again.", status_code=409
                 )
-            snapshot = await read_document_snapshot(source, data)
-            async with dataset_lock(target.id):
+            if preview:
+                await validate_destination_embedding(target, snapshot.embedding_identity)
+                # No source material is persisted. Cloud applies its evaluator's
+                # input limits; the SDK never silently truncates the document.
+                import json
+
+                from cognee.modules.storage.utils import JSONEncoder
+
+                context = json.dumps(
+                    {
+                        "nodes": snapshot.nodes,
+                        "edges": snapshot.edges,
+                        "external_metadata": data.external_metadata,
+                        "vector_payloads": {
+                            name: [
+                                {
+                                    key: value
+                                    for key, value in row.payload.items()
+                                    if key != "vector"
+                                }
+                                for row in rows
+                            ]
+                            for name, rows in snapshot.vectors.items()
+                        },
+                    },
+                    cls=JSONEncoder,
+                )
+                return {
+                    "source_fingerprint": digest,
+                    "source_data_id": str(data.id),
+                    "source_name": data.name,
+                    "source_context": context,
+                    "context_complete": True,
+                    "nodes": len(snapshot.nodes),
+                    "edges": len(snapshot.edges),
+                    "vectors": sum(map(len, snapshot.vectors.values())),
+                }
+            async with AsyncExitStack() as locks:
+                for identifier in sorted((source.id, target.id), key=str):
+                    await locks.enter_async_context(dataset_lock(identifier))
+                if await source_revision(source.id, data.id) != revision:
+                    raise CogneeValidationError(
+                        "The source changed during the copy. Retry with a fresh review.",
+                        status_code=409,
+                    )
+                source = await _authorized_dataset_or_raise(user, source.id, "read")
+                target = await _authorized_dataset_or_raise(user, target.id, "write")
                 copied = await write_document_copy(target, data, snapshot, user)
 
             conflict_review = None

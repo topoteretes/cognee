@@ -206,6 +206,14 @@ async def run_tasks_data_item_incremental(
 
     # Check pipeline status, if Data already processed for pipeline before skip current processing
     if data_point:
+        copy_state = (data_point.pipeline_status or {}).get("copy_data", {})
+        if copy_state and copy_state.get("state") != "complete":
+            from cognee.exceptions import CogneeValidationError
+
+            raise CogneeValidationError(
+                "Document copy is incomplete. Retry copy_data or forget it before cognifying.",
+                status_code=409,
+            )
         status_for_pipeline = (data_point.pipeline_status or {}).get(pipeline_name) or {}
         if is_data_item_completed(status_for_pipeline.get(str(dataset.id))):
             yield {

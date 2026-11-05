@@ -35,6 +35,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | Script | Demonstrates |
 |---|---|
 | [`simple_cognee_example.py`](guides/simple_cognee_example.py) | Canonical `remember → recall` flow (start here) |
+| [`copy_document.py`](guides/copy_document.py) | Preview and copy one approved document version without re-extraction |
 | [`recall_core.py`](guides/recall_core.py) | `recall` semantics and parameters |
 | [`improve_quickstart.py`](guides/improve_quickstart.py) | Graph enrichment before/after `improve()` |
 | [`agent_memory_quickstart.py`](guides/agent_memory_quickstart.py) | Wrap an LLM agent with `@cognee.agent_memory` |

@@ -3,8 +3,8 @@
 No LLM call and no embedding call: the destination gets the exact nodes, edges and
 stored vectors the source holds for the document, so recall there behaves as it does
 in the source. Elements the destination already holds merge by id (entity ids derive
-from names, chunk ids from content): ``add_nodes`` / ``add_edges`` upsert, and the raw
-vector upsert unions ``belongs_to_set``.
+from names, chunk ids from content): existing destination properties and vectors
+are retained, while document provenance refs are merged.
 
 Two steps, so a caller can read the source without holding the destination's lock:
 
@@ -15,12 +15,12 @@ Two steps, so a caller can read the source without holding the destination's loc
   store with their stored vectors, and the document's confirmed edge-evidence rows.
 - ``write_document_copy`` gives the destination a ``Data`` row of its own (new id, the
   source row's id kept as ``legacy_id`` so either id resolves there, the same stored
-  file, stamped cognified for the destination so the next cognify does not extract
-  it again; a second copy finds and reuses it), then writes the nodes and edges with
+  file, completed only after every store succeeds; a second unchanged copy reuses
+  the stored receipt), then writes the nodes and edges with
   their refs re-addressed to that row, the vectors under the same collection names,
   and the evidence re-keyed. When a write fails and this copy created the row,
   everything written for it is removed again through the provenance delete
-  ``forget()`` uses, so a failed first copy leaves the destination as it was.
+  ``forget()`` uses. If cleanup also fails, the incomplete receipt remains retryable.
 
 Only adapters that keep source refs on the graph can answer the lookups (Ladybug,
 Neo4j, the Postgres demo); the relational-ledger backends raise
@@ -40,6 +40,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import and_, or_, select
 
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
 from cognee.infrastructure.databases.provenance.source_refs import (
@@ -81,6 +82,7 @@ class DocumentSnapshot:
     edge_refs: dict[EdgeIdentity, list[str]]
     vectors: dict[str, list[Any]]
     evidence: list[ProvenanceEdgeEvidence]
+    embedding_identity: tuple[str, int]
 
 
 @dataclass(frozen=True)
@@ -212,9 +214,12 @@ async def read_document_snapshot(dataset: Dataset, data: Data) -> DocumentSnapsh
             rows = await vector_engine.retrieve(name, node_ids, include_vector=True)
             if rows:
                 vectors[name] = rows
+        from .copy_safety import embedding_identity
+
+        model = await embedding_identity(dataset.id)
     evidence = await _confirmed_evidence(dataset.id, data.id)
     return DocumentSnapshot(
-        dataset.id, data.id, nodes, node_refs, edges, edge_refs, vectors, evidence
+        dataset.id, data.id, nodes, node_refs, edges, edge_refs, vectors, evidence, model
     )
 
 
@@ -223,11 +228,31 @@ async def write_document_copy(
 ) -> CopiedDocument:
     """Write ``snapshot`` of ``data`` into ``target`` and return what was written.
 
-    Call it under ``target``'s dataset lock. Entering the destination context checks its
-    recorded embedding width against the configured model, as reading the source did,
-    so the two share one width; the raw upsert checks every vector against it again.
+    Call it under the source and destination dataset locks. Preflight requires the
+    exact same embedding model and width; the raw upsert validates vectors again.
     """
-    target_data, created = await _ensure_target_data_row(data, target, user)
+    from .copy_safety import fingerprint, validate_destination_embedding
+
+    await validate_destination_embedding(target, snapshot.embedding_identity)
+    digest = fingerprint(data, snapshot)
+    target_data, created = await _ensure_target_data_row(data, target, user, digest)
+    if not created:
+        saved = (target_data.pipeline_status or {}).get("copy_data", {})
+        if saved.get("fingerprint") != digest:
+            raise CogneeValidationError(
+                "The source changed or this copy predates versioned receipts. Forget the previous copy before copying again.",
+                status_code=409,
+            )
+        if saved.get("state") == "complete":
+            return CopiedDocument(target_data.id, False, **saved["counts"])
+        await _discard_copy(target, target_data)
+        async with get_relational_engine().get_async_session() as session:
+            if await session.get(Data, target_data.id):
+                raise CogneeValidationError(
+                    "The incomplete copy could not be cleaned up. Retry after storage recovers.",
+                    status_code=409,
+                )
+        target_data, created = await _ensure_target_data_row(data, target, user, digest)
     try:
         nodes, edges, vectors = await _write_graph_and_vectors(target, target_data.id, snapshot)
         evidence_rows = await _copy_edge_evidence(
@@ -239,6 +264,16 @@ async def write_document_copy(
             # by every later cognify and never repaired: take the copy back out.
             await _discard_copy(target, target_data)
         raise
+    counts = {"nodes": nodes, "edges": edges, "vectors": vectors, "evidence_rows": evidence_rows}
+    from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
+
+    async with get_relational_engine().get_async_session() as session:
+        row = await session.get(Data, target_data.id)
+        row.pipeline_status = {
+            COGNIFY_PIPELINE_NAME: {str(target.id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED},
+            "copy_data": {"state": "complete", "fingerprint": digest, "counts": counts},
+        }
+        await session.commit()
     return CopiedDocument(
         data_id=target_data.id,
         data_record_created=created,
@@ -249,32 +284,35 @@ async def write_document_copy(
     )
 
 
-async def _ensure_target_data_row(data: Data, target: Dataset, user: User) -> tuple[Data, bool]:
+async def _ensure_target_data_row(
+    data: Data, target: Dataset, user: User, digest: str
+) -> tuple[Data, bool]:
     """The destination's row for ``data``: the one an earlier copy left, or a new one.
 
     The new row is the source row with a new id, ``legacy_id`` naming the source id,
-    owned by the user who copies, and stamped cognified for the destination. The stamp
-    is safe to write first because ``write_document_copy`` discards the row again when
-    a later write fails.
+    owned by the user who copies. The pending receipt prevents cognify from
+    extracting a second set of chunks after a crash. Completion is recorded only
+    after every store succeeds; retry cleans up an interrupted first copy.
     """
-    # Imported on use: the pipelines package imports this package's methods.
-    from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
-
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         existing_id = await resolve_data_id(target.id, data.id)
         if existing_id is not None:
             return await session.get(Data, existing_id), False
 
-        # TODO(SDK-1435): a destination that ingested the same content on its own is
-        # not detected. That row has its own id, and chunk ids embed the document id,
-        # so this copy adds a second Document node and a second set of chunks (with
-        # their edges and evidence) for the same text. Refusing on a matching
-        # ``content_hash`` (``get_dataset_data_by_content_hash``, the predicate
-        # ingestion dedup uses) covers file-backed rows only: not every data type
-        # carries a content hash, so the check needs a per-type answer before it can
-        # be the rule. Until then, callers copying into a dataset that may already
-        # hold the document should look for it first.
+        if data.content_hash:
+            duplicate = await session.scalar(
+                select(Data.id)
+                .where(
+                    Data.dataset_id == target.id,
+                    Data.content_hash == data.content_hash,
+                )
+                .limit(1)
+            )
+            if duplicate is not None:
+                raise CogneeValidationError(
+                    "The destination already contains this document's content.", status_code=409
+                )
 
         row = Data(
             id=uuid4(),
@@ -299,11 +337,7 @@ async def _ensure_target_data_row(data: Data, target: Dataset, user: User) -> tu
             token_count=data.token_count,
             data_size=data.data_size,
             importance_weight=data.importance_weight,
-            pipeline_status={
-                COGNIFY_PIPELINE_NAME: {
-                    str(target.id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-                }
-            },
+            pipeline_status={"copy_data": {"state": "writing", "fingerprint": digest}},
         )
         session.add(row)
         await session.commit()
@@ -335,7 +369,33 @@ async def _write_graph_and_vectors(
 
     async with set_database_global_context_variables(target.id, target.owner_id):
         graph = await get_graph_engine()
-        node_objects = [SimpleNamespace(**properties) for properties in snapshot.nodes]
+        # Copy ownership into shared elements without replacing another document's
+        # properties. Then a failed copy can remove its refs without corrupting
+        # existing destination content.
+        existing_nodes = {
+            str(row["id"]): _without_provenance(row)
+            for row in await graph.get_nodes(list(node_refs))
+        }
+        existing_edges = await graph.get_edge_delete_data(list(edge_refs))
+        node_objects = [
+            SimpleNamespace(**existing_nodes.get(str(properties["id"]), properties))
+            for properties in snapshot.nodes
+        ]
+        edges = [
+            (
+                source,
+                destination,
+                relation,
+                _without_provenance(
+                    existing_edges[
+                        EdgeIdentity(str(source), str(destination), str(relation))
+                    ].edge_properties
+                )
+                if EdgeIdentity(str(source), str(destination), str(relation)) in existing_edges
+                else properties,
+            )
+            for source, destination, relation, properties in snapshot.edges
+        ]
         if getattr(graph, "supports_per_row_source_refs", False):
             # The bulk writes stamp one ref per row; the rest of a row's refs follow.
             await graph.add_nodes(
@@ -346,7 +406,7 @@ async def _write_graph_and_vectors(
                 {nid: keys[1:] for nid, keys in node_refs.items() if len(keys) > 1},
             )
             await graph.add_edges(
-                snapshot.edges,
+                edges,
                 source_ref_key={
                     (identity.source_id, identity.target_id, identity.relationship_name): keys[0]
                     for identity, keys in edge_refs.items()
@@ -359,19 +419,31 @@ async def _write_graph_and_vectors(
         else:
             await graph.add_nodes(node_objects)
             await _attach_grouped(graph.attach_node_source_refs, node_refs)
-            await graph.add_edges(snapshot.edges)
+            await graph.add_edges(edges)
             await _attach_grouped(graph.attach_edge_source_refs, edge_refs)
 
         vector_engine = await get_vector_engine_async()
         index_schema = _index_schema_of(vector_engine)
         written = 0
+        target_collections = set(await _collection_names(vector_engine))
         for name, rows in snapshot.vectors.items():
+            existing = (
+                {
+                    str(row.id)
+                    for row in await vector_engine.retrieve(name, [str(row.id) for row in rows])
+                }
+                if name in target_collections
+                else set()
+            )
             points = []
             for row in rows:
+                if str(row.id) in existing:
+                    continue
                 payload = dict(row.payload)
                 vector = payload.pop("vector")
                 points.append({"id": str(row.id), "vector": list(vector), "payload": payload})
-            await vector_engine.upsert_raw_vectors(name, points, payload_schema=index_schema)
+            if points:
+                await vector_engine.upsert_raw_vectors(name, points, payload_schema=index_schema)
             written += len(points)
 
     return len(snapshot.nodes), len(snapshot.edges), written
