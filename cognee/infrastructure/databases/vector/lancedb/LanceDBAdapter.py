@@ -646,8 +646,7 @@ class LanceDBAdapter(VectorDBInterface):
             #      schema now requires to be non-null. Raised from the Rust side
             #      (lance-file writer) when an old-schema row is upserted against
             #      a newer schema with a non-null field and no default in storage.
-            err = str(e)
-            if "not found in target schema" not in err and "contained null values" not in err:
+            if not self._is_schema_drift_error(e):
                 raise
             logger.warning(
                 "Schema mismatch detected for collection '%s', migrating table: %s",
@@ -655,7 +654,7 @@ class LanceDBAdapter(VectorDBInterface):
                 e,
             )
             await self._migrate_collection_schema(
-                collection_name, collection, payload_schema, lance_data_points
+                collection_name, payload_schema, lance_data_points
             )
 
     async def upsert_raw_vectors(
@@ -741,17 +740,14 @@ class LanceDBAdapter(VectorDBInterface):
             # The same two schema-drift errors create_data_points recovers from: a
             # table created with an older payload shape is rebuilt to the current
             # one, its rows kept, and the points are written into the new table.
-            err = str(e)
-            if "not found in target schema" not in err and "contained null values" not in err:
+            if not self._is_schema_drift_error(e):
                 raise
             logger.warning(
                 "Schema mismatch detected for collection '%s', migrating table: %s",
                 collection_name,
                 e,
             )
-            await self._migrate_collection_schema(
-                collection_name, collection, payload_schema, raw_points
-            )
+            await self._migrate_collection_schema(collection_name, payload_schema, raw_points)
 
     # ------------------------------------------------------------------
     # Compaction
@@ -962,14 +958,66 @@ class LanceDBAdapter(VectorDBInterface):
             max_versions=max_versions,
         )
 
+    @staticmethod
+    def _is_schema_drift_error(error: Exception) -> bool:
+        """Whether a write failed because the table's payload shape is an older one.
+
+        Two LanceDB failures are recoverable by rebuilding the table through
+        Pydantic validation, which fills the defaults of the current schema:
+        "not found in target schema" (the payload has a field the table does
+        not know) and "contained null values" (old rows lack a field the
+        current schema requires; raised by the Rust file writer).
+        """
+        message = str(error)
+        return "not found in target schema" in message or "contained null values" in message
+
     async def _migrate_collection_schema(
         self,
+        collection_name: str,
+        payload_schema: type,
+        new_lance_data_points: list,
+    ):
+        """Rebuild a LanceDB table to the current schema, keeping its rows, and write the points.
+
+        Everything from the row copy to the table replacement runs under
+        ``VECTOR_DB_LOCK``, which serializes every write to the table: a row
+        written between an unlocked copy and the drop would be lost with the
+        old table, and both writers would report success. The routing
+        collection is one table for every dataset, so two datasets' first
+        writes after an upgrade reach here together. Each caller's own write
+        failed outside the lock, and another migration may have rebuilt the
+        table in the meantime, so the points are written once more first and
+        the table is rebuilt only when they still do not fit; the table is
+        opened afresh for the same reason.
+        """
+        async with self.VECTOR_DB_LOCK:
+            connection = await self.get_connection()
+            collection = await connection.open_table(collection_name)
+            if new_lance_data_points:
+                try:
+                    await (
+                        collection.merge_insert("id")
+                        .when_matched_update_all()
+                        .when_not_matched_insert_all()
+                        .execute(self._records_for_write(new_lance_data_points))
+                    )
+                    return
+                except (ValueError, OSError, RuntimeError) as e:
+                    if not self._is_schema_drift_error(e):
+                        raise
+            await self._replace_collection_schema(
+                connection, collection_name, collection, payload_schema, new_lance_data_points
+            )
+
+    async def _replace_collection_schema(
+        self,
+        connection,
         collection_name: str,
         old_collection,
         payload_schema: type,
         new_lance_data_points: list,
     ):
-        """Migrate a LanceDB table to a new schema, preserving existing data."""
+        """The rebuild itself; call it under ``VECTOR_DB_LOCK`` (see ``_migrate_collection_schema``)."""
         rows = (await old_collection.to_arrow()).to_pylist()
 
         vector_size = self.embedding_engine.get_vector_size()
@@ -1042,25 +1090,23 @@ class LanceDBAdapter(VectorDBInterface):
                 "(or make them optional) and re-run migration."
             )
 
-        async with self.VECTOR_DB_LOCK:
-            connection = await self.get_connection()
-            await connection.drop_table(collection_name)
-            await connection.create_table(
-                name=collection_name,
-                schema=self._schema_for_create_table(MigrationLanceDataPoint),
+        await connection.drop_table(collection_name)
+        await connection.create_table(
+            name=collection_name,
+            schema=self._schema_for_create_table(MigrationLanceDataPoint),
+        )
+        collection = await connection.open_table(collection_name)
+
+        if typed_old_rows:
+            await collection.add(self._records_for_write(typed_old_rows))
+
+        if new_lance_data_points:
+            await (
+                collection.merge_insert("id")
+                .when_matched_update_all()
+                .when_not_matched_insert_all()
+                .execute(self._records_for_write(new_lance_data_points))
             )
-            collection = await connection.open_table(collection_name)
-
-            if typed_old_rows:
-                await collection.add(self._records_for_write(typed_old_rows))
-
-            if new_lance_data_points:
-                await (
-                    collection.merge_insert("id")
-                    .when_matched_update_all()
-                    .when_not_matched_insert_all()
-                    .execute(self._records_for_write(new_lance_data_points))
-                )
 
         logger.info(
             "Migrated collection '%s' schema (%d existing rows preserved)",
@@ -1205,7 +1251,6 @@ class LanceDBAdapter(VectorDBInterface):
             try:
                 await self._migrate_collection_schema(
                     collection_name=collection_name,
-                    old_collection=collection,
                     payload_schema=payload_schema,
                     new_lance_data_points=[],
                 )

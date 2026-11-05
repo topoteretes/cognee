@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 
 import pytest
@@ -178,3 +179,55 @@ async def test_lancedb_upsert_raw_vectors_migrates_a_table_of_an_older_shape(tmp
     assert rows[str(new_id)]["document_id"] == "doc"
     assert "is_root" not in rows[str(old_id)]
     assert set(rows[str(old_id)]) == set(rows[str(new_id)])
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_concurrent_first_writes_after_an_upgrade_keep_every_row(tmp_path):
+    """The routing table is one table for every dataset, so two datasets' first
+    writes after an upgrade both find the older shape and both migrate. The
+    second migration must not rebuild the table from a copy taken before the
+    first one wrote its row: the copy and the replacement run under the write
+    lock, and a migration that gets the lock after another one rebuilt the
+    table writes its row into that table instead."""
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"),
+        api_key=None,
+        embedding_engine=_FakeEmbeddingEngine(),
+    )
+    collection = "DatasetRoute_text"
+    old_id, first_id, second_id = uuid4(), uuid4(), uuid4()
+
+    await adapter.upsert_raw_vectors(
+        collection,
+        [
+            {
+                "id": old_id,
+                "vector": [1.0, 0.0, 0.0],
+                "payload": {"id": str(old_id), "text": "old root", "dataset_id": "d"},
+            }
+        ],
+        payload_schema=_OldRoutingRow,
+    )
+
+    def new_row(row_id, text):
+        return {
+            "id": row_id,
+            "vector": [0.0, 1.0, 0.0],
+            "payload": {"id": str(row_id), "text": text, "document_id": "doc"},
+        }
+
+    await asyncio.gather(
+        adapter.upsert_raw_vectors(collection, [new_row(first_id, "first dataset")]),
+        adapter.upsert_raw_vectors(collection, [new_row(second_id, "second dataset")]),
+    )
+
+    rows = {
+        str(row.id): row.payload["text"]
+        for row in await adapter.retrieve(collection, [str(old_id), str(first_id), str(second_id)])
+    }
+    assert rows == {
+        str(old_id): "old root",
+        str(first_id): "first dataset",
+        str(second_id): "second dataset",
+    }

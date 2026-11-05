@@ -29,7 +29,11 @@ from .build_document_index import _persist_bucket_edges, build_root_summary
 from .ids import create_document_bucket_id, create_root_summary_id
 from .load_dataset_content import load_dataset_content
 from .models import DatasetContent
-from .persist import persist_context_summaries, safe_delete_context_vectors
+from .persist import (
+    delete_context_index_nodes,
+    persist_context_summaries,
+    safe_delete_context_vectors,
+)
 
 logger = get_logger("global_context_index")
 
@@ -45,7 +49,9 @@ async def rebuild_document_index_root(dataset_id: UUID | str, user) -> GlobalCon
     the index is the ``llm`` method's, or no document with chunks survives (the
     last document went). The forget that calls it is done by then, so a
     failure here, an embedding provider that cannot be reached first of all, is
-    a warning and leaves the root absent until the next ``improve()``, as before.
+    a warning and leaves the root absent until the next ``improve()``, as before:
+    a root node the failure left behind is taken out again, since the build
+    compares text and would take it for complete.
     """
     try:
         return await _rebuild_root(str(dataset_id), user)
@@ -70,20 +76,31 @@ async def _rebuild_root(dataset_id: str, user) -> GlobalContextSummary | None:
     buckets = stored_document_buckets(content)
 
     unified_engine = await get_unified_engine()
+    root_id = str(root.id)
     # The deletion dropped the root node and its vector. Should a root still be
     # stored, its vector goes first, as in the build: the stores keep a
     # conflicting row's vector, and the id never changes.
-    if str(root.id) in content.existing_summary_texts:
-        await safe_delete_context_vectors(unified_engine.vector, [str(root.id)])
-    await persist_context_summaries([root], ctx)
-    # The root took every bucket's summarized_in edge with it.
-    await _persist_bucket_edges(
-        [], dataset_id, unified_engine, link_documents=False, relink=buckets, ctx=ctx
-    )
-    # The buckets go in as stored, so the mirror sees them unchanged and copies
-    # the root's vector only. Their texts shift a little with the deletion
-    # (tf-idf over fewer documents); the next build writes those.
-    await sync_dataset_routes(dataset_id, [*buckets, root], unified_engine.vector)
+    if root_id in content.existing_summary_texts:
+        await safe_delete_context_vectors(unified_engine.vector, [root_id])
+    try:
+        await persist_context_summaries([root], ctx)
+        # The root took every bucket's summarized_in edge with it.
+        await _persist_bucket_edges(
+            [], dataset_id, unified_engine, link_documents=False, relink=buckets, ctx=ctx
+        )
+        # The buckets go in as stored, so the mirror sees them unchanged and
+        # copies the root's vector only. Their texts shift a little with the
+        # deletion (tf-idf over fewer documents); the next build writes those.
+        await sync_dataset_routes(dataset_id, [*buckets, root], unified_engine.vector)
+    except Exception:
+        # The node is written before its text is embedded, and the edges after
+        # both, so a failure can leave a root with no vector or no bucket
+        # edges. The build compares text, and this root's text is the one it
+        # computes, so it would leave such a root as it is: unembedded, the
+        # mirror cannot copy its vector and every later build fails. Take the
+        # root out again, and the next build writes it as one that was missing.
+        await delete_context_index_nodes(unified_engine, [root_id])
+        raise
     logger.info("Global context index: root of dataset %s rebuilt after a deletion", dataset_id)
     return root
 

@@ -75,6 +75,7 @@ class FakeStores:
         self.edges = []
         self.synced = []
         self.vector_deletes = []
+        self.node_deletes = []
         self.engine = SimpleNamespace(graph="graph", vector="vector")
 
         async def load(data=None, ctx=None):
@@ -97,6 +98,9 @@ class FakeStores:
         async def delete_vectors(vector_engine, ids):
             self.vector_deletes.append(list(ids))
 
+        async def delete_nodes(engine, ids):
+            self.node_deletes.append(list(ids))
+
         monkeypatch.setattr(rebuild_module, "load_dataset_content", load)
         monkeypatch.setattr(rebuild_module, "get_unified_engine", engine)
         monkeypatch.setattr(rebuild_module, "persist_context_summaries", persist)
@@ -108,9 +112,12 @@ class FakeStores:
         )
         monkeypatch.setattr(rebuild_module, "sync_dataset_routes", sync)
         monkeypatch.setattr(rebuild_module, "safe_delete_context_vectors", delete_vectors)
+        monkeypatch.setattr(rebuild_module, "delete_context_index_nodes", delete_nodes)
 
     def wrote_nothing(self):
-        return not (self.persisted or self.edges or self.synced or self.vector_deletes)
+        return not (
+            self.persisted or self.edges or self.synced or self.vector_deletes or self.node_deletes
+        )
 
 
 @pytest.mark.asyncio
@@ -255,6 +262,41 @@ async def test_a_failure_is_a_warning_not_an_error(monkeypatch, caplog):
     assert any("could not be rebuilt" in record.message for record in caplog.records)
     # Nothing after the failed write ran: no edges, no mirror.
     assert stores.edges == [] and stores.synced == []
+    # The write stores the node before it embeds the text, so the root node may
+    # be there without a vector. It goes again: the build compares text, and
+    # would otherwise keep that root as it is, never embed it, and fail at the
+    # mirror on every improve, since the mirror copies the vector it lacks.
+    assert stores.node_deletes == [[str(create_root_summary_id(DATASET_ID))]]
+
+
+@pytest.mark.asyncio
+async def test_a_failure_after_the_root_write_takes_the_root_out_again(monkeypatch):
+    """The edges and the mirror follow the node write. A root left without
+    its buckets' edges would also pass as complete at the next build, which
+    relinks every bucket only to a root it found missing."""
+    content = content_after_deleting_gamma()
+    stores = FakeStores(monkeypatch, content)
+    root_id = str(create_root_summary_id(DATASET_ID))
+
+    async def edge_write_failed(edges_by_relationship, engine, ctx=None):
+        raise RuntimeError("graph write failed")
+
+    monkeypatch.setattr(build_module, "persist_context_index_edges", edge_write_failed)
+
+    assert await rebuild_document_index_root(DATASET_ID, USER) is None
+
+    assert [s.id for s in stores.persisted] == [UUID(root_id)]
+    assert stores.synced == []
+    assert stores.node_deletes == [[root_id]]
+
+
+@pytest.mark.asyncio
+async def test_a_rebuild_that_succeeds_removes_nothing(monkeypatch):
+    stores = FakeStores(monkeypatch, content_after_deleting_gamma())
+
+    assert await rebuild_document_index_root(DATASET_ID, USER) is not None
+
+    assert stores.node_deletes == []
 
 
 def test_stored_document_buckets_are_the_surviving_documents_with_a_bucket():
