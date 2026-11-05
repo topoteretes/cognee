@@ -640,11 +640,10 @@ def build_site_check_user_message(
 
 
 async def site_check_with_llm(system_prompt: str, user_message: str) -> Any:
-    """One structured LLM call. Same instructor/litellm block as tools/assess_branch_notes.py."""
+    """One structured LLM call. Same structured_llm call as tools/assess_branch_notes.py."""
     try:
-        import instructor
-        import litellm
         from pydantic import BaseModel, Field
+        from structured_llm import structured_completion
     except ImportError as exc:
         raise RuntimeError(f"Required dependencies not available: {exc}") from exc
 
@@ -687,8 +686,7 @@ async def site_check_with_llm(system_prompt: str, user_message: str) -> Any:
         )
 
     try:
-        client = instructor.from_litellm(litellm.acompletion)
-        return await client.chat.completions.create(
+        return await structured_completion(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -1146,11 +1144,10 @@ def build_source_check_user_message(
 
 
 async def source_check_with_llm(system_prompt: str, user_message: str) -> Any:
-    """Second structured LLM call, same instructor/litellm block as the site check."""
+    """Second structured LLM call, same structured_llm call as the site check."""
     try:
-        import instructor
-        import litellm
         from pydantic import BaseModel, Field
+        from structured_llm import structured_completion
     except ImportError as exc:
         raise RuntimeError(f"Required dependencies not available: {exc}") from exc
 
@@ -1174,8 +1171,7 @@ async def source_check_with_llm(system_prompt: str, user_message: str) -> Any:
         )
 
     try:
-        client = instructor.from_litellm(litellm.acompletion)
-        return await client.chat.completions.create(
+        return await structured_completion(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},

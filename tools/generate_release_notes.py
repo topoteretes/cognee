@@ -5,7 +5,7 @@ Generate human-friendly release notes by analyzing git diff with LLM.
 This script compares changes between two branches (typically main and dev)
 and uses an LLM to generate readable, user-focused release notes.
 
-Uses litellm + instructor directly to avoid cognee's dotenv.load_dotenv(override=True)
+Uses litellm directly to avoid cognee's dotenv.load_dotenv(override=True)
 which can overwrite CI environment variables with .env file placeholders.
 """
 
@@ -210,18 +210,17 @@ async def generate_release_notes_with_llm(
 ) -> Any:
     """Use LLM to generate human-friendly release notes.
 
-    Uses litellm + instructor directly instead of cognee's LLM client
+    Uses litellm directly instead of cognee's LLM client
     to avoid cognee's dotenv.load_dotenv(override=True) overwriting
     CI environment variables.
     """
     try:
-        import instructor
-        import litellm
         from pydantic import BaseModel, Field
+        from structured_llm import structured_completion
     except ImportError as e:
         print(f"Error: Required dependencies not available: {e}", file=sys.stderr)
         print(
-            "Please ensure litellm, instructor, and pydantic are installed.",
+            "Please ensure litellm and pydantic are installed.",
             file=sys.stderr,
         )
         return None
@@ -321,8 +320,7 @@ Create engaging release notes that help users understand what's new and improved
 """
 
     try:
-        client = instructor.from_litellm(litellm.acompletion)
-        response = await client.chat.completions.create(
+        response = await structured_completion(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},

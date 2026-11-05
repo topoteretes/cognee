@@ -63,9 +63,8 @@ def collect_branch_payload(
 
 async def generate_notes_with_llm(payload: dict[str, Any]) -> Any:
     try:
-        import instructor
-        import litellm
         from pydantic import BaseModel, Field
+        from structured_llm import structured_completion
     except ImportError as exc:
         raise RuntimeError(f"Required dependencies not available: {exc}") from exc
 
@@ -90,8 +89,7 @@ async def generate_notes_with_llm(payload: dict[str, Any]) -> Any:
     )
 
     try:
-        client = instructor.from_litellm(litellm.acompletion)
-        return await client.chat.completions.create(
+        return await structured_completion(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},

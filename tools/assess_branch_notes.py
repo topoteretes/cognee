@@ -3,7 +3,7 @@
 Assess whether generated dev notes imply a documentation update is needed.
 
 Matches the LLM integration style used by tools/generate_release_notes.py:
-- uses litellm + instructor directly
+- uses litellm directly (tools/structured_llm.py)
 - reads LLM_API_KEY / LLM_MODEL from the environment
 - raises on missing dependencies, missing credentials, or LLM failures
 """
@@ -65,9 +65,8 @@ def format_markdown(assessment: Any) -> str:
 
 async def assess_with_llm(notes_json: str, notes_markdown: str) -> Any:
     try:
-        import instructor
-        import litellm
         from pydantic import BaseModel, Field
+        from structured_llm import structured_completion
     except ImportError as exc:
         raise RuntimeError(f"Required dependencies not available: {exc}") from exc
 
@@ -94,8 +93,7 @@ async def assess_with_llm(notes_json: str, notes_markdown: str) -> Any:
     )
 
     try:
-        client = instructor.from_litellm(litellm.acompletion)
-        return await client.chat.completions.create(
+        return await structured_completion(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
