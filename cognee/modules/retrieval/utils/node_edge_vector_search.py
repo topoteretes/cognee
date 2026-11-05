@@ -156,10 +156,18 @@ class NodeEdgeVectorSearch:
         self, collections: list[str], query_batch: list[str]
     ) -> list[list[Any]]:
         """Runs batch search across all collections and returns list-of-lists per collection."""
+        vector_engine = await self._get_vector_engine()
+        existing = set(await vector_engine.existing_collections(collections))
         search_tasks = [
-            self._search_batch_collection(collection, query_batch) for collection in collections
+            self._search_batch_collection(collection, query_batch)
+            for collection in collections
+            if collection in existing
         ]
-        return await asyncio.gather(*search_tasks)
+        found = iter(await asyncio.gather(*search_tasks))
+        return [
+            next(found) if collection in existing else [[]] * len(query_batch)
+            for collection in collections
+        ]
 
     async def _search_batch_collection(
         self, collection_name: str, query_batch: list[str]
@@ -188,6 +196,9 @@ class NodeEdgeVectorSearch:
         """
         await self._embed_query(query)
         vector_engine = await self._get_vector_engine()
+        # Missing collections answer empty without a search: on pgvector each
+        # one would otherwise cost a connection to find out it does not exist.
+        existing = set(await vector_engine.existing_collections(collections))
         search_tasks = [
             self._search_single_collection(
                 vector_engine,
@@ -197,9 +208,10 @@ class NodeEdgeVectorSearch:
                 node_name_filter_operator,
             )
             for collection in collections
+            if collection in existing
         ]
-        search_results = await asyncio.gather(*search_tasks)
-        return search_results
+        found = iter(await asyncio.gather(*search_tasks))
+        return [next(found) if collection in existing else [] for collection in collections]
 
     async def _embed_query(self, query: str):
         """Embeds the query and stores the resulting vector."""
