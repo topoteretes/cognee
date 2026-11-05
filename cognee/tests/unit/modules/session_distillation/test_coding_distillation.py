@@ -414,10 +414,18 @@ def test_lesson_metadata_reads_the_plugins_qa_context():
         "git_commit": "abc123",
         "git_branch": "dev",
         "files": ["cli/tasks.py"],
+        "project_node_sets": [],
     }
     bare = lesson_metadata(_written("pitfall", "pitfall:Bash:x:cat"), scope, {}, ["s-0", "s-1"])
     assert bare["session_date"] == "" and bare["git_commit"] == ""
     assert bare["seen_sessions"] == ["s-0", "s-1"] and bare["seen_in_sessions"] == 2
+
+
+def test_lesson_metadata_names_the_project_scope_without_the_distillation_sets():
+    scope = SimpleNamespace(session_id="s-1")
+    node_set = ["session_learnings", "session_learnings:s-1", "project-acme-0123"]
+    metadata = lesson_metadata(_written("state", "test-baseline"), scope, {}, None, node_set)
+    assert metadata["project_node_sets"] == ["project-acme-0123"]
 
 
 # -- Publish ---------------------------------------------------------------------------

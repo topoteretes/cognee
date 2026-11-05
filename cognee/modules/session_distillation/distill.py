@@ -71,6 +71,7 @@ from .lesson_store import (
     lesson_data_id,
     mentioned_files,
     pitfall_sessions,
+    project_node_sets,
     render_coding_lesson_document,
     replace_superseded_lessons,
 )
@@ -830,12 +831,19 @@ def render_lesson_document(
 
 
 def lesson_metadata(
-    lesson: CodingWrittenLesson, scope, qa_context: dict, seen: list[str] | None
+    lesson: CodingWrittenLesson,
+    scope,
+    qa_context: dict,
+    seen: list[str] | None,
+    node_set: list[str] | None = None,
 ) -> dict:
     """The ``Data.external_metadata`` of one coding lesson (SDK-1336 reads it from the listing).
 
     ``seen`` is the list of sessions a pitfall was seen in, this one included; it is
     stored as ``seen_sessions`` with its length as ``seen_in_sessions``.
+    ``project_node_sets`` is the lesson's project scope (``node_set`` minus the
+    distillation's own sets): the listing does not expose ``Data.node_set``, so this is
+    how the plugin keeps another repository's lessons out of its memory block.
     """
     metadata = {
         "lesson_type": lesson.lesson_type,
@@ -845,6 +853,7 @@ def lesson_metadata(
         "git_commit": str(qa_context.get("end_commit") or qa_context.get("start_commit") or ""),
         "git_branch": str(qa_context.get("branch") or ""),
         "files": mentioned_files(lesson.statement),
+        "project_node_sets": list(project_node_sets(node_set or [])),
     }
     if seen is not None:
         metadata["seen_sessions"] = list(seen)
@@ -876,7 +885,7 @@ async def build_coding_lesson_documents(
         documents.append(
             LessonDocument(
                 text=text,
-                metadata=lesson_metadata(lesson, scope, lesson.turn_context, seen),
+                metadata=lesson_metadata(lesson, scope, lesson.turn_context, seen, node_set),
                 data_id=lesson_data_id(scope.dataset.id, text),
             )
         )

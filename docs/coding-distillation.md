@@ -135,6 +135,9 @@ Edit on an unchanged string fails with "No changes to make" → rewrite the file
 The document's `Data` row carries the same facts in `external_metadata`, which the dataset
 listing exposes: `lesson_type`, `state_key`, `session_id`, `session_date`, `git_commit`,
 `git_branch`, `files` (file names the statement mentions, in their original casing),
+`project_node_sets` (the lesson's project scope: its node sets without the distillation's
+own `session_learnings` ones, empty when the session pinned none; the listing does not
+expose `Data.node_set`, so this is how the plugin filters lessons by repository),
 `seen_sessions` and `seen_in_sessions`. The date, commit and branch come from the `context` of the Q&A
 entry of the lesson's own turn when the plugin sends it as JSON (`{"cwd", "transcript_path", "date", "start_commit",
 "end_commit", "branch"}`); without it the lesson is stored with empty values.
