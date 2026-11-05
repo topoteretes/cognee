@@ -33,6 +33,7 @@ COMMAND_DESCRIPTIONS = {
     "report": "Generate a Graph Insight Report (hub nodes, surprising links, confidence tags, suggested questions)",
     "demo": "Load a bundled demo knowledge graph and search it — no API key needed",
     "doctor": "Diagnose configuration and local services (config traps, databases, providers)",
+    "provenance": "Inspect, verify, anchor and export the audit provenance ledger",
 }
 
 # Search type choices
