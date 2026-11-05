@@ -34,3 +34,5 @@ __all__ = [
     "obsidian_source",
     "onenote_source",
 ]
+from .readwise import readwise_source
+__all__.append("readwise_source")
