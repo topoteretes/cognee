@@ -507,6 +507,11 @@ def _event_time(event: dict[str, Any]) -> datetime | None:
     raw = event.get("time")
     if not raw:
         return None
+    # RFC 3339 producers may emit a trailing "Z". fromisoformat only accepts it
+    # from Python 3.11 on and 3.10 is still supported, so normalize it first;
+    # otherwise the event is dropped as unparseable instead of compared.
+    if raw.endswith(("Z", "z")):
+        raw = raw[:-1] + "+00:00"
     try:
         return _as_naive_utc(datetime.fromisoformat(raw))
     except ValueError:
@@ -574,6 +579,9 @@ async def get_live_events(
         ]
 
     if events:
+        # events[-1] is the newest only because collect_session_events sorts by
+        # time; the cursor is the delivered event's own stamp so it can never
+        # drift from what the client actually received.
         cursor = events[-1]["time"]
     else:
         cursor = since.isoformat() if since is not None else None
