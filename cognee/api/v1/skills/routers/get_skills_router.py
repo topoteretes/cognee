@@ -74,6 +74,8 @@ class ErrorResponse(BaseModel):
     """Generic API error response."""
 
     error: str
+    detail: str | None = None
+    exception_type: str | None = None
 
 
 def get_skills_router() -> APIRouter:
@@ -89,7 +91,11 @@ def get_skills_router() -> APIRouter:
     @router.post(
         "",
         response_model=dict,
-        responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+        responses={
+            400: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
     )
     async def ingest_skill(
         payload: SkillIngestRequest,
@@ -136,10 +142,30 @@ def get_skills_router() -> APIRouter:
             )
             return jsonable_encoder(result.to_dict())
         except CogneeApiError:
+            # Typed API errors carry their own status (including 409 for genuine
+            # conflicts). Let the app-level handler map them instead of flattening
+            # every failure into 409.
             raise
-        except Exception:
+        except (ValueError, PermissionError, FileNotFoundError) as error:
             logger.exception("ingest skill failed")
-            return JSONResponse(status_code=409, content={"error": "Failed to ingest skill"})
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Failed to ingest skill",
+                    "exception_type": type(error).__name__,
+                    "detail": str(error),
+                },
+            )
+        except Exception as error:
+            logger.exception("ingest skill failed")
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": "Failed to ingest skill",
+                    "exception_type": type(error).__name__,
+                    "detail": str(error),
+                },
+            )
 
     @router.get(
         "/",
