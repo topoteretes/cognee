@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -8,6 +7,7 @@ from cognee.modules.agent_memory.sanitization import (
     sanitize_value,
     truncate_text,
 )
+from cognee.shared.event_time import normalize_event_time
 
 
 def _validate_list_of_str(value: object, key: str) -> list[str]:
@@ -17,24 +17,6 @@ def _validate_list_of_str(value: object, key: str) -> list[str]:
         if not isinstance(item, str):
             raise ValueError(f"{key}[{i}] must be a string")
     return value
-
-
-def normalize_event_time(value: str) -> str:
-    """An ISO-8601 event time as the cache stores it: timezone-aware, in UTC.
-
-    The client's clock stamps the event (the plugin's Stop hook for an answer, its
-    PostToolUse hook for a trace), so a session's entries compare on one clock
-    whatever order they arrived in. A naive or unparsable value is refused.
-    """
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError("time must be a non-empty ISO-8601 string")
-    try:
-        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-    except ValueError as error:
-        raise ValueError(f"time is not an ISO-8601 timestamp: {value!r}") from error
-    if parsed.tzinfo is None:
-        raise ValueError("time must carry a timezone offset")
-    return parsed.astimezone(timezone.utc).isoformat()
 
 
 class SessionQAEntry(BaseModel):

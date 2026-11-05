@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
-from cognee.infrastructure.databases.cache.models import normalize_event_time
+from cognee.shared.event_time import normalize_event_time
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("memory.entries")
