@@ -67,12 +67,12 @@ from cognee.shared.logging_utils import get_logger
 
 from .lesson_store import (
     LessonDocument,
-    delete_superseded_lessons,
     find_lessons_by_state_key,
     lesson_data_id,
     mentioned_files,
+    pitfall_sessions,
     render_coding_lesson_document,
-    seen_in_sessions,
+    replace_superseded_lessons,
 )
 from .models import (
     CODING_WRITER_STYLE_LINE,
@@ -186,7 +186,10 @@ async def resolve_distillation_scope(
     session_id: str,
     dataset: str | UUID,
     user: User | None,
+    replaces_lessons: bool = False,
 ) -> SessionDistillationScope:
+    """The user and the dataset the lessons land in; ``replaces_lessons`` (coding mode)
+    also requires delete permission, since a state key's older lessons are deleted."""
     resolved_user = user if user is not None else session_user.get()
     if resolved_user is None or getattr(resolved_user, "id", None) is None:
         resolved_user = await get_default_user()
@@ -204,6 +207,17 @@ async def resolve_distillation_scope(
     if not writable_datasets:
         raise CogneeValidationError(
             message=f"Dataset '{dataset}' not found or not writable for this user.",
+            name="SessionDistillationError",
+        )
+    if replaces_lessons and not await get_authorized_existing_datasets(
+        [dataset], "delete", resolved_user
+    ):
+        raise CogneeValidationError(
+            message=(
+                f"Dataset '{dataset}' is writable but not deletable for this user; coding "
+                "distillation replaces older lessons with the same state key, which needs "
+                "delete permission."
+            ),
             name="SessionDistillationError",
         )
 
@@ -730,8 +744,14 @@ def render_lesson_document(
     return f"# Session learning (session {session_id})\n\n{body}\n"
 
 
-def lesson_metadata(lesson: CodingWrittenLesson, scope, qa_context: dict, seen: int | None) -> dict:
-    """The ``Data.external_metadata`` of one coding lesson (SDK-1336 reads it from the listing)."""
+def lesson_metadata(
+    lesson: CodingWrittenLesson, scope, qa_context: dict, seen: list[str] | None
+) -> dict:
+    """The ``Data.external_metadata`` of one coding lesson (SDK-1336 reads it from the listing).
+
+    ``seen`` is the list of sessions a pitfall was seen in, this one included; it is
+    stored as ``seen_sessions`` with its length as ``seen_in_sessions``.
+    """
     metadata = {
         "lesson_type": lesson.lesson_type,
         "state_key": lesson.state_key,
@@ -742,7 +762,8 @@ def lesson_metadata(lesson: CodingWrittenLesson, scope, qa_context: dict, seen: 
         "files": mentioned_files(lesson.statement),
     }
     if seen is not None:
-        metadata["seen_in_sessions"] = seen
+        metadata["seen_sessions"] = list(seen)
+        metadata["seen_in_sessions"] = len(seen)
     return metadata
 
 
@@ -750,19 +771,22 @@ async def build_coding_lesson_documents(
     scope: SessionDistillationScope,
     accepted: list[CodingWrittenLesson],
     qa_context: dict,
+    node_set: list[str],
 ) -> list[LessonDocument]:
+    """Render the accepted lessons; a pitfall's count reads the key's lessons in the
+    project scope of ``node_set`` (the set the documents are added under)."""
     documents = []
     for lesson in accepted:
         seen = None
         if lesson.lesson_type == "pitfall" and lesson.state_key:
-            rows = await find_lessons_by_state_key(scope.dataset.id, lesson.state_key)
-            seen = seen_in_sessions(rows, scope.session_id)
+            rows = await find_lessons_by_state_key(scope.dataset.id, lesson.state_key, node_set)
+            seen = pitfall_sessions(rows, scope.session_id)
         text = render_coding_lesson_document(
             lesson.statement,
             session_id=scope.session_id,
             lesson_type=lesson.lesson_type,
             state_key=lesson.state_key,
-            seen_in_sessions=seen,
+            seen_in_sessions=len(seen) if seen is not None else None,
         )
         documents.append(
             LessonDocument(
@@ -794,8 +818,11 @@ async def publish_distilled_lessons(
     """Store the accepted lessons as documents; ``qa_context`` given means coding mode.
 
     Coding lessons are added as ``DataItem``s with their metadata and a deterministic
-    id, and once they are in the graph every older lesson of the dataset with one of
-    their state keys is deleted, so a state key always names its newest lesson.
+    id, and once they are in the graph the lessons of the same project scope with one
+    of their state keys are reduced to the newest (``replace_superseded_lessons``), so
+    a state key always names one lesson. The replacement also runs when only the step
+    after the lessons' cognify failed (``AfterRunHookError``, the lessons landed); that
+    error is raised once the replacement is done.
     """
     # Imported lazily to avoid a circular import through the cognee package root.
     from cognee.api.v1.add import add
@@ -815,7 +842,7 @@ async def publish_distilled_lessons(
     if not all(isinstance(lesson, CodingWrittenLesson) for lesson in accepted):
         raise TypeError("coding distillation publishes CodingWrittenLesson items only")
     coding_lessons = [lesson for lesson in accepted if isinstance(lesson, CodingWrittenLesson)]
-    lessons = await build_coding_lesson_documents(scope, coding_lessons, qa_context)
+    lessons = await build_coding_lesson_documents(scope, coding_lessons, qa_context, node_set)
     items = [
         DataItem(
             data=lesson.text,
@@ -826,12 +853,26 @@ async def publish_distilled_lessons(
         for lesson in lessons
     ]
     await add(items, dataset_id=scope.dataset.id, user=scope.user, node_set=node_set)
-    await cognify(datasets=[scope.dataset.id], user=scope.user)
+    hook_error: AfterRunHookError | None = None
+    try:
+        await cognify(datasets=[scope.dataset.id], user=scope.user)
+    except AfterRunHookError as error:
+        hook_error = error
     for state_key in sorted({lesson.metadata["state_key"] for lesson in lessons} - {""}):
-        keep = {lesson.data_id for lesson in lessons if lesson.metadata["state_key"] == state_key}
-        await delete_superseded_lessons(
-            dataset_id=scope.dataset.id, state_key=state_key, keep=keep, user=scope.user
+        stored = {
+            lesson.data_id: lesson.metadata["session_date"]
+            for lesson in lessons
+            if lesson.metadata["state_key"] == state_key
+        }
+        await replace_superseded_lessons(
+            dataset_id=scope.dataset.id,
+            state_key=state_key,
+            node_set=node_set,
+            stored=stored,
+            user=scope.user,
         )
+    if hook_error is not None:
+        raise hook_error
     return [lesson.text for lesson in lessons]
 
 
@@ -879,7 +920,10 @@ async def distill_session(
     cap); ``None`` reads ``IMPROVE_DISTILL_MAX_BATCHES_PER_RUN``. A failed step after
     the lessons' cognify run (``AfterRunHookError``) is raised once the watermark moved.
     """
-    scope = await resolve_distillation_scope(session_id=session_id, dataset=dataset, user=user)
+    coding = coding_distillation_enabled()
+    scope = await resolve_distillation_scope(
+        session_id=session_id, dataset=dataset, user=user, replaces_lessons=coding
+    )
 
     context_entries = await load_distillable_context_entries(scope)
     if not context_entries:
@@ -897,7 +941,6 @@ async def distill_session(
 
     if max_batches is None:
         max_batches = get_improve_config().distill_max_batches_per_run
-    coding = coding_distillation_enabled()
     if coding:
         # A coding unit is judged against its own request and final answer only.
         qa_rows = await load_latest_qa_row(scope)

@@ -237,6 +237,41 @@ class TestRepeatedErrors:
         assert len(groups) == 1 and not groups[0].fixed
         assert build_failure_candidates(groups, REPO) == []
 
+    def test_the_same_program_on_another_target_is_not_a_fix(self):
+        failed = {"command": "python broken.py"}
+        failures = [
+            _trace("Bash", status="error", params=failed, error="NameError: x") for _ in range(2)
+        ]
+        unrelated = _trace("Bash", params={"command": "python --version"})
+        (group,) = group_repeated_errors([*failures, unrelated])
+        assert not group.fixed
+
+        rerun = _trace("Bash", params={"command": "cd src && python broken.py -v"})
+        (group,) = group_repeated_errors([*failures, rerun])
+        assert group.fixed and group.fix is rerun
+
+    def test_a_bare_program_rerun_matches_a_bare_failure(self):
+        failed = {"command": "pytest -q"}
+        traces = [
+            _trace("Bash", status="error", params=failed, error="FAILED tests/test_a.py"),
+            _trace("Bash", params={"command": "pytest -q -x"}),
+        ]
+        (group,) = group_repeated_errors(traces)
+        assert group.fixed
+
+    def test_candidates_cover_every_fixed_group_beyond_the_rendered_ten(self):
+        traces = []
+        for index in range(12):
+            path = f"{REPO}/src/m{index}.py"
+            traces.append(
+                _trace("Edit", status="error", params={"file_path": path}, error=f"Error {index}")
+            )
+            traces.append(_trace("Edit", params={"file_path": path}))
+        groups = group_repeated_errors(traces)
+        assert len(groups) == 12
+        assert cue.render_error_groups(groups, REPO).count("Edit failed 1x") == 10
+        assert len(build_failure_candidates(groups, REPO)) == 12
+
 
 # -- Extraction input -----------------------------------------------------------
 
@@ -437,14 +472,42 @@ async def test_no_usable_llm_extracts_nothing(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_caps_a_unit_at_its_newest_400_traces(monkeypatch):
+async def test_a_backlog_is_walked_in_windows_of_400_oldest_first(monkeypatch):
     manager = _unit_manager(trace_count=450)
     calls = _llm(monkeypatch)
 
     await extract_coding_unit_context(session_manager=manager, user_id="u", session_id="s")
 
     assert manager.watermark() == 450
-    assert "a49.py" not in "".join(calls) and "a50.py" in "".join(calls)
+    # One explore block per window, each short enough for one input: two calls.
+    assert len(calls) == 2
+    assert "a0.py" in calls[0] and "a399.py" in calls[0] and "a400.py" not in calls[0]
+    assert "a400.py" in calls[1] and "a449.py" in calls[1] and "a399.py" not in calls[1]
+
+
+@pytest.mark.asyncio
+async def test_a_failure_in_a_later_window_keeps_the_earlier_window_sealed(monkeypatch):
+    manager = _unit_manager(trace_count=450)
+    calls = []
+
+    async def fake(*, text_input, system_prompt, response_model):
+        calls.append(text_input)
+        if "a400.py" in text_input:
+            raise RuntimeError("llm down")
+        return AgentContextExtraction(lessons=[])
+
+    monkeypatch.setattr(cue.LLMGateway, "acreate_structured_output", fake)
+    monkeypatch.setattr(cue, "llm_available", lambda: True)
+    monkeypatch.setattr(cue, "read_query_prompt", lambda name: "coding prompt")
+
+    with pytest.raises(RuntimeError):
+        await extract_coding_unit_context(session_manager=manager, user_id="u", session_id="s")
+    assert manager.watermark() == 400
+
+    retried = _llm(monkeypatch)
+    await extract_coding_unit_context(session_manager=manager, user_id="u", session_id="s")
+    assert manager.watermark() == 450
+    assert len(retried) == 1 and "a400.py" in retried[0] and "a399.py" not in retried[0]
 
 
 def test_state_row_names_match_the_shared_trace_watermark():

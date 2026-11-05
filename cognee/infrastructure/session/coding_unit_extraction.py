@@ -10,7 +10,9 @@ Flow, once per unit, from the ``extract_agent_context`` improve stage:
 
 1. LOAD    the traces past ``TRACE_EXTRACTION_WATERMARK`` (the previous unit's end) and
            the latest Q&A entry (request and final answer), under a per-(user, session)
-           lock so two triggers never extract the same unit.
+           lock so two triggers never extract the same unit. More than
+           ``TRACE_WINDOW_SIZE`` pending traces are walked oldest first in windows of
+           that size, each sealed before the next, so nothing is skipped.
 2. SPLIT   the traces into explore, change and verify parts (``trace_phases``), and a
            part longer than one input into trace chunks.
 3. RENDER  one extraction input per chunk, every chunk carrying all five sections:
@@ -24,16 +26,18 @@ Flow, once per unit, from the ``extract_agent_context`` improve stage:
 5. RECORD  one deterministic ``failure_lessons`` candidate per fixed error group, keyed
            ``[state-key: pitfall:<tool>:<slug>[:<qualifier>]]`` so distillation stores it
            as a pitfall that replaces its predecessor.
-6. SEAL    advance the watermark to the trace count the unit was loaded with.
+6. SEAL    advance the watermark to the end of the window.
 
-Failures propagate, as in ``extract_pending_agent_context``: the watermark moves only
-after every call completed, and the improve stage reports ``errored`` per session.
+Failures propagate, as in ``extract_pending_agent_context``: a window's watermark moves
+only after every call of the window completed, and the improve stage reports ``errored``
+per session; the windows sealed before the failure are not extracted again.
 """
 
 import asyncio
 import json
 import re
-from dataclasses import dataclass, field
+import shlex
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
@@ -64,8 +68,9 @@ logger = get_logger("coding_unit_extraction")
 
 CODING_PROMPT_FILE = "coding/agent_context_extraction_system.txt"
 
-# One unit's extraction reads at most this many of its newest traces.
-UNIT_TRACE_LIMIT = 400
+# Pending traces are extracted oldest first in windows of this many; a backlog larger
+# than one window (improves that failed or were off for a while) takes several in one run.
+TRACE_WINDOW_SIZE = 400
 # One LLM input; a longer unit is split into trace chunks that each repeat every section.
 MAX_INPUT_CHARS = 120_000
 MAX_UNIT_LESSONS = 10
@@ -285,11 +290,41 @@ def _changes_file(entry, path: str) -> bool:
     return bool(command) and (path in command or basename in command)
 
 
+def _program_segment(command: str) -> list[str]:
+    """The words of the first chained segment that runs a program, wrappers dropped."""
+    for segment in _SHELL_CHAIN_RE.split(str(command or "").strip()):
+        try:
+            words = shlex.split(segment)
+        except ValueError:
+            words = segment.split()
+        while words and (words[0] in _SHELL_WRAPPERS or "=" in words[0]):
+            words = words[1:]
+        if words and words[0] not in _SHELL_NO_PROGRAM:
+            return words
+    return []
+
+
+def _command_target(command: str) -> str:
+    """What the program ran on: its first argument that is not a flag (a script, a file,
+    a subcommand), or "" when it ran bare."""
+    for word in _program_segment(command)[1:]:
+        if not word.startswith("-"):
+            return word
+    return ""
+
+
 def _reruns_program(entry, failure) -> bool:
+    """The same tool ran the same program on the same target: ``python broken.py`` after
+    a failed ``python broken.py``, not ``python --version``."""
     if entry.origin_function != failure.origin_function:
         return False
-    program = shell_program(trace_command(entry))
-    return bool(program) and program == shell_program(trace_command(failure))
+    later, failed = trace_command(entry), trace_command(failure)
+    program = shell_program(later)
+    return (
+        bool(program)
+        and program == shell_program(failed)
+        and _command_target(later) == _command_target(failed)
+    )
 
 
 def group_repeated_errors(traces: list) -> list[ErrorGroup]:
@@ -297,8 +332,9 @@ def group_repeated_errors(traces: list) -> list[ErrorGroup]:
 
     A group counts when it failed at least twice, or once and a later successful trace
     changed the same file or reran the same program. The fix is the first such success
-    after the group's last failure. At most ``MAX_ERROR_GROUPS`` groups, in order of
-    first failure.
+    after the group's last failure. In order of first failure; the rendered section
+    shows the first ``MAX_ERROR_GROUPS``, the deterministic candidates cover every
+    fixed group.
     """
     groups: dict[tuple[str, str], ErrorGroup] = {}
     for index, entry in enumerate(traces):
@@ -324,13 +360,13 @@ def group_repeated_errors(traces: list) -> list[ErrorGroup]:
                 group.fix = later
                 break
 
-    kept = [group for group in groups.values() if len(group.failures) >= 2 or group.fixed]
-    return kept[:MAX_ERROR_GROUPS]
+    return [group for group in groups.values() if len(group.failures) >= 2 or group.fixed]
 
 
 def render_error_groups(groups: list[ErrorGroup], repo_root: str = "") -> str:
+    """The REPEATED ERRORS AND WHAT WORKED lines of the first ``MAX_ERROR_GROUPS`` groups."""
     lines = []
-    for group in groups:
+    for group in groups[:MAX_ERROR_GROUPS]:
         failure = group.failures[0]
         lines.append(
             f"- {group.tool} failed {len(group.failures)}x: "
@@ -622,7 +658,8 @@ async def recent_agent_lessons(session_manager, user_id: str, session_id: str) -
 async def load_unit_of_work(
     session_manager, user_id: str, session_id: str
 ) -> tuple[UnitOfWork, int] | None:
-    """The pending unit and the trace count to seal, or None when nothing is pending."""
+    """Every pending trace as one unit and the count already sealed, or None when
+    nothing is pending. ``trace_windows`` cuts the unit for extraction."""
     total = await session_manager.get_agent_trace_count(user_id=user_id, session_id=session_id)
     stored = await TRACE_EXTRACTION_WATERMARK.read_count(session_manager, user_id, session_id)
     processed = StateRowWatermark.resolve_effective(stored, total, session_id=session_id)
@@ -631,7 +668,7 @@ async def load_unit_of_work(
         return None
 
     traces = await session_manager.get_agent_trace_session(
-        user_id=user_id, session_id=session_id, last_n=min(pending, UNIT_TRACE_LIMIT)
+        user_id=user_id, session_id=session_id, last_n=pending
     )
     latest = await session_manager.get_session(
         user_id=user_id, session_id=session_id, last_n=1, formatted=False
@@ -645,7 +682,16 @@ async def load_unit_of_work(
         repo_root=str(qa_context.get("cwd") or ""),
         qa_context=qa_context,
     )
-    return unit, total
+    return unit, processed
+
+
+def trace_windows(unit: UnitOfWork, size: int = TRACE_WINDOW_SIZE) -> list[UnitOfWork]:
+    """The unit cut into windows of at most ``size`` traces, oldest first, each with the
+    unit's request, answer and context."""
+    return [
+        replace(unit, traces=unit.traces[start : start + size])
+        for start in range(0, len(unit.traces), size)
+    ]
 
 
 async def extract_coding_unit_context(
@@ -660,8 +706,10 @@ async def extract_coding_unit_context(
     ``dataset`` (id and owner_id) is where the stored lessons for the LESSONS ALREADY IN
     MEMORY section are searched; without it the section is left out. Serialized per
     (user, session): a concurrent trigger waits, then finds the watermark at the total
-    and extracts nothing. LLM failures propagate before the watermark moves, so the
-    unit is retried by the next improve.
+    and extracts nothing. The pending traces are walked in windows of
+    ``TRACE_WINDOW_SIZE``, oldest first, the watermark sealed after each; an LLM failure
+    propagates before its window's watermark moves, so that window and the ones after
+    it are retried by the next improve.
     """
     if not llm_available():
         return []
@@ -674,56 +722,72 @@ async def extract_coding_unit_context(
         loaded = await load_unit_of_work(session_manager, user_id, session_id)
         if loaded is None:
             return []
-        unit, total = loaded
+        pending_unit, sealed = loaded
 
         system_prompt = read_query_prompt(CODING_PROMPT_FILE)
         if not system_prompt:
             raise RuntimeError("Coding unit extraction: system prompt not found")
 
-        groups = group_repeated_errors(unit.traces)
-        chunks = plan_extraction_parts(unit, groups)
         touched: list[str] = []
-        for chunk in chunks:
-            # Re-read per chunk, so each sees the candidates the earlier ones produced.
-            existing = await recent_agent_lessons(session_manager, user_id, session_id)
-            memory = await memory_lessons_for_part(
-                dataset, session_id, chunk.traces, unit.repo_root
-            )
-            result = await LLMGateway.acreate_structured_output(
-                text_input=render_extraction_input(unit, existing, memory, groups, chunk),
+        for unit in trace_windows(pending_unit):
+            sealed += len(unit.traces)
+            touched += await _extract_window(
+                session_manager=session_manager,
+                user_id=user_id,
+                session_id=session_id,
+                dataset=dataset,
+                unit=unit,
                 system_prompt=system_prompt,
-                response_model=AgentContextExtraction,
             )
-            candidates = list(result.lessons)[:MAX_UNIT_LESSONS]
-            if candidates:
-                touched += await apply_candidate_updates(
-                    session_manager=session_manager,
-                    user_id=user_id,
-                    session_id=session_id,
-                    source_id="",
-                    candidates=candidates,
-                )
+            await TRACE_EXTRACTION_WATERMARK.write_count(
+                session_manager, user_id, session_id, count=sealed
+            )
+        return touched
 
-        for source_id, candidate in build_failure_candidates(groups, unit.repo_root):
+
+async def _extract_window(
+    *, session_manager, user_id: str, session_id: str, dataset, unit: UnitOfWork, system_prompt
+) -> list[str]:
+    """One window's extraction calls and failure candidates; returns the touched ids."""
+    groups = group_repeated_errors(unit.traces)
+    chunks = plan_extraction_parts(unit, groups)
+    touched: list[str] = []
+    for chunk in chunks:
+        # Re-read per chunk, so each sees the candidates the earlier ones produced.
+        existing = await recent_agent_lessons(session_manager, user_id, session_id)
+        memory = await memory_lessons_for_part(dataset, session_id, chunk.traces, unit.repo_root)
+        result = await LLMGateway.acreate_structured_output(
+            text_input=render_extraction_input(unit, existing, memory, groups, chunk),
+            system_prompt=system_prompt,
+            response_model=AgentContextExtraction,
+        )
+        candidates = list(result.lessons)[:MAX_UNIT_LESSONS]
+        if candidates:
             touched += await apply_candidate_updates(
                 session_manager=session_manager,
                 user_id=user_id,
                 session_id=session_id,
-                source_id=source_id,
-                candidates=[candidate],
+                source_id="",
+                candidates=candidates,
             )
 
-        await TRACE_EXTRACTION_WATERMARK.write_count(
-            session_manager, user_id, session_id, count=total
+    for source_id, candidate in build_failure_candidates(groups, unit.repo_root):
+        touched += await apply_candidate_updates(
+            session_manager=session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            source_id=source_id,
+            candidates=[candidate],
         )
-        logger.info(
-            "Coding unit extraction: session '%s' traces=%d parts=%d inputs=%d "
-            "error_groups=%d touched=%d",
-            session_id,
-            len(unit.traces),
-            chunks[-1].parts if chunks else 0,
-            len(chunks),
-            len(groups),
-            len(touched),
-        )
-        return touched
+
+    logger.info(
+        "Coding unit extraction: session '%s' window traces=%d parts=%d inputs=%d "
+        "error_groups=%d touched=%d",
+        session_id,
+        len(unit.traces),
+        chunks[-1].parts if chunks else 0,
+        len(chunks),
+        len(groups),
+        len(touched),
+    )
+    return touched

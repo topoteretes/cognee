@@ -32,9 +32,12 @@ from cognee.modules.session_distillation.distill import (
     write_or_reject,
 )
 from cognee.modules.session_distillation.lesson_store import (
+    lessons_in_scope,
     mentioned_files,
+    pitfall_sessions,
+    project_node_sets,
     render_coding_lesson_document,
-    seen_in_sessions,
+    rows_to_delete,
 )
 from cognee.modules.session_distillation.models import (
     CODING_WRITER_STYLE_LINE,
@@ -267,14 +270,55 @@ def test_non_pitfall_documents_carry_no_count_and_no_key_without_one():
     )
 
 
-def test_seen_in_sessions_counts_other_sessions_only():
+def test_pitfall_sessions_are_the_distinct_sessions_that_stored_the_key():
     rows = [
-        SimpleNamespace(external_metadata={"session_id": "other", "seen_in_sessions": 1}),
-        SimpleNamespace(external_metadata={"session_id": "s-1", "seen_in_sessions": 7}),
+        SimpleNamespace(external_metadata={"session_id": "s-1"}),  # a row before the list
+        SimpleNamespace(external_metadata={"session_id": "s-2", "seen_sessions": ["s-1", "s-2"]}),
     ]
-    assert seen_in_sessions([], "s-1") == 1
-    assert seen_in_sessions(rows, "s-1") == 2
-    assert seen_in_sessions(rows, "s-2") == 8
+    assert pitfall_sessions([], "s-1") == ["s-1"]
+    assert pitfall_sessions(rows, "s-2") == ["s-1", "s-2"]  # re-distilling s-2 stays at 2
+    assert pitfall_sessions(rows, "s-1") == ["s-1", "s-2"]  # re-distilling s-1 too
+    assert pitfall_sessions(rows, "s-3") == ["s-1", "s-2", "s-3"]
+
+
+def test_project_scope_ignores_the_distillations_own_node_sets():
+    stored = '["session_learnings", "session_learnings:s-1", "proj:acme"]'
+    assert project_node_sets(stored) == ("proj:acme",)
+    assert project_node_sets(["session_learnings:s-9", "session_learnings"]) == ()
+    assert project_node_sets(None) == ()
+
+
+def test_lessons_in_scope_keep_generated_lessons_of_the_same_project_only():
+    same = SimpleNamespace(
+        node_set='["session_learnings", "proj:acme"]',
+        external_metadata={"lesson_type": "state", "state_key": "test-baseline"},
+    )
+    other_project = SimpleNamespace(
+        node_set='["session_learnings", "proj:other"]',
+        external_metadata={"lesson_type": "state", "state_key": "test-baseline"},
+    )
+    users_document = SimpleNamespace(
+        node_set='["proj:acme"]', external_metadata={"state_key": "test-baseline"}
+    )
+    rows = [same, other_project, users_document]
+    assert lessons_in_scope(rows, ["session_learnings", "session_learnings:s-2", "proj:acme"]) == [
+        same
+    ]
+    assert lessons_in_scope(rows, ["session_learnings"]) == []
+
+
+def test_rows_to_delete_lets_the_newest_session_date_win():
+    new_id = uuid4()
+    older = SimpleNamespace(id=uuid4(), external_metadata={"session_date": "2026-11-01"})
+    newer = SimpleNamespace(id=uuid4(), external_metadata={"session_date": "2026-11-05"})
+    stored = SimpleNamespace(id=new_id, external_metadata={"session_date": "2026-11-03"})
+
+    assert rows_to_delete([older, stored], {new_id: "2026-11-03"}) == [older]
+    # A later session already stored the key: this session's lesson is the one dropped.
+    assert rows_to_delete([older, newer, stored], {new_id: "2026-11-03"}) == [older, stored]
+    # Without a date on both sides the lesson just stored wins.
+    undated = SimpleNamespace(id=uuid4(), external_metadata={"session_date": ""})
+    assert rows_to_delete([undated, newer, stored], {new_id: ""}) == [undated, newer]
 
 
 def test_mentioned_files_keep_original_casing():
@@ -295,8 +339,9 @@ def test_lesson_metadata_reads_the_plugins_qa_context():
         "git_branch": "dev",
         "files": ["cli/tasks.py"],
     }
-    bare = lesson_metadata(_written("pitfall", "pitfall:Bash:x:cat"), scope, {}, 2)
-    assert bare["session_date"] == "" and bare["git_commit"] == "" and bare["seen_in_sessions"] == 2
+    bare = lesson_metadata(_written("pitfall", "pitfall:Bash:x:cat"), scope, {}, ["s-0", "s-1"])
+    assert bare["session_date"] == "" and bare["git_commit"] == ""
+    assert bare["seen_sessions"] == ["s-0", "s-1"] and bare["seen_in_sessions"] == 2
 
 
 # -- Publish ---------------------------------------------------------------------------
@@ -305,14 +350,25 @@ def test_lesson_metadata_reads_the_plugins_qa_context():
 @pytest.fixture
 def publish_env(monkeypatch):
     """Fake add/cognify/node-set/lesson-store; returns what publish did."""
-    calls = SimpleNamespace(added=None, deleted=[], existing=[])
+    calls = SimpleNamespace(added=None, deleted=[], existing=[], finds=[], cognify_error=None)
 
     async def fake_add(data, **kwargs):
         calls.added = data
         calls.add_kwargs = kwargs
+        # The rows are in the dataset from here on, as the replacement will find them.
+        for item in data if isinstance(data, list) else []:
+            if hasattr(item, "data_id"):
+                calls.existing.append(
+                    SimpleNamespace(
+                        id=item.data_id,
+                        node_set='["session_learnings"]',
+                        external_metadata=item.external_metadata,
+                    )
+                )
 
     async def fake_cognify(**kwargs):
-        return None
+        if calls.cognify_error is not None:
+            raise calls.cognify_error
 
     import cognee.api.v1.add as add_module
     import cognee.api.v1.cognify as cognify_module
@@ -323,8 +379,13 @@ def publish_env(monkeypatch):
         distill_module, "_lesson_node_set", AsyncMock(return_value=["session_learnings"])
     )
 
-    async def fake_find(dataset_id, state_key):
-        return [row for row in calls.existing if row.external_metadata["state_key"] == state_key]
+    async def fake_find(dataset_id, state_key, node_set):
+        calls.finds.append(node_set)
+        return [
+            row
+            for row in calls.existing
+            if row.external_metadata["state_key"] == state_key and row.id not in calls.deleted
+        ]
 
     async def fake_delete(*, dataset_id, data_id, user, delete_dataset_if_empty):
         calls.deleted.append(data_id)
@@ -344,16 +405,20 @@ async def test_publish_stores_typed_items_and_replaces_the_older_state_key(publi
     older = SimpleNamespace(
         id=uuid4(),
         external_metadata={
+            "lesson_type": "state",
             "state_key": "test-baseline",
             "session_id": "s-1",
-            "seen_in_sessions": 0,
+            "session_date": "2026-11-01",
         },
     )
     older_pitfall = SimpleNamespace(
         id=uuid4(),
         external_metadata={
+            "lesson_type": "pitfall",
             "state_key": "pitfall:Edit:no-changes-to-make:py",
             "session_id": "s-1",
+            "session_date": "2026-11-01",
+            "seen_sessions": ["s-1"],
             "seen_in_sessions": 1,
         },
     )
@@ -374,12 +439,92 @@ async def test_publish_stores_typed_items_and_replaces_the_older_state_key(publi
         "pitfall",
         "location",
     ]
+    assert items[1].external_metadata["seen_sessions"] == ["s-1", "s-2"]
     assert items[1].external_metadata["seen_in_sessions"] == 2
     assert "(seen in 2 sessions)" in items[1].data
     assert documents[0].startswith("Lesson-Type: state\nState-Key: test-baseline\n")
     assert all(item.literal_text for item in items)
     assert publish_env.add_kwargs["node_set"] == ["session_learnings"]
     assert sorted(publish_env.deleted) == sorted([older.id, older_pitfall.id])
+    assert all(node_set == ["session_learnings"] for node_set in publish_env.finds)
+
+
+@pytest.mark.asyncio
+async def test_publish_keeps_the_pitfall_count_when_the_same_session_runs_again(publish_env):
+    """A → B → B: the count reaches 2 and stays there, although A's row is gone."""
+    pitfall = "pitfall:Edit:no-changes-to-make:py"
+    scope_a = SimpleNamespace(session_id="s-a", user=USER, user_id=str(USER.id), dataset=DATASET)
+    scope_b = SimpleNamespace(session_id="s-b", user=USER, user_id=str(USER.id), dataset=DATASET)
+
+    await publish_distilled_lessons(
+        scope_a, [_written("pitfall", pitfall, "Edit → script.")], qa_context={}
+    )
+    await publish_distilled_lessons(
+        scope_b, [_written("pitfall", pitfall, "Edit → rewrite.")], qa_context={}
+    )
+    assert publish_env.added[0].external_metadata["seen_in_sessions"] == 2
+    assert len(publish_env.deleted) == 1  # A's row
+
+    await publish_distilled_lessons(
+        scope_b, [_written("pitfall", pitfall, "Edit → rewrite.")], qa_context={}
+    )
+    assert publish_env.added[0].external_metadata["seen_in_sessions"] == 2
+    assert "(seen in 2 sessions)" in publish_env.added[0].data
+    assert len(publish_env.deleted) == 1  # nothing new to delete: the same row again
+
+
+@pytest.mark.asyncio
+async def test_publish_of_an_older_session_does_not_displace_a_newer_state(publish_env):
+    scope = SimpleNamespace(session_id="s-old", user=USER, user_id=str(USER.id), dataset=DATASET)
+    newer = SimpleNamespace(
+        id=uuid4(),
+        node_set='["session_learnings"]',
+        external_metadata={
+            "lesson_type": "state",
+            "state_key": "test-baseline",
+            "session_id": "s-new",
+            "session_date": "2026-11-05",
+        },
+    )
+    publish_env.existing = [newer]
+
+    await publish_distilled_lessons(
+        scope,
+        [_written("state", "test-baseline", "pytest: 10 passed.")],
+        qa_context={"date": "2026-11-02"},
+    )
+
+    (stored,) = publish_env.added
+    assert publish_env.deleted == [stored.data_id]
+
+
+@pytest.mark.asyncio
+async def test_publish_replaces_the_older_lesson_even_when_the_hook_after_cognify_fails(
+    publish_env,
+):
+    from cognee.modules.pipelines.exceptions import AfterRunHookError
+
+    scope = SimpleNamespace(session_id="s-2", user=USER, user_id=str(USER.id), dataset=DATASET)
+    older = SimpleNamespace(
+        id=uuid4(),
+        node_set='["session_learnings"]',
+        external_metadata={
+            "lesson_type": "state",
+            "state_key": "test-baseline",
+            "session_id": "s-1",
+        },
+    )
+    publish_env.existing = [older]
+    publish_env.cognify_error = AfterRunHookError(
+        [(DATASET.id, DATASET.name, RuntimeError("compaction"))]
+    )
+
+    with pytest.raises(AfterRunHookError):
+        await publish_distilled_lessons(
+            scope, [_written("state", "test-baseline", "pytest passes.")], qa_context={}
+        )
+
+    assert publish_env.deleted == [older.id]
 
 
 @pytest.mark.asyncio
@@ -454,7 +599,10 @@ async def test_distill_session_in_coding_mode_judges_the_latest_turn(monkeypatch
     monkeypatch.setattr(distill_module, "get_session_manager", lambda: manager)
     monkeypatch.setattr(distill_module, "coding_distillation_enabled", lambda: True)
 
+    permissions_checked = []
+
     async def fake_datasets(requested, permission_type, user):
+        permissions_checked.append(permission_type)
         return [DATASET]
 
     monkeypatch.setattr(distill_module, "get_authorized_existing_datasets", fake_datasets)
@@ -483,7 +631,27 @@ async def test_distill_session_in_coding_mode_judges_the_latest_turn(monkeypatch
     result = await distill_module.distill_session("s-1", dataset=DATASET.name, user=USER)
 
     assert result.status == "completed"
+    assert permissions_checked == ["write", "delete"]
     assert manager.session_reads == [{"last_n": 1, "since": None}]
     assert [row["question"] for row in seen["propose"][0]] == ["Add a route"]
     assert seen["propose"][1] is True and seen["accept"] is True
     assert seen["qa_context"] == {"date": "2026-11-03", "end_commit": "abc"}
+
+
+@pytest.mark.asyncio
+async def test_coding_scope_requires_delete_permission(monkeypatch):
+    from cognee.exceptions import CogneeValidationError
+
+    async def write_only(requested, permission_type, user):
+        return [DATASET] if permission_type == "write" else []
+
+    monkeypatch.setattr(distill_module, "get_authorized_existing_datasets", write_only)
+
+    scope = await distill_module.resolve_distillation_scope(
+        session_id="s-1", dataset=DATASET.name, user=USER
+    )
+    assert scope.dataset is DATASET
+    with pytest.raises(CogneeValidationError, match="delete permission"):
+        await distill_module.resolve_distillation_scope(
+            session_id="s-1", dataset=DATASET.name, user=USER, replaces_lessons=True
+        )

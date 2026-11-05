@@ -20,8 +20,11 @@ from the graph glossary, and outdated project state accumulating across sessions
 
 **Nothing happens mid-session.** The per-trace hooks are off. `improve()` (the
 `extract_agent_context` stage) extracts one *unit of work* at a time: the traces past the
-session's extraction watermark (the newest 400 at most), plus the latest Q&A entry as the
-user request and the agent's final answer. The stage no longer requires `AUTO_FEEDBACK`.
+session's extraction watermark, plus the latest Q&A entry as the user request and the
+agent's final answer. A backlog of more than 400 pending traces (improves that failed or
+were off for a while) is walked oldest first in windows of 400, the watermark sealed after
+each, so a failure in a later window never repeats an earlier one and no trace is skipped.
+The stage no longer requires `AUTO_FEEDBACK`.
 
 **Traces are split into parts.** Each trace is classified without an LLM
 (`cognee/infrastructure/session/trace_phases.py`): *explore* for read and search tools,
@@ -52,7 +55,9 @@ into trace chunks, every chunk repeating every section), in this order:
    old/new snippets of an edit), errors and outputs cut at 600 chars, secrets redacted.
 4. `REPEATED ERRORS AND WHAT WORKED`: failed traces grouped by tool and normalized first
    error line (at least two failures, or one that a later call fixed), each paired with
-   the first later successful call that changed the same file or reran the same program.
+   the first later successful call that changed the same file or reran the same program
+   on the same target (`python broken.py` again, not `python --version`). The section
+   shows the first 10 groups; the deterministic pitfall candidates cover every fixed group.
 5. `FINAL MESSAGE`: the request (1,200 chars) and the final answer (6,000 chars).
 
 Parts run in order so each sees the candidates of the earlier ones; up to 10 candidates per
@@ -95,18 +100,29 @@ Edit on an unchanged string fails with "No changes to make" → rewrite the file
 - `State-Key` appears on state lessons (`test-baseline`, `footprint:<feature>`) and
   pitfalls (`pitfall:<tool>:<error-slug>[:<qualifier>]`, the qualifier being the file
   extension or the shell program).
-- `(seen in N sessions)` appears on pitfalls only: one more than the highest count another
-  session stored for the key. Re-distilling the same session keeps its number.
+- `(seen in N sessions)` appears on pitfalls only: the number of distinct sessions that
+  stored the key in this project. Each row carries that list (`seen_sessions`), so the count
+  survives the replacement of older rows and re-distilling a session keeps its number.
 
 The document's `Data` row carries the same facts in `external_metadata`, which the dataset
 listing exposes: `lesson_type`, `state_key`, `session_id`, `session_date`, `git_commit`,
-`git_branch`, `files` (file names the statement mentions, in their original casing) and
-`seen_in_sessions`. The date, commit and branch come from the Q&A entry's `context` when the
+`git_branch`, `files` (file names the statement mentions, in their original casing),
+`seen_sessions` and `seen_in_sessions`. The date, commit and branch come from the Q&A entry's `context` when the
 plugin sends it as JSON (`{"cwd", "transcript_path", "date", "start_commit",
 "end_commit", "branch"}`); without it the lesson is stored with empty values.
 
-**Replacement.** Once the new lessons are in the graph, every older row of the dataset with
-one of their state keys is deleted, so a state key always names its newest lesson. A
+**Replacement.** A state key names one lesson *per project*: the scope is the dataset's
+coding lessons (rows whose metadata carries `lesson_type`, never a user's own documents)
+with the same project node sets, meaning the row's node sets minus the distillation's own
+`session_learnings` ones. The plugin pins one node set per repository, so two repositories
+in one dataset keep separate `test-baseline` lessons, and a `node_name`-scoped recall still
+finds its project's pitfalls. Once the new lessons are in the graph, the key's lessons in
+that scope are reduced to the one with the newest `session_date`: normally the new lesson,
+which deletes the older rows; when a later session already stored the key, the lesson of
+the late-distilled older session is the one deleted. Without a date on both sides the
+lesson stored last wins. The replacement also runs when only the step after cognify failed
+(`AfterRunHookError`), which is raised afterwards. Deleting needs delete permission on the
+dataset, so coding mode requires it next to write permission before anything runs. A
 re-distilled identical lesson has the same row id and is kept.
 
 ## Writer rules enforced in code
