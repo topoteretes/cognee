@@ -159,6 +159,19 @@ jobs:
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/e2e/postgres/test_admin_helpers_concurrency.py -v
 
+      - name: Run Google Drive Postgres Staging Tests
+        env:
+          DB_PROVIDER: postgres
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+          DB_NAME: cognee_db
+        shell: bash
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run pytest cognee/tests/e2e/postgres/test_google_drive_staging.py -v
+
       - name: Run Postgres Graph E2E Test
         env:
           ENV: 'dev'

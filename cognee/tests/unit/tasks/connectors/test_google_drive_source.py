@@ -218,6 +218,56 @@ def test_initial_sync_yields_all_files_and_advances_state(fake_content_extractio
     assert state["page_token"] == "t0"
 
 
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("pre\x00posle\x00\nĆirilica: ћ 😀\t", "pre\ufffdposle\ufffd\nĆirilica: ћ 😀\t"),
+        ("\x00", "\ufffd"),
+        ("običan tekst\n\t😀", "običan tekst\n\t😀"),
+    ],
+)
+def test_nul_in_extracted_text_and_title_keeps_document_and_sync_progress(
+    monkeypatch, content, expected
+):
+    """Whatever the extractor returns is normalized, and the neighbours load untouched."""
+    files = [_file_meta(file_id) for file_id in ("before", "nul", "after")]
+    files[1]["name"] = "Naslov\x00dokumenta"
+    service = FakeDriveService({"root": files}, {file["id"]: file for file in files})
+    monkeypatch.setattr(
+        gd_source,
+        "extract_file_content",
+        lambda service, file_id, *args: content if file_id == "nul" else f"content::{file_id}",
+    )
+    state, stats = {}, {}
+
+    rows = list(gd_source._iter_rows(service, _config(), state, stats))
+
+    assert [row["id"] for row in rows] == ["before", "nul", "after"]
+    assert rows[1] == {
+        "id": "nul",
+        "title": "Naslov\ufffddokumenta",
+        "content": expected,
+        "url": "https://drive/nul",
+        "_deleted": False,
+    }
+    assert rows[0]["content"] == "content::before"
+    assert rows[2]["content"] == "content::after"
+    assert files[1]["name"] == "Naslov\x00dokumenta"  # don't mutate provider metadata
+    assert stats["failed"] == stats["skipped"] == 0
+    assert set(state["versions"]) == {"before", "nul", "after"}
+    assert state["page_token"] == "token-0"
+
+
+@pytest.mark.parametrize("name", [None, ""])
+def test_nul_normalization_preserves_missing_title(monkeypatch, name):
+    """A missing title stays as it is instead of becoming a string."""
+    file = {**_file_meta("nul"), "name": name}
+    monkeypatch.setattr(gd_source, "extract_file_content", lambda *args: "a\x00b")
+    row = gd_source._file_to_row(object(), file, _config())
+    assert row["title"] == name
+    assert row["content"] == "a\ufffdb"
+
+
 def test_full_scan_deletes_absent_files_despite_permanently_bad_content(monkeypatch):
     good, bad = _file_meta("good"), _file_meta("bad", mime_type=PDF_MIME)
     service = FakeDriveService({"root": [good, bad]}, {"good": good, "bad": bad})
