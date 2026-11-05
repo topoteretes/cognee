@@ -44,6 +44,42 @@ answer = await cognee.search(
 
 See `examples/guides/google_drive.py` for the full flow.
 
+### Host-managed access tokens
+
+For a long-running sync with a host-supplied token, pass its expiry and a synchronous
+renewal callback to `build_drive_service_from_access_token`. The callback takes the access
+token the client used and returns `(access_token, expires_at)`, with a UTC datetime (a host
+serving several clients can return the token another one already renewed). `expires_at` is
+required on the client too, and a callback without it is a `ValueError`. Google's
+transport invokes it during requests once the token has expired, or when Drive answers
+401 (a host that returns the same token then ends the run as an auth failure).
+The host keeps refresh secrets and checks that the connection is still authorized.
+The callback raises `TokenRenewalError` if it cannot supply a token; the host should
+convert every renewal failure to it, since any other exception fails the file being read.
+
+```python
+from cognee.tasks.ingestion.connectors.google_drive import build_drive_service_from_access_token
+
+
+def service_factory():
+    return build_drive_service_from_access_token(
+        access_token,
+        expires_at=expires_at,
+        refresh_access_token=renew_access_token,
+    )
+
+
+source = google_drive_source(
+    folder_id=folder_id,
+    resource_name=resource_name,
+    service_factory=service_factory,
+)
+```
+
+Worker clients call the same callback, so the host must serialize renewal and share the
+replacement token. If renewal fails, the source reports an auth failure and preserves
+its progress for a later sync. A token without a callback cannot renew during ingestion.
+
 ## How sync + forget-on-delete work
 
 Deletion propagation requires a successful foreground sync (the default).
@@ -105,7 +141,7 @@ per file on every full scan:
 | `skipped_empty_content` | the extracted text is empty | no |
 | `skipped_too_large` | over the `max_file_size_mb` you set | no |
 | `failed_rate_limit` | Drive kept answering 429 or a rate-limit 403 after the retries; the run stopped and resumes | yes |
-| `failed_auth` | the token was refused (401) after the run had produced rows; the run stopped and resumes | yes |
+| `failed_auth` | the token was refused (401) or Google credential renewal failed after the run had produced rows; the run stopped and resumes | yes |
 | `failed_unreadable` | a PDF that downloaded but that pypdf cannot read: password protected, corrupt, or a feature pypdf lacks. The same bytes give the same answer, so it is reported and the cursor still moves. Only memory, the disk and a missing `cryptography` package are treated as passing | yes |
 | `failed_loader_unavailable` | an Office or document file and no loader installed (install `cognee[docling]`) | yes |
 | `failed_export_too_large` | a Google Doc or Sheet over Google's export limit (about 10 MB) | yes |
@@ -124,10 +160,38 @@ do not hold the cursor, because a rerun cannot cure them: after installing the e
 file or clear the source's state to read it. Fetching is bounded: at most `max_workers` files are in flight, and together at
 most 256 MB of reported file size (a larger file runs alone).
 
+The cursor is kept with the folder, shared drive and `include_subfolders` it was taken for. When
+any of them changes, the next run lists the whole scope again instead of resuming the old cursor,
+so files in a newly included subfolder are read at once. A source synced before this was recorded
+has no scope on file and resumes its cursor; it is protected from the first run that ends
+normally or stops at Drive's rate limit.
+
 When syncing multiple folders into one dataset, assign each a stable, distinct
-`resource_name`. It isolates both the Changes API cursor and cleanup scope.
+`resource_name`. It isolates both the Changes API cursor and cleanup scope. The default
+`google_drive_files` is only safe for one folder per dataset.
 Previously ingested documents without a table provenance stamp are retained
 conservatively; explicitly clear and re-sync the dataset to rebuild legacy data.
+
+## Limits
+
+* Drive's rate limits and server errors are retried with backoff; one that outlasts the retries
+  stops the run early (`failed_rate_limit`) and the next run goes on from there.
+* A token Drive refuses stops it as `failed_auth`, keeping the rows already read; before any row it
+  raises `DriveAuthError`.
+* The Changes feed is account wide, so tombstones for files outside the folder are harmless no-ops.
+* Fetching is bounded by `max_workers` and 256 MB of reported file size in flight.
+
+## Privacy
+
+File text is sent to the LLM and embedding providers you configured when cognee builds the graph.
+`forget()` removes the documents, graph and vectors, but not everything: dlt keeps its staging copy
+and the completed load packages, which hold the rendered text of every file, in its own directory
+(`~/.dlt` by default, outside cognee's data root), and the next sync under the same dataset and
+`resource_name` rebuilds the memory from that state. To erase a file for good, delete it in Drive
+(or leave its folder out) and sync, then clear dlt's directory for the source.
+The error raised for a failed Drive request carries only its HTTP status, never file names, ids
+or tokens. The log lines for a file that was skipped or could not be read do name it (title and
+Drive id), so treat the logs as sensitive as the folder itself.
 
 ## Setup
 

@@ -1,6 +1,8 @@
 """Drive sync delegates extraction and incremental state to the SDK source."""
 
+import asyncio
 from contextlib import ExitStack
+from datetime import datetime, timedelta, timezone
 from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, Mock, patch
@@ -25,6 +27,7 @@ def make_credential(**metadata):
         workspace_id=None,
         provider_account_id="subject",
         user_id=UUID("22222222-2222-2222-2222-222222222222"),
+        token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
         provider_metadata={"email": "person@example.com", **metadata},
     )
 
@@ -88,7 +91,7 @@ async def test_selected_folders_use_stable_independent_sources(sync_mocks):
             "service_factory": ANY,
             "check_active": ANY,
         }
-        # each fetch thread gets its own client, built with the same access token
+        # Each fetch thread gets its own renewable client.
         assert call.kwargs["service_factory"]() == "service"
     for call in sync_mocks.remember.await_args_list:
         assert not isinstance(call.args[0], list)
@@ -100,6 +103,148 @@ async def test_selected_folders_use_stable_independent_sources(sync_mocks):
             "max_rows_per_table": 0,
             "self_improvement": False,
         }
+
+
+@pytest.mark.asyncio
+async def test_every_worker_client_gets_the_callback_and_the_renewed_token(sync_mocks):
+    credential = make_credential(selected_folder_ids=["folder"])
+    expiry = datetime.now(timezone.utc) + timedelta(hours=2)
+
+    async def remember(source, **kwargs):
+        sync_mocks.token.return_value = "renewed-token"
+        credential.token_expires_at = expiry
+        with patch.object(sync_module.ingestion, "build_service") as build:
+            source.service_factory()
+            callback = build.call_args.kwargs["refresh_access_token"]
+            assert await asyncio.to_thread(callback, "token") == ("renewed-token", expiry)
+            # A client built after the renewal starts from the renewed token.
+            source.service_factory()
+            assert build.call_args.args[1] == "renewed-token"
+            assert build.call_args.kwargs["expires_at"] == expiry
+        return SimpleNamespace(status="completed")
+
+    sync_mocks.remember.side_effect = remember
+    await sync_drive(credential)
+    assert sync_mocks.token.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_renewal_after_disconnect_is_a_renewal_error(sync_mocks):
+    from cognee.modules.integrations.credentials import CredentialInactiveError
+    from cognee.tasks.ingestion.connectors.google_drive import TokenRenewalError
+
+    async def remember(source, **kwargs):
+        with patch.object(sync_module.ingestion, "build_service") as build:
+            source.service_factory()
+            callback = build.call_args.kwargs["refresh_access_token"]
+        with (
+            patch.object(
+                sync_module.ingestion,
+                "require_active_credential",
+                AsyncMock(side_effect=CredentialInactiveError("disconnected")),
+            ),
+            pytest.raises(TokenRenewalError),
+        ):
+            await asyncio.to_thread(callback, "token")
+        return SimpleNamespace(status="completed")
+
+    sync_mocks.remember.side_effect = remember
+    await sync_drive(make_credential(selected_folder_ids=["folder"]))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [RuntimeError("secret-token-material"), asyncio.TimeoutError(), asyncio.CancelledError()],
+)
+async def test_any_renewal_failure_is_a_renewal_error_without_leaking_its_message(
+    sync_mocks, caplog, error
+):
+    from cognee.tasks.ingestion.connectors.google_drive import TokenRenewalError
+
+    async def remember(source, **kwargs):
+        with patch.object(sync_module.ingestion, "build_service") as build:
+            source.service_factory()
+            callback = build.call_args.kwargs["refresh_access_token"]
+        sync_mocks.token.side_effect = error
+        with pytest.raises(TokenRenewalError) as raised:
+            await asyncio.to_thread(callback, "token")
+        assert "secret-token-material" not in str(raised.value)
+        return SimpleNamespace(status="completed")
+
+    sync_mocks.remember.side_effect = remember
+    await sync_drive(make_credential(selected_folder_ids=["folder"]))
+    assert "secret-token-material" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_renewal_that_returns_no_expiry_is_a_renewal_error(sync_mocks):
+    from cognee.tasks.ingestion.connectors.google_drive import TokenRenewalError
+
+    credential = make_credential(selected_folder_ids=["folder"])
+
+    async def remember(source, **kwargs):
+        credential.token_expires_at = None
+        with patch.object(sync_module.ingestion, "build_service") as build:
+            source.service_factory()
+            callback = build.call_args.kwargs["refresh_access_token"]
+        with pytest.raises(TokenRenewalError):
+            await asyncio.to_thread(callback, "token")
+        return SimpleNamespace(status="completed")
+
+    sync_mocks.remember.side_effect = remember
+    await sync_drive(credential)
+
+
+@pytest.mark.asyncio
+async def test_a_connection_without_an_expiry_gets_a_client_that_does_not_renew(sync_mocks):
+    credential = make_credential(selected_folder_ids=["folder"])
+    credential.token_expires_at = None
+
+    async def remember(source, **kwargs):
+        with patch.object(sync_module.ingestion, "build_service") as build:
+            source.service_factory()
+            assert build.call_args.kwargs == {"expires_at": None, "refresh_access_token": None}
+        return SimpleNamespace(status="completed")
+
+    sync_mocks.remember.side_effect = remember
+    await sync_drive(credential)
+
+
+@pytest.mark.asyncio
+async def test_workers_that_hit_the_expiry_together_renew_once(sync_mocks):
+    async def remember(source, **kwargs):
+        with patch.object(sync_module.ingestion, "build_service") as build:
+            source.service_factory()
+            callback = build.call_args.kwargs["refresh_access_token"]
+
+        sync_mocks.token.return_value = "renewed-token"
+        results = await asyncio.gather(*(asyncio.to_thread(callback, "token") for _ in range(5)))
+        assert {token for token, _ in results} == {"renewed-token"}
+        return SimpleNamespace(status="completed")
+
+    sync_mocks.remember.side_effect = remember
+    await sync_drive(make_credential(selected_folder_ids=["folder"]))
+    assert sync_mocks.token.await_count == 2  # the sync's own token, then one renewal
+
+
+@pytest.mark.asyncio
+async def test_a_client_that_used_an_older_token_gets_the_current_one_without_a_renewal(
+    sync_mocks,
+):
+    async def remember(source, **kwargs):
+        with patch.object(sync_module.ingestion, "build_service") as build:
+            source.service_factory()
+            callback = build.call_args.kwargs["refresh_access_token"]
+        sync_mocks.token.return_value = "renewed-token"
+        await asyncio.to_thread(callback, "token")  # renews
+        token, _ = await asyncio.to_thread(callback, "older-token")  # a client that is behind
+        assert token == "renewed-token"
+        return SimpleNamespace(status="completed")
+
+    sync_mocks.remember.side_effect = remember
+    await sync_drive(make_credential(selected_folder_ids=["folder"]))
+    assert sync_mocks.token.await_count == 2  # the sync's own token, then one renewal
 
 
 @pytest.mark.asyncio

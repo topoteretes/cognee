@@ -1021,7 +1021,8 @@ def test_rate_limit_while_reading_the_changes_feed_keeps_the_token(monkeypatch):
     monkeypatch.setattr(gd_source, "_list_changed_file_ids", limited)
     state, stats = {"page_token": "t0", "known_ids": ["a"], "versions": {"a": "v"}}, {}
     assert list(gd_source._iter_rows(service, _config(), state, stats)) == []
-    assert state == {"page_token": "t0", "known_ids": ["a"], "versions": {"a": "v"}}
+    stamp = {"v": gd_source.STATE_VERSION, "scope": ["root", None, True]}
+    assert state == {"page_token": "t0", "known_ids": ["a"], "versions": {"a": "v"}, **stamp}
     assert stats["failed_rate_limit"] == 1
 
 
@@ -1052,6 +1053,69 @@ def test_listing_error_that_is_not_a_limit_still_raises(monkeypatch):
     monkeypatch.setattr(_FakeFilesResource, "list", failing)
     with pytest.raises(RuntimeError, match="failed to list"):
         list(gd_source._iter_rows(service, _config(), {}))
+
+
+def test_a_failed_request_reports_its_status_and_nothing_from_its_text(monkeypatch):
+    service, _, failing = _service_failing_listing_after(0, 500)
+    monkeypatch.setattr(_FakeFilesResource, "list", failing)
+    with pytest.raises(RuntimeError) as raised:
+        list(gd_source._iter_rows(service, _config(), {}))
+    assert str(raised.value).endswith("(HTTP 500)")
+
+
+def test_the_host_check_runs_before_each_drive_request():
+    class Disconnected(Exception):
+        pass
+
+    def check():
+        raise Disconnected
+
+    config = _DriveConfig(**{**_config().__dict__, "check_active": check})
+    service = object()  # any request made before the check would fail on it, not on Disconnected
+    calls = [
+        lambda: gd_source._get_start_page_token(service, None, check),
+        lambda: list(gd_source._list_files_in_folder(service, "f", check_active=check)),
+        lambda: gd_source._get_scope_folder_ids(service, config),
+        lambda: gd_source._list_changed_file_ids(service, "t", None, None, check),
+        lambda: gd_source._resolve_folder_id(service, "f", check),
+    ]
+    for call in calls:
+        with pytest.raises(Disconnected):
+            call()
+
+
+def test_a_scope_stamp_is_written_when_the_changes_listing_is_cut(monkeypatch):
+    def cut(*args):
+        raise gd_source._CutShort("rate_limit")
+
+    monkeypatch.setattr(gd_source, "_list_changed_file_ids", cut)
+    config = _config()
+    state = {"page_token": "legacy-cursor"}
+    list(gd_source._iter_rows(object(), config, state, {}))
+    assert state["page_token"] == "legacy-cursor"
+    assert state["scope"] == [config.folder_id, None, config.include_subfolders]
+    assert state["v"] == gd_source.STATE_VERSION
+
+
+def test_a_changed_scope_lists_everything_again_instead_of_resuming_the_cursor(monkeypatch):
+    listed = []
+    monkeypatch.setattr(
+        gd_source, "_list_files_in_scope", lambda *args: listed.append(1) or iter(())
+    )
+    monkeypatch.setattr(gd_source, "_get_start_page_token", lambda *args: "fresh")
+    monkeypatch.setattr(gd_source, "_list_changed_file_ids", lambda *args: (set(), set(), "next"))
+    config = _config()
+    state = {"page_token": "old", "scope": [config.folder_id, None, not config.include_subfolders]}
+    list(gd_source._iter_rows(object(), config, state, {}))
+    assert listed == [1]
+    assert state["page_token"] == "fresh"
+    assert state["v"] == gd_source.STATE_VERSION
+
+    # The same scope resumes from the cursor; a state without a recorded scope does too.
+    listed.clear()
+    list(gd_source._iter_rows(object(), config, {**state, "page_token": "kept"}, {}))
+    list(gd_source._iter_rows(object(), config, {"page_token": "kept"}, {}))
+    assert listed == []
 
 
 def test_rate_limit_on_the_listing_is_a_cut(monkeypatch):

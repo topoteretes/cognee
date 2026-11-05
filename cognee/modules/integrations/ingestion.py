@@ -30,7 +30,7 @@ class _Provider:
     prefix: str
     source_module: str
     source_name: str
-    service_builder: Callable[[str], Any] | None = None
+    service_builder: Callable[..., Any] | None = None
 
 
 def _google_service_builder(api: str, version: str) -> Callable[[str], Any]:
@@ -44,6 +44,12 @@ def _google_service_builder(api: str, version: str) -> Callable[[str], Any]:
         )
 
     return build_service
+
+
+def _drive_service(access_token: str, **kwargs: Any) -> Any:
+    from cognee.tasks.ingestion.connectors.google_drive import build_drive_service_from_access_token
+
+    return build_drive_service_from_access_token(access_token, **kwargs)
 
 
 def _linear_service(access_token: str) -> Any:
@@ -69,7 +75,7 @@ _PROVIDERS: dict[str, _Provider] = {
         prefix="google_drive_files",
         source_module="cognee.tasks.ingestion.connectors.google_drive",
         source_name="google_drive_source",
-        service_builder=_google_service_builder("drive", "v3"),
+        service_builder=_drive_service,
     ),
     "gmail": _Provider(
         prefix="gmail_messages",
@@ -162,11 +168,18 @@ def source_factory(provider: str) -> Callable[..., Any]:
     return getattr(import_module(entry.source_module), entry.source_name)
 
 
-def build_service(provider: str, access_token: str) -> Any:
+def build_service(provider: str, access_token: str, **options: Any) -> Any:
+    """Build a provider client; ``options`` go to the provider's builder.
+
+    Only Drive takes options: ``expires_at`` and a synchronous ``refresh_access_token()``
+    callback returning a new token and its UTC expiry. It runs on worker threads during
+    API requests and raises the connector's ``TokenRenewalError`` for any failure to renew.
+    A provider that takes no options raises ``TypeError`` when given one.
+    """
     builder = _provider(provider).service_builder
     if builder is None:
         raise KeyError(f"Document provider {provider!r} has no service to build")
-    return builder(access_token)
+    return builder(access_token, **options)
 
 
 def empty_resource(provider: str, name: str, check_active=None):
