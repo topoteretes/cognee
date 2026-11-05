@@ -240,6 +240,47 @@ async def test_typed_scope_fallback_scans_unfiltered_and_scopes_through_projecti
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("batch", [False, True])
+async def test_typed_scope_fallback_keeps_unembedded_scope_when_no_vector_matches(batch):
+    """Without ``score_by_ids``, an all-empty vector result must not drop a typed scope.
+
+    The ID-scoring path keeps such a scope with missing-distance penalties; the
+    fallback has to return the same triplets rather than stopping before projection.
+    """
+    graph = CogneeGraph()
+    first, second = Node("first"), Node("second")
+    graph.add_node(first)
+    graph.add_node(second)
+    graph.add_edge(Edge(first, second, {"relationship_type": "has_value"}))
+    engine = vector_engine_mock()
+    engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
+    engine.score_by_ids = MethodType(VectorDBInterface.score_by_ids, object())
+    engine.search = AsyncMock(return_value=[])
+    engine.batch_search = AsyncMock(return_value=[[], []])
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=graph,
+        ) as project,
+    ):
+        results = await brute_force_triplet_search(
+            query=None if batch else "query",
+            query_batch=["first", "second"] if batch else None,
+            node_type=SchemaTable,
+            node_name=["table"],
+            feedback_influence=0.0,
+        )
+
+    project.assert_awaited_once()
+    assert results == ([graph.edges, graph.edges] if batch else graph.edges)
+    assert first.attributes["vector_distance"] == [6.5] * (2 if batch else 1)
+
+
+@pytest.mark.asyncio
 async def test_brute_force_triplet_search_empty_query():
     """Test that empty query raises ValueError."""
     with pytest.raises(ValueError, match="The query must be a non-empty string."):

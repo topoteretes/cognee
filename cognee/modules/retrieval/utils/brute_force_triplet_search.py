@@ -328,13 +328,16 @@ async def brute_force_triplet_search(
 
             ids_by_collection = None
             vector_node_name = node_name
-            if (
+            # A typed scope is fixed by the graph, so its triplets stay eligible (with
+            # missing-distance penalties) even when no vector matches.
+            typed_scope = bool(
                 node_type is not None
                 and not issubclass(node_type, NodeSet)
                 and node_name
                 and memory_fragment is None
                 and neighborhood_depth is None
-            ):
+            )
+            if typed_scope:
                 if await vector_search.supports_id_scoring():
                     # This scope is fixed by the graph, not by vector seeds. Resolve it
                     # first so unrelated vectors never enter scoring.
@@ -379,7 +382,7 @@ async def brute_force_triplet_search(
             if query_batch is not None:
                 otel_span.set_attribute("cognee.retrieval.batch_size", len(query_batch))
 
-            if not vector_search.has_results() and ids_by_collection is None:
+            if not vector_search.has_results() and not typed_scope:
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
                 otel_span.set_attribute(COGNEE_RESULT_SUMMARY, "No vector results found")
                 return [[] for _ in range(query_list_length)] if query_list_length else []
