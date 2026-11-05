@@ -1,9 +1,10 @@
 import asyncio
 from uuid import UUID
 
-from cognee.api.v1.datasets.dto import DataDTO, DeleteDataReceiptDTO
+from cognee.api.v1.datasets.dto import CopyDataReceiptDTO, DataDTO, DeleteDataReceiptDTO
 from cognee.api.v1.exceptions import DataDeletionIncompleteError
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.conflicts.methods import retire_forgotten_decisions
@@ -196,6 +197,20 @@ def _is_reference_string(text: str, *, check_local_files: bool = True) -> bool:
     return _resolve_local_file_uri(text) is not None
 
 
+async def _authorized_dataset_or_raise(user: User, dataset_id: UUID, permission_type: str):
+    """The dataset when ``user`` holds ``permission_type`` on it, else the error the
+    dataset routes raise for a dataset the caller may not touch."""
+    try:
+        dataset = await get_authorized_dataset(user, dataset_id, permission_type)
+    except PermissionDeniedError:
+        dataset = None
+    if dataset is None:
+        raise UnauthorizedDataAccessError(
+            f"Dataset {dataset_id} not accessible for {permission_type}."
+        )
+    return dataset
+
+
 class datasets:
     """
     Dataset management namespace for Cognee.
@@ -215,6 +230,11 @@ class datasets:
 
         # Delete a specific data item from a dataset
         await cognee.datasets.delete_data(dataset_id=dataset_id, data_id=data_id)
+
+        # Copy a cognified document into another dataset, graph and vectors included
+        await cognee.datasets.copy_data(
+            dataset_id=dataset_id, data_id=data_id, target_dataset_id=other_dataset_id
+        )
         ```
     """
 
@@ -624,6 +644,74 @@ class datasets:
                 data_remaining=False,
                 dataset_deleted=dataset_deleted,
             )
+
+    @staticmethod
+    async def copy_data(
+        dataset_id: UUID,
+        data_id: UUID,
+        target_dataset_id: UUID,
+        user: User | None = None,
+    ) -> dict:
+        """Copy one cognified document from ``dataset_id`` into ``target_dataset_id``.
+
+        The destination receives the document's graph nodes and edges, its stored
+        vectors and its edge evidence, plus a ``Data`` row of its own, without any
+        LLM or embedding call (see ``copy_data_to_dataset``). Elements the destination
+        already holds merge by id. The caller needs ``read`` on the source dataset and
+        ``write`` on the destination; the destination is locked like a pipeline run
+        while it is written.
+
+        Returns the ``CopyDataReceiptDTO`` dict: the destination's ``data_id`` (its row
+        keeps the source id as ``legacy_id``, so ``forget()`` there accepts either) and
+        the counts written. Copying the same document again reuses that row and
+        rewrites the same elements.
+
+        Raises:
+            UnauthorizedDataAccessError: a dataset is missing or the user lacks the
+                permission on it, or the document is not in the source dataset.
+            CogneeValidationError: source and destination are the same dataset.
+            DataNotInGraphError: the source graph owns nothing for the document.
+            EmbeddingDimensionMismatchError: a dataset was built with a different
+                embedding width than the configured model.
+        """
+        async with record_operation(
+            "copy_data", user=user, dataset_id=target_dataset_id
+        ) as operation_context:
+            from cognee.modules.data.methods import copy_data_to_dataset, get_data
+
+            if not user:
+                user = await get_default_user()
+            operation_context.set_user(user)
+            if dataset_id == target_dataset_id:
+                raise CogneeValidationError(
+                    message=f"Dataset {dataset_id} is both source and destination of the copy.",
+                    name="SameDatasetCopyError",
+                )
+            source = await _authorized_dataset_or_raise(user, dataset_id, "read")
+            target = await _authorized_dataset_or_raise(user, target_dataset_id, "write")
+
+            async with dataset_lock(target.id):
+                # Access was granted through the source dataset's ACL above, so row
+                # ownership is not re-checked (same rule as delete_data).
+                data = await get_data(user.id, data_id, source.id, verify_owner=False)
+                if data is None:
+                    raise UnauthorizedDataAccessError(
+                        f"Data {data_id} not accessible in dataset {dataset_id}."
+                    )
+                copied = await copy_data_to_dataset(source, data, target, user)
+
+            return CopyDataReceiptDTO(
+                status="success",
+                source_dataset_id=source.id,
+                target_dataset_id=target.id,
+                source_data_id=data.id,
+                data_id=copied.data_id,
+                data_record_created=copied.data_record_created,
+                copied_nodes=copied.nodes,
+                copied_edges=copied.edges,
+                copied_vectors=copied.vectors,
+                copied_evidence=copied.evidence_rows,
+            ).model_dump()
 
     @staticmethod
     async def delete_all(user: User | None = None):

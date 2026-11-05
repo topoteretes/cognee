@@ -92,3 +92,33 @@ class DeleteDataReceiptDTO(OutDTO):
         description="The now-empty dataset was removed as well (only when "
         "delete_dataset_if_empty was requested)."
     )
+
+
+class CopyDataReceiptDTO(OutDTO):
+    """What ``datasets.copy_data`` returns: the destination row and what was written.
+
+    A returned receipt means the copy succeeded; every failure raises. The counts are
+    the elements written to the destination, whether or not it already held them (a
+    shared entity is upserted, not skipped).
+    """
+
+    status: Literal["success"] = Field(description="Always success on a returned receipt.")
+    source_dataset_id: UUID = Field(description="The dataset the document was read from.")
+    target_dataset_id: UUID = Field(description="The dataset the document was written to.")
+    source_data_id: UUID = Field(description="The document's id in the source dataset.")
+    data_id: UUID = Field(
+        description="The document's id in the destination dataset. Its row records the "
+        "source id as legacy_id, so forget() there resolves either."
+    )
+    data_record_created: bool = Field(
+        description="A Data row was created in the destination. False when an earlier "
+        "copy of the same document left one, which this copy reused."
+    )
+    copied_nodes: int = Field(description="Graph nodes written to the destination.")
+    copied_edges: int = Field(description="Graph edges written to the destination.")
+    copied_vectors: int = Field(
+        description="Vector rows written to the destination, across every collection."
+    )
+    copied_evidence: int = Field(
+        description="Edge evidence rows re-keyed to the destination (0 when evidence is off)."
+    )

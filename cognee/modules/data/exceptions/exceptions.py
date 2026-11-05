@@ -84,3 +84,48 @@ class InvalidTableAttributeError(CogneeValidationError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
         super().__init__(message, name, status_code)
+
+
+class DataNotInGraphError(CogneeValidationError):
+    """The dataset's graph owns no element for the document, so there is nothing to copy.
+
+    Raised by ``datasets.copy_data`` for a document that was never cognified in its
+    dataset, or whose graph predates source refs (cognee 1.5) and so records no
+    ownership.
+    """
+
+    def __init__(
+        self,
+        data_id,
+        dataset_id,
+        name: str = "DataNotInGraphError",
+        status_code=status.HTTP_409_CONFLICT,
+    ):
+        super().__init__(
+            f"Data {data_id} owns no graph element in dataset {dataset_id}: cognify it "
+            "there before copying it.",
+            name,
+            status_code,
+        )
+
+
+class VectorAdapterIndexSchemaError(CogneeValidationError):
+    """The destination vector adapter declares no ``IndexSchema`` to validate copied rows.
+
+    Every in-tree adapter stores index rows through its module's ``IndexSchema``;
+    ``datasets.copy_data`` validates the copied rows against it. A community adapter
+    without one cannot receive a copy yet.
+    """
+
+    def __init__(
+        self,
+        adapter_name: str,
+        name: str = "VectorAdapterIndexSchemaError",
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(
+            f"Vector adapter {adapter_name} declares no IndexSchema, so copied index rows "
+            "cannot be validated for it.",
+            name,
+            status_code,
+        )

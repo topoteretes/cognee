@@ -10,4 +10,6 @@ from .exceptions import (
     AmbiguousDataIdError,
     DatasetNotFoundError,
     DatasetTypeError,
+    DataNotInGraphError,
+    VectorAdapterIndexSchemaError,
 )
