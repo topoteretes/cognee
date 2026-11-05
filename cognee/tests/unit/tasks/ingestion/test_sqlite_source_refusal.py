@@ -15,7 +15,11 @@ import cognee.infrastructure.databases.vector.config as vector_config
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.files.utils import local_path_safety
 from cognee.infrastructure.files.utils.local_path_safety import ALLOWED_LOCAL_FILE_ROOTS_ENV
-from cognee.tasks.ingestion.create_dlt_source import _allowed_sqlite_connection_string
+from cognee.tasks.ingestion.create_dlt_source import (
+    ALLOW_DATABASE_INGESTION_ENV,
+    _allowed_sqlite_connection_string,
+    create_dlt_source_from_connection_string,
+)
 
 
 @pytest.fixture
@@ -139,3 +143,33 @@ def test_allowlist_never_admits_cognee_storage(storage, monkeypatch):
 
 def test_in_memory_database_is_allowed(storage):
     assert _allowed_sqlite_connection_string("sqlite:///") == "sqlite:///"
+
+
+def test_a_vector_url_that_is_not_a_sqlalchemy_url_does_not_break_the_check(storage, monkeypatch):
+    """Neptune Analytics is configured as `neptune-graph://<id>`, which make_url
+    rejects; the internal-roots check must still run (and still refuse)."""
+    monkeypatch.setattr(
+        vector_config,
+        "get_vectordb_config",
+        lambda: SimpleNamespace(vector_db_url="neptune-graph://g-abc123"),
+    )
+    _allowed_sqlite_connection_string(f"sqlite:///{storage.outside / 'shop.db'}")
+    with pytest.raises(CogneeValidationError, match="cognee's own storage"):
+        _allowed_sqlite_connection_string(f"sqlite:///{storage.system / 'cognee_db'}")
+
+
+def test_driver_errors_are_reported_by_class_only(storage, monkeypatch):
+    """The advisory's probe: a file that is not a database. The driver's message
+    (which carries the SQL it ran and says why the open failed) stays in the log;
+    the caller learns the exception class and nothing else."""
+    monkeypatch.delenv(ALLOW_DATABASE_INGESTION_ENV, raising=False)
+    target = storage.outside / "hostname"
+    target.write_text("not a database\n")
+
+    with pytest.raises(CogneeValidationError) as info:
+        create_dlt_source_from_connection_string(f"sqlite:///{target}")
+
+    assert info.value.name == "DatabaseSourceUnreachable"
+    assert "DatabaseError" in info.value.message
+    assert "sqlite_master" not in info.value.message
+    assert "not a database" not in info.value.message

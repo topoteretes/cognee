@@ -2,7 +2,11 @@ import csv
 import os
 import re
 
+from cognee.shared.logging_utils import get_logger
+
 from .dlt_utils import SOURCE_LABEL_ATTR
+
+logger = get_logger("create_dlt_source")
 
 DB_CONNECTION_PATTERNS = [
     "postgresql://",
@@ -51,9 +55,17 @@ def create_dlt_source_from_connection_string(
 
     ``resolve_foreign_keys`` makes dlt record the source's foreign keys in its schema;
     the staging tables dlt creates carry no key constraints to reflect them from.
+
+    The connection is opened here: ``sql_database`` connects and reflects the schema
+    when it is built. Driver errors are reported by class only — the driver message
+    names the target and says whether it refused, timed out or rejected the
+    credentials, which would make this call a scanner for every server it can reach.
+    The full error is logged.
     """
     import sqlalchemy
     from dlt.sources.sql_database import sql_database
+
+    from cognee.exceptions import CogneeValidationError
 
     _require_database_ingestion_allowed()
     if connection_string.startswith("sqlite:///"):
@@ -61,6 +73,25 @@ def create_dlt_source_from_connection_string(
     else:
         _require_foreign_database_server(connection_string)
 
+    try:
+        return _build_sql_source(sql_database, sqlalchemy, connection_string, query)
+    except CogneeValidationError:
+        raise
+    except Exception as error:
+        logger.warning(
+            "Database source could not be opened (%s.%s): %s",
+            type(error).__module__,
+            type(error).__name__,
+            error,
+        )
+        raise CogneeValidationError(
+            message="The database could not be opened as a source "
+            f"({type(error).__name__}); details are in the server log.",
+            name="DatabaseSourceUnreachable",
+        ) from error
+
+
+def _build_sql_source(sql_database, sqlalchemy, connection_string: str, query: str | None):
     if query:
         table_name, where_clause = _parse_sql_query(query)
         schema_name, bare_table_name = _split_schema_and_table(table_name)
@@ -106,8 +137,6 @@ def _allowed_sqlite_connection_string(connection_string: str) -> str:
     files inside cognee's own storage (every tenant's users, ACLs and data), and
     files outside COGNEE_ALLOWED_LOCAL_FILE_ROOTS when that allowlist is set.
     """
-    from sqlalchemy.engine import make_url
-
     from cognee.exceptions import CogneeValidationError
     from cognee.infrastructure.files.utils.local_path_safety import (
         get_cognee_internal_roots,
@@ -117,7 +146,7 @@ def _allowed_sqlite_connection_string(connection_string: str) -> str:
 
     # Parsed with the same parser the connection uses, so the path checked here
     # is the path that gets opened.
-    url = make_url(connection_string)
+    url = _parse_connection_string(connection_string)
     # `uri=true` makes SQLite read the path as a `file:` URI, a second path
     # syntax; refuse it rather than parse it.
     if "uri" in url.query:
@@ -160,29 +189,58 @@ _DEFAULT_PORTS = {
     "oracle": 1521,
 }
 
-# Query options that move a connection to another target than the URL's host
-# and port: a libpq host / hostaddr / port / service override, or a socket.
-_TARGET_OVERRIDE_OPTIONS = frozenset(
-    {"host", "hostaddr", "port", "service", "servicefile", "unix_socket"}
-)
+# The only driver options a network connection string may carry. Every driver
+# option is handed to the driver, and several move the connection elsewhere or
+# make it read server files: libpq's host / hostaddr / port / service / passfile /
+# sslkey, pymysql's unix_socket / read_default_file, pyodbc's driver. An
+# allowlist keeps up with drivers; a blocklist would not.
+_ALLOWED_OPTIONS = frozenset({"sslmode", "connect_timeout", "application_name", "charset"})
 
 
 def _require_database_ingestion_allowed() -> None:
-    """Refuse every connection-string source when ``ALLOW_DATABASE_INGESTION`` is off.
+    """Refuse connection-string sources unless ``ALLOW_DATABASE_INGESTION`` allows them.
 
-    On by default. A deployment that serves callers it does not trust turns it
-    off: the server connects with its own network position, so a caller who can
-    name a database can read any one the server reaches.
+    The server connects with its own network position, so a caller who can name a
+    database can read any one the server reaches. Unset (the default), the SDK, CLI
+    and MCP server may ingest a database and the API server may not: its callers
+    are whoever can register. ``true`` allows every surface; ``false`` refuses all.
     """
     from cognee.exceptions import CogneeValidationError
+    from cognee.modules.operations import ORIGIN_API, get_operation_origin
     from cognee.tasks.web_scraper.ssrf_protection import _FALSEY
 
-    if os.getenv(ALLOW_DATABASE_INGESTION_ENV, "true").strip().lower() in _FALSEY:
+    value = (os.getenv(ALLOW_DATABASE_INGESTION_ENV) or "").strip().lower()
+    if not value:
+        if get_operation_origin() == ORIGIN_API:
+            raise CogneeValidationError(
+                message="Ingesting a database from a connection string is not enabled for "
+                f"API callers on this server (set {ALLOW_DATABASE_INGESTION_ENV}=true to "
+                "allow it).",
+                name="DatabaseIngestionDisabled",
+            )
+        return
+    if value in _FALSEY:
         raise CogneeValidationError(
             message="Ingesting a database from a connection string is disabled on this "
             f"server ({ALLOW_DATABASE_INGESTION_ENV}=false).",
             name="DatabaseIngestionDisabled",
         )
+
+
+def _parse_connection_string(connection_string: str):
+    """``make_url`` with a 422 instead of a parser error for a malformed string."""
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.exc import ArgumentError
+
+    from cognee.exceptions import CogneeValidationError
+
+    try:
+        return make_url(connection_string)
+    except (ArgumentError, ValueError) as error:
+        raise CogneeValidationError(
+            message="The database connection string could not be parsed.",
+            name="DatabaseSourceRefused",
+        ) from error
 
 
 def _require_foreign_database_server(connection_string: str) -> None:
@@ -191,18 +249,20 @@ def _require_foreign_database_server(connection_string: str) -> None:
     Matched by server (resolved address + port), not database name: the per-dataset
     Postgres handlers keep one database per dataset on the same server, so any
     database there may belong to another user.
-    """
-    from sqlalchemy.engine import make_url
 
+    The address is resolved here and again by the driver, so a name whose record
+    changes in between (DNS rebinding) is not caught; ``ALLOW_DATABASE_INGESTION``
+    is the control for callers who could do that.
+    """
     from cognee.exceptions import CogneeValidationError
 
-    url = make_url(connection_string)
+    url = _parse_connection_string(connection_string)
     # A target the URL does not state (a socket, a host or service given as an
     # option) cannot be compared with cognee's servers; refuse rather than guess.
-    if not url.host or _TARGET_OVERRIDE_OPTIONS & set(url.query):
+    if not url.host or set(url.query) - _ALLOWED_OPTIONS:
         raise CogneeValidationError(
             message="Database connection strings must name the server as the URL's "
-            "host, without socket, host, port or service options.",
+            f"host; the only options accepted are {', '.join(sorted(_ALLOWED_OPTIONS))}.",
             name="DatabaseSourceRefused",
         )
     target = _server_addresses(url.host, url.port or _DEFAULT_PORTS.get(url.get_backend_name()))
