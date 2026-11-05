@@ -1,3 +1,4 @@
+import asyncio
 from types import MethodType, SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -80,6 +81,42 @@ async def test_id_scoring_reuses_embeddings_and_preserves_query_shapes(batch):
         assert [row.id for row in edges] == ["edge-type"]
         assert search.node_distances["Missing_text"] == []
         assert search.node_distances["Unrequested_text"] == []
+
+
+@pytest.mark.asyncio
+async def test_batch_id_scoring_runs_the_queries_of_a_batch_concurrently():
+    """Like ``batch_search``, the batch's query vectors are scored at once, not one
+    after another: on LanceDB each ``score_by_ids`` is a scan, and serial scans
+    multiplied the batch's cost by its size."""
+    engine = AsyncMock()
+    vectors = [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]]
+    engine.embedding_engine.embed_text.return_value = vectors
+    in_flight = 0
+    most_in_flight = 0
+
+    async def score(collection_name, data_point_ids, query_vector):
+        nonlocal in_flight, most_in_flight
+        in_flight += 1
+        most_in_flight = max(most_in_flight, in_flight)
+        await asyncio.sleep(0)  # let the other queries of the batch start
+        in_flight -= 1
+        return [MockScoredResult(point_id, query_vector[0]) for point_id in data_point_ids]
+
+    engine.score_by_ids.side_effect = score
+    search = NodeEdgeVectorSearch(vector_engine=engine)
+    await search.embed_and_retrieve_distances(
+        query=None,
+        query_batch=["first", "second", "third"],
+        collections=["Entity_name"],
+        ids_by_collection={"Entity_name": ["a", "b"]},
+    )
+
+    assert most_in_flight == len(vectors)
+    assert [[row.score for row in rows] for rows in search.node_distances["Entity_name"]] == [
+        [1.0, 1.0],
+        [0.0, 0.0],
+        [0.5, 0.5],
+    ]
 
 
 @pytest.mark.asyncio
