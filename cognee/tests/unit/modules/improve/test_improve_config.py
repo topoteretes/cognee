@@ -92,6 +92,7 @@ def test_config_declares_no_shared_knobs():
         "stages_disabled",
         "feedback_alpha",
         "review_conflicts",
+        "global_context_index",
         "effective_date_key",
         "trace_window_steps",
         "trace_windows_per_run",

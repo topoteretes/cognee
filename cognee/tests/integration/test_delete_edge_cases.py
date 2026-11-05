@@ -27,6 +27,7 @@ from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.cleanup.cleanup_unused_data import cleanup_unused_data
+from cognee.tests.utils.ci_search_type import ci_llm_available
 
 logger = get_logger()
 
@@ -96,11 +97,14 @@ async def test_last_accessed_updates_on_search():
 
     # Perform search to trigger last_accessed update
     logger.info("Performing search to trigger last_accessed update...")
+    # Access is recorded at retrieval, before any answer is generated, so without
+    # an LLM key (fork PRs) the same retrieval runs with only_context=True.
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="Apple technology",
         datasets=[dataset_name],
         user=user,
+        only_context=not ci_llm_available(),
     )
 
     logger.info(f"Search returned {len(search_results)} results")

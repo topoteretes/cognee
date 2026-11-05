@@ -50,6 +50,7 @@ from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.models import Dataset
 from cognee.modules.improve.config import get_improve_config
 from cognee.modules.improve.constants import SESSION_LEARNINGS_NODE_SET
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.truth_subspace.constants import truth_session_node_set
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -625,7 +626,8 @@ async def distill_session(
     A per-(session, dataset) watermark records which gated entries a completed run
     already covered; when none are new the call returns ``no_new_entries`` and makes
     zero LLM calls. ``max_batches`` caps the curator batches of this run (0 = no
-    cap); ``None`` reads ``IMPROVE_DISTILL_MAX_BATCHES_PER_RUN``.
+    cap); ``None`` reads ``IMPROVE_DISTILL_MAX_BATCHES_PER_RUN``. A failed step after
+    the lessons' cognify run (``AfterRunHookError``) is raised once the watermark moved.
     """
     scope = await resolve_distillation_scope(session_id=session_id, dataset=dataset, user=user)
 
@@ -680,11 +682,18 @@ async def distill_session(
         )
 
     documents: list[str] = []
+    hook_error: AfterRunHookError | None = None
     if accepted:
         # Publish what survived before reporting a failure: the lesson documents
         # are date-free, so a re-run re-accepting the same lesson dedups in add()
         # instead of duplicating.
-        documents = await publish_distilled_lessons(scope, accepted)
+        try:
+            documents = await publish_distilled_lessons(scope, accepted)
+        except AfterRunHookError as error:
+            # The lessons landed; only the step after their cognify failed. The
+            # watermark still moves below, so the curator and writer calls are not
+            # repeated, and the error is raised after it.
+            hook_error = error
 
     if run.failed_batches:
         # Seal the batches that completed, now that their lessons have landed:
@@ -704,8 +713,8 @@ async def distill_session(
             f"session {scope.session_id}: {run.failed_batches} curator batch(es) and "
             f"{writer_failures} writer call(s) failed; {len(run.curated_entry_ids)} entries "
             f"of completed batches sealed, the rest left for the next run "
-            f"({len(documents)} lesson document(s) from surviving calls were published)"
-        )
+            f"({len(accepted)} lesson document(s) from surviving calls were published)"
+        ) from hook_error
 
     await advance_distillation_watermark(scope, context_entries)
     if writer_failures:
@@ -714,8 +723,10 @@ async def distill_session(
         raise DistillationCallsFailedError(
             f"session {scope.session_id}: {writer_failures} writer call(s) failed; every "
             f"curated entry sealed, the lost lessons are not retried "
-            f"({len(documents)} lesson document(s) from surviving calls were published)"
-        )
+            f"({len(accepted)} lesson document(s) from surviving calls were published)"
+        ) from hook_error
+    if hook_error is not None:
+        raise hook_error
     if not accepted:
         return scope.result("no_accepted_lessons", uncurated_entries=uncurated)
     return scope.result("completed", documents=documents, uncurated_entries=uncurated)

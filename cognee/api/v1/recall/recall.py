@@ -27,7 +27,7 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.operations import get_current_operation, record_operation
-from cognee.modules.preflight import llm_available
+from cognee.modules.recall.methods.graph_warmup import STATE_BUILD_FAILED, STATE_PARTIAL
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
@@ -40,7 +40,11 @@ from cognee.modules.recall.types.RecallResponse import (
     ResponseToolEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
+from cognee.modules.retrieval.broad_retriever import BroadLimitError, BroadNoTextError
+from cognee.modules.retrieval.broad_store import BroadQueryError
+from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchResult, SearchType
@@ -56,9 +60,87 @@ logger = get_logger("recall")
 _MIN_WORD_LEN = 2
 
 # Routed types whose empty result means the lane was unavailable — no lexical
-# hits, no rules nodeset — and so is worth retrying as the default. Types the
-# router cannot pick never reach this set: the retry only second-guesses a guess.
-_RETRY_ON_EMPTY = frozenset({SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES})
+# hits, no rules nodeset, no code symbol or code graph, no BROAD answer — and so
+# is worth retrying as the default. Types the router cannot pick never reach this
+# set: the retry only second-guesses a guess.
+_RETRY_ON_EMPTY = frozenset(
+    {SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES, SearchType.CODE, SearchType.BROAD}
+)
+
+
+def _code_hits(payloads: list[SearchResultPayload]) -> list[SearchResultPayload]:
+    """The routed CODE payloads whose ``ask`` found at least one seed.
+
+    Seed-miss markers (multi-dataset searches, including datasets without a code
+    graph) and seedless results are misses.
+    """
+    return [
+        p for p in payloads if isinstance(p.result_object, dict) and p.result_object.get("seeds")
+    ]
+
+
+# The searches that answer from chunks alone, before the graph exists (SDK-397).
+_CHUNK_LEVEL_TYPES = frozenset(
+    {
+        SearchType.CHUNKS,
+        SearchType.CHUNKS_LEXICAL,
+        SearchType.RAG_COMPLETION,
+        SearchType.HYBRID_COMPLETION,
+    }
+)
+
+
+def _warmup_marker(probe, recall_config) -> ResponseMarkerEntry:
+    """The ``source="system"`` item recall returns instead of searching a memory with no graph.
+
+    ``build_failed`` names the failure of the last build; otherwise the memory
+    is still warming up.
+    """
+    if probe.state == STATE_BUILD_FAILED:
+        failure_desc = probe.error_class or "unknown error"
+        if probe.error_message:
+            failure_desc = f"{failure_desc}: {probe.error_message}"
+        status = "build_failed"
+        text = (
+            "Memory build failed: the last ingestion for the requested "
+            f"datasets ended in an error ({failure_desc}). Fix the cause "
+            "and re-run remember() or cognify()."
+        )
+    else:
+        status = "memory_warming_up"
+        text = (
+            "Memory is still warming up: no knowledge graph data "
+            "exists yet for the requested datasets."
+        )
+    return ResponseMarkerEntry(
+        source="system",
+        status=status,
+        text=text,
+        datapoint_count=probe.datapoint_count,
+        threshold=recall_config.recall_warmup_threshold,
+        error_class=probe.error_class,
+        error_message=probe.error_message,
+    )
+
+
+def _partial_memory_marker(probe, recall_config) -> ResponseMarkerEntry:
+    """The ``source="system"`` item recall appends while only the chunks are searchable.
+
+    ``status`` is ``memory_<state>`` in the vocabulary of
+    ``cognee.modules.cognify.memory_status`` (``memory_extracting``,
+    ``memory_indexed``, ``memory_extraction_failed``, ...); ``text`` says the
+    answer came from chunk search and what improves next.
+    """
+    detail = probe.message or "Memory is still being built."
+    return ResponseMarkerEntry(
+        source="system",
+        status=f"memory_{probe.memory_state or 'partial'}",
+        text=f"These results come from chunk-level search; the graph is not built yet. {detail}",
+        datapoint_count=probe.datapoint_count,
+        threshold=recall_config.recall_warmup_threshold,
+        error_class=probe.error_class,
+        error_message=probe.error_message,
+    )
 
 
 class RecallKwargs(TypedDict, total=False):
@@ -582,7 +664,7 @@ async def recall(
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
             return results
 
-        async with record_operation("recall", user=user, session_id=session_id):
+        async with record_operation("recall", user=user, session_ids=[session_id]):
             merged: list[RecallResponse] = []
 
             async def _run_session() -> list[RecallResponse]:
@@ -649,28 +731,44 @@ async def recall(
 
                 await set_session_user_context_variable(user)
 
-                from cognee.api.v1.recall.query_router import ROUTER_FALLBACK_TYPE, route_query
+                from cognee.api.v1.recall.query_router import (
+                    ROUTER_FALLBACK_TYPE,
+                    RoutingConstraints,
+                    default_route,
+                    pinned_route,
+                    route_query,
+                )
 
-                # Set only when the router chose the type, so the retry below
-                # never second-guesses a pinned type or the no-LLM CHUNKS pick.
+                # What this deployment can run: no LLM means only types that work
+                # without one, completion types running with only_context=True;
+                # Cypher off means no Cypher types. Keyed on LLM availability, not on
+                # the extractor that built the graph. An explicit query_type is not
+                # rerouted; with no LLM a completion type runs with only_context=True.
+                constraints = RoutingConstraints.from_config(llm_config)
+                fallback_decision = default_route(constraints)
+
+                # routed_rule is set only when the router chose the type, so the
+                # retry below never second-guesses a pinned type.
                 routed_rule = None
+                routed_config = retriever_specific_config
 
                 if query_type is not None:
-                    local_query_type = query_type
-                elif not llm_available(llm_config):
-                    # No usable LLM is configured, so nothing can write a
-                    # completion answer; the default lookup is the vector
-                    # search over chunks. Keyed on LLM availability, not on the
-                    # extractor that built the graph — a gliner_demo-built graph
-                    # with a key present answers completions fine. An explicit
-                    # query_type still selects any search type.
-                    local_query_type = SearchType.CHUNKS
+                    decision = pinned_route(query_type, constraints)
                 elif auto_route:
-                    decision = route_query(query_text)
-                    local_query_type = decision.search_type
+                    decision = route_query(query_text, constraints)
                     routed_rule = decision.rule
+                    if decision.retriever_config:
+                        # The caller's keys win over the router's.
+                        routed_config = {
+                            **decision.retriever_config,
+                            **(retriever_specific_config or {}),
+                        }
                 else:
-                    local_query_type = ROUTER_FALLBACK_TYPE
+                    decision = fallback_decision
+                local_query_type = decision.search_type
+                # The caller's only_context stays what it was for the warm-up guard and
+                # the skill gate below; the router's forced one applies to the search.
+                search_only_context = only_context or decision.only_context
 
                 span.set_attribute(COGNEE_SEARCH_TYPE, local_query_type.value)
                 if routed_rule is not None:
@@ -741,14 +839,38 @@ async def recall(
                         )
                         guard_active = False
 
+                # Set while the chunks are searchable but the graph is not built
+                # yet: the search runs at chunk level, and a marker saying so and
+                # what improves next is appended.
+                partial_probe = None
                 if guard_active:
                     from cognee.modules.recall.methods.graph_warmup import (
-                        STATE_BUILD_FAILED,
                         assess_memory_readiness,
                     )
 
                     probe = await assess_memory_readiness(user, probe_dataset_ids)
-                    if not probe.is_warm:
+                    if probe.state == STATE_PARTIAL:
+                        partial_probe = probe
+                        span.set_attribute("cognee.recall.warmup_state", probe.state)
+                        span.set_attribute("cognee.recall.memory_state", probe.memory_state or "")
+                        if query_type is None and local_query_type not in _CHUNK_LEVEL_TYPES:
+                            # Recall's own pick needs the graph, which has
+                            # nothing yet; the chunk-level completion answers
+                            # from what the indexing pipeline stored. A pinned
+                            # query_type is the caller's to choose.
+                            # With no LLM it runs with only_context=True.
+                            chunk_decision = pinned_route(SearchType.RAG_COMPLETION, constraints)
+                            local_query_type = chunk_decision.search_type
+                            search_only_context = only_context or chunk_decision.only_context
+                            routed_rule = None
+                            span.set_attribute(COGNEE_SEARCH_TYPE, local_query_type.value)
+                        logger.info(
+                            "Recall on partially built memory (state '%s'): searching with %s "
+                            "and appending a status marker.",
+                            probe.memory_state,
+                            local_query_type.value,
+                        )
+                    elif not probe.is_warm:
                         logger.info(
                             "Recall warm-up short-circuit: graph readiness is '%s' "
                             "(threshold %d); skipping search.",
@@ -764,35 +886,11 @@ async def recall(
                             # merged result is empty — behave exactly as if
                             # the graph lane returned no results.
                             return []
-                        if probe.state == STATE_BUILD_FAILED:
-                            failure_desc = probe.error_class or "unknown error"
-                            if probe.error_message:
-                                failure_desc = f"{failure_desc}: {probe.error_message}"
-                            status = "build_failed"
-                            text = (
-                                "Memory build failed: the last ingestion for the requested "
-                                f"datasets ended in an error ({failure_desc}). Fix the cause "
-                                "and re-run remember() or cognify()."
-                            )
-                        else:
-                            status = "memory_warming_up"
-                            text = (
-                                "Memory is still warming up: no knowledge graph data "
-                                "exists yet for the requested datasets."
-                            )
-                        return [
-                            ResponseMarkerEntry(
-                                source="system",
-                                status=status,
-                                text=text,
-                                datapoint_count=probe.datapoint_count,
-                                threshold=recall_config.recall_warmup_threshold,
-                                error_class=probe.error_class,
-                                error_message=probe.error_message,
-                            )
-                        ]
+                        return [_warmup_marker(probe, recall_config)]
 
-                async def _search(search_type: SearchType):
+                async def _search(
+                    search_type: SearchType, config: dict | None = retriever_specific_config
+                ):
                     return await authorized_search(
                         query_text=query_text,
                         query_type=search_type,
@@ -803,12 +901,12 @@ async def recall(
                         top_k=top_k,
                         node_name=node_name,
                         node_name_filter_operator=node_name_filter_operator,
-                        only_context=only_context,
+                        only_context=search_only_context,
                         session_id=session_id,
                         wide_search_top_k=wide_search_top_k,
                         triplet_distance_penalty=triplet_distance_penalty,
                         feedback_influence=feedback_influence,
-                        retriever_specific_config=retriever_specific_config,
+                        retriever_specific_config=config,
                         neighborhood_depth=neighborhood_depth,
                         neighborhood_seed_top_k=neighborhood_seed_top_k,
                         include_references=include_references,
@@ -824,31 +922,65 @@ async def recall(
                 )
 
                 try:
-                    graph_results = await _search(local_query_type)
-                except (UnsupportedSearchTypeError, SearchTypeNotSupported) as error:
-                    if not routed_guess:
-                        raise
-                    # The backend rejected a routed guess — a deployment-level
-                    # choice, not the caller's; the default always substitutes.
-                    logger.info(
-                        "Rule %s routed to %s, which the backend rejected (%s); retrying as %s.",
-                        routed_rule,
-                        local_query_type.value,
-                        error,
-                        ROUTER_FALLBACK_TYPE.value,
-                    )
-                    local_query_type = ROUTER_FALLBACK_TYPE
-                    graph_results = await _search(local_query_type)
+                    try:
+                        graph_results = await _search(local_query_type, routed_config)
+                    except (
+                        UnsupportedSearchTypeError,
+                        SearchTypeNotSupported,
+                        CodeSeedNotFoundError,
+                        BroadQueryError,
+                        BroadLimitError,
+                        BroadNoTextError,
+                    ) as error:
+                        if not routed_guess:
+                            raise
+                        # The backend rejected a routed guess — a deployment-level
+                        # choice, not the caller's — or its lane cannot answer these
+                        # datasets (no code symbol or code graph, no working BROAD
+                        # query, a BROAD limit hit, no document text); either way the
+                        # default substitutes.
+                        logger.info(
+                            "Rule %s routed to %s, which could not answer (%s); retrying as %s.",
+                            routed_rule,
+                            local_query_type.value,
+                            error,
+                            ROUTER_FALLBACK_TYPE.value,
+                        )
+                        local_query_type = fallback_decision.search_type
+                        search_only_context = only_context or fallback_decision.only_context
+                        graph_results = await _search(local_query_type)
 
-                if routed_guess and not graph_results and local_query_type in _RETRY_ON_EMPTY:
+                    if routed_guess and local_query_type is SearchType.CODE:
+                        # Datasets whose ``ask`` found no symbol, or that have no
+                        # code graph, are misses, so all-miss is an empty result.
+                        graph_results = _code_hits(graph_results)
+
+                    if routed_guess and not graph_results and local_query_type in _RETRY_ON_EMPTY:
+                        logger.info(
+                            "Rule %s routed to %s, which returned nothing; retrying as %s.",
+                            routed_rule,
+                            local_query_type.value,
+                            ROUTER_FALLBACK_TYPE.value,
+                        )
+                        local_query_type = fallback_decision.search_type
+                        search_only_context = only_context or fallback_decision.only_context
+                        graph_results = await _search(local_query_type)
+                except NoDataError:
+                    if partial_probe is None:
+                        raise
+                    # The memory's state promised chunks the store does not have
+                    # for this search (a pinned type that needs the graph, or the
+                    # chunks of another dataset): answer with the state the memory
+                    # is in, as the cold path does, instead of raising.
                     logger.info(
-                        "Rule %s routed to %s, which returned nothing; retrying as %s.",
-                        routed_rule,
+                        "%s found nothing to read on partially built memory (state '%s'); "
+                        "returning the memory status marker.",
                         local_query_type.value,
-                        ROUTER_FALLBACK_TYPE.value,
+                        partial_probe.memory_state,
                     )
-                    local_query_type = ROUTER_FALLBACK_TYPE
-                    graph_results = await _search(local_query_type)
+                    if sources != ["graph"]:
+                        return []
+                    return [_partial_memory_marker(partial_probe, recall_config)]
 
                 # A fallback above may have changed the type that answered; the
                 # span recorded the routed one before the search ran.
@@ -866,6 +998,12 @@ async def recall(
                     tagged.extend(
                         [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]
                     )
+                # Graph-only recalls always learn the memory's state; a
+                # multi-source recall only when this lane answered, so the
+                # tools "on_empty" fallback (which fires on an empty merge)
+                # keeps firing.
+                if partial_probe is not None and (sources == ["graph"] or tagged):
+                    tagged.append(_partial_memory_marker(partial_probe, recall_config))
                 return tagged
 
             async def _run_tools() -> list[RecallResponse]:

@@ -124,18 +124,43 @@ def test_postgres_backend_with_cache_db_url_returns_sql_adapter():
     assert engine.db_uri == explicit_url
 
 
-def test_default_sqlite_backend_falls_back_to_fs_when_db_path_on_s3():
-    """The implicit sqlite default degrades to the fs cache on S3 system roots."""
+def test_tapes_backend_returns_tapes_adapter_on_the_sql_cache(tmp_path):
+    """tapes keeps session state in the SQL cache (sqlite default) and mirrors QA to tapes."""
+    fake_relational = types.SimpleNamespace(db_path=str(tmp_path), db_provider="sqlite")
+
+    with patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational):
+        engine = _create_engine("tapes")
+
+    from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
+    from cognee.infrastructure.databases.cache.tapes.TapesCacheAdapter import TapesCacheAdapter
+
+    assert isinstance(engine, TapesCacheAdapter)
+    assert isinstance(engine, SqlCacheAdapter)
+    assert engine.db_uri == f"sqlite+aiosqlite:///{tmp_path}/cache.db"
+    assert engine.tapes_ingest_url == "http://localhost:8082"
+
+
+def test_tapes_backend_honours_cache_db_url(tmp_path):
+    engine = _create_engine("tapes", cache_db_url=f"sqlite+aiosqlite:///{tmp_path}/other.db")
+
+    from cognee.infrastructure.databases.cache.tapes.TapesCacheAdapter import TapesCacheAdapter
+
+    assert isinstance(engine, TapesCacheAdapter)
+    assert engine.db_uri == f"sqlite+aiosqlite:///{tmp_path}/other.db"
+
+
+def test_default_sqlite_backend_on_s3_raises():
+    """The implicit sqlite default fails loudly on an S3 system root: there is no
+    filesystem cache to degrade to, so the deployment must name a cache backend."""
     fake_relational = types.SimpleNamespace(
         db_path="s3://bucket/cognee/system/databases", db_provider="sqlite"
     )
 
-    with patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational):
-        engine = _create_engine("sqlite")
-
-    from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import FSCacheAdapter
-
-    assert isinstance(engine, FSCacheAdapter)
+    with (
+        patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational),
+        pytest.raises(CacheConnectionError, match="cannot store cache.db on S3"),
+    ):
+        _create_engine("sqlite")
 
 
 def test_explicitly_chosen_sqlite_backend_on_s3_still_raises():
@@ -187,7 +212,7 @@ def test_unknown_backend_raises_value_error_listing_all_backends():
 
     message = str(exc_info.value)
     assert "bogus" in message
-    for backend in ("redis", "fs", "tapes", "sqlite", "postgres"):
+    for backend in ("redis", "tapes", "sqlite", "postgres"):
         assert f"'{backend}'" in message
 
 

@@ -10,6 +10,7 @@ that a budget failure inside ``cognify_session`` reaches the orchestrator in a
 shape it can classify.
 """
 
+import asyncio
 import importlib
 import sys
 import uuid
@@ -44,15 +45,6 @@ session_lock = importlib.import_module("cognee.infrastructure.locks.session_lock
 BUDGET_SENTENCE = "Budget has been exceeded! Current cost: 20.0, Max budget: 20.0"
 
 
-@pytest.fixture(autouse=True)
-def _clean_registry():
-    session_lock._improving_sessions.clear()
-    session_lock._rerun_requested.clear()
-    yield
-    session_lock._improving_sessions.clear()
-    session_lock._rerun_requested.clear()
-
-
 def _budget_error() -> LLMPaymentRequiredError:
     return LLMPaymentRequiredError(f"LLM budget exhausted: {BUDGET_SENTENCE}")
 
@@ -74,8 +66,14 @@ def _outcomes(stages: list[StageResult]) -> list[tuple[str, str, str | None]]:
 
 
 async def _assert_claim_is_free(keys) -> None:
-    assert await session_lock.try_acquire_improve_lock_many(keys)
+    await asyncio.wait_for(session_lock.acquire_improve_lock_many(keys), 1)
     await session_lock.release_improve_lock_many(keys)
+
+
+async def _assert_dataset_lock_is_free(harness) -> None:
+    from cognee.infrastructure.locks.dataset_lock import get_dataset_lock
+
+    assert not (await get_dataset_lock(harness.dataset.id)).locked()
 
 
 @pytest.mark.asyncio
@@ -111,7 +109,7 @@ async def test_stage_that_raises_on_the_budget_stops_the_run_and_skips_the_rest(
     assert harness.span.attributes[COGNEE_IMPROVE_STAGES] == (
         "first=completed,broke=errored,after_1=skipped,after_2=skipped"
     )
-    await _assert_claim_is_free([f"dataset:{harness.dataset.id}"])
+    await _assert_dataset_lock_is_free(harness)
 
 
 @pytest.mark.asyncio
@@ -174,7 +172,7 @@ async def test_fatal_stage_on_the_budget_still_raises_and_names_the_budget(harne
     ]
     assert partial.error == partial.stages[1].error
     assert partial.status == "errored"
-    await _assert_claim_is_free([f"dataset:{harness.dataset.id}"])
+    await _assert_dataset_lock_is_free(harness)
 
 
 @pytest.mark.asyncio
@@ -268,112 +266,29 @@ async def test_fatal_stage_failing_for_another_reason_keeps_the_abort_reason(har
 
 
 @pytest.mark.asyncio
-async def test_budget_stop_starts_no_rerun_pass_and_releases_the_claim_once(harness, monkeypatch):
-    """A loser asked this run for one more pass. That pass would fail on the
-    same budget, so it never starts: the claim is released by the plain
-    release — exactly once — and the request is left to the next claimant."""
+async def test_budget_stop_releases_the_claim_once(harness, monkeypatch):
+    """A second release would raise, and could hand the next queued run a claim
+    still in use."""
     improve_mod = harness.improve_mod
-    calls = []
     releases = []
-    session_key = f"session:{harness.user.id}:chat_1"
-    real_release_or_rerun = improve_mod.release_or_rerun_improve_lock_many
     real_release = improve_mod.release_improve_lock_many
 
-    async def spy_release_or_rerun(keys, *, rerun_keys):
-        releases.append("release_or_rerun")
-        return await real_release_or_rerun(keys, rerun_keys=rerun_keys)
-
     async def spy_release(keys):
-        releases.append("release")
+        releases.append(tuple(keys))
         await real_release(keys)
 
-    monkeypatch.setattr(improve_mod, "release_or_rerun_improve_lock_many", spy_release_or_rerun)
     monkeypatch.setattr(improve_mod, "release_improve_lock_many", spy_release)
-
-    async def asked_for_one_more(_inputs):
-        assert await session_lock.request_improve_rerun_many([session_key])
-        return StageResult.completed("asked", items=1)
-
-    harness.use_stages(
-        [
-            FakeStage("asked", run=asked_for_one_more, calls=calls),
-            FakeStage("broke", run=lambda _i: _budget_error(), calls=calls),
-            FakeStage("after", calls=calls),
-        ]
-    )
+    harness.use_stages([FakeStage("broke", run=lambda _i: _budget_error()), FakeStage("after")])
 
     result = await harness.improve(session_ids=["chat_1"])
 
-    assert calls == ["asked", "broke"]  # one pass, cut short
-    assert result.rerun_passes == []
     assert _outcomes(result.stages) == [
-        ("asked", "completed", None),
         ("broke", "errored", None),
         ("after", "skipped", REASON_BUDGET_EXHAUSTED),
     ]
-    assert result.stage_summary() == "asked=completed,broke=errored,after=skipped"
-    assert releases == ["release"]
-    # The request survives the release and is cleared by the next claim, whose
-    # full pass covers it.
-    assert session_key in session_lock._rerun_requested
-    keys = session_lock.improve_lock_keys(["chat_1"], harness.dataset.id, harness.user.id)
-    assert await session_lock.try_acquire_improve_lock_many(keys)
-    assert session_key not in session_lock._rerun_requested
-
-
-@pytest.mark.asyncio
-async def test_budget_failure_in_the_last_stage_starts_no_rerun_pass(harness):
-    """Nothing is left to skip, and still no further pass."""
-    calls = []
-    session_key = f"session:{harness.user.id}:chat_1"
-
-    async def broke_after_a_rerun_request(_inputs):
-        await session_lock.request_improve_rerun_many([session_key])
-        raise _budget_error()
-
-    harness.use_stages(
-        [
-            FakeStage("first", calls=calls),
-            FakeStage("broke", run=broke_after_a_rerun_request, calls=calls),
-        ]
-    )
-
-    result = await harness.improve(session_ids=["chat_1"])
-
-    assert calls == ["first", "broke"]
-    assert result.rerun_passes == []
-    assert _outcomes(result.stages) == [("first", "completed", None), ("broke", "errored", None)]
-    assert result.status == "errored"
-
-
-@pytest.mark.asyncio
-async def test_budget_failure_inside_a_rerun_pass_stops_that_pass(harness):
-    """The stop applies to whichever pass hits the budget; its skipped stages
-    are recorded in that pass, and no third pass follows."""
-    calls = []
-    session_key = f"session:{harness.user.id}:chat_1"
-
-    async def fine_then_broke(_inputs):
-        # Every call asks for one more pass, as a stream of losers would.
-        await session_lock.request_improve_rerun_many([session_key])
-        if calls.count("flaky") == 1:
-            return StageResult.completed("flaky", items=1)
-        raise _budget_error()
-
-    harness.use_stages(
-        [FakeStage("flaky", run=fine_then_broke, calls=calls), FakeStage("after", calls=calls)]
-    )
-
-    result = await harness.improve(session_ids=["chat_1"])
-
-    assert calls == ["flaky", "after", "flaky"]
-    assert _outcomes(result.stages) == [("flaky", "completed", None), ("after", "completed", None)]
-    assert len(result.rerun_passes) == 1
-    assert _outcomes(result.rerun_passes[0]) == [
-        ("flaky", "errored", None),
-        ("after", "skipped", REASON_BUDGET_EXHAUSTED),
-    ]
-    assert result.status == "errored"
+    assert len(releases) == 1
+    keys = session_lock.improve_lock_keys(["chat_1"], harness.user.id)
+    await _assert_claim_is_free(keys)
 
 
 @pytest.mark.asyncio
@@ -398,7 +313,7 @@ async def test_background_run_stops_on_the_budget_without_an_error_to_report(har
     assert result.error is None
     assert [call["error"] for call in harness.finish_calls] == [None]
     assert harness.operations[-1].outcome == OperationOutcome.FAILED
-    await _assert_claim_is_free([f"dataset:{harness.dataset.id}"])
+    await _assert_dataset_lock_is_free(harness)
 
 
 # --- the chain: cognify_session -> memify pipeline -> stage -> orchestrator ---
@@ -633,5 +548,5 @@ async def test_budget_failure_in_cognify_session_stops_the_improve_run(
     # the one that failed stays put, so the next improve picks it up.
     assert await get_persisted_qa_count(session_bridge.sessions, user_id, "chat_1") == 1
     assert await get_persisted_qa_count(session_bridge.sessions, user_id, "chat_2") == 0
-    keys = session_lock.improve_lock_keys(["chat_1", "chat_2"], harness.dataset.id, harness.user.id)
+    keys = session_lock.improve_lock_keys(["chat_1", "chat_2"], harness.user.id)
     await _assert_claim_is_free(keys)

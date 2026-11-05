@@ -788,16 +788,20 @@ class TestSessionManager:
         )
 
     @pytest.mark.asyncio
-    async def test_delete_session_skips_vector_cleanup_when_cache_delete_misses(
+    async def test_delete_session_cleans_vectors_even_when_cache_delete_misses(
         self, sm, mock_cache, session_vector_mocks
     ):
-        """delete_session leaves vectors alone when the cache session was not deleted."""
+        """An expired session has no cache entries left but still has its Q&A
+        vectors, which hold the question and answer text; delete_session strips
+        them whether or not the cache held anything."""
         mock_cache.delete_session.return_value = False
 
         ok = await sm.delete_session(user_id="u1", session_id="s1")
 
         assert ok is False
-        session_vector_mocks["delete_session"].assert_not_awaited()
+        session_vector_mocks["delete_session"].assert_awaited_once_with(
+            user_id="u1", session_id="s1"
+        )
 
     @pytest.mark.asyncio
     async def test_generate_completion_with_session_no_user_id_calls_generate_completion_only(

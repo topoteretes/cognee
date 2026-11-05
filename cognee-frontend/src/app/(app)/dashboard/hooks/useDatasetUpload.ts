@@ -9,6 +9,7 @@ import { trackEvent } from "@/modules/analytics";
 import { MAX_FILES_PER_UPLOAD } from "@/modules/ingestion/uploadLimits";
 import { useBrainUpload } from "@/modules/ingestion/useBrainUpload";
 import createDataset from "@/modules/datasets/createDataset";
+import { describeProcessingError } from "@/app/(app)/datasets/processingErrorMessage";
 import { loadGraphModelsConfig } from "@/modules/configuration/userConfiguration";
 import buildCognifyOptions from "@/modules/configuration/buildCognifyOptions";
 
@@ -96,11 +97,8 @@ export function useDatasetUpload(): DatasetUploadState {
       onProcessingError: (error) => {
         console.error("Dataset processing failed:", error);
         refreshDatasets();
-        notifications.show({
-          title: "Knowledge graph build failed",
-          message: `Files were added, but building the knowledge graph failed: ${error instanceof Error ? error.message : String(error)}`,
-          color: "red",
-        });
+        const { title, message, isTimeout } = describeProcessingError(error);
+        notifications.show({ title, message, color: isTimeout ? "yellow" : "red" });
       },
     });
   }

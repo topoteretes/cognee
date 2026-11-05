@@ -81,6 +81,10 @@ async def test_empty_table_cleanup_retains_other_tables_and_unscoped_legacy_rows
             "delete_data_nodes_and_edges",
             new=AsyncMock(return_value=SimpleNamespace(node_ids=[], edge_ids=[])),
         ),
+        patch(
+            "cognee.modules.conflicts.methods.retire_forgotten_decisions",
+            new=AsyncMock(return_value=set()),
+        ),
         patch.object(
             importlib.import_module("cognee.modules.data.methods.delete_data"),
             "delete_data",
@@ -99,4 +103,4 @@ async def test_empty_table_cleanup_retains_other_tables_and_unscoped_legacy_rows
             sources=("google_drive",),
             document_scopes={("google_drive", "drive_a")},
         )
-    delete.assert_awaited_once_with(owned, dataset.id)
+    delete.assert_awaited_once_with([owned], dataset.id)

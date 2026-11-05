@@ -407,3 +407,34 @@ async def test_cognify_session_preserves_last_entry_time_as_source_metadata(monk
     assert content.data == window.text
     assert content.external_metadata == {date_key: window.last_entry_time}
     assert content.literal_text is True
+
+
+@pytest.mark.asyncio
+async def test_cognify_session_failed_step_after_the_run_is_raised_after_every_window():
+    """The windows are cognified; only the step after a run failed. Every window
+    still runs and advances its watermark (leaving it put would rebuild the window
+    on every improve), then the error is raised."""
+    from cognee.modules.pipelines.exceptions import AfterRunHookError
+
+    mock_sm = _mock_session_manager()
+    failed_step, clean = _completed_run(), _completed_run()
+    failed_step.after_run_error = "RuntimeError: compaction"
+    windows = [
+        _window("Question: q1?\n\nAnswer: a\n\n", persisted_qa_count=1),
+        _window("Question: q2?\n\nAnswer: b\n\n", persisted_qa_count=2),
+    ]
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock),
+        patch(
+            "cognee.cognify",
+            new_callable=AsyncMock,
+            side_effect=[{failed_step.dataset_id: failed_step}, {clean.dataset_id: clean}],
+        ) as mock_cognify,
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+        pytest.raises(AfterRunHookError, match="'ds' \\(RuntimeError: compaction\\)"),
+    ):
+        await cognify_session(windows, dataset_id="123")
+
+    assert mock_cognify.await_count == 2
+    assert mock_sm.update_session_context_entry.call_count == 2

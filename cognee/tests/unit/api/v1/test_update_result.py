@@ -235,6 +235,19 @@ async def test_errored_rebuild_is_a_failed_result_not_an_exception():
     )
 
 
+async def test_a_failed_step_after_the_rebuild_is_reported_not_raised():
+    data_id, dataset_id = uuid4(), uuid4()
+    completed = _run(dataset_id)
+    completed.after_run_error = "RuntimeError: compaction"
+    stack = _Stack(data_id, dataset_id, AsyncMock(), completed)
+
+    result = await _update(stack, data_id, dataset_id, chunk_level_diff=False)
+
+    assert result["status"] == "full_rebuild"
+    assert result["pipeline_run_id"] == completed.pipeline_run_id
+    assert result["after_run_error"] == "RuntimeError: compaction"
+
+
 def test_result_schema_round_trips_through_json():
     result = UpdateResult(
         status="full_rebuild",

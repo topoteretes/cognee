@@ -1,4 +1,7 @@
+import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
@@ -138,3 +141,70 @@ async def test_missing_scope_is_reported_without_secrets():
     with pytest.raises(SlackAPIError, match="missing_scope") as caught:
         await client.call("conversations.history")
     assert "secret-for-test" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_reports_wait_and_restores_phase_without_fake_progress(monkeypatch):
+    from cognee.modules.integrations.sync_progress import SyncProgressReporter, track_sync
+
+    observations = []
+
+    original_report = SyncProgressReporter.report
+
+    async def capture(reporter, **kwargs):
+        await original_report(reporter, **kwargs)
+        observations.append(reporter.snapshot())
+
+    async def sleep(delay):
+        current = observations[-1]
+        assert delay == 61
+        assert current.state == "waiting"
+        assert current.reason == "rate_limited"
+        assert current.phase == "downloading"
+        assert current.completed == 3
+        assert current.total is None
+
+    monkeypatch.setattr(SyncProgressReporter, "report", capture)
+    monkeypatch.setattr(SyncProgressReporter, "_publish", AsyncMock())
+    monkeypatch.setattr("cognee.modules.integrations.slack.history_client.asyncio.sleep", sleep)
+    credential = SimpleNamespace(
+        provider="slack", id=uuid4(), user_id=uuid4(), workspace_id=None, provider_account_id="T1"
+    )
+    client = client_with(
+        Response(None, 429, {"Retry-After": "61"}), Response({"ok": True, "messages": []})
+    )
+    async with track_sync("slack", credential) as reporter:
+        await reporter.report(phase="downloading", completed=3, unit="documents")
+        await client.history("C1", oldest="10", latest="20")
+        assert reporter.snapshot().state == "running"
+        assert reporter.snapshot().completed == 3
+    assert observations[-1].state == "succeeded"
+    assert all("secret-for-test" not in p.model_dump_json() for p in observations)
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_rate_limit_wait_remains_cancelled(monkeypatch):
+    from cognee.modules.integrations.sync_progress import SyncProgressReporter, track_sync
+
+    observations = []
+
+    original_report = SyncProgressReporter.report
+
+    async def capture(reporter, **kwargs):
+        await original_report(reporter, **kwargs)
+        observations.append(reporter.snapshot())
+
+    monkeypatch.setattr(SyncProgressReporter, "report", capture)
+    monkeypatch.setattr(SyncProgressReporter, "_publish", AsyncMock())
+    monkeypatch.setattr(
+        "cognee.modules.integrations.slack.history_client.asyncio.sleep",
+        AsyncMock(side_effect=asyncio.CancelledError),
+    )
+    credential = SimpleNamespace(
+        provider="slack", id=uuid4(), user_id=uuid4(), workspace_id=None, provider_account_id="T1"
+    )
+    client = client_with(Response(None, 429))
+    with pytest.raises(asyncio.CancelledError):
+        async with track_sync("slack", credential):
+            await client.history("C1", oldest="10", latest="20")
+    assert observations[-1].state == "cancelled"

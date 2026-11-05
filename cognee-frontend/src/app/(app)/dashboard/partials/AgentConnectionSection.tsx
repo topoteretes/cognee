@@ -1,90 +1,76 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { trackEvent } from "@/modules/analytics";
-import { SEARCH_SESSION_PREFIX } from "@/modules/sessions/getSessions";
-import type { SessionRow } from "@/modules/sessions/getSessions";
+import { isAgentIntegrationKey } from "@/modules/agents/getAgentConnections";
+import type { AgentIntegrationKey } from "@/modules/agents/getAgentConnections";
 import Modal from "@/ui/elements/Modal/Modal";
 import { OsToggle } from "@/ui/elements/OsToggle";
 import { useOsPreference } from "@/ui/layout/OsPreferenceContext";
-import { exportEnvVar } from "@/utils/osCommands";
 import { CARDS_CFG, getSteps } from "./agentConnectionSteps";
 import type { AciAgentKey } from "./agentConnectionSteps";
 import { AciCard } from "./AciCard";
 import { AciStepRow } from "./AciStepRow";
 
-// Index of the "Upload something" step in the claude-code flow — used to
-// auto-advance when a new session is detected while the modal is open.
-const CLAUDE_CONNECT_STEP = 2;
-
 interface AgentConnectionSectionProps {
   onUploadClick: () => void;
+  /** Opens AgentSetupModal for a plugin agent (claude-code/codex) — the same
+   *  modal a click on its Integrations card or its memory-graph node opens,
+   *  so all three surfaces make the same choice between the connected
+   *  summary and the install wizard. This section's own inline popup below
+   *  is now only ever reached by openclaw/api-mcp, which have no such
+   *  connected-summary split. */
+  onOpenAgentSetup: (agent: AgentIntegrationKey) => void;
   isUploading: boolean;
   serviceUrl: string | null;
   apiKey: string | null;
   isInitializing: boolean;
   hasDocuments: boolean;
-  sessions: SessionRow[];
   integrationConnected?: Record<string, boolean>;
+  lastSeenByAgent?: Partial<Record<string, string>>;
+  /** Plugin agents with a running session right now — see AciCard. */
+  runningAgents?: ReadonlySet<string>;
+  /** Telemetry's first poll hasn't answered yet — see AciCard. */
+  connectionsLoading?: boolean;
 }
 
 export function AgentConnectionSection({
   onUploadClick,
+  onOpenAgentSetup,
   isUploading,
   serviceUrl,
   apiKey,
   isInitializing,
   hasDocuments,
-  sessions,
   integrationConnected = {},
+  lastSeenByAgent = {},
+  runningAgents,
+  connectionsLoading = false,
 }: AgentConnectionSectionProps): React.ReactElement {
   const router = useRouter();
   const { os } = useOsPreference();
   const [activeKey, setActiveKey] = useState<AciAgentKey | null>(null);
   const [stepIndexMap, setStepIndexMap] = useState<Partial<Record<AciAgentKey, number>>>({});
-  const [connectVerified, setConnectVerified] = useState(false);
-  const sessionBaselineRef = useRef<Set<string> | null>(null);
-
   const baseUrl = serviceUrl ?? "https://your-tenant.aws.cognee.ai";
   const resolvedKey = apiKey ?? "your-api-key";
-  const credsCode = `${exportEnvVar(os, "COGNEE_BASE_URL", baseUrl)}\n${exportEnvVar(os, "COGNEE_API_KEY", resolvedKey)}`;
-  const stepOpts = { baseUrl, resolvedKey, credsCode, isInitializing, connectVerified, os };
-
-  // Detect a new Claude Code session while the modal is open. Derives connection
-  // state from the `sessions` prop (circuit-breaker-protected, 15s poll) —
-  // no rogue setInterval bypassing the breaker.
-  useEffect(() => {
-    if (activeKey !== "claude-code") {
-      sessionBaselineRef.current = null;
-      setConnectVerified(false);
-      return;
-    }
-    if (connectVerified) return;
-
-    const realIds = sessions
-      .map((s) => s.session_id)
-      .filter((id) => !id.startsWith(SEARCH_SESSION_PREFIX));
-
-    if (sessionBaselineRef.current === null) {
-      // First render with modal open — snapshot the pre-existing session set.
-      sessionBaselineRef.current = new Set(realIds);
-      return;
-    }
-
-    const baseline = sessionBaselineRef.current;
-    if (realIds.some((id) => !baseline.has(id))) {
-      setConnectVerified(true);
-      setStepIndexMap((prev) => {
-        const cur = prev["claude-code"] ?? 0;
-        return cur <= CLAUDE_CONNECT_STEP ? { ...prev, "claude-code": CLAUDE_CONNECT_STEP + 1 } : prev;
-      });
-    }
-  }, [sessions, activeKey, connectVerified]);
+  // `!apiKey` belongs in the gate as much as `isInitializing` does: provisioning
+  // releases the spinner before the key lands (useTenantInit.ts:256), so a new
+  // user sits at isInitializing === false with no key for a minute or two. The
+  // Claude Code / Codex steps write ~/.cognee/.env, where copying the
+  // "your-api-key" placeholder would replace a working key rather than set a
+  // throwaway shell variable.
+  const stepOpts = { baseUrl, resolvedKey, isInitializing: isInitializing || !apiKey, os };
 
   function handleCardClick(key: AciAgentKey) {
     trackEvent({ pageName: "Dashboard", eventName: "agent_card_clicked", additionalProperties: { card: key } });
     if (key === "upload") { onUploadClick(); return; }
+    // claude-code/codex open AgentSetupModal instead of this section's own
+    // popup below: that popup baselines whatever registration already exists
+    // as "not new" and has no connected-summary view, so a card that already
+    // reads "Connected" reopened the install steps and showed "Waiting for
+    // Claude Code to start…" for an agent that had been running for hours.
+    if (isAgentIntegrationKey(key)) { onOpenAgentSetup(key); return; }
     setActiveKey(key);
     if (stepIndexMap[key] === undefined) {
       setStepIndexMap((s) => ({ ...s, [key]: 0 }));
@@ -101,12 +87,10 @@ export function AgentConnectionSection({
   const activeSteps = activeKey ? getSteps(activeKey, stepOpts) : [];
   const currentStep = activeKey ? (stepIndexMap[activeKey] ?? 0) : 0;
 
-  const logoSrc =
-    activeKey === "claude-code"
-      ? "/visuals/logos/claude.svg"
-      : activeKey === "codex"
-      ? "/visuals/logos/codex.svg"
-      : "/visuals/logos/openclaw.svg";
+  // claude-code/codex never reach this popup (handleCardClick routes them to
+  // AgentSetupModal instead), so the only logo this needs is openclaw's —
+  // api-mcp renders its own inline svg in the header below.
+  const logoSrc = "/visuals/logos/openclaw.svg";
 
   const popupContent =
     popupOpen && activeCfg && activeKey ? (
@@ -203,6 +187,9 @@ export function AgentConnectionSection({
             isUploading={isUploading}
             hasDocuments={hasDocuments}
             integrationConnected={integrationConnected}
+            lastSeenByAgent={lastSeenByAgent}
+            runningAgents={runningAgents}
+            loading={connectionsLoading}
             onCardClick={handleCardClick}
           />
         ))}

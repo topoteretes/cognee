@@ -5,8 +5,10 @@ from cognee.modules.ontology.construct_data_points_and_edges_with_ontology impor
 from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.ontology_env_config import (
+    DEFAULT_ONTOLOGY_REASONING,
     get_ontology_env_config,
     normalize_ontology_mode,
+    normalize_ontology_reasoning,
 )
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
@@ -19,12 +21,18 @@ def get_configured_ontology_resolver(
     config: Config | None = None,
     ontology_file_path: str | None = None,
 ) -> BaseOntologyResolver | None:
-    """Resolve an explicit file path, configured resolver, or environment in that order."""
+    """Resolve an explicit file path, configured resolver, or environment in that order.
+
+    ``ontology_reasoning`` applies wherever this function builds the resolver itself
+    (an explicit file path, or the environment); a resolver instance passed in via
+    ``config`` is returned as-is and carries whatever reasoning it was built with.
+    """
     if ontology_file_path:
         return get_ontology_resolver_from_env(
             ontology_resolver="rdflib",
             matching_strategy="fuzzy",
             ontology_file_path=ontology_file_path,
+            ontology_reasoning=get_configured_ontology_reasoning(config),
         )
     if config is not None:
         ontology_config = config.get("ontology_config")
@@ -61,8 +69,28 @@ def get_configured_ontology_mode(config: Config | None = None) -> str:
     return get_ontology_env_config().ontology_mode
 
 
+def get_configured_ontology_reasoning(config: Config | None = None) -> str:
+    """Resolve the ontology reasoning from an explicit config or the environment.
+
+    A per-call ``ontology_reasoning`` in the config wins; otherwise the
+    ONTOLOGY_REASONING environment value applies. The result is always normalized.
+    """
+    if config is not None:
+        ontology_config = config.get("ontology_config")
+        if (
+            isinstance(ontology_config, dict)
+            and ontology_config.get("ontology_reasoning") is not None
+        ):
+            return normalize_ontology_reasoning(ontology_config["ontology_reasoning"])
+
+    return get_ontology_env_config().ontology_reasoning
+
+
 def get_ontology_resolver_from_env(
-    ontology_resolver: str = "", matching_strategy: str = "", ontology_file_path: str = ""
+    ontology_resolver: str = "",
+    matching_strategy: str = "",
+    ontology_file_path: str = "",
+    ontology_reasoning: str = DEFAULT_ONTOLOGY_REASONING,
 ) -> BaseOntologyResolver:
     """
     Create and return an ontology resolver instance based on environment parameters.
@@ -77,6 +105,9 @@ def get_ontology_resolver_from_env(
             Supported value: "fuzzy".
         ontology_file_path (str): Path to the ontology file(s) required for the resolver.
             Can be a single path or comma-separated paths for multiple files.
+        ontology_reasoning (str): "none" (asserted triples only, the default) or
+            "owl_rl" (expand the OWL 2 RL closure before building the lookup;
+            requires the optional ``owlrl`` package).
 
     Returns:
         BaseOntologyResolver: An instance of the requested ontology resolver.
@@ -92,7 +123,9 @@ def get_ontology_resolver_from_env(
             file_paths = ontology_file_path
 
         return RDFLibOntologyResolver(
-            matching_strategy=FuzzyMatchingStrategy(), ontology_file=file_paths
+            matching_strategy=FuzzyMatchingStrategy(),
+            ontology_file=file_paths,
+            ontology_reasoning=ontology_reasoning,
         )
     else:
         raise OSError(
