@@ -12,6 +12,7 @@ from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     DecompositionMode,
     GraphCompletionDecompositionRetriever,
 )
+from cognee.modules.retrieval.graph_completion_ppr_retriever import GraphCompletionPPRRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
@@ -434,6 +435,7 @@ async def test_coding_rules_uses_node_name_as_rules_nodeset_name():
             GraphCompletionContextExtensionRetriever,
         ),
         (SearchType.GRAPH_SUMMARY_COMPLETION, GraphSummaryCompletionRetriever),
+        (SearchType.GRAPH_COMPLETION_PPR, GraphCompletionPPRRetriever),
     ],
 )
 async def test_graph_search_retrievers_receive_feedback_influence(search_type, expected_class):
@@ -459,6 +461,7 @@ async def test_graph_search_retrievers_default_triplet_penalty_is_updated():
         SearchType.GRAPH_COMPLETION_COT,
         SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
         SearchType.GRAPH_SUMMARY_COMPLETION,
+        SearchType.GRAPH_COMPLETION_PPR,
     ]:
         retriever_instance = await mod.get_search_type_retriever_instance(
             search_type, query_text="q"

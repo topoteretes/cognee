@@ -14,6 +14,7 @@ together.
 | `GRAPH_COMPLETION_COT` | `GraphCompletionCotRetriever` | `graph_completion_cot_retriever.py` | yes | Chain-of-thought rounds |
 | `GRAPH_COMPLETION_CONTEXT_EXTENSION` | `GraphCompletionContextExtensionRetriever` | `graph_completion_context_extension_retriever.py` | yes | Iteratively widens context |
 | `GRAPH_COMPLETION_DECOMPOSITION` | `GraphCompletionDecompositionRetriever` | `graph_completion_decomposition_retriever.py` | yes | Splits the query into sub-queries first |
+| `GRAPH_COMPLETION_PPR` | `GraphCompletionPPRRetriever` | `graph_completion_ppr_retriever.py` | yes | Ranks triplets by Personalized PageRank seeded from the query's vector hits, blended with vector similarity (`utils/ppr_triplet_search.py`) |
 | `GRAPH_SUMMARY_COMPLETION` | `GraphSummaryCompletionRetriever` | `graph_summary_completion_retriever.py` | yes | Graph context built from summaries |
 | `TEMPORAL` | `TemporalHybridRetriever` | `temporal_hybrid_retriever.py` | yes | Hybrid retrieval reranked by time: the adapter returns the `Timestamp` nodes overlapping the window the LLM extracts from the question (`GraphDBInterface.get_timestamps_in_range`), the chunks and entities anchored to them move to the front of the candidate set, nothing is dropped; plain hybrid when the question carries no time or nothing overlaps (`temporal_hybrid/matching.py`) |
 | `RAG_COMPLETION` | `CompletionRetriever` | `completion_retriever.py` | yes | Chunk vector search + completion |
