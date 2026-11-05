@@ -35,7 +35,12 @@ from .delete_dataset import delete_dataset
 from .delete_data import delete_data
 
 # Copy
-from .copy_data_to_dataset import copy_data_to_dataset, CopiedDocument
+from .copy_data_to_dataset import (
+    CopiedDocument,
+    DocumentSnapshot,
+    read_document_snapshot,
+    write_document_copy,
+)
 
 # Create
 from .load_or_create_datasets import load_or_create_datasets

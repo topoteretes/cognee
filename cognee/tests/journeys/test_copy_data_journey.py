@@ -10,6 +10,7 @@ throughout. A user without permission on the destination is refused.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -21,6 +22,7 @@ from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance.source_refs import parse_source_ref_key
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.data.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import get_data
 from cognee.modules.provenance.edge_evidence.models import ProvenanceEdgeEvidence
@@ -200,3 +202,141 @@ async def test_copy_data_refuses_without_permission_or_into_itself(clean_env, de
             user=default_user,
         )
     assert len(await cognee.datasets.list_data(destination_id, default_user)) == 1
+
+
+async def _remember_both(default_user):
+    await cognee.remember(DOC_A, dataset_name=SOURCE, self_improvement=False)
+    await cognee.remember(DOC_B, dataset_name=DESTINATION, self_improvement=False)
+    source_id = await _support.dataset_id_by_name(SOURCE, default_user)
+    destination_id = await _support.dataset_id_by_name(DESTINATION, default_user)
+    (document,) = await cognee.datasets.list_data(source_id, default_user)
+    return source_id, destination_id, document
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_copy_data_leaves_unconfirmed_evidence_behind(clean_env, default_user):
+    """An evidence row whose pipeline run never completed is ignored by the source's
+    own lookup; the copy must not turn it into a confirmed citation."""
+    source_id, destination_id, document = await _remember_both(default_user)
+    confirmed = await _evidence_links(source_id, document.id)
+    assert confirmed
+    phantom_chunk, phantom_edge = uuid4(), uuid4()
+    async with get_relational_engine().get_async_session() as session:
+        session.add(
+            ProvenanceEdgeEvidence(
+                user_id=default_user.id,
+                dataset_id=source_id,
+                data_id=document.id,
+                pipeline_run_id=uuid4(),  # no such run: never completed
+                chunk_id=phantom_chunk,
+                chunk_index=0,
+                edge_id=phantom_edge,
+                source_node_id=uuid4(),
+                destination_node_id=uuid4(),
+                relationship_name="phantom",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
+
+    receipt = await cognee.datasets.copy_data(
+        dataset_id=source_id,
+        data_id=document.id,
+        target_dataset_id=destination_id,
+        user=default_user,
+    )
+
+    assert receipt["copied_evidence"] == len(confirmed)
+    assert await _evidence_links(destination_id, receipt["data_id"]) == confirmed
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_copy_data_takes_a_failed_first_copy_back_out(clean_env, default_user, monkeypatch):
+    """A write that fails after the graph went in must not leave a row stamped
+    cognified in front of a partial copy: the destination ends as it began."""
+    source_id, destination_id, document = await _remember_both(default_user)
+    before = await _support.snapshot_dataset(destination_id, default_user)
+    nodes_before = await _node_ids(destination_id, default_user)
+
+    async with set_database_global_context_variables(destination_id, default_user.id):
+        adapter_class = (await get_vector_engine_async()).__class__
+
+    async def refuse(self, *args, **kwargs):
+        raise RuntimeError("vector store refused the write")
+
+    monkeypatch.setattr(adapter_class, "upsert_raw_vectors", refuse)
+    with pytest.raises(RuntimeError, match="refused the write"):
+        await cognee.datasets.copy_data(
+            dataset_id=source_id,
+            data_id=document.id,
+            target_dataset_id=destination_id,
+            user=default_user,
+        )
+    monkeypatch.undo()
+
+    assert await _support.snapshot_dataset(destination_id, default_user) == before
+    assert await _node_ids(destination_id, default_user) == nodes_before
+    assert len(await cognee.datasets.list_data(destination_id, default_user)) == 1
+    assert "lantern" not in (await _chunk_text(DESTINATION, "Harbour Lantern Society")).lower()
+
+    # and the same copy succeeds afterwards, as a first copy
+    receipt = await cognee.datasets.copy_data(
+        dataset_id=source_id,
+        data_id=document.id,
+        target_dataset_id=destination_id,
+        user=default_user,
+    )
+    assert receipt["data_record_created"] is True
+    assert "lantern" in (await _chunk_text(DESTINATION, "Harbour Lantern Society")).lower()
+
+
+DOC_QUAY_1902 = (
+    "Title: Wrenfield Quay History\n\nWrenfield Quay was built in 1902 by the Harbour "
+    "Lantern Society, and it has exactly three mooring berths."
+)
+DOC_QUAY_1910 = (
+    "Title: Wrenfield Quay Records\n\nWrenfield Quay was built in 1910 by the Wrenfield "
+    "Rowing Club, and it has exactly five mooring berths."
+)
+
+
+async def _node_types(dataset_id, user) -> set[str]:
+    async with set_database_global_context_variables(dataset_id, user.id):
+        nodes, _ = await (await get_graph_engine()).get_graph_data()
+    return {str(props.get("type")) for _, props in nodes}
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_copy_data_can_review_the_destination_for_conflicts(clean_env, default_user):
+    """``review_conflicts=True`` runs cognee's conflict review over the destination
+    after the copy. With a real LLM (``COGNEE_JOURNEY_MODE=llm``) the two documents'
+    contradicting facts about Wrenfield Quay become a ``FactConflict`` node in the
+    destination; the mock LLM has no model to review with, so the stage reports that
+    it was skipped and the receipt carries the reason."""
+    await cognee.remember(DOC_QUAY_1902, dataset_name=SOURCE, self_improvement=False)
+    await cognee.remember(DOC_QUAY_1910, dataset_name=DESTINATION, self_improvement=False)
+    source_id = await _support.dataset_id_by_name(SOURCE, default_user)
+    destination_id = await _support.dataset_id_by_name(DESTINATION, default_user)
+    (document,) = await cognee.datasets.list_data(source_id, default_user)
+    assert "FactConflict" not in await _node_types(destination_id, default_user)
+
+    receipt = await cognee.datasets.copy_data(
+        dataset_id=source_id,
+        data_id=document.id,
+        target_dataset_id=destination_id,
+        user=default_user,
+        review_conflicts=True,
+    )
+
+    review = receipt["conflict_review"]
+    assert review["stage"] == "review_conflicts"
+    assert "1902" in (await _chunk_text(DESTINATION, "When was Wrenfield Quay built")).lower()
+    if _support.IS_MOCK:
+        assert review["status"] == "skipped"
+        assert review["reason"] == "no_llm_configured"
+    else:
+        assert review["status"] == "completed", review
+        assert "FactConflict" in await _node_types(destination_id, default_user)

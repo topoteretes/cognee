@@ -6,25 +6,25 @@ in the source. Elements the destination already holds merge by id (entity ids de
 from names, chunk ids from content): ``add_nodes`` / ``add_edges`` upsert, and the raw
 vector upsert unions ``belongs_to_set``.
 
-What is copied, and how it is found:
+Two steps, so a caller can read the source without holding the destination's lock:
 
-- Graph nodes and edges: every element whose source refs name the document in the
-  source dataset. They are written to the destination with those refs rewritten to the
-  destination dataset and its own ``Data`` row, so ``forget()`` there removes exactly
-  them and leaves what other documents share.
-- Vectors: the rows of those node ids in every collection of the source store, read
-  with their stored vectors and written raw under the same collection names.
-- The ``Data`` row: a new row in the destination that keeps the source row's id as
-  ``legacy_id`` (the shape the per-dataset split gives forked rows, so either id
-  resolves there), points at the same stored file, and is stamped cognified for the
-  destination so the next cognify of that dataset does not extract it again. A second
-  copy of the same document finds that row and reuses it.
-- Edge evidence rows (which chunk supports which edge), re-keyed to the destination.
+- ``read_document_snapshot`` collects everything the source dataset holds for the
+  document: the nodes and edges whose source refs name it (``find_*_source_refs_by_
+  dataset`` filtered to the document, then ``get_nodes`` / ``get_edge_delete_data`` for
+  their properties), the rows of those node ids in every collection of the source
+  store with their stored vectors, and the document's confirmed edge-evidence rows.
+- ``write_document_copy`` gives the destination a ``Data`` row of its own (new id, the
+  source row's id kept as ``legacy_id`` so either id resolves there, the same stored
+  file, stamped cognified for the destination so the next cognify does not extract
+  it again; a second copy finds and reuses it), then writes the nodes and edges with
+  their refs re-addressed to that row, the vectors under the same collection names,
+  and the evidence re-keyed. When a write fails and this copy created the row,
+  everything written for it is removed again through the provenance delete
+  ``forget()`` uses, so a failed first copy leaves the destination as it was.
 
-Only adapters that keep source refs on the graph can answer the lookup (Ladybug,
+Only adapters that keep source refs on the graph can answer the lookups (Ladybug,
 Neo4j, the Postgres demo); the relational-ledger backends raise
-``UnsupportedProvenanceCapability``. The source dataset's edge list is read once to
-pick the document's edges, because the graph interface has no edge lookup by identity.
+``UnsupportedProvenanceCapability``.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -55,9 +55,13 @@ from cognee.modules.provenance.edge_evidence.buffer import ProvenanceBatch, _evi
 from cognee.modules.provenance.edge_evidence.models import ProvenanceEdgeEvidence
 from cognee.modules.provenance.edge_evidence.persistence import persist_provenance_batch
 from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME
 
+from .delete_data import delete_data
 from .resolve_data_id import resolve_data_id
+
+logger = get_logger()
 
 # Graph provenance columns (``GraphDBInterface.attach_*_source_refs``). They describe
 # the source dataset's ownership and are rebuilt for the destination, so they never
@@ -66,8 +70,22 @@ _PROVENANCE_FIELDS = ("source_ref_keys", "source_dataset_ids", "source_run_ids",
 
 
 @dataclass(frozen=True)
+class DocumentSnapshot:
+    """Everything the source dataset holds for one document."""
+
+    source_dataset_id: UUID
+    data_id: UUID
+    nodes: list[dict[str, Any]]
+    node_refs: dict[str, list[str]]
+    edges: list[tuple[str, str, str, dict[str, Any]]]
+    edge_refs: dict[EdgeIdentity, list[str]]
+    vectors: dict[str, list[Any]]
+    evidence: list[ProvenanceEdgeEvidence]
+
+
+@dataclass(frozen=True)
 class CopiedDocument:
-    """What ``copy_data_to_dataset`` wrote: the destination's row and the element counts."""
+    """What ``write_document_copy`` wrote: the destination's row and the element counts."""
 
     data_id: UUID
     data_record_created: bool
@@ -75,52 +93,6 @@ class CopiedDocument:
     edges: int
     vectors: int
     evidence_rows: int
-
-
-@dataclass(frozen=True)
-class _DocumentSnapshot:
-    """Everything the source dataset holds for one document."""
-
-    nodes: list[dict[str, Any]]
-    node_refs: dict[str, list[str]]
-    edges: list[tuple[str, str, str, dict[str, Any]]]
-    edge_refs: dict[EdgeIdentity, list[str]]
-    vectors: dict[str, list[Any]]
-
-
-async def copy_data_to_dataset(
-    source_dataset: Dataset, data: Data, target_dataset: Dataset, user: User
-) -> CopiedDocument:
-    """Copy ``data`` from ``source_dataset`` into ``target_dataset``.
-
-    Authorization is the caller's job (``datasets.copy_data`` checks read on the source
-    and write on the destination); both dataset contexts are entered under their owner,
-    as every dataset operation does. Entering a context checks the dataset's recorded
-    embedding width against the configured model, so two datasets this can enter share
-    one width, and the raw upsert checks every vector against it again.
-
-    Raises:
-        DataNotInGraphError: the source graph owns nothing for the document (never
-            cognified, or a graph from before source refs existed).
-        UnsupportedProvenanceCapability: the source graph adapter keeps no source refs.
-    """
-    snapshot = await _read_document(source_dataset, data.id)
-    if not snapshot.nodes:
-        raise DataNotInGraphError(data.id, source_dataset.id)
-
-    target_data, created = await _ensure_target_data_row(data, target_dataset, user)
-    nodes, edges, vectors = await _write_document(target_dataset, target_data.id, snapshot)
-    evidence_rows = await _copy_edge_evidence(
-        source_dataset.id, data.id, target_dataset.id, target_data.id, user
-    )
-    return CopiedDocument(
-        data_id=target_data.id,
-        data_record_created=created,
-        nodes=nodes,
-        edges=edges,
-        vectors=vectors,
-        evidence_rows=evidence_rows,
-    )
 
 
 def _refs_of_document(refs: dict[Any, list[str]], data_id: UUID) -> dict[Any, list[str]]:
@@ -177,24 +149,61 @@ def _index_schema_of(vector_engine) -> type:
     return schema
 
 
-async def _read_document(dataset: Dataset, data_id: UUID) -> _DocumentSnapshot:
+async def _confirmed_evidence(dataset_id: UUID, data_id: UUID) -> list[ProvenanceEdgeEvidence]:
+    """The document's evidence rows the source itself counts: rows without a run, and
+    rows whose run completed. The lookup (``_active_support``) ignores the rest, and the
+    copy writes rows without a run, which it counts, so unconfirmed rows must not travel."""
+    # Imported on use: the pipelines package imports this package's methods.
+    from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
+
+    async with get_relational_engine().get_async_session() as session:
+        rows = await session.execute(
+            select(ProvenanceEdgeEvidence)
+            .outerjoin(
+                PipelineRun,
+                and_(
+                    PipelineRun.pipeline_run_id == ProvenanceEdgeEvidence.pipeline_run_id,
+                    PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+                ),
+            )
+            .where(
+                ProvenanceEdgeEvidence.dataset_id == dataset_id,
+                ProvenanceEdgeEvidence.data_id == data_id,
+                or_(ProvenanceEdgeEvidence.pipeline_run_id.is_(None), PipelineRun.id.is_not(None)),
+            )
+        )
+        return list(rows.scalars().all())
+
+
+async def read_document_snapshot(dataset: Dataset, data: Data) -> DocumentSnapshot:
+    """Everything ``dataset`` holds for ``data``, read under the dataset's owner.
+
+    Raises:
+        DataNotInGraphError: the graph owns nothing for the document (never cognified,
+            or a graph from before source refs existed).
+        UnsupportedProvenanceCapability: the graph adapter keeps no source refs.
+    """
     async with set_database_global_context_variables(dataset.id, dataset.owner_id):
         graph = await get_graph_engine()
         node_refs = _refs_of_document(
-            await graph.find_node_source_refs_by_dataset(str(dataset.id)), data_id
+            await graph.find_node_source_refs_by_dataset(str(dataset.id)), data.id
         )
         if not node_refs:
-            return _DocumentSnapshot([], {}, [], {}, {})
+            raise DataNotInGraphError(data.id, dataset.id)
         edge_refs = _refs_of_document(
-            await graph.find_edge_source_refs_by_dataset(str(dataset.id)), data_id
+            await graph.find_edge_source_refs_by_dataset(str(dataset.id)), data.id
         )
         node_ids = list(node_refs)
         nodes = [_without_provenance(node) for node in await graph.get_nodes(node_ids)]
-        _, all_edges = await graph.get_graph_data()
+        edge_data = await graph.get_edge_delete_data(list(edge_refs))
         edges = [
-            (source_id, target_id, relationship, _without_provenance(properties or {}))
-            for source_id, target_id, relationship, properties in all_edges
-            if EdgeIdentity(str(source_id), str(target_id), str(relationship)) in edge_refs
+            (
+                identity.source_id,
+                identity.target_id,
+                identity.relationship_name,
+                _without_provenance(stored.edge_properties),
+            )
+            for identity, stored in edge_data.items()
         ]
 
         vector_engine = await get_vector_engine_async()
@@ -203,14 +212,50 @@ async def _read_document(dataset: Dataset, data_id: UUID) -> _DocumentSnapshot:
             rows = await vector_engine.retrieve(name, node_ids, include_vector=True)
             if rows:
                 vectors[name] = rows
-    return _DocumentSnapshot(nodes, node_refs, edges, edge_refs, vectors)
+    evidence = await _confirmed_evidence(dataset.id, data.id)
+    return DocumentSnapshot(
+        dataset.id, data.id, nodes, node_refs, edges, edge_refs, vectors, evidence
+    )
+
+
+async def write_document_copy(
+    target: Dataset, data: Data, snapshot: DocumentSnapshot, user: User
+) -> CopiedDocument:
+    """Write ``snapshot`` of ``data`` into ``target`` and return what was written.
+
+    Call it under ``target``'s dataset lock. Entering the destination context checks its
+    recorded embedding width against the configured model, as reading the source did,
+    so the two share one width; the raw upsert checks every vector against it again.
+    """
+    target_data, created = await _ensure_target_data_row(data, target, user)
+    try:
+        nodes, edges, vectors = await _write_graph_and_vectors(target, target_data.id, snapshot)
+        evidence_rows = await _copy_edge_evidence(
+            snapshot.evidence, target.id, target_data.id, user
+        )
+    except BaseException:
+        if created:
+            # A row stamped cognified with a partial graph behind it would be skipped
+            # by every later cognify and never repaired: take the copy back out.
+            await _discard_copy(target, target_data)
+        raise
+    return CopiedDocument(
+        data_id=target_data.id,
+        data_record_created=created,
+        nodes=nodes,
+        edges=edges,
+        vectors=vectors,
+        evidence_rows=evidence_rows,
+    )
 
 
 async def _ensure_target_data_row(data: Data, target: Dataset, user: User) -> tuple[Data, bool]:
     """The destination's row for ``data``: the one an earlier copy left, or a new one.
 
     The new row is the source row with a new id, ``legacy_id`` naming the source id,
-    owned by the user who copies, and stamped cognified for the destination.
+    owned by the user who copies, and stamped cognified for the destination. The stamp
+    is safe to write first because ``write_document_copy`` discards the row again when
+    a later write fails.
     """
     # Imported on use: the pipelines package imports this package's methods.
     from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
@@ -276,8 +321,8 @@ async def _attach_grouped(attach, keyed_refs: dict[Any, list[str]]) -> None:
         await attach(elements, list(keys), None)
 
 
-async def _write_document(
-    target: Dataset, target_data_id: UUID, snapshot: _DocumentSnapshot
+async def _write_graph_and_vectors(
+    target: Dataset, target_data_id: UUID, snapshot: DocumentSnapshot
 ) -> tuple[int, int, int]:
     node_refs = {
         node_id: [_rewrite_ref(key, target.id, target_data_id) for key in keys]
@@ -333,8 +378,7 @@ async def _write_document(
 
 
 async def _copy_edge_evidence(
-    source_dataset_id: UUID,
-    source_data_id: UUID,
+    source_rows: list[ProvenanceEdgeEvidence],
     target_dataset_id: UUID,
     target_data_id: UUID,
     user: User,
@@ -345,20 +389,6 @@ async def _copy_edge_evidence(
     observed when written. Ids derive from the destination keys, so source rows that
     differed only by run collapse into one, and a repeated copy inserts nothing new.
     """
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        source_rows = (
-            (
-                await session.execute(
-                    select(ProvenanceEdgeEvidence).where(
-                        ProvenanceEdgeEvidence.dataset_id == source_dataset_id,
-                        ProvenanceEdgeEvidence.data_id == source_data_id,
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
     if not source_rows:
         return 0
 
@@ -398,3 +428,24 @@ async def _copy_edge_evidence(
         )
     }
     return await persist_provenance_batch(ProvenanceBatch(evidence_rows=tuple(rows_by_id.values())))
+
+
+async def _discard_copy(target: Dataset, target_data: Data) -> None:
+    """Undo a failed first copy: drop the row's refs from the destination graph (which
+    hard-deletes what nothing else owns, vectors included), then its evidence rows and
+    the row itself. Elements other documents share keep their own refs. A failure here
+    is logged, not raised: the write error the caller is already propagating is the one
+    to report, and the row left behind is what ``forget()`` removes."""
+    from cognee.infrastructure.databases.unified import get_unified_engine
+
+    try:
+        async with set_database_global_context_variables(target.id, target.owner_id):
+            unified = await get_unified_engine()
+            await unified.delete_by_document(str(target.id), str(target_data.id))
+            await delete_data([target_data], target.id)
+    except Exception:
+        logger.exception(
+            "Could not discard the failed copy %s in dataset %s; forget it there by hand",
+            target_data.id,
+            target.id,
+        )

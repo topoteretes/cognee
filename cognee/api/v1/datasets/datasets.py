@@ -651,20 +651,30 @@ class datasets:
         data_id: UUID,
         target_dataset_id: UUID,
         user: User | None = None,
+        review_conflicts: bool = False,
     ) -> dict:
         """Copy one cognified document from ``dataset_id`` into ``target_dataset_id``.
 
         The destination receives the document's graph nodes and edges, its stored
-        vectors and its edge evidence, plus a ``Data`` row of its own, without any
-        LLM or embedding call (see ``copy_data_to_dataset``). Elements the destination
-        already holds merge by id. The caller needs ``read`` on the source dataset and
-        ``write`` on the destination; the destination is locked like a pipeline run
-        while it is written.
+        vectors and its confirmed edge evidence, plus a ``Data`` row of its own, without
+        any LLM or embedding call (see ``copy_data_to_dataset.py``). Elements the
+        destination already holds merge by id. The caller needs ``read`` on the source
+        dataset and ``write`` on the destination. The source is read first, without a
+        lock; the destination is then locked like a pipeline run while it is written.
+        A write that fails on a first copy is taken back out, so the destination is
+        left as it was.
+
+        ``review_conflicts=True`` runs cognee's conflict review over the destination
+        once the copy is in (``improve(review_conflicts=True)`` with the index build
+        off): the copied document's facts are the entities touched since the last
+        review, so contradictions between them and what the destination already held
+        become ``FactConflict`` nodes there. It needs an LLM and edge evidence; the
+        stage result, skip reason included, comes back on the receipt.
 
         Returns the ``CopyDataReceiptDTO`` dict: the destination's ``data_id`` (its row
-        keeps the source id as ``legacy_id``, so ``forget()`` there accepts either) and
-        the counts written. Copying the same document again reuses that row and
-        rewrites the same elements.
+        keeps the source id as ``legacy_id``, so ``forget()`` there accepts either),
+        the counts written and the conflict-review stage result when requested.
+        Copying the same document again reuses that row and rewrites the same elements.
 
         Raises:
             UnauthorizedDataAccessError: a dataset is missing or the user lacks the
@@ -677,7 +687,11 @@ class datasets:
         async with record_operation(
             "copy_data", user=user, dataset_id=target_dataset_id
         ) as operation_context:
-            from cognee.modules.data.methods import copy_data_to_dataset, get_data
+            from cognee.modules.data.methods import (
+                get_data,
+                read_document_snapshot,
+                write_document_copy,
+            )
 
             if not user:
                 user = await get_default_user()
@@ -690,15 +704,32 @@ class datasets:
             source = await _authorized_dataset_or_raise(user, dataset_id, "read")
             target = await _authorized_dataset_or_raise(user, target_dataset_id, "write")
 
+            # Access was granted through the source dataset's ACL above, so row
+            # ownership is not re-checked (same rule as delete_data).
+            data = await get_data(user.id, data_id, source.id, verify_owner=False)
+            if data is None:
+                raise UnauthorizedDataAccessError(
+                    f"Data {data_id} not accessible in dataset {dataset_id}."
+                )
+            snapshot = await read_document_snapshot(source, data)
             async with dataset_lock(target.id):
-                # Access was granted through the source dataset's ACL above, so row
-                # ownership is not re-checked (same rule as delete_data).
-                data = await get_data(user.id, data_id, source.id, verify_owner=False)
-                if data is None:
-                    raise UnauthorizedDataAccessError(
-                        f"Data {data_id} not accessible in dataset {dataset_id}."
-                    )
-                copied = await copy_data_to_dataset(source, data, target, user)
+                copied = await write_document_copy(target, data, snapshot, user)
+
+            conflict_review = None
+            if review_conflicts:
+                from cognee.api.v1.improve.improve import improve
+
+                improved = await improve(
+                    target.id,
+                    user=user,
+                    review_conflicts=True,
+                    build_global_context_index=False,
+                )
+                conflict_review = next(
+                    stage.model_dump(mode="json")
+                    for stage in improved.stages
+                    if stage.stage == "review_conflicts"
+                )
 
             return CopyDataReceiptDTO(
                 status="success",
@@ -711,6 +742,7 @@ class datasets:
                 copied_edges=copied.edges,
                 copied_vectors=copied.vectors,
                 copied_evidence=copied.evidence_rows,
+                conflict_review=conflict_review,
             ).model_dump()
 
     @staticmethod

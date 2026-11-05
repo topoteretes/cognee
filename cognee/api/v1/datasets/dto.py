@@ -122,3 +122,8 @@ class CopyDataReceiptDTO(OutDTO):
     copied_evidence: int = Field(
         description="Edge evidence rows re-keyed to the destination (0 when evidence is off)."
     )
+    conflict_review: dict | None = Field(
+        default=None,
+        description="The review_conflicts stage result (improve's StageResult) when the copy "
+        "was asked to review the destination for contradictions; null otherwise.",
+    )
