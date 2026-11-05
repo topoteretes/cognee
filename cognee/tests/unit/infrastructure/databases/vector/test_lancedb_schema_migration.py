@@ -6,6 +6,8 @@ import hashlib
 import importlib
 import os
 import tracemalloc
+from datetime import datetime, timezone
+from enum import Enum
 from uuid import uuid4
 
 import pyarrow as pa
@@ -50,6 +52,21 @@ def _make_point(id: str, text: str, name: str = "") -> IndexSchema:
 
 class _InheritedFieldsPoint(DataPoint):
     text: str
+    metadata: dict = {"index_fields": ["text"]}
+
+
+class _Tier(str, Enum):
+    FREE = "free"
+    PAID = "paid"
+
+
+class _TypedDefaultsPoint(DataPoint):
+    """Defaults pyarrow cannot build from their string form, and one required Enum
+    (whose inferred default is an Enum member)."""
+
+    text: str
+    seen_at: datetime = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    tier: _Tier
     metadata: dict = {"index_fields": ["text"]}
 
 
@@ -550,7 +567,7 @@ async def test_interrupted_migration_after_the_swap_keeps_the_new_payload(tmp_pa
     point = _make_point(str(uuid4()), "survivor")
     await _seed(adapter, col, [point])
     await _strip_payload_named_field(adapter, col, "external_metadata")
-    target = adapter._get_target_payload_arrow_type(IndexSchema)
+    target, required = adapter._target_payload_struct(IndexSchema)
 
     dataset = await open_as_lance(await adapter.get_collection(col))
     real_drop = dataset.drop_columns
@@ -564,7 +581,7 @@ async def test_interrupted_migration_after_the_swap_keeps_the_new_payload(tmp_pa
             dataset,
             target,
             adapter._get_payload_defaults(IndexSchema),
-            required=adapter._required_payload_fields(IndexSchema),
+            required=required,
         )
     dataset.drop_columns = real_drop
 
@@ -911,3 +928,228 @@ async def test_subprocess_migration_refuses_a_required_field_without_default(tmp
         assert row.payload["text"] == "old"
     finally:
         await adapter.close()
+
+
+async def _interrupt(adapter, col, step: str):
+    """Run the evolution of ``col`` up to ``step`` (``"swap"`` or ``"drop"``) and crash
+    there, leaving the table as an interrupted migration would."""
+    from cognee_db_workers.lancedb_compaction import open_as_lance
+    from cognee_db_workers.lancedb_schema_evolution import evolve_payload_schema
+
+    target, required = adapter._target_payload_struct(IndexSchema)
+    dataset = await open_as_lance(await adapter.get_collection(col))
+
+    def crash(*_args, **_kwargs):
+        raise OSError("simulated crash")
+
+    setattr(dataset, "alter_columns" if step == "swap" else "drop_columns", crash)
+    with pytest.raises(OSError, match="simulated crash"):
+        evolve_payload_schema(
+            dataset, target, adapter._get_payload_defaults(IndexSchema), required=required
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+@pytest.mark.parametrize("step", ["swap", "drop"])
+async def test_writes_land_while_a_migration_is_interrupted(tmp_path, step):
+    """A write carries only id, vector and payload. The leftover column of either
+    interrupted state is nullable, so merge_insert takes the write instead of refusing
+    a non-nullable column the source does not provide."""
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
+    )
+    col = "Test_text"
+    old = _make_point(str(uuid4()), "before")
+    await _seed(adapter, col, [old])
+    await _strip_payload_named_field(adapter, col, "external_metadata")
+    await _interrupt(adapter, col, step)
+
+    schema = await (await adapter.get_collection(col)).schema()
+    leftover = MIGRATING_COLUMN if step == "swap" else OLD_PAYLOAD_COLUMN
+    assert leftover in schema.names and schema.field(leftover).nullable
+
+    new = _make_point(str(uuid4()), "during")
+    await adapter.create_data_points(col, [new])
+    rows = {str(r.id): r.payload for r in await adapter.retrieve(col, [old.id, new.id])}
+    assert rows[old.id]["text"] == "before" and rows[new.id]["text"] == "during"
+    # Before the swap the write finds the old payload, hits the drift error and
+    # finishes the migration reactively; after it the payload is already the new
+    # struct, the write lands, and the leftover waits for run_migrations.
+    schema = await (await adapter.get_collection(col)).schema()
+    finished_by_write = leftover not in schema.names
+    assert finished_by_write == (step == "swap")
+
+    migrated = (await adapter.run_migrations())["migrated_collections"]
+    assert migrated == ([] if finished_by_write else [col])
+    schema = await (await adapter.get_collection(col)).schema()
+    assert leftover not in schema.names and "external_metadata" in _payload_fields(schema)
+    rows = {str(r.id): r.payload for r in await adapter.retrieve(col, [old.id, new.id])}
+    assert rows[old.id]["text"] == "before" and rows[new.id]["text"] == "during"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_migration_fills_datetime_and_enum_defaults(tmp_path):
+    """A datetime default is built as a timestamp, not from its string form, and a
+    required Enum field takes its inferred member's value."""
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
+    )
+    col = "TypedDefaults_text"
+    old = _TypedDefaultsPoint(id=str(uuid4()), text="old", tier=_Tier.PAID)
+    await _seed(adapter, col, [old])
+    await _strip_payload_named_field(adapter, col, "seen_at")
+    await _strip_payload_named_field(adapter, col, "tier")
+
+    stats = await adapter._migrate_collection_schema(
+        col, await adapter.get_collection(col), _TypedDefaultsPoint, []
+    )
+    assert sorted(stats["added"]) == ["seen_at", "tier"]
+    [row] = await adapter.retrieve(col, [old.id])
+    assert row.payload["tier"] == _Tier.FREE.value
+    assert (
+        row.payload["seen_at"].replace(tzinfo=timezone.utc)
+        == _TypedDefaultsPoint.model_fields["seen_at"].default
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_migration_aborts_on_a_default_of_the_wrong_type(tmp_path):
+    """A default pyarrow cannot build as the field's type is a SchemaEvolutionError with
+    the field named, not a bare Arrow error, and the table is unchanged."""
+    from cognee_db_workers.lancedb_compaction import open_as_lance
+    from cognee_db_workers.lancedb_schema_evolution import evolve_payload_schema
+
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
+    )
+    col = "TypedDefaults_text"
+    old = _TypedDefaultsPoint(id=str(uuid4()), text="old", tier=_Tier.PAID)
+    await _seed(adapter, col, [old])
+    await _strip_payload_named_field(adapter, col, "seen_at")
+    target, required = adapter._target_payload_struct(_TypedDefaultsPoint)
+    dataset = await open_as_lance(await adapter.get_collection(col))
+    version = dataset.version
+
+    with pytest.raises(SchemaEvolutionError, match="default 'not a time' of field 'seen_at'"):
+        evolve_payload_schema(dataset, target, {"seen_at": "not a time"}, required=required)
+    assert dataset.version == version
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_run_migrations_visits_every_table_before_raising(tmp_path):
+    """Tables whose data cannot be migrated do not leave the others on the old schema:
+    they are migrated, then one error names each table that failed (a single failure
+    is raised as itself)."""
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
+    )
+    bad = ["Bad_text", "Worse_text"]
+    for name in bad:
+        await _seed(adapter, name, [_make_point(str(uuid4()), "uncastable")])
+        struct = await _payload_type(adapter, name)
+        index = struct.get_field_index("chunk_index")
+        retyped = pa.struct(
+            [
+                pa.field("chunk_index", pa.string()) if i == index else struct.field(i)
+                for i in range(struct.num_fields)
+            ]
+        )
+
+        def build(old, index=index, retyped=retyped):
+            children = old.flatten()
+            children[index] = pa.array(["not a number"] * len(old))
+            return pa.StructArray.from_arrays(children, fields=list(retyped))
+
+        await _rewrite_payload(adapter, name, retyped, build)
+    good = "Test_text"
+    await _seed(adapter, good, [_make_point(str(uuid4()), "row")])
+    await _strip_payload_named_field(adapter, good, "external_metadata")
+
+    with pytest.raises(RuntimeError, match="cannot be cast") as info:
+        await adapter.run_migrations()
+    assert all(f"'{name}'" in str(info.value) for name in bad)
+    assert isinstance(info.value.__cause__, SchemaEvolutionError)
+    assert "external_metadata" in _payload_fields(
+        await (await adapter.get_collection(good)).schema()
+    )
+    for name in bad:
+        assert (await _payload_type(adapter, name)).field("chunk_index").type == pa.string()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_run_migrations_skips_a_table_whose_payload_is_not_a_struct(tmp_path):
+    adapter = LanceDBAdapter(
+        url=str(tmp_path / "db"), api_key=None, embedding_engine=_FakeEmbeddingEngine()
+    )
+    conn = await adapter.get_connection()
+    await conn.create_table(
+        "Odd_text",
+        data=pa.table(
+            {
+                "id": ["1"],
+                "vector": pa.array([[0.1, 0.2, 0.3]], pa.list_(pa.float32(), 3)),
+                "payload": ["not a struct"],
+            }
+        ),
+    )
+    result = await adapter.run_migrations()
+    assert result["skipped_collections"] == ["Odd_text"]
+    assert result["migrated_collections"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_defaults_cross_to_the_worker_as_plain_values(tmp_path, monkeypatch):
+    """An Enum member or model instance in the defaults would make the worker import
+    cognee when unpickled; the adapter sends plain values."""
+    from cognee.infrastructure.databases.vector.config import VectorConfig
+    from cognee.infrastructure.databases.vector.lancedb.subprocess.proxy import RemoteLanceDBTable
+
+    db_path = str(tmp_path / "db")
+    seeded = LanceDBAdapter(url=db_path, api_key=None, embedding_engine=_FakeEmbeddingEngine())
+    col = "TypedDefaults_text"
+    old = _TypedDefaultsPoint(id=str(uuid4()), text="old", tier=_Tier.PAID)
+    await _seed(seeded, col, [old])
+    await _strip_payload_named_field(seeded, col, "tier")
+    await seeded.close()
+
+    factory = importlib.import_module("cognee.infrastructure.databases.vector.create_vector_engine")
+    monkeypatch.setattr(factory, "get_embedding_engine", _FakeEmbeddingEngine)
+    adapter = factory.create_vector_engine(
+        **VectorConfig(
+            vector_db_provider="lancedb",
+            vector_db_url=db_path,
+            vector_db_name="worker_defaults",
+            vector_db_subprocess_enabled=True,
+        ).to_dict()
+    )
+    sent = []
+    real = RemoteLanceDBTable.evolve_payload_schema
+
+    async def recording(self, target, **kwargs):
+        sent.append(kwargs["defaults"])
+        return await real(self, target, **kwargs)
+
+    monkeypatch.setattr(RemoteLanceDBTable, "evolve_payload_schema", recording)
+    try:
+        await adapter._migrate_collection_schema(
+            col, await adapter.get_collection(col), _TypedDefaultsPoint, []
+        )
+        [defaults] = sent
+        assert defaults["tier"] == "free" and not isinstance(defaults["tier"], Enum)
+        assert all(type(v).__module__ != "cognee" for v in defaults.values())
+        [row] = await adapter.retrieve(col, [old.id])
+        assert row.payload["tier"] == "free"
+    finally:
+        await adapter.close()
+
+
+def test_width_error_names_a_variable_length_vector_column():
+    error = StoredVectorWidthMismatchError("Test_text", None, 1536)
+    assert "variable-length" in error.message and "None" not in error.message
+    assert "EMBEDDING_MODEL" not in str(error)

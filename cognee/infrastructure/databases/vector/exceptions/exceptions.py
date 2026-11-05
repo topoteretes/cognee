@@ -69,20 +69,30 @@ class StoredVectorWidthMismatchError(CogneeValidationError):
         self.collection_name = collection_name
         self.stored_dimensions = stored_dimensions
         self.configured_dimensions = configured_dimensions
-        super().__init__(
-            message=(
-                f"LanceDB collection '{collection_name}' holds {stored_dimensions}-dimensional "
-                f"vectors, but the configured embedding model produces {configured_dimensions}. "
-                "A schema migration keeps the stored vectors, so it cannot bring this table to "
-                "the current model."
-            ),
-            name=name,
-            status_code=status_code,
-            remediation=(
+        if stored_dimensions is None:
+            # A variable-length list column, which no cognee release writes.
+            stored = "a variable-length vector column with no fixed width"
+            remediation = (
+                "Delete the dataset (forget(dataset=...) / cognee-cli forget) and ingest it "
+                "again with the current model."
+            )
+        else:
+            stored = f"{stored_dimensions}-dimensional vectors"
+            remediation = (
                 "Set EMBEDDING_MODEL back to the model that built this store to keep using it, "
                 "or delete the dataset (forget(dataset=...) / cognee-cli forget) and ingest it "
                 "again with the current model."
+            )
+        super().__init__(
+            message=(
+                f"LanceDB collection '{collection_name}' holds {stored}, but the configured "
+                f"embedding model produces {configured_dimensions} dimensions. A schema "
+                "migration keeps the stored vectors, so it cannot bring this table to the "
+                "current model."
             ),
+            name=name,
+            status_code=status_code,
+            remediation=remediation,
         )
 
 

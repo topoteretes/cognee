@@ -19,11 +19,14 @@ column is evolved on its own with Lance's schema evolution:
 
 Each step is a committed Lance version and ``payload`` exists at every one of
 them, so a reader never sees a table without it and an interrupted migration
-leaves the table readable. The next run finishes it: a leftover
-``__payload_old`` is dropped (the swap committed, ``payload`` is the new
-struct), a leftover ``__payload_migrating`` is dropped and computed again. The
-vector column's data files are never rewritten, and no row is ever
-materialized as Python objects.
+leaves the table readable. The temporary columns are nullable (the swap also
+makes the old column nullable), so a write that carries only ``id``,
+``vector`` and ``payload`` still lands between the steps: a non-nullable
+column the writer does not provide would be refused by ``merge_insert``. The
+next run finishes it: a leftover ``__payload_old`` is dropped (the swap
+committed, ``payload`` is the new struct), a leftover ``__payload_migrating``
+is dropped and computed again. The vector column's data files are never
+rewritten, and no row is ever materialized as Python objects.
 
 Nothing partial: a required target field that is missing from the stored
 struct with no default, a value that cannot be cast to its new type, or a null
@@ -35,6 +38,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 from enum import Enum
 from typing import Any
 
@@ -118,18 +123,39 @@ class FieldStep:
 
 
 def arrow_default(value: Any) -> Any:
-    """A model default as a value pyarrow can build an array from."""
+    """A model default as a plain value pyarrow can build an array from.
+
+    Plain means picklable without importing the model's module: the adapter
+    applies this before the defaults cross to the worker. Enum members become
+    their value, pydantic models their ``model_dump``, tuples and sets lists;
+    datetimes, dates, times and decimals pyarrow takes as they are; anything
+    else (a UUID, a path) its string form.
+    """
     if isinstance(value, Enum):
         return arrow_default(value.value)
-    if isinstance(value, (tuple, set, frozenset)):
-        return [arrow_default(item) for item in value]
-    if isinstance(value, list):
+    if hasattr(value, "model_dump"):
+        return arrow_default(value.model_dump())
+    if isinstance(value, (tuple, set, frozenset, list)):
         return [arrow_default(item) for item in value]
     if isinstance(value, dict):
         return {key: arrow_default(item) for key, item in value.items()}
-    if value is None or isinstance(value, (str, int, float, bool, bytes)):
+    if value is None or isinstance(
+        value, (str, int, float, bool, bytes, datetime, date, time, timedelta, Decimal)
+    ):
         return value
     return str(value)
+
+
+def _default_array(field: pa.Field, default: Any, row_count: int) -> pa.Array:
+    """``row_count`` copies of ``default`` as ``field``'s type, or ``SchemaEvolutionError``."""
+    try:
+        return pa.array([arrow_default(default)] * row_count, type=field.type)
+    except (pa.ArrowInvalid, pa.ArrowTypeError, pa.ArrowNotImplementedError) as error:
+        raise SchemaEvolutionError(
+            f"the default {default!r} of field '{field.name}' is not a {field.type} ({error}). "
+            "No data was modified. Give the field a default of its own type and re-run "
+            "migration."
+        ) from error
 
 
 def plan_payload_evolution(
@@ -182,13 +208,13 @@ def _build_struct(payload: pa.Array, stored: pa.StructType, target, steps) -> pa
             if step.source == "cast":
                 try:
                     array = array.cast(field.type)
-                except (pa.ArrowInvalid, pa.ArrowNotImplementedError) as error:
+                except (pa.ArrowInvalid, pa.ArrowTypeError, pa.ArrowNotImplementedError) as error:
                     raise SchemaEvolutionError(
                         f"field '{field.name}' cannot be cast from {array.type} to "
                         f"{field.type} ({error}). No data was modified."
                     ) from error
         elif step.source == "default":
-            array = pa.array([arrow_default(step.default)] * row_count, type=field.type)
+            array = _default_array(field, step.default, row_count)
         else:
             array = pa.nulls(row_count, field.type)
 
@@ -200,7 +226,7 @@ def _build_struct(payload: pa.Array, stored: pa.StructType, target, steps) -> pa
                     "modified. Add an explicit default value (or make the field optional) and "
                     "re-run migration."
                 )
-            array = pc.fill_null(array, pa.scalar(arrow_default(step.default), type=field.type))
+            array = pc.fill_null(array, _default_array(field, step.default, 1)[0])
         arrays.append(array)
     return pa.StructArray.from_arrays(arrays, fields=list(target))
 
@@ -258,7 +284,9 @@ def evolve_payload_schema(
 
     # An explicit output schema: without one Lance probes the callable on a
     # sample batch and reports any error as a TypeError about the transform.
-    output = pa.schema([pa.field(MIGRATING_COLUMN, target, nullable=False)])
+    # Nullable, so a write between the steps (which does not carry this
+    # column) is not refused; every row the UDF produces holds a struct.
+    output = pa.schema([pa.field(MIGRATING_COLUMN, target, nullable=True)])
 
     @batch_udf(output_schema=output)
     def transform(batch: pa.RecordBatch) -> pa.RecordBatch:
@@ -274,9 +302,10 @@ def evolve_payload_schema(
             raise SchemaEvolutionError(str(error).split(_ABORTED, 1)[1].strip(" :,\n")) from error
         raise
     # One commit: the table goes from the old ``payload`` to the new one with
-    # no version in between that lacks the column.
+    # no version in between that lacks the column. The old column turns
+    # nullable in the same commit, for the writes that land before its drop.
     dataset.alter_columns(
-        {"path": PAYLOAD_COLUMN, "name": OLD_PAYLOAD_COLUMN},
+        {"path": PAYLOAD_COLUMN, "name": OLD_PAYLOAD_COLUMN, "nullable": True},
         {"path": MIGRATING_COLUMN, "name": PAYLOAD_COLUMN},
     )
     dataset.drop_columns([OLD_PAYLOAD_COLUMN])

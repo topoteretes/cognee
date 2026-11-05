@@ -53,6 +53,8 @@ from cognee_db_workers.lancedb_compaction import (
 from cognee_db_workers.lancedb_schema_evolution import (
     MIGRATING_COLUMN,
     OLD_PAYLOAD_COLUMN,
+    SchemaEvolutionError,
+    arrow_default,
     evolve_payload_schema,
     relax_nullability,
 )
@@ -986,7 +988,7 @@ class LanceDBAdapter(VectorDBInterface):
         migration.
         """
         vector_size = self.embedding_engine.get_vector_size()
-        target = self._get_target_payload_arrow_type(payload_schema)
+        target, required = self._target_payload_struct(payload_schema)
         if target is None:
             raise TypeError(
                 f"The payload model of '{collection_name}' has no Arrow representation, so "
@@ -996,8 +998,12 @@ class LanceDBAdapter(VectorDBInterface):
         stored_width = getattr(stored_schema.field("vector").type, "list_size", None)
         if stored_width != vector_size:
             raise StoredVectorWidthMismatchError(collection_name, stored_width, vector_size)
-        defaults = self._get_payload_defaults(payload_schema)
-        required = self._required_payload_fields(payload_schema)
+        # Plain values only: the defaults cross to the worker pickled, and an
+        # Enum member or model instance would make it import cognee.
+        defaults = {
+            name: arrow_default(value)
+            for name, value in self._get_payload_defaults(payload_schema).items()
+        }
         self._require_lance_core()
 
         async with self.VECTOR_DB_LOCK:
@@ -1107,28 +1113,29 @@ class LanceDBAdapter(VectorDBInterface):
             return None
         return schema.field(payload_field_index).type
 
-    def _get_target_payload_arrow_type(self, payload_schema: type):
-        """The Arrow struct this adapter writes for ``payload_schema``, or ``None`` when
-        the model has no Arrow form.
+    def _target_payload_struct(self, payload_schema: type):
+        """The Arrow struct this adapter writes for ``payload_schema`` and the names of
+        the fields the model requires a value for; ``(None, frozenset())`` when the
+        model has no Arrow form. One schema build for both.
 
         In subprocess mode the worker creates every table with relaxed nullability
         (``relax_nullability``), so the target is relaxed the same way; otherwise a
         stored table would never compare equal to its own model. Which fields must
-        hold a value is ``_required_payload_fields``, not this struct's nullability.
+        hold a value is the model's rule (non-null in the struct ``LanceModel``
+        derives), kept apart from the struct the table is stored with.
         """
         payload_type = self._model_payload_arrow_type(payload_schema)
-        if payload_type is None or not self._subprocess_mode:
-            return payload_type
-        relaxed = relax_nullability(pa.schema([pa.field("payload", payload_type)]))
-        return relaxed.field(0).type
-
-    def _required_payload_fields(self, payload_schema: type) -> frozenset[str]:
-        """The payload fields the model requires a value for: non-null in the struct
-        ``LanceModel`` derives from it, whatever nullability the table is stored with."""
-        payload_type = self._model_payload_arrow_type(payload_schema)
         if payload_type is None:
-            return frozenset()
-        return frozenset(field.name for field in payload_type if not field.nullable)
+            return None, frozenset()
+        required = frozenset(field.name for field in payload_type if not field.nullable)
+        if self._subprocess_mode:
+            relaxed = relax_nullability(pa.schema([pa.field("payload", payload_type)]))
+            payload_type = relaxed.field(0).type
+        return payload_type, required
+
+    def _get_target_payload_arrow_type(self, payload_schema: type):
+        """The Arrow struct this adapter writes for ``payload_schema``, or ``None``."""
+        return self._target_payload_struct(payload_schema)[0]
 
     def _is_payload_schema_compatible(self, existing_payload_type, payload_schema: type) -> bool:
         """
@@ -1137,7 +1144,7 @@ class LanceDBAdapter(VectorDBInterface):
         """
         target_payload_type = self._get_target_payload_arrow_type(payload_schema)
         if target_payload_type is None:
-            if not hasattr(existing_payload_type, "num_fields"):
+            if not pa.types.is_struct(existing_payload_type):
                 return False
 
             existing_payload_fields = {
@@ -1158,7 +1165,9 @@ class LanceDBAdapter(VectorDBInterface):
 
         Reads each table's schema only; a table whose payload struct already matches
         its model costs one metadata read, and one that does not is evolved in place
-        (``_migrate_collection_schema``) without its rows ever leaving the engine.
+        (``_migrate_collection_schema``) without its rows ever leaving the engine. A
+        table whose data cannot be migrated does not stop the others: every table is
+        visited, then one error names each that failed.
         """
         connection = await self.get_connection()
         collection_names = await connection.table_names()
@@ -1166,6 +1175,7 @@ class LanceDBAdapter(VectorDBInterface):
         migrated_collections = []
         checked_collections = []
         skipped_collections = []
+        failures: dict[str, Exception] = {}
 
         for collection_name in collection_names:
             payload_schema = self._resolve_collection_payload_schema(collection_name)
@@ -1183,7 +1193,7 @@ class LanceDBAdapter(VectorDBInterface):
                 continue
 
             payload_field_type = schema.field(payload_field_index).type
-            if not hasattr(payload_field_type, "num_fields"):
+            if not pa.types.is_struct(payload_field_type):
                 skipped_collections.append(collection_name)
                 continue
 
@@ -1219,6 +1229,21 @@ class LanceDBAdapter(VectorDBInterface):
                     e,
                 )
                 skipped_collections.append(collection_name)
+            except (SchemaEvolutionError, StoredVectorWidthMismatchError) as e:
+                # One table's data, not the store's: migrate the rest, then
+                # raise naming every table that failed. A pylance mismatch
+                # would fail every table the same way and propagates at once.
+                logger.error("LanceDB migration of '%s' failed: %s", collection_name, e)
+                failures[collection_name] = e
+
+        if len(failures) == 1:
+            raise next(iter(failures.values()))
+        if failures:
+            first = next(iter(failures.values()))
+            raise RuntimeError(
+                "LanceDB schema migration failed for "
+                + ", ".join(f"'{name}': {error}" for name, error in failures.items())
+            ) from first
 
         return {
             "checked_collections": checked_collections,
@@ -1668,7 +1693,7 @@ class LanceDBAdapter(VectorDBInterface):
                 continue
 
             payload_type = arrow_schema.field(payload_idx).type
-            if not hasattr(payload_type, "num_fields"):
+            if not pa.types.is_struct(payload_type):
                 continue
 
             payload_fields = {payload_type.field(i).name for i in range(payload_type.num_fields)}
