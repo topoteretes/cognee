@@ -787,9 +787,7 @@ async def test_migration_aborts_on_an_impossible_cast_and_changes_nothing(tmp_pa
     before = await _payload_type(adapter, col)
 
     with pytest.raises(SchemaEvolutionError, match="cannot be cast"):
-        await adapter._migrate_collection_schema(
-            col, await adapter.get_collection(col), IndexSchema, []
-        )
+        await adapter._migrate_collection_schema(col, IndexSchema, [])
     assert await _payload_type(adapter, col) == before
     [row] = await adapter.retrieve(col, [point.id])
     assert row.payload["chunk_index"] == "not a number"
@@ -1003,9 +1001,7 @@ async def test_migration_fills_datetime_and_enum_defaults(tmp_path):
     await _strip_payload_named_field(adapter, col, "seen_at")
     await _strip_payload_named_field(adapter, col, "tier")
 
-    stats = await adapter._migrate_collection_schema(
-        col, await adapter.get_collection(col), _TypedDefaultsPoint, []
-    )
+    stats = await adapter._migrate_collection_schema(col, _TypedDefaultsPoint, [])
     assert sorted(stats["added"]) == ["seen_at", "tier"]
     [row] = await adapter.retrieve(col, [old.id])
     assert row.payload["tier"] == _Tier.FREE.value
@@ -1138,9 +1134,7 @@ async def test_defaults_cross_to_the_worker_as_plain_values(tmp_path, monkeypatc
 
     monkeypatch.setattr(RemoteLanceDBTable, "evolve_payload_schema", recording)
     try:
-        await adapter._migrate_collection_schema(
-            col, await adapter.get_collection(col), _TypedDefaultsPoint, []
-        )
+        await adapter._migrate_collection_schema(col, _TypedDefaultsPoint, [])
         [defaults] = sent
         assert defaults["tier"] == "free" and not isinstance(defaults["tier"], Enum)
         assert all(type(v).__module__ != "cognee" for v in defaults.values())

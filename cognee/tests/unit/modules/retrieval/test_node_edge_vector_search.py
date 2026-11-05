@@ -6,6 +6,13 @@ from cognee.infrastructure.databases.vector.exceptions import CollectionNotFound
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 
 
+def vector_engine_mock() -> AsyncMock:
+    """A vector engine mock that, like the interface default, reports every collection."""
+    engine = AsyncMock()
+    engine.existing_collections = AsyncMock(side_effect=lambda names: list(names))
+    return engine
+
+
 class MockScoredResult:
     """Mock class for vector search results."""
 
@@ -18,7 +25,7 @@ class MockScoredResult:
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_single_query_shape():
     """Test that single query mode produces flat lists (not list-of-lists)."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
 
@@ -49,7 +56,7 @@ async def test_node_edge_vector_search_single_query_shape():
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_batch_query_shape_and_empties():
     """Test that batch query mode produces list-of-lists with correct length and handles empty collections."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
 
     query_batch = ["query a", "query b"]
@@ -99,7 +106,7 @@ async def test_node_edge_vector_search_batch_query_shape_and_empties():
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_input_validation_both_provided():
     """Test that providing both query and query_batch raises ValueError."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
     collections = ["Entity_name"]
 
@@ -112,7 +119,7 @@ async def test_node_edge_vector_search_input_validation_both_provided():
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_input_validation_neither_provided():
     """Test that providing neither query nor query_batch raises ValueError."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
     collections = ["Entity_name"]
 
@@ -125,7 +132,7 @@ async def test_node_edge_vector_search_input_validation_neither_provided():
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_extract_relevant_node_ids_single_query():
     """Test that extract_relevant_node_ids returns IDs for single query mode."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
     vector_search.query_list_length = None
     vector_search.node_distances = {
@@ -156,7 +163,7 @@ def test_node_edge_vector_search_extract_relevant_node_ids_ordered_by_score():
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_extract_relevant_node_ids_batch():
     """Test that extract_relevant_node_ids returns empty list for batch mode."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
     vector_search.query_list_length = 2
     vector_search.node_distances = {
@@ -173,7 +180,7 @@ async def test_node_edge_vector_search_extract_relevant_node_ids_batch():
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_has_results_single_query():
     """Test has_results returns True when results exist and False when only empties."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
 
     vector_search.edge_distances = [MockScoredResult("edge1", 0.92)]
@@ -192,7 +199,7 @@ async def test_node_edge_vector_search_has_results_single_query():
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_has_results_batch():
     """Test has_results works correctly for batch mode with list-of-lists."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
     vector_search.query_list_length = 2
 
@@ -214,7 +221,7 @@ async def test_node_edge_vector_search_has_results_batch():
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_single_query_collection_not_found():
     """Test that CollectionNotFoundError in single query mode returns empty list."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(
@@ -234,7 +241,7 @@ async def test_node_edge_vector_search_single_query_collection_not_found():
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_missing_collections_single_query():
     """Test that missing collections in single-query mode are handled gracefully with empty lists."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
 
@@ -267,7 +274,7 @@ async def test_node_edge_vector_search_missing_collections_single_query():
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_has_results_batch_nodes_only():
     """Test has_results returns True when only node distances are populated in batch mode."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
     vector_search.query_list_length = 2
     vector_search.edge_distances = [[], []]
@@ -281,7 +288,7 @@ async def test_node_edge_vector_search_has_results_batch_nodes_only():
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_has_results_batch_edges_only():
     """Test has_results returns True when only edge distances are populated in batch mode."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
     vector_search.query_list_length = 2
     vector_search.edge_distances = [[MockScoredResult("edge1", 0.92)], []]
@@ -294,7 +301,7 @@ async def test_node_edge_vector_search_has_results_batch_edges_only():
 async def test_node_set_filter_skips_edge_type_collection():
     """Node collections keep the node-set filter; edge types never get it, since they only
     score edges the graph projection already scoped (gh #4822)."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[MockScoredResult("hit", 0.5)])
@@ -319,3 +326,34 @@ async def test_node_set_filter_skips_edge_type_collection():
         "EdgeType_relationship_name": (None, "AND"),
     }
     assert vector_search.edge_distances
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch", [False, True])
+async def test_missing_collections_are_not_searched(batch):
+    """Collections the store lacks answer empty without a search call, in input order."""
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2]])
+    mock_vector_engine.existing_collections = AsyncMock(return_value=["Entity_name"])
+    hit = MockScoredResult("node-1", 0.1)
+    mock_vector_engine.search = AsyncMock(return_value=[hit])
+    mock_vector_engine.batch_search = AsyncMock(return_value=[[hit]])
+
+    vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
+    collections = ["Missing_text", "Entity_name", "EdgeType_relationship_name"]
+    if batch:
+        await vector_search.embed_and_retrieve_distances(query_batch=["q"], collections=collections)
+        searched = [
+            c.kwargs["collection_name"] for c in mock_vector_engine.batch_search.await_args_list
+        ]
+        assert vector_search.node_distances == {"Missing_text": [[]], "Entity_name": [[hit]]}
+        assert vector_search.edge_distances == [[]]
+    else:
+        await vector_search.embed_and_retrieve_distances(query="q", collections=collections)
+        searched = [c.kwargs["collection_name"] for c in mock_vector_engine.search.await_args_list]
+        assert vector_search.node_distances == {"Missing_text": [], "Entity_name": [hit]}
+        assert vector_search.edge_distances == []
+
+    mock_vector_engine.existing_collections.assert_awaited_once_with(collections)
+    assert searched == ["Entity_name"]
