@@ -1,3 +1,4 @@
+from types import MethodType
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
@@ -5,7 +6,10 @@ import pytest
 
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.retrieval.utils.brute_force_triplet_search import (
@@ -13,6 +17,7 @@ from cognee.modules.retrieval.utils.brute_force_triplet_search import (
     format_triplets,
     get_memory_fragment,
 )
+from cognee.tasks.schema.models import SchemaTable
 
 
 class MockScoredResult:
@@ -22,6 +27,209 @@ class MockScoredResult:
         self.id = id
         self.score = score
         self.payload = payload or {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch", [False, True])
+async def test_typed_scope_projects_before_scoring_only_its_node_and_edge_ids(batch):
+    graph = CogneeGraph()
+    anchor, first, second = [Node(name, {"name": name}) for name in ["anchor", "first", "second"]]
+    for node in [anchor, first, second]:
+        graph.add_node(node)
+    for node in [first, second]:
+        graph.add_edge(Edge(anchor, node, {"edge_text": f"contains {node.id}"}))
+    engine = AsyncMock()
+    engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]] * (2 if batch else 1)
+
+    async def score(collection_name, data_point_ids, query_vector):
+        if collection_name == "Entity_name":
+            # The unembedded anchor keeps its normal missing-distance penalty.
+            return [MockScoredResult("first", 0.1), MockScoredResult("second", 0.9)]
+        return [MockScoredResult(point_id, 0.2) for point_id in data_point_ids]
+
+    engine.score_by_ids.side_effect = score
+    module = "cognee.modules.retrieval.utils.brute_force_triplet_search"
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=engine,
+        ),
+        patch(f"{module}.get_memory_fragment", return_value=graph) as project,
+    ):
+        results = await brute_force_triplet_search(
+            query=None if batch else "first",
+            query_batch=["first", "second"] if batch else None,
+            node_type=SchemaTable,
+            node_name=["table"],
+            collections=["Entity_name"],
+            top_k=2,
+            feedback_influence=0.0,
+        )
+    project.assert_awaited_once()
+    assert project.call_args.kwargs["node_name"] == ["table"]
+    engine.search.assert_not_awaited()
+    engine.batch_search.assert_not_awaited()
+    for call in engine.score_by_ids.call_args_list:
+        expected = (
+            list(graph.nodes)
+            if call.kwargs["collection_name"] == "Entity_name"
+            else list(graph.edges_by_distance_key)
+        )
+        assert call.kwargs["data_point_ids"] == expected
+    for edges in results if batch else [results]:
+        assert [edge.node2.id for edge in edges] == ["first", "second"]
+    assert anchor.attributes["vector_distance"] == [6.5] * (2 if batch else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch", [False, True])
+async def test_empty_typed_scope_does_not_embed_or_search(batch):
+    engine = AsyncMock()
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=CogneeGraph(),
+        ),
+    ):
+        results = await brute_force_triplet_search(
+            query=None if batch else "query",
+            query_batch=["first", "second"] if batch else None,
+            node_type=SchemaTable,
+            node_name=["missing"],
+        )
+    assert results == ([[], []] if batch else [])
+    engine.embedding_engine.embed_text.assert_not_awaited()
+    engine.search.assert_not_awaited()
+    engine.score_by_ids.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_typed_scope_keeps_unembedded_edges_with_existing_distance_penalties():
+    graph = CogneeGraph()
+    first, second = Node("first"), Node("second")
+    graph.add_node(first)
+    graph.add_node(second)
+    graph.add_edge(Edge(first, second, {"relationship_type": "has_value"}))
+    engine = AsyncMock()
+    engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
+    engine.score_by_ids.return_value = []
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=graph,
+        ),
+    ):
+        results = await brute_force_triplet_search(
+            query="query", node_type=SchemaTable, node_name=["table"], feedback_influence=0.0
+        )
+    assert results == graph.edges
+    assert first.attributes["vector_distance"] == [6.5]
+    assert results[0].attributes["vector_distance"] == [6.5]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode", ["unscoped", "nodeset", "nodeset-subclass", "unsupported", "provided", "neighborhood"]
+)
+async def test_other_search_paths_keep_existing_vector_retrieval(mode):
+    engine = AsyncMock()
+    engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
+    engine.search.return_value = [MockScoredResult("hit", 0.1)]
+    if mode == "unsupported":
+        engine.score_by_ids = MethodType(VectorDBInterface.score_by_ids, object())
+    kwargs = {"node_type": SchemaTable, "node_name": ["table"]}
+    if mode == "unscoped":
+        kwargs["node_name"] = None
+    elif mode == "nodeset":
+        kwargs["node_type"] = NodeSet
+    elif mode == "nodeset-subclass":
+
+        class CustomNodeSet(NodeSet):
+            pass
+
+        kwargs["node_type"] = CustomNodeSet
+    elif mode == "provided":
+        kwargs["memory_fragment"] = CogneeGraph()
+    elif mode == "neighborhood":
+        kwargs["neighborhood_depth"] = 1
+    module = "cognee.modules.retrieval.utils.brute_force_triplet_search"
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=engine,
+        ),
+        patch(f"{module}.get_memory_fragment") as project,
+        patch(f"{module}._get_top_triplet_importances", return_value=[]),
+    ):
+        await brute_force_triplet_search(query="query", **kwargs)
+    project.assert_not_awaited()
+    assert engine.search.await_count > 0
+    if mode != "unsupported":
+        engine.score_by_ids.assert_not_awaited()
+
+    # Only the typed-scope fallback drops the NodeSet filter from the vector search.
+    searched_names = [call.kwargs["node_name"] for call in engine.search.await_args_list]
+    if mode in ("unsupported", "unscoped"):
+        assert searched_names == [None] * len(searched_names)
+    else:
+        assert ["table"] in searched_names
+
+
+@pytest.mark.asyncio
+async def test_typed_scope_fallback_scans_unfiltered_and_scopes_through_projection():
+    """An engine without ``score_by_ids`` still scores every node of a typed scope.
+
+    The vector ``node_name`` filter means NodeSet membership, which an Entity scope
+    never has: forwarding it matches nothing and every scoped node is penalised.
+    The fallback scans unfiltered and leaves the scoping to the graph projection.
+    """
+    graph = CogneeGraph()
+    first, second = Node("first"), Node("second")
+    graph.add_node(first)
+    graph.add_node(second)
+    graph.add_edge(Edge(first, second, {"relationship_type": "has_value"}))
+    engine = AsyncMock()
+    engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
+    engine.score_by_ids = MethodType(VectorDBInterface.score_by_ids, object())
+
+    async def search(collection_name, **kwargs):
+        if collection_name == "Entity_name":
+            return [MockScoredResult("first", 0.2), MockScoredResult("outside", 0.1)]
+        return []
+
+    engine.search = AsyncMock(side_effect=search)
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=graph,
+        ) as project,
+    ):
+        results = await brute_force_triplet_search(
+            query="query", node_type=SchemaTable, node_name=["table"], feedback_influence=0.0
+        )
+
+    for call in engine.search.await_args_list:
+        assert call.kwargs["node_name"] is None
+        assert call.kwargs["limit"] is None
+    project.assert_awaited_once()
+    assert project.await_args.kwargs["node_type"] is SchemaTable
+    assert project.await_args.kwargs["node_name"] == ["table"]
+    assert results == graph.edges
+    assert first.attributes["vector_distance"] == [0.2]
+    assert second.attributes["vector_distance"] == [6.5]
+    assert "outside" not in graph.nodes
 
 
 @pytest.mark.asyncio

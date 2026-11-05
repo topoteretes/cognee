@@ -71,6 +71,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
     _COLLECTION_PREFIX = "VECTOR_COLLECTION"
     _TOPK_LOWER_BOUND = 0
     _TOPK_UPPER_BOUND = 10
+    _SCORE_ID_BATCH_SIZE = 1000
 
     def __init__(
         self,
@@ -264,6 +265,34 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         except Exception as e:
             logger.debug("Ignoring exception in NeptuneAnalyticsAdapter.retrieve", exc_info=True)
             self._na_exception_handler(e, query_string)
+
+    async def score_by_ids(
+        self, collection_name: str, data_point_ids: list[str], query_vector: list[float]
+    ) -> list[ScoredResult]:
+        """Score every requested vector using server-side cosine distance, without ANN."""
+        ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
+        if not ids:
+            return []
+        query = (
+            f"MATCH (n:{self._VECTOR_NODE_LABEL}) "
+            f"WHERE id(n) IN $node_ids AND n.{self._COLLECTION_PREFIX} = $collection_name "
+            "CALL neptune.algo.vectors.distance.byEmbedding("
+            "n, {embedding: $embedding, metric: 'CosineDistance'}) "
+            "YIELD distance RETURN id(n) AS node_id, distance"
+        )
+        scores = []
+        for start in range(0, len(ids), self._SCORE_ID_BATCH_SIZE):
+            params = {
+                "node_ids": ids[start : start + self._SCORE_ID_BATCH_SIZE],
+                "collection_name": collection_name,
+                "embedding": query_vector,
+            }
+            rows = await asyncio.to_thread(self._client.query, query, params)
+            scores.extend(
+                ScoredResult(id=row["node_id"], score=float(row["distance"]), payload=None)
+                for row in rows
+            )
+        return scores
 
     async def search(
         self,
