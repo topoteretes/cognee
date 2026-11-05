@@ -13,12 +13,16 @@ from cognee.modules.graph.models.Edge import Edge
 UPSERT_BATCH_SIZE = 1000
 
 
+def _ensure_uuid(value: UUID | str) -> UUID:
+    return value if isinstance(value, UUID) else UUID(str(value))
+
+
 # When ``session`` is passed by the caller this function does NOT commit —
 # the caller is responsible for committing. When no session is provided,
 # ``@with_async_session`` opens one and commits it.
 @with_async_session
 async def upsert_edges(
-    edges: list[tuple[UUID, UUID, str, dict[str, Any]]],
+    edges: list[tuple[UUID | str, UUID | str, str, dict[str, Any]]],
     tenant_id: UUID,
     user_id: UUID,
     data_id: UUID,
@@ -36,6 +40,8 @@ async def upsert_edges(
     edges_to_add = []
 
     for edge in edges:
+        source_node_id = _ensure_uuid(edge[0])
+        destination_node_id = _ensure_uuid(edge[1])
         edge_text = (
             edge[3]["edge_text"] if edge[2] == "contains" and "edge_text" in edge[3] else edge[2]
         )
@@ -51,17 +57,17 @@ async def upsert_edges(
                     str(tenant_id)
                     + str(user_id)
                     + str(dataset_id)
-                    + str(edge[0])
+                    + str(source_node_id)
                     + str(sanitized_edge_text)
-                    + str(edge[1]),
+                    + str(destination_node_id),
                 ),
                 "slug": generate_edge_id(sanitized_edge_text),
                 "user_id": user_id,
                 "data_id": data_id,
                 "dataset_id": dataset_id,
                 "pipeline_run_id": pipeline_run_id,
-                "source_node_id": edge[0],
-                "destination_node_id": edge[1],
+                "source_node_id": source_node_id,
+                "destination_node_id": destination_node_id,
                 "relationship_name": sanitized_edge_text,
                 "label": sanitized_label,
                 "attributes": sanitize_relational_payload(jsonable_encoder(edge[3])),

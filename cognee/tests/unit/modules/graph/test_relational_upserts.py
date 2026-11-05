@@ -207,3 +207,45 @@ async def test_upsert_edges_sanitizes_contains_edge_text_before_insert():
     }
     session.execute.assert_awaited_once_with(statement)
     session.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_upsert_edges_coerces_string_node_ids_to_uuid_for_sqlite():
+    source_id = uuid4()
+    target_id = uuid4()
+    session = AsyncMock()
+    statement = FakeInsertStatement()
+    edge = (
+        str(source_id),
+        str(target_id),
+        "conflict_about",
+        {"edge_text": "RotorHazard conflict"},
+    )
+
+    with patch.object(upsert_edges_module, "insert", return_value=statement):
+        await upsert_edges(
+            [edge],
+            tenant_id=uuid4(),
+            user_id=uuid4(),
+            dataset_id=uuid4(),
+            data_id=uuid4(),
+            session=session,
+        )
+
+    payload = statement.values_arg[0]
+    assert isinstance(payload["source_node_id"], UUID)
+    assert isinstance(payload["destination_node_id"], UUID)
+    assert payload["source_node_id"] == source_id
+    assert payload["destination_node_id"] == target_id
+
+    engine = create_engine("sqlite://")
+    Edge.__table__.create(engine)
+    with Session(engine) as sqlite_session:
+        sqlite_session.add(Edge(**payload))
+        sqlite_session.commit()
+        stored = sqlite_session.scalar(select(Edge).where(Edge.id == payload["id"]))
+
+    assert stored is not None
+    assert stored.source_node_id == source_id
+    assert stored.destination_node_id == target_id
+
