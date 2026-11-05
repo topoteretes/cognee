@@ -23,11 +23,54 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 MCP_ROOT = Path(__file__).resolve().parents[1]  # cognee-mcp/
 if str(MCP_ROOT) not in sys.path:
     sys.path.insert(0, str(MCP_ROOT))
 
 _STRICT_ENV = "COGNEE_MCP_STRICT_TOOL_COVERAGE"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_session_capture_state(tmp_path, monkeypatch):
+    """Keep session-capture state out of ~/.cognee and out of the next test.
+
+    Any recall through the in-memory MCP client records a turn and would write
+    the conversation file for the client under the real home directory.
+    """
+    from src import server
+
+    monkeypatch.setenv("COGNEE_MCP_STATE_DIR", str(tmp_path / "mcp_state"))
+    # The documented defaults, whatever the developer's .env or shell says.
+    for name in (
+        "COGNEE_MCP_SESSION_CAPTURE",
+        "COGNEE_MCP_SESSION_IDLE_SECONDS",
+        "IMPROVE_AUTO_ENABLED",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    for handle in server._idle_timers.values():
+        handle.cancel()
+    monkeypatch.setattr(server, "_conversations", {})
+    monkeypatch.setattr(server, "_idle_timers", {})
+    monkeypatch.setattr(server, "_running_improves", {})
+    monkeypatch.setattr(server, "_improve_locks", {})
+    monkeypatch.setattr(server, "_failed_retries", {})
+    monkeypatch.setattr(server, "_capture_failures", 0)
+    monkeypatch.setattr(server, "_state_failures", {"read": 0, "write": 0})
+    yield
+    for handle in server._idle_timers.values():
+        handle.cancel()
+    # A timer that fired in the test's last loop iteration may have left a task
+    # behind; it belongs to that test's loop and must not reach the next test.
+    for task in list(server._background_tasks):
+        try:
+            task.cancel()
+        except RuntimeError:
+            pass
+    server._background_tasks.clear()
+    server._background_task_datasets.clear()
+
 
 _called: set[str] = set()
 _uninstrumented: set[str] = set()
