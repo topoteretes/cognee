@@ -221,6 +221,16 @@ async def _ensure_target_data_row(data: Data, target: Dataset, user: User) -> tu
         if existing_id is not None:
             return await session.get(Data, existing_id), False
 
+        # TODO(SDK-1435): a destination that ingested the same content on its own is
+        # not detected. That row has its own id, and chunk ids embed the document id,
+        # so this copy adds a second Document node and a second set of chunks (with
+        # their edges and evidence) for the same text. Refusing on a matching
+        # ``content_hash`` (``get_dataset_data_by_content_hash``, the predicate
+        # ingestion dedup uses) covers file-backed rows only: not every data type
+        # carries a content hash, so the check needs a per-type answer before it can
+        # be the rule. Until then, callers copying into a dataset that may already
+        # hold the document should look for it first.
+
         row = Data(
             id=uuid4(),
             legacy_id=data.id,
