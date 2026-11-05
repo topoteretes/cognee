@@ -15,18 +15,28 @@ column is evolved on its own with Lance's schema evolution:
    no longer has are left out.
 2. ``alter_columns`` renames ``payload`` to ``__payload_old`` and
    ``__payload_migrating`` to ``payload`` in one commit.
-3. ``drop_columns`` removes ``__payload_old``.
+3. Rows another process wrote between steps 1 and 2 (the adapter's lock covers
+   this process only) have their real payload in ``__payload_old`` and a null
+   or stale ``payload``: Lance refuses step 1's commit over a concurrent
+   write, but rebases step 2 over one. They are exactly the rows of the
+   fragments present at the swap version that did not exist before step 1
+   (fragment ids are stable and new writes always create fragments), so the
+   swap version's new fragment ids are recorded in the table's config under
+   ``cognee.payload_migration`` and their rows get ``payload`` rebuilt from
+   ``__payload_old`` with the same transform, merged by ``id``.
+4. ``drop_columns`` removes ``__payload_old``; the record is deleted.
 
 Each step is a committed Lance version and ``payload`` exists at every one of
 them, so a reader never sees a table without it and an interrupted migration
 leaves the table readable. The temporary columns are nullable (the swap also
 makes the old column nullable), so a write that carries only ``id``,
-``vector`` and ``payload`` still lands between the steps: a non-nullable
-column the writer does not provide would be refused by ``merge_insert``. The
-next run finishes it: a leftover ``__payload_old`` is dropped (the swap
-committed, ``payload`` is the new struct), a leftover ``__payload_migrating``
-is dropped and computed again. The vector column's data files are never
-rewritten, and no row is ever materialized as Python objects.
+``vector`` and ``payload`` still lands between the steps. The next run
+finishes it: a leftover ``__payload_migrating`` is dropped and computed again;
+a leftover ``__payload_old`` has its recorded window rows repaired and is
+dropped. A table interrupted between the swap and its record is refused, with
+the old column kept, since the window rows cannot be told from later writes.
+The vector column's data files are never rewritten, and no row is ever
+materialized as Python objects.
 
 Nothing partial: a required target field that is missing from the stored
 struct with no default, a value that cannot be cast to its new type, or a null
@@ -36,6 +46,7 @@ in a required field that no default can fill, fails the UDF, and
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -51,6 +62,9 @@ MIGRATING_COLUMN = "__payload_migrating"
 #: Where the previous struct sits between the swap and its drop.
 OLD_PAYLOAD_COLUMN = "__payload_old"
 PAYLOAD_COLUMN = "payload"
+ID_COLUMN = "id"
+#: Table config key holding the swap's new fragment ids until the old column is dropped.
+STATE_KEY = "cognee.payload_migration"
 
 _NO_DEFAULT = object()
 
@@ -231,14 +245,39 @@ def _build_struct(payload: pa.Array, stored: pa.StructType, target, steps) -> pa
     return pa.StructArray.from_arrays(arrays, fields=list(target))
 
 
-def _finish_interrupted(dataset) -> None:
-    """Bring a table an earlier migration left mid-way back to the start state.
+def _fragment_ids(dataset) -> set[int]:
+    return {fragment.fragment_id for fragment in dataset.get_fragments()}
 
-    Only two intermediate states exist, since ``payload`` is present at every
-    committed version: after the swap (``__payload_old`` still there: the new
-    struct is already ``payload``, drop the old one), or after the first step
-    (``__payload_migrating`` next to ``payload``: drop it, it is computed again
-    against the current target).
+
+def _repair_window_rows(dataset, fragment_ids, stored, target, steps, batch_size) -> int:
+    """Rebuild ``payload`` from ``__payload_old`` for the rows of ``fragment_ids``, the
+    fragments written between the add-column commit and the swap, merged by id.
+    Returns the number of rows repaired."""
+    fragments = [f for f in dataset.get_fragments() if f.fragment_id in fragment_ids]
+    if not fragments:
+        return 0
+    repaired = 0
+    scanner = dataset.scanner(
+        fragments=fragments, columns=[ID_COLUMN, OLD_PAYLOAD_COLUMN], batch_size=batch_size
+    )
+    for batch in scanner.to_batches():
+        if batch.num_rows == 0:
+            continue
+        struct = _build_struct(batch.column(OLD_PAYLOAD_COLUMN), stored, target, steps)
+        source = pa.table({ID_COLUMN: batch.column(ID_COLUMN), PAYLOAD_COLUMN: struct})
+        dataset.merge_insert(ID_COLUMN).when_matched_update_all().execute(source)
+        repaired += batch.num_rows
+    return repaired
+
+
+def _finish_interrupted(dataset, defaults, required, batch_size) -> int:
+    """Bring a table an earlier migration left mid-way back to the start state and
+    return the number of window rows repaired on the way.
+
+    ``payload`` is present at every committed version, so only two states exist:
+    before the swap (``__payload_migrating`` next to ``payload``: drop it, it is
+    computed again against the current target) or after it (``__payload_old``
+    next to the new ``payload``: repair the recorded window rows, drop it).
     """
     names = dataset.schema.names
     if PAYLOAD_COLUMN not in names:
@@ -246,9 +285,28 @@ def _finish_interrupted(dataset) -> None:
             f"the table has no '{PAYLOAD_COLUMN}' column (columns: {', '.join(names)}). "
             "No data was modified."
         )
-    leftovers = [name for name in (OLD_PAYLOAD_COLUMN, MIGRATING_COLUMN) if name in names]
-    if leftovers:
-        dataset.drop_columns(leftovers)
+    if MIGRATING_COLUMN in names:
+        dataset.drop_columns([MIGRATING_COLUMN])
+    repaired = 0
+    if OLD_PAYLOAD_COLUMN in names:
+        record = dataset.config().get(STATE_KEY)
+        if record is None:
+            raise SchemaEvolutionError(
+                "an earlier run was interrupted between its swap and the record of the rows "
+                f"written meanwhile, so '{OLD_PAYLOAD_COLUMN}' is kept: a row written then "
+                f"holds its payload there and null or an outdated value in '{PAYLOAD_COLUMN}'. "
+                "No data was modified. Restore such rows from the old column by id, then drop "
+                "it, and re-run migration."
+            )
+        stored = dataset.schema.field(OLD_PAYLOAD_COLUMN).type
+        current = dataset.schema.field(PAYLOAD_COLUMN).type
+        steps = plan_payload_evolution(stored, current, defaults, required)
+        window = set(json.loads(record)["window"])
+        repaired = _repair_window_rows(dataset, window, stored, current, steps, batch_size)
+        dataset.drop_columns([OLD_PAYLOAD_COLUMN])
+    if STATE_KEY in dataset.config():
+        dataset.delete_config_keys([STATE_KEY])
+    return repaired
 
 
 def evolve_payload_schema(
@@ -266,7 +324,7 @@ def evolve_payload_schema(
     ``required`` names the fields the model requires a value for.
     Returns what changed: the fields added, removed and cast, and the row count.
     """
-    _finish_interrupted(dataset)
+    repaired = _finish_interrupted(dataset, defaults, required, batch_size)
 
     stored = dataset.schema.field(PAYLOAD_COLUMN).type
     if not pa.types.is_struct(stored):
@@ -275,10 +333,9 @@ def evolve_payload_schema(
         )
     if stored == target:
         # A migration interrupted after its swap: the payload is already the
-        # target, only the old column was left to drop, done above.
-        return {"rows": dataset.count_rows(), "added": [], "removed": [], "cast": []}
+        # target, only the old column was left to finish, done above.
+        return _stats(dataset, [], stored, target, repaired)
     steps = plan_payload_evolution(stored, target, defaults, required)
-    target_names = {field.name for field in target}
 
     from lance.udf import batch_udf
 
@@ -293,6 +350,7 @@ def evolve_payload_schema(
         struct = _build_struct(batch.column(PAYLOAD_COLUMN), stored, target, steps)
         return pa.RecordBatch.from_arrays([struct], schema=output)
 
+    before = _fragment_ids(dataset)
     try:
         dataset.add_columns(transform, read_columns=[PAYLOAD_COLUMN], batch_size=batch_size)
     except Exception as error:
@@ -300,6 +358,11 @@ def evolve_payload_schema(
         # its text; nothing was committed. Surface ours under its own type.
         if _ABORTED in str(error):
             raise SchemaEvolutionError(str(error).split(_ABORTED, 1)[1].strip(" :,\n")) from error
+        if "commit conflict" in str(error).lower():
+            raise SchemaEvolutionError(
+                "another process wrote to the table while its new payload column was being "
+                "computed, so Lance refused the commit. No data was modified. Re-run migration."
+            ) from error
         raise
     # One commit: the table goes from the old ``payload`` to the new one with
     # no version in between that lacks the column. The old column turns
@@ -308,8 +371,20 @@ def evolve_payload_schema(
         {"path": PAYLOAD_COLUMN, "name": OLD_PAYLOAD_COLUMN, "nullable": True},
         {"path": MIGRATING_COLUMN, "name": PAYLOAD_COLUMN},
     )
+    # The handle is at the swap version: its fragments beyond ``before`` were
+    # written in the window. Recorded first, so an interruption from here on
+    # can finish exactly.
+    window = sorted(_fragment_ids(dataset) - before)
+    dataset.update_config({STATE_KEY: json.dumps({"window": window})})
+    repaired += _repair_window_rows(dataset, set(window), stored, target, steps, batch_size)
     dataset.drop_columns([OLD_PAYLOAD_COLUMN])
+    dataset.delete_config_keys([STATE_KEY])
 
+    return _stats(dataset, steps, stored, target, repaired)
+
+
+def _stats(dataset, steps, stored, target, repaired) -> dict[str, Any]:
+    target_names = {field.name for field in target}
     return {
         "rows": dataset.count_rows(),
         "added": [step.name for step in steps if step.source in ("default", "null")],
@@ -319,4 +394,5 @@ def evolve_payload_schema(
             if stored.field(i).name not in target_names
         ],
         "cast": [step.name for step in steps if step.source == "cast"],
+        "repaired": repaired,
     }

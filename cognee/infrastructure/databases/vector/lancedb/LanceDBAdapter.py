@@ -1032,12 +1032,13 @@ class LanceDBAdapter(VectorDBInterface):
 
         logger.info(
             "Migrated collection '%s' payload schema in place (%d rows; fields added %s, "
-            "removed %s, cast %s)",
+            "removed %s, cast %s; %d rows written meanwhile repaired)",
             collection_name,
             stats["rows"],
             stats["added"],
             stats["removed"],
             stats["cast"],
+            stats["repaired"],
         )
         return stats
 

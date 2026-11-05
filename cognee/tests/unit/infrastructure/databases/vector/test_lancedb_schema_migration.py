@@ -19,6 +19,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee_db_workers.lancedb_schema_evolution import (
     MIGRATING_COLUMN,
     OLD_PAYLOAD_COLUMN,
+    STATE_KEY,
     SchemaEvolutionError,
 )
 
@@ -1153,3 +1154,160 @@ def test_width_error_names_a_variable_length_vector_column():
     error = StoredVectorWidthMismatchError("Test_text", None, 1536)
     assert "variable-length" in error.message and "None" not in error.message
     assert "EMBEDDING_MODEL" not in str(error)
+
+
+def _intruder(db_path: str, col: str, existing_id: str, appended_id: str):
+    """A writer in another process: through its own connection, outside the adapter's
+    lock, it updates the existing row's text and appends a row, both in the stored
+    (old) payload shape, copied from the existing row's Arrow payload."""
+    import lancedb
+    import pyarrow.compute as pc
+
+    def write():
+        table = lancedb.connect(db_path).open_table(col)
+        arrow = table.to_arrow()
+        payload = arrow.filter(pc.equal(arrow["id"], existing_id)).column("payload")
+        payload = payload.combine_chunks()
+        struct = payload.type
+        text_index = struct.get_field_index("text")
+
+        def with_text(text):
+            children = payload.flatten()
+            children[text_index] = pa.array([text], type=struct.field(text_index).type)
+            return pa.StructArray.from_arrays(children, fields=list(struct))
+
+        source = pa.table(
+            {
+                "id": [existing_id, appended_id],
+                "vector": pa.array([[0.5, 0.5, 0.5]] * 2, pa.list_(pa.float32(), 3)),
+                "payload": pa.concat_arrays(
+                    [with_text("updated meanwhile"), with_text("appended meanwhile")]
+                ),
+            }
+        )
+        table.merge_insert("id").when_matched_update_all().when_not_matched_insert_all().execute(
+            source
+        )
+
+    return write
+
+
+async def _migrate_with_window_writes(adapter, col, db_path, existing_id, crash_at=None):
+    """Evolve ``col`` while another connection appends one row and updates another
+    between the add-column commit and the swap; optionally crash at ``crash_at``
+    (``"update_config"`` or ``"drop_columns"``) after the swap."""
+    from cognee_db_workers.lancedb_compaction import open_as_lance
+    from cognee_db_workers.lancedb_schema_evolution import evolve_payload_schema
+
+    appended_id = str(uuid4())
+    intrude = _intruder(db_path, col, existing_id, appended_id)
+
+    target, required = adapter._target_payload_struct(IndexSchema)
+    dataset = await open_as_lance(await adapter.get_collection(col))
+    real_swap = dataset.alter_columns
+
+    def swap_after_intruder(*args, **kwargs):
+        intrude()
+        return real_swap(*args, **kwargs)
+
+    dataset.alter_columns = swap_after_intruder
+    if crash_at:
+
+        def crash(*_args, **_kwargs):
+            raise OSError("simulated crash")
+
+        setattr(dataset, crash_at, crash)
+    run = lambda: evolve_payload_schema(
+        dataset, target, adapter._get_payload_defaults(IndexSchema), required=required
+    )
+    if crash_at:
+        with pytest.raises(OSError, match="simulated crash"):
+            run()
+        return None, existing_id, appended_id
+    return run(), existing_id, appended_id
+
+
+async def _assert_window_rows_survived(adapter, col, updated_id, appended_id):
+    rows = {str(r.id): r.payload for r in await adapter.retrieve(col, [updated_id, appended_id])}
+    assert rows[updated_id]["text"] == "updated meanwhile"
+    assert rows[appended_id]["text"] == "appended meanwhile"
+    assert "external_metadata" in rows[updated_id] and "external_metadata" in rows[appended_id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_rows_written_by_another_process_during_the_migration_survive(tmp_path):
+    """The adapter's lock covers this process only. A row appended, and one updated,
+    between the add-column commit and the swap keep their payload: the swap moves
+    it into the old column, and the repair rebuilds payload from there for exactly
+    the fragments the window created."""
+    db_path = str(tmp_path / "db")
+    adapter = LanceDBAdapter(url=db_path, api_key=None, embedding_engine=_FakeEmbeddingEngine())
+    col = "Test_text"
+    seeded = _make_point(str(uuid4()), "before")
+    await _seed(adapter, col, [seeded])
+    await _strip_payload_named_field(adapter, col, "external_metadata")
+
+    stats, updated_id, appended_id = await _migrate_with_window_writes(
+        adapter, col, db_path, seeded.id
+    )
+    assert stats["repaired"] == 2 and stats["rows"] == 2
+    await _assert_window_rows_survived(adapter, col, updated_id, appended_id)
+    schema = await (await adapter.get_collection(col)).schema()
+    assert OLD_PAYLOAD_COLUMN not in schema.names
+    from cognee_db_workers.lancedb_compaction import open_as_lance
+
+    assert STATE_KEY not in (await open_as_lance(await adapter.get_collection(col))).config()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_interrupted_after_the_swap_repairs_the_window_rows_on_the_next_run(tmp_path):
+    """The window's fragment ids were recorded with the swap, so a run interrupted
+    before the repair finishes it exactly, after later writes have landed."""
+    db_path = str(tmp_path / "db")
+    adapter = LanceDBAdapter(url=db_path, api_key=None, embedding_engine=_FakeEmbeddingEngine())
+    col = "Test_text"
+    seeded = _make_point(str(uuid4()), "before")
+    await _seed(adapter, col, [seeded])
+    await _strip_payload_named_field(adapter, col, "external_metadata")
+    _, updated_id, appended_id = await _migrate_with_window_writes(
+        adapter, col, db_path, seeded.id, crash_at="drop_columns"
+    )
+
+    # A write after the swap is in the new shape and must not be touched.
+    later = _make_point(str(uuid4()), "after the swap")
+    await adapter.create_data_points(col, [later])
+
+    assert (await adapter.run_migrations())["migrated_collections"] == [col]
+    await _assert_window_rows_survived(adapter, col, updated_id, appended_id)
+    [row] = await adapter.retrieve(col, [later.id])
+    assert row.payload["text"] == "after the swap"
+    schema = await (await adapter.get_collection(col)).schema()
+    assert OLD_PAYLOAD_COLUMN not in schema.names
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_interrupted_before_the_window_was_recorded_keeps_the_old_column(tmp_path):
+    """Without the record the window rows cannot be told from later writes: the next
+    run refuses, says where the payloads are, and the table stays usable."""
+    db_path = str(tmp_path / "db")
+    adapter = LanceDBAdapter(url=db_path, api_key=None, embedding_engine=_FakeEmbeddingEngine())
+    col = "Test_text"
+    seeded = _make_point(str(uuid4()), "before")
+    await _seed(adapter, col, [seeded])
+    await _strip_payload_named_field(adapter, col, "external_metadata")
+    _, _updated_id, appended_id = await _migrate_with_window_writes(
+        adapter, col, db_path, seeded.id, crash_at="update_config"
+    )
+
+    with pytest.raises(SchemaEvolutionError, match=f"'{OLD_PAYLOAD_COLUMN}' is kept"):
+        await adapter.run_migrations()
+    schema = await (await adapter.get_collection(col)).schema()
+    assert OLD_PAYLOAD_COLUMN in schema.names
+    later = _make_point(str(uuid4()), "still writable")
+    await adapter.create_data_points(col, [later])
+    rows = {str(r.id): r.payload for r in await adapter.retrieve(col, [later.id, appended_id])}
+    assert rows[later.id]["text"] == "still writable"
+    assert rows[appended_id] is None  # the window row, until restored by hand
