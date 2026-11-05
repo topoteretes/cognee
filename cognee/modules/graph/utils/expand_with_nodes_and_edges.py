@@ -56,6 +56,11 @@ def _get_or_create_timestamp(
     return timestamp
 
 
+def _readable_type_name(name: str) -> str:
+    """Clean a type's display name without losing case or word boundaries."""
+    return " ".join(name.replace("'", "").split())
+
+
 def _get_or_create_entity_type(
     extracted_type: str,
     data_chunk: DocumentChunk,
@@ -66,7 +71,7 @@ def _get_or_create_entity_type(
     An empty or punctuation-only type from the LLM would otherwise become an
     EntityType named "", which every reader shows as a type with no label.
     """
-    normalized_type_name = generate_node_name(extracted_type)
+    normalized_type_name = _readable_type_name(extracted_type)
     if not normalized_type_name.strip():
         return None
     entity_type_id = EntityType.id_for(extracted_type)

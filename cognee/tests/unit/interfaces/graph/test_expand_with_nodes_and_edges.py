@@ -4,7 +4,7 @@ import pytest
 
 from cognee.infrastructure.databases.provenance import EdgeIdentity
 from cognee.infrastructure.engine.models.Edge import Edge
-from cognee.modules.engine.models import Entity
+from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.utils.expand_with_nodes_and_edges import (
     attach_new_edges_to_data_points,
     construct_data_points_and_edges,
@@ -256,6 +256,34 @@ def test_unique_entity_id_comes_from_name_not_llm_id():
     assert alice.id == Entity.id_for("Alice")
 
 
+@pytest.mark.parametrize(
+    ("extracted_type", "display_name"),
+    [
+        ("CustomerSuccessManager", "CustomerSuccessManager"),
+        ("Support desk", "Support desk"),
+        ("  Customer's\t Support  Team\n", "Customers Support Team"),
+    ],
+)
+def test_type_display_name_preserves_case_and_original_tbox_identity(extracted_type, display_name):
+    tbox_type = EntityType(name=extracted_type, description="Bootstrap definition")
+    graph = _make_graph(
+        [
+            Node(id="n1", name="Alice", type=extracted_type, description="A person"),
+            Node(id="n2", name="Bob", type=extracted_type.lower(), description="Another person"),
+        ],
+        [],
+    )
+    points = _construct_test_data_points([_make_chunk()], [graph])
+    types = [point for point in points if isinstance(point, EntityType)]
+    assert len(types) == 1
+    assert types[0].name == display_name
+    assert types[0].description == display_name
+    assert types[0].id == tbox_type.id == EntityType.id_for(extracted_type)
+    entities = [point for point in points if isinstance(point, Entity)]
+    assert [entity.name for entity in entities] == ["alice", "bob"]
+    assert all(entity.is_a is types[0] for entity in entities)
+
+
 def test_duplicate_names_remain_distinct_within_one_graph():
     chunk = _make_chunk()
     chunk.id = "chunk-1"
@@ -307,7 +335,7 @@ def test_importance_weight_propagates_to_created_nodes():
     data_points = _construct_test_data_points([chunk], [graph])
 
     alice = next(data_point for data_point in data_points if data_point.name == "alice")
-    person = next(data_point for data_point in data_points if data_point.name == "person")
+    person = next(data_point for data_point in data_points if data_point.name == "Person")
     _, contained_entity = chunk.contains[0]
 
     assert alice.importance_weight == 0.9
@@ -325,7 +353,7 @@ def test_default_importance_weight_propagates_to_created_nodes():
     data_points = _construct_test_data_points([chunk], [graph])
 
     alice = next(data_point for data_point in data_points if data_point.name == "alice")
-    person = next(data_point for data_point in data_points if data_point.name == "person")
+    person = next(data_point for data_point in data_points if data_point.name == "Person")
     _, contained_entity = chunk.contains[0]
 
     assert alice.importance_weight == 0.5
@@ -400,7 +428,7 @@ def test_a_timestamp_node_becomes_a_timestamp_datapoint_the_at_edge_points_to():
     assert timestamp.id == Timestamp.id_for("1867-11-07")
     assert timestamp.importance_weight == chunk.importance_weight
     # No EntityType "timestamp" is created for it, only the person's type.
-    assert [dp.name for dp in data_points if isinstance(dp, EntityType)] == ["person"]
+    assert [dp.name for dp in data_points if isinstance(dp, EntityType)] == ["Person"]
 
     marie = next(dp for dp in data_points if isinstance(dp, Entity))
     edge, target = marie.relations[0]
@@ -439,7 +467,7 @@ def test_a_timestamp_whose_name_is_not_a_normalized_time_stays_an_entity(name):
 
     assert not [dp for dp in data_points if isinstance(dp, Timestamp)]
     kept = next(dp for dp in data_points if isinstance(dp, Entity) and dp.name != "marie curie")
-    assert kept.is_a.name == "timestamp"
+    assert kept.is_a.name == "Timestamp"
     assert isinstance(kept.is_a, EntityType)
 
 
