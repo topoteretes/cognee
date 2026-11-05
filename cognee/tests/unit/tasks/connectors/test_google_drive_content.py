@@ -198,10 +198,17 @@ def test_google_slides_export_as_plain_text():
 
 
 class _FakeLoaderEngine:
-    def __init__(self, loader_available=True, text="from the loader"):
+    def __init__(self, loader_available=True, text="from the loader", registered=True):
         self.loader_available = loader_available
+        self.registered = registered
         self.text = text
         self.seen = {}
+
+    def get_available_loaders(self):
+        return ["fake"] if self.registered else []
+
+    def get_loader_info(self, loader_name):
+        return {"extensions": ["docx"]}
 
     def get_loader(self, file_path, preferred_loaders):
         return object() if self.loader_available else None
@@ -244,7 +251,26 @@ def test_office_file_goes_through_the_loader_engine_without_persisting(loader_en
 
 
 def test_missing_loader_is_a_named_error_not_a_skip(loader_engine):
-    loader_engine.loader_available = False
+    loader_engine.registered = loader_engine.loader_available = False
+    service = _FakeService(_FakeFiles(media_result=b"x"))
+    with pytest.raises(LoaderUnavailableError, match="docling"):
+        extract_file_content(service, "d", DOCX, "report.docx")
+
+
+def test_a_missing_loader_is_found_before_the_download(loader_engine, monkeypatch):
+    loader_engine.registered = loader_engine.loader_available = False
+    downloads = []
+    monkeypatch.setattr(
+        gd_source, "_download_file", lambda *args: downloads.append(args) or pytest.fail("download")
+    )
+    service = _FakeService(_FakeFiles(media_result=b"x"))
+    with pytest.raises(LoaderUnavailableError, match="docling"):
+        extract_file_content(service, "d", DOCX, "report.docx")
+    assert downloads == []
+
+
+def test_a_file_the_listed_loader_cannot_claim_is_a_named_error_after_the_download(loader_engine):
+    loader_engine.loader_available = False  # registered for .docx, but not for this content
     service = _FakeService(_FakeFiles(media_result=b"x"))
     with pytest.raises(LoaderUnavailableError, match="docling"):
         extract_file_content(service, "d", DOCX, "report.docx")
