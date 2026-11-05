@@ -274,6 +274,18 @@ def _significant_terms(text: str) -> set[str]:
     return {token for token in tokens if len(token) >= 3 and token not in _STOPWORDS}
 
 
+def answer_grounded_chunks(
+    retrieved_objects: Any, answer: str | None = None, limit: int = 5
+) -> list[Any]:
+    """The retrieved chunks an Evidence block cites, in citation order.
+
+    The selection behind :func:`format_chunk_references`, returned as the
+    original retrieved objects so callers can describe the same citations as
+    structured evidence instead of re-reading them from the rendered text.
+    """
+    return [citation[0] for citation in _select_citations(retrieved_objects, answer, limit)]
+
+
 def format_chunk_references(
     retrieved_objects: Any, answer: str | None = None, limit: int = 5
 ) -> str:
@@ -307,13 +319,33 @@ def format_chunk_references(
         A multi-line Evidence block prefixed by an ``Evidence:`` header, or an
         empty string when nothing usable was found.
     """
-    if not retrieved_objects:
+    citations = _select_citations(retrieved_objects, answer, limit)
+    if not citations:
         return ""
+
+    bullets = [
+        f"- chunk {number} of document {document_name}"
+        f'{_provenance_suffix(data_id, chunk_id)}: "{_snippet(text)}"'
+        for _, document_name, number, text, data_id, chunk_id in citations
+    ]
+
+    return EVIDENCE_HEADER + "\n" + "\n".join(bullets)
+
+
+def _select_citations(
+    retrieved_objects: Any, answer: str | None, limit: int
+) -> list[tuple[Any, str, int, str, str | None, str | None]]:
+    """(obj, document_name, number, text, data_id, chunk_id) per cited chunk, best first.
+
+    See :func:`format_chunk_references` for the selection rules.
+    """
+    if not retrieved_objects:
+        return []
 
     try:
         iterator = list(retrieved_objects)
     except TypeError:
-        return ""
+        return []
 
     answer_terms: set[str] | None = None
     if answer is not None:
@@ -321,10 +353,10 @@ def format_chunk_references(
         if not answer_terms:
             # Nothing to ground the citation in (e.g. "Yes."): omit Evidence
             # rather than presenting unverifiable retrieval order as provenance.
-            return ""
+            return []
 
-    # (overlap_score, document_name, number, text, data_id, chunk_id) per candidate.
-    candidates: list[tuple[int, str, int, str, str | None, str | None]] = []
+    # (overlap_score, obj, document_name, number, text, data_id, chunk_id) per candidate.
+    candidates: list[tuple[int, Any, str, int, str, str | None, str | None]] = []
     seen: set = set()
 
     for obj in iterator:
@@ -361,23 +393,13 @@ def format_chunk_references(
                 # certainly not a source of the answer.
                 continue
 
-        candidates.append((score, document_name, number, text, data_id, chunk_id))
-
-    if not candidates:
-        return ""
+        candidates.append((score, obj, document_name, number, text, data_id, chunk_id))
 
     if answer_terms is not None:
         # Stable sort: highest answer overlap first, retrieval order as tiebreak.
         candidates.sort(key=lambda candidate: -candidate[0])
 
-    max_bullets = _clamp_limit(limit)
-    bullets = [
-        f"- chunk {number} of document {document_name}"
-        f'{_provenance_suffix(data_id, chunk_id)}: "{_snippet(text)}"'
-        for _, document_name, number, text, data_id, chunk_id in candidates[:max_bullets]
-    ]
-
-    return EVIDENCE_HEADER + "\n" + "\n".join(bullets)
+    return [candidate[1:] for candidate in candidates[: _clamp_limit(limit)]]
 
 
 async def build_answer_grounded_chunk_references(
