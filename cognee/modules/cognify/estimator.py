@@ -335,9 +335,9 @@ def _require_text_like(name: str) -> None:
 
 def _accept_local_file_path() -> bool:
     """The same ACCEPT_LOCAL_FILE_PATH gate real ingestion applies."""
-    from cognee.tasks.ingestion.save_data_item_to_storage import settings
+    from cognee.tasks.ingestion.save_data_item_to_storage import local_file_paths_accepted
 
-    return settings.accept_local_file_path
+    return local_file_paths_accepted()
 
 
 def _path_candidate(value: str) -> Path | None:

@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 from cognee.modules.ingestion import StoredFile, save_data_to_file_detailed
 from cognee.modules.ingestion.exceptions import IngestionError
+from cognee.modules.operations.origin import ORIGIN_API, get_operation_origin
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
@@ -24,6 +25,28 @@ class SaveDataSettings(BaseSettings):
 
 
 settings = SaveDataSettings()
+
+
+def local_file_paths_configured() -> bool:
+    """Whether ``ACCEPT_LOCAL_FILE_PATH`` was set, rather than left at the code default."""
+    return "accept_local_file_path" in settings.model_fields_set
+
+
+def local_file_paths_accepted() -> bool:
+    """Whether a path the caller passed may be read with this server's access.
+
+    That is a local file or directory, including one under cognee's own data
+    root, and an ``s3://`` object, read with cognee's AWS credentials. One
+    rule, read at the gates: an explicit ``ACCEPT_LOCAL_FILE_PATH`` is
+    honoured everywhere. Unset, the answer depends on who is calling: the SDK,
+    CLI and MCP server run on the caller's own machine, so the code default
+    (True) stands; an API request names a file on the server, so it is
+    refused. Uploads and text are never subject to this: they are stored
+    first and loaded from cognee's own copy.
+    """
+    if local_file_paths_configured():
+        return settings.accept_local_file_path
+    return get_operation_origin() != ORIGIN_API
 
 
 def _resolve_local_file_uri(
@@ -78,7 +101,11 @@ async def save_data_item_to_storage_detailed(
 
         # data is s3 file path
         if parsed_url.scheme == "s3":
-            return StoredFile(file_path=data_item)
+            # Read with cognee's own AWS credentials, so it is a server-side
+            # path like a local one: same gate.
+            if local_file_paths_accepted():
+                return StoredFile(file_path=data_item)
+            raise IngestionError(message="S3 paths are not accepted.")
         elif parsed_url.scheme == "http" or parsed_url.scheme == "https":
             # Guard against SSRF: reject disabled outbound HTTP, non-http(s) schemes,
             # and hosts that resolve to internal/reserved addresses before fetching.
@@ -89,7 +116,7 @@ async def save_data_item_to_storage_detailed(
             )
         # data is local file path
         elif parsed_url.scheme == "file":
-            if settings.accept_local_file_path:
+            if local_file_paths_accepted():
                 local_uri = _resolve_local_file_uri(url2pathname(parsed_url.path), strict=True)
                 if local_uri:
                     return StoredFile(file_path=local_uri)
@@ -116,13 +143,13 @@ async def save_data_item_to_storage_detailed(
             # of becoming a broken file:// URI.
             local_uri = _resolve_local_file_uri(data_item)
             if local_uri:
-                if settings.accept_local_file_path:
+                if local_file_paths_accepted():
                     return StoredFile(file_path=local_uri)
                 raise IngestionError(message="Local files are not accepted.")
         # Data is a relative file path
         local_uri = _resolve_local_file_uri(data_item)
         if local_uri:
-            if settings.accept_local_file_path:
+            if local_file_paths_accepted():
                 return StoredFile(file_path=local_uri)
             raise IngestionError(message="Local files are not accepted.")
 
