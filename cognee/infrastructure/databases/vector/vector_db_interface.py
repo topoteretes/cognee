@@ -1,3 +1,4 @@
+import asyncio
 from abc import abstractmethod
 from typing import Any, Protocol
 from uuid import UUID
@@ -371,13 +372,13 @@ class VectorDBInterface(Protocol):
         """
         Return the names in ``collection_names`` that exist, in their given order.
 
-        A caller searching many collections uses it to skip the missing ones with
-        one lookup instead of one probe per name. The default returns every name,
-        since ``search`` already answers a missing collection with
-        ``CollectionNotFoundError``; adapters whose probe costs a round trip
-        (a connection, under NullPool) override it.
+        A caller searching many collections uses it to skip the missing ones. The
+        default asks ``has_collection`` for every name at once; an adapter that can
+        list its collections in one call overrides it, so the answer costs one
+        round trip instead of one per name.
         """
-        return list(collection_names)
+        checks = await asyncio.gather(*(self.has_collection(name) for name in collection_names))
+        return [name for name, exists in zip(collection_names, checks) if exists]
 
     async def compact(self, collection_name: str | None = None):
         """
