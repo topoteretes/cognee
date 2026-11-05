@@ -367,6 +367,18 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError
 
     # Optional methods that may be implemented by adapters
+    async def existing_collections(self, collection_names: list[str]) -> list[str]:
+        """
+        Return the names in ``collection_names`` that exist, in their given order.
+
+        A caller searching many collections uses it to skip the missing ones with
+        one lookup instead of one probe per name. The default returns every name,
+        since ``search`` already answers a missing collection with
+        ``CollectionNotFoundError``; adapters whose probe costs a round trip
+        (a connection, under NullPool) override it.
+        """
+        return list(collection_names)
+
     async def compact(self, collection_name: str | None = None):
         """
         Reclaim storage the adapter's own writes left behind (merge small

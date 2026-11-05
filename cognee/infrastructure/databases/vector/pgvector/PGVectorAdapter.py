@@ -475,6 +475,21 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self._pgvector_version_cache = parse_pgvector_version(raw)
         return self._pgvector_version_cache
 
+    async def existing_collections(self, collection_names: list[str]) -> list[str]:
+        """Return the given collections that exist, read in one round trip.
+
+        A missing table is never cached by ``get_table``, so a search over many
+        collection names would otherwise reflect each missing one on its own
+        connection, every search. The list holds the tables visible on the
+        connection's ``search_path``, the same resolution ``get_table`` and the
+        unqualified search statements use.
+        """
+        async with self.engine.connect() as connection:
+            table_names = set(
+                await connection.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
+            )
+        return [name for name in collection_names if name in table_names]
+
     async def has_collection(self, collection_name: str) -> bool:
         """
         Check if a specified collection exists in the database.
