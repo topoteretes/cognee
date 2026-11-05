@@ -181,6 +181,36 @@ class TelemetryAggregateExtractTest(unittest.TestCase):
         self.assertEqual(row["runs_unclassified"], 0)
         self.assertEqual(self._rows("pipeline_run_durations_daily"), [])
 
+    def test_missing_versions_keep_their_own_buckets(self):
+        self._insert_event("Pipeline Run Started", None, {}, "a")
+        self._insert_event("Pipeline Run Started", "unknown", {}, "b")
+        self._insert_event("Pipeline Run Started", "unknown", {}, "c")
+        self._insert_event("Pipeline Run Errored", "unknown", {"recovered_at_startup": True}, "d")
+        self._insert_event("Pipeline Run Started", "1.6.3-local", {}, "e")
+        self._insert_event("Pipeline Run Started", "1.6.3", {}, "f")
+
+        lifecycle = {
+            (row["version"], row["self_hosted"]): row for row in self._rows("version_lifecycle")
+        }
+        self.assertEqual(
+            set(lifecycle),
+            {
+                ("unknown-null", None),
+                ("unknown-unresolved", False),
+                ("unknown-recovered", False),
+                ("1.6.3", True),
+                ("1.6.3", False),
+            },
+        )
+        self.assertEqual(lifecycle[("unknown-unresolved", False)]["distinct_identities"], 2)
+        self.assertEqual(lifecycle[("unknown-null", None)]["events"], 1)
+
+        outcomes = {row["version"]: row for row in self._rows("pipeline_outcomes_daily")}
+        self.assertEqual(outcomes["unknown-unresolved"]["errored"], 0)
+        self.assertEqual(outcomes["unknown-recovered"]["errored"], 1)
+        (error,) = self._rows("pipeline_error_types_daily")
+        self.assertEqual(error["version"], "unknown-recovered")
+
     def test_item_events_and_partial_legacy_runs_are_not_timed(self):
         for event, timestamp in (
             ("Started", "10:00:00"),
