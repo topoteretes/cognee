@@ -158,6 +158,16 @@ def test_a_vector_url_that_is_not_a_sqlalchemy_url_does_not_break_the_check(stor
         _allowed_sqlite_connection_string(f"sqlite:///{storage.system / 'cognee_db'}")
 
 
+@pytest.mark.parametrize("value", ["true", "1"])
+def test_cognee_storage_stays_refused_with_the_switch_on(storage, monkeypatch, value):
+    """The switch opens the feature; it never opens cognee's own storage."""
+    monkeypatch.setenv(ALLOW_DATABASE_INGESTION_ENV, value)
+    target = _sqlite_file(storage.db_dir / "cognee_db")
+
+    with pytest.raises(CogneeValidationError, match="cognee's own storage"):
+        create_dlt_source_from_connection_string(f"sqlite:///{target}")
+
+
 def test_driver_errors_are_reported_by_class_only(storage, monkeypatch):
     """The advisory's probe: a file that is not a database. The driver's message
     (which carries the SQL it ran and says why the open failed) stays in the log;

@@ -1,6 +1,7 @@
 """Connection-string sources: the ALLOW_DATABASE_INGESTION switch, and network
 databases that resolve to a server cognee itself uses."""
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -124,6 +125,17 @@ def test_an_unresolvable_host_is_refused(servers):
 )
 def test_other_servers_are_allowed(servers, dsn):
     _require_foreign_database_server(dsn)
+
+
+@pytest.mark.parametrize("value", ["true", "1", "yes"])
+@pytest.mark.parametrize("origin", [None, ORIGIN_API], ids=["sdk", "api"])
+def test_cognee_servers_stay_refused_with_the_switch_on(servers, monkeypatch, value, origin):
+    """The switch opens the feature; it never opens cognee's own storage."""
+    monkeypatch.setenv(ALLOW_DATABASE_INGESTION_ENV, value)
+    scope = operation_origin_scope(origin) if origin else nullcontext()
+
+    with scope, pytest.raises(CogneeValidationError, match="cognee's own storage"):
+        create_dlt_source_from_connection_string("postgresql://u:p@localhost:5432/other_db")
 
 
 def test_unset_switch_refuses_api_callers_only(servers, monkeypatch):
