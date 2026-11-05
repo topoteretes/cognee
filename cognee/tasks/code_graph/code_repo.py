@@ -429,7 +429,8 @@ def is_repository_spec(spec, *, declared: bool = False) -> bool:
 
     try:
         path = resolve_local_path(text, must_exist=True)
-    except (FileNotFoundError, ValueError):
+    except (OSError, ValueError):
+        # No such path, a name too long to be one (prose), or outside the roots.
         return False
     return path.is_dir() and detect_code_project(path)
 
