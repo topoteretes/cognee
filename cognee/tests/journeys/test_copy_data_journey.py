@@ -19,6 +19,7 @@ import cognee
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.provenance.source_refs import parse_source_ref_key
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import get_data
@@ -41,6 +42,16 @@ async def _node_ids(dataset_id, user) -> set[str]:
     async with set_database_global_context_variables(dataset_id, user.id):
         nodes, _ = await (await get_graph_engine()).get_graph_data()
     return {str(node_id) for node_id, _ in nodes}
+
+
+async def _owners_of_nodes(dataset_id, user) -> dict[str, set]:
+    """node id -> the data ids its source refs name, in one dataset."""
+    async with set_database_global_context_variables(dataset_id, user.id):
+        refs = await (await get_graph_engine()).find_node_source_refs_by_dataset(str(dataset_id))
+    return {
+        str(node_id): {parse_source_ref_key(key).data_id for key in keys}
+        for node_id, keys in refs.items()
+    }
 
 
 async def _chunk_text(dataset: str, query: str) -> str:
@@ -109,6 +120,21 @@ async def test_copy_data_moves_a_document_between_datasets(clean_env, default_us
 
     # graph: union of both documents, shared entity merged, nothing duplicated
     assert await _node_ids(destination_id, default_user) == source_nodes | destination_nodes_before
+    # provenance: a shared node now names both documents, a copied-only node names the
+    # copy, and a destination-only node still names only its own document
+    (doc_b,) = [
+        row
+        for row in await cognee.datasets.list_data(destination_id, default_user)
+        if row.id != receipt["data_id"]
+    ]
+    owners = await _owners_of_nodes(destination_id, default_user)
+    shared = source_nodes & destination_nodes_before
+    for node_id in shared:
+        assert owners[node_id] == {doc_b.id, receipt["data_id"]}
+    for node_id in source_nodes - destination_nodes_before:
+        assert owners[node_id] == {receipt["data_id"]}
+    for node_id in destination_nodes_before - source_nodes:
+        assert owners[node_id] == {doc_b.id}
     assert "lantern" in (await _chunk_text(DESTINATION, "Harbour Lantern Society")).lower()
     assert await _evidence_links(destination_id, receipt["data_id"]) == source_links
     assert await _support.snapshot_dataset(source_id, default_user) == source_before
@@ -129,6 +155,8 @@ async def test_copy_data_moves_a_document_between_datasets(clean_env, default_us
     await cognee.forget(data_id=document.id, dataset_id=destination_id, user=default_user)
 
     assert await _node_ids(destination_id, default_user) == destination_nodes_before
+    owners = await _owners_of_nodes(destination_id, default_user)
+    assert all(owners[node_id] == {doc_b.id} for node_id in destination_nodes_before)
     assert "lantern" not in (await _chunk_text(DESTINATION, "Harbour Lantern Society")).lower()
     assert len(await cognee.datasets.list_data(destination_id, default_user)) == 1
     assert not await _evidence_links(destination_id, receipt["data_id"])
