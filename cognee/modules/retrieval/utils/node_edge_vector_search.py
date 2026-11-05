@@ -11,6 +11,18 @@ from cognee.shared.logging_utils import ERROR, get_logger
 logger = get_logger(level=ERROR)
 
 
+def engine_supports_id_scoring(engine) -> bool:
+    """Whether ``engine`` implements ``score_by_ids`` rather than inheriting the stub."""
+    # Engine leases wrap bound methods, but preserve the adapter's __class__.
+    if getattr(engine.__class__, "score_by_ids", None) is VectorDBInterface.score_by_ids:
+        return False
+    score_by_ids = getattr(engine, "score_by_ids", None)
+    return (
+        callable(score_by_ids)
+        and getattr(score_by_ids, "__func__", None) is not VectorDBInterface.score_by_ids
+    )
+
+
 class NodeEdgeVectorSearch:
     """Manages vector search and distance retrieval for graph nodes and edges."""
 
@@ -35,15 +47,7 @@ class NodeEdgeVectorSearch:
         return self.vector_engine
 
     async def supports_id_scoring(self) -> bool:
-        engine = await self._get_vector_engine()
-        # Engine leases wrap bound methods, but preserve the adapter's __class__.
-        if getattr(engine.__class__, "score_by_ids", None) is VectorDBInterface.score_by_ids:
-            return False
-        score_by_ids = getattr(engine, "score_by_ids", None)
-        return (
-            callable(score_by_ids)
-            and getattr(score_by_ids, "__func__", None) is not VectorDBInterface.score_by_ids
-        )
+        return engine_supports_id_scoring(await self._get_vector_engine())
 
     async def embed_and_retrieve_distances(
         self,

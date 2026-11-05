@@ -304,7 +304,6 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         include_payload: bool = False,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-        document_name: list[str] | None = None,
     ):
         """
         Perform a search in the specified collection using either a text query or a vector
@@ -388,15 +387,6 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 WITH node, score
                 WHERE all(name IN node.belongs_to_set WHERE name IN [{name_list}])
                 """
-
-        # Filter by the source document; chunk rows carry document_name as a property.
-        if document_name:
-            escaped_documents = [name.replace("'", "\\'") for name in document_name]
-            document_list = ", ".join(f"'{name}'" for name in escaped_documents)
-            query_string += f"""
-            WITH node, score
-            WHERE node.document_name IN [{document_list}]
-            """
 
         if with_vector:
             query_string += """

@@ -41,9 +41,7 @@ from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.temporal_hybrid_retriever import TemporalHybridRetriever
 from cognee.modules.search.exceptions import SearchTypeDisabledError, UnsupportedSearchTypeError
 from cognee.modules.search.methods.node_name_scope import (
-    NodeNameScope,
     lucky_search_types,
-    node_name_scope,
     reject_unsupported_node_name,
 )
 from cognee.modules.search.operations import select_search_type
@@ -123,11 +121,6 @@ async def get_search_type_retriever_instance(
     node_type = kwargs.get("node_type", NodeSet)
     node_name = kwargs.get("node_name")
     node_name_filter_operator = kwargs.get("node_name_filter_operator", "OR")
-    # Chunk searches filter the vector rows: node-set names go to belongs_to_set,
-    # document names to document_name. Graph retrievers take node_type + node_name as is.
-    scope = node_name_scope(node_type, node_name)
-    chunk_node_set_names = node_name if scope is NodeNameScope.NODE_SET else None
-    chunk_document_names = node_name if scope is NodeNameScope.DOCUMENT else None
     wide_search_top_k = kwargs.get("wide_search_top_k")
     triplet_distance_penalty = kwargs.get("triplet_distance_penalty")
     feedback_influence = kwargs.get(
@@ -160,9 +153,9 @@ async def get_search_type_retriever_instance(
             ChunksRetriever,
             {
                 "top_k": top_k,
-                "node_name": chunk_node_set_names,
+                "node_type": node_type,
+                "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
-                "document_name": chunk_document_names,
             },
         ),
         # No top_k: BROAD reads the whole dataset (SDK-324).
@@ -192,9 +185,9 @@ async def get_search_type_retriever_instance(
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
                 "include_references": include_references,
-                "node_name": chunk_node_set_names,
+                "node_type": node_type,
+                "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
-                "document_name": chunk_document_names,
                 "wide_search_top_k": wide_search_top_k,
             },
         ),
@@ -493,7 +486,7 @@ async def get_search_type_retriever_instance(
 
         # A filter the retriever would drop or mis-apply is an error, not a silent
         # unscoped (or empty) result.
-        reject_unsupported_node_name(query_type, node_type, node_name, node_name_filter_operator)
+        reject_unsupported_node_name(query_type, node_type, node_name)
 
         # If it exists unpack the retriever class and its initialization arguments
         retriever_cls, retriever_args = retriever_info

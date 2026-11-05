@@ -5,6 +5,7 @@ import pytest
 
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.engine.models import Entity
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
@@ -549,27 +550,28 @@ async def test_temporal_forwards_external_metadata_keys_like_hybrid():
 
 
 @pytest.mark.asyncio
-async def test_chunks_route_a_document_name_to_the_document_filter():
+@pytest.mark.parametrize("node_type", [TextDocument, Entity])
+async def test_chunks_take_a_graph_scope_as_node_type_and_name(node_type):
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
 
     retriever = await mod.get_search_type_retriever_instance(
-        SearchType.CHUNKS, query_text="q", node_type=TextDocument, node_name=["doc_a"]
+        SearchType.CHUNKS, query_text="q", node_type=node_type, node_name=["x"]
     )
     assert isinstance(retriever, ChunksRetriever)
-    assert retriever.document_name == ["doc_a"]
-    assert retriever.node_name is None
+    assert retriever.node_type is node_type
+    assert retriever.node_name == ["x"]
 
 
 @pytest.mark.asyncio
-async def test_rag_completion_routes_a_document_name_to_the_document_filter():
+async def test_rag_completion_takes_a_graph_scope_as_node_type_and_name():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
 
     retriever = await mod.get_search_type_retriever_instance(
         SearchType.RAG_COMPLETION, query_text="q", node_type=TextDocument, node_name=["doc_a"]
     )
     assert isinstance(retriever, CompletionRetriever)
-    assert retriever.document_name == ["doc_a"]
-    assert retriever.node_name is None
+    assert retriever.node_type is TextDocument
+    assert retriever.node_name == ["doc_a"]
 
 
 @pytest.mark.asyncio
@@ -580,9 +582,9 @@ async def test_chunks_keep_a_node_set_name_on_the_node_set_filter():
         SearchType.CHUNKS, query_text="q", node_name=["tag"], node_name_filter_operator="AND"
     )
     assert isinstance(retriever, ChunksRetriever)
+    assert retriever.node_type is NodeSet
     assert retriever.node_name == ["tag"]
     assert retriever.node_name_filter_operator == "AND"
-    assert retriever.document_name is None
 
 
 @pytest.mark.asyncio
@@ -610,34 +612,28 @@ async def test_types_that_ignore_node_name_refuse_it(search_type):
 
 
 @pytest.mark.asyncio
-async def test_chunks_refuse_a_graph_node_type():
+async def test_temporal_refuses_a_graph_scope():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
 
-    with pytest.raises(QueryValidationError, match="node_type=Entity"):
+    with pytest.raises(QueryValidationError, match="TEMPORAL does not apply"):
         await mod.get_search_type_retriever_instance(
-            SearchType.CHUNKS, query_text="q", node_type=Entity, node_name=["Apple"]
+            SearchType.TEMPORAL, query_text="q", node_type=TextDocument, node_name=["doc_a"]
         )
 
 
 @pytest.mark.asyncio
-async def test_chunks_refuse_and_over_several_documents():
+async def test_node_name_without_a_node_type_is_refused():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
-    from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
 
-    with pytest.raises(QueryValidationError, match="exactly one document"):
+    with pytest.raises(QueryValidationError, match="node_name needs a node_type"):
         await mod.get_search_type_retriever_instance(
-            SearchType.CHUNKS,
-            query_text="q",
-            node_type=TextDocument,
-            node_name=["doc_a", "doc_b"],
-            node_name_filter_operator="AND",
+            SearchType.CHUNKS, query_text="q", node_type=None, node_name=["Apple"]
         )
 
 
 @pytest.mark.asyncio
-async def test_feeling_lucky_with_a_document_filter_bounds_the_selector(monkeypatch):
+async def test_feeling_lucky_with_a_graph_scope_bounds_the_selector(monkeypatch):
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
-    from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 
     seen = {}
 
@@ -651,6 +647,6 @@ async def test_feeling_lucky_with_a_document_filter_bounds_the_selector(monkeypa
         SearchType.FEELING_LUCKY, query_text="q", node_type=TextDocument, node_name=["doc_a"]
     )
     assert isinstance(retriever, ChunksRetriever)
-    assert retriever.document_name == ["doc_a"]
+    assert retriever.node_type is TextDocument
     assert SearchType.CHUNKS in seen["allowed"]
     assert SearchType.SUMMARIES not in seen["allowed"]

@@ -2,6 +2,7 @@ from typing import Any
 
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.conflict_context import (
@@ -9,7 +10,7 @@ from cognee.modules.retrieval.utils.conflict_context import (
     public_chunk_payload,
     render_chunk_context,
 )
-from cognee.modules.retrieval.utils.document_filter import document_filter
+from cognee.modules.retrieval.utils.scoped_chunk_search import search_scoped_chunks
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ChunksRetriever")
@@ -35,9 +36,9 @@ class ChunksRetriever(BaseRetriever):
     def __init__(
         self,
         top_k: int | None = 5,
+        node_type: type | None = NodeSet,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-        document_name: list[str] | None = None,
     ):
         """
         Initializes the chunk retriever.
@@ -47,18 +48,19 @@ class ChunksRetriever(BaseRetriever):
 
             - top_k (Optional[int]): Maximum number of chunks to retrieve.
               Defaults to 5.
-            - node_name (Optional[List[str]]): Node names used to filter chunks by
-              their belongs_to_set relationship. Defaults to None, which applies no
-              node set filtering.
+            - node_type (type): What ``node_name`` names. ``NodeSet`` (the default)
+              filters chunks by their belongs_to_set tags in the vector store; any
+              other graph node type scopes the search to the chunks one hop from the
+              named nodes of that type (a document's chunks, an entity's mentions).
+            - node_name (Optional[List[str]]): Names to scope to. Defaults to None,
+              which applies no filtering.
             - node_name_filter_operator (str): Logical operator used when applying
               multiple node_name filters, such as "OR" or "AND". Defaults to "OR".
-            - document_name (Optional[List[str]]): Source document names; only chunks
-              cut from one of those documents are returned. Defaults to None.
         """
         self.top_k = top_k
+        self.node_type = node_type
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
-        self.document_name = document_name
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
@@ -134,15 +136,26 @@ class ChunksRetriever(BaseRetriever):
         vector_engine = unified.vector
 
         try:
-            found_chunks = await vector_engine.search(
-                "DocumentChunk_text",
-                query,
-                limit=self.top_k,
-                include_payload=True,
-                node_name=self.node_name,
-                node_name_filter_operator=self.node_name_filter_operator,
-                **document_filter(self.document_name),
-            )
+            node_type = self.node_type
+            if self.node_name and node_type is not None and node_type is not NodeSet:
+                found_chunks = await search_scoped_chunks(
+                    vector_engine,
+                    unified.graph,
+                    query,
+                    node_type=node_type,
+                    node_name=self.node_name,
+                    node_name_filter_operator=self.node_name_filter_operator,
+                    limit=self.top_k,
+                )
+            else:
+                found_chunks = await vector_engine.search(
+                    "DocumentChunk_text",
+                    query,
+                    limit=self.top_k,
+                    include_payload=True,
+                    node_name=self.node_name,
+                    node_name_filter_operator=self.node_name_filter_operator,
+                )
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error

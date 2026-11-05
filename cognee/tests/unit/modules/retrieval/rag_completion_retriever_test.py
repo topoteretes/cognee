@@ -376,22 +376,35 @@ async def test_get_context_missing_text_key(mock_vector_engine):
 
 
 @pytest.mark.asyncio
-async def test_document_filter_reaches_the_vector_search(mock_vector_engine):
-    mock_vector_engine.search.return_value = []
-    retriever = CompletionRetriever(top_k=2, document_name=["doc_a"])
+async def test_graph_scope_goes_through_the_scoped_search_not_the_node_set_filter(
+    mock_vector_engine,
+):
+    from cognee.modules.data.processing.document_types import TextDocument
 
-    with patch(
-        "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
-        return_value=mock_vector_engine,
+    graph_engine = AsyncMock()
+    scoped = AsyncMock(return_value=[])
+    retriever = CompletionRetriever(top_k=2, node_type=TextDocument, node_name=["doc_a"])
+
+    with (
+        patch(
+            "cognee.modules.retrieval.completion_retriever.get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.completion_retriever.get_graph_engine",
+            return_value=graph_engine,
+        ),
+        patch("cognee.modules.retrieval.completion_retriever.search_scoped_chunks", scoped),
     ):
         await retriever.get_retrieved_objects("test query")
 
-    mock_vector_engine.search.assert_awaited_once_with(
-        "DocumentChunk_text",
+    scoped.assert_awaited_once_with(
+        mock_vector_engine,
+        graph_engine,
         "test query",
-        limit=2,
-        include_payload=True,
-        node_name=None,
+        node_type=TextDocument,
+        node_name=["doc_a"],
         node_name_filter_operator="OR",
-        document_name=["doc_a"],
+        limit=2,
     )
+    mock_vector_engine.search.assert_not_awaited()
