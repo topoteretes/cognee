@@ -499,6 +499,28 @@ class RedisAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
+    async def delete_sessions(self, sessions: list[tuple[str, str]]) -> list[bool]:
+        """Delete each session's QA, trace and context keys in one pipelined round trip."""
+        if not sessions:
+            return []
+        try:
+            pipe = self.async_redis.pipeline(transaction=False)
+            for user_id, session_id in sessions:
+                pipe.delete(
+                    self._session_key(user_id, session_id),
+                    self._agent_trace_key(user_id, session_id),
+                    self._session_context_key(user_id, session_id),
+                )
+            return [deleted > 0 for deleted in await pipe.execute()]
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while deleting sessions: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while deleting sessions from Redis: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
     async def list_session_ids(self, user_id: str) -> list[str]:
         """Every session id with a QA, trace or session-context key for the user."""
         prefixes = [
@@ -568,6 +590,21 @@ class RedisAdapter(CacheDBInterface):
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
             error_msg = f"Unexpected error while deleting value from Redis: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def delete_values(self, keys: list[str]) -> None:
+        """Delete the values stored under the given keys in one call."""
+        if not keys:
+            return
+        try:
+            await self.async_redis.delete(*keys)
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while deleting values: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while deleting values from Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 

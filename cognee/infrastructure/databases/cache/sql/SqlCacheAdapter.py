@@ -65,6 +65,11 @@ _PURGE_LOCK_ID = int.from_bytes(sha256(b"cognee_cache_ttl_sweep").digest()[:8], 
 # and 1.0 of the TTL after the session's last write.
 _TTL_REFRESH_FRACTION = 0.05
 
+# Ids per IN list in a batch delete, under every backend's bind-parameter cap.
+_IDS_PER_STATEMENT = 500
+
+_SESSION_TABLES = (cache_qa_entries, cache_trace_entries, cache_session_context)
+
 
 class _SqlAdvisoryLockHandle:
     """Handle returned by acquire_lock; owns one checked-out sync connection."""
@@ -806,6 +811,46 @@ class SqlCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from error
 
+    async def delete_sessions(self, sessions: list[tuple[str, str]]) -> list[bool]:
+        """Delete many sessions whole, one transaction per chunk of an owner's sessions.
+
+        Each chunk takes the same per-session write locks as ``delete_session``,
+        in table order and then session order, so it never cycles with another
+        writer. A session existed if any of its rows was still live.
+        """
+        await self._ensure_initialized()
+        owners: dict[str, list[str]] = {}
+        for user_id, session_id in dict.fromkeys(sessions):
+            owners.setdefault(user_id, []).append(session_id)
+        existed: set[tuple[str, str]] = set()
+        try:
+            for user_id, session_ids in owners.items():
+                session_ids.sort()
+                for start in range(0, len(session_ids), _IDS_PER_STATEMENT):
+                    chunk = session_ids[start : start + _IDS_PER_STATEMENT]
+                    async with self.sessionmaker() as session, session.begin():
+                        for table in _SESSION_TABLES:
+                            for session_id in chunk:
+                                await self._lock_session_writes(session, table, user_id, session_id)
+                        now = self._now()
+                        for table in _SESSION_TABLES:
+                            scope = (table.c.user_id == user_id) & table.c.session_id.in_(chunk)
+                            live = await session.execute(
+                                select(table.c.session_id)
+                                .where(
+                                    scope,
+                                    or_(table.c.expires_at.is_(None), table.c.expires_at > now),
+                                )
+                                .distinct()
+                            )
+                            existed.update((user_id, session_id) for session_id in live.scalars())
+                            await session.execute(delete(table).where(scope))
+        except Exception as error:
+            error_msg = f"Unexpected error while deleting sessions from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+        return [pair in existed for pair in sessions]
+
     async def list_session_ids(self, user_id: str) -> list[str]:
         """Every session id with QA, trace or session-context rows for the user."""
         await self._ensure_initialized()
@@ -1240,6 +1285,21 @@ class SqlCacheAdapter(CacheDBInterface):
                 await session.execute(delete(cache_kv).where(cache_kv.c.key == key))
         except Exception as error:
             error_msg = f"Unexpected error while deleting key/value from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
+    async def delete_values(self, keys: list[str]) -> None:
+        """Delete the values stored under the given keys, in one transaction."""
+        if not keys:
+            return
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session, session.begin():
+                for start in range(0, len(keys), _IDS_PER_STATEMENT):
+                    chunk = keys[start : start + _IDS_PER_STATEMENT]
+                    await session.execute(delete(cache_kv).where(cache_kv.c.key.in_(chunk)))
+        except Exception as error:
+            error_msg = f"Unexpected error while deleting key/values from SQL cache: {error}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from error
 

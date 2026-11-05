@@ -962,47 +962,38 @@ class SessionManager:
             logger.debug("SessionManager: cache unavailable, skipping delete_sessions")
             return [False] * len(sessions)
 
-        existed = [
-            await self._delete_session_cache(user_id=user_id, session_id=session_id)
-            for user_id, session_id in sessions
-        ]
+        existed = await self._cache.delete_sessions(sessions)
+        await self._delete_legacy_graph_snapshots(sessions)
         # Unconditionally: cache entries expire (session TTL) while their Q&A
         # vectors, which hold the question and answer text, do not.
         await delete_session_qa_vectors(sessions)
         return existed
 
-    async def _delete_session_cache(self, *, user_id: str, session_id: str) -> bool:
-        """Delete one session's cache content; True if any of it existed."""
-        # One-release cleanup for graph snapshots written by the removed
-        # graph-to-session sync feature.
-        graph_key = f"graph_knowledge:{user_id}:{session_id}"
+    async def _delete_legacy_graph_snapshots(self, sessions: list[tuple[str, str]]) -> None:
+        """One-release cleanup for graph snapshots written by the removed
+        graph-to-session sync feature; failures are ignored."""
+        keys = [f"graph_knowledge:{user_id}:{session_id}" for user_id, session_id in sessions]
         try:
-            await self._cache.delete_value(graph_key)
+            await self._cache.delete_values(keys)
         except (NotImplementedError, AttributeError, TypeError):
             # Adapter predates the KV interface (missing, non-async, or
             # different-signature delete_value), fall back to legacy duck-typing
-            try:
-                await self._cache.async_redis.delete(graph_key)
-            except AttributeError:
+            for key in keys:
                 try:
-                    del self._cache._cache[graph_key]
+                    await self._cache.async_redis.delete(key)
+                except AttributeError:
+                    try:
+                        del self._cache._cache[key]
+                    except Exception:
+                        logger.debug(
+                            "Ignoring exception in SessionManager.delete_sessions", exc_info=True
+                        )
                 except Exception:
                     logger.debug(
-                        "Ignoring exception in SessionManager.delete_session", exc_info=True
+                        "Ignoring exception in SessionManager.delete_sessions", exc_info=True
                     )
-            except Exception:
-                logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
         except Exception:
-            logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
-
-        # Also clear the active session-context list (fail-open; adapter.delete_session may also
-        # clear it, but this guarantees no leak if the adapter does not).
-        try:
-            await self._cache.delete_session_context(user_id, session_id)
-        except Exception:
-            logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
-
-        return await self._cache.delete_session(user_id=user_id, session_id=session_id)
+            logger.debug("Ignoring exception in SessionManager.delete_sessions", exc_info=True)
 
     async def list_session_ids(self, *, user_id: str) -> list[str]:
         """

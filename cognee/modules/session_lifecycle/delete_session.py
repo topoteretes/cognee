@@ -30,10 +30,12 @@ written lands before the delete, never after it.
 ``delete_sessions`` deletes many sessions in one pass (forget(everything=True)):
 each owner's datasets are resolved once, each vector store gets one
 tag-removal call for all of its sessions, each relational table one delete
-per owner, and every claim is taken up front.
+per owner, and every claim is taken up front. A caller that deletes datasets
+right after names them, and their stores are skipped: the Q&A vectors there
+go with the store.
 """
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from contextlib import AsyncExitStack
 from uuid import UUID
 
@@ -173,13 +175,17 @@ async def delete_session(user_id: UUID, session_id: str) -> bool:
     return await delete_sessions([(user_id, session_id)]) > 0
 
 
-async def delete_sessions(sessions: Iterable[Session]) -> int:
+async def delete_sessions(
+    sessions: Iterable[Session], datasets_being_deleted: Collection[UUID] = ()
+) -> int:
     """Delete each (owner id, session id) pair whole; return how many existed.
 
     Same contract as ``delete_session``, for many sessions at once: it raises
     with ``CACHING=false``, and cache, vector-store and relational errors
     propagate, so a retry deletes what is left. The caller decides whose
     sessions these are; this deletes exactly the pairs it is given.
+    ``datasets_being_deleted`` are datasets the caller deletes right after,
+    whose stores are dropped with their Q&A vectors, so none is opened here.
     """
     sessions = list(dict.fromkeys(sessions))
     if any(not session_id for _, session_id in sessions):
@@ -202,6 +208,8 @@ async def delete_sessions(sessions: Iterable[Session]) -> int:
     dataset_targets = (
         await _session_vector_datasets(sessions) if backend_access_control_enabled() else {}
     )
+    for dataset_id in datasets_being_deleted:
+        dataset_targets.pop(dataset_id, None)
     claim_keys = [
         key
         for user_id, session_ids in _by_owner(sessions).items()

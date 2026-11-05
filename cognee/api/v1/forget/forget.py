@@ -309,8 +309,16 @@ async def _forget_everything(user: Any) -> dict:
 
     # Also before the data, and not caught: the dataset half of the session
     # rule finds its sessions only while the datasets exist, so a failure here
-    # must leave them in place for the retry.
-    sessions_removed = await delete_sessions(session_pairs) if session_pairs else 0
+    # must leave them in place for the retry. The deletable datasets' stores
+    # are not detagged: delete_all drops them, Q&A vectors included.
+    sessions_removed = (
+        await delete_sessions(
+            session_pairs,
+            datasets_being_deleted=[dataset.id for dataset in deletable_datasets],
+        )
+        if session_pairs
+        else 0
+    )
 
     await datasets.delete_all(user=user)
 

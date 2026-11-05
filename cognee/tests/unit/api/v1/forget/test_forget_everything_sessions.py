@@ -300,8 +300,9 @@ async def test_forget_everything_deletes_a_session_whose_owner_no_longer_exists(
             "backend_access_control_enabled": lambda: True,
             "get_user": get_user,
             "get_all_user_permission_datasets": AsyncMock(return_value=[]),
-            "_recorded_datasets": AsyncMock(return_value={(USER_B, "b_shared"): DATASET_SHARED}),
-            "_existing_datasets": AsyncMock(return_value={DATASET_SHARED}),
+            # Recorded on a dataset A does not delete, so its store stays and is detagged.
+            "_recorded_datasets": AsyncMock(return_value={(USER_B, "b_shared"): DATASET_PRIVATE}),
+            "_existing_datasets": AsyncMock(return_value={DATASET_PRIVATE}),
             "set_database_global_context_variables": dataset_context,
             "delete_session_qa_vectors": dataset_detag,
         }.items():
@@ -312,7 +313,52 @@ async def test_forget_everything_deletes_a_session_whose_owner_no_longer_exists(
     assert result["sessions_removed"] == 2
     assert await _session_counts(cache, USER_B, "b_shared") == (0, 0, 0)
     # The recorded dataset's store is still detagged for the deleted owner's session.
-    assert entered == [DATASET_SHARED]
+    assert entered == [DATASET_PRIVATE]
+    assert set(dataset_detag.await_args.args[0]) == {(str(USER_B), "b_shared")}
+
+
+@pytest.mark.asyncio
+async def test_forget_everything_skips_the_stores_of_the_datasets_it_deletes(cache):
+    """delete_all drops each deletable dataset's store, Q&A vectors included, so forget opens
+    and detags only the other datasets a session owner can read."""
+    from contextlib import asynccontextmanager
+
+    await _seed_session(cache, USER_B, "b_shared")
+    manager = SessionManager(cache)
+    patches = _patches(
+        manager,
+        session_pairs_by_owner={},
+        dataset_pairs={DATASET_SHARED: [(USER_B, "b_shared")]},
+        deletable_datasets=[SimpleNamespace(id=DATASET_SHARED)],
+    )
+    entered = []
+
+    @asynccontextmanager
+    async def dataset_context(dataset_id, user_id):
+        entered.append(dataset_id)
+        yield
+
+    readable = [SimpleNamespace(id=DATASET_SHARED), SimpleNamespace(id=DATASET_PRIVATE)]
+    dataset_detag = AsyncMock()
+    module = "cognee.modules.session_lifecycle.delete_session"
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        for target, value in {
+            "backend_access_control_enabled": lambda: True,
+            "get_user": AsyncMock(return_value=SimpleNamespace(id=USER_B)),
+            "get_all_user_permission_datasets": AsyncMock(return_value=readable),
+            "_recorded_datasets": AsyncMock(return_value={(USER_B, "b_shared"): DATASET_SHARED}),
+            "_existing_datasets": AsyncMock(return_value={DATASET_SHARED}),
+            "set_database_global_context_variables": dataset_context,
+            "delete_session_qa_vectors": dataset_detag,
+        }.items():
+            stack.enter_context(patch(f"{module}.{target}", value))
+        result = await forget_module._forget_everything(SimpleNamespace(id=USER_A))
+
+    assert result["sessions_removed"] == 1
+    assert await _session_counts(cache, USER_B, "b_shared") == (0, 0, 0)
+    assert entered == [DATASET_PRIVATE]
     assert set(dataset_detag.await_args.args[0]) == {(str(USER_B), "b_shared")}
 
 
