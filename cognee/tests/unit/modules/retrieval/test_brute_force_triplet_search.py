@@ -45,7 +45,7 @@ async def test_typed_scope_projects_before_scoring_only_its_node_and_edge_ids(ba
         graph.add_node(node)
     for node in [first, second]:
         graph.add_edge(Edge(anchor, node, {"edge_text": f"contains {node.id}"}))
-    engine = AsyncMock()
+    engine = vector_engine_mock()
     engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]] * (2 if batch else 1)
 
     async def score(collection_name, data_point_ids, query_vector):
@@ -91,7 +91,7 @@ async def test_typed_scope_projects_before_scoring_only_its_node_and_edge_ids(ba
 @pytest.mark.asyncio
 @pytest.mark.parametrize("batch", [False, True])
 async def test_empty_typed_scope_does_not_embed_or_search(batch):
-    engine = AsyncMock()
+    engine = vector_engine_mock()
     with (
         patch(
             "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
@@ -121,7 +121,7 @@ async def test_typed_scope_keeps_unembedded_edges_with_existing_distance_penalti
     graph.add_node(first)
     graph.add_node(second)
     graph.add_edge(Edge(first, second, {"relationship_type": "has_value"}))
-    engine = AsyncMock()
+    engine = vector_engine_mock()
     engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
     engine.score_by_ids.return_value = []
     with (
@@ -147,7 +147,7 @@ async def test_typed_scope_keeps_unembedded_edges_with_existing_distance_penalti
     "mode", ["unscoped", "nodeset", "nodeset-subclass", "unsupported", "provided", "neighborhood"]
 )
 async def test_other_search_paths_keep_existing_vector_retrieval(mode):
-    engine = AsyncMock()
+    engine = vector_engine_mock()
     engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
     engine.search.return_value = [MockScoredResult("hit", 0.1)]
     if mode == "unsupported":
@@ -203,7 +203,7 @@ async def test_typed_scope_fallback_scans_unfiltered_and_scopes_through_projecti
     graph.add_node(first)
     graph.add_node(second)
     graph.add_edge(Edge(first, second, {"relationship_type": "has_value"}))
-    engine = AsyncMock()
+    engine = vector_engine_mock()
     engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
     engine.score_by_ids = MethodType(VectorDBInterface.score_by_ids, object())
 
