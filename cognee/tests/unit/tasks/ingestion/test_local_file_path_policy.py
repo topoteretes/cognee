@@ -122,11 +122,11 @@ def test_an_explicit_variable_is_honoured_everywhere(
 @pytest.mark.asyncio
 async def test_api_refuses_a_file_outside_the_data_root(fresh_settings, tmp_path):
     fresh_settings()
-    secret = tmp_path / "flag.txt"
-    secret.write_text("secret")
+    outside = tmp_path / "flag.txt"
+    outside.write_text("not for callers")
 
     with operation_origin_scope(ORIGIN_API):
-        for path in (str(secret), secret.as_uri()):
+        for path in (str(outside), outside.as_uri()):
             with pytest.raises(IngestionError, match="Local files are not accepted"):
                 await save_data_item_to_storage_detailed(path)
 
