@@ -28,6 +28,7 @@ from cognee.modules.operations.origin import (
     ORIGIN_SDK,
     operation_origin_scope,
 )
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
 from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
 from cognee.tasks.ingestion.save_data_item_to_storage import (
@@ -99,7 +100,22 @@ def test_unset_variable_refuses_api_requests(fresh_settings):
 
     with operation_origin_scope(ORIGIN_API):
         assert local_file_paths_accepted() is False
-    assert instance.accept_local_file_path is True, "the setting itself is never rewritten"
+    assert instance.accept_local_file_path is None, "the setting itself is never rewritten"
+
+
+def test_assigning_the_setting_in_process_is_explicit(fresh_settings):
+    """An assignment counts like the variable: it wins everywhere until set back to None."""
+    instance = fresh_settings()
+
+    instance.accept_local_file_path = False
+    assert local_file_paths_configured() is True
+    with operation_origin_scope(ORIGIN_SDK):
+        assert local_file_paths_accepted() is False
+
+    instance.accept_local_file_path = None
+    assert local_file_paths_configured() is False
+    with operation_origin_scope(ORIGIN_SDK):
+        assert local_file_paths_accepted() is True
 
 
 @pytest.mark.parametrize("name", [VARIABLE, VARIABLE.lower()])
@@ -208,7 +224,31 @@ async def test_api_still_ingests_text(fresh_settings):
     save.assert_awaited_once_with(note)
 
 
-# --- uploads and cognee's own copies are never gated ----------------------
+# --- uploads, cloned repositories and cognee's own copies are never gated ---
+
+
+@pytest.mark.asyncio
+async def test_api_ingests_the_documents_of_a_repository_it_cloned(fresh_settings, tmp_path):
+    """The caller named a URL; the clone's files are cognee's own paths, not the caller's."""
+    fresh_settings()
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    readme = clone / "README.md"
+    readme.write_text("# repo")
+    manifest = DataItem(data="manifest", label="code_repo:clone")
+
+    async def fake_clone(spec, user=None, dataset_id=None, branch=None):
+        return manifest, [readme], 0
+
+    with (
+        operation_origin_scope(ORIGIN_API),
+        patch("cognee.tasks.code_graph.code_repo.resolve_code_repository_url", fake_clone),
+    ):
+        resolved = await resolve_data_directories(["https://github.com/org/repo"])
+        assert resolved == [manifest, DataItem(data=str(readme), cognee_path=True)]
+        stored = await save_data_item_to_storage_detailed(resolved[1])
+
+    assert stored == StoredFile(file_path=readme.resolve().as_uri())
 
 
 @pytest.mark.asyncio

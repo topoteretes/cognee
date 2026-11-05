@@ -19,7 +19,9 @@ logger = get_logger()
 
 
 class SaveDataSettings(BaseSettings):
-    accept_local_file_path: bool = True
+    # None = not set: the gate decides from the call origin. True or False, from
+    # the environment or assigned in process, is explicit and wins everywhere.
+    accept_local_file_path: bool | None = None
 
     model_config = SettingsConfigDict(extra="allow")
 
@@ -28,8 +30,8 @@ settings = SaveDataSettings()
 
 
 def local_file_paths_configured() -> bool:
-    """Whether ``ACCEPT_LOCAL_FILE_PATH`` was set, rather than left at the code default."""
-    return "accept_local_file_path" in settings.model_fields_set
+    """Whether ``ACCEPT_LOCAL_FILE_PATH`` was set, rather than left to the call origin."""
+    return settings.accept_local_file_path is not None
 
 
 def local_file_paths_accepted() -> bool:
@@ -44,9 +46,15 @@ def local_file_paths_accepted() -> bool:
     refused. Uploads and text are never subject to this: they are stored
     first and loaded from cognee's own copy.
     """
-    if local_file_paths_configured():
+    if settings.accept_local_file_path is not None:
         return settings.accept_local_file_path
     return get_operation_origin() != ORIGIN_API
+
+
+def require_server_path_access(kind: str) -> None:
+    """Raise unless the gate admits a server-side path; ``kind`` names it in the error."""
+    if not local_file_paths_accepted():
+        raise IngestionError(message=f"{kind} are not accepted.")
 
 
 def _resolve_local_file_uri(
@@ -103,9 +111,8 @@ async def save_data_item_to_storage_detailed(
         if parsed_url.scheme == "s3":
             # Read with cognee's own AWS credentials, so it is a server-side
             # path like a local one: same gate.
-            if local_file_paths_accepted():
-                return StoredFile(file_path=data_item)
-            raise IngestionError(message="S3 paths are not accepted.")
+            require_server_path_access("S3 paths")
+            return StoredFile(file_path=data_item)
         elif parsed_url.scheme == "http" or parsed_url.scheme == "https":
             # Guard against SSRF: reject disabled outbound HTTP, non-http(s) schemes,
             # and hosts that resolve to internal/reserved addresses before fetching.
@@ -116,13 +123,11 @@ async def save_data_item_to_storage_detailed(
             )
         # data is local file path
         elif parsed_url.scheme == "file":
-            if local_file_paths_accepted():
-                local_uri = _resolve_local_file_uri(url2pathname(parsed_url.path), strict=True)
-                if local_uri:
-                    return StoredFile(file_path=local_uri)
-                raise IngestionError(message="Local file does not exist or is not a file.")
-            else:
-                raise IngestionError(message="Local files are not accepted.")
+            require_server_path_access("Local files")
+            local_uri = _resolve_local_file_uri(url2pathname(parsed_url.path), strict=True)
+            if local_uri:
+                return StoredFile(file_path=local_uri)
+            raise IngestionError(message="Local file does not exist or is not a file.")
 
         # data is an absolute file path that points at an existing file
         elif (
@@ -143,15 +148,13 @@ async def save_data_item_to_storage_detailed(
             # of becoming a broken file:// URI.
             local_uri = _resolve_local_file_uri(data_item)
             if local_uri:
-                if local_file_paths_accepted():
-                    return StoredFile(file_path=local_uri)
-                raise IngestionError(message="Local files are not accepted.")
+                require_server_path_access("Local files")
+                return StoredFile(file_path=local_uri)
         # Data is a relative file path
         local_uri = _resolve_local_file_uri(data_item)
         if local_uri:
-            if local_file_paths_accepted():
-                return StoredFile(file_path=local_uri)
-            raise IngestionError(message="Local files are not accepted.")
+            require_server_path_access("Local files")
+            return StoredFile(file_path=local_uri)
 
         # data is text, save it to data storage and return the file path
         return await save_data_to_file_detailed(data_item)
@@ -162,6 +165,13 @@ async def save_data_item_to_storage_detailed(
             # path (see DataItem.literal_text). Every storage path ends here, so
             # the flag holds on add(), its incremental pre-save, and update().
             return await save_data_to_file_detailed(data_item.data)
+        if data_item.cognee_path:
+            # A path cognee produced itself (a file of a repository it cloned
+            # from an admitted URL), never one the caller named: no gate.
+            local_uri = _resolve_local_file_uri(data_item.data, strict=True)
+            if local_uri:
+                return StoredFile(file_path=local_uri)
+            raise IngestionError(message="Local file does not exist or is not a file.")
         return await save_data_item_to_storage_detailed(data_item.data)
 
     # data is not a supported type

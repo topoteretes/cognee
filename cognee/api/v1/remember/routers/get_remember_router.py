@@ -525,8 +525,8 @@ def get_remember_router() -> APIRouter:
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        "Local repository paths are disabled on this server "
-                        "(ACCEPT_LOCAL_FILE_PATH=false) — pass a git URL instead."
+                        "Local repository paths are not accepted over HTTP on this server "
+                        "(set ACCEPT_LOCAL_FILE_PATH=true to allow them) — pass a git URL instead."
                     ),
                 )
 
