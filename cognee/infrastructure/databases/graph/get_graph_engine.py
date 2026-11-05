@@ -17,6 +17,24 @@ from .supported_databases import supported_databases
 
 logger = get_logger("GraphEngine")
 
+POSTGRES_GRAPH_DEMO_NOTICE = (
+    "Graph database provider '{provider}' uses the Postgres demo graph adapter "
+    "(postgres_demo). Postgres as a graph store is a demo feature and is not "
+    "production-ready; use a graph-native backend (Ladybug, Neo4j) for production "
+    "workloads. Interested in production use of Postgres as a graph database? Write to "
+    "social@cognee.ai to explore the options."
+)
+_postgres_graph_demo_notice_logged = False
+
+
+def _log_postgres_graph_demo_notice_once(provider: str) -> None:
+    """Tell the operator once per process that the Postgres graph backend is a demo."""
+    global _postgres_graph_demo_notice_logged
+    if _postgres_graph_demo_notice_logged:
+        return
+    _postgres_graph_demo_notice_logged = True
+    logger.warning(POSTGRES_GRAPH_DEMO_NOTICE.format(provider=provider))
+
 
 def _normalize_graph_database_provider(provider: str) -> str:
     return provider.lower() if isinstance(provider, str) else provider
@@ -383,7 +401,8 @@ def _create_graph_engine(
     # DEMO: Postgres as a graph store is not production-ready — use a graph-native
     # backend (Kuzu, Neo4j) for production. See PostgresDemoAdapter's docstring for details.
     # ``postgres_demo`` is the canonical name; ``postgres`` stays accepted so existing
-    # deployments and CI keep resolving to this adapter.
+    # deployments and CI keep resolving to this adapter. Either spelling logs
+    # POSTGRES_GRAPH_DEMO_NOTICE once per process, since the alias never says "demo".
     elif graph_database_provider in ("postgres", "postgres_demo"):
         from cognee.context_global_variables import backend_access_control_enabled
 
@@ -439,6 +458,7 @@ def _create_graph_engine(
 
         from .postgres_demo.adapter import PostgresDemoAdapter
 
+        _log_postgres_graph_demo_notice_once(graph_database_provider)
         return PostgresDemoAdapter(
             connection_string=connection_string, schema=graph_database_schema
         )
