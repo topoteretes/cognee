@@ -36,6 +36,7 @@ class ChunksRetriever(BaseRetriever):
         top_k: int | None = 5,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
+        document_name: list[str] | None = None,
     ):
         """
         Initializes the chunk retriever.
@@ -50,10 +51,13 @@ class ChunksRetriever(BaseRetriever):
               node set filtering.
             - node_name_filter_operator (str): Logical operator used when applying
               multiple node_name filters, such as "OR" or "AND". Defaults to "OR".
+            - document_name (Optional[List[str]]): Source document names used to
+              filter chunks; distinct from NodeSet tags.
         """
         self.top_k = top_k
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
+        self.document_name = document_name
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
@@ -129,13 +133,18 @@ class ChunksRetriever(BaseRetriever):
         vector_engine = unified.vector
 
         try:
+            search_kwargs = {
+                "limit": self.top_k,
+                "include_payload": True,
+                "node_name": self.node_name,
+                "node_name_filter_operator": self.node_name_filter_operator,
+            }
+            if self.document_name:
+                search_kwargs["document_name"] = self.document_name
             found_chunks = await vector_engine.search(
                 "DocumentChunk_text",
                 query,
-                limit=self.top_k,
-                include_payload=True,
-                node_name=self.node_name,
-                node_name_filter_operator=self.node_name_filter_operator,
+                **search_kwargs,
             )
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found in vector database")
