@@ -52,7 +52,9 @@ USER = SimpleNamespace(id=uuid4())
 DATASET = SimpleNamespace(id=uuid4(), name="repo", owner_id=USER.id)
 
 
-def _entry(content, section="success_patterns", source_trace_ids=(), entry_id=None):
+def _entry(
+    content, section="success_patterns", source_trace_ids=(), entry_id=None, source_qa_ids=()
+):
     return SessionContextEntry(
         id=entry_id or f"e-{uuid4().hex[:6]}",
         section=section,
@@ -61,13 +63,30 @@ def _entry(content, section="success_patterns", source_trace_ids=(), entry_id=No
         confidence=0.9,
         created_at="2026-11-03T10:00:00+00:00",
         source_trace_ids=list(source_trace_ids),
+        source_qa_ids=list(source_qa_ids),
     )
 
 
-def _written(lesson_type="other", state_key="", statement="MarkTaskCommand lives in cli/tasks.py."):
-    return CodingWrittenLesson(
+def _written(
+    lesson_type="other",
+    state_key="",
+    statement="MarkTaskCommand lives in cli/tasks.py.",
+    context=None,
+):
+    lesson = CodingWrittenLesson(
         accept=True, statement=statement, lesson_type=lesson_type, state_key=state_key
     )
+    return lesson.with_turn_context(context or {})
+
+
+def _row(qa_id, question, time, answer="Done.", context=""):
+    return {
+        "qa_id": qa_id,
+        "question": question,
+        "answer": answer,
+        "time": time,
+        "context": context,
+    }
 
 
 # -- Mode switch ------------------------------------------------------------------
@@ -133,6 +152,63 @@ def test_pinned_turns_open_every_batch_of_six_candidates():
         assert batch.text.startswith("User: Add tests\nAssistant: Added.")
     assert [len(batch.entry_ids) for batch in batches] == [6, 6, 1]
     assert batches[0].entry_ids == [f"c{index}" for index in range(6)]
+
+
+def test_each_batch_pins_only_the_turns_of_its_candidates_in_turn_order():
+    qa_rows = [
+        _row("q1", "First", "2026-11-03T08:00:00"),
+        _row("q2", "Second", "2026-11-03T09:00:00"),
+        _row("q3", "Third", "2026-11-03T10:00:00"),
+    ]
+    entries = [
+        _entry(f"late {index}", entry_id=f"l{index}", source_qa_ids=["q3"]) for index in range(6)
+    ]
+    entries += [_entry("early", entry_id="e1", source_qa_ids=["q1"])]
+    entries += [_entry("unlinked", entry_id="u1")]  # judged against the newest turn
+    entries += [_entry("both", entry_id="b1", source_qa_ids=["q2", "q1"])]
+
+    batches = build_curator_batches(qa_rows, entries, pin_turns=True)
+
+    assert [batch.entry_ids for batch in batches] == [
+        ["e1", "b1", "l0", "l1", "l2", "l3"],
+        ["l4", "l5", "u1"],
+    ]
+    first, second = (batch.text for batch in batches)
+    assert first.index("User: First") < first.index("User: Second") < first.index("User: Third")
+    assert first.index("User: Third") < first.index("Candidate e1")
+    assert "User: First" not in second and "User: Second" not in second
+    assert second.startswith("User: Third")
+
+
+def test_turn_rows_for_entries_are_the_linked_turns_or_the_newest():
+    qa_rows = [
+        _row("q1", "First", "2026-11-03T08:00:00"),
+        _row("q2", "Second", "2026-11-03T09:00:00"),
+    ]
+    linked = [_entry("x", source_qa_ids=["q1"])]
+    assert [row["qa_id"] for row in distill_module.rows_for_entries(qa_rows, linked)] == ["q1"]
+    unlinked = [_entry("y"), _entry("z", source_qa_ids=["gone"])]
+    assert [row["qa_id"] for row in distill_module.rows_for_entries(qa_rows, unlinked)] == ["q2"]
+    assert distill_module.rows_for_entries(qa_rows, []) == []
+
+
+def test_lesson_turn_context_is_the_newest_turn_of_its_members():
+    qa_rows = [
+        _row("q1", "First", "2026-11-03T08:00:00", context='{"end_commit": "one"}'),
+        _row("q2", "Second", "2026-11-03T09:00:00", context='{"end_commit": "two"}'),
+        _row("q3", "Third", "2026-11-03T10:00:00", context='{"end_commit": "three"}'),
+    ]
+    members = [_entry("a", source_qa_ids=["q1"]), _entry("b", source_qa_ids=["q2"])]
+    assert distill_module.lesson_turn_context(members, qa_rows) == {"end_commit": "two"}
+    assert distill_module.lesson_turn_context([], qa_rows) == {"end_commit": "three"}
+    assert distill_module.lesson_turn_context(members, []) == {}
+
+
+def test_a_capped_coding_run_keeps_every_pinned_turn():
+    qa_rows = [_row("q1", "First", "2026-11-03T08:00:00")]
+    entries = [_entry(f"c{index}", entry_id=f"c{index}") for index in range(8)]
+    rows, chosen = distill_module.select_curator_inputs(qa_rows, entries, 1, pin_turns=True)
+    assert rows == qa_rows and len(chosen) == 6
 
 
 def test_default_batches_keep_the_turn_in_one_block():
@@ -423,15 +499,14 @@ async def test_publish_stores_typed_items_and_replaces_the_older_state_key(publi
         },
     )
     publish_env.existing = [older, older_pitfall]
+    context = {"date": "2026-11-03", "end_commit": "abc", "branch": "dev"}
     accepted = [
-        _written("state", "test-baseline", "pytest -q: 40 passed, 0 failed."),
-        _written("pitfall", "pitfall:Edit:no-changes-to-make:py", "Edit fails → script."),
-        _written("location", "", "Routes live in api/routes.py."),
+        _written("state", "test-baseline", "pytest -q: 40 passed, 0 failed.", context),
+        _written("pitfall", "pitfall:Edit:no-changes-to-make:py", "Edit fails → script.", context),
+        _written("location", "", "Routes live in api/routes.py.", context),
     ]
 
-    documents = await publish_distilled_lessons(
-        scope, accepted, qa_context={"date": "2026-11-03", "end_commit": "abc", "branch": "dev"}
-    )
+    documents = await publish_distilled_lessons(scope, accepted, coding=True)
 
     items = publish_env.added
     assert [item.external_metadata["lesson_type"] for item in items] == [
@@ -457,16 +532,16 @@ async def test_publish_keeps_the_pitfall_count_when_the_same_session_runs_again(
     scope_b = SimpleNamespace(session_id="s-b", user=USER, user_id=str(USER.id), dataset=DATASET)
 
     await publish_distilled_lessons(
-        scope_a, [_written("pitfall", pitfall, "Edit → script.")], qa_context={}
+        scope_a, [_written("pitfall", pitfall, "Edit → script.")], coding=True
     )
     await publish_distilled_lessons(
-        scope_b, [_written("pitfall", pitfall, "Edit → rewrite.")], qa_context={}
+        scope_b, [_written("pitfall", pitfall, "Edit → rewrite.")], coding=True
     )
     assert publish_env.added[0].external_metadata["seen_in_sessions"] == 2
     assert len(publish_env.deleted) == 1  # A's row
 
     await publish_distilled_lessons(
-        scope_b, [_written("pitfall", pitfall, "Edit → rewrite.")], qa_context={}
+        scope_b, [_written("pitfall", pitfall, "Edit → rewrite.")], coding=True
     )
     assert publish_env.added[0].external_metadata["seen_in_sessions"] == 2
     assert "(seen in 2 sessions)" in publish_env.added[0].data
@@ -490,8 +565,8 @@ async def test_publish_of_an_older_session_does_not_displace_a_newer_state(publi
 
     await publish_distilled_lessons(
         scope,
-        [_written("state", "test-baseline", "pytest: 10 passed.")],
-        qa_context={"date": "2026-11-02"},
+        [_written("state", "test-baseline", "pytest: 10 passed.", {"date": "2026-11-02"})],
+        coding=True,
     )
 
     (stored,) = publish_env.added
@@ -521,7 +596,7 @@ async def test_publish_replaces_the_older_lesson_even_when_the_hook_after_cognif
 
     with pytest.raises(AfterRunHookError):
         await publish_distilled_lessons(
-            scope, [_written("state", "test-baseline", "pytest passes.")], qa_context={}
+            scope, [_written("state", "test-baseline", "pytest passes.")], coding=True
         )
 
     assert publish_env.deleted == [older.id]
@@ -531,13 +606,13 @@ async def test_publish_replaces_the_older_lesson_even_when_the_hook_after_cognif
 async def test_publish_keeps_the_same_sessions_identical_lesson(publish_env):
     scope = SimpleNamespace(session_id="s-1", user=USER, user_id=str(USER.id), dataset=DATASET)
     lesson = _written("state", "test-baseline", "pytest -q passes.")
-    await publish_distilled_lessons(scope, [lesson], qa_context={})
+    await publish_distilled_lessons(scope, [lesson], coding=True)
     (item,) = publish_env.added
     publish_env.existing = [
         SimpleNamespace(id=item.data_id, external_metadata=item.external_metadata)
     ]
 
-    await publish_distilled_lessons(scope, [lesson], qa_context={})
+    await publish_distilled_lessons(scope, [lesson], coding=True)
 
     assert publish_env.deleted == []
 
@@ -584,16 +659,15 @@ class _CodingSessionManager:
 
 
 @pytest.mark.asyncio
-async def test_distill_session_in_coding_mode_judges_the_latest_turn(monkeypatch):
-    entries = [_entry("Routes live in api/routes.py.", entry_id="c1")]
+async def test_distill_session_in_coding_mode_judges_each_candidate_by_its_turn(monkeypatch):
+    entries = [
+        _entry("Routes live in api/routes.py.", entry_id="c1", source_qa_ids=["q1"]),
+        _entry("Tests live in tests/.", entry_id="c2"),  # no link: the newest turn
+    ]
     qa_rows = [
-        {"question": "old", "answer": "old", "time": "2026-11-03T08:00:00", "context": ""},
-        {
-            "question": "Add a route",
-            "answer": "Added.",
-            "time": "2026-11-03T09:00:00",
-            "context": '{"date": "2026-11-03", "end_commit": "abc"}',
-        },
+        _row("q1", "Add a route", "2026-11-03T08:00:00", context='{"end_commit": "old"}'),
+        _row("q2", "Unrelated", "2026-11-03T08:30:00"),
+        _row("q3", "Add tests", "2026-11-03T09:00:00", context='{"end_commit": "abc"}'),
     ]
     manager = _CodingSessionManager(entries, qa_rows)
     monkeypatch.setattr(distill_module, "get_session_manager", lambda: manager)
@@ -616,12 +690,12 @@ async def test_distill_session_in_coding_mode_judges_the_latest_turn(monkeypatch
             curated_entry_ids={"c1"},
         )
 
-    async def fake_accept(scope, proposed, context_entries, *, coding=False):
-        seen["accept"] = coding
+    async def fake_accept(scope, proposed, context_entries, *, coding=False, qa_rows=None):
+        seen["accept"] = (coding, [row["qa_id"] for row in qa_rows])
         return [_written("location")], 0
 
-    async def fake_publish(scope, accepted, *, qa_context=None):
-        seen["qa_context"] = qa_context
+    async def fake_publish(scope, accepted, *, coding=False):
+        seen["publish"] = coding
         return ["doc"]
 
     monkeypatch.setattr(distill_module, "propose_lessons", fake_propose)
@@ -632,10 +706,11 @@ async def test_distill_session_in_coding_mode_judges_the_latest_turn(monkeypatch
 
     assert result.status == "completed"
     assert permissions_checked == ["write", "delete"]
-    assert manager.session_reads == [{"last_n": 1, "since": None}]
-    assert [row["question"] for row in seen["propose"][0]] == ["Add a route"]
-    assert seen["propose"][1] is True and seen["accept"] is True
-    assert seen["qa_context"] == {"date": "2026-11-03", "end_commit": "abc"}
+    assert manager.session_reads == [{"last_n": None, "since": None}]
+    # The turns the candidates came from, in time order; the unlinked turn q2 is not read.
+    assert [row["question"] for row in seen["propose"][0]] == ["Add a route", "Add tests"]
+    assert seen["propose"][1] is True
+    assert seen["accept"] == (True, ["q1", "q3"]) and seen["publish"] is True
 
 
 @pytest.mark.asyncio

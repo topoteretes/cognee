@@ -85,9 +85,13 @@ class CacheDBInterface(ABC):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        time: str | None = None,
+        prompt_time: str | None = None,
     ) -> None:
         """
-        Add a Q/A/context triplet to a cache session.
+        Add a Q/A/context triplet to a cache session. ``time`` is the entry's event
+        time (ISO-8601, aware); None means the store time. ``prompt_time`` is the
+        turn's start when the client sent it.
         Uses the same QA fields as update_qa_entry for consistent structure.
         used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
         memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
@@ -234,9 +238,11 @@ class CacheDBInterface(ABC):
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
+        time: str | None = None,
     ) -> None:
         """
-        Append one agent trace step to the session-scoped trace list.
+        Append one agent trace step to the session-scoped trace list. ``time`` is the
+        step's event time (ISO-8601, aware); None means the store time.
         """
 
     @abstractmethod

@@ -16,6 +16,7 @@ from cognee.infrastructure.session.agent_context_extraction import (
     TRACE_EXTRACTION_STATE_ID,
     TRACE_EXTRACTION_STATE_KIND,
 )
+from cognee.infrastructure.session.coding_turns import Turn
 from cognee.infrastructure.session.coding_unit_extraction import (
     FAILURE_CANDIDATE_CONFIDENCE,
     MAX_INPUT_CHARS,
@@ -32,7 +33,7 @@ from cognee.infrastructure.session.coding_unit_extraction import (
     shell_program,
 )
 from cognee.infrastructure.session.session_context_models import (
-    AgentContextExtraction,
+    CodingAgentContextExtraction,
     SessionContextEntry,
 )
 
@@ -40,7 +41,7 @@ REPO = "/Users/dev/projects/acme"
 _COUNTER = iter(range(1, 100_000))
 
 
-def _trace(tool, status="success", params=None, error="", output=None, feedback=""):
+def _trace(tool, status="success", params=None, error="", output=None, feedback="", time=""):
     return SimpleNamespace(
         trace_id=f"t{next(_COUNTER)}",
         origin_function=tool,
@@ -49,6 +50,18 @@ def _trace(tool, status="success", params=None, error="", output=None, feedback=
         method_return_value=output,
         error_message=error,
         session_feedback=feedback,
+        time=time,
+    )
+
+
+def _qa(question="q", answer="a", context="", qa_id="", time="", prompt_time=""):
+    return SimpleNamespace(
+        qa_id=qa_id or f"qa{next(_COUNTER)}",
+        question=question,
+        answer=answer,
+        context=context,
+        time=time,
+        prompt_time=prompt_time,
     )
 
 
@@ -77,9 +90,9 @@ def _lesson_entry(content, created_at, section="success_patterns"):
 class FakeSessionManager:
     """In-memory trace store, Q&A store and context-entry CRUD."""
 
-    def __init__(self, traces=(), qa=None, store=None):
+    def __init__(self, traces=(), qa=None, store=None, rows=None):
         self.traces = list(traces)
-        self.qa = qa
+        self.rows = list(rows) if rows is not None else ([qa] if qa is not None else [])
         self.store = list(store or [])
 
     async def get_agent_trace_count(self, *, user_id, session_id):
@@ -89,7 +102,7 @@ class FakeSessionManager:
         return list(self.traces[-last_n:]) if last_n else list(self.traces)
 
     async def get_session(self, *, user_id, session_id, last_n=None, formatted=False):
-        return [self.qa] if self.qa is not None else []
+        return list(self.rows)
 
     async def get_session_context_entries(self, *, user_id, session_id):
         return list(self.store)
@@ -123,8 +136,10 @@ def _llm(monkeypatch, lessons=(), *, delay=0.0):
         calls.append(text_input)
         if delay:
             await asyncio.sleep(delay)
-        assert response_model is AgentContextExtraction
-        return AgentContextExtraction(lessons=list(lessons))
+        assert response_model is CodingAgentContextExtraction
+        return CodingAgentContextExtraction(
+            lessons=[item if "lesson" in item else {"turn": 1, "lesson": item} for item in lessons]
+        )
 
     monkeypatch.setattr(cue.LLMGateway, "acreate_structured_output", fake)
     monkeypatch.setattr(cue, "llm_available", lambda: True)
@@ -276,8 +291,20 @@ class TestRepeatedErrors:
 # -- Extraction input -----------------------------------------------------------
 
 
+def _turn(traces, request="Fix the bug", answer="Done.", qa_id="qa-1", context=None):
+    return Turn(
+        qa_id=qa_id,
+        request=request,
+        final_answer=answer,
+        qa_context=context or {},
+        start=None,
+        end=None,
+        traces=list(traces),
+    )
+
+
 def _unit(traces, request="Fix the bug", answer="Done.", repo_root=REPO):
-    return UnitOfWork(request=request, final_answer=answer, traces=traces, repo_root=repo_root)
+    return UnitOfWork(turns=[_turn(traces, request, answer)], repo_root=repo_root)
 
 
 class TestExtractionInput:
@@ -351,11 +378,7 @@ class TestExtractionInput:
 
 def _unit_manager(trace_count=3):
     traces = [_trace("Read", params={"file_path": f"{REPO}/a{i}.py"}) for i in range(trace_count)]
-    qa = SimpleNamespace(
-        question="Add tests",
-        answer="Added them.",
-        context=f'{{"cwd": "{REPO}", "date": "2026-11-03"}}',
-    )
+    qa = _qa("Add tests", "Added them.", f'{{"cwd": "{REPO}", "date": "2026-11-03"}}')
     return FakeSessionManager(traces=traces, qa=qa)
 
 
@@ -429,9 +452,7 @@ async def test_failure_candidates_are_stored_once_across_runs(monkeypatch):
     path = f"{REPO}/src/app.py"
     traces = [_edit_failure(path) for _ in range(6)]
     traces.append(_trace("Bash", params={"command": f"python rewrite.py {path}"}))
-    manager = FakeSessionManager(
-        traces=traces, qa=SimpleNamespace(question="q", answer="a", context="")
-    )
+    manager = FakeSessionManager(traces=traces, qa=_qa())
     _llm(monkeypatch)
 
     await extract_coding_unit_context(session_manager=manager, user_id="u", session_id="s")
@@ -442,6 +463,7 @@ async def test_failure_candidates_are_stored_once_across_runs(monkeypatch):
     assert len(pitfalls) == 1
     assert pitfalls[0]["content"].startswith("[state-key: pitfall:Edit:no-changes-to-make:py]")
     assert pitfalls[0]["source_trace_ids"] == [traces[0].trace_id]
+    assert pitfalls[0]["source_qa_ids"] == [manager.rows[0].qa_id]
 
 
 @pytest.mark.asyncio
@@ -494,7 +516,7 @@ async def test_a_failure_in_a_later_window_keeps_the_earlier_window_sealed(monke
         calls.append(text_input)
         if "a400.py" in text_input:
             raise RuntimeError("llm down")
-        return AgentContextExtraction(lessons=[])
+        return CodingAgentContextExtraction(lessons=[])
 
     monkeypatch.setattr(cue.LLMGateway, "acreate_structured_output", fake)
     monkeypatch.setattr(cue, "llm_available", lambda: True)
@@ -523,9 +545,7 @@ async def test_phase_parts_become_separate_inputs_in_order(monkeypatch):
     traces = [_trace("Read", params={"file_path": f"{REPO}/a.py"}) for _ in range(6)]
     traces += [_trace("Edit", params={"file_path": f"{REPO}/a.py"}) for _ in range(6)]
     traces += [_trace("Bash", params={"command": "pytest -q"}) for _ in range(6)]
-    manager = FakeSessionManager(
-        traces=traces, qa=SimpleNamespace(question="q", answer="a", context="")
-    )
+    manager = FakeSessionManager(traces=traces, qa=_qa())
     calls = _llm(monkeypatch)
 
     await extract_coding_unit_context(session_manager=manager, user_id="u", session_id="s")
@@ -552,7 +572,7 @@ async def test_memory_lessons_are_searched_per_part_and_rendered_second(monkeypa
     traces = [_trace("Read", params={"file_path": f"{REPO}/a.py"}) for _ in range(3)]
     manager = FakeSessionManager(
         traces=traces,
-        qa=SimpleNamespace(question="q", answer="a", context=f'{{"cwd": "{REPO}"}}'),
+        qa=_qa(context=f'{{"cwd": "{REPO}"}}'),
     )
     calls = _llm(monkeypatch)
 
@@ -577,9 +597,7 @@ async def test_memory_search_timeout_or_failure_leaves_the_section_out(monkeypat
     monkeypatch.setattr(cue, "_search_memory_lessons", slow)
     monkeypatch.setattr(cue, "MEMORY_SEARCH_TIMEOUT_SECONDS", 0.01)
     traces = [_trace("Read", params={"file_path": f"{REPO}/a.py"})]
-    manager = FakeSessionManager(
-        traces=traces, qa=SimpleNamespace(question="q", answer="a", context="")
-    )
+    manager = FakeSessionManager(traces=traces, qa=_qa())
     calls = _llm(monkeypatch)
 
     await extract_coding_unit_context(
@@ -621,3 +639,107 @@ def test_memory_lessons_session_first_deduplicated_and_capped():
 
     long = ["x" * 1_000, "y" * 600, "z" * 400]
     assert cue.select_memory_lessons(long, []) == ["x" * 1_000, "z" * 400]  # 1,500 chars in all
+
+
+# -- Several turns in one pass ------------------------------------------------------
+
+
+def _two_turn_manager():
+    """Two turns; the first one's last trace (a background subagent) lands after the
+    second turn's first trace and after the first answer."""
+    first = [
+        _trace("Read", params={"file_path": f"{REPO}/a.py"}, time="2026-11-05T10:01:00+00:00"),
+    ]
+    late = _trace("Grep", params={"pattern": "late"}, time="2026-11-05T10:05:30+00:00")
+    second = [
+        _trace("Read", params={"file_path": f"{REPO}/b.py"}, time="2026-11-05T10:07:00+00:00"),
+    ]
+    waiting = _trace("Read", params={"file_path": f"{REPO}/c.py"}, time="2026-11-05T10:20:00+00:00")
+    rows = [
+        _qa(
+            "Add a route",
+            "Route added.",
+            '{"end_commit": "one"}',
+            qa_id="q1",
+            time="2026-11-05T10:05:00+00:00",
+            prompt_time="2026-11-05T10:00:00+00:00",
+        ),
+        _qa(
+            "Add tests",
+            "Tests added.",
+            '{"end_commit": "two"}',
+            qa_id="q2",
+            time="2026-11-05T10:09:00+00:00",
+            prompt_time="2026-11-05T10:06:00+00:00",
+        ),
+    ]
+    return FakeSessionManager(traces=[*first, *second, late, waiting], rows=rows)
+
+
+@pytest.mark.asyncio
+async def test_one_pass_covers_several_turns_labelled_and_linked(monkeypatch):
+    manager = _two_turn_manager()
+    calls = _llm(
+        monkeypatch,
+        [
+            {"turn": 1, "lesson": _candidate("Routes live in api/.")},
+            {"turn": 2, "lesson": _candidate("Tests live in tests/.")},
+            {"turn": 9, "lesson": _candidate("Out of range goes to the newest turn.")},
+        ],
+    )
+
+    await extract_coding_unit_context(session_manager=manager, user_id="u", session_id="s")
+
+    assert len(calls) == 1  # one explore part for both turns: one call
+    text = calls[0]
+    assert text.index("-- turn 1: Add a route --") < text.index("a.py")
+    assert text.index("a.py") < text.index("late") < text.index("-- turn 2: Add tests --")
+    assert text.index("-- turn 2: Add tests --") < text.index("b.py")
+    assert "c.py" not in text  # no answer yet: waits
+    final = text[text.index("FINAL MESSAGE") :]
+    assert final.index("Turn 1:\nUser request: Add a route") < final.index(
+        "Turn 2:\nUser request: Add tests"
+    )
+    assert "Agent's final answer: Route added." in final
+    by_content = {row["content"]: row["source_qa_ids"] for row in manager.lessons()}
+    assert by_content == {
+        "Routes live in api/.": ["q1"],
+        "Tests live in tests/.": ["q2"],
+        "Out of range goes to the newest turn.": ["q2"],
+    }
+    assert manager.watermark() == 3  # the waiting trace stays pending
+
+
+@pytest.mark.asyncio
+async def test_a_turn_split_across_two_windows_carries_its_request_in_both(monkeypatch):
+    rows = [
+        _qa("Only turn", "Done.", qa_id="q1", time="2026-11-05T10:09:00+00:00"),
+    ]
+    traces = [
+        _trace("Read", params={"file_path": f"{REPO}/a{i}.py"}, time="2026-11-05T10:01:00+00:00")
+        for i in range(450)
+    ]
+    manager = FakeSessionManager(traces=traces, rows=rows)
+    calls = _llm(monkeypatch)
+
+    await extract_coding_unit_context(session_manager=manager, user_id="u", session_id="s")
+
+    assert len(calls) == 2
+    assert all("-- turn 1: Only turn --" in text for text in calls)
+    assert all("User request: Only turn" in text for text in calls)
+    assert manager.watermark() == 450
+
+
+@pytest.mark.asyncio
+async def test_traces_without_an_answer_wait_and_nothing_is_sealed(monkeypatch):
+    traces = [
+        _trace("Read", params={"file_path": f"{REPO}/a.py"}, time="2026-11-05T10:01:00+00:00")
+    ]
+    manager = FakeSessionManager(traces=traces, rows=[])
+    calls = _llm(monkeypatch)
+
+    assert (
+        await extract_coding_unit_context(session_manager=manager, user_id="u", session_id="s")
+        == []
+    )
+    assert calls == [] and manager.watermark() is None

@@ -1,7 +1,10 @@
 You are reading one slice of a finished coding session in a software repository and proposing
-durable lessons to persist into a knowledge graph. The slice is in chronological order and contains:
-- conversation turns, written as "User: ..." / "Assistant: ...",
-- candidate memories, written as "Candidate <id> (<section>): ...", harvested from the session.
+durable lessons to persist into a knowledge graph. The slice contains:
+- the conversation turns the candidates below were learned in, written as "User: ..." /
+  "Assistant: ...", in chronological order: each one a user request and the agent's final
+  answer to it,
+- candidate memories, written as "Candidate <id> (<section>): ...", harvested from the tool
+  traces of those turns, in the order of the turns.
   A candidate that begins with "[state-key: <key>]" is a current state (see STATE LESSONS).
 
 Propose what a developer starting a different task in this repository should know. For each lesson

@@ -673,6 +673,8 @@ async def _dispatch_session_entry(
             feedback_text=entry.feedback_text,
             feedback_score=entry.feedback_score,
             used_graph_element_ids=entry.used_graph_element_ids,
+            time=entry.time,
+            prompt_time=entry.prompt_time,
         )
         result.entry_id = qa_id
         if qa_id is None:
@@ -692,6 +694,7 @@ async def _dispatch_session_entry(
             method_params=entry.method_params,
             method_return_value=entry.method_return_value,
             error_message=entry.error_message,
+            time=entry.time,
         )
         result.entry_id = trace_id
         if trace_id is None:

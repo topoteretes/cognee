@@ -19,12 +19,30 @@ from the graph glossary, and outdated project state accumulating across sessions
 ## What changes
 
 **Nothing happens mid-session.** The per-trace hooks are off. `improve()` (the
-`extract_agent_context` stage) extracts one *unit of work* at a time: the traces past the
-session's extraction watermark, plus the latest Q&A entry as the user request and the
-agent's final answer. A backlog of more than 400 pending traces (improves that failed or
+`extract_agent_context` stage) extracts the traces past the session's extraction
+watermark, each paired with the *turn* it belongs to: the user request and the agent's
+final answer it was made for. The plugin runs `improve()` at session end and on a
+cooldown, so the pending traces usually span many turns; they are all extracted in one
+pass, labelled per turn, so the number of LLM calls follows the amount of trace text, not
+the number of turns. A backlog of more than 400 pending traces (improves that failed or
 were off for a while) is walked oldest first in windows of 400, the watermark sealed after
 each, so a failure in a later window never repeats an earlier one and no trace is skipped.
 The stage no longer requires `AUTO_FEEDBACK`.
+
+**Traces are paired to turns by time, not position**
+(`cognee/infrastructure/session/coding_turns.py`). The plugin's Stop hook writes the
+answer asynchronously, so the first traces of the next turn can land before it, and a
+subagent left in the background keeps writing traces after the turn is over; the order
+rows arrive in says nothing reliable. Instead every entry carries the moment of its event:
+`QAEntry.time` (the turn's end) and `QAEntry.prompt_time` (its start), `TraceEntry.time`
+(when the tool call finished), all stamped by the plugin on one clock, and by the server
+at store time when a client sends none. A turn starts at its `prompt_time`, else at the
+previous answer's time, and ends at its answer's time. A trace belongs to the latest turn
+that had started when it happened (so a trace between one turn's answer and the next
+turn's prompt is the earlier turn's late work), else to the first turn; a trace without a
+time (a row from before the field existed) belongs to the newest turn, as every trace did
+before. A trace newer than the last answer has no answer yet: it and everything stored
+after it wait for the next `improve()`, which keeps the watermark a plain count.
 
 **Traces are split into parts.** Each trace is classified without an LLM
 (`cognee/infrastructure/session/trace_phases.py`): *explore* for read and search tools,
@@ -50,7 +68,8 @@ into trace chunks, every chunk repeating every section), in this order:
    search over a query built from the part's file paths, first error lines, commands and
    patterns; this session's lessons first, then the dataset's, without duplicates. The
    search has a 30 s timeout and is fail-open: when it fails, the section is left out.
-3. `TRACES (part k of N, phase <phase>)`: one line per trace, `- <tool> <input> [<status>] | feedback | error | output`,
+3. `TRACES (part k of N, phase <phase>)`: a `-- turn k: <request> --` line opens each
+   turn's traces, then one line per trace, `- <tool> <input> [<status>] | feedback | error | output`,
    with the tool input (repo-relative file path, the command, the search pattern, or the
    old/new snippets of an edit), errors and outputs cut at 600 chars, secrets redacted.
 4. `REPEATED ERRORS AND WHAT WORKED`: failed traces grouped by tool and normalized first
@@ -58,27 +77,36 @@ into trace chunks, every chunk repeating every section), in this order:
    the first later successful call that changed the same file or reran the same program
    on the same target (`python broken.py` again, not `python --version`). The section
    shows the first 10 groups; the deterministic pitfall candidates cover every fixed group.
-5. `FINAL MESSAGE`: the request (1,200 chars) and the final answer (6,000 chars).
+5. `FINAL MESSAGE`: for each turn the input covers, numbered as in `TRACES`, the request
+   (1,200 chars) and the final answer (6,000 chars).
 
 Parts run in order so each sees the candidates of the earlier ones; up to 10 candidates per
-call. After the last part, each fixed error group stores one deterministic `failure_lessons`
-candidate (confidence 0.9) that opens with its pitfall key, so it survives the curator as a
-pitfall and replaces its predecessor:
+call, each naming the turn it was learned in (`CodingAgentContextExtraction`; a number
+outside the input's turns counts as its newest). Every stored candidate links that turn's
+Q&A row (`SessionContextEntry.source_qa_ids`), which is how the distillation finds the
+request and answer to judge it against. After the last part, each fixed error group stores
+one deterministic `failure_lessons` candidate (confidence 0.9) that opens with its pitfall
+key, linked to its failing trace's turn, so it survives the curator as a pitfall and
+replaces its predecessor:
 
 ```
 [state-key: pitfall:Edit:no-changes-to-make:py] Edit src/app.py 'foo' -> 'foo' failed with
 "no changes to make: ..." → Bash python rewrite.py src/app.py
 ```
 
-**Once per unit.** The extraction holds a per-(user, session) lock, reads the watermark
-inside it and advances it to the trace count it loaded. A second trigger on the same unit,
-sequential or concurrent, makes no LLM call. An LLM failure propagates before the watermark
-moves, so the unit is retried by the next `improve()`.
+**Once per trace.** The extraction holds a per-(user, session) lock, reads the watermark
+inside it and advances it past each window it extracted. A second trigger on the same
+traces, sequential or concurrent, makes no LLM call. An LLM failure propagates before the
+window's watermark moves, so the window is retried by the next `improve()`.
 
 **Coding prompts and typed lessons.** The `distill_sessions` stage uses the prompts under
 `cognee/infrastructure/llm/prompts/coding/` (the default files are untouched) and typed
-models. The curator sees the unit's request and final answer at the top of every batch of
-six candidates. The writer additionally gets `PROPOSED STATE KEY`, a glossary recased from
+models. The candidates are batched six at a time in the order of their turns, and every
+batch opens with the request and final answer of the turns its candidates were learned in
+(a candidate that links no turn is judged against the newest one), so the call count is
+the same as with one pinned turn while each candidate is judged against its own request
+and answer. Each accepted lesson takes the date, commit and branch of its own turn (the
+newest of its members' turns). The writer additionally gets `PROPOSED STATE KEY`, a glossary recased from
 the session's own text (the graph stores `marktaskcommand`; the lesson says
 `MarkTaskCommand`) and a compact STYLE line (statements of about 25 words). Evidence rules
 then settle the type: a lesson backed by a repeated-error candidate is a `pitfall` with that
@@ -107,8 +135,8 @@ Edit on an unchanged string fails with "No changes to make" → rewrite the file
 The document's `Data` row carries the same facts in `external_metadata`, which the dataset
 listing exposes: `lesson_type`, `state_key`, `session_id`, `session_date`, `git_commit`,
 `git_branch`, `files` (file names the statement mentions, in their original casing),
-`seen_sessions` and `seen_in_sessions`. The date, commit and branch come from the Q&A entry's `context` when the
-plugin sends it as JSON (`{"cwd", "transcript_path", "date", "start_commit",
+`seen_sessions` and `seen_in_sessions`. The date, commit and branch come from the `context` of the Q&A
+entry of the lesson's own turn when the plugin sends it as JSON (`{"cwd", "transcript_path", "date", "start_commit",
 "end_commit", "branch"}`); without it the lesson is stored with empty values.
 
 **Replacement.** A state key names one lesson *per project*: the scope is the dataset's

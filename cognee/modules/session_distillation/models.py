@@ -10,7 +10,7 @@ Curator calls run in parallel by batch; judge/write calls run in parallel by les
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from cognee.infrastructure.session.session_context_models import GATE_CONFIDENCE
 
@@ -126,7 +126,23 @@ class WrittenLesson(BaseModel):
 
 
 class CodingWrittenLesson(WrittenLesson):
-    """A written coding lesson: typed, and keyed when it is a state or a pitfall."""
+    """A written coding lesson: typed, and keyed when it is a state or a pitfall.
+
+    ``turn_context`` is the context JSON of the turn the lesson was learned in (the
+    plugin's ``date``, ``end_commit``, ``branch``, ...), attached after the writer call;
+    a private attribute, so the LLM schema does not carry it.
+    """
+
+    _turn_context: dict = PrivateAttr(default_factory=dict)
+
+    @property
+    def turn_context(self) -> dict:
+        return self._turn_context
+
+    def with_turn_context(self, context: dict) -> "CodingWrittenLesson":
+        lesson = self.model_copy()
+        lesson._turn_context = dict(context)
+        return lesson
 
     lesson_type: LessonType = Field(
         default="other",

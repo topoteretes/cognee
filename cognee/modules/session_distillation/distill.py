@@ -36,7 +36,7 @@ from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
-from cognee.infrastructure.session.coding_unit_extraction import parse_qa_context
+from cognee.infrastructure.session.coding_turns import parse_qa_context
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_context_builder import (
     clamped_net_helpfulness,
@@ -260,16 +260,42 @@ async def load_distillable_context_entries(
     ]
 
 
-async def load_latest_qa_row(scope: SessionDistillationScope) -> list[dict]:
-    """The session's newest QA turn as a one-row list: a coding unit's request and answer."""
-    session_manager = get_session_manager()
-    raw_qa = await session_manager.get_session(
-        user_id=scope.user_id, session_id=scope.session_id, formatted=False, last_n=1
-    )
+def _row_dicts(raw_qa) -> list[dict]:
     return [
         entry.model_dump() if hasattr(entry, "model_dump") else dict(entry)
         for entry in (raw_qa if isinstance(raw_qa, list) else [])
     ]
+
+
+def newest_qa_row(qa_rows: list[dict]) -> dict | None:
+    return max(qa_rows, key=lambda row: row.get("time") or "", default=None)
+
+
+def rows_for_entries(qa_rows: list[dict], entries: list[SessionContextEntry]) -> list[dict]:
+    """The turns the entries were learned in, in time order: the rows their
+    ``source_qa_ids`` name, plus the newest row when an entry names none (a candidate
+    written before the link existed is judged against the newest turn, as before)."""
+    rows_by_id = {str(row.get("qa_id") or ""): row for row in qa_rows}
+    wanted: dict[str, dict] = {}
+    for entry in entries:
+        linked = [qa_id for qa_id in entry.source_qa_ids if qa_id in rows_by_id]
+        if not linked:
+            newest = newest_qa_row(qa_rows)
+            linked = [str(newest.get("qa_id") or "")] if newest is not None else []
+        for qa_id in linked:
+            wanted[qa_id] = rows_by_id[qa_id]
+    return sorted(wanted.values(), key=lambda row: row.get("time") or "")
+
+
+async def load_turn_qa_rows(
+    scope: SessionDistillationScope, entries: list[SessionContextEntry]
+) -> list[dict]:
+    """The QA turns the coding candidates were learned in (see ``rows_for_entries``)."""
+    session_manager = get_session_manager()
+    raw_qa = await session_manager.get_session(
+        user_id=scope.user_id, session_id=scope.session_id, formatted=False
+    )
+    return rows_for_entries(_row_dicts(raw_qa), entries)
 
 
 async def load_session_qa_rows(
@@ -293,10 +319,7 @@ async def load_session_qa_rows(
         since=since,
         lead_in=1 if since is not None else 0,
     )
-    return [
-        entry.model_dump() if hasattr(entry, "model_dump") else dict(entry)
-        for entry in (raw_qa if isinstance(raw_qa, list) else [])
-    ]
+    return _row_dicts(raw_qa)
 
 
 def earliest_entry_time(entries: list[SessionContextEntry]) -> datetime | None:
@@ -314,6 +337,8 @@ def select_curator_inputs(
     qa_rows: list[dict],
     new_entries: list[SessionContextEntry],
     max_batches: int,
+    *,
+    pin_turns: bool = False,
 ) -> tuple[list[dict], list[SessionContextEntry]]:
     """Pick what one run curates.
 
@@ -321,7 +346,9 @@ def select_curator_inputs(
     With a cap, the run packs into at most that many batches: new entries first,
     highest confidence then most recent; QA turns fill the remaining blocks, most
     recent first. Entries left out are still sealed by the watermark when the run
-    completes, so a capped run trades the overflow for a bounded run.
+    completes, so a capped run trades the overflow for a bounded run. With
+    ``pin_turns`` (coding mode) the turns are pinned to the batches, not packed into
+    them, so every turn stays.
     """
     if max_batches == 0:
         return qa_rows, list(new_entries)
@@ -329,6 +356,8 @@ def select_curator_inputs(
     entries = sorted(
         new_entries, key=lambda entry: (entry.confidence, entry.created_at or ""), reverse=True
     )[:budget]
+    if pin_turns:
+        return qa_rows, entries
     qa_budget = budget - len(entries)
     recent_qa = sorted(qa_rows, key=lambda row: row.get("time") or "")[-qa_budget:]
     return (recent_qa if qa_budget else []), entries
@@ -342,43 +371,86 @@ def build_curator_batches(
 ) -> list[CuratorBatch]:
     """Pack the session timeline into coarse, size-safe chronological batches.
 
-    With ``pin_turns`` (coding mode) the turns are not part of the timeline: every
-    batch opens with all of them, so each curator call judges its candidates against
-    the unit's request and final answer, and the candidates alone fill the batches.
+    With ``pin_turns`` (coding mode) the turns are not part of the timeline: the
+    candidates alone fill the batches, in the order of the turns they were learned
+    in (``source_qa_ids``), and each batch opens with the turns of its candidates,
+    so each curator call judges a candidate against the request and final answer it
+    came from. A candidate that names no turn is judged against the newest one.
     """
+    if pin_turns:
+        return _pinned_curator_batches(qa_rows, context_entries)
+
     timeline: list[tuple[str, str, str | None]] = []
     for row in qa_rows:
-        question = " ".join((row.get("question") or "").split())[:MAX_QA_QUESTION_CHARS]
-        answer = " ".join((row.get("answer") or "").split())[:MAX_QA_ANSWER_CHARS]
-        if not question and not answer:
-            continue
-        block = f"User: {question}\nAssistant: {answer}"
-        feedback_text = " ".join((row.get("feedback_text") or "").split())[:MAX_QA_FEEDBACK_CHARS]
-        if feedback_text:
-            block += f"\nUser feedback on this answer: {feedback_text}"
-        timeline.append((row.get("time") or "", block, None))
-
+        timeline.append((row.get("time") or "", _turn_block(row), None))
     for entry in context_entries:
-        content = " ".join(entry.content.split())[:MAX_CANDIDATE_CHARS]
-        block = f"Candidate {entry.id} [{entry.context_profile}/{entry.section}]: {content}"
-        timeline.append((entry.created_at or "", block, entry.id))
-
+        timeline.append((entry.created_at or "", _candidate_block(entry), entry.id))
     timeline.sort(key=lambda item: item[0])
-
-    pinned: list[str] = []
-    if pin_turns:
-        pinned = [block for _timestamp, block, entry_id in timeline if entry_id is None]
-        timeline = [item for item in timeline if item[2] is not None]
+    timeline = [item for item in timeline if item[1]]
 
     batches: list[CuratorBatch] = []
     for index in range(0, len(timeline), CURATOR_BLOCKS_PER_BATCH):
         chunk = timeline[index : index + CURATOR_BLOCKS_PER_BATCH]
-        blocks = pinned + [block for _timestamp, block, _entry_id in chunk]
         batches.append(
             CuratorBatch(
-                text="\n\n".join(blocks),
+                text="\n\n".join(block for _timestamp, block, _entry_id in chunk),
                 entry_ids=[entry_id for _timestamp, _block, entry_id in chunk if entry_id],
             )
+        )
+    return batches
+
+
+def _turn_block(row: dict) -> str:
+    """A turn as the curator sees it; "" when the row has neither question nor answer."""
+    question = " ".join((row.get("question") or "").split())[:MAX_QA_QUESTION_CHARS]
+    answer = " ".join((row.get("answer") or "").split())[:MAX_QA_ANSWER_CHARS]
+    if not question and not answer:
+        return ""
+    block = f"User: {question}\nAssistant: {answer}"
+    feedback_text = " ".join((row.get("feedback_text") or "").split())[:MAX_QA_FEEDBACK_CHARS]
+    if feedback_text:
+        block += f"\nUser feedback on this answer: {feedback_text}"
+    return block
+
+
+def _candidate_block(entry: SessionContextEntry) -> str:
+    content = " ".join(entry.content.split())[:MAX_CANDIDATE_CHARS]
+    return f"Candidate {entry.id} [{entry.context_profile}/{entry.section}]: {content}"
+
+
+def entry_turns(entry: SessionContextEntry, qa_rows: list[dict]) -> list[dict]:
+    """The rows of the turns the entry was learned in, in time order; the newest row
+    when it names none."""
+    rows_by_id = {str(row.get("qa_id") or ""): row for row in qa_rows}
+    linked = [rows_by_id[qa_id] for qa_id in entry.source_qa_ids if qa_id in rows_by_id]
+    if not linked:
+        newest = newest_qa_row(qa_rows)
+        linked = [newest] if newest is not None else []
+    return sorted(linked, key=lambda row: row.get("time") or "")
+
+
+def _pinned_curator_batches(
+    qa_rows: list[dict], context_entries: list[SessionContextEntry]
+) -> list[CuratorBatch]:
+    turns_of = {entry.id: entry_turns(entry, qa_rows) for entry in context_entries}
+    ordered = sorted(
+        context_entries,
+        key=lambda entry: (
+            turns_of[entry.id][0].get("time") or "" if turns_of[entry.id] else "",
+            entry.created_at or "",
+        ),
+    )
+    batches: list[CuratorBatch] = []
+    for index in range(0, len(ordered), CURATOR_BLOCKS_PER_BATCH):
+        chunk = ordered[index : index + CURATOR_BLOCKS_PER_BATCH]
+        pinned: dict[str, str] = {}
+        for entry in chunk:
+            for row in turns_of[entry.id]:
+                pinned.setdefault(str(row.get("qa_id") or ""), _turn_block(row))
+        blocks = [block for block in pinned.values() if block]
+        blocks += [_candidate_block(entry) for entry in chunk]
+        batches.append(
+            CuratorBatch(text="\n\n".join(blocks), entry_ids=[entry.id for entry in chunk])
         )
     return batches
 
@@ -647,12 +719,21 @@ def apply_evidence_rules(
     )
 
 
+def lesson_turn_context(members: list[SessionContextEntry], qa_rows: list[dict]) -> dict:
+    """The context JSON of the newest turn the lesson's members were learned in (the
+    newest turn of the session when they name none)."""
+    rows = [row for member in members for row in entry_turns(member, qa_rows)]
+    newest = newest_qa_row(rows) if rows else newest_qa_row(qa_rows)
+    return parse_qa_context(newest.get("context") if newest else "")
+
+
 async def evaluate_proposed_lesson(
     vector_engine,
     lesson: ProposedLesson,
     entries_by_id: dict,
     *,
     coding: bool = False,
+    qa_rows: list[dict] | None = None,
 ) -> WrittenLesson | None:
     members = [
         entries_by_id[entry_id] for entry_id in lesson.member_entry_ids if entry_id in entries_by_id
@@ -674,7 +755,8 @@ async def evaluate_proposed_lesson(
     )
     written = await write_or_reject(lesson, members, prior_lessons, glossary, coding=coding)
     if coding and isinstance(written, CodingWrittenLesson):
-        return apply_evidence_rules(keep_state_key_update(lesson, written), members)
+        written = apply_evidence_rules(keep_state_key_update(lesson, written), members)
+        return written.with_turn_context(lesson_turn_context(members, qa_rows or []))
     return written
 
 
@@ -684,9 +766,12 @@ async def accept_proposed_lessons(
     context_entries: list[SessionContextEntry],
     *,
     coding: bool = False,
+    qa_rows: list[dict] | None = None,
 ) -> tuple[list[WrittenLesson], int]:
     """Returns ``(accepted lessons, failed writer calls)`` — see write_or_reject.
 
+    In coding mode ``qa_rows`` are the turns the entries were learned in; each
+    accepted lesson gets the context of its turn (``CodingWrittenLesson.turn_context``).
     Raises ``LLMPaymentRequiredError`` once a writer call reports an exhausted
     budget; the remaining calls are skipped, not made.
     """
@@ -699,7 +784,7 @@ async def accept_proposed_lessons(
             return None
         try:
             return await evaluate_proposed_lesson(
-                vector_engine, lesson, entries_by_id, coding=coding
+                vector_engine, lesson, entries_by_id, coding=coding, qa_rows=qa_rows
             )
         except LLMPaymentRequiredError:
             budget_exhausted = True
@@ -770,11 +855,11 @@ def lesson_metadata(
 async def build_coding_lesson_documents(
     scope: SessionDistillationScope,
     accepted: list[CodingWrittenLesson],
-    qa_context: dict,
     node_set: list[str],
 ) -> list[LessonDocument]:
-    """Render the accepted lessons; a pitfall's count reads the key's lessons in the
-    project scope of ``node_set`` (the set the documents are added under)."""
+    """Render the accepted lessons, each with the metadata of its own turn; a pitfall's
+    count reads the key's lessons in the project scope of ``node_set`` (the set the
+    documents are added under)."""
     documents = []
     for lesson in accepted:
         seen = None
@@ -791,7 +876,7 @@ async def build_coding_lesson_documents(
         documents.append(
             LessonDocument(
                 text=text,
-                metadata=lesson_metadata(lesson, scope, qa_context, seen),
+                metadata=lesson_metadata(lesson, scope, lesson.turn_context, seen),
                 data_id=lesson_data_id(scope.dataset.id, text),
             )
         )
@@ -813,9 +898,9 @@ async def publish_distilled_lessons(
     scope: SessionDistillationScope,
     accepted: list[WrittenLesson],
     *,
-    qa_context: dict | None = None,
+    coding: bool = False,
 ) -> list[str]:
-    """Store the accepted lessons as documents; ``qa_context`` given means coding mode.
+    """Store the accepted lessons as documents.
 
     Coding lessons are added as ``DataItem``s with their metadata and a deterministic
     id, and once they are in the graph the lessons of the same project scope with one
@@ -829,7 +914,7 @@ async def publish_distilled_lessons(
     from cognee.api.v1.cognify import cognify
 
     node_set = await _lesson_node_set(scope)
-    if qa_context is None:
+    if not coding:
         documents = [
             render_lesson_document(lesson, session_id=scope.session_id) for lesson in accepted
         ]
@@ -842,7 +927,7 @@ async def publish_distilled_lessons(
     if not all(isinstance(lesson, CodingWrittenLesson) for lesson in accepted):
         raise TypeError("coding distillation publishes CodingWrittenLesson items only")
     coding_lessons = [lesson for lesson in accepted if isinstance(lesson, CodingWrittenLesson)]
-    lessons = await build_coding_lesson_documents(scope, coding_lessons, qa_context, node_set)
+    lessons = await build_coding_lesson_documents(scope, coding_lessons, node_set)
     items = [
         DataItem(
             data=lesson.text,
@@ -942,13 +1027,14 @@ async def distill_session(
     if max_batches is None:
         max_batches = get_improve_config().distill_max_batches_per_run
     if coding:
-        # A coding unit is judged against its own request and final answer only.
-        qa_rows = await load_latest_qa_row(scope)
-        qa_context = parse_qa_context(qa_rows[-1].get("context") if qa_rows else "")
+        # A coding candidate is judged against the request and final answer of the
+        # turn it was learned in; the lesson takes that turn's date and commit.
+        qa_rows = await load_turn_qa_rows(scope, new_entries)
     else:
         qa_rows = await load_session_qa_rows(scope, earliest_entry_time(new_entries))
-        qa_context = None
-    qa_rows, curated_entries = select_curator_inputs(qa_rows, new_entries, max_batches)
+    qa_rows, curated_entries = select_curator_inputs(
+        qa_rows, new_entries, max_batches, pin_turns=coding
+    )
     uncurated = len(new_entries) - len(curated_entries)
     if uncurated:
         logger.warning(
@@ -978,7 +1064,7 @@ async def distill_session(
     writer_failures = 0
     if run.proposed:
         accepted, writer_failures = await accept_proposed_lessons(
-            scope, run.proposed, curated_entries, coding=coding
+            scope, run.proposed, curated_entries, coding=coding, qa_rows=qa_rows
         )
 
     documents: list[str] = []
@@ -988,7 +1074,7 @@ async def distill_session(
         # are date-free, so a re-run re-accepting the same lesson dedups in add()
         # instead of duplicating.
         try:
-            documents = await publish_distilled_lessons(scope, accepted, qa_context=qa_context)
+            documents = await publish_distilled_lessons(scope, accepted, coding=coding)
         except AfterRunHookError as error:
             # The lessons landed; only the step after their cognify failed. The
             # watermark still moves below, so the curator and writer calls are not

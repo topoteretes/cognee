@@ -6,23 +6,34 @@ of ``agent_context_extraction`` are off in this mode: they see ten traces at a t
 without tool inputs and never see how the task ended, which is what produced vague
 lessons and failures recorded without their fix.
 
-Flow, once per unit, from the ``extract_agent_context`` improve stage:
+An improve may run after one turn or after a whole session of them (the plugin runs it
+at session end and on a cooldown), so the pending traces usually belong to several
+turns. They are paired to their turns by time (``coding_turns``), and one extraction
+pass covers the whole backlog: the number of LLM calls is set by the amount of trace
+text, not by the number of turns. Within a call the traces are labelled per turn and
+FINAL MESSAGE lists the request and answer of every turn the call covers, and each
+lesson names the turn it comes from, so the distillation judges it against the right
+request and answer.
 
-1. LOAD    the traces past ``TRACE_EXTRACTION_WATERMARK`` (the previous unit's end) and
-           the latest Q&A entry (request and final answer), under a per-(user, session)
-           lock so two triggers never extract the same unit. More than
-           ``TRACE_WINDOW_SIZE`` pending traces are walked oldest first in windows of
-           that size, each sealed before the next, so nothing is skipped.
+Flow, from the ``extract_agent_context`` improve stage:
+
+1. LOAD    the traces past ``TRACE_EXTRACTION_WATERMARK`` and every Q&A row of the
+           session, under a per-(user, session) lock so two triggers never extract the
+           same traces. Traces newer than the last answer wait for the next improve.
+           More than ``TRACE_WINDOW_SIZE`` settled traces are walked oldest first in
+           windows of that size, each sealed before the next, so nothing is skipped;
+           a window's traces are grouped by the turns that own them.
 2. SPLIT   the traces into explore, change and verify parts (``trace_phases``), and a
            part longer than one input into trace chunks.
 3. RENDER  one extraction input per chunk, every chunk carrying all five sections:
            EXISTING LESSONS, LESSONS ALREADY IN MEMORY (a vector search over the
-           dataset's stored lessons, fail-open), TRACES (with tool inputs), REPEATED
-           ERRORS AND WHAT WORKED, FINAL MESSAGE. Inputs and outputs are redacted and
-           paths made repo-relative.
+           dataset's stored lessons, fail-open), TRACES (with tool inputs, a header per
+           turn), REPEATED ERRORS AND WHAT WORKED, FINAL MESSAGE (the request and answer
+           of each covered turn). Inputs and outputs are redacted and paths made
+           repo-relative.
 4. EXTRACT one LLM call per chunk, in order, so each sees the candidates of the earlier
            ones; up to ``MAX_UNIT_LESSONS`` candidates per call go through the shared
-           applier (``apply_candidate_updates``).
+           applier (``apply_candidate_updates``), each linked to its turn's Q&A row.
 5. RECORD  one deterministic ``failure_lessons`` candidate per fixed error group, keyed
            ``[state-key: pitfall:<tool>:<slug>[:<qualifier>]]`` so distillation stores it
            as a pitfall that replaces its predecessor.
@@ -37,7 +48,7 @@ import asyncio
 import json
 import re
 import shlex
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass
 from typing import Any
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
@@ -48,14 +59,21 @@ from cognee.infrastructure.session.agent_context_extraction import (
 from cognee.infrastructure.session.agent_context_extraction import (
     _sanitize_error_text as redact_text,
 )
+from cognee.infrastructure.session.coding_turns import (
+    Turn,
+    build_turns,
+    group_by_turn,
+    parse_qa_context,
+    settled_traces,
+)
 from cognee.infrastructure.session.session_context_builder import (
     apply_candidate_updates,
     coerce_active_context_entries,
 )
 from cognee.infrastructure.session.session_context_models import (
     MAX_CONTEXT_CONTENT_CHARS,
-    AgentContextExtraction,
     CandidateFailureLessonUpdate,
+    CodingAgentContextExtraction,
     ContextProfile,
 )
 from cognee.infrastructure.session.session_persist_watermark import StateRowWatermark
@@ -79,7 +97,6 @@ EXISTING_LESSONS_SHOWN = 40
 MEMORY_LESSONS_SHOWN = 8
 MEMORY_LESSONS_CHARS = 1_500
 MEMORY_SEARCH_TIMEOUT_SECONDS = 30
-MEMORY_QUERY_CHARS = 2_000
 
 MAX_TRACE_INPUT_CHARS = 200
 MAX_COMMAND_CHARS = 160
@@ -88,6 +105,7 @@ MAX_TRACE_TEXT_CHARS = 600  # error and output, each
 MAX_ERROR_GROUPS = 10
 MAX_REQUEST_CHARS = 1_200
 MAX_FINAL_ANSWER_CHARS = 6_000
+MAX_TURN_LABEL_CHARS = 120  # the request in a turn's TRACES header
 
 # A fixed error group is direct evidence; it clears the 0.75 candidate gate.
 FAILURE_CANDIDATE_CONFIDENCE = 0.9
@@ -107,13 +125,24 @@ _WORD_RE = re.compile(r"[a-z0-9_]{2,}")
 
 @dataclass(frozen=True, slots=True)
 class UnitOfWork:
-    """One request, its traces (oldest first) and the agent's final answer."""
+    """What one extraction window learns from: its turns, oldest first, each one a
+    request, the traces it owns and the agent's final answer."""
 
-    request: str
-    final_answer: str
-    traces: list
+    turns: list[Turn]
     repo_root: str = ""
-    qa_context: dict = field(default_factory=dict)
+
+    @property
+    def traces(self) -> list:
+        """The window's traces, turn by turn."""
+        return [trace for turn in self.turns for trace in turn.traces]
+
+    def turn_numbers(self) -> dict[str, int]:
+        """Trace id to the 1-based number of its turn, as the input labels them."""
+        return {
+            trace.trace_id: number
+            for number, turn in enumerate(self.turns, start=1)
+            for trace in turn.traces
+        }
 
 
 @dataclass(slots=True)
@@ -129,21 +158,6 @@ class ErrorGroup:
     @property
     def fixed(self) -> bool:
         return self.fix is not None
-
-
-def parse_qa_context(context: str | None) -> dict:
-    """The structured context a coding plugin stores on its Q&A entry, or ``{}``.
-
-    SDK-1336 sends ``{"cwd", "transcript_path", "date", "start_commit", "end_commit",
-    "branch"}`` as the entry's ``context``; any other text is not an error.
-    """
-    if not context or not isinstance(context, str):
-        return {}
-    try:
-        parsed = json.loads(context)
-    except ValueError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
 
 
 def relative_path(path: str, repo_root: str) -> str:
@@ -454,7 +468,7 @@ def memory_search_query(traces: list, repo_root: str = "") -> str:
         pattern = _params(entry).get("pattern")
         if isinstance(pattern, str):
             add(pattern)
-    return "\n".join(redact_text(piece) for piece in pieces)[:MEMORY_QUERY_CHARS]
+    return "\n".join(redact_text(piece) for piece in pieces)
 
 
 def select_memory_lessons(session_lessons: list[str], dataset_lessons: list[str]) -> list[str]:
@@ -531,16 +545,33 @@ def render_existing_lessons(lessons: list) -> str:
     return "EXISTING LESSONS (already saved — do not repeat or reword these):\n" + rendered
 
 
-def render_tail_sections(unit: UnitOfWork, groups: list[ErrorGroup]) -> str:
-    """REPEATED ERRORS AND WHAT WORKED (when any) followed by FINAL MESSAGE."""
+def turn_header(number: int, turn: Turn) -> str:
+    """The line that opens a turn's traces in TRACES."""
+    return f"-- turn {number}: {_clip(turn.request, MAX_TURN_LABEL_CHARS) or '(no request)'} --"
+
+
+def render_final_message(unit: UnitOfWork, numbers: tuple[int, ...] | None = None) -> str:
+    """FINAL MESSAGE: the request and final answer of the given turns (all by default)."""
+    blocks = []
+    for number, turn in enumerate(unit.turns, start=1):
+        if numbers is not None and number not in numbers:
+            continue
+        request = _clip(turn.request, MAX_REQUEST_CHARS) or "(none recorded)"
+        answer = _clip(turn.final_answer, MAX_FINAL_ANSWER_CHARS) or "(none recorded)"
+        blocks.append(f"Turn {number}:\nUser request: {request}\nAgent's final answer: {answer}")
+    return "FINAL MESSAGE:\n" + "\n\n".join(blocks)
+
+
+def render_tail_sections(
+    unit: UnitOfWork, groups: list[ErrorGroup], numbers: tuple[int, ...] | None = None
+) -> str:
+    """REPEATED ERRORS AND WHAT WORKED (when any) followed by FINAL MESSAGE for ``numbers``."""
     sections = []
     if groups:
         sections.append(
             "REPEATED ERRORS AND WHAT WORKED:\n" + render_error_groups(groups, unit.repo_root)
         )
-    request = _clip(unit.request, MAX_REQUEST_CHARS) or "(none recorded)"
-    answer = _clip(unit.final_answer, MAX_FINAL_ANSWER_CHARS) or "(none recorded)"
-    sections.append(f"FINAL MESSAGE:\nUser request: {request}\nAgent's final answer: {answer}")
+    sections.append(render_final_message(unit, numbers))
     return "\n\n".join(sections)
 
 
@@ -560,13 +591,15 @@ def chunk_trace_lines(lines: list[str], budget: int) -> list[list[str]]:
 
 @dataclass(frozen=True, slots=True)
 class ExtractionChunk:
-    """One LLM input's traces: a part (or a piece of one) with its phase."""
+    """One LLM input's traces: a part (or a piece of one) with its phase, and the
+    numbers of the turns the traces belong to."""
 
     part: int
     parts: int
     phase: str
     traces: list
     lines: list[str]
+    turns: tuple[int, ...] = ()
 
 
 def plan_extraction_parts(
@@ -574,28 +607,34 @@ def plan_extraction_parts(
 ) -> list[ExtractionChunk]:
     """The unit's phase parts, each cut into chunks that fit ``max_chars`` with the
     other sections; a short unit is one part and one chunk."""
-    tail = render_tail_sections(unit, groups)
+    tail = render_tail_sections(unit, groups)  # every turn: the largest the tail gets
+    turn_headers = sum(len(turn_header(n, t)) + 1 for n, t in enumerate(unit.turns, start=1))
     budget = (
         max_chars
         - _EXISTING_LESSONS_RESERVE
         - _MEMORY_LESSONS_RESERVE
         - len(tail)
         - _TRACES_HEADER_RESERVE
+        - turn_headers
     )
-    parts: list[PhaseBlock] = split_into_parts(unit.traces)
+    all_traces = unit.traces
+    numbers = unit.turn_numbers()
+    parts: list[PhaseBlock] = split_into_parts(all_traces)
     chunks: list[ExtractionChunk] = []
     for index, part in enumerate(parts, start=1):
-        traces = unit.traces[part.start : part.end]
+        traces = all_traces[part.start : part.end]
         lines = [render_trace_line(entry, unit.repo_root) for entry in traces]
         offset = 0
         for chunk_lines in chunk_trace_lines(lines, max(budget, 1)):
+            chunk_traces = traces[offset : offset + len(chunk_lines)]
             chunks.append(
                 ExtractionChunk(
                     part=index,
                     parts=len(parts),
                     phase=part.phase,
-                    traces=traces[offset : offset + len(chunk_lines)],
+                    traces=chunk_traces,
                     lines=chunk_lines,
+                    turns=tuple(sorted({numbers[entry.trace_id] for entry in chunk_traces})),
                 )
             )
             offset += len(chunk_lines)
@@ -609,16 +648,26 @@ def render_extraction_input(
     groups: list[ErrorGroup],
     chunk: ExtractionChunk,
 ) -> str:
-    """The five sections in order: EXISTING LESSONS, LESSONS ALREADY IN MEMORY, TRACES,
-    REPEATED ERRORS AND WHAT WORKED, FINAL MESSAGE."""
+    """The five sections in order: EXISTING LESSONS, LESSONS ALREADY IN MEMORY, TRACES
+    (a header opens each turn's traces), REPEATED ERRORS AND WHAT WORKED, FINAL MESSAGE
+    (the chunk's turns)."""
+    numbers = unit.turn_numbers()
+    lines = []
+    current = 0
+    for entry, line in zip(chunk.traces, chunk.lines):
+        number = numbers[entry.trace_id]
+        if number != current:
+            lines.append(turn_header(number, unit.turns[number - 1]))
+            current = number
+        lines.append(line)
     traces = f"TRACES (part {chunk.part} of {chunk.parts}, phase {chunk.phase}):\n" + "\n".join(
-        chunk.lines
+        lines
     )
     sections = [
         render_existing_lessons(existing_lessons),
         render_memory_lessons(memory_lessons),
         traces,
-        render_tail_sections(unit, groups),
+        render_tail_sections(unit, groups, chunk.turns),
     ]
     return "\n\n".join(section for section in sections if section)
 
@@ -655,11 +704,22 @@ async def recent_agent_lessons(session_manager, user_id: str, session_id: str) -
     return agent_entries[-EXISTING_LESSONS_SHOWN:]
 
 
-async def load_unit_of_work(
+@dataclass(frozen=True, slots=True)
+class PendingBacklog:
+    """The settled pending traces (oldest first, as stored), the session's turns, and
+    the count already sealed."""
+
+    traces: list
+    turns: list[Turn]
+    processed: int
+
+
+async def load_pending_backlog(
     session_manager, user_id: str, session_id: str
-) -> tuple[UnitOfWork, int] | None:
-    """Every pending trace as one unit and the count already sealed, or None when
-    nothing is pending. ``trace_windows`` cuts the unit for extraction."""
+) -> PendingBacklog | None:
+    """Every pending trace that has its answer, with the session's turns, or None when
+    nothing is pending. A trace newer than the last answer, and everything stored after
+    it, waits for the next improve (``settled_traces``)."""
     total = await session_manager.get_agent_trace_count(user_id=user_id, session_id=session_id)
     stored = await TRACE_EXTRACTION_WATERMARK.read_count(session_manager, user_id, session_id)
     processed = StateRowWatermark.resolve_effective(stored, total, session_id=session_id)
@@ -670,28 +730,26 @@ async def load_unit_of_work(
     traces = await session_manager.get_agent_trace_session(
         user_id=user_id, session_id=session_id, last_n=pending
     )
-    latest = await session_manager.get_session(
-        user_id=user_id, session_id=session_id, last_n=1, formatted=False
+    rows = await session_manager.get_session(
+        user_id=user_id, session_id=session_id, formatted=False
     )
-    qa = latest[-1] if isinstance(latest, list) and latest else None
-    qa_context = parse_qa_context(getattr(qa, "context", "")) if qa is not None else {}
-    unit = UnitOfWork(
-        request=getattr(qa, "question", "") or "",
-        final_answer=getattr(qa, "answer", "") or "",
-        traces=list(traces),
-        repo_root=str(qa_context.get("cwd") or ""),
-        qa_context=qa_context,
-    )
-    return unit, processed
+    turns = build_turns(list(rows) if isinstance(rows, list) else [])
+    settled = settled_traces(list(traces), turns)
+    if not settled:
+        return None
+    return PendingBacklog(traces=settled, turns=turns, processed=processed)
 
 
-def trace_windows(unit: UnitOfWork, size: int = TRACE_WINDOW_SIZE) -> list[UnitOfWork]:
-    """The unit cut into windows of at most ``size`` traces, oldest first, each with the
-    unit's request, answer and context."""
-    return [
-        replace(unit, traces=unit.traces[start : start + size])
-        for start in range(0, len(unit.traces), size)
-    ]
+def trace_windows(traces: list, size: int = TRACE_WINDOW_SIZE) -> list[list]:
+    """The traces cut into windows of at most ``size``, oldest first."""
+    return [traces[start : start + size] for start in range(0, len(traces), size)]
+
+
+def window_unit(window: list, turns: list[Turn]) -> UnitOfWork:
+    """One window's traces grouped by the turns that own them; the repository root is
+    the newest covered turn's ``cwd``."""
+    covered = group_by_turn(window, turns)
+    return UnitOfWork(turns=covered, repo_root=str(covered[-1].qa_context.get("cwd") or ""))
 
 
 async def extract_coding_unit_context(
@@ -701,12 +759,13 @@ async def extract_coding_unit_context(
     session_id: str,
     dataset=None,
 ) -> list[str]:
-    """Extract the session's pending unit of work once. Returns the touched entry ids.
+    """Extract the session's pending traces once, paired to their turns. Returns the
+    touched entry ids.
 
     ``dataset`` (id and owner_id) is where the stored lessons for the LESSONS ALREADY IN
     MEMORY section are searched; without it the section is left out. Serialized per
     (user, session): a concurrent trigger waits, then finds the watermark at the total
-    and extracts nothing. The pending traces are walked in windows of
+    and extracts nothing. The settled traces are walked in windows of
     ``TRACE_WINDOW_SIZE``, oldest first, the watermark sealed after each; an LLM failure
     propagates before its window's watermark moves, so that window and the ones after
     it are retried by the next improve.
@@ -719,24 +778,24 @@ async def extract_coding_unit_context(
     from cognee.infrastructure.locks import session_lock
 
     async with session_lock(f"{user_id}:{session_id}", "coding_unit_extraction"):
-        loaded = await load_unit_of_work(session_manager, user_id, session_id)
-        if loaded is None:
+        backlog = await load_pending_backlog(session_manager, user_id, session_id)
+        if backlog is None:
             return []
-        pending_unit, sealed = loaded
+        sealed = backlog.processed
 
         system_prompt = read_query_prompt(CODING_PROMPT_FILE)
         if not system_prompt:
             raise RuntimeError("Coding unit extraction: system prompt not found")
 
         touched: list[str] = []
-        for unit in trace_windows(pending_unit):
-            sealed += len(unit.traces)
+        for window in trace_windows(backlog.traces):
+            sealed += len(window)
             touched += await _extract_window(
                 session_manager=session_manager,
                 user_id=user_id,
                 session_id=session_id,
                 dataset=dataset,
-                unit=unit,
+                unit=window_unit(window, backlog.turns),
                 system_prompt=system_prompt,
             )
             await TRACE_EXTRACTION_WATERMARK.write_count(
@@ -748,9 +807,15 @@ async def extract_coding_unit_context(
 async def _extract_window(
     *, session_manager, user_id: str, session_id: str, dataset, unit: UnitOfWork, system_prompt
 ) -> list[str]:
-    """One window's extraction calls and failure candidates; returns the touched ids."""
+    """One window's extraction calls and failure candidates; returns the touched ids.
+
+    Every candidate is linked to the Q&A row of its turn: the LLM names the turn of
+    each lesson (a number outside the chunk's turns counts as its newest), a failure
+    candidate takes its failing trace's turn.
+    """
     groups = group_repeated_errors(unit.traces)
     chunks = plan_extraction_parts(unit, groups)
+    numbers = unit.turn_numbers()
     touched: list[str] = []
     for chunk in chunks:
         # Re-read per chunk, so each sees the candidates the earlier ones produced.
@@ -759,16 +824,20 @@ async def _extract_window(
         result = await LLMGateway.acreate_structured_output(
             text_input=render_extraction_input(unit, existing, memory, groups, chunk),
             system_prompt=system_prompt,
-            response_model=AgentContextExtraction,
+            response_model=CodingAgentContextExtraction,
         )
-        candidates = list(result.lessons)[:MAX_UNIT_LESSONS]
-        if candidates:
+        by_turn: dict[int, list] = {}
+        for item in list(result.lessons)[:MAX_UNIT_LESSONS]:
+            number = item.turn if item.turn in chunk.turns else chunk.turns[-1]
+            by_turn.setdefault(number, []).append(item.lesson)
+        for number, candidates in by_turn.items():
             touched += await apply_candidate_updates(
                 session_manager=session_manager,
                 user_id=user_id,
                 session_id=session_id,
                 source_id="",
                 candidates=candidates,
+                qa_id=unit.turns[number - 1].qa_id,
             )
 
     for source_id, candidate in build_failure_candidates(groups, unit.repo_root):
@@ -778,13 +847,15 @@ async def _extract_window(
             session_id=session_id,
             source_id=source_id,
             candidates=[candidate],
+            qa_id=unit.turns[numbers[source_id] - 1].qa_id,
         )
 
     logger.info(
-        "Coding unit extraction: session '%s' window traces=%d parts=%d inputs=%d "
+        "Coding unit extraction: session '%s' window traces=%d turns=%d parts=%d inputs=%d "
         "error_groups=%d touched=%d",
         session_id,
         len(unit.traces),
+        len(unit.turns),
         chunks[-1].parts if chunks else 0,
         len(chunks),
         len(groups),
