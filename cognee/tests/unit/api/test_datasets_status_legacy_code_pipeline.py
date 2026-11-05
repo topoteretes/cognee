@@ -1,12 +1,9 @@
 """Deprecated ``code_graph_pipeline`` alias on the dataset status endpoints (SDK-793).
 
 Code repositories are built under ``cognify_pipeline`` now, so legacy pollers that
-still ask for ``code_graph_pipeline`` must see cognify's state, keyed as they asked.
-The alias reports the dataset's latest ``code_graph_pipeline`` or ``cognify_pipeline``
-run, one still in progress first and otherwise the newer: a dataset whose last
-pre-upgrade build left a ``code_graph_pipeline`` run must still see a cognify build
-run and finish, while a custom pipeline that keeps running under the old name keeps
-reporting its own (newer) run.
+still ask for ``code_graph_pipeline`` see cognify's state, keyed as they asked, with
+one deprecation warning per process. The processing status counts an item completed
+under either stamp: a pre-upgrade build left only the ``code_graph_pipeline`` one.
 """
 
 import importlib
@@ -86,13 +83,12 @@ def _fake_runs(monkeypatch, runs):
         statuses = await fake_status(dataset_ids, pipeline_name)
         return {d: {"status": s, "progress": None} for d, s in statuses.items()}
 
-    monkeypatch.setattr(datasets_module, "get_latest_pipeline_runs_by_datasets", fake_latest_runs)
     monkeypatch.setattr(datasets_module, "get_pipeline_status", fake_status)
     monkeypatch.setattr(datasets_module, "get_pipeline_progress", fake_progress)
     return calls
 
 
-def test_alias_falls_back_to_cognify_when_no_code_graph_run(client, monkeypatch):
+def test_alias_reads_cognify_pipeline(client, monkeypatch):
     dataset_id = uuid.uuid4()
     _authorize(monkeypatch, [dataset_id])
     _fake_runs(monkeypatch, {"cognify_pipeline": {dataset_id: "DATASET_PROCESSING_COMPLETED"}})
@@ -104,87 +100,6 @@ def test_alias_falls_back_to_cognify_when_no_code_graph_run(client, monkeypatch)
 
     assert response.status_code == 200
     assert response.json() == {str(dataset_id): "DATASET_PROCESSING_COMPLETED"}
-
-
-@pytest.mark.parametrize(
-    "code_graph_created_at, cognify_created_at, expected",
-    [
-        # A pre-upgrade code_graph_pipeline run must not mask a newer cognify build.
-        (OLDER, NEWER, "DATASET_PROCESSING_STARTED"),
-        # A newer but finished code_graph_pipeline run loses to an in-progress
-        # cognify run: a poller must keep seeing the build that is running.
-        (NEWER, OLDER, "DATASET_PROCESSING_STARTED"),
-    ],
-    ids=["newer_cognify_run", "in_progress_beats_newer_terminal"],
-)
-def test_alias_reports_the_newer_of_the_two_runs(
-    client, monkeypatch, code_graph_created_at, cognify_created_at, expected
-):
-    dataset_id = uuid.uuid4()
-    _authorize(monkeypatch, [dataset_id])
-    _fake_runs(
-        monkeypatch,
-        {
-            "code_graph_pipeline": {
-                dataset_id: ("DATASET_PROCESSING_COMPLETED", code_graph_created_at)
-            },
-            "cognify_pipeline": {dataset_id: ("DATASET_PROCESSING_STARTED", cognify_created_at)},
-        },
-    )
-
-    for endpoint, body in (
-        ("/api/v1/datasets/status", expected),
-        ("/api/v1/datasets/status/progress", {"status": expected, "progress": None}),
-    ):
-        response = client.get(
-            endpoint, params={"dataset": str(dataset_id), "pipeline": "code_graph_pipeline"}
-        )
-        assert response.status_code == 200
-        assert response.json() == {str(dataset_id): body}
-
-
-@pytest.mark.parametrize(
-    "code_graph_run, cognify_run, expected",
-    [
-        # Both terminal: the newer wins.
-        (
-            ("DATASET_PROCESSING_ERRORED", NEWER),
-            ("DATASET_PROCESSING_COMPLETED", OLDER),
-            "DATASET_PROCESSING_ERRORED",
-        ),
-        # Both in progress: the newer wins (a custom pipeline under the old name).
-        (
-            ("DATASET_PROCESSING_STARTED", NEWER),
-            ("DATASET_PROCESSING_INITIATED", OLDER),
-            "DATASET_PROCESSING_STARTED",
-        ),
-        # A full tie goes to cognify_pipeline.
-        (
-            ("DATASET_PROCESSING_ERRORED", OLDER),
-            ("DATASET_PROCESSING_COMPLETED", OLDER),
-            "DATASET_PROCESSING_COMPLETED",
-        ),
-    ],
-    ids=["terminal_newer_wins", "in_progress_newer_wins", "tie_goes_to_cognify"],
-)
-def test_alias_tie_break(client, monkeypatch, code_graph_run, cognify_run, expected):
-    dataset_id = uuid.uuid4()
-    _authorize(monkeypatch, [dataset_id])
-    _fake_runs(
-        monkeypatch,
-        {
-            "code_graph_pipeline": {dataset_id: code_graph_run},
-            "cognify_pipeline": {dataset_id: cognify_run},
-        },
-    )
-
-    response = client.get(
-        "/api/v1/datasets/status",
-        params={"dataset": str(dataset_id), "pipeline": "code_graph_pipeline"},
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {str(dataset_id): expected}
 
 
 def test_alias_deprecation_is_logged_once_per_process(client, monkeypatch):

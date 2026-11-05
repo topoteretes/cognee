@@ -245,7 +245,8 @@ async def test_task_resolver_composes_with_pipeline_cache(monkeypatch):
     dataset inside _run_body)."""
     import cognee.modules.pipelines.operations.pipeline as pipeline_module
 
-    monkeypatch.setattr(pipeline_module, "setup_and_check_environment", AsyncMock())
+    monkeypatch.setattr(pipeline_module, "setup_environment", AsyncMock())
+    monkeypatch.setattr(pipeline_module, "check_connections", AsyncMock())
     monkeypatch.setattr(
         pipeline_module,
         "resolve_authorized_user_datasets",

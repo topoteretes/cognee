@@ -44,26 +44,22 @@ async def get_dataset_processing_status(
     # Imported on use: the pipeline layer imports this package at module
     # scope, so a top-level import here would close a cycle (see
     # publish_updated_data._completed_status for the full story).
-    from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
+    from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed_for
 
     data_items = await get_dataset_data(dataset_id, order_by="created_at")
-    dataset_key = str(dataset_id)
 
     pipeline_names = (pipeline_name, *also_completed_by)
 
-    items = []
-    for item in data_items:
-        pipeline_status = item.pipeline_status or {}
-        items.append(
-            {
-                "id": item.id,
-                "name": item.name,
-                "completed": any(
-                    is_data_item_completed((pipeline_status.get(name) or {}).get(dataset_key))
-                    for name in pipeline_names
-                ),
-            }
-        )
+    items = [
+        {
+            "id": item.id,
+            "name": item.name,
+            "completed": any(
+                is_data_item_completed_for(item, name, dataset_id) for name in pipeline_names
+            ),
+        }
+        for item in data_items
+    ]
 
     total = len(items)
     completed = sum(1 for item in items if item["completed"])

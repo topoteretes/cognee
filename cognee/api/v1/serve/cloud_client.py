@@ -186,6 +186,18 @@ class CloudClient:
         if kwargs.get("chunks_per_batch") is not None:
             form.add_field("chunks_per_batch", str(kwargs["chunks_per_batch"]))
         content_type_kw = kwargs.get("content_type")
+        if content_type_kw == "code":
+            # The deprecated spelling folds into codegraph_config, as the SDK's
+            # remember() folds it: the server then sees the one normal request.
+            from cognee.api.v1.remember.remember import (
+                CODE_CONTENT_TYPE_CODEGRAPH_CONFIG,
+                fold_into_codegraph_config,
+            )
+
+            fold_into_codegraph_config(
+                kwargs, dict(CODE_CONTENT_TYPE_CODEGRAPH_CONFIG), 'content_type="code"'
+            )
+            content_type_kw = None
         if content_type_kw is not None:
             form.add_field("content_type", str(content_type_kw))
         if kwargs.get("import_mode") is not None:
@@ -198,16 +210,11 @@ class CloudClient:
             form.add_field("codegraph_config", json.dumps(codegraph_config))
         # A declared repository spec is a git URL or a path on the server: it
         # must reach the server as a string, never as an uploaded text file.
-        # strings_as_raw_data is set by remember() for the deprecated
-        # content_type="code", whose strings were always repository specs.
-        strings_as_raw_data = bool(
-            kwargs.get("strings_as_raw_data") or codegraph_config.get("treat_as_repository")
-        )
+        strings_as_raw_data = bool(codegraph_config.get("treat_as_repository"))
 
         from cognee.tasks.code_graph.resolve_repo import (
-            SSH_REPO_SPEC_MESSAGE,
             code_repo_clone_url,
-            is_ssh_repo_spec,
+            refuse_undeclared_ssh_spec,
         )
 
         sent_repo_url = False
@@ -221,10 +228,9 @@ class CloudClient:
                 form.add_field("raw_data", item)
                 sent_repo_url = True
                 return
-            # The server refuses an undeclared ssh remote too; uploading the
-            # spec would store it as text there. Fail with the same guidance.
-            if is_ssh_repo_spec(item):
-                raise ValueError(SSH_REPO_SPEC_MESSAGE)
+            # The server refuses an undeclared ssh remote in raw_data; this
+            # string would go up as a text upload, which it would store as is.
+            refuse_undeclared_ssh_spec(item)
             form.add_field(
                 "data",
                 io.BytesIO(item.encode("utf-8")),

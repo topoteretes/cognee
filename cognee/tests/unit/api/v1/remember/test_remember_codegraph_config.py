@@ -6,7 +6,7 @@ Code repositories go through ``add()`` + ``cognify()`` like any other input
 ``repo_credentials``, ``include_documents`` and ``treat_as_repository``,
 cognify() reads ``index_vectors`` for the CODE / CODE_REPO task lists. The
 top-level ``index_vectors=`` / ``repo_credentials=`` spellings fold into it
-with a FutureWarning, and the removed ``content_type="code"`` is ignored with
+with a FutureWarning, and the deprecated ``content_type="code"`` folds into it with
 one.
 """
 
@@ -86,9 +86,9 @@ async def test_codegraph_config_reaches_add_and_cognify(permanent_pipeline):
             {"index_vectors": True, "repo_credentials": "tok123"},
             {"index_vectors": True, "repo_credentials": "tok123"},
         ),
-        # An explicit codegraph_config wins over the top-level spelling.
+        # The same value both ways is one value.
         (
-            {"index_vectors": False, "codegraph_config": {"index_vectors": True}},
+            {"index_vectors": True, "codegraph_config": {"index_vectors": True}},
             {"index_vectors": True},
         ),
     ],
@@ -105,6 +105,22 @@ async def test_top_level_spellings_fold_into_codegraph_config(permanent_pipeline
         assert "repo_credentials" not in permanent_pipeline[call]
     # The warning points at the caller, not at remember()'s own frames.
     assert [w.filename for w in caught if "codegraph_config=" in str(w.message)] == [__file__]
+
+
+@pytest.mark.asyncio
+async def test_a_key_given_both_ways_with_different_values_raises(permanent_pipeline):
+    """Neither spelling silently wins: index_vectors=True next to
+    codegraph_config={"index_vectors": False} is a caller mistake."""
+    with (
+        pytest.warns(FutureWarning, match="codegraph_config="),
+        pytest.raises(ValueError, match="index_vectors given both"),
+    ):
+        await _remember(
+            "https://github.com/acme/api",
+            index_vectors=True,
+            codegraph_config={"index_vectors": False},
+        )
+    assert "add" not in permanent_pipeline
 
 
 @pytest.mark.asyncio
@@ -150,28 +166,19 @@ def improve_calls(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_removed_code_content_type_is_ignored(permanent_pipeline, improve_calls, caplog):
-    # Accepted so existing callers do not break, and ignored: the call is a
-    # plain remember(data) -- no translation into codegraph_config, and the
-    # plain call's improve default -- with a warning naming the replacement.
-    dataset_id = uuid4()
-    user = SimpleNamespace(id=uuid4())
-    await remember_module.remember("https://github.com/acme/api", dataset_id=dataset_id, user=user)
-    plain = dict(permanent_pipeline)
-    permanent_pipeline.clear()
-    assert len(improve_calls) == 1
-
+async def test_code_content_type_folds_into_codegraph_config(permanent_pipeline, caplog):
+    """The deprecated spelling keeps its semantics through the one normal path:
+    every item a declared repository, documents left out, forwarded to add()
+    and cognify() exactly as a caller passing the dict would, with the
+    FutureWarning naming that dict."""
     with warnings.catch_warnings(record=True) as caught, caplog.at_level(logging.WARNING):
         warnings.simplefilter("always")
-        result = await remember_module.remember(
-            "https://github.com/acme/api",
-            dataset_id=dataset_id,
-            user=user,
-            content_type="code",
-        )
+        result = await _remember("https://github.com/acme/api", content_type="code")
 
     assert result.status == "completed"
-    assert permanent_pipeline == plain
+    folded = {"treat_as_repository": True, "include_documents": False}
+    assert permanent_pipeline["add"]["codegraph_config"] == folded
+    assert permanent_pipeline["cognify"]["codegraph_config"] == folded
     assert "content_type" not in permanent_pipeline["add"]
     assert "content_type" not in permanent_pipeline["cognify"]
     deprecations = [w for w in caught if "content_type" in str(w.message)]
@@ -179,7 +186,35 @@ async def test_removed_code_content_type_is_ignored(permanent_pipeline, improve_
     assert deprecations[0].filename == __file__
     assert '"treat_as_repository": True' in str(deprecations[0].message)
     assert 'content_type="code"' in caplog.text
-    assert len(improve_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_code_content_type_merges_with_an_agreeing_config_and_refuses_a_conflicting_one(
+    permanent_pipeline,
+):
+    with pytest.warns(FutureWarning, match="content_type"):
+        await _remember(
+            "https://github.com/acme/api",
+            content_type="code",
+            codegraph_config={"index_vectors": True, "include_documents": False},
+        )
+    assert permanent_pipeline["cognify"]["codegraph_config"] == {
+        "treat_as_repository": True,
+        "include_documents": False,
+        "index_vectors": True,
+    }
+    permanent_pipeline.clear()
+
+    with (
+        pytest.warns(FutureWarning, match="content_type"),
+        pytest.raises(ValueError, match="include_documents given both"),
+    ):
+        await _remember(
+            "https://github.com/acme/api",
+            content_type="code",
+            codegraph_config={"include_documents": True},
+        )
+    assert "add" not in permanent_pipeline
 
 
 @pytest.mark.asyncio

@@ -10,15 +10,15 @@ from cognee.tasks.code_graph.config import requests_codegraph_options, validate_
     [
         (None, False),
         ({}, False),
-        ({"index_vectors": False}, False),
-        ({"include_documents": True}, False),
+        ({"index_vectors": False}, True),
+        ({"include_documents": True}, True),
         ({"treat_as_repository": True}, True),
         ({"include_documents": False}, True),
         ({"index_vectors": True}, True),
         ({"repo_credentials": "tok"}, True),
     ],
 )
-def test_only_non_default_options_count_as_requested(config, expected):
+def test_any_option_counts_as_requested(config, expected):
     assert requests_codegraph_options(config) is expected
 
 

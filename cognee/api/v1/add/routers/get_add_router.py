@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from pydantic import WithJsonSchema
 
 from cognee import __version__ as cognee_version
-from cognee.api.codegraph_config_field import parse_codegraph_config_field
+from cognee.api.codegraph_config_field import codegraph_config_form
 from cognee.api.DTO import ErrorResponse
 from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
 from cognee.api.v1.exceptions import DocumentUpdateRequiredError
@@ -18,6 +18,7 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
+from cognee.tasks.code_graph.config import CodeGraphConfig
 from cognee.tasks.ingestion.data_item import (
     pair_labels_with_data,
     parse_external_metadata,
@@ -106,21 +107,8 @@ def get_add_router() -> APIRouter:
         ),
         node_set: list[str] | None = Form(default=[""], example=[""]),
         run_in_background: bool | None = Form(default=False),
-        codegraph_config: str | None = Form(
-            default=None,
-            examples=[""],
-            description=(
-                "JSON object of code repository options, the same dict the SDK's "
-                "add(codegraph_config=...) takes: 'include_documents' (default true; false "
-                "stores a repository's code graph row only, no README/docs), "
-                "'treat_as_repository' (every raw_data entry is a repository spec, cloned "
-                "or used in place instead of sniffed) and 'repo_credentials' (a token for "
-                "private clones; it reaches git only through environment config). "
-                "'index_vectors' is cognify's. Unknown keys are a 400. 'codegraphConfig' is "
-                "accepted as the same field."
-            ),
-        ),
-        codegraphConfig: str | None = Form(default=None, include_in_schema=False),
+        # A mistyped option is a 400 before anything is stored.
+        codegraph_config: CodeGraphConfig = Depends(codegraph_config_form),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -199,9 +187,6 @@ def get_add_router() -> APIRouter:
                 ).model_dump(),
             )
 
-        # A mistyped option is a 400 before anything is stored.
-        parsed_codegraph_config = parse_codegraph_config_field(codegraph_config, codegraphConfig)
-
         # String inputs join the uploads as one item list, uploads first. Drop
         # empty entries — Swagger UI submits untouched array items as "".
         raw_items = [item.strip() for item in (raw_data or []) if item and item.strip()]
@@ -232,7 +217,7 @@ def get_add_router() -> APIRouter:
                 node_set=node_set
                 if node_set != [""]
                 else None,  # Transform default node_set endpoint value to None
-                codegraph_config=parsed_codegraph_config or None,
+                codegraph_config=codegraph_config or None,
             )
 
             if isinstance(add_run, PipelineRunErrored):

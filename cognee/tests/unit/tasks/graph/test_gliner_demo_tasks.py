@@ -9,6 +9,7 @@ import importlib
 import textwrap
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -860,19 +861,22 @@ async def _cognify_standard_tasks(**kwargs):
         assert pipeline_kwargs["extras"]["graph_extractor"] == expected
         return {}
 
+    # A real standard document pending in a dataset of this user, so cognify's
+    # own read of the pending routes (not a stub) wires the standard list the
+    # executor above resolves for its txt item. add() stores the row only.
+    import cognee
+
+    await cognee.add(
+        "A standard document pending extraction.",
+        dataset_name=f"gliner_task_lists_{uuid4().hex}",
+        skip_connection_test=True,
+    )
+
     with (
         patch.object(migrations, "run_migrations_and_block", AsyncMock()),
         patch.object(cognify_module, "get_pipeline_executor", return_value=execute_pipeline),
         # These tests select task lists; runtime installation has its own suite.
         patch.object(cognify_module, "ensure_extractor_runtime", AsyncMock()),
-        # The executor above hands the resolver a standard (txt) item, so the
-        # run it simulates has a standard item pending -- whatever datasets
-        # other tests in the process left behind with nothing pending.
-        patch.object(
-            cognify_module,
-            "_pending_routes",
-            AsyncMock(return_value={cognify_module.CognifyRoute.STANDARD}),
-        ),
     ):
         await cognify_module.cognify(chunk_size=512, **kwargs)
 

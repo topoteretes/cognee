@@ -59,11 +59,13 @@ from cognee.tasks.ingestion.data_item import DataItem
 logger = get_logger("remember")
 
 CODE_CONTENT_TYPE_DEPRECATION_MESSAGE = (
-    'remember(content_type="code") is deprecated and ignored: a repository is ordinary '
-    "data, so the call runs as a plain remember(data) and cognify builds its code graph. "
-    "To keep the old code-graph-only behaviour, pass "
-    'codegraph_config={"treat_as_repository": True, "include_documents": False} instead.'
+    'remember(content_type="code") is deprecated: pass '
+    'codegraph_config={"treat_as_repository": True, "include_documents": False} instead. '
+    "The call folds into that config and runs as a plain remember(data): every item is "
+    "a repository spec, its README/docs stay out, and cognify builds the code graph."
 )
+# What content_type="code" folds into: the old call's semantics, as codegraph_config.
+CODE_CONTENT_TYPE_CODEGRAPH_CONFIG = {"treat_as_repository": True, "include_documents": False}
 
 # The result item kind of a code_repo row (system_metadata.source == "code_repo").
 CODE_REPOSITORY_ITEM_KIND = "code_repository"
@@ -211,8 +213,7 @@ def _fold_codegraph_kwargs(kwargs: dict) -> None:
     """Move top-level ``index_vectors`` / ``repo_credentials`` into ``codegraph_config``.
 
     The top-level spellings are the removed code content type's options; they
-    warn once per call. An explicit ``codegraph_config`` key wins over its
-    top-level spelling.
+    warn once per call and fold like ``content_type="code"`` does.
     """
     legacy = {
         key: kwargs.pop(key) for key in ("index_vectors", "repo_credentials") if key in kwargs
@@ -226,7 +227,26 @@ def _fold_codegraph_kwargs(kwargs: dict) -> None:
         FutureWarning,
         stacklevel=3,
     )
-    kwargs["codegraph_config"] = {**legacy, **(kwargs.get("codegraph_config") or {})}
+    fold_into_codegraph_config(kwargs, legacy, "a keyword argument")
+
+
+def fold_into_codegraph_config(kwargs: dict, legacy: dict, spelling: str) -> None:
+    """Merge a deprecated spelling's options into ``kwargs["codegraph_config"]``.
+
+    The one fold for every deprecated spelling (the top-level keywords,
+    ``content_type="code"``): a key given both ways with different values
+    raises, so neither spelling silently wins.
+    """
+    explicit = kwargs.get("codegraph_config") or {}
+    conflicting = [
+        key for key, value in legacy.items() if key in explicit and explicit[key] != value
+    ]
+    if conflicting:
+        raise ValueError(
+            f"remember(): {', '.join(conflicting)} given both by {spelling} and in "
+            "codegraph_config with different values. Pass it once, in codegraph_config."
+        )
+    kwargs["codegraph_config"] = {**legacy, **explicit}
 
 
 async def _attach_item_identity(result: "RememberResult") -> None:
@@ -240,52 +260,40 @@ async def _attach_item_identity(result: "RememberResult") -> None:
     A ``code_repo`` row's item gets ``kind="code_repository"``, ``source`` (the
     repository's credential-free URL, or its path for a local project) and
     ``path``. Items whose row is not a repository -- ordinary documents, code
-    files -- are untouched, and any failure here leaves the items exactly as
-    the pipeline reported them: this names what was stored, it never decides
-    whether the remember succeeded.
+    files -- are untouched. The lookup is one SELECT over ids the pipeline
+    itself reported; a failure is the remember's, since what follows (the
+    automatic improve, the telemetry event) reads what this named.
     """
     items = [item for item in (result.items or []) if item.get("id")]
     if not items:
         return
-    try:
-        from sqlalchemy import select
+    from sqlalchemy import select
 
-        from cognee.infrastructure.databases.relational import get_relational_engine
-        from cognee.modules.data.models.Data import Data
-        from cognee.tasks.code_graph.code_repo import is_code_repo_sourced
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models.Data import Data
+    from cognee.tasks.code_graph.code_repo import is_code_repo_sourced
 
-        by_id: dict[UUID, list[dict]] = {}
-        for item in items:
-            try:
-                by_id.setdefault(UUID(str(item["id"])), []).append(item)
-            except (TypeError, ValueError):
-                continue
-        if not by_id:
-            return
+    by_id: dict[UUID, list[dict]] = {}
+    for item in items:
+        by_id.setdefault(UUID(str(item["id"])), []).append(item)
 
-        db_engine = get_relational_engine()
-        async with db_engine.get_async_session() as session:
-            rows = (
-                (await session.execute(select(Data).filter(Data.id.in_(list(by_id)))))
-                .scalars()
-                .all()
-            )
-            metadata_by_id = {
-                row.id: dict(getattr(row, "system_metadata", None) or {}) for row in rows
-            }
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        rows = (
+            (await session.execute(select(Data).filter(Data.id.in_(list(by_id))))).scalars().all()
+        )
+        metadata_by_id = {row.id: dict(getattr(row, "system_metadata", None) or {}) for row in rows}
 
-        for data_id, matching_items in by_id.items():
-            metadata = metadata_by_id.get(data_id) or {}
-            if not is_code_repo_sourced(metadata):
-                continue
-            repo_url = metadata.get("repo_url")
-            repo_path = metadata.get("repo_path")
-            for item in matching_items:
-                item["kind"] = CODE_REPOSITORY_ITEM_KIND
-                item["source"] = repo_url or repo_path
-                item["path"] = repo_path
-    except Exception:
-        logger.debug("Could not attach item identity to the remember result", exc_info=True)
+    for data_id, matching_items in by_id.items():
+        metadata = metadata_by_id.get(data_id) or {}
+        if not is_code_repo_sourced(metadata):
+            continue
+        repo_url = metadata.get("repo_url")
+        repo_path = metadata.get("repo_path")
+        for item in matching_items:
+            item["kind"] = CODE_REPOSITORY_ITEM_KIND
+            item["source"] = repo_url or repo_path
+            item["path"] = repo_path
 
 
 def _all_code_repositories(items: list[dict]) -> bool:
@@ -296,36 +304,17 @@ def _all_code_repositories(items: list[dict]) -> bool:
 def _all_repository_specs(data, codegraph_config: Mapping[str, object]) -> bool:
     """Whether every input of a permanent remember is a code repository, before add() runs.
 
-    The same detection add() applies: a declared call (``treat_as_repository``),
-    a GitHub/GitLab repository URL (``code_repo_clone_url``) or a local directory
-    with a project marker (``detect_code_project``). Such a call builds through
-    the LLM-free enola route only, so its preflight needs no LLM and resolves no
-    graph extractor. Anything else (text, files, an undetected directory) is
-    read as a document call, which gates on the resolved extractor as before.
+    The detection add() applies (``is_repository_spec``: declared, a
+    GitHub/GitLab URL, a directory with a project marker). Such a call builds
+    through the LLM-free enola route only, so its preflight needs no LLM.
+    Anything else (text, files, an undetected directory) is read as a document
+    call, which gates on the resolved extractor as before.
     """
-    if codegraph_config.get("treat_as_repository"):
-        return True
+    from cognee.tasks.code_graph.code_repo import is_repository_spec
+
     items = data if isinstance(data, list) else [data]
-    if not items:
-        return False
-
-    from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
-    from cognee.tasks.code_graph.code_repo import detect_code_project
-    from cognee.tasks.code_graph.resolve_repo import code_repo_clone_url
-
-    for item in items:
-        if not isinstance(item, (str, Path)):
-            return False
-        spec = str(item)
-        if code_repo_clone_url(spec) is not None:
-            continue
-        try:
-            path = resolve_local_path(spec, must_exist=True)
-        except (OSError, ValueError):
-            return False
-        if not (path.is_dir() and detect_code_project(path)):
-            return False
-    return True
+    declared = bool(codegraph_config.get("treat_as_repository"))
+    return bool(items) and all(is_repository_spec(item, declared=declared) for item in items)
 
 
 PRESORT_FOLDERS_ENV = "PRESORT_FOLDERS_ENABLED"
@@ -1353,15 +1342,18 @@ async def remember(
 
     drop_deprecated_temporal_cognify(kwargs)
 
-    # content_type="code" was removed (SDK-793): a repository is ordinary data
-    # and builds through add() + cognify(). The value is still accepted so
-    # existing callers do not break, and ignored: the call is a plain
-    # remember(data). Dropped here, before any path reads content_type.
-    legacy_code_content_type = kwargs.get("content_type") == "code"
-    if legacy_code_content_type:
+    # content_type="code" is deprecated (SDK-793): a repository is ordinary data
+    # that builds through add() + cognify(). The value folds into
+    # codegraph_config -- every item a declared repository, documents left out,
+    # the old call's semantics -- and the call takes the one normal path.
+    # Folded here, before any path reads content_type.
+    if kwargs.get("content_type") == "code":
         kwargs.pop("content_type")
         warnings.warn(CODE_CONTENT_TYPE_DEPRECATION_MESSAGE, FutureWarning, stacklevel=2)
         logger.warning(CODE_CONTENT_TYPE_DEPRECATION_MESSAGE)
+        fold_into_codegraph_config(
+            kwargs, dict(CODE_CONTENT_TYPE_CODEGRAPH_CONFIG), 'content_type="code"'
+        )
 
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The
@@ -1690,7 +1682,6 @@ async def remember(
             session_ids=session_ids,
             span=span,
             raise_on_error=raise_on_error,
-            legacy_code_content_type=legacy_code_content_type,
             **kwargs,
         )
 
@@ -1746,7 +1737,6 @@ async def _remember_inner(
     session_ids,
     span,
     raise_on_error: bool = True,
-    legacy_code_content_type: bool = False,
     **kwargs,
 ) -> "RememberResult":
     from cognee.api.v1.serve.state import get_remote_client
@@ -1804,11 +1794,6 @@ async def _remember_inner(
                 "session ids after the remote remember finishes."
             )
         span.set_attribute(COGNEE_OPERATION_MODE, "cloud")
-        if legacy_code_content_type:
-            # A content_type="code" caller passes repository specs, often a path
-            # on the server: send every string as raw_data, as that call always
-            # did, so it is not uploaded and stored as the path's text.
-            kwargs["strings_as_raw_data"] = True
         return await client.remember(
             data,
             dataset_name,

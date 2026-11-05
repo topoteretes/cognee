@@ -178,9 +178,14 @@ async def sync_repositories(
                 reason="processing_error",
             )
         else:
+            if len(items) > len(repo_full_names):
+                raise RuntimeError(
+                    f"GitHub sync for {account_login}: the result lists {len(items)} items "
+                    f"for {len(repo_full_names)} repositories."
+                )
             await report_sync_progress(
                 phase="finalizing",
-                completed=min(len(items), len(repo_full_names)),
+                completed=len(items),
                 total=len(repo_full_names),
                 unit="repositories",
                 counts={"processed": processed, "failed": failed},

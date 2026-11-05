@@ -5,7 +5,7 @@ from uuid import UUID
 
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
-from cognee.infrastructure.locks import get_dataset_lock, held_datasets
+from cognee.infrastructure.locks import dataset_lock, get_dataset_lock, held_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.methods.get_selected_dataset_data import get_selected_dataset_data
 from cognee.modules.data.models import Data, Dataset
@@ -15,7 +15,8 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
 from cognee.modules.pipelines.layers.setup_and_check_environment import (
-    setup_and_check_environment,
+    check_connections,
+    setup_environment,
 )
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
@@ -99,14 +100,28 @@ async def run_pipeline(
     if not callable(tasks):
         validate_pipeline_tasks(tasks)
         needs_llm = pipeline_needs_llm(tasks)
-    await setup_and_check_environment(
-        vector_db_config,
-        graph_db_config,
-        skip_connection_test=skip_connection_test,
-        needs_llm=needs_llm,
-    )
+    await setup_environment(vector_db_config, graph_db_config)
 
     user, authorized_datasets = await resolve_authorized_user_datasets(datasets, user)
+
+    # The one resolve of the call's inputs (directories, repository URLs,
+    # declared repository specs), per dataset and under its lock: resolving a
+    # repository rewrites its manifest row's pipeline stamps, which a
+    # concurrent run of the dataset must not interleave with. It runs before
+    # the connection probes because what the call ingests decides them: an
+    # add made of repository manifests alone embeds nothing, so its first-run
+    # embedding probe is skipped unless the call indexes vectors (a keyless
+    # install would otherwise fetch the local embedding model for nothing).
+    data_by_dataset: dict[UUID, Any] = {}
+    if data is not None and (data_cache or incremental_loading):
+        for dataset in authorized_datasets:
+            data_by_dataset[dataset.id] = await _resolve_inputs(data, user, dataset, extras)
+        if data_by_dataset and all(
+            _embeds_nothing(items, extras) for items in data_by_dataset.values()
+        ):
+            skip_connection_test = True
+
+    await check_connections(skip_connection_test=skip_connection_test, needs_llm=needs_llm)
 
     # TODO: If multiple datasets are provided, we currently run them sequentially to avoid overwhelming the system with too many concurrent pipeline runs.
     #       In the future, we could consider adding concurrency here with proper resource management and limits.
@@ -116,7 +131,7 @@ async def run_pipeline(
             dataset=dataset,
             user=user,
             tasks=tasks,
-            data=data,
+            data=data_by_dataset.get(dataset.id, data),
             pipeline_name=pipeline_name,
             incremental_loading=incremental_loading,
             data_per_batch=data_per_batch,
@@ -146,6 +161,43 @@ async def run_pipeline(
         raise AfterRunHookError(hook_failures) from next(
             (error for *_, error in hook_failures if isinstance(error, BaseException)), None
         )
+
+
+async def _resolve_inputs(data, user: User, dataset: Dataset, extras: dict | None):
+    """Resolve the call's raw inputs for ``dataset`` under its lock.
+
+    ``extras`` carries the add() call's repository options: ``codegraph_config``
+    (credentials, ``include_documents``, ``treat_as_repository``) and
+    ``repo_branch``. ``dataset_lock`` is re-entrant through ``held_datasets``,
+    so a run nested in one that already holds the lock resolves in place.
+    """
+    from cognee.tasks.ingestion import resolve_data_directories
+
+    config = (extras or {}).get("codegraph_config") or {}
+    async with dataset_lock(dataset.id):
+        return await resolve_data_directories(
+            data,
+            user=user,
+            dataset_id=dataset.id,
+            credentials=config.get("repo_credentials"),
+            include_documents=config.get("include_documents", True),
+            treat_as_repository=bool(config.get("treat_as_repository")),
+            branch=(extras or {}).get("repo_branch"),
+        )
+
+
+def _embeds_nothing(resolved_items, extras: dict | None) -> bool:
+    """Whether a run over ``resolved_items`` embeds nothing: every item is a code
+    repository manifest and the call does not index vectors."""
+    from cognee.tasks.code_graph.code_repo import is_code_repo_sourced
+
+    items = resolved_items if isinstance(resolved_items, list) else [resolved_items]
+    config = (extras or {}).get("codegraph_config") or {}
+    return (
+        bool(items)
+        and not config.get("index_vectors")
+        and all(is_code_repo_sourced(getattr(item, "system_metadata", None)) for item in items)
+    )
 
 
 async def run_pipeline_per_dataset(

@@ -88,9 +88,8 @@ async def main(args: argparse.Namespace) -> None:
     result = await cognee.remember(
         args.repo,
         dataset_name=args.dataset,
-        # The code graph only: the repository is declared (no sniffing) and its
-        # README/docs stay out, so nothing reaches an LLM or embedding provider.
         codegraph_config={"treat_as_repository": True, "include_documents": False},
+        self_improvement=False,
     )
     arch = await cognee.search(
         query_type=cognee.SearchType.CODE,

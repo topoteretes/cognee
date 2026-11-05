@@ -417,7 +417,8 @@ def session_bridge(harness, monkeypatch):
     monkeypatch.setattr(memify_module, "setup", AsyncMock(return_value=None))
     monkeypatch.setattr(memify_module, "resolve_authorized_user_datasets", resolved_datasets)
     monkeypatch.setattr(migrations_module, "run_migrations_and_block", AsyncMock())
-    monkeypatch.setattr(pipeline_module, "setup_and_check_environment", AsyncMock())
+    monkeypatch.setattr(pipeline_module, "setup_environment", AsyncMock())
+    monkeypatch.setattr(pipeline_module, "check_connections", AsyncMock())
     monkeypatch.setattr(pipeline_module, "resolve_authorized_user_datasets", resolved_datasets)
 
     run_log = SimpleNamespace(errors=[], completed=[])

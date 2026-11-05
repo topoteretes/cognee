@@ -407,6 +407,53 @@ def _names_no_directory(spec) -> bool:
         return False
 
 
+def is_repository_spec(spec, *, declared: bool = False) -> bool:
+    """Whether ``add()`` resolves ``spec`` as a code repository.
+
+    The one detection rule, shared by ingestion's resolve, ``remember()``'s
+    preflight and the remote client: a declared call (``treat_as_repository``)
+    takes every item as one; otherwise a GitHub/GitLab repository URL
+    (``code_repo_clone_url``) or a local directory with a project marker
+    (``detect_code_project``, read through ``resolve_local_path`` so nothing
+    outside the allowed roots is looked at). An ssh remote is not detected:
+    ``refuse_undeclared_ssh_spec`` names the fix.
+    """
+    if declared:
+        return True
+    if not isinstance(spec, (str, Path)):
+        return False
+    text = str(spec)
+    if code_repo_clone_url(text) is not None:
+        return True
+    from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+
+    try:
+        path = resolve_local_path(text, must_exist=True)
+    except (FileNotFoundError, ValueError):
+        return False
+    return path.is_dir() and detect_code_project(path)
+
+
+def refuse_local_paths_when_disabled(specs) -> None:
+    """Raise ``IngestionError`` for a local directory or repository path when the
+    server does not accept local paths (``ACCEPT_LOCAL_FILE_PATH=false``).
+
+    The one gate for a directory read in place: a code project resolves to a
+    manifest that never reaches the per-file check, and cognify then reads the
+    directory at build time.
+    """
+    from cognee.modules.ingestion.exceptions import IngestionError
+    from cognee.tasks.ingestion.save_data_item_to_storage import settings as save_data_settings
+
+    if save_data_settings.accept_local_file_path:
+        return
+    if any(not is_remote_repo(spec) for spec in specs):
+        raise IngestionError(
+            message="Local directories and repository paths are not accepted "
+            "(ACCEPT_LOCAL_FILE_PATH=false). Pass a git URL or upload the files instead."
+        )
+
+
 async def resolve_declared_repositories(
     data,
     credentials: str | None = None,
@@ -439,7 +486,6 @@ async def resolve_declared_repositories(
     paths) in input order.
     """
     from cognee.modules.ingestion.exceptions import IngestionError
-    from cognee.tasks.ingestion.save_data_item_to_storage import settings as save_data_settings
 
     items = data if isinstance(data, list) else [data]
     non_specs = [item for item in items if not isinstance(item, (str, Path))]
@@ -458,20 +504,13 @@ async def resolve_declared_repositories(
     )
     if not_a_repository is not None:
         raise ValueError(
-            f"codegraph_config treat_as_repository: {str(not_a_repository)[:120]!r} is not a "
-            "repository path or git URL. Drop treat_as_repository to ingest it normally."
+            f"codegraph_config treat_as_repository: '{redact_repo_spec(not_a_repository)}' is "
+            "not a repository path or git URL. Drop treat_as_repository to ingest it normally."
         )
 
-    # Local specs are read from this machine's filesystem, so they take the
-    # same gate the in-pipeline directory path applies -- a declaration that
-    # something is a repository is not a licence to read a disabled root.
-    if not save_data_settings.accept_local_file_path and any(
-        not is_remote_repo(item) for item in items
-    ):
-        raise IngestionError(
-            message="Local repository paths are not accepted "
-            "(ACCEPT_LOCAL_FILE_PATH=false). Pass a git URL instead."
-        )
+    # A declaration that something is a repository is not a licence to read a
+    # disabled root.
+    refuse_local_paths_when_disabled(items)
 
     # Checked before anything is cloned: resolve_repo_source rejects a branch
     # for a local path too, but only when the loop reaches it.

@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, WithJsonSchema
 
 from cognee import __version__ as cognee_version
-from cognee.api.codegraph_config_field import parse_codegraph_config_field
+from cognee.api.codegraph_config_field import codegraph_config_form
 from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
 from cognee.exceptions import CogneeApiError
 from cognee.memory import FeedbackEntry, QAEntry, SkillRunEntry, TraceEntry
@@ -17,7 +17,7 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
-from cognee.tasks.code_graph.config import requests_codegraph_options
+from cognee.tasks.code_graph.config import CodeGraphConfig, requests_codegraph_options
 from cognee.tasks.ingestion.data_item import (
     pair_labels_with_data,
     parse_external_metadata,
@@ -291,23 +291,7 @@ def get_remember_router() -> APIRouter:
                 "(defaults to 'skill')."
             ),
         ),
-        codegraph_config: str | None = Form(
-            default=None,
-            examples=[""],
-            description=(
-                "JSON object of code repository options, the same dict the SDK's "
-                "remember(codegraph_config=...) takes: 'index_vectors' (also embed the "
-                "code facts; requires an embedding provider), 'include_documents' "
-                "(default true; false indexes the code graph only, no README/docs), "
-                "'treat_as_repository' (every raw_data entry is a repository spec, "
-                "cloned or used in place instead of sniffed: Bitbucket or self-hosted "
-                "forge URLs without .git, ssh remotes, source trees without a build "
-                "manifest) and 'repo_credentials' (a token for private clones; it "
-                "reaches git only through environment config). Unknown keys are a 400. "
-                "Normal ingestion only. 'codegraphConfig' is accepted as the same field."
-            ),
-        ),
-        codegraphConfig: str | None = Form(default=None, include_in_schema=False),
+        codegraph_config: CodeGraphConfig = Depends(codegraph_config_form),
         index_vectors: bool | None = Form(
             default=False,
             description=(
@@ -413,27 +397,19 @@ def get_remember_router() -> APIRouter:
                 detail="Either datasetId or datasetName must be provided.",
             )
 
-        # content_type='code' was removed (SDK-793): a repository in raw_data is
-        # ordinary data. Clients still sending it keep working: the value is
-        # ignored and the request is normal ingestion. Its request contract
-        # stays: the payload is raw_data repository specs, never uploads.
-        legacy_code_content_type = content_type == "code"
-        if legacy_code_content_type:
+        # content_type='code' is deprecated (SDK-793): it folds into
+        # codegraph_config below (every raw_data entry a declared repository,
+        # documents left out) and the request is normal ingestion.
+        folds_code_content_type = content_type == "code"
+        # The uploads as sent, before raw_data strings join them below.
+        has_uploads = bool(data)
+        if folds_code_content_type:
             logger.warning(
-                "POST /remember: content_type='code' is deprecated and ignored; the request "
-                "is normal ingestion. Send repository specs in raw_data without it, with "
-                "codegraph_config for the repository options."
+                "POST /remember: content_type='code' is deprecated; pass "
+                'codegraph_config={"treat_as_repository": true, "include_documents": false} '
+                "instead. The request folds into that config."
             )
             content_type = None
-            if data:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "content_type='code' does not accept file uploads — pass repository "
-                        "paths or git URLs via 'raw_data'. To ingest individual code "
-                        "files, upload them under their real filename without content_type."
-                    ),
-                )
 
         # String inputs join the uploads as one item list, uploads first. Drop
         # empty entries — Swagger UI submits untouched array items as "". The
@@ -516,14 +492,37 @@ def get_remember_router() -> APIRouter:
                 ),
             )
 
-        parsed_codegraph_config = parse_codegraph_config_field(codegraph_config, codegraphConfig)
+        parsed_codegraph_config = dict(codegraph_config)
+        if folds_code_content_type:
+            from cognee.api.v1.remember.remember import (
+                CODE_CONTENT_TYPE_CODEGRAPH_CONFIG,
+                fold_into_codegraph_config,
+            )
+
+            folded = {"codegraph_config": parsed_codegraph_config}
+            try:
+                fold_into_codegraph_config(
+                    folded, dict(CODE_CONTENT_TYPE_CODEGRAPH_CONFIG), "content_type='code'"
+                )
+            except ValueError as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+            parsed_codegraph_config = folded["codegraph_config"]
         if index_vectors:
-            # The deprecated spelling folds into the dict; an explicit key wins.
+            # The deprecated spelling folds into the dict; given both ways with
+            # different values, neither silently wins.
             logger.warning(
                 "POST /remember: index_vectors is deprecated; pass "
                 'codegraph_config={"index_vectors": true}.'
             )
-            parsed_codegraph_config = {"index_vectors": True, **parsed_codegraph_config}
+            if parsed_codegraph_config.get("index_vectors") is False:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "index_vectors=true conflicts with codegraph_config "
+                        '{"index_vectors": false}. Pass it once, in codegraph_config.'
+                    ),
+                )
+            parsed_codegraph_config["index_vectors"] = True
         # Only add() and cognify() read it; the session-cache and skills paths
         # never run them, so the option would be dropped silently -- a 400 instead.
         if requests_codegraph_options(parsed_codegraph_config) and (session_id or content_type):
@@ -535,28 +534,31 @@ def get_remember_router() -> APIRouter:
                 ),
             )
 
-        # Local paths are read from the server's own filesystem. That is the
-        # intended setup for a local server sharing the caller's checkout, but
-        # a server that disables local file ingestion must not hand out a
-        # read-any-directory primitive through this route either. Checked here
-        # for the calls whose raw_data entries are repository specs by
-        # contract, so the refusal stays a 400 as it always was.
-        if legacy_code_content_type or parsed_codegraph_config.get("treat_as_repository"):
-            from cognee.tasks.code_graph.resolve_repo import is_remote_repo
-            from cognee.tasks.ingestion.save_data_item_to_storage import (
-                settings as save_data_settings,
-            )
-
-            if not save_data_settings.accept_local_file_path and any(
-                not is_remote_repo(spec) for spec in raw_items
-            ):
+        if parsed_codegraph_config.get("treat_as_repository"):
+            # Declared repositories are raw_data specs (paths or git URLs),
+            # never uploads: a file is not a repository.
+            if has_uploads:
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        "Local repository paths are disabled on this server "
-                        "(ACCEPT_LOCAL_FILE_PATH=false) — pass a git URL instead."
+                        "treat_as_repository (and content_type='code') does not accept file "
+                        "uploads — pass repository paths or git URLs via 'raw_data'. To ingest "
+                        "individual code files, upload them under their real filename without it."
                     ),
                 )
+            # Local paths are read from the server's own filesystem. That is the
+            # intended setup for a local server sharing the caller's checkout,
+            # but a server that disables local file ingestion must not hand out
+            # a read-any-directory primitive through this route either. Checked
+            # here, for the calls whose raw_data entries are repository specs by
+            # contract, so the refusal stays a 400 as it always was.
+            from cognee.modules.ingestion.exceptions import IngestionError
+            from cognee.tasks.code_graph.code_repo import refuse_local_paths_when_disabled
+
+            try:
+                refuse_local_paths_when_disabled(raw_items)
+            except IngestionError as error:
+                raise HTTPException(status_code=400, detail=error.message) from error
 
         # After the field-specific checks above, so a misused field is
         # reported as such rather than as "nothing to ingest".

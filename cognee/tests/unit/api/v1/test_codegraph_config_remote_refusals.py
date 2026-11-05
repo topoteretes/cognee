@@ -46,15 +46,18 @@ async def test_add_refuses_options_the_remote_cannot_carry(remote, config):
 
 
 @pytest.mark.asyncio
-async def test_add_forwards_a_config_that_only_restates_the_defaults(monkeypatch):
+async def test_add_refuses_any_config_remotely_and_forwards_none(monkeypatch):
     client = AsyncMock()
     client.add = AsyncMock(return_value={"status": "ok"})
     monkeypatch.setattr(serve_state, "get_remote_client", lambda: client)
 
-    await add_module.add(
-        "a note", codegraph_config={"index_vectors": False, "include_documents": True}
-    )
+    with pytest.raises(ValueError, match="codegraph_config is not supported by add"):
+        await add_module.add(
+            "a note", codegraph_config={"index_vectors": False, "include_documents": True}
+        )
+    client.add.assert_not_awaited()
 
+    await add_module.add("a note", codegraph_config={})
     client.add.assert_awaited_once_with("a note", "main_dataset")
 
 

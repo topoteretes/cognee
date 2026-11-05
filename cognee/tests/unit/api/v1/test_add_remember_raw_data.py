@@ -8,7 +8,7 @@ with the combined list. Empty entries (Swagger UI submits untouched array items
 as "") are dropped. A request with neither uploads nor raw_data is a 400.
 remember rejects raw_data together with content_type="skills" or "cogx-archive"
 because those paths never run string inputs through add(); the removed
-content_type="code" is ignored, so its raw_data entries are plain ingestion.
+content_type="code" folds into codegraph_config, so its raw_data entries are declared repositories.
 """
 
 import importlib
@@ -221,32 +221,53 @@ def test_remember_forwards_the_codegraph_config_with_repo_specs(client):
         assert mock_remember.call_args.kwargs["content_type"] is None
 
 
-@pytest.mark.parametrize(
-    "form",
-    [{"raw_data": [REPO_URL], "session_id": "s1"}, {"raw_data": [REPO_URL, "/srv/other/repo"]}],
-)
-def test_remember_ignores_the_removed_code_content_type(client, form):
-    # The old request shape keeps working and is plain ingestion: remember()
-    # gets exactly what the same request without content_type sends it. (Its
-    # old contract also stays: a file upload with it is a 400.)
+def test_remember_folds_the_code_content_type_into_the_config(client):
+    # The old request shape keeps working through the one normal path: remember()
+    # gets what the same request with the folded codegraph_config sends it.
     calls = []
-    for extra in ({}, {"content_type": "code"}):
+    for extra in (
+        {"codegraph_config": '{"treat_as_repository": true, "include_documents": false}'},
+        {"content_type": "code"},
+    ):
         with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
             mock_remember.return_value = remember_completed()
 
             response = client.post(
-                "/api/v1/remember", data={"datasetName": "test_dataset", **form, **extra}
+                "/api/v1/remember",
+                data={
+                    "datasetName": "test_dataset",
+                    "raw_data": [REPO_URL, "/srv/other/repo"],
+                    **extra,
+                },
             )
 
             assert response.status_code == 200, response.text
             calls.append(mock_remember.call_args)
 
-    plain, legacy = calls
+    declared, legacy = calls
     assert legacy.kwargs["content_type"] is None
-    assert repr(legacy.args) == repr(plain.args)
-    assert legacy.kwargs.keys() == plain.kwargs.keys()
-    for key in plain.kwargs:
-        assert repr(legacy.kwargs[key]) == repr(plain.kwargs[key]), key
+    assert repr(legacy.args) == repr(declared.args)
+    assert legacy.kwargs.keys() == declared.kwargs.keys()
+    for key in declared.kwargs:
+        assert repr(legacy.kwargs[key]) == repr(declared.kwargs[key]), key
+
+
+def test_remember_code_content_type_with_a_session_is_refused(client):
+    # The folded config is a code graph option; the session cache never runs add().
+    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
+        response = client.post(
+            "/api/v1/remember",
+            data={
+                "datasetName": "test_dataset",
+                "raw_data": [REPO_URL],
+                "session_id": "s1",
+                "content_type": "code",
+            },
+        )
+
+    assert response.status_code == 400, response.text
+    assert "codegraph_config" in response.json()["detail"]
+    mock_remember.assert_not_called()
 
 
 @pytest.mark.parametrize("content_type", ["skills", "cogx-archive"])

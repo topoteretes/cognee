@@ -77,18 +77,10 @@ def validate_codegraph_config(codegraph_config: CodeGraphConfig | None) -> CodeG
 
 
 def requests_codegraph_options(codegraph_config: Mapping[str, object] | None) -> bool:
-    """Whether the config asks for anything beyond the defaults.
+    """Whether the call passed any code graph option at all.
 
-    The defaults are ``index_vectors=False``, ``include_documents=True``,
-    ``treat_as_repository=False`` and no credentials, so a config that only
-    restates them -- ``{"index_vectors": False}`` from an explicit top-level
-    ``index_vectors=False`` -- changes nothing and must not trip the checks
-    that reject codegraph options on other paths.
+    The paths that cannot honour the options (the session cache, memory
+    entries, skills, a remote instance) refuse a config with any key set, so a
+    caller never passes one that is silently dropped.
     """
-    config = codegraph_config or {}
-    return bool(
-        config.get("index_vectors")
-        or config.get("repo_credentials")
-        or config.get("treat_as_repository")
-        or config.get("include_documents", True) is False
-    )
+    return bool(codegraph_config)

@@ -224,3 +224,22 @@ async def test_declared_local_specs_honour_the_allowed_local_roots(monkeypatch, 
 
     with pytest.raises(CodeRepositoryError, match="outside the allowed local roots"):
         await code_repo.resolve_declared_repositories(str(outside))
+
+
+@pytest.mark.asyncio
+async def test_local_repo_row_records_no_source_url(tmp_path):
+    """A repository used in place has a path and no URL: nothing was cloned, so
+    the row carries ``repo_path`` only (``remember`` names it by that path)."""
+    from cognee.tasks.ingestion import resolve_data_directories
+
+    repo = tmp_path / "proj"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text("[project]\nname = 'proj'\n")
+    (repo / "main.py").write_text("print('hi')\n")
+
+    resolved = await resolve_data_directories(str(repo), include_subdirectories=True)
+
+    manifest = next(item for item in resolved if getattr(item, "system_metadata", None))
+    assert manifest.system_metadata["source"] == "code_repo"
+    assert manifest.system_metadata["repo_path"] == str(repo.resolve())
+    assert "repo_url" not in manifest.system_metadata

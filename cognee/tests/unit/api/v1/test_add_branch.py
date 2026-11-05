@@ -1,7 +1,8 @@
 """add() and remember() clone a chosen branch of a repository URL.
 
-The branch reaches the clone from two places: run_tasks, which resolves repository URLs
-before any task list runs, and the add task itself. remember() passes it on to add(),
+The branch reaches the clone from two places: run_pipeline, which resolves repository
+URLs before the run (from ``extras``, next to the call's ``codegraph_config``), and the
+add task itself. remember() passes it on to add(),
 and refuses it wherever it would be dropped: with the skills content_type or a
 session_id, or while connected to a remote instance.
 """
@@ -43,13 +44,6 @@ def executor(monkeypatch):
         add_module, "resolve_dlt_sources", AsyncMock(side_effect=lambda data, **kw: (data, None))
     )
     monkeypatch.setattr(add_module, "refuse_changed_existing_documents", AsyncMock())
-    # add() resolves directories and repository URLs ahead of the run; a real
-    # resolve would clone the URL. The run's own resolve is stubbed with it.
-    monkeypatch.setattr(
-        add_module,
-        "resolve_data_directories",
-        AsyncMock(side_effect=lambda data, **kw: data if isinstance(data, list) else [data]),
-    )
     run = AsyncMock(return_value=None)
     monkeypatch.setattr(add_module, "get_pipeline_executor", lambda **kwargs: run)
     return run
@@ -61,10 +55,10 @@ async def test_the_branch_reaches_run_tasks_and_the_add_task(executor):
     await add_module.add(_REPO)
 
     with_branch, without = executor.await_args_list
-    # run_tasks resolves repository URLs before the task list runs, from the extras.
-    assert with_branch.kwargs["extras"] == {"repo_branch": "dev"}
+    # run_pipeline resolves repository URLs before the run, from the extras.
+    assert with_branch.kwargs["extras"] == {"repo_branch": "dev", "codegraph_config": {}}
     assert with_branch.kwargs["tasks"][0].default_params["kwargs"]["branch"] == "dev"
-    assert without.kwargs["extras"] == {"repo_branch": None}
+    assert without.kwargs["extras"] == {"repo_branch": None, "codegraph_config": {}}
 
     with pytest.raises(ValueError, match="Invalid branch name"):  # never reaches git
         await add_module.add(_REPO, branch="-x")
@@ -72,18 +66,16 @@ async def test_the_branch_reaches_run_tasks_and_the_add_task(executor):
 
 
 @pytest.mark.asyncio
-async def test_the_branch_reaches_the_early_resolve_of_an_add(executor, monkeypatch):
-    # add() resolves (and clones) before the pipeline runs, with the call's
-    # repository options; the pipeline's own resolve then passes the items
-    # through, so this call is the only one that can clone the branch.
-    early = AsyncMock(return_value=["resolved"])
-    monkeypatch.setattr(add_module, "resolve_data_directories", early)
-
+async def test_the_repository_options_travel_with_the_branch(executor):
+    # add() resolves nothing itself: the options reach run_pipeline's one
+    # resolve through the extras, next to the branch.
     await add_module.add(_REPO, branch="dev", codegraph_config={"include_documents": False})
 
-    assert early.await_args.kwargs["branch"] == "dev"
-    assert early.await_args.kwargs["include_documents"] is False
-    assert executor.await_args.kwargs["data"] == ["resolved"]
+    assert executor.await_args.kwargs["extras"] == {
+        "repo_branch": "dev",
+        "codegraph_config": {"include_documents": False},
+    }
+    assert executor.await_args.kwargs["data"] == _REPO
 
 
 @pytest.mark.asyncio

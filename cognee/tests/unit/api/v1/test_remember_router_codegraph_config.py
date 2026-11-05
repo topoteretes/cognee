@@ -174,7 +174,9 @@ def test_options_are_refused_where_add_and_cognify_never_run(client, fake_rememb
     assert not fake_remember
 
 
-def test_a_config_that_restates_the_defaults_is_fine_with_a_session(client, fake_remember):
+def test_the_default_index_vectors_field_is_no_option(client, fake_remember):
+    """The form's index_vectors defaults to false, which is not a request for
+    anything: a session write with it is fine. Any codegraph_config key is."""
     response = client.post(
         "/remember",
         data={
@@ -182,15 +184,41 @@ def test_a_config_that_restates_the_defaults_is_fine_with_a_session(client, fake
             "raw_data": ["a note"],
             "session_id": "s1",
             "index_vectors": "false",
-            "codegraph_config": json.dumps({"include_documents": True}),
         },
     )
-
     assert response.status_code == 200, response.text
     assert fake_remember["kwargs"]["session_id"] == "s1"
 
+    response = client.post(
+        "/remember",
+        data={
+            "datasetName": "ds",
+            "raw_data": ["a note"],
+            "session_id": "s1",
+            "codegraph_config": json.dumps({"include_documents": True}),
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert "codegraph_config" in response.json()["detail"]
 
-def test_the_removed_code_content_type_is_ignored(client, fake_remember, caplog):
+
+def test_index_vectors_conflicting_with_the_config_is_a_400(client, fake_remember):
+    response = client.post(
+        "/remember",
+        data={
+            "datasetName": "ds",
+            "raw_data": [REPO_URL],
+            "index_vectors": "true",
+            "codegraph_config": json.dumps({"index_vectors": False}),
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    assert "conflicts" in response.json()["detail"]
+    assert not fake_remember
+
+
+def test_the_code_content_type_folds_into_the_config(client, fake_remember, caplog):
     import logging
 
     with caplog.at_level(logging.WARNING):
@@ -208,16 +236,44 @@ def test_the_removed_code_content_type_is_ignored(client, fake_remember, caplog)
     assert response.status_code == 200, response.text
     assert fake_remember["data"] == [REPO_URL]
     assert fake_remember["kwargs"]["content_type"] is None
-    assert fake_remember["kwargs"]["codegraph_config"] == {"index_vectors": True}
+    # The deprecated spelling folds into the config, next to the other options.
+    assert fake_remember["kwargs"]["codegraph_config"] == {
+        "treat_as_repository": True,
+        "include_documents": False,
+        "index_vectors": True,
+    }
     assert fake_remember["kwargs"]["run_in_background"] is True
-    assert "content_type='code' is deprecated" in caplog.text
+    # The structlog record escapes the quotes; the deprecation and its replacement are logged.
+    assert "is deprecated" in caplog.text and "treat_as_repository" in caplog.text
 
 
-def test_the_removed_code_content_type_still_rejects_uploads(client, fake_remember):
-    # The old request contract stays: the payload is raw_data repository specs.
+def test_the_code_content_type_conflicting_with_the_config_is_a_400(client, fake_remember):
     response = client.post(
         "/remember",
-        data={"datasetName": "ds", "content_type": "code", "raw_data": [REPO_URL]},
+        data={
+            "datasetName": "code_ds",
+            "content_type": "code",
+            "raw_data": [REPO_URL],
+            "codegraph_config": json.dumps({"include_documents": True}),
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    assert "include_documents given both" in response.json()["detail"]
+    assert not fake_remember
+
+
+@pytest.mark.parametrize(
+    "form",
+    [{"content_type": "code"}, {"codegraph_config": '{"treat_as_repository": true}'}],
+    ids=["code_content_type", "treat_as_repository"],
+)
+def test_declared_repositories_reject_uploads(client, fake_remember, form):
+    # One rule: a declared repository is a raw_data spec, never a file. The old
+    # content_type='code' contract is that rule, through the fold.
+    response = client.post(
+        "/remember",
+        data={"datasetName": "ds", "raw_data": [REPO_URL], **form},
         files=[("data", ("main.py", b"print('hi')", "text/plain"))],
     )
 

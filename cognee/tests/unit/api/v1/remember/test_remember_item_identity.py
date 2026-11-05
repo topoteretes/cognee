@@ -109,17 +109,18 @@ async def test_other_rows_are_untouched(monkeypatch, metadata):
 
 
 @pytest.mark.asyncio
-async def test_a_lookup_failure_leaves_the_items_alone(monkeypatch):
+async def test_a_lookup_failure_fails_the_remember(monkeypatch):
+    """One SELECT names the stored rows; what follows (the automatic improve, the
+    telemetry event) reads what it named, so a failed read is never swallowed."""
+
     def _boom():
         raise RuntimeError("relational database unavailable")
 
     monkeypatch.setattr("cognee.infrastructure.databases.relational.get_relational_engine", _boom)
     result = _result([{"id": str(uuid4())}])
-    original = [dict(item) for item in result.items]
 
-    await remember_module._attach_item_identity(result)
-
-    assert result.items == original
+    with pytest.raises(RuntimeError, match="relational database unavailable"):
+        await remember_module._attach_item_identity(result)
 
 
 def test_all_code_repositories_needs_at_least_one_item():

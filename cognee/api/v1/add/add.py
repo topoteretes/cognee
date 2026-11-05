@@ -27,7 +27,6 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.code_graph.code_repo import is_code_repo_sourced
 from cognee.tasks.code_graph.config import (
     CodeGraphConfig,
     requests_codegraph_options,
@@ -402,39 +401,6 @@ async def add(
     # items ahead of it one by one, and point at update().
     await refuse_changed_existing_documents(data, user, authorized_dataset)
 
-    # Directories and repository URLs are resolved here, with this call's
-    # repository options, under the same condition the pipeline runner resolves
-    # them (it resolves again, which passes resolved items through): what the
-    # call ingests has to be known before the run starts, because an add made
-    # of code repository manifests alone stores small JSON rows and embeds
-    # nothing, so its first-run embedding probe is skipped unless the call
-    # indexes vectors. A keyless install would otherwise fetch the local
-    # embedding model for a run that never uses it.
-    if data_cache or incremental_loading:
-        from cognee.infrastructure.locks import dataset_lock
-
-        # Resolving a repository resets the manifest row's pipeline stamps (a
-        # read-modify-write of pipeline_status). The runner does that under the
-        # dataset lock; running it here, before the pipeline, needs the same lock
-        # or a concurrent cognify of the dataset can lose a stamp.
-        async with dataset_lock(authorized_dataset.id):
-            data = await resolve_data_directories(
-                data,
-                include_subdirectories=True,
-                user=user,
-                dataset_id=authorized_dataset.id,
-                credentials=codegraph_config.get("repo_credentials"),
-                include_documents=codegraph_config.get("include_documents", True),
-                treat_as_repository=bool(codegraph_config.get("treat_as_repository")),
-                branch=branch,
-            )
-        if (
-            data
-            and not codegraph_config.get("index_vectors")
-            and all(is_code_repo_sourced(getattr(item, "system_metadata", None)) for item in data)
-        ):
-            skip_connection_test = True
-
     # Background runs must not depend on caller/request-scoped stream lifetimes.
     # Materialize stream-like inputs into owned in-memory buffers up front.
     if run_in_background:
@@ -465,8 +431,9 @@ async def add(
         embedding_config=embedding_config,
         data_cache=data_cache,
         skip_connection_test=skip_connection_test,
-        # run_tasks resolves repository URLs itself, before this task list runs.
-        extras={"repo_branch": branch},
+        # run_pipeline resolves directories and repository URLs itself, under
+        # the dataset lock and before the connection probes, with these options.
+        extras={"repo_branch": branch, "codegraph_config": codegraph_config},
     )
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers

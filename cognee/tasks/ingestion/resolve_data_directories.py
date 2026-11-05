@@ -46,10 +46,10 @@ async def resolve_data_directories(
     ``credentials`` authenticates the clone of a private repository URL,
     ``include_documents=False`` emits a repository's manifest without its
     README/docs, and ``treat_as_repository`` takes EVERY item as a repository
-    spec (``resolve_declared_repositories``) instead of detecting them. The
-    pipeline runner calls this with the defaults; ``add()`` calls it ahead of
-    the run when any option is set, and this function is idempotent on its
-    own output, so the later call passes the resolved items through.
+    spec (``resolve_declared_repositories``) instead of detecting them.
+    ``run_pipeline`` is the one caller, under the dataset lock and before the
+    connection probes, with the options ``add()`` hands it in ``extras``; the
+    function is idempotent on its own output, so resolved items pass through.
 
     A local directory that IS a code project (see
     ``cognee.tasks.code_graph.code_repo.PROJECT_MARKERS``) is not flattened:
@@ -133,26 +133,29 @@ async def resolve_data_directories(
                     raise S3FileSystemNotFoundError()
                 continue
 
-            # A GitHub/GitLab repository URL is a code project, not a web page:
-            # clone it and resolve it like the local project directory below --
-            # one code_repo manifest plus the repo's documents. Deferred import:
-            # code_repo reaches back into this package (dlt_utils).
+            # A code repository (the one rule: ``is_repository_spec``) is a
+            # code project, not a web page or a document tree: a GitHub/GitLab
+            # URL is cloned, a project directory is used in place, and either
+            # resolves to one code_repo manifest plus the repo's documents.
+            # Deferred imports: code_repo reaches back into this package
+            # (dlt_utils).
+            from cognee.tasks.code_graph.code_repo import (
+                is_repository_spec,
+                refuse_local_paths_when_disabled,
+                resolve_code_repository,
+                resolve_code_repository_url,
+            )
             from cognee.tasks.code_graph.resolve_repo import (
-                SSH_REPO_SPEC_MESSAGE,
                 code_repo_clone_url,
-                is_ssh_repo_spec,
+                refuse_undeclared_ssh_spec,
             )
 
             # An ssh remote names a repository and nothing else, so falling
             # through to the text path below would store the spec string as a
-            # document -- a silent wrong result. http(s) URLs are NOT checked
-            # this way: most of them really are web pages.
-            if is_ssh_repo_spec(item):
-                raise IngestionError(message=SSH_REPO_SPEC_MESSAGE)
+            # document -- a silent wrong result.
+            refuse_undeclared_ssh_spec(item)
 
             if code_repo_clone_url(item) is not None:
-                from cognee.tasks.code_graph.code_repo import resolve_code_repository_url
-
                 manifest_item, document_paths, _skipped = await resolve_code_repository_url(
                     item,
                     user=user,
@@ -168,29 +171,11 @@ async def resolve_data_directories(
             local_path = _resolve_existing_local_path(item)
 
             if local_path and local_path.is_dir():  # If it's a directory
-                # Checked here, not only per file at storage time: a code project
-                # resolves to a manifest DataItem that never reaches that check,
-                # and cognify then reads the directory in place.
-                from cognee.tasks.ingestion.save_data_item_to_storage import (
-                    settings as save_data_settings,
-                )
-
-                if not save_data_settings.accept_local_file_path:
-                    raise IngestionError(
-                        message="Local directories are not accepted "
-                        "(ACCEPT_LOCAL_FILE_PATH=false). Pass a repository URL "
-                        "or upload the files instead."
-                    )
+                refuse_local_paths_when_disabled([item])
                 if include_subdirectories:
                     # A code project resolves to one repo item + its documents
-                    # instead of a flat file list. Deferred import: code_repo
-                    # reaches back into this package (dlt_utils).
-                    from cognee.tasks.code_graph.code_repo import (
-                        detect_code_project,
-                        resolve_code_repository,
-                    )
-
-                    if detect_code_project(local_path):
+                    # instead of a flat file list.
+                    if is_repository_spec(local_path):
                         manifest_item, document_paths, _skipped = await resolve_code_repository(
                             local_path,
                             user=user,

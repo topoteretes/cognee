@@ -125,6 +125,19 @@ SSH_REPO_SPEC_MESSAGE = (
 )
 
 
+def refuse_undeclared_ssh_spec(spec) -> None:
+    """Raise ``IngestionError`` for an ssh remote the call did not declare.
+
+    The one refusal: ingestion applies it to every string it resolves, and the
+    remote client before uploading a string, which the server would store as
+    text. http(s) URLs are never refused this way: most of them are web pages.
+    """
+    if is_ssh_repo_spec(spec):
+        from cognee.modules.ingestion.exceptions import IngestionError
+
+        raise IngestionError(message=SSH_REPO_SPEC_MESSAGE)
+
+
 def code_repo_clone_url(spec) -> str | None:
     """The clone URL when an http(s) string names a whole git repository, else None.
 

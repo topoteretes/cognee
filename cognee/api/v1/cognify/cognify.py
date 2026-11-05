@@ -159,41 +159,37 @@ async def _pending_routes(
     code-repo manifests alone (or with nothing pending) runs no standard task, so
     it still validates the extractor argument but needs no GLiNER runtime or task
     list on a keyless install, no LLM probe, and no embedding probe unless it
-    indexes vectors. Any error while looking
-    (permissions, a tombstoned DLT row, ...) answers None, and the caller keeps the
-    checks for every wired route. An item added between this read and the run
-    meets its route's tasks without the skipped checks; the extractor then raises
-    its own not-installed error.
+    indexes vectors. An item added between this read and the run meets its
+    route's tasks without the skipped checks; the extractor then raises its own
+    not-installed error. A failing read fails the call: the routes decide what
+    the run installs and probes, so they are never guessed.
     """
-    try:
-        from cognee.modules.data.methods import (
-            get_authorized_existing_datasets,
-            get_dataset_data,
-        )
-        from cognee.modules.pipelines.models import is_data_item_completed
-        from cognee.modules.users.methods import get_default_user
+    from cognee.modules.data.methods import (
+        get_authorized_existing_datasets,
+        get_dataset_data,
+    )
+    from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed_for
+    from cognee.modules.users.methods import get_default_user
 
-        if user is None:
-            user = await get_default_user()
-        requested = [datasets] if isinstance(datasets, (str, UUID)) else datasets
-        target_datasets = await get_authorized_existing_datasets(requested, "write", user)
-        if not target_datasets:
-            return None
-
-        routes: set[CognifyRoute] = set()
-        for dataset in target_datasets:
-            dataset_id = cast(UUID, dataset.id)
-            for data_item in await get_dataset_data(dataset_id=dataset_id):
-                if incremental_loading:
-                    status = (data_item.pipeline_status or {}).get(COGNIFY_PIPELINE_NAME) or {}
-                    if is_data_item_completed(status.get(str(dataset_id))):
-                        continue
-                routes.add(cognify_route_for(data_item))
-        return routes
-    except Exception as error:
-        # Any doubt keeps every check.
-        logger.debug("Could not read the pending items' routes: %s", error, exc_info=True)
+    if user is None:
+        user = await get_default_user()
+    requested = [datasets] if isinstance(datasets, (str, UUID)) else datasets
+    target_datasets = await get_authorized_existing_datasets(requested, "write", user)
+    if not target_datasets:
         return None
+
+    routes: set[CognifyRoute] = set()
+    for dataset in target_datasets:
+        dataset_id = cast(UUID, dataset.id)
+        for data_item in await get_dataset_data(dataset_id=dataset_id):
+            # The runner's own skip rule (incremental loading): a completed
+            # item is not pending.
+            if incremental_loading and is_data_item_completed_for(
+                data_item, COGNIFY_PIPELINE_NAME, dataset_id
+            ):
+                continue
+            routes.add(cognify_route_for(data_item))
+    return routes
 
 
 async def cognify(
@@ -458,10 +454,12 @@ async def cognify(
     cognify_config = get_cognify_config()
     resolved_summary_method = resolve_summary_method(summary_method, cognify_config)
 
-    # The extractor is resolved once per run, below, after the pending items'
-    # routes are known: a code-only run never uses it. A dry run estimates the
-    # LLM pipeline, so it has to know the extractor up front.
-    if dry_run and resolve_extractor(extractor, cognify_config) == GLINER_DEMO_EXTRACTOR:
+    # The extractor decision is made once, here, for every call: the argument
+    # is validated whatever is pending, before any config or database access.
+    # Branches that cannot honour it raise instead of silently running
+    # something other than what the caller selected.
+    resolved_extractor = resolve_extractor(extractor, cognify_config)
+    if dry_run and resolved_extractor == GLINER_DEMO_EXTRACTOR:
         raise ValueError(
             "dry_run estimates the LLM extraction pipeline only; it has no cost model "
             "for the gliner_demo extractor."
@@ -591,14 +589,10 @@ async def cognify(
                 summary_method=resolved_summary_method,
             )
 
-        # The extractor decision is made once, here, for every call: the
-        # argument is validated whatever is pending. Branches that cannot
-        # honour it raise below instead of silently running something other
-        # than what the caller selected. After the argument checks and the
-        # remote route: a cognify that raises above, or runs remotely, must not
-        # install anything locally. Awaited, so the pipeline below never
-        # starts before the GLiNER runtime is importable.
-        resolved_extractor = resolve_extractor(extractor, cognify_config)
+        # After the argument checks and the remote route: a cognify that raises
+        # above, or runs remotely, must not install anything locally. Awaited,
+        # so the pipeline below never starts before the GLiNER runtime is
+        # importable.
         if standard_pending:
             await ensure_extractor_runtime(resolved_extractor, cognify_config)
 

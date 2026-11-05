@@ -106,7 +106,9 @@ async def test_a_detected_repository_url_is_sent_as_raw_data_without_a_config(fo
 
 @pytest.mark.asyncio
 async def test_an_undeclared_ssh_remote_is_refused_not_uploaded(form):
-    with pytest.raises(ValueError, match="treat_as_repository"):
+    from cognee.modules.ingestion.exceptions import IngestionError
+
+    with pytest.raises(IngestionError, match="treat_as_repository"):
         await _client().remember("git@github.com:acme/api.git", "ds")
 
     assert form.values_for("raw_data") == [] and form.values_for("data") == []
@@ -125,4 +127,28 @@ async def test_a_code_content_type_call_sends_its_strings_as_raw_data(form, monk
 
     assert form.values_for("raw_data") == ["/srv/checkout/repo"]
     assert form.values_for("data") == [] and form.values_for("content_type") == []
-    assert form.values_for("codegraph_config") == []
+    # The SDK folded the spelling into the config the server reads.
+    assert form.values_for("codegraph_config") == [
+        json.dumps({"treat_as_repository": True, "include_documents": False})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_client_itself_folds_the_code_content_type(form):
+    # A direct client caller gets the same fold: no content_type field, the
+    # folded config, and the strings as raw_data.
+    await _client().remember("/srv/checkout/repo", "ds", content_type="code")
+
+    assert form.values_for("content_type") == []
+    assert form.values_for("raw_data") == ["/srv/checkout/repo"]
+    assert form.values_for("codegraph_config") == [
+        json.dumps({"treat_as_repository": True, "include_documents": False})
+    ]
+
+    with pytest.raises(ValueError, match="include_documents given both"):
+        await _client().remember(
+            "/srv/checkout/repo",
+            "ds",
+            content_type="code",
+            codegraph_config={"include_documents": True},
+        )

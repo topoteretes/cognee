@@ -223,11 +223,14 @@ async def test_pending_routes_are_read_from_the_datasets_rows():
 
 
 @pytest.mark.asyncio
-async def test_an_unreadable_pending_set_answers_none():
-    with patch(
-        "cognee.modules.data.methods.get_authorized_existing_datasets",
-        AsyncMock(side_effect=PermissionError("no")),
+async def test_an_unreadable_pending_set_fails_the_call():
+    """The routes decide what the run installs and probes, so they are never
+    guessed: a failed read is the caller's error, not a silent "keep every check"."""
+    with (
+        patch(
+            "cognee.modules.data.methods.get_authorized_existing_datasets",
+            AsyncMock(side_effect=PermissionError("no")),
+        ),
+        pytest.raises(PermissionError, match="no"),
     ):
-        assert (
-            await cognify_module._pending_routes(["x"], SimpleNamespace(id=uuid4()), True) is None
-        )
+        await cognify_module._pending_routes(["x"], SimpleNamespace(id=uuid4()), True)
