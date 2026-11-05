@@ -57,6 +57,13 @@ class Storage(Protocol):
             - int: The size of the file in bytes.
         """
 
+    def stored_file_key(self, file_path: str) -> str:
+        """
+        The backend's absolute location of ``file_path``: one string per stored file,
+        whichever storage root it is reached through. Keys pins on stored files
+        (see ``cognee.infrastructure.locks.stored_file_pins``).
+        """
+
     async def store(self, file_path: str, data: BinaryIO | str, overwrite: bool):
         """
         Store data at the specified file path.

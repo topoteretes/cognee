@@ -160,6 +160,9 @@ class EncryptedFileStorage(Storage):
 
     # -- pass-through -----------------------------------------------------
 
+    def stored_file_key(self, file_path: str) -> str:
+        return self.inner.stored_file_key(file_path)
+
     async def file_exists(self, file_path: str) -> bool:
         return await self.inner.file_exists(file_path)
 

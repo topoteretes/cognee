@@ -43,6 +43,10 @@ class StorageManager:
     async def get_size(self, file_path: str) -> int:
         return await self.storage.get_size(file_path)
 
+    def stored_file_key(self, file_path: str) -> str:
+        """The backend's absolute location of ``file_path``, the key pins on stored files use."""
+        return self.storage.stored_file_key(file_path)
+
     async def store(self, file_path: str, data: BinaryIO | str, overwrite: bool = False) -> str:
         """
         Store data at the specified file path.

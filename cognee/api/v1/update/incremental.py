@@ -62,7 +62,7 @@ from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_p
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.utils import get_max_chunk_tokens
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
-from cognee.infrastructure.locks import dataset_lock
+from cognee.infrastructure.locks import dataset_lock, stored_file_pin_scope
 from cognee.modules.chunking.chunk_id import chunk_content_hash
 from cognee.modules.chunking.chunk_policy import (
     DEFAULT_CHUNK_POLICY,
@@ -747,6 +747,10 @@ async def incremental_update(
         # collaborator's update to a different per-user store than the one
         # cognify and delete use for this dataset.
         set_database_global_context_variables(dataset.id, dataset.owner_id),
+        # Staging stores the new content well before publish commits the row
+        # that references it; the pin scope keeps a delete in another dataset
+        # from reclaiming those shared files in between.
+        stored_file_pin_scope(),
     ):
         graph_engine = await get_graph_engine()
         vector_engine = await get_vector_engine_async()

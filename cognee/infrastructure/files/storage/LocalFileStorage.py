@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import BinaryIO
 from urllib.parse import urlparse
 
+from cognee.infrastructure.locks import pin_stored_file
+
 from .FileBufferedReader import FileBufferedReader
 from .storage import Storage
 
@@ -102,6 +104,9 @@ class LocalFileStorage(Storage):
 
         return Path(full_file_path)
 
+    def stored_file_key(self, file_path: str) -> str:
+        return str(self._resolve_storage_path(file_path))
+
     async def store(self, file_path: str, data: BinaryIO | str, overwrite: bool = False) -> str:
         """
         Store data into a specified file path. The data can be either a string or a binary
@@ -121,6 +126,11 @@ class LocalFileStorage(Storage):
         """
         full_file_path = self._resolve_storage_path(file_path)
         file_dir_path = full_file_path.parent
+
+        # Before the existence check and the write: a cleanup removing this
+        # shared, content-addressed file must not take it after we decide to
+        # skip or make the write.
+        await pin_stored_file(str(full_file_path))
 
         await self.ensure_directory_exists(file_dir_path)
 
