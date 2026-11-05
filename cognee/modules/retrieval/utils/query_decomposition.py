@@ -39,16 +39,28 @@ class DecompositionRunState:
     final_context: str | None = None
 
 
-def normalize_subqueries(original_query: str, subqueries: list[str] | None) -> list[str]:
-    """Clean and bound decomposed subqueries."""
+def normalize_subqueries(
+    original_query: str, subqueries: list[str] | None, max_subqueries: int = 5
+) -> list[str]:
+    """Clean and bound decomposed subqueries to at most ``max_subqueries``."""
+
+    if (
+        isinstance(max_subqueries, bool)
+        or not isinstance(max_subqueries, int)
+        or max_subqueries < 1
+    ):
+        raise ValueError("max_subqueries must be a positive integer")
 
     normalized_queries: list[str] = []
-    for subquery in subqueries or []:
+    candidates = subqueries if isinstance(subqueries, (list, tuple)) else []
+    for subquery in candidates:
+        if not isinstance(subquery, str):
+            continue
         cleaned_query = subquery.strip()
         if not cleaned_query or cleaned_query in normalized_queries:
             continue
         normalized_queries.append(cleaned_query)
-        if len(normalized_queries) >= 5:
+        if len(normalized_queries) >= max_subqueries:
             break
 
     if normalized_queries:
