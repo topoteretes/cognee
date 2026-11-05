@@ -9,6 +9,10 @@ from cognee.infrastructure.session.get_session_manager import get_session_manage
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.completion import SessionPrompt, generate_completion
+from cognee.modules.retrieval.utils.conflict_context import (
+    attach_chunk_conflicts,
+    render_chunk_context,
+)
 from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
 from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
 from cognee.modules.retrieval.utils.references import append_chunk_evidence
@@ -152,6 +156,7 @@ class CompletionRetriever(BaseRetriever):
                 : self.top_k
             ]
 
+        await attach_chunk_conflicts(found_chunks)
         return found_chunks
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
@@ -192,10 +197,7 @@ class CompletionRetriever(BaseRetriever):
               empty string if none are found.
         """
         if retrieved_objects:
-            # Combine all chunks text returned from vector search (number of chunks is determined by top_k)
-            chunks_payload = [found_chunk.payload["text"] for found_chunk in retrieved_objects]
-            combined_context = "\n".join(chunks_payload)
-            return combined_context
+            return render_chunk_context([chunk.payload for chunk in retrieved_objects])
         return ""
 
     def _completion_kwargs(self, context: str) -> dict:

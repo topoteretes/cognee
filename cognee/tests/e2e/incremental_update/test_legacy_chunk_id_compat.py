@@ -159,11 +159,18 @@ async def _scenario():
     # --- phase 1: ingest under the LEGACY id scheme ------------------------ #
     real_minter = chunker_module.content_chunk_id
     minted_per_document: dict = {}
+    minted_per_chunk: dict = {}
 
     def legacy_minter(document_id, content_hash, occurrence):
-        index = minted_per_document.get(document_id, 0)
-        minted_per_document[document_id] = index + 1
-        return uuid5(NAMESPACE_OID, f"{document_id}-{index}")
+        # cognify() chunks a document in its indexing run and again in its
+        # cognify run (SDK-397); the released scheme gave a chunk the same id
+        # every time, so the n-th distinct chunk of a document keeps index n.
+        key = (document_id, content_hash, occurrence)
+        if key not in minted_per_chunk:
+            index = minted_per_document.get(document_id, 0)
+            minted_per_document[document_id] = index + 1
+            minted_per_chunk[key] = uuid5(NAMESPACE_OID, f"{document_id}-{index}")
+        return minted_per_chunk[key]
 
     chunker_module.content_chunk_id = legacy_minter
     try:

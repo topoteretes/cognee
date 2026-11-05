@@ -124,9 +124,7 @@ async def upsert_preference_node(
         turn_counter=turn_counter,
         text_watermark=text_watermark,
     )
-    node_set = NodeSet(
-        id=generate_node_id(f"NodeSet:{PREFERENCE_NODE_SET}"), name=PREFERENCE_NODE_SET
-    )
+    node_set = NodeSet(name=PREFERENCE_NODE_SET)
     await graph_engine.add_nodes([preference, node_set])
     await graph_engine.add_edges(
         [

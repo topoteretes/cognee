@@ -12,6 +12,7 @@ from .tracing import (
     CogneeTrace,
     redact_secrets,
     get_tracer,
+    bind_trace_owner,
     COGNEE_DB_SYSTEM,
     COGNEE_DB_QUERY,
     COGNEE_DB_ROW_COUNT,

@@ -6,11 +6,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from cognee.modules.integrations.gmail import adapter, client
+from cognee.modules.integrations.google import oauth_integration
 
 
 @pytest.fixture(autouse=True)
 def active_credential():
-    with patch.object(adapter, "require_active_credential", AsyncMock(side_effect=lambda c: c)):
+    with patch.object(
+        oauth_integration, "require_active_credential", AsyncMock(side_effect=lambda c: c)
+    ):
         yield
 
 
@@ -18,7 +21,9 @@ def active_credential():
 async def test_label_picker_uses_gmail_client_with_current_access_token():
     credential = SimpleNamespace(token_expires_at=None)
     with (
-        patch.object(adapter, "decrypt_token_payload", return_value={"access_token": "token"}),
+        patch.object(
+            oauth_integration, "decrypt_token_payload", return_value={"access_token": "token"}
+        ),
         patch.object(
             client,
             "list_labels",
@@ -55,10 +60,12 @@ async def test_expired_token_is_refreshed_before_listing_labels():
     with (
         patch.object(adapter.GoogleGmailIntegration, "refresh", AsyncMock()) as refresh,
         patch.object(
-            adapter, "require_active_credential", AsyncMock(side_effect=[credential, refreshed])
+            oauth_integration,
+            "require_active_credential",
+            AsyncMock(side_effect=[credential, refreshed]),
         ),
         patch.object(
-            adapter, "decrypt_token_payload", return_value={"access_token": "fresh-token"}
+            oauth_integration, "decrypt_token_payload", return_value={"access_token": "fresh-token"}
         ) as decrypt,
         patch.object(client, "list_labels", AsyncMock(return_value={"labels": []})) as labels,
     ):

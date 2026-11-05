@@ -26,6 +26,7 @@ from cognee.infrastructure.databases.vector.pgvector.serialize_data import seria
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
     COGNEE_DB_SYSTEM,
@@ -34,13 +35,28 @@ from cognee.modules.observability.tracing import (
 )
 from cognee.modules.storage.utils import copy_model
 from cognee.shared.logging_utils import get_logger
+from cognee_db_workers.lancedb_compaction import (
+    DEFAULT_MAX_TASKS_PER_RUN,
+    DEFAULT_MAX_VERSIONS_PER_RUN,
+    DEFAULT_RETENTION_SECONDS,
+    DEFAULT_TARGET_ROWS_PER_FRAGMENT,
+    PylanceIncompatibleError,
+    compact_fragments,
+    lance_core_mismatch,
+    open_as_lance,
+    prune_superseded_versions,
+)
 
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..embeddings.EmbeddingGateway import EmbeddingGateway
 from ..models.ScoredResult import ScoredResult
 from ..stored_vector_size import choose_stored_vector_size
-from ..vector_db_interface import VectorDBInterface
+from ..vector_db_interface import VectorDBInterface, validate_raw_vector_points
 
 logger = get_logger("LanceDBAdapter")
+
+# Waits between attempts to open a table another task is still creating
+# (get_collection); about three seconds in all.
+_OPEN_TABLE_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4, 0.8, 1.6)
 _NO_DEFAULT = object()
 _SIMPLE_TYPE_DEFAULTS = {
     str: "",
@@ -129,7 +145,7 @@ class LanceDBAdapter(VectorDBInterface):
         cls,
         url: str | None,
         api_key: str | None,
-        embedding_engine: "EmbeddingEngine",
+        embedding_engine: "EmbeddingGateway",
     ) -> "LanceDBAdapter":
         """Create a LanceDBAdapter running in subprocess-proxy mode."""
         from .subprocess.proxy import (
@@ -156,7 +172,7 @@ class LanceDBAdapter(VectorDBInterface):
         self,
         url: str | None,
         api_key: str | None,
-        embedding_engine: EmbeddingEngine,
+        embedding_engine: EmbeddingGateway,
         *,
         connection: object | None = None,
         session: object | None = None,
@@ -188,7 +204,9 @@ class LanceDBAdapter(VectorDBInterface):
         self.url = url
         self.api_key = api_key
         self.embedding_engine = embedding_engine
-        self.VECTOR_DB_LOCK = asyncio.Lock()
+        # Loop-agnostic: the adapter is cached across event loops, and an
+        # asyncio.Lock binds to the first loop that awaits it.
+        self.VECTOR_DB_LOCK = LoopAgnosticLock()
         # Guards lifecycle state — the ``connection``, ``_session`` and
         # ``_permanently_closed`` triple must be observed/mutated atomically
         # so a concurrent ``close()`` can't be silently overwritten by an
@@ -211,8 +229,22 @@ class LanceDBAdapter(VectorDBInterface):
         #   (*,     True)  — closed, not reusable in either mode
         self._subprocess_mode = session is not None
         self._permanently_closed = False
+        # Compaction state (see ``compact``): tables written since their last
+        # pass, a rotation cursor so a shared task budget is not always spent on
+        # the same tables, a lock so concurrent passes do not overlap, and the
+        # reason compaction was turned off for good, if it was.
+        self._compaction_dirty: set[str] = set()
+        self._compaction_cursor = 0
+        # Loop-agnostic like VECTOR_DB_LOCK: the adapter is cached across loops.
+        self._compaction_lock = LoopAgnosticLock()
+        self._compaction_unsupported: str | None = None
+        self._lance_core_checked = False
 
     async def get_connection(self):
+        """Return the connection used by this adapter."""
+        return await self._open_connection()
+
+    async def _open_connection(self):
         """
         Return the connection used by this adapter.
 
@@ -392,6 +424,19 @@ class LanceDBAdapter(VectorDBInterface):
         collection_names = await connection.table_names()
         return collection_name in collection_names
 
+    async def delete_collection(self, collection_name: str) -> None:
+        """Drop the table for ``collection_name``; a missing table is not an error.
+
+        Same lock order as ``prune``: a compaction pass finishes before the table
+        is dropped under it.
+        """
+        connection = await self.get_connection()
+        async with self._compaction_lock:
+            async with self.VECTOR_DB_LOCK:
+                if collection_name in await connection.table_names():
+                    await connection.drop_table(collection_name)
+            self._compaction_dirty.discard(collection_name)
+
     async def get_stored_vector_size(self) -> int | None:
         """Width of the vectors already in this store, or None when nothing is stored yet.
 
@@ -438,19 +483,77 @@ class LanceDBAdapter(VectorDBInterface):
             raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
 
         connection = await self.get_connection()
-        return await connection.open_table(collection_name)
+        # has_collection lists table directories, and a concurrent
+        # create_collection (another data item of the same run writing the
+        # same index) makes the directory visible before the first manifest
+        # is committed, so open_table can still answer "not found" for a
+        # moment. Retry instead of waiting on VECTOR_DB_LOCK: callers such as
+        # prune() and create_data_points already hold it, and the lock is not
+        # re-entrant. A table that is really gone stops the retries; one whose
+        # manifest never appears (a creator that crashed mid-create) is
+        # reported as missing once they run out.
+        for delay in _OPEN_TABLE_RETRY_DELAYS:
+            try:
+                return await connection.open_table(collection_name)
+            except Exception as error:
+                if "not found" not in str(error).lower():
+                    raise
+                missing = error
+            await asyncio.sleep(delay)
+            if not await self.has_collection(collection_name):
+                raise CollectionNotFoundError(
+                    f"Collection '{collection_name}' not found!"
+                ) from missing
+        raise CollectionNotFoundError(f"Collection '{collection_name}' not found!") from missing
+
+    async def _stored_belongs_to_set(
+        self, collection, collection_name: str, ids: list[str]
+    ) -> dict[str, list]:
+        """The non-empty ``belongs_to_set`` of each stored row among ``ids``.
+
+        Call it under ``VECTOR_DB_LOCK`` and write under the same lock section, or a
+        writer in between would leave tags the merge never saw to be overwritten.
+        """
+        existing_belongs_to_set: dict[str, list] = {}
+        if not ids:
+            return existing_belongs_to_set
+        # Build the WHERE predicate explicitly with escaped string literals rather
+        # than relying on Python's tuple repr — mirrors how search() escapes `name`
+        # values to keep single-quotes from breaking the LanceDB SQL grammar.
+        escaped_ids = [id_.replace("'", "''") for id_ in ids]
+        if len(escaped_ids) == 1:
+            where_clause = f"id = '{escaped_ids[0]}'"
+        else:
+            id_list = ", ".join(f"'{id_}'" for id_ in escaped_ids)
+            where_clause = f"id IN ({id_list})"
+        try:
+            existing_rows = await collection.query().where(where_clause).to_list()
+            for row in existing_rows:
+                row_payload = row.get("payload") or {}
+                prior = row_payload.get("belongs_to_set") or []
+                if prior:
+                    existing_belongs_to_set[row["id"]] = list(prior)
+        except Exception as e:
+            # Best-effort: if the lookup fails (e.g. empty table, schema mismatch
+            # the migration path will handle), fall through to the standard upsert.
+            logger.debug(
+                "belongs_to_set merge lookup failed for '%s': %s",
+                collection_name,
+                e,
+                exc_info=True,
+            )
+        return existing_belongs_to_set
 
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""
         payload_schema = type(data_points[0])
+        self._mark_written(collection_name)
 
+        # create_collection does its own double-checked locking on VECTOR_DB_LOCK;
+        # taking the lock here as well deadlocked the first write to a collection
+        # (the lock is not reentrant).
         if not await self.has_collection(collection_name):
-            async with self.VECTOR_DB_LOCK:
-                if not await self.has_collection(collection_name):
-                    await self.create_collection(
-                        collection_name,
-                        payload_schema,
-                    )
+            await self.create_collection(collection_name, payload_schema)
 
         collection = await self.get_collection(collection_name)
 
@@ -476,36 +579,9 @@ class LanceDBAdapter(VectorDBInterface):
         lance_data_points: list = []
         try:
             async with self.VECTOR_DB_LOCK:
-                existing_belongs_to_set: dict[str, list] = {}
-                incoming_ids = [str(dp.id) for dp in data_points]
-                if incoming_ids:
-                    # Build the WHERE predicate explicitly with escaped string
-                    # literals rather than relying on Python's tuple repr —
-                    # mirrors how search() escapes `name` values to keep
-                    # single-quotes from breaking the LanceDB SQL grammar.
-                    escaped_ids = [id_.replace("'", "''") for id_ in incoming_ids]
-                    if len(escaped_ids) == 1:
-                        where_clause = f"id = '{escaped_ids[0]}'"
-                    else:
-                        id_list = ", ".join(f"'{id_}'" for id_ in escaped_ids)
-                        where_clause = f"id IN ({id_list})"
-                    try:
-                        existing_rows = await collection.query().where(where_clause).to_list()
-                        for row in existing_rows:
-                            row_payload = row.get("payload") or {}
-                            prior = row_payload.get("belongs_to_set") or []
-                            if prior:
-                                existing_belongs_to_set[row["id"]] = list(prior)
-                    except Exception as e:
-                        # Best-effort: if the lookup fails (e.g. empty table,
-                        # schema mismatch the migration path will handle),
-                        # fall through to the standard upsert.
-                        logger.debug(
-                            "belongs_to_set merge lookup failed for '%s': %s",
-                            collection_name,
-                            e,
-                            exc_info=True,
-                        )
+                existing_belongs_to_set = await self._stored_belongs_to_set(
+                    collection, collection_name, [str(dp.id) for dp in data_points]
+                )
 
                 def create_lance_data_point(data_point: DataPoint, vector: list[float]):
                     lance_cls, payload_model = _lance_cls_for(data_point)
@@ -588,14 +664,35 @@ class LanceDBAdapter(VectorDBInterface):
         points: list[dict],
         payload_schema: type[BaseModel] | None = None,
     ) -> None:
-        """Upsert caller-provided vectors without invoking the embedding engine."""
+        """Upsert caller-provided vectors without invoking the embedding engine.
+
+        A DataPoint schema is stored in the same shape ``create_data_points`` gives it
+        (``get_data_point_schema``: ``id`` and ``belongs_to_set`` columns, nested models
+        and ``metadata`` dropped), so a row copied from another store is indistinguishable
+        from one ingested here; a plain BaseModel payload (system-owned state such as
+        truth centroids) is stored as declared. A conflicting id takes the new payload
+        and the new vector, except ``belongs_to_set``, which is unioned with the stored
+        row's as in ``create_data_points``.
+        """
         if not points:
             return
         if payload_schema is None:
             raise ValueError("payload_schema is required for LanceDB raw vector upserts")
 
         vector_size = self.embedding_engine.get_vector_size()
-        LanceDataPoint = self._make_lance_datapoint_cls(payload_schema, vector_size)
+        payload_model = (
+            self.get_data_point_schema(payload_schema)
+            if issubclass(payload_schema, DataPoint)
+            else payload_schema
+        )
+        LanceDataPoint = self._make_lance_datapoint_cls(payload_model, vector_size)
+
+        # Every check runs before the table exists, so a rejected call creates nothing.
+        rows = validate_raw_vector_points(points, vector_size)
+        properties_by_id = {
+            row_id: payload_model.model_validate(serialize_data(row["payload"])).model_dump()
+            for row_id, row in rows.items()
+        }
 
         if not await self.has_collection(collection_name):
             async with self.VECTOR_DB_LOCK:
@@ -609,34 +706,238 @@ class LanceDBAdapter(VectorDBInterface):
 
         collection = await self.get_collection(collection_name)
 
-        raw_points = []
-        for point in points:
-            point_id = point.get("id")
-            vector = point.get("vector")
-            payload_value = point.get("payload")
-            if point_id is None:
-                raise ValueError("Raw vector point is missing id")
-            if not isinstance(vector, list):
-                raise ValueError("Raw vector point vector must be a list")
-            if len(vector) != vector_size:
-                raise ValueError(
-                    f"Raw vector size {len(vector)} does not match expected size {vector_size}"
-                )
-            raw_points.append(
-                LanceDataPoint(
-                    id=str(point_id),
-                    vector=vector,
-                    payload=payload_schema.model_validate(payload_value).model_dump(),
-                )
-            )
-
+        self._mark_written(collection_name)
+        # Read the stored tags, build and write under one lock section, as
+        # create_data_points does: when_matched_update_all replaces the whole
+        # payload, so a stored row's own belongs_to_set survives only if it is
+        # unioned into the incoming payload here.
         async with self.VECTOR_DB_LOCK:
+            stored_tags = await self._stored_belongs_to_set(collection, collection_name, list(rows))
+            raw_points = []
+            for row_id, properties in properties_by_id.items():
+                prior = stored_tags.get(row_id)
+                if prior:
+                    incoming = properties.get("belongs_to_set") or []
+                    properties["belongs_to_set"] = list(dict.fromkeys(list(prior) + list(incoming)))
+                raw_points.append(
+                    LanceDataPoint(id=row_id, vector=rows[row_id]["vector"], payload=properties)
+                )
+
             await (
                 collection.merge_insert("id")
                 .when_matched_update_all()
                 .when_not_matched_insert_all()
                 .execute(self._records_for_write(raw_points))
             )
+
+    # ------------------------------------------------------------------
+    # Compaction
+    # ------------------------------------------------------------------
+
+    _REMOTE_URL_PREFIXES = ("db://", "http://", "https://", "s3://", "gs://", "az://")
+
+    def _store_url(self) -> str | None:
+        """The LanceDB location: ``self.url`` in local mode, the remote
+        connection's URL in subprocess mode (where ``url`` may be ``None``)."""
+        return self.url or getattr(self.connection, "_url", None)
+
+    def _is_remote_store(self, url: str | None) -> bool:
+        return bool(url) and url.startswith(self._REMOTE_URL_PREFIXES)
+
+    def _mark_written(self, collection_name: str) -> None:
+        """Record a write so the next compaction pass serves this table first."""
+        self._compaction_dirty.add(collection_name)
+
+    def _compaction_options(self) -> dict:
+        return {
+            "target_rows_per_fragment": DEFAULT_TARGET_ROWS_PER_FRAGMENT,
+            "retention_seconds": DEFAULT_RETENTION_SECONDS,
+            "max_tasks": DEFAULT_MAX_TASKS_PER_RUN,
+            "max_versions": DEFAULT_MAX_VERSIONS_PER_RUN,
+        }
+
+    def _compaction_order(self, names: list[str]) -> list[str]:
+        """Tables written since their last pass first, then the rest.
+
+        Each group is rotated by a cursor that advances every pass, so when the
+        budget runs out before the end of the list, the next pass starts with
+        tables this one did not reach. Called under ``_compaction_lock``.
+        """
+        cursor = self._compaction_cursor
+        self._compaction_cursor += 1
+
+        def rotated(group: list[str]) -> list[str]:
+            if len(group) < 2:
+                return group
+            start = cursor % len(group)
+            return group[start:] + group[:start]
+
+        written = [name for name in names if name in self._compaction_dirty]
+        untouched = [name for name in names if name not in self._compaction_dirty]
+        return rotated(written) + rotated(untouched)
+
+    def _compaction_skip_reason(self) -> str | None:
+        """Why no compaction or version prune may run on this (enabled) store, or ``None``."""
+        if self._is_remote_store(self._store_url()):
+            return "remote_store"
+        if not self._lance_core_checked:
+            self._lance_core_checked = True
+            mismatch = lance_core_mismatch()
+            if mismatch:
+                self._compaction_unsupported = "lance_core_mismatch"
+                logger.warning(
+                    "LanceDB compaction turned off: %s. Install the pylance release "
+                    "line matching lancedb's bundled Lance core (see pyproject).",
+                    mismatch,
+                )
+        return self._compaction_unsupported
+
+    async def compact(self, collection_name: str | None = None) -> dict:
+        """Fold the fragments cognee's upserts leave behind and prune old versions.
+
+        Every ``merge_insert`` appends a new fragment and leaves the superseded
+        rows on disk; LanceDB never reclaims either on its own, so a store in
+        daily use grows without bound (issue #4684: 136 GB on disk for ~6 GB of
+        live vectors). Called once at the end of every cognify run (see
+        ``compact_vector_store``); a no-op on a compact table.
+
+        Bounded, not whole-store: a pass executes at most
+        ``DEFAULT_MAX_TASKS_PER_RUN`` compaction tasks and deletes
+        at most ``DEFAULT_MAX_VERSIONS_PER_RUN`` old versions IN
+        TOTAL across the store's tables (``0`` = no limit). A task rewrites one
+        group of small fragments into one of at most
+        ``target_rows_per_fragment`` rows; a version is deleted only once its
+        successor has aged past the retention window, so a reader that opened
+        the table a moment ago keeps working. A store with a large backlog
+        therefore drains over several cognify runs instead of stalling one.
+        Both budgets are spent greedily in table order: tables written since
+        their last pass first, each group starting from a cursor that advances
+        every pass, so no table starves. A pass ends once both are spent.
+
+        The files a pass supersedes can only go once the retention window has
+        passed, i.e. in a later pass: the next cognify on the store reclaims
+        them. Nothing prunes in the background, so no prune can outlive the
+        adapter or run while it closes.
+
+        Only the fragment rewrite runs under ``VECTOR_DB_LOCK``: its commit is a
+        Lance "rewrite" transaction that conflicts with a concurrent upsert or
+        delete on the same fragments. Version pruning commits nothing and runs
+        outside the lock, so writers are never blocked behind it. Concurrent
+        passes on one adapter do not queue: the second one returns at once.
+
+        Skipped for remote stores (``s3://`` and friends), where every rewrite
+        is network transfer and cleanup is thousands of object deletes, and
+        turned off for the adapter's lifetime when the installed pylance is not
+        on the Lance core lancedb bundles, or cannot open the tables lancedb
+        wrote (that pass raises ``PylanceIncompatibleError``, later ones skip).
+        A failure on one collection does not stop the pass: the rest are
+        compacted, the failed one stays first in line for the next pass, and
+        one error naming every failed collection is raised at the end.
+        """
+        options = self._compaction_options()
+        reason = self._compaction_skip_reason()
+        if reason:
+            return {"skipped": reason}
+        if self._compaction_lock.locked():
+            return {"skipped": "in_progress"}
+
+        async with self._compaction_lock:
+            connection = await self.get_connection()
+            if collection_name is not None:
+                names = [collection_name]
+            else:
+                names = self._compaction_order(list(await connection.table_names()))
+
+            task_budget = int(options["max_tasks"])  # 0 = unlimited
+            version_budget = int(options["max_versions"])  # 0 = unlimited
+            tasks_left, versions_left = task_budget, version_budget
+            results: dict = {}
+            failures: list[tuple[str, Exception]] = []
+            for name in names:
+                tasks_spent = task_budget > 0 and tasks_left <= 0
+                versions_spent = version_budget > 0 and versions_left <= 0
+                if tasks_spent and versions_spent:
+                    break
+                # The helpers read 0 as "no limit" and a negative value as "none".
+                max_tasks = -1 if tasks_spent else (tasks_left if task_budget > 0 else 0)
+                max_versions = (
+                    -1 if versions_spent else (versions_left if version_budget > 0 else 0)
+                )
+                if not tasks_spent:
+                    # Cleared before the pass, so a write that lands during it
+                    # marks the table again for the next one. A table whose
+                    # rewrite the budget skipped stays first in line.
+                    self._compaction_dirty.discard(name)
+                try:
+                    stats = await self._compact_collection(name, options, max_tasks, max_versions)
+                except PylanceIncompatibleError:
+                    # Not specific to this table: every later pass would fail the
+                    # same way, so raise it once and stop compacting.
+                    self._compaction_unsupported = "pylance_incompatible"
+                    raise
+                except Exception as error:
+                    # The others still drain; this table stays first in line. The
+                    # error raised after the pass chains only the first failure.
+                    logger.warning("Compaction failed for collection '%s'", name, exc_info=True)
+                    self._compaction_dirty.add(name)
+                    failures.append((name, error))
+                    continue
+                results[name] = stats
+                if task_budget > 0:
+                    tasks_left -= int(stats.get("executed_tasks", 0) or 0)
+                if version_budget > 0:
+                    versions_left -= int(stats.get("old_versions_removed", 0) or 0)
+            if failures:
+                described = "; ".join(f"'{name}': {error!r}" for name, error in failures)
+                raise RuntimeError(
+                    f"LanceDB compaction failed for {len(failures)} collection(s): {described}"
+                ) from failures[0][1]
+            return results
+
+    async def _compact_collection(
+        self, collection_name: str, options: dict, max_tasks: int, max_versions: int
+    ) -> dict:
+        collection = await self.get_collection(collection_name)
+        target_rows = options["target_rows_per_fragment"]
+
+        async with self.VECTOR_DB_LOCK:
+            if self._subprocess_mode:
+                stats = await collection.compact_fragments(
+                    target_rows_per_fragment=target_rows, max_tasks=max_tasks
+                )
+            else:
+                # Plan against the version current under the lock: a write that
+                # committed after the handle was opened would otherwise make
+                # the rewrite conflict and fail. Hand the table to pylance, do
+                # the I/O off the event loop, then move the handle to the
+                # version the compaction committed.
+                await collection.checkout_latest()
+                dataset = await open_as_lance(collection)
+                stats = await asyncio.to_thread(
+                    compact_fragments,
+                    dataset,
+                    target_rows_per_fragment=target_rows,
+                    max_tasks=max_tasks,
+                )
+                await collection.checkout_latest()
+
+        pruned = await self._prune_collection(
+            collection, options["retention_seconds"], max_versions
+        )
+        return {**(stats or {}), **(pruned or {})}
+
+    async def _prune_collection(self, collection, retention_seconds: int, max_versions: int):
+        if self._subprocess_mode:
+            return await collection.prune_versions(
+                retention_seconds=retention_seconds, max_versions=max_versions
+            )
+        dataset = await open_as_lance(collection)
+        return await asyncio.to_thread(
+            prune_superseded_versions,
+            dataset,
+            retention_seconds=retention_seconds,
+            max_versions=max_versions,
+        )
 
     async def _migrate_collection_schema(
         self,
@@ -808,7 +1109,7 @@ class LanceDBAdapter(VectorDBInterface):
         try:
             target_schema = to_arrow_schema()
         except TypeError:
-            # Models with complex Union types (e.g. List[Union[Entity, Event,
+            # Models with complex Union types (e.g. List[Union[Entity, Timestamp,
             # tuple[Edge, Entity]]]) can't be converted to Arrow. Fall back to
             # field-name comparison in _is_payload_schema_compatible.
             return None
@@ -1003,10 +1304,9 @@ class LanceDBAdapter(VectorDBInterface):
     ):
         """Return rows from `collection_name` whose id is in `data_point_ids`.
 
-        ``include_vector`` is a LanceDB-only extension (the shared interface is
-        unchanged): when True, the stored embedding is attached to each result
-        under ``payload["vector"]``. The semantic memory map is the consumer;
-        it needs the raw vectors the plain retrieve path drops.
+        With ``include_vector`` the stored embedding is attached to each result
+        under ``payload["vector"]``, as the shared interface specifies; the plain
+        retrieve path drops it.
         """
         if not data_point_ids:
             # No ids requested. Avoid building an "id IN ()" filter, which lance
@@ -1107,11 +1407,11 @@ class LanceDBAdapter(VectorDBInterface):
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
                 return []
 
-            # Note: Exclude payload if not needed to optimize performance
+            # Never select the vector column: results carry only id, payload and
+            # distance. A limit=None search reads the whole collection, and fetching
+            # vectors there materializes every stored embedding (see PGVectorAdapter).
             select_columns = (
-                ["id", "vector", "payload", "_distance"]
-                if include_payload
-                else ["id", "vector", "_distance"]
+                ["id", "payload", "_distance"] if include_payload else ["id", "_distance"]
             )
 
             if node_name:
@@ -1244,6 +1544,7 @@ class LanceDBAdapter(VectorDBInterface):
             import pyarrow
 
             arrow_records = pyarrow.Table.from_pylist(records, schema=schema)
+            self._mark_written(collection_name)
             await collection.merge_insert("id").when_matched_update_all().execute(arrow_records)
 
     # Ids per `IN (...)` delete predicate. Each `collection.delete` is a
@@ -1267,12 +1568,19 @@ class LanceDBAdapter(VectorDBInterface):
         # `id` column is a str, so match by string and escape single quotes to
         # keep the predicate injection-safe (mirrors create_data_points). The
         # sequential batches cannot commit-conflict with each other, and a
-        # non-existent id no-ops.
+        # non-existent id no-ops. Each batch takes VECTOR_DB_LOCK like every
+        # other write here: a Lance delete and a compaction rewrite of the same
+        # fragments conflict at commit, and the loser would be this delete
+        # (surfacing as a failed forget() or rollback). Per batch, not around
+        # the loop, so a large delete does not hold off upserts for its whole
+        # duration.
+        self._mark_written(collection_name)
         for start in range(0, len(data_point_ids), self.DELETE_PREDICATE_BATCH_SIZE):
             batch = data_point_ids[start : start + self.DELETE_PREDICATE_BATCH_SIZE]
             escaped_ids = [str(data_point_id).replace("'", "''") for data_point_id in batch]
             id_list = ", ".join(f"'{escaped_id}'" for escaped_id in escaped_ids)
-            await collection.delete(f"id IN ({id_list})")
+            async with self.VECTOR_DB_LOCK:
+                await collection.delete(f"id IN ({id_list})")
 
     async def remove_belongs_to_set_tags(
         self,
@@ -1389,6 +1697,8 @@ class LanceDBAdapter(VectorDBInterface):
                 # collection pays two round-trips at most instead of N.
                 # Ids are UUID strings produced by cognee so no escaping
                 # is needed (mirrors the assumption in `retrieve()`).
+                if rows_to_delete or rows_to_update:
+                    self._mark_written(collection_name)
                 if rows_to_delete:
                     orphan_predicate = (
                         "id IN (" + ", ".join(f"'{row_id}'" for row_id in rows_to_delete) + ")"
@@ -1457,17 +1767,21 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def prune(self):
+        # A compaction pass (whose version cleanup runs outside VECTOR_DB_LOCK)
+        # finishes before the tables are dropped under it. Same lock order as
+        # ``compact``: compaction lock, then the write lock.
         connection = await self.get_connection()
-        collection_names = await connection.table_names()
 
-        for collection_name in collection_names:
-            collection = await self.get_collection(collection_name)
-            await collection.delete("id IS NOT NULL")
-            await connection.drop_table(collection_name)
+        async with self._compaction_lock:
+            collection_names = await connection.table_names()
+            async with self.VECTOR_DB_LOCK:
+                for collection_name in collection_names:
+                    collection = await self.get_collection(collection_name)
+                    await collection.delete("id IS NOT NULL")
+                    await connection.drop_table(collection_name)
+            self._compaction_dirty.clear()
 
-        if self.url and not self.url.startswith(
-            ("db://", "http://", "https://", "s3://", "gs://", "az://")
-        ):
+        if self.url and not self._is_remote_store(self.url):
             db_dir_path = path.dirname(self.url)
             db_file_name = path.basename(self.url)
             await get_file_storage(db_dir_path).remove_all(db_file_name)

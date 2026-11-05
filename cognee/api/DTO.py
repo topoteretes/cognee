@@ -38,7 +38,8 @@ class ErrorResponse(OutDTO):
 
     ``error`` is the human-readable message. Errors raised as ``CogneeApiError`` are
     rendered instead by the app-level handler in ``cognee/api/client.py`` as
-    ``{"detail": "<message> [<ErrorName>]"}`` plus ``"remediation"`` when a fix is known.
+    ``{"detail": "<message> [<ErrorName>]"}`` plus ``"remediation"`` when a fix is known,
+    and ``"code"``/``"param"`` when the error carries a stable reason (SearchType.CODE).
     """
 
     error: str

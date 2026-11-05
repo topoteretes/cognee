@@ -67,7 +67,8 @@ async def get_unterminated_pipeline_runs() -> list[PipelineRun]:
     the same pipeline on the same dataset later completed must still be found,
     and "newest row per dataset" would hide it behind that newer run forever.
     Rows without a pipeline_name (operation records) are never included. The
-    returned row is the run's newest one, so ``created_at`` is its last activity.
+    returned row is the run's newest lifecycle row; in-place progress updates
+    do not change ``created_at``, so it is not a liveness timestamp.
     """
     ranked = (
         select(

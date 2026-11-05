@@ -21,6 +21,10 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.llm.azure_identity import (
+    get_azure_ad_token_provider,
+    require_azure_endpoint,
+)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     raise_if_budget_exhausted,
@@ -121,30 +125,11 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         llm_args: dict[str, Any] | None,
     ) -> None:
         """Initialize using Azure managed identity (DefaultAzureCredential)."""
-        try:
-            from azure.identity import (  # ty:ignore[unresolved-import]
-                DefaultAzureCredential,
-                get_bearer_token_provider,
-            )
-        except ImportError:
-            raise ImportError(
-                "azure-identity is required for managed identity authentication. "
-                "Install it with: pip install azure-identity"
-            )
-
         logger.info("Attempting to use Azure managed identity")
 
-        credential = DefaultAzureCredential()
-        token_provider = get_bearer_token_provider(
-            credential,
-            "https://cognitiveservices.azure.com/.default",
-        )
-
-        if not endpoint:
-            raise ValueError(
-                "LLM_ENDPOINT must be set to your Azure OpenAI endpoint "
-                "(e.g. https://YOUR-RESOURCE.openai.azure.com) when using Azure provider."
-            )
+        # The same process-wide provider the litellm_native path uses.
+        token_provider = get_azure_ad_token_provider()
+        endpoint = require_azure_endpoint(endpoint)
 
         # Set instance attributes directly (skip parent __init__ to avoid litellm client setup)
         self.name = "AzureOpenAI"

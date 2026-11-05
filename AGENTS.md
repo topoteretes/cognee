@@ -2,10 +2,23 @@
 
 This document summarizes how to work with the cognee repository: how it’s organized, how to build, test, lint, and contribute. It mirrors our actual tooling and CI while providing quick commands for local development.
 
+## Design Principles
+
+1. **Don't overengineer**: Simple beats complex.
+2. **No fallbacks**: One correct path, no alternatives.
+3. **One way**: One way to do things, not many.
+4. **Throw errors**: Fail fast when the operation's preconditions aren't met. Observability (telemetry, logging) is best-effort and never changes the outcome of the operation.
+5. **No backups**: Trust the primary mechanism.
+6. **Separation of concerns**: Each function has a single responsibility.
+7. **Be concise but informative**: No essays, but the docstrings and comments a reader needs.
+8. **No invented limits**: Never add a cutoff (`max_n`, `[:k]`, "older than X") or an expiry (TTL, cooldown, eviction) the task did not ask for — both are silent data loss. If you believe one is unavoidable, stop and ask, stating what would be dropped and why; never add it first and justify it afterwards. Existing bounds (lock leases, recovery floors, batch caps) are deliberate: removing or changing one is the same question.
+
+**Methodology**: surgical changes only; evidence-based debugging (minimal, targeted logging); fix root causes, not symptoms. Debug like a detective: form the theory of the crime, collect evidence, and change code only once the evidence proves it.
+
 ## Project Structure & Module Organization
 
 - `cognee/`: Core Python library and API.
-  - `api/`: FastAPI application and versioned routers under `api/v1/` — memory API (`remember`, `recall`, `improve`, `forget`), low-level operations (`add`, `cognify`, `memify`, `search`, `delete`, `update`), and supporting routers (`datasets`, `users`, `permissions`, `settings`, `sync`, `visualize`, `health`, `skills`, `sessions`, …). Each router package has a `routers/` folder; `api/client.py` registers them.
+  - `api/`: FastAPI application and versioned routers under `api/v1/` — memory API (`remember`, `recall`, `improve`, `forget`), low-level operations (`add`, `cognify`, `search`, `delete`, `update`), and supporting routers (`datasets`, `users`, `permissions`, `settings`, `sync`, `visualize`, `health`, `skills`, `sessions`, …). Each router package has a `routers/` folder; `api/client.py` registers them.
   - `cli/`: CLI entry points and subcommands invoked via `cognee` / `cognee-cli`.
   - `infrastructure/`: Databases, LLM providers, embeddings, loaders, and storage adapters.
   - `modules/`: Domain logic (graph, retrieval, ontology, users, processing, observability, etc.).
@@ -128,7 +141,10 @@ graph and vector databases. Backend support (source of truth:
 - Vector — supported: LanceDB (default), PGVector, Turso. Unsupported: Neptune
   Analytics and community adapters (unless they register a handler via
   `use_dataset_database_handler()`).
-- Relational (SQLite/Postgres) is always a single shared DB (users, ACLs, registry).
+- Relational (SQLite/Postgres/Turso) is always a single shared DB (users, ACLs, registry).
+- Turso: the three layers and the session cache (`CACHE_BACKEND=turso`) can run on the Turso
+  rewrite engine (`pyturso`, local files only);
+  setup, journal modes and engine limits are in `docs/turso-local.md`.
 
 Each provider has a default handler derived from it, so no handler setting is needed
 normally. Setting `GRAPH_DATASET_DATABASE_HANDLER` / `VECTOR_DATASET_DATABASE_HANDLER`

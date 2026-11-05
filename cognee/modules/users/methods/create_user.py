@@ -5,7 +5,7 @@ from fastapi_users.exceptions import UserAlreadyExists
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.get_user_db import get_user_db_context
 from cognee.modules.users.get_user_manager import get_user_manager_context
-from cognee.modules.users.models.User import UserCreate
+from cognee.modules.users.models.User import InternalUserCreate
 
 # Stored as hashed_password for an account with NO password. Not a valid hash by
 # construction (Unix "locked account" convention), so pwdlib raises
@@ -49,7 +49,7 @@ async def create_user(
                 )
             else:
                 user = await user_manager.create(
-                    UserCreate(
+                    InternalUserCreate(
                         email=email,
                         password=password,
                         is_superuser=is_superuser,

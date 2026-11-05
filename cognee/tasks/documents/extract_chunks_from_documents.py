@@ -8,6 +8,7 @@ from cognee.modules.chunking.Chunker import Chunker
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types.Document import Document
+from cognee.modules.engine.utils.temporal_hints import hint_lines
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.documents.exceptions import InvalidChunkerError, InvalidChunkSizeError
@@ -33,6 +34,7 @@ async def extract_chunks_from_documents(
     documents: list[Document],
     max_chunk_size: int,
     chunker: Chunker = TextChunker,
+    temporal_hints: bool = True,
 ) -> AsyncGenerator:
     """
     Extracts chunks of data from a list of documents based on the specified chunking parameters.
@@ -40,6 +42,9 @@ async def extract_chunks_from_documents(
     Notes:
         - The `read` method of the `Document` class must be implemented to support the chunking operation.
         - The `chunker` parameter determines the chunking logic and should align with the document type.
+        - `temporal_hints` attaches the date hints graph extraction puts in its prompt. The
+          indexing pipeline turns it off: its chunks are only stored and embedded, the hints
+          are never persisted, and the dateparser pass costs more than cutting the chunks.
     """
     if not isinstance(max_chunk_size, int) or max_chunk_size <= 0:
         raise InvalidChunkSizeError(max_chunk_size)
@@ -50,12 +55,21 @@ async def extract_chunks_from_documents(
 
     for document in documents:
         document_token_count = 0
+        # This is the one place that sees a document's chunks in order, so the
+        # date hints are computed here and travel with each chunk: the rolling
+        # base is local to this loop and never crosses into another document
+        # (the same pass ``document_temporal_hints`` runs over a text list).
+        temporal_base = None
 
         async for document_chunk in document.read(
             max_chunk_size=max_chunk_size, chunker_cls=chunker
         ):
             document_token_count += document_chunk.chunk_size
             document_chunk.belongs_to_set = document.belongs_to_set
+            if temporal_hints:
+                document_chunk._temporal_hints, temporal_base = hint_lines(
+                    document_chunk.text, temporal_base
+                )
             yield document_chunk
 
         await update_document_token_count(document.id, document_token_count)

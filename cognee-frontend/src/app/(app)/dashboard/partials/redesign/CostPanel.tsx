@@ -1,9 +1,8 @@
 "use client";
 
 import React from "react";
-import type { SessionRow } from "@/modules/sessions/getSessions";
+import type { PipelineRun, SessionRow } from "@/modules/sessions/getSessions";
 import type { TenantHourlyCosts } from "@/modules/billing/getTenantHourlyCosts";
-import type { PipelineRun } from "@/ui/elements/AgentActivityTerminal";
 import { AsciiFrame } from "./AsciiFrame";
 import { FONT, T } from "./mono";
 import type { DashRange } from "./RangeToggle";
@@ -20,6 +19,12 @@ interface CostPanelProps {
   onRangeChange: (range: DashRange) => void;
   hourlyCosts?: TenantHourlyCosts | null;
   onViewBreakdown?: () => void;
+  // Unused by the notice, but declared: OverviewPage syncs and passes them, and
+  // a stub whose props lag the real panel fails the synced type-check gate.
+  updatedAt: number;
+  loading: boolean;
+  runsTruncated: boolean;
+  sessionsTruncated: boolean;
 }
 
 export function CostPanel(_props: CostPanelProps): React.ReactElement {

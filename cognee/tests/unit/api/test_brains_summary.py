@@ -21,6 +21,7 @@ from cognee.api.v1.visualize.visualize import (
     build_brains_summary_payload as _build_brains_summary_payload,
 )
 from cognee.modules.data.methods import DatasetGraphCounts
+from cognee.modules.engine.models.node_set import parse_node_set_names
 from cognee.modules.visualization.cognee_network_visualization import build_brain_summary_payload
 
 visualize_module = sys.modules["cognee.api.v1.visualize.visualize"]
@@ -174,7 +175,7 @@ async def test_a_cold_count_cache_costs_one_count_query_and_no_traversal():
     for the bounded node/link fetch /brains does on every single call."""
     dataset = _dataset("billing")
     run_id = uuid4()
-    get_graph_metrics = AsyncMock(return_value={"num_nodes": 42, "num_edges": 99})
+    get_graph_counts = AsyncMock(return_value=(42, 99))
     get_graph_data = AsyncMock()
     datasets_patch, node_sets_patch = _summary_patches(dataset)
 
@@ -193,7 +194,7 @@ async def test_a_cold_count_cache_costs_one_count_query_and_no_traversal():
             "get_graph_engine",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    get_graph_metrics=get_graph_metrics, get_graph_data=get_graph_data
+                    get_graph_counts=get_graph_counts, get_graph_data=get_graph_data
                 )
             ),
         ),
@@ -202,7 +203,7 @@ async def test_a_cold_count_cache_costs_one_count_query_and_no_traversal():
     ):
         payload = await visualize_module.build_brains_summary_payload(user=MagicMock())
 
-    get_graph_metrics.assert_awaited_once_with(include_optional=False)
+    get_graph_counts.assert_awaited_once_with()
     get_graph_data.assert_not_awaited()
     fetch_graph.assert_not_called()
     assert payload[str(dataset.id)]["node_count"] == 42
@@ -245,7 +246,7 @@ async def test_a_multi_set_document_colors_the_joined_key_and_lists_names_apart(
 
 
 def test_node_sets_are_parsed_from_the_json_string_ingestion_writes():
-    assert visualize_module._parse_node_set('["slack", "notion"]') == ["slack", "notion"]
+    assert parse_node_set_names('["slack", "notion"]') == ["slack", "notion"]
 
 
 @pytest.mark.parametrize(
@@ -266,4 +267,4 @@ def test_node_sets_are_parsed_from_the_json_string_ingestion_writes():
 def test_malformed_node_set_rows_degrade_instead_of_breaking_the_overview(raw, expected):
     """One unparsable row must not take down a payload covering every dataset
     the caller can read."""
-    assert visualize_module._parse_node_set(raw) == expected
+    assert parse_node_set_names(raw) == expected

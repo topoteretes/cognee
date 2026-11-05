@@ -52,7 +52,9 @@ async def test_stage_pipeline_tasks_need_no_llm(module, pipeline):
             f"{module}.get_authorized_existing_datasets",
             new=AsyncMock(return_value=[dataset]),
         ),
-        patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock,
+        patch(
+            f"{module}.run_memify_tasks", new=AsyncMock(return_value={"status": "ok"})
+        ) as memify_mock,
     ):
         await pipeline(user=user, session_ids=["s1"])
 

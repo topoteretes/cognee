@@ -414,6 +414,39 @@ def get_sessions_router() -> APIRouter:
             logger.exception("cost_by_user_agent failed")
             return JSONResponse(status_code=500, content={"error": "aggregation failed"})
 
+    @router.delete("/{session_id}")
+    async def delete_session_endpoint(
+        session_id: str = Path(
+            ...,
+            description=(
+                "Client-supplied session identifier; the same value passed as session_id "
+                "to POST /api/v1/remember."
+            ),
+            examples=["claude-code-1718000000"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Delete one of the caller's sessions — DELETE /api/v1/sessions/{session_id}.
+
+        Removes the session's Q&A turns, agent traces, session context and
+        watermarks, its Q&A vectors, and its dashboard and usage rows. Only the
+        caller's own sessions: read access to a session through a dataset grant
+        does not allow deleting it. Lessons already distilled from the session
+        into a dataset stay; delete them with POST /api/v1/forget and their data id.
+
+        ## Path Parameters
+        - **session_id** (str): The session to delete.
+
+        ## Response
+        `{"session_id": ..., "deleted": true}`; 404 when the caller has no such
+        session; 422 when session memory is disabled (CACHING=false).
+        """
+        from cognee.modules.session_lifecycle.delete_session import delete_session
+
+        if not await delete_session(user.id, session_id):
+            raise HTTPException(status_code=404, detail="session not found")
+        return {"session_id": session_id, "deleted": True}
+
     @router.get("/{session_id}")
     async def get_session_detail(
         session_id: str = Path(
@@ -426,7 +459,15 @@ def get_sessions_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ):
-        """Get session detail — GET /api/v1/sessions/{session_id}.
+        """Get one session with its recent Q&As and trace steps.
+
+        Returns the session record plus label (first question cut to 120 characters, else the
+        first trace's origin function, else null), msg_count and tool_calls (counts over all
+        Q&As and trace steps), and qas and traces trimmed to the last 20 entries.
+        A session is visible when the caller or one of their child agents owns it, or when
+        its dataset is readable by the caller; otherwise 404. When the session cache is
+        unavailable, qas and traces are empty, label is null and both counts are 0; when only
+        the trace read fails, qas are still returned.
 
         ## Path Parameters
         - **session_id** (str): Client-supplied session identifier; the same value passed as

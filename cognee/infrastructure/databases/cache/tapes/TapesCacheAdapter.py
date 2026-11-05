@@ -1,7 +1,7 @@
-"""Filesystem-backed cache adapter that mirrors QA writes to a running tapes
+"""SQL-backed cache adapter that mirrors QA writes to a running tapes
 ingest server (https://github.com/papercomputeco/tapes).
 
-The FS adapter remains the source of truth for session state. Every new QA
+The SQL adapter remains the source of truth for session state. Every new QA
 entry is additionally POSTed to `{tapes_ingest_url}/v1/ingest` as a provider-
 shaped request/response turn, so the conversation becomes queryable through
 tapes' Merkle DAG and semantic search surfaces. Tapes is append-only; QA
@@ -14,18 +14,24 @@ import uuid
 
 import httpx
 
-from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import FSCacheAdapter
+from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("TapesCacheAdapter")
 
 
-class TapesCacheAdapter(FSCacheAdapter):
-    """FS adapter that also mirrors each new QA to tapes /v1/ingest."""
+class TapesCacheAdapter(SqlCacheAdapter):
+    """SQL adapter that also mirrors each new QA to tapes /v1/ingest."""
 
     def __init__(
         self,
+        connection_string: str,
+        lock_key: str = "default_lock",
+        log_key: str = "usage_logs",
         session_ttl_seconds: int | None = 604800,
+        agentic_lock_expire: int = 240,
+        agentic_lock_timeout: int = 300,
+        purge_interval_seconds: int = 900,
         *,
         tapes_ingest_url: str = "http://localhost:8082",
         tapes_provider: str = "openai",
@@ -33,7 +39,15 @@ class TapesCacheAdapter(FSCacheAdapter):
         tapes_model: str = "cognee-session",
         tapes_request_timeout: float = 5.0,
     ):
-        super().__init__(session_ttl_seconds=session_ttl_seconds)
+        super().__init__(
+            connection_string,
+            lock_key=lock_key,
+            log_key=log_key,
+            session_ttl_seconds=session_ttl_seconds,
+            agentic_lock_expire=agentic_lock_expire,
+            agentic_lock_timeout=agentic_lock_timeout,
+            purge_interval_seconds=purge_interval_seconds,
+        )
         self.tapes_ingest_url = tapes_ingest_url.rstrip("/")
         self.tapes_provider = tapes_provider
         self.tapes_agent_name = tapes_agent_name
@@ -135,7 +149,7 @@ class TapesCacheAdapter(FSCacheAdapter):
                 )
         except Exception as e:
             logger.warning(
-                "Tapes mirror failed, continuing with FS cache only: %s", e, exc_info=True
+                "Tapes mirror failed, continuing with the SQL cache only: %s", e, exc_info=True
             )
 
     async def create_qa_entry(

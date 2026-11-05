@@ -36,7 +36,10 @@ async def _effective_search_type(
         reject_hybrid_graph_only_knobs(kwargs)
         reason = await hybrid_deferral_reason(kwargs, graph_is_empty=graph_is_empty)
         if reason:
-            logger.info("Deferring HYBRID_COMPLETION to GRAPH_COMPLETION: %s", reason)
+            logger.warning(
+                "HYBRID_COMPLETION is not available for this search; answering with "
+                "GRAPH_COMPLETION instead."
+            )
             # Payload.search_type records this. search() strips it; only_context
             # and verbose callers that parse shape must pin query_type.
             return SearchType.GRAPH_COMPLETION
@@ -60,7 +63,8 @@ def _context_evidence(retriever_instance, retrieved_objects, kwargs: dict) -> li
         return []
     dataset = kwargs.get("dataset")
     try:
-        return evidence_method(retrieved_objects, dataset_id=getattr(dataset, "id", None))
+        # None from a retriever means "no evidence", like []; callers iterate the result.
+        return evidence_method(retrieved_objects, dataset_id=getattr(dataset, "id", None)) or []
     except Exception as error:
         logger.warning("Unable to build structured context evidence: %s", error, exc_info=True)
         return []

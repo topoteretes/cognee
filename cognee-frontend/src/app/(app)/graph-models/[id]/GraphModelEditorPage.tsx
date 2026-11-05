@@ -3,13 +3,18 @@
 import { useCallback, useEffect, useReducer, useState } from "react";
 import { notifications } from "@mantine/notifications";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { GraphModel } from "@/modules/graphModels/types";
+import type { DatasetDataRow } from "@/modules/datasets/getAllDatasetData";
 import { schemaReducer, emptySchema } from "@/modules/graphModels/schemaReducer";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
-import { syncGraphModels, loadGraphModelsConfig } from "@/modules/configuration/userConfiguration";
+import { saveGraphModel, deleteGraphModel, fetchGraphModelsConfig } from "@/modules/configuration/userConfiguration";
 import { inferSchema, downloadRawData } from "@/modules/llm/managementLlmApi";
 import useDatasetDataPages from "@/modules/datasets/useDatasetDataPages";
+import { connectorRepository } from "@/modules/datasets/describeTextBlob";
+import mapInferredSchema from "@/modules/graphModels/mapInferredSchema";
+import { useIsMounted } from "@/utils/useIsMounted";
 import { v4 as uuid } from "uuid";
 import { TrackPageView, trackEvent } from "@/modules/analytics";
 
@@ -20,15 +25,31 @@ interface GraphModelEditorPageProps {
   modelId: string;
 }
 
+type LoadStatus = "loading" | "ready" | "notFound" | "failed";
+
+const LOAD_PROBLEM: Record<"notFound" | "failed", string> = {
+  notFound: "This model could not be found.",
+  failed: "Could not load this model. Please try again.",
+};
+
+function fileNameOf(row: DatasetDataRow): string {
+  if (typeof row.name === "string" && row.name) return connectorRepository({ name: row.name, label: row.label }) ?? row.name;
+  const fromLocation = typeof row.rawDataLocation === "string" ? row.rawDataLocation.split("/").pop() : undefined;
+  return fromLocation || row.id;
+}
+
 export default function GraphModelEditorPage({ modelId }: GraphModelEditorPageProps) {
   const router = useRouter();
   const { cogniInstance } = useCogniInstance();
   const { datasets: contextDatasets } = useFilter();
+  const isMounted = useIsMounted();
 
   // ── Model metadata ──────────────────────────────────────────────────────────
   const [modelName, setModelName] = useState("Untitled Model");
   const [savedModelId, setSavedModelId] = useState<string>(modelId);
   const [isDirty, setIsDirty] = useState(false);
+  const [loadStatus, setLoadStatus] = useState<LoadStatus>(modelId === "new" ? "ready" : "loading");
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [assignedDatasetIds, setAssignedDatasetIds] = useState<string[]>([]);
@@ -58,14 +79,21 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
   const [showRegenerateModal, setShowRegenerateModal] = useState(false);
   const [regenDatasets, setRegenDatasets] = useState<{ id: string; name: string }[]>([]);
   const [regenSelectedDataset, setRegenSelectedDataset] = useState<string | null>(null);
-  const { data: regenData, loading: regenLoadingFiles, error: regenFilesError,
+  // One bounded page of the dataset at a time, so what can be selected is what
+  // has been loaded (hence "Select loaded files" below), not the whole dataset.
+  const {
+    data: regenData, loading: regenLoadingFiles, error: regenFilesError,
     hasMore: regenHasMore, load: loadRegenFiles, loadMore: loadMoreRegenFiles, reset: resetRegenFiles,
-  } = useDatasetDataPages<{ id: string; name?: string; rawDataLocation?: string }>(cogniInstance);
-  const regenFiles = regenData.map(d => ({ id: d.id, name: d.name || d.rawDataLocation?.split("/").pop() || d.id }));
+  } = useDatasetDataPages<DatasetDataRow>(cogniInstance);
+  const regenFiles = regenData.map((d) => ({ id: d.id, name: fileNameOf(d) }));
   const [regenSelectedFiles, setRegenSelectedFiles] = useState<Set<string>>(new Set());
 
-
   // ── Load model from sessionStorage (fast) or backend config ─────────────────
+  // A missing or unreadable model is shown in place, never answered with a
+  // redirect: the response can arrive after the user has already clicked
+  // somewhere else, and a late router.replace would pull them off the page
+  // they chose (CLO-1110). `cancelled` drops a response for a page that is
+  // gone or a request that a newer one replaced.
   useEffect(() => {
     if (modelId === "new") {
       const newId = uuid();
@@ -74,38 +102,39 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
       return;
     }
 
+    const showModel = (model: GraphModel): void => {
+      setModelName(model.name);
+      dispatch({ type: "SET_SCHEMA", schema: model.schema });
+      setSavedModelId(model.id);
+      setAssignedDatasetIds(model.assignedDatasets ?? []);
+      setIsDirty(false);
+      setLoadStatus("ready");
+    };
+
     // Try sessionStorage first (set by dataset page when creating a model)
     const cached = sessionStorage.getItem(`graph-model-${modelId}`);
     if (cached) {
       try {
-        const model = JSON.parse(cached) as GraphModel;
-        setModelName(model.name);
-        dispatch({ type: "SET_SCHEMA", schema: model.schema });
-        setSavedModelId(model.id);
-        setAssignedDatasetIds(model.assignedDatasets ?? []);
-        setIsDirty(false);
+        showModel(JSON.parse(cached) as GraphModel);
         sessionStorage.removeItem(`graph-model-${modelId}`);
         return;
       } catch {}
     }
 
     if (!cogniInstance) return;
-    loadGraphModelsConfig(cogniInstance).then((cfg) => {
-      const model = cfg.models.find((m) => m.id === modelId);
-      if (!model) {
-        router.replace("/datasets");
-        return;
-      }
-      setModelName(model.name);
-      dispatch({ type: "SET_SCHEMA", schema: model.schema });
-      setSavedModelId(model.id);
-      setAssignedDatasetIds(model.assignedDatasets ?? []);
-      setIsDirty(false);
-    }).catch(() => {
-      router.replace("/datasets");
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cogniInstance]);
+    let cancelled = false;
+    setLoadStatus("loading");
+    fetchGraphModelsConfig(cogniInstance).then(
+      (cfg) => {
+        if (cancelled) return;
+        const model = cfg.models.find((m) => m.id === modelId);
+        if (model) showModel(model);
+        else setLoadStatus("notFound");
+      },
+      () => { if (!cancelled) setLoadStatus("failed"); },
+    );
+    return () => { cancelled = true; };
+  }, [cogniInstance, modelId, loadAttempt]);
 
   // ── Clear selection if entity was deleted ────────────────────────────────────
   useEffect(() => {
@@ -155,26 +184,9 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
 
     setIsSaving(true);
     try {
-      const cfg = await loadGraphModelsConfig(cogniInstance);
-      const now = new Date().toISOString();
-      const currentModel: GraphModel = {
-        id: savedModelId,
-        name: modelName,
-        schema,
-        createdAt: cfg.models.find((m) => m.id === savedModelId)?.createdAt ?? now,
-        updatedAt: now,
-        status: "draft",
-        assignedDatasets: cfg.models.find((m) => m.id === savedModelId)?.assignedDatasets,
-      };
-      // Upsert into the models list
-      const idx = cfg.models.findIndex((m) => m.id === savedModelId);
-      const updatedModels = [...cfg.models];
-      if (idx >= 0) {
-        updatedModels[idx] = currentModel;
-      } else {
-        updatedModels.push(currentModel);
-      }
-      await syncGraphModels(cogniInstance, updatedModels);
+      // Merged into the model as it is stored at write time, so the dataset
+      // assignments and creation time come from there, not from when the page loaded.
+      await saveGraphModel(cogniInstance, { id: savedModelId, name: modelName, schema }, new Date().toISOString());
       setIsDirty(false);
       trackEvent({ pageName: "Graph Model Editor", eventName: "model_saved", additionalProperties: { model_id: savedModelId, model_name: modelName, entity_count: String(schema.entities.length) } });
       notifications.show({ title: "Saved", message: `"${modelName}" saved.`, color: "green" });
@@ -260,32 +272,7 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
       if (!result) throw lastError;
 
       if (result.graphSchema) {
-        const defs = (result.graphSchema as Record<string, any>).$defs || {};
-        const newSchema = {
-          options: {},
-          entities: Object.entries(defs)
-            .filter(([key]) => !key.endsWith("Type"))
-            .map(([name, def]: [string, any]) => ({
-              _id: uuid(),
-              name: def.title || name,
-              description: def.description || "",
-              fields: Object.entries(def.properties || {})
-                .filter(([fieldName]) => fieldName !== "is_type" && fieldName !== "metadata")
-                .map(([fieldName, fieldDef]: [string, any]) => {
-                  if (fieldDef.$ref) {
-                    const target = fieldDef.$ref.replace("#/$defs/", "");
-                    return { _id: uuid(), name: fieldName, kind: "relation" as const, relation: { targetEntityName: target, cardinality: "one" as const } };
-                  }
-                  if (fieldDef.type === "array" && fieldDef.items?.$ref) {
-                    const target = fieldDef.items.$ref.replace("#/$defs/", "");
-                    return { _id: uuid(), name: fieldName, kind: "relation" as const, relation: { targetEntityName: target, cardinality: "many" as const } };
-                  }
-                  const primitiveType = (fieldDef.type === "number" || fieldDef.type === "integer") ? "number" : fieldDef.type === "boolean" ? "boolean" : "string";
-                  return { _id: uuid(), name: fieldName, kind: "primitive" as const, primitiveType: primitiveType as "string" | "number" | "boolean" | "date", required: (def.required || []).includes(fieldName) };
-                }),
-              indexFields: [],
-            })),
-        };
+        const newSchema = mapInferredSchema(result.graphSchema);
         dispatch({ type: "SET_SCHEMA", schema: newSchema });
         setIsDirty(true);
         notifications.show({ title: "Schema regenerated", message: `Detected ${newSchema.entities.length} entity types from ${selectedFileEntries.length} file${selectedFileEntries.length !== 1 ? "s" : ""}.`, color: "green", autoClose: 4000 });
@@ -304,20 +291,30 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
     trackEvent({ pageName: "Graph Model Editor", eventName: "entity_added", additionalProperties: { model_id: savedModelId, entity_name: name } });
   }
 
-  function handleCreateEntityFromRelation(name: string) {
-    dirtyDispatch({ type: "ADD_ENTITY", name });
-    setTimeout(() => {
-      const newEntity = schema.entities.find((e) => e.name === name);
-      if (newEntity) setSelectedEntityId(newEntity._id);
-    }, 50);
-  }
-
   function handleDeleteEntity(entityId: string) {
     dirtyDispatch({ type: "DELETE_ENTITY", entityId });
     trackEvent({ pageName: "Graph Model Editor", eventName: "entity_deleted", additionalProperties: { model_id: savedModelId } });
   }
 
   const selectedEntity = schema.entities.find((e) => e._id === selectedEntityId) ?? null;
+
+  if (loadStatus === "loading") {
+    return <p role="status" style={{ padding: "2rem", color: "rgba(237,236,234,0.55)" }}>Loading model…</p>;
+  }
+
+  if (loadStatus !== "ready") {
+    return (
+      <div role="alert" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem", padding: "3rem", color: "rgba(237,236,234,0.8)" }}>
+        <p style={{ margin: 0 }}>{LOAD_PROBLEM[loadStatus]}</p>
+        <div style={{ display: "flex", gap: "1.5rem" }}>
+          <button type="button" onClick={() => setLoadAttempt((n) => n + 1)} className="cursor-pointer underline" style={{ background: "none", border: "none", color: "inherit", fontFamily: "inherit" }}>
+            Try again
+          </button>
+          <Link href="/datasets" className="underline">Back to datasets</Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -374,11 +371,9 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
               if (!cogniInstance) return;
               if (!window.confirm(`Delete "${modelName}"? This cannot be undone.`)) return;
               try {
-                const cfg = await loadGraphModelsConfig(cogniInstance);
-                const updated = cfg.models.filter((m) => m.id !== savedModelId);
-                await syncGraphModels(cogniInstance, updated);
+                await deleteGraphModel(cogniInstance, savedModelId);
                 notifications.show({ title: "Deleted", message: `"${modelName}" has been deleted.`, color: "green", autoClose: 4000 });
-                router.push(assignedDatasetIds.length > 0 ? `/datasets/${assignedDatasetIds[0]}` : "/datasets");
+                if (isMounted()) router.push(assignedDatasetIds.length > 0 ? `/datasets/${assignedDatasetIds[0]}` : "/datasets");
               } catch (err) {
                 notifications.show({ title: "Delete failed", message: err instanceof Error ? err.message : String(err), color: "red" });
               }
@@ -687,13 +682,17 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
                     </button>
                   )}
                 </div>
-                {regenFilesError && <div role="alert">Couldn&apos;t load files. <button onClick={loadMoreRegenFiles}>Retry</button></div>}
-                {regenHasMore && !regenFilesError && <button disabled={regenLoadingFiles} onClick={loadMoreRegenFiles}>Load more files</button>}
-                {regenLoadingFiles ? (
+                {regenLoadingFiles && regenFiles.length === 0 ? (
                   <div style={{ padding: "12px 0", textAlign: "center", fontSize: 13, color: "rgba(237,236,234,0.55)" }}>Loading files...</div>
+                ) : regenFilesError && regenFiles.length === 0 ? (
+                  <div role="alert" style={{ padding: "12px 0", textAlign: "center", fontSize: 13, color: "#F87171" }}>
+                    Couldn&rsquo;t load files.{" "}
+                    <button onClick={loadMoreRegenFiles} className="cursor-pointer underline" style={{ background: "none", border: "none", color: "inherit", fontFamily: "inherit", fontSize: "inherit", padding: 0 }}>Try again</button>
+                  </div>
                 ) : regenFiles.length === 0 ? (
                   <div style={{ padding: "12px 0", textAlign: "center", fontSize: 13, color: "rgba(237,236,234,0.55)" }}>No files in this dataset</div>
                 ) : (
+                  <>
                   <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, maxHeight: 220, overflowY: "auto" }}>
                     {regenFiles.map((file) => (
                       <label key={file.id} className="hover:bg-white/10" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
@@ -713,6 +712,17 @@ export default function GraphModelEditorPage({ modelId }: GraphModelEditorPagePr
                       </label>
                     ))}
                   </div>
+                  {(regenHasMore || regenFilesError) && (
+                    <button
+                      onClick={loadMoreRegenFiles}
+                      disabled={regenLoadingFiles}
+                      className="cursor-pointer"
+                      style={{ background: "none", border: "none", fontSize: 12, color: regenFilesError ? "#F87171" : "#6510F4", fontWeight: 500, fontFamily: "inherit", padding: "4px 0", alignSelf: "flex-start" }}
+                    >
+                      {regenLoadingFiles ? "Loading..." : regenFilesError ? "Couldn’t load more files. Try again" : "Load more files"}
+                    </button>
+                  )}
+                  </>
                 )}
               </div>
             )}

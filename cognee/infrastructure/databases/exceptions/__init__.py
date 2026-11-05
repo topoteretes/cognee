@@ -12,6 +12,7 @@ from .exceptions import (
     DatabaseNotCreatedError,
     EmbeddingContextWindowTooSmallError,
     EmbeddingCredentialsError,
+    EmbeddingEncodingError,
     EmbeddingException,
     MissingQueryParameterError,
     MutuallyExclusiveQueryParametersError,
@@ -20,4 +21,5 @@ from .exceptions import (
     SessionParameterValidationError,
     DatabaseCredentialsError,
     Neo4jMultiDatabaseSupportError,
+    TursoDatabaseInUseError,
 )

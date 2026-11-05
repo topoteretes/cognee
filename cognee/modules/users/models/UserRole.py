@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import UUID, Column, DateTime, ForeignKey
+from sqlalchemy import Column, DateTime, ForeignKey, Uuid
 
 from cognee.infrastructure.databases.relational import Base
 
@@ -10,5 +10,5 @@ class UserRole(Base):
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    user_id = Column(UUID, ForeignKey("users.id"), primary_key=True)
-    role_id = Column(UUID, ForeignKey("roles.id"), primary_key=True)
+    user_id = Column(Uuid, ForeignKey("users.id"), primary_key=True)
+    role_id = Column(Uuid, ForeignKey("roles.id"), primary_key=True)

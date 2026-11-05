@@ -18,11 +18,13 @@ def _result(result_id="chunk-1", payload=None):
 def _unified_engine():
     engine = MagicMock()
     engine.vector = MagicMock()
+    engine.vector.has_collection = AsyncMock(return_value=False)
     engine.vector.embedding_engine.embed_text = AsyncMock(return_value=[[1.0, 0.0, 0.0]])
     engine.vector.search = AsyncMock(return_value=[_result()])
     engine.graph = MagicMock()
     engine.graph.is_empty = AsyncMock(return_value=False)
     engine.graph.get_neighborhood = AsyncMock(return_value=([], []))
+    engine.graph.get_filtered_graph_data = AsyncMock(return_value=([], []))
     engine.graph.get_node_truth_state = AsyncMock(
         return_value={"chunk-1": {"truth_alignment": [1.0], "truth_epoch": 3}}
     )

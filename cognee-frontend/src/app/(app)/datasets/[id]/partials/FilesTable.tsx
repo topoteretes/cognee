@@ -1,21 +1,32 @@
 "use client";
 
 import type { ReactElement } from "react";
-import FileIcon, { getExtMeta } from "@/ui/elements/FileIcon";
+import FileIcon, { getExtMeta, REPOSITORY_META } from "@/ui/elements/FileIcon";
+import SkeletonBar from "@/ui/elements/SkeletonBar";
 import TrashIcon from "@/ui/elements/TrashIcon";
 import { formatDate, formatFileSize } from "@/utils/fileFormat";
-import isMemoryBlobName from "@/modules/datasets/isMemoryBlobName";
+import { fmtCount } from "@/utils/formatCount";
+import { clipTitle, connectorRepository, needsContentRead, textBlobLabel, type TextBlobDescription } from "@/modules/datasets/describeTextBlob";
 import { capRows, MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
 import ProcessingBadge from "../../partials/ProcessingBadge";
 
 export interface FileRow {
+  /** Stored processing outcome; undefined while it is not known. */
   completed?: boolean;
   id: string;
   name: string;
+  /** What the pod stored the row under at ingest; names a synced repository. */
+  label?: string;
   extension?: string;
   size?: number;
   createdAt?: string;
 }
+
+const MEMORY_META = { fill: "rgba(188,155,255,0.20)", stroke: "#BC9BFF", text: "#BC9BFF", label: "MEM" };
+// Neither MEM nor TXT: what a hashed blob is has not been read yet, and
+// painting either one now means repainting it a moment later as the other
+// (review-reported). The badge commits to nothing until the content answers.
+const PENDING_META = { fill: "rgba(255,255,255,0.06)", stroke: "rgba(237,236,234,0.30)", text: "rgba(237,236,234,0.30)", label: "" };
 
 function getTypeName(name: string, ext?: string): string {
   const e = (ext || name.split(".").pop() || "").toLowerCase();
@@ -25,7 +36,7 @@ function getTypeName(name: string, ext?: string): string {
 
 export default function FilesTable({
   files,
-  memorySessionIds,
+  blobDescriptions,
   search,
   loadError,
   onDelete,
@@ -34,7 +45,8 @@ export default function FilesTable({
   deletingId,
 }: {
   files: FileRow[];
-  memorySessionIds: Record<string, string | null>;
+  /** What each hashed text blob turned out to be; absent until its content has been read. */
+  blobDescriptions: Record<string, TextBlobDescription | null>;
   search: string;
   loadError: boolean;
   onDelete: (id: string) => void;
@@ -68,22 +80,29 @@ export default function FilesTable({
     <div style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.1)", padding: "12px 20px" }}>
         <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)" }}>Name</span>
-        <span style={{ width: 85, fontSize: 12, color: "rgba(237,236,234,0.55)" }}>Processing</span>
+        <span style={{ width: 85, fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>Processing</span>
         <span style={{ width: 100, fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>Type</span>
         <span style={{ width: 80, fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>Size</span>
         <span style={{ width: 170, fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>Added</span>
         <span style={{ width: 40, flexShrink: 0 }} />
       </div>
       {visible.map((file, i) => {
-        const isMemory = isMemoryBlobName(file.name);
-        const memorySession = memorySessionIds[file.id];
-        const meta = isMemory
-          ? { fill: "rgba(188,155,255,0.20)", stroke: "#BC9BFF", text: "#BC9BFF", label: "MEM" }
-          : getExtMeta(file.name, file.extension);
-        const typeName = isMemory ? "Memory" : getTypeName(file.name, file.extension);
-        const displayName = isMemory
-          ? (memorySession ? `Memory · ${memorySession}` : "Memory")
-          : decodeURIComponent(file.name);
+        const repository = connectorRepository(file);
+        const isBlob = needsContentRead(file);
+        const description = blobDescriptions[file.id];
+        // Three states, not two: a blob whose content has not come back yet is
+        // not "not a memory", and rendering it as text is the same unproven
+        // claim this stopped making in the other direction.
+        const pending = isBlob && description === undefined;
+        // Only a blob that proved it carries a session is a memory. The rest
+        // came in as text from somewhere this app cannot name — connector
+        // content lands here too — so it is typed as the text it is.
+        const isMemory = isBlob && description?.kind === "memory";
+        const meta = repository ? REPOSITORY_META : pending ? PENDING_META : isMemory ? MEMORY_META : getExtMeta(file.name, file.extension);
+        const typeName = repository ? "Repository" : isMemory ? "Memory" : getTypeName(file.name, file.extension);
+        // A hash is not a name: a synced repository says what it is on its
+        // label, any other blob says it in its content.
+        const displayName = repository ? clipTitle(repository) : (isBlob ? textBlobLabel(description) : decodeURIComponent(file.name));
         return (
           <div
             key={file.id}
@@ -92,10 +111,16 @@ export default function FilesTable({
           >
             <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
               <FileIcon fill={meta.fill} stroke={meta.stroke} text={meta.text} label={meta.label} />
-              <span style={{ fontSize: 13, fontWeight: 500, color: "#EDECEA" }}>{displayName}</span>
+              {pending ? (
+                <SkeletonBar width={180} height={12} />
+              ) : (
+                <span title={repository ?? undefined} style={{ fontSize: 13, fontWeight: 500, color: "#EDECEA" }}>{displayName}</span>
+              )}
             </div>
             <span style={{ width: 85, flexShrink: 0 }}><ProcessingBadge completed={file.completed} /></span>
-            <span style={{ width: 100, fontSize: 13, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>{typeName}</span>
+            <span style={{ width: 100, fontSize: 13, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>
+              {pending ? <SkeletonBar width={52} height={12} /> : typeName}
+            </span>
             <span style={{ width: 80, fontSize: 13, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>{formatFileSize(file.size)}</span>
             <span style={{ width: 170, fontSize: 13, color: "rgba(237,236,234,0.35)", flexShrink: 0 }}>{formatDate(file.createdAt, true)}</span>
             <div style={{ width: 40, display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
@@ -116,7 +141,7 @@ export default function FilesTable({
       })}
       {hidden > 0 && (
         <div style={{ padding: "12px 20px", fontSize: 12, color: "rgba(237,236,234,0.35)", textAlign: "center", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-          Showing {MAX_RENDERED_ROWS.toLocaleString()} of {files.length.toLocaleString()} files
+          Showing {fmtCount(MAX_RENDERED_ROWS)} of {fmtCount(files.length)} files
         </div>
       )}
     </div>

@@ -12,6 +12,7 @@ from .record_operation import (
     OperationContext,
     finish_operation,
     get_current_operation,
+    get_current_session_ids,
     record_operation,
 )
 from .scrub_error import scrub_error_message
@@ -34,6 +35,7 @@ __all__ = [
     "finish_operation",
     "get_active_operation_usage",
     "get_current_operation",
+    "get_current_session_ids",
     "get_operation_origin",
     "get_parent_run_id",
     "operation_origin_scope",

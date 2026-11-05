@@ -1,9 +1,8 @@
-"""Persist and load cloud credentials from ~/.cognee/cloud_credentials.json."""
+"""Persist and load the saved connection from ~/.cognee/cloud_credentials.json."""
 
 import json
 import os
-import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from cognee.shared.logging_utils import get_logger
@@ -16,15 +15,13 @@ _CREDENTIALS_FILE = _CREDENTIALS_DIR / "cloud_credentials.json"
 
 @dataclass
 class CloudCredentials:
-    access_token: str
-    refresh_token: str | None = None
-    expires_at: float = 0.0  # Unix timestamp
+    """The instance ``serve()`` connected to and the API key it accepted."""
+
     service_url: str = ""
     api_key: str = ""
-    management_url: str = ""
+    # Tenant the instance's /api/v1/users/me reported at connect time (on
+    # Cognee Cloud, the control-plane tenants.id). Read by telemetry.
     tenant_id: str = ""
-    tenant_name: str = ""
-    email: str = ""
 
 
 def get_credentials_path() -> Path:
@@ -37,6 +34,8 @@ def load_credentials() -> CloudCredentials | None:
         return None
     try:
         data = json.loads(path.read_text())
+        # Keys the file may still carry from older releases (Auth0 tokens,
+        # tenant fields) are dropped here, not rejected.
         return CloudCredentials(
             **{k: v for k, v in data.items() if k in CloudCredentials.__dataclass_fields__}
         )
@@ -58,9 +57,3 @@ def clear_credentials() -> None:
     if path.exists():
         path.unlink()
         logger.debug("Cleared cloud credentials at %s", path)
-
-
-def is_token_expired(creds: CloudCredentials) -> bool:
-    if not creds.expires_at:
-        return True
-    return time.time() > (creds.expires_at - 60)  # 60s buffer

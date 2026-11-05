@@ -44,37 +44,16 @@ def print_improve_result(result: Any, background: bool = False) -> None:
 
     status = _field(result, "status")
     stages = _field(result, "stages") or []
-    lock_held = bool(stages) and all(
-        _field(stage, "status") == "skipped" and _field(stage, "reason") == "lock_held"
-        for stage in stages
-    )
 
     if status == "errored":
         fmt.warning("Knowledge graph improvement finished with errors.")
     elif status == "skipped":
-        if lock_held and _field(result, "rerun_requested"):
-            fmt.warning(
-                "Another improve run already holds this session; nothing ran here (lock_held), "
-                "but it will run one more pass over the newer entries before it finishes."
-            )
-        elif lock_held:
-            fmt.warning(
-                "Another improve run already holds this dataset/session; nothing ran (lock_held)."
-            )
-        else:
-            fmt.warning("Nothing to improve: every stage was skipped.")
+        fmt.warning("Nothing to improve: every stage was skipped.")
     else:
         fmt.success("Knowledge graph improved successfully!")
 
     for stage in stages:
         fmt.echo(format_stage_line(stage))
-
-    rerun_passes = _field(result, "rerun_passes") or []
-    if rerun_passes:
-        fmt.echo(
-            f"  ran {len(rerun_passes)} extra pass(es) requested by improves that found "
-            "the session locked"
-        )
 
     error = _field(result, "error")
     if error and status == "errored" and not any(_field(s, "error") == error for s in stages):
@@ -91,9 +70,11 @@ Enrich and improve the knowledge graph.
 Runs the self-improvement loop over a dataset: nine stages in a fixed order,
 each of which first declines work it cannot do (no LLM calls) and then runs.
 Stages 1-7 (feedback weights, session Q&A / trace persistence, agent context,
-distillation, user preferences, truth subspace) need --session-ids; triplet
-enrichment always runs when the graph changed; the truth subspace and the
-global context index are opt-in flags. The result prints one line per stage.
+distillation, user preferences, truth subspace) need --session-ids. The truth
+subspace is an opt-in flag; conflict review runs by default
+(--no-review-conflicts turns it off) and is skipped without an LLM, and the
+global context index runs by default (IMPROVE_GLOBAL_CONTEXT_INDEX). The
+result prints one line per stage.
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -110,7 +91,7 @@ global context index are opt-in flags. The result prints one line per stage.
         parser.add_argument(
             "--node-name",
             nargs="*",
-            help="Filter to specific named entities",
+            help="Deprecated and ignored (it scoped the removed triplet-enrichment stage)",
         )
         parser.add_argument(
             "--session-ids",
@@ -130,7 +111,10 @@ global context index are opt-in flags. The result prints one line per stage.
         parser.add_argument(
             "--build-global-context-index",
             action="store_true",
-            help="Build the global context index after enrichment (opt-in stage)",
+            help=(
+                "Build the global context index for this run even if "
+                "IMPROVE_GLOBAL_CONTEXT_INDEX is false (default: follow that setting)"
+            ),
         )
         parser.add_argument(
             "--build-truth-subspace",
@@ -138,6 +122,15 @@ global context index are opt-in flags. The result prints one line per stage.
             help=(
                 "Build the truth subspace from the sessions' distilled learnings "
                 "(opt-in stage; needs --session-ids and a backend with truth state)"
+            ),
+        )
+        parser.add_argument(
+            "--review-conflicts",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help=(
+                "Review conflicts using source documents and dates "
+                "(default: IMPROVE_REVIEW_CONFLICTS, true; skipped without an LLM)"
             ),
         )
         parser.add_argument(
@@ -160,8 +153,14 @@ global context index are opt-in flags. The result prints one line per stage.
             fmt.echo(f"Improving knowledge graph for dataset '{dataset}'...")
 
             feedback_alpha: float | None = getattr(args, "feedback_alpha", None)
-            build_global_context_index = bool(getattr(args, "build_global_context_index", False))
+            # The flag only forces the stage on; absent, improve() follows its config.
+            build_global_context_index = (
+                True if getattr(args, "build_global_context_index", False) else None
+            )
             build_truth_subspace = bool(getattr(args, "build_truth_subspace", False))
+            review_conflicts = getattr(args, "review_conflicts", None)
+            if getattr(args, "node_name", None) is not None:
+                fmt.warning("--node-name is deprecated and ignored.")
 
             async def run_improve():
                 try:
@@ -175,10 +174,10 @@ global context index are opt-in flags. The result prints one line per stage.
 
                     result = await cognee.improve(
                         dataset=dataset_arg,
-                        node_name=args.node_name,
                         session_ids=args.session_ids,
                         build_global_context_index=build_global_context_index,
                         build_truth_subspace=build_truth_subspace,
+                        review_conflicts=review_conflicts,
                         run_in_background=args.background,
                         **improve_kwargs,
                     )

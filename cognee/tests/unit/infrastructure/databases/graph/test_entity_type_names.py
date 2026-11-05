@@ -74,9 +74,10 @@ async def _fill(adapter):
 
 @pytest.mark.asyncio
 async def test_turso_native_lookup(tmp_path):
+    pytest.importorskip("turso")
     from cognee.infrastructure.databases.graph.turso.adapter import TursoAdapter
 
-    adapter = TursoAdapter(f"sqlite+aiosqlite:///{tmp_path / 'types.db'}")
+    adapter = TursoAdapter(str(tmp_path / "types.db"))
     try:
         await _fill(adapter)
         assert await adapter.get_entity_type_names(["alice", "bob", "carol"]) == {

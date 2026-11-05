@@ -100,16 +100,26 @@ class NodeEdgeVectorSearch:
         )
 
     def extract_relevant_node_ids(self) -> list[str]:
-        """Extracts unique node IDs from search results."""
+        """Extracts unique node IDs from search results, nearest first.
+
+        Scores are vector distances (lower = closer). A node found in several
+        collections is ranked by its best score, so callers can take a top-k
+        slice (e.g. neighborhood seeds) and get the most similar nodes.
+        """
         if self.query_list_length is not None:
             return []
-        relevant_node_ids = set()
+        best_score: dict[str, float] = {}
         for scored_results in self.node_distances.values():
             for scored_node in scored_results:
                 node_id = getattr(scored_node, "id", None)
-                if node_id:
-                    relevant_node_ids.add(str(node_id))
-        return list(relevant_node_ids)
+                if not node_id:
+                    continue
+                score = getattr(scored_node, "score", None)
+                score = float("inf") if score is None else score
+                node_id = str(node_id)
+                if node_id not in best_score or score < best_score[node_id]:
+                    best_score[node_id] = score
+        return sorted(best_score, key=best_score.__getitem__)
 
     def set_distances_from_results(
         self,

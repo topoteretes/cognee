@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, UUID, Column, DateTime, ForeignKey, String, text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, String, Uuid, text
 
 from cognee.infrastructure.databases.relational import Base
 
@@ -8,9 +8,9 @@ from cognee.infrastructure.databases.relational import Base
 class DatasetDatabase(Base):
     __tablename__ = "dataset_database"
 
-    owner_id = Column(UUID, ForeignKey("principals.id", ondelete="CASCADE"), index=True)
+    owner_id = Column(Uuid, ForeignKey("principals.id", ondelete="CASCADE"), index=True)
     dataset_id = Column(
-        UUID, ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True, index=True
+        Uuid, ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True, index=True
     )
 
     vector_database_name = Column(String, unique=False, nullable=False)

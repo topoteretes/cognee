@@ -85,6 +85,8 @@ async def test_slack_history_native_lifecycle(tmp_path, monkeypatch):
 
     monkeypatch.setattr(LLMGateway, "acreate_structured_output", AsyncMock(side_effect=llm_output))
     credential = SimpleNamespace(
+        provider="slack",
+        workspace_id=None,
         provider_account_id="T1",
         id=uuid4(),
         status="active",

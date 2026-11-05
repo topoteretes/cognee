@@ -27,7 +27,7 @@ graph_engine_module = importlib.import_module(
 def _row(table_name="orders", row_data=None, foreign_keys=None, primary_key_column="id"):
     return DltRowData(
         table_name=table_name,
-        primary_key_column=primary_key_column,
+        primary_key_columns=[primary_key_column],
         primary_key_value="1",
         row_data=row_data or {},
         content_hash="hash",
@@ -59,6 +59,15 @@ class TestSelectedColumnValues:
     def test_wildcard_table(self):
         row = _row(row_data=self.ROW_DATA)
         assert _selected_column_values(row, {"*": ["country"]}) == {"country": "RS"}
+
+    def test_an_explicit_empty_list_switches_a_table_off_under_a_wildcard(self):
+        """`{"*": [...], "orders": []}` means none for orders; the wildcard is for unnamed tables."""
+        row = _row(row_data=self.ROW_DATA)
+        assert _selected_column_values(row, {"*": ["status"], "orders": []}) == {}
+        other = _row(table_name="customers", row_data=self.ROW_DATA)
+        assert _selected_column_values(other, {"*": ["status"], "orders": []}) == {
+            "status": "active"
+        }
 
     def test_wildcard_columns_excludes_pk_and_fk(self):
         row = _row(row_data=self.ROW_DATA, foreign_keys=self.FOREIGN_KEYS)

@@ -1,4 +1,4 @@
-"""Engine-agnostic SQL cache adapter (Postgres via asyncpg, SQLite via aiosqlite)."""
+"""Engine-agnostic SQL cache adapter (Postgres via asyncpg, SQLite via aiosqlite, Turso via pyturso)."""
 
 import asyncio
 import json
@@ -33,6 +33,7 @@ from cognee.infrastructure.databases.exceptions.exceptions import (
     SessionQAEntryValidationError,
     SharedLadybugLockRequiresRedisError,
 )
+from cognee.infrastructure.databases.postgres.deadlock import is_deadlock
 from cognee.infrastructure.databases.relational import get_relational_config
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
@@ -65,22 +66,6 @@ _PURGE_LOCK_ID = int.from_bytes(sha256(b"cognee_cache_ttl_sweep").digest()[:8], 
 _TTL_REFRESH_FRACTION = 0.05
 
 
-def _is_deadlock_error(error: Exception) -> bool:
-    """Best-effort detection of a Postgres deadlock without importing asyncpg."""
-    if not isinstance(error, DBAPIError):
-        return False
-    orig = getattr(error, "orig", None)
-    seen = set()
-    while orig is not None and id(orig) not in seen:
-        seen.add(id(orig))
-        if type(orig).__name__ == "DeadlockDetectedError":
-            return True
-        if getattr(orig, "sqlstate", None) == "40P01":
-            return True
-        orig = getattr(orig, "__cause__", None)
-    return "deadlock detected" in str(error).lower()
-
-
 class _SqlAdvisoryLockHandle:
     """Handle returned by acquire_lock; owns one checked-out sync connection."""
 
@@ -110,9 +95,10 @@ class _SqlAdvisoryLockHandle:
 class SqlCacheAdapter(CacheDBInterface):
     """SQL-backed cache adapter for session QA, trace, usage-log, and KV storage.
 
-    Runs on any SQLAlchemy async URL — production Postgres (``postgresql+asyncpg``)
-    and serverless SQLite (``sqlite+aiosqlite``) share the same code paths; Postgres
-    extras (``FOR UPDATE``, advisory locks) degrade gracefully on SQLite.
+    Runs on any SQLAlchemy async URL — production Postgres (``postgresql+asyncpg``),
+    serverless SQLite (``sqlite+aiosqlite``) and the Turso rewrite engine
+    (``sqlite+cognee_turso``) share the same code paths; Postgres extras
+    (``FOR UPDATE``, advisory locks) degrade gracefully on the SQLite-family engines.
 
     Note: the factory caches one adapter per ``lock_key`` (Ladybug per-db lock_key
     instantiation pattern), so several instances may share one database.
@@ -142,6 +128,15 @@ class SqlCacheAdapter(CacheDBInterface):
             self._is_postgres = url.get_backend_name() == "postgresql"
 
             is_sqlite = url.get_backend_name() == "sqlite"
+            # Turso uses the sqlite dialect through cognee's own driver; it needs its
+            # PRAGMAs and connect args. The journal mode is pinned to wal: a cache
+            # write that hit an mvcc write-write conflict would be lost, not retried.
+            is_turso = url.get_driver_name() == "cognee_turso"
+            turso_config = None
+            if is_turso:
+                from cognee.infrastructure.databases.turso import get_turso_config
+
+                turso_config = get_turso_config().wal_only()
 
             relational_config = get_relational_config()
             pool_args: dict = (
@@ -157,6 +152,10 @@ class SqlCacheAdapter(CacheDBInterface):
                 # with SQLITE_BUSY when several processes share one cache.db.
                 connect_args = dict(pool_args.pop("connect_args", None) or {})
                 connect_args.setdefault("timeout", 30)
+                if is_turso:
+                    from cognee.infrastructure.databases.turso import connect_args_for_mode
+
+                    connect_args.update(connect_args_for_mode(turso_config))
                 pool_args["connect_args"] = connect_args
 
             self.engine = create_async_engine(
@@ -164,7 +163,11 @@ class SqlCacheAdapter(CacheDBInterface):
                 json_serializer=lambda obj: json.dumps(obj, cls=JSONEncoder),
                 **pool_args,
             )
-            if is_sqlite:
+            if is_turso:
+                from cognee.infrastructure.databases.turso import configure_engine
+
+                configure_engine(self.engine, config=turso_config)
+            elif is_sqlite:
 
                 @event.listens_for(self.engine.sync_engine, "connect")
                 def _set_sqlite_pragmas(dbapi_connection, connection_record):
@@ -177,7 +180,8 @@ class SqlCacheAdapter(CacheDBInterface):
         except ModuleNotFoundError as error:
             raise CacheConnectionError(
                 "SQL cache backend driver is not installed "
-                "(CACHE_BACKEND=postgres requires cognee[postgres]): " + str(error)
+                "(CACHE_BACKEND=postgres requires cognee[postgres], "
+                "CACHE_BACKEND=turso requires cognee[turso]): " + str(error)
             ) from error
         except Exception as error:
             raise CacheConnectionError(
@@ -540,6 +544,9 @@ class SqlCacheAdapter(CacheDBInterface):
                         session_id=session_id,
                         qa_id=qa_entry["qa_id"],
                         payload=qa_entry,
+                        # The same instant as the payload's ``time``, so a time filter
+                        # on the column agrees with one on the payload.
+                        created_at=datetime.fromisoformat(qa_entry["time"]),
                         expires_at=self._session_expiry(),
                     )
                 )
@@ -587,6 +594,36 @@ class SqlCacheAdapter(CacheDBInterface):
                     .order_by(cache_qa_entries.c.seq.asc())
                 )
                 rows = result.scalars().all()
+            return [SessionQAEntry.model_validate(payload) for payload in rows]
+        except Exception as error:
+            error_msg = f"Unexpected error while reading Q&A from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
+    async def get_qa_entries_since(
+        self, user_id: str, session_id: str, since: datetime, lead_in: int = 0
+    ) -> list[SessionQAEntry]:
+        """Filter on the ``created_at`` column, so only the wanted rows are read."""
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session:
+                scoped = select(cache_qa_entries.c.payload).where(
+                    self._session_filter(cache_qa_entries, user_id, session_id),
+                    self._not_expired(cache_qa_entries),
+                )
+                result = await session.execute(
+                    scoped.where(cache_qa_entries.c.created_at >= since).order_by(
+                        cache_qa_entries.c.seq.asc()
+                    )
+                )
+                rows = list(result.scalars().all())
+                if lead_in:
+                    result = await session.execute(
+                        scoped.where(cache_qa_entries.c.created_at < since)
+                        .order_by(cache_qa_entries.c.seq.desc())
+                        .limit(lead_in)
+                    )
+                    rows = list(reversed(result.scalars().all())) + rows
             return [SessionQAEntry.model_validate(payload) for payload in rows]
         except Exception as error:
             error_msg = f"Unexpected error while reading Q&A from SQL cache: {error}"
@@ -654,7 +691,7 @@ class SqlCacheAdapter(CacheDBInterface):
                     return True
             except DBAPIError as error:
                 attempt += 1
-                if _is_deadlock_error(error) and attempt < _DEADLOCK_ATTEMPTS:
+                if is_deadlock(error) and attempt < _DEADLOCK_ATTEMPTS:
                     await asyncio.sleep(0.05 * (2**attempt))
                     continue
                 raise
@@ -988,7 +1025,7 @@ class SqlCacheAdapter(CacheDBInterface):
                     return True
             except DBAPIError as error:
                 attempt += 1
-                if _is_deadlock_error(error) and attempt < _DEADLOCK_ATTEMPTS:
+                if is_deadlock(error) and attempt < _DEADLOCK_ATTEMPTS:
                     await asyncio.sleep(0.05 * (2**attempt))
                     continue
                 error_msg = f"Unexpected error while updating session context in SQL cache: {error}"

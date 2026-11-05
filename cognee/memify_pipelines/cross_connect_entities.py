@@ -1,4 +1,4 @@
-import cognee
+from cognee.modules.memify import run_memify_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.tasks.memify.cross_connect_entities import (
     cross_connect_entities,
@@ -26,7 +26,7 @@ async def cross_connect_entities_pipeline(
         )
     ]
 
-    return await cognee.memify(
+    return await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
         data=[{}],

@@ -28,7 +28,10 @@ from typing import Any
 
 from cognee.api.v1.search.search import search as cognee_search
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-from cognee.modules.integrations.linear.client import create_agent_activity
+from cognee.modules.integrations.linear.client import (
+    LinearUnauthorizedError,
+    create_agent_activity,
+)
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_user
@@ -52,9 +55,13 @@ async def handle_agent_session(credential: IntegrationCredential, payload: dict[
     # circular.
     from cognee.modules.integrations.linear.adapter import access_token_for
 
+    # An expiring token is refreshed here, ahead of the acknowledgement, with a
+    # refresh timeout short enough for the 10 seconds. A token that Linear then
+    # rejects costs one more refresh inside ``post`` below, which that bound
+    # does not cover.
     try:
-        access_token = access_token_for(credential)
-    except Exception:  # a bad stored payload must not crash the detached handler
+        access_token = await access_token_for(credential)
+    except Exception:  # a bad payload or a failed refresh must not crash the detached handler
         logger.exception(
             "Linear agent session %s: no usable token for organization %s",
             agent_session_id,
@@ -62,26 +69,32 @@ async def handle_agent_session(credential: IntegrationCredential, payload: dict[
         )
         return
 
+    async def post(content: dict[str, Any]) -> None:
+        """Post one activity; on a 401 refresh the token once and post it again."""
+        nonlocal access_token
+        try:
+            await create_agent_activity(access_token, agent_session_id, content)
+        except LinearUnauthorizedError:
+            fresh = await access_token_for(credential, rejected=access_token)
+            if fresh == access_token:
+                raise  # the refresh had nothing new, so a second post would 401 again
+            access_token = fresh
+            await create_agent_activity(access_token, agent_session_id, content)
+
     # The 10-second rule: acknowledge before any search/LLM work, or Linear
     # marks the session unresponsive.
     try:
-        await create_agent_activity(
-            access_token, agent_session_id, {"type": "thought", "body": _ACK_THOUGHT}
-        )
+        await post({"type": "thought", "body": _ACK_THOUGHT})
     except Exception:  # a failed ack degrades the display; a missing response would kill the turn
         logger.exception("Linear agent session %s: acknowledgement failed", agent_session_id)
 
     try:
         answer = await _answer(credential, payload)
-        await create_agent_activity(
-            access_token, agent_session_id, {"type": "response", "body": answer}
-        )
+        await post({"type": "response", "body": answer})
     except Exception:  # every failure must end the turn in an error activity, not a raise
         logger.exception("Linear agent session %s: answering failed", agent_session_id)
         try:
-            await create_agent_activity(
-                access_token, agent_session_id, {"type": "error", "body": _ERROR_BODY}
-            )
+            await post({"type": "error", "body": _ERROR_BODY})
         except Exception:  # best effort; nothing left to do but log
             logger.exception(
                 "Linear agent session %s: error activity delivery failed", agent_session_id

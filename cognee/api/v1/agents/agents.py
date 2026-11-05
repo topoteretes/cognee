@@ -169,21 +169,6 @@ class agents:
         if user is None:
             user = await get_default_user()
 
-        # Validate the calling user is authorized read on every supplied dataset
-        # BEFORE building/sending the register request.
-        for did in dataset_ids or []:
-            dataset = await get_authorized_dataset(user, UUID(str(did)), "read")
-            if dataset is None:
-                raise PermissionDeniedError(f"Dataset {did} not accessible.")
-
-        for dname in dataset_names or []:
-            matched = await get_datasets_by_name(dname, user.id)
-            if not matched:
-                raise PermissionDeniedError(f"Dataset '{dname}' not accessible.")
-            dataset = await get_authorized_dataset(user, UUID(str(matched[0].id)), "read")
-            if dataset is None:
-                raise PermissionDeniedError(f"Dataset '{dname}' not accessible.")
-
         request = RegisterAgentRequest(
             agent_session_name=agent_session_name,
             type=type,
@@ -236,19 +221,6 @@ class agents:
             limit=limit,
             offset=offset,
         )
-
-        # Defensive scope filter: the backend visibility rule treats in-memory
-        # registered connections with no owning user AND no datasets as visible to
-        # everyone. Drop them here so a caller never sees connections that are not
-        # bound to their own user scope or a dataset they can read.
-        scoped_agents = [
-            agent for agent in response.agents if agent.user_id is not None or agent.datasets
-        ]
-        removed = len(response.agents) - len(scoped_agents)
-        if removed:
-            response.agents = scoped_agents
-            response.total = max(0, response.total - removed)
-            response.has_more = response.offset + len(scoped_agents) < response.total
 
         return response.model_dump(mode="json")
 

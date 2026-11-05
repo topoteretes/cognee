@@ -1,16 +1,23 @@
+from datetime import datetime, timezone
 from importlib import import_module
 from unittest.mock import AsyncMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import create_engine, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import Session
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.modules.graph.methods.upsert_edges import upsert_edges
 from cognee.modules.graph.methods.upsert_nodes import upsert_nodes
+from cognee.modules.graph.models import Edge
 
 upsert_nodes_module = import_module("cognee.modules.graph.methods.upsert_nodes")
 upsert_edges_module = import_module("cognee.modules.graph.methods.upsert_edges")
+
+NUMERIC_LOOKING_UUID = UUID("123e4567890123456789012345678901")
 
 
 class RelationalPoint(DataPoint):
@@ -32,6 +39,74 @@ class FakeInsertStatement:
     def on_conflict_do_nothing(self, index_elements):
         self.index_elements = index_elements
         return self
+
+
+def test_edge_uuid_columns_keep_numeric_looking_values_as_text_in_sqlite():
+    engine = create_engine("sqlite://")
+    Edge.__table__.create(engine)
+
+    edge = Edge(
+        id=NUMERIC_LOOKING_UUID,
+        slug=uuid4(),
+        user_id=uuid4(),
+        data_id=uuid4(),
+        dataset_id=uuid4(),
+        source_node_id=uuid4(),
+        destination_node_id=uuid4(),
+        relationship_name="contains",
+        created_at=datetime.now(timezone.utc),
+    )
+
+    with Session(engine) as session:
+        session.add(edge)
+        session.commit()
+        session.expire_all()
+        stored_edge = session.scalar(select(Edge).where(Edge.id == NUMERIC_LOOKING_UUID))
+
+    with engine.connect() as connection:
+        table_sql = connection.scalar(
+            text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'edges'")
+        )
+        storage_type = connection.scalar(text("SELECT typeof(id) FROM edges"))
+
+    assert "CHAR(32)" in table_sql
+    assert storage_type == "text"
+    assert stored_edge.id == NUMERIC_LOOKING_UUID
+
+
+@pytest.mark.asyncio
+async def test_upsert_edges_accepts_string_node_ids_on_sqlite():
+    """review_conflicts and the RDF ingest build edges from ``str(node.id)``; SQLite has
+    no native UUID type, so the Uuid bind processor needs real UUIDs (GH #6537)."""
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Edge.__table__.create)
+
+    source_id, target_id = uuid4(), uuid4()
+    ids = {"tenant_id": uuid4(), "user_id": uuid4(), "data_id": uuid4(), "dataset_id": uuid4()}
+    async with AsyncSession(engine) as session:
+        await upsert_edges([(str(source_id), str(target_id), "about", {})], session=session, **ids)
+        # The same edge with UUID ids maps to the same ledger row.
+        await upsert_edges([(source_id, target_id, "about", {})], session=session, **ids)
+        await session.commit()
+        stored = (await session.scalars(select(Edge))).all()
+    await engine.dispose()
+
+    assert len(stored) == 1
+    assert (stored[0].source_node_id, stored[0].destination_node_id) == (source_id, target_id)
+
+
+@pytest.mark.asyncio
+async def test_upsert_edges_names_the_field_of_a_malformed_node_id():
+    with pytest.raises(ValueError, match="destination_node_id must be a UUID: 'not-a-uuid'"):
+        await upsert_edges(
+            [(uuid4(), "not-a-uuid", "about", {})],
+            tenant_id=uuid4(),
+            user_id=uuid4(),
+            dataset_id=uuid4(),
+            data_id=uuid4(),
+            session=AsyncMock(),
+        )
 
 
 def test_sanitize_relational_payload_strips_null_bytes_recursively():

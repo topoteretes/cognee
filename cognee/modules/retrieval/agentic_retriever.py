@@ -353,7 +353,7 @@ class AgenticRetriever(GraphCompletionRetriever):
                 started_at_ms=started_at_ms,
                 latency_ms=latency_ms,
                 tool_trace=list(resolved_trace),
-                belongs_to_set=[NodeSet(id=generate_node_id("NodeSet:skills"), name="skills")],
+                belongs_to_set=[NodeSet(name="skills")],
             )
             for s in skills
         ]

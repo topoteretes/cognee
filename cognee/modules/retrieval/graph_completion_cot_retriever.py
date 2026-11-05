@@ -16,6 +16,7 @@ from cognee.modules.retrieval.utils.completion import (
     generate_completion_batch,
 )
 from cognee.modules.retrieval.utils.query_state import QueryState
+from cognee.modules.retrieval.utils.resolved_context import user_resolution_scope
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.shared.logging_utils import get_logger
 
@@ -98,6 +99,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         self._cot_final_context = None
         self.max_iter = max_iter
 
+    @user_resolution_scope()
     async def get_retrieved_objects(
         self, query: str | None = None, query_batch: list[str] | None = None
     ) -> list[Edge] | list[list[Edge]]:

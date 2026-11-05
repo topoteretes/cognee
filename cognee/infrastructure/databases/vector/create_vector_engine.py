@@ -8,7 +8,7 @@ from cognee.infrastructure.databases.utils.engine_cache_ops import EngineCacheOp
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
-from .embeddings import get_embedding_engine
+from .embeddings import EmbeddingGateway, get_embedding_engine
 from .supported_databases import supported_databases
 
 logger = get_logger("VectorEngine")
@@ -164,7 +164,7 @@ def _create_vector_engine(
 
         An instance of the corresponding database adapter class for the specified provider.
     """
-    embedding_engine = get_embedding_engine()
+    embedding_engine = EmbeddingGateway(get_embedding_engine())
 
     if vector_db_provider in supported_databases:
         adapter = supported_databases[vector_db_provider]
@@ -192,6 +192,17 @@ def _create_vector_engine(
                 vector_db_host and vector_db_port and vector_db_username and vector_db_password
             ):
                 raise OSError("Missing required pgvector credentials.")
+
+            if not vector_db_name:
+                # The dataset handlers name every dataset's database. With no
+                # name this is the deployment's default store (dataset routing
+                # keeps its collection there): the relational database, as in
+                # the branch below. It exists when the relational database is
+                # Postgres on this server; otherwise the routing store creates
+                # it on first use (``ensure_default_store``).
+                from cognee.infrastructure.databases.relational import get_relational_config
+
+                vector_db_name = get_relational_config().db_name
 
             connection_string: str = (
                 f"postgresql+asyncpg://{vector_db_username}:{vector_db_password}"
@@ -294,15 +305,11 @@ def _create_vector_engine(
         )
 
     elif vector_db_provider.lower() == "turso":
-        try:
-            # Probe the driver itself: the adapter module imports it lazily, so
-            # importing the module alone would not catch a missing turso extra.
-            import libsql_experimental
-        except ImportError:
-            raise ImportError(
-                "Turso/libSQL dependencies are not installed. Please install with "
-                "'pip install cognee\"[turso]\"' to use Turso functionality."
-            )
+        from cognee.infrastructure.databases.turso import require_turso
+
+        # Probe the driver itself: the adapter module imports it lazily, so
+        # importing the module alone would not catch a missing turso extra.
+        require_turso()
 
         from .turso.TursoVectorAdapter import TursoVectorAdapter
 

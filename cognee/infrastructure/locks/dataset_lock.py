@@ -1,4 +1,4 @@
-"""Per-dataset lock primitives — in-process asyncio registry.
+"""Per-dataset lock primitives — in-process, event-loop-agnostic registry.
 
 Serializes operations that mutate the same dataset — pipeline runs
 (``add``/``cognify``/``memify``) and delete operations — while letting
@@ -6,6 +6,13 @@ different datasets proceed in parallel. Both acquire the lock from the
 same registry, so a delete waits for an in-flight pipeline run on the
 dataset (and vice versa) and two deletes on the same dataset are
 serialized.
+
+The registry hands out :class:`LoopAgnosticLock` objects, not
+``asyncio.Lock``: the cached lock outlives any single event loop, and an
+``asyncio.Lock`` binds to the first loop that awaits it (see
+``loop_agnostic_lock.py`` for the failure modes). The loop-agnostic lock
+also genuinely serializes same-dataset operations across loops/threads,
+which the asyncio registry only pretended to do.
 
 LOCK ORDERING (SDK-483): the canonical order is dataset lock FIRST, then the
 DatasetQueue slot (``set_database_global_context_variables``). A task that
@@ -15,12 +22,12 @@ them and deadlock the whole process against lock-holding slot-waiters.
 ``get_dataset_lock`` enforces this: same-dataset violations raise, cross-dataset
 ones log a warning.
 
-NOTE: process-local only (asyncio) — this does NOT protect against multiple
+NOTE: process-local only — this does NOT protect against multiple
 processes/workers operating on the same dataset. To be replaced by a
 cross-process mechanism (e.g. DB-backed lock) later.
 """
 
-import asyncio
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -28,10 +35,19 @@ from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
 
+from .loop_agnostic_lock import LoopAgnosticLock
+
 logger = get_logger("dataset_lock")
 
-_dataset_locks: dict[UUID, asyncio.Lock] = {}
-_dataset_locks_guard = asyncio.Lock()
+
+class DatasetLock(LoopAgnosticLock):
+    """The per-dataset mutual exclusion handed out by :func:`get_dataset_lock`."""
+
+
+# Plain dict guarded by a threading.Lock (held only for dict ops, never while
+# waiting on a dataset lock), so registry access is safe from any loop/thread.
+_dataset_locks: dict[UUID, DatasetLock] = {}
+_dataset_locks_guard = threading.Lock()
 
 
 def _check_lock_slot_order(dataset_id: UUID) -> None:
@@ -75,13 +91,18 @@ def _check_lock_slot_order(dataset_id: UUID) -> None:
 held_datasets: ContextVar[frozenset] = ContextVar("held_datasets", default=frozenset())
 
 
-async def get_dataset_lock(dataset_id: UUID) -> asyncio.Lock:
-    """Return the asyncio.Lock for a dataset, creating it on first use."""
+async def get_dataset_lock(dataset_id: UUID) -> DatasetLock:
+    """Return the lock for a dataset, creating it on first use.
+
+    The returned :class:`DatasetLock` is loop-agnostic: it may be created on
+    one event loop and acquired on another (e.g. sequential ``asyncio.run``
+    calls, or worker threads each running their own loop).
+    """
     _check_lock_slot_order(dataset_id)
-    async with _dataset_locks_guard:
+    with _dataset_locks_guard:
         lock = _dataset_locks.get(dataset_id)
         if lock is None:
-            lock = asyncio.Lock()
+            lock = DatasetLock()
             _dataset_locks[dataset_id] = lock
         return lock
 

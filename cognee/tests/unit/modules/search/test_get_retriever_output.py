@@ -400,6 +400,37 @@ async def test_get_retriever_output_attaches_structured_context_evidence():
 
 
 @pytest.mark.asyncio
+async def test_get_retriever_output_treats_none_evidence_as_empty():
+    # BROAD returned None from its evidence hook, and include_references then
+    # failed with "'NoneType' object is not iterable".
+    retriever = _EvidenceRetriever()
+    retriever.get_context_evidence = lambda *_args, **_kwargs: None
+    dataset = SimpleNamespace(id=uuid4(), name="reports", tenant_id=uuid4())
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+    ):
+        result = await get_retriever_output(
+            SearchType.RAG_COMPLETION,
+            "That was wrong. What should I audit in Lisbon?",
+            dataset=dataset,
+            include_references=True,
+        )
+
+    assert result.evidence == []
+
+
+@pytest.mark.asyncio
 async def test_get_retriever_output_skips_evidence_hook_when_references_disabled():
     retriever = _EvidenceRetriever()
     retriever.get_context_evidence = lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -713,3 +744,21 @@ async def test_graph_completion_accepts_graph_only_knobs():
     assert result.search_type is SearchType.GRAPH_COMPLETION
     assert factory_mock.await_args.kwargs["wide_search_top_k"] == 200
     assert factory_mock.await_args.kwargs["triplet_distance_penalty"] == 2.5
+
+
+@pytest.mark.asyncio
+async def test_hybrid_deferral_to_graph_completion_is_logged_as_a_warning(caplog):
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "hybrid_deferral_reason",
+            AsyncMock(return_value="DocumentChunk_text collection missing"),
+        ),
+        caplog.at_level("WARNING"),
+    ):
+        effective = await get_retriever_output_module._effective_search_type(
+            SearchType.HYBRID_COMPLETION, "q", {}, graph_is_empty=False
+        )
+
+    assert effective is SearchType.GRAPH_COMPLETION
+    assert "HYBRID_COMPLETION is not available for this search" in caplog.text

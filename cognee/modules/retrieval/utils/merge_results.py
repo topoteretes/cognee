@@ -9,7 +9,7 @@ these helpers; nothing here knows what a retriever's objects mean.
 from collections.abc import Callable, Hashable
 from typing import Any
 
-from cognee.modules.retrieval.hybrid.results import display_value, result_id
+from cognee.modules.retrieval.utils.results import display_value, result_id
 
 
 def conversational_reserve(limit: int | None) -> int:

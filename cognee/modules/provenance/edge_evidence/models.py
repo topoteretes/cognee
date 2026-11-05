@@ -9,7 +9,7 @@ It is append-only and is never consulted by graph-native deletion.
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import UUID, Column, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, Index, Integer, String, Text, Uuid
 
 from cognee.infrastructure.databases.relational import Base
 
@@ -17,20 +17,20 @@ from cognee.infrastructure.databases.relational import Base
 class ProvenanceEdgeEvidence(Base):
     __tablename__ = "provenance_edge_evidence"
 
-    id = Column(UUID, primary_key=True, default=uuid4)
-    tenant_id = Column(UUID, nullable=True)
-    user_id = Column(UUID, nullable=False)
-    dataset_id = Column(UUID, nullable=False)
-    data_id = Column(UUID, nullable=False)
-    pipeline_run_id = Column(UUID, nullable=True)
+    id = Column(Uuid, primary_key=True, default=uuid4)
+    tenant_id = Column(Uuid, nullable=True)
+    user_id = Column(Uuid, nullable=False)
+    dataset_id = Column(Uuid, nullable=False)
+    data_id = Column(Uuid, nullable=False)
+    pipeline_run_id = Column(Uuid, nullable=True)
 
-    chunk_id = Column(UUID, nullable=False)
+    chunk_id = Column(Uuid, nullable=False)
     chunk_index = Column(Integer, nullable=True)
 
     # edge_id is the graph's deterministic edge_object_id.
-    edge_id = Column(UUID, nullable=False)
-    source_node_id = Column(UUID, nullable=False)
-    destination_node_id = Column(UUID, nullable=False)
+    edge_id = Column(Uuid, nullable=False)
+    source_node_id = Column(Uuid, nullable=False)
+    destination_node_id = Column(Uuid, nullable=False)
     relationship_name = Column(Text, nullable=False)
 
     # server_default too: migration f3a7b9c1d2e4 gives the column a database-side

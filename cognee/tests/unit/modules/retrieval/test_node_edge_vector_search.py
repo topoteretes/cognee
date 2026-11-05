@@ -137,6 +137,22 @@ async def test_node_edge_vector_search_extract_relevant_node_ids_single_query():
     assert set(node_ids) == {"node1", "node2", "node3"}
 
 
+def test_node_edge_vector_search_extract_relevant_node_ids_ordered_by_score():
+    """Node IDs come back nearest first (lowest distance), using each node's best score."""
+    vector_search = NodeEdgeVectorSearch(vector_engine=AsyncMock())
+    vector_search.query_list_length = None
+    vector_search.node_distances = {
+        "Entity_name": [
+            MockScoredResult("far", 0.9),
+            MockScoredResult("near", 0.1),
+            MockScoredResult("shared", 0.8),
+        ],
+        "TextSummary_text": [MockScoredResult("shared", 0.2), MockScoredResult("mid", 0.5)],
+    }
+
+    assert vector_search.extract_relevant_node_ids() == ["near", "shared", "mid", "far"]
+
+
 @pytest.mark.asyncio
 async def test_node_edge_vector_search_extract_relevant_node_ids_batch():
     """Test that extract_relevant_node_ids returns empty list for batch mode."""
