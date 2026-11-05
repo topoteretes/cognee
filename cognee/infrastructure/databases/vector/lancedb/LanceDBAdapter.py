@@ -424,6 +424,16 @@ class LanceDBAdapter(VectorDBInterface):
         collection_names = await connection.table_names()
         return collection_name in collection_names
 
+    async def existing_collections(self, collection_names: list[str]) -> list[str]:
+        """Return the given collections that exist, from one table listing.
+
+        ``has_collection`` lists every table on each call, so the interface
+        default would list them once per name.
+        """
+        connection = await self.get_connection()
+        table_names = set(await connection.table_names())
+        return [name for name in collection_names if name in table_names]
+
     async def delete_collection(self, collection_name: str) -> None:
         """Drop the table for ``collection_name``; a missing table is not an error.
 
