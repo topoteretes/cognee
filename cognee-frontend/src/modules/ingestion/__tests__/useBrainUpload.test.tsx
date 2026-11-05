@@ -153,6 +153,28 @@ describe("useBrainUpload", () => {
       expect(onProcessingError).not.toHaveBeenCalled();
     });
 
+    it("asks about the build every five seconds, with the poll's own first wait, when the caller says nothing", async () => {
+      const { result } = renderHook(() => useBrainUpload(instance), { wrapper: Wrapper });
+
+      await act(async () => {
+        await result.current.upload(makeParams());
+      });
+
+      const options = mockPollDatasetStatus.mock.calls[0][2];
+      expect(options.intervalMs).toBe(5000);
+      expect(options).not.toHaveProperty("initialDelayMs");
+    });
+
+    it("asks sooner when the caller does, for a build its user is waiting on", async () => {
+      const { result } = renderHook(() => useBrainUpload(instance), { wrapper: Wrapper });
+
+      await act(async () => {
+        await result.current.upload(makeParams({ poll: { intervalMs: 2000, initialDelayMs: 1000 } }));
+      });
+
+      expect(mockPollDatasetStatus.mock.calls[0][2]).toMatchObject({ intervalMs: 2000, initialDelayMs: 1000 });
+    });
+
     it("invalidates the dataset-status query with the tenant-scoped key after polling completes", async () => {
       const { result } = renderHook(() => useBrainUpload(instance), { wrapper: Wrapper });
 

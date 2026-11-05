@@ -3,6 +3,9 @@
 import { useTenant } from "@/modules/tenant/TenantProvider";
 import { trackEvent } from "@/modules/analytics";
 
+// Lives here, not in modules/analytics, because the old onboarding that uses it
+// syncs to the public repo and modules/analytics does not: the public build
+// has a stub of it, and this hook has to resolve there too.
 type TrackEventParams = Parameters<typeof trackEvent>[0];
 
 // Wraps trackEvent to stamp every onboarding event with the active tenant_id.

@@ -5,7 +5,7 @@ import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import TetrisBackground from "@/ui/elements/Auth/TetrisBackground";
 import PodUnreachableCard from "@/ui/elements/PodUnreachableCard";
 import { GraphBuildingAnimation } from "./GraphBuildingAnimation";
-import { useOnboardingTrackEvent } from "../useOnboardingTrackEvent";
+import { useOnboardingTrackEvent } from "@/utils/useOnboardingTrackEvent";
 
 // Bridges the gap between "Get started" and a live cogniInstance so path
 // selection and Step 2's own pod-readiness bar never race a null connection.

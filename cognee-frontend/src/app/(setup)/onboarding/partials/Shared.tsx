@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useUser } from "@/modules/users/UserContext";
 import { completeOnboardingAndNavigate } from "../completeOnboardingAndNavigate";
-import { useOnboardingTrackEvent } from "../useOnboardingTrackEvent";
+import { useOnboardingTrackEvent } from "@/utils/useOnboardingTrackEvent";
 
 export function StepBadge({ step, total = 4 }: { step: number; total?: number }) {
   return (

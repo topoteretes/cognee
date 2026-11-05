@@ -8,7 +8,7 @@ import ServeOnboarding from "./ServeOnboarding";
 import { completeOnboardingAndNavigate } from "./completeOnboardingAndNavigate";
 import getDatasets from "@/modules/datasets/getDatasets";
 import { TrackPageView } from "@/modules/analytics";
-import { useOnboardingTrackEvent } from "./useOnboardingTrackEvent";
+import { useOnboardingTrackEvent } from "@/utils/useOnboardingTrackEvent";
 import { type OnboardingDemoEntry, DEMO_QUERIES } from "@/ui/elements/AgentActivityTerminal";
 import recallKnowledge from "@/modules/datasets/recallKnowledge";
 import { StepPreparing } from "./partials/StepPreparing";
@@ -19,7 +19,11 @@ import { StepSelect, type OnboardingPath } from "./partials/StepSelect";
 import { AgentOnboarding } from "./partials/AgentOnboarding";
 import isCloudEnvironment from "@/utils/isCloudEnvironment";
 import { isNewOnboardingHost } from "@/utils/newOnboardingRollout";
-import { NEW_ONBOARDING_PATH } from "@/utils/onboardingPaths";
+import {
+  NEW_ONBOARDING_PATH,
+  NO_HANDOVER_PARAM,
+  NO_HANDOVER_VALUE,
+} from "@/utils/onboardingPaths";
 
 // Completes onboarding and navigates to the dashboard, where the skeleton
 // takes over until the workspace is fully ready. Used by the "Skip to
@@ -42,6 +46,7 @@ export default function OnboardingPage() {
   const searchParams = useSearchParams();
   const isServeMode = searchParams.get("source") === "serve";
   const isReplay = searchParams.get("replay") === "1";
+  const handoverOff = searchParams.get(NO_HANDOVER_PARAM) === NO_HANDOVER_VALUE;
   const rawStep = parseInt(searchParams.get("step") ?? "0", 10);
   const initialStep = Math.min(Math.max(isNaN(rawStep) ? 0 : rawStep, 0), 3);
   const [step, setStep] = useState(initialStep);
@@ -111,14 +116,18 @@ export default function OnboardingPage() {
   // land on a preparing screen that hands over again.
   const handedOver = useRef(false);
   const onPrepared = useCallback((): void => {
-    if (isCloudEnvironment() && isNewOnboardingHost(window.location.host)) {
+    if (
+      isCloudEnvironment() &&
+      !handoverOff &&
+      isNewOnboardingHost(window.location.host)
+    ) {
       if (handedOver.current) return;
       handedOver.current = true;
       router.replace(isReplay ? `${NEW_ONBOARDING_PATH}?replay=1` : NEW_ONBOARDING_PATH);
       return;
     }
     setView("select");
-  }, [router, isReplay]);
+  }, [router, isReplay, handoverOff]);
 
   if (isInitializing) {
     return (

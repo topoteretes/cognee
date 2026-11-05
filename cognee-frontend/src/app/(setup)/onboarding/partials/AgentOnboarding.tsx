@@ -11,7 +11,7 @@ import { TerminalBlock } from "@/ui/elements/AgentSetupBlocks";
 import { AgentConnectionStatus } from "@/ui/elements/AgentConnectionStatus";
 import { agentSetupSteps, setupIntro } from "@/modules/integrations/agentSetupSteps";
 import { completeOnboardingAndNavigate } from "../completeOnboardingAndNavigate";
-import { useOnboardingTrackEvent } from "../useOnboardingTrackEvent";
+import { useOnboardingTrackEvent } from "@/utils/useOnboardingTrackEvent";
 
 function Action({ index, label, description, children }: { index: number; label: string; description?: string; children?: React.ReactNode }) {
   return (

@@ -9,8 +9,8 @@ import getAgentConnections, {
   runningAgents,
 } from "@/modules/agents/getAgentConnections";
 import type { AgentConnection, AgentIntegrationKey } from "@/modules/agents/getAgentConnections";
-import { useAgentConnectionDetection } from "@/app/(setup)/onboarding/hooks/useAgentConnectionDetection";
-import type { AgentActivitySignal } from "@/app/(setup)/onboarding/hooks/useAgentConnectionDetection";
+import { useAgentConnectionDetection } from "@/modules/agents/useAgentConnectionDetection";
+import type { AgentActivitySignal } from "@/modules/agents/useAgentConnectionDetection";
 import { useBoundedPoll } from "@/utils/useBoundedPoll";
 
 // The endpoint is cheap and this only ever runs while a tutorial step is on

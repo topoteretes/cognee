@@ -9,7 +9,7 @@ jest.mock("@/modules/agents/getAgentConnections", () => {
 });
 
 const mockUseAgentConnectionDetection = jest.fn();
-jest.mock("@/app/(setup)/onboarding/hooks/useAgentConnectionDetection", () => ({
+jest.mock("@/modules/agents/useAgentConnectionDetection", () => ({
   useAgentConnectionDetection: (...args: unknown[]) => mockUseAgentConnectionDetection(...args),
 }));
 

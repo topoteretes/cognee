@@ -10,7 +10,7 @@ jest.mock("@/modules/users/UserContext", () => ({
 }));
 
 const mockTrack = jest.fn();
-jest.mock("../../useOnboardingTrackEvent", () => ({
+jest.mock("@/utils/useOnboardingTrackEvent", () => ({
   useOnboardingTrackEvent: () => mockTrack,
 }));
 

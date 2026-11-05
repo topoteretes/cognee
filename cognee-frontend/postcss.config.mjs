@@ -1,10 +1,8 @@
-import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Turbopack only accepts an absolute path for a local PostCSS plugin.
-// Its PostCSS worker runs in the app root; import.meta.url points into .next.
-const mantineControlFonts = resolve(
-  process.cwd(),
-  'postcss/mantineLeavesControlFontsToTailwind.cjs',
+const mantineControlFonts = fileURLToPath(
+  new URL('./postcss/mantineLeavesControlFontsToTailwind.cjs', import.meta.url),
 );
 
 const config = {

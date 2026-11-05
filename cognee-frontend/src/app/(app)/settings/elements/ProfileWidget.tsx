@@ -15,7 +15,6 @@ import {
   type ProfileNames,
 } from "@/modules/users/profileName";
 import NameFields, { namesAreSendable, type NameDraft } from "@/ui/elements/NameFields";
-import styles from "../SettingsPage.module.css";
 
 function toDraft(names: ProfileNames | null): NameDraft {
   return { firstName: names?.firstName ?? "", lastName: names?.lastName ?? "" };
@@ -116,8 +115,13 @@ export default function ProfileWidget() {
 
   return (
     <Stack
-      className={styles.card}
-      gap={0}
+      className="rounded-[0.5rem] px-[2rem] pt-[1.5rem] pb-[1.75rem] !gap-[0] min-w-[25rem] max-w-[29.5rem]"
+      style={{
+        background: "rgba(255,255,255,0.06)",
+        backdropFilter: "blur(12px)",
+        border: "1px solid rgba(255,255,255,0.1)",
+        borderRadius: 12,
+      }}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: "1.375rem" }}>
         <h2 style={{ fontSize: 20, fontWeight: 300, color: "#EDECEA", margin: 0, fontFamily: '"TWKLausanne", sans-serif' }}>Profile</h2>

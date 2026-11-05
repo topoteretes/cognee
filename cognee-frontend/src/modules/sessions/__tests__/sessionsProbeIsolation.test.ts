@@ -45,8 +45,8 @@ describe("sessions availability probe", () => {
     aborted.abort();
 
     // The aborting caller's own list request fails, which is correct.
-    await expect(listSessions(instance, { limit: 1 }, { signal: aborted.signal }))
-      .rejects.toMatchObject({ name: "AbortError" });
+    const first = await listSessions(instance, { limit: 1 }, { signal: aborted.signal });
+    expect(first.failed).toBe(true);
 
     // The next caller must not inherit that. Before the fix it did, for 30s.
     const second = await listSessions(instance, { limit: 1 });
@@ -59,8 +59,7 @@ describe("sessions availability probe", () => {
     const aborted = new AbortController();
     aborted.abort();
 
-    await expect(listSessions(instance, { limit: 1 }, { signal: aborted.signal }))
-      .rejects.toMatchObject({ name: "AbortError" });
+    await listSessions(instance, { limit: 1 }, { signal: aborted.signal });
 
     // The probe ran and succeeded despite the caller being aborted, which is
     // only possible if the signal never reached it.

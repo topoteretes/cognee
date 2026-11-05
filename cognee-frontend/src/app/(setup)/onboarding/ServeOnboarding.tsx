@@ -7,7 +7,7 @@ import { useUser } from "@/modules/users/UserContext";
 import searchDataset from "@/modules/datasets/searchDataset";
 import { TrackPageView } from "@/modules/analytics";
 import { completeOnboardingAndNavigate } from "./completeOnboardingAndNavigate";
-import { useOnboardingTrackEvent } from "./useOnboardingTrackEvent";
+import { useOnboardingTrackEvent } from "@/utils/useOnboardingTrackEvent";
 
 const darkPage: React.CSSProperties = {
   backgroundColor: "#000000",
