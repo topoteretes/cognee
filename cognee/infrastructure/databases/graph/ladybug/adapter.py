@@ -593,7 +593,10 @@ class LadybugAdapter(GraphDBInterface):
         # without importing cognee. Pass the instance's configured limits
         # so callers that tune ``kuzu_buffer_pool_size`` / ``kuzu_max_db_size``
         # via env or config aren't silently ignored during the install step.
-        from cognee_db_workers._kuzu_helpers import install_json_extension_local
+        from cognee_db_workers._kuzu_helpers import (
+            install_json_extension_local,
+            is_missing_json_extension_error,
+        )
 
         install_json_extension_local(
             buffer_pool_size=self.kuzu_buffer_pool_size,
@@ -636,7 +639,16 @@ class LadybugAdapter(GraphDBInterface):
                         max_db_size=self.kuzu_max_db_size,
                     )
                 except RuntimeError as e:
-                    if "wal" in str(e).lower():
+                    if is_missing_json_extension_error(str(e)):
+                        # Same upgrade-path self-heal as the subprocess worker:
+                        # the catalog registers json but ~/.lbdb lacks the
+                        # binary (the warm-up above is best-effort and may
+                        # have failed). Materialize it; the retry below opens.
+                        install_json_extension_local(
+                            buffer_pool_size=self.kuzu_buffer_pool_size,
+                            max_db_size=self.kuzu_max_db_size,
+                        )
+                    elif "wal" in str(e).lower():
                         wal_path = self.db_path + ".wal"
                         logger.warning(
                             "Corrupted WAL detected at %s — removing to recover. "

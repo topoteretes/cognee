@@ -11,7 +11,11 @@ from __future__ import annotations
 
 import logging
 
-from ._kuzu_helpers import install_json_extension_local, load_json_extension
+from ._kuzu_helpers import (
+    install_json_extension_local,
+    is_missing_json_extension_error,
+    load_json_extension,
+)
 from .harness import (
     DEFAULT_DISPATCH,
     HandleRegistry,
@@ -86,7 +90,19 @@ def _open_database(registry: HandleRegistry, req: Request) -> HandleResult:
             # rather than treating it as corruption/migration.
             db = _retry_open_locked(ladybug, req.kwargs, e)
         else:
-            if "wal" in message:
+            if is_missing_json_extension_error(str(e)):
+                # Upgrade path: the database's catalog registers json, but the
+                # binary is gone from ~/.lbdb because an older image installed
+                # it into its own container layer. The open fails before any
+                # LOAD-by-path fallback can run (no connection exists yet), so
+                # materialize the bundled binary where the engine auto-loads
+                # from; the retry below then succeeds. The marker check is
+                # narrow — other IO errors still fall through unchanged.
+                install_json_extension_local(
+                    buffer_pool_size=req.kwargs.get("buffer_pool_size") or 64 * 1024 * 1024,
+                    max_db_size=req.kwargs.get("max_db_size"),
+                )
+            elif "wal" in message:
                 # In case of corrupted WAL file preventing database opening, remove the WAL file and try again
                 wal_path = db_path + ".wal"
                 try:
