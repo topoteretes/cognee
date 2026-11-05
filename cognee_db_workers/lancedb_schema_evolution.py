@@ -23,7 +23,10 @@ column is evolved on its own with Lance's schema evolution:
    (fragment ids are stable and new writes always create fragments), so the
    swap version's new fragment ids are recorded in the table's config under
    ``cognee.payload_migration`` and their rows get ``payload`` rebuilt from
-   ``__payload_old`` with the same transform, merged by ``id``.
+   ``__payload_old`` with the same transform, merged by ``id``. A row another
+   process updates after the swap is its writer's: the merge runs without
+   Lance's own retry, so Lance refuses it over such a row, and the window
+   fragments are scanned again, where the row no longer is.
 4. ``drop_columns`` removes ``__payload_old``; the record is deleted.
 
 Each step is a committed Lance version and ``payload`` exists at every one of
@@ -70,6 +73,9 @@ _NO_DEFAULT = object()
 
 
 _ABORTED = "LanceDB payload schema migration aborted"
+# Lance's refusal of a merge over a row updated since it was planned, with its
+# retry off (``conflict_retries(0)``).
+_CONCURRENT_WRITER = "concurrent writers"
 
 
 class SchemaEvolutionError(RuntimeError):
@@ -252,22 +258,41 @@ def _fragment_ids(dataset) -> set[int]:
 def _repair_window_rows(dataset, fragment_ids, stored, target, steps, batch_size) -> int:
     """Rebuild ``payload`` from ``__payload_old`` for the rows of ``fragment_ids``, the
     fragments written between the add-column commit and the swap, merged by id.
-    Returns the number of rows repaired."""
-    fragments = [f for f in dataset.get_fragments() if f.fragment_id in fragment_ids]
-    if not fragments:
-        return 0
+    Returns the number of rows repaired.
+
+    Each batch is merged with Lance's own retry off: a retry would replay the
+    batch over a row another process updated since the scan, whose new payload
+    is its writer's. Lance refuses the commit instead, and the window fragments
+    are scanned again at the latest version; an update moves its row to a new
+    fragment, so the row is no longer there and every pass has fewer rows left.
+    """
     repaired = 0
-    scanner = dataset.scanner(
-        fragments=fragments, columns=[ID_COLUMN, OLD_PAYLOAD_COLUMN], batch_size=batch_size
-    )
-    for batch in scanner.to_batches():
-        if batch.num_rows == 0:
+    while True:
+        fragments = [f for f in dataset.get_fragments() if f.fragment_id in fragment_ids]
+        if not fragments:
+            return repaired
+        scanner = dataset.scanner(
+            fragments=fragments, columns=[ID_COLUMN, OLD_PAYLOAD_COLUMN], batch_size=batch_size
+        )
+        try:
+            for batch in scanner.to_batches():
+                if batch.num_rows == 0:
+                    continue
+                struct = _build_struct(batch.column(OLD_PAYLOAD_COLUMN), stored, target, steps)
+                source = pa.table({ID_COLUMN: batch.column(ID_COLUMN), PAYLOAD_COLUMN: struct})
+                (
+                    dataset.merge_insert(ID_COLUMN)
+                    .when_matched_update_all()
+                    .conflict_retries(0)
+                    .execute(source)
+                )
+                repaired += batch.num_rows
+        except OSError as error:
+            if _CONCURRENT_WRITER not in str(error):
+                raise
+            dataset.checkout_latest()
             continue
-        struct = _build_struct(batch.column(OLD_PAYLOAD_COLUMN), stored, target, steps)
-        source = pa.table({ID_COLUMN: batch.column(ID_COLUMN), PAYLOAD_COLUMN: struct})
-        dataset.merge_insert(ID_COLUMN).when_matched_update_all().execute(source)
-        repaired += batch.num_rows
-    return repaired
+        return repaired
 
 
 def _finish_interrupted(dataset, defaults, required, batch_size) -> int:

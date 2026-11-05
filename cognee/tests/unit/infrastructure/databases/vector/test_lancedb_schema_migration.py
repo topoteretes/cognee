@@ -1150,17 +1150,17 @@ def test_width_error_names_a_variable_length_vector_column():
     assert "EMBEDDING_MODEL" not in str(error)
 
 
-def _intruder(db_path: str, col: str, existing_id: str, appended_id: str):
+def _intruder(db_path: str, col: str, template_id: str, texts_by_id: dict[str, str]):
     """A writer in another process: through its own connection, outside the adapter's
-    lock, it updates the existing row's text and appends a row, both in the stored
-    (old) payload shape, copied from the existing row's Arrow payload."""
+    lock, it upserts one row per id with that text, in the table's current payload
+    shape, copied from the template row's Arrow payload."""
     import lancedb
     import pyarrow.compute as pc
 
     def write():
         table = lancedb.connect(db_path).open_table(col)
         arrow = table.to_arrow()
-        payload = arrow.filter(pc.equal(arrow["id"], existing_id)).column("payload")
+        payload = arrow.filter(pc.equal(arrow["id"], template_id)).column("payload")
         payload = payload.combine_chunks()
         struct = payload.type
         text_index = struct.get_field_index("text")
@@ -1172,11 +1172,9 @@ def _intruder(db_path: str, col: str, existing_id: str, appended_id: str):
 
         source = pa.table(
             {
-                "id": [existing_id, appended_id],
-                "vector": pa.array([[0.5, 0.5, 0.5]] * 2, pa.list_(pa.float32(), 3)),
-                "payload": pa.concat_arrays(
-                    [with_text("updated meanwhile"), with_text("appended meanwhile")]
-                ),
+                "id": list(texts_by_id),
+                "vector": pa.array([[0.5, 0.5, 0.5]] * len(texts_by_id), pa.list_(pa.float32(), 3)),
+                "payload": pa.concat_arrays([with_text(text) for text in texts_by_id.values()]),
             }
         )
         table.merge_insert("id").when_matched_update_all().when_not_matched_insert_all().execute(
@@ -1186,15 +1184,24 @@ def _intruder(db_path: str, col: str, existing_id: str, appended_id: str):
     return write
 
 
-async def _migrate_with_window_writes(adapter, col, db_path, existing_id, crash_at=None):
+async def _migrate_with_window_writes(
+    adapter, col, db_path, existing_id, crash_at=None, write_during_repair=False
+):
     """Evolve ``col`` while another connection appends one row and updates another
     between the add-column commit and the swap; optionally crash at ``crash_at``
-    (``"update_config"`` or ``"drop_columns"``) after the swap."""
+    (``"update_config"`` or ``"drop_columns"``) after the swap, or update the
+    existing row once more, in the new shape, between the repair's scan and its
+    merge (``write_during_repair``)."""
     from cognee_db_workers.lancedb_compaction import open_as_lance
     from cognee_db_workers.lancedb_schema_evolution import evolve_payload_schema
 
     appended_id = str(uuid4())
-    intrude = _intruder(db_path, col, existing_id, appended_id)
+    intrude = _intruder(
+        db_path,
+        col,
+        existing_id,
+        {existing_id: "updated meanwhile", appended_id: "appended meanwhile"},
+    )
 
     target, required = adapter._target_payload_struct(IndexSchema)
     dataset = await open_as_lance(await adapter.get_collection(col))
@@ -1205,6 +1212,18 @@ async def _migrate_with_window_writes(adapter, col, db_path, existing_id, crash_
         return real_swap(*args, **kwargs)
 
     dataset.alter_columns = swap_after_intruder
+    if write_during_repair:
+        late = _intruder(db_path, col, existing_id, {existing_id: "updated after the swap"})
+        real_merge = dataset.merge_insert
+        fired = []
+
+        def merge_after_late_write(*args, **kwargs):
+            if not fired:
+                fired.append(True)
+                late()
+            return real_merge(*args, **kwargs)
+
+        dataset.merge_insert = merge_after_late_write
     if crash_at:
 
         def crash(*_args, **_kwargs):
@@ -1252,6 +1271,30 @@ async def test_rows_written_by_another_process_during_the_migration_survive(tmp_
     from cognee_db_workers.lancedb_compaction import open_as_lance
 
     assert STATE_KEY not in (await open_as_lance(await adapter.get_collection(col))).config()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_a_row_updated_after_the_swap_keeps_its_writers_payload(tmp_path):
+    """A window row another process updates between the repair's scan and its merge
+    is the writer's: Lance refuses the merge over it, the window is scanned again
+    without it, and only the other window row is repaired."""
+    db_path = str(tmp_path / "db")
+    adapter = LanceDBAdapter(url=db_path, api_key=None, embedding_engine=_FakeEmbeddingEngine())
+    col = "Test_text"
+    seeded = _make_point(str(uuid4()), "before")
+    await _seed(adapter, col, [seeded])
+    await _strip_payload_named_field(adapter, col, "external_metadata")
+
+    stats, updated_id, appended_id = await _migrate_with_window_writes(
+        adapter, col, db_path, seeded.id, write_during_repair=True
+    )
+    assert stats["repaired"] == 1
+    rows = {str(r.id): r.payload for r in await adapter.retrieve(col, [updated_id, appended_id])}
+    assert rows[updated_id]["text"] == "updated after the swap"
+    assert rows[appended_id]["text"] == "appended meanwhile"
+    schema = await (await adapter.get_collection(col)).schema()
+    assert OLD_PAYLOAD_COLUMN not in schema.names
 
 
 @pytest.mark.asyncio
