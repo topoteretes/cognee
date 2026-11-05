@@ -611,3 +611,108 @@ async def test_one_page_that_cannot_be_extracted_does_not_freeze_the_tree_of_the
         await cognee.cognify(datasets=[DATASET_NAME])
 
     assert {edge for edge in await _page_tree() if edge[0] == CHILD} == {(CHILD, MID)}
+
+
+def _unsupported_children(fake, monkeypatch, block_type):
+    original_handler = fake.handler
+    failures = {"blocked": True, "calls": 0}
+
+    def handler(request):
+        if request.url.path == "/v1/blocks/unsupported/children":
+            failures["calls"] += 1
+            if failures["blocked"]:
+                return httpx.Response(
+                    400,
+                    json={
+                        "code": "validation_error",
+                        "message": (
+                            f"Block type {block_type} is not supported via the API "
+                            "for your bot type."
+                        ),
+                    },
+                )
+        return original_handler(request)
+
+    monkeypatch.setattr(fake, "handler", handler)
+    return failures
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("block_type", ["external_object_instance_page", "ai_block"])
+async def test_unsupported_children_sync_and_recover_without_page_edit(
+    clean_environment, monkeypatch, block_type
+):
+    fake = _tree()
+    fake.blocks[ROOT].extend(
+        [
+            {"id": "unsupported", "type": block_type, "has_children": True, block_type: {}},
+            _paragraph("after", "Content after unsupported block."),
+        ]
+    )
+    fake.blocks["unsupported"] = [_paragraph("recovered", "Recovered content.")]
+    failures = _unsupported_children(fake, monkeypatch, block_type)
+    await _sync(fake)
+    first = await _notion_data()
+    assert set(first) == {ROOT, CHILD}
+    assert failures["calls"] == 1
+    with open(first[ROOT].raw_data_location.removeprefix("file://"), encoding="utf-8") as document:
+        content = document.read()
+    assert "Q4 moves orders to Postgres." in content
+    assert "Content after unsupported block." in content
+    assert "Recovered content." not in content
+
+    await _sync(fake)
+    assert {key: record.id for key, record in (await _notion_data()).items()} == {
+        key: record.id for key, record in first.items()
+    }
+    assert failures["calls"] == 2
+
+    failures["blocked"] = False
+    await _sync(fake)
+    recovered = await _notion_data()
+    assert recovered[ROOT].id != first[ROOT].id
+    assert recovered[CHILD].id == first[CHILD].id
+    with open(
+        recovered[ROOT].raw_data_location.removeprefix("file://"), encoding="utf-8"
+    ) as document:
+        assert "Recovered content." in document.read()
+    await _sync(fake)
+    assert {key: record.id for key, record in (await _notion_data()).items()} == {
+        key: record.id for key, record in recovered.items()
+    }
+
+
+@pytest.mark.asyncio
+async def test_unsupported_subtree_keeps_previous_pages_until_it_reads_completely(
+    clean_environment, monkeypatch
+):
+    fake = _tree()
+    await _sync(fake)
+    original = await _notion_data()
+    child_block = fake.blocks[ROOT].pop()
+    fake.blocks[ROOT].append(
+        {
+            "id": "unsupported",
+            "type": "ai_block",
+            "has_children": True,
+            "ai_block": {},
+        }
+    )
+    fake.blocks["unsupported"] = [child_block]
+    fake.pages[ROOT]["last_edited_time"] = "2026-02-01T00:00:00.000Z"
+    failures = _unsupported_children(fake, monkeypatch, "ai_block")
+
+    # The child page is no longer listed, but nothing proves it is gone: the sync succeeds,
+    # the page that was edited lands, and the child stays.
+    await _sync(fake)
+    kept = await _notion_data()
+    assert set(kept) == {ROOT, CHILD}
+    assert kept[CHILD].id == original[CHILD].id
+    assert kept[ROOT].id != original[ROOT].id
+
+    failures["blocked"] = False
+    await _sync(fake)
+    assert set(await _notion_data()) == {ROOT, CHILD}
+    fake.blocks["unsupported"] = []
+    await _sync(fake)
+    assert set(await _notion_data()) == {ROOT}
