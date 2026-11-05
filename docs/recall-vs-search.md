@@ -203,6 +203,15 @@ That is why these are *not* auto-routed, even though they are valid
   `lint`) do not select `CODING_RULES`. That retriever reads only the
   `coding_agent_rules` nodeset and returns nothing on an ordinary graph.
 
+### With a `node_name` filter
+
+The router picks only a type that can apply the filter (`node_name_scope` in
+`cognee/modules/search/methods/`). `CHUNKS_LEXICAL`, `CODE` and `BROAD` cannot,
+and with a filter they would raise `QueryValidationError`, so a quoted phrase, a
+code question or a count resolves to `HYBRID_COMPLETION`, which applies it.
+`CODING_RULES` and `TEMPORAL` keep their routes. A pinned `query_type` is not
+rerouted: a type that cannot apply the filter raises.
+
 ### When a routed strategy comes up empty
 
 A routed type is a guess, so `recall()` does not let one do worse than the
