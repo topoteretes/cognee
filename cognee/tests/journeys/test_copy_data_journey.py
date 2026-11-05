@@ -314,8 +314,8 @@ async def test_copy_data_can_review_the_destination_for_conflicts(clean_env, def
     """``review_conflicts=True`` runs cognee's conflict review over the destination
     after the copy. With a real LLM (``COGNEE_JOURNEY_MODE=llm``) the two documents'
     contradicting facts about Wrenfield Quay become a ``FactConflict`` node in the
-    destination; the mock LLM has no model to review with, so the stage reports that
-    it was skipped and the receipt carries the reason."""
+    destination; under the mock LLM the stage either runs on canned answers or is
+    skipped for want of a key, and the receipt carries its result either way."""
     await cognee.remember(DOC_QUAY_1902, dataset_name=SOURCE, self_improvement=False)
     await cognee.remember(DOC_QUAY_1910, dataset_name=DESTINATION, self_improvement=False)
     source_id = await _support.dataset_id_by_name(SOURCE, default_user)
@@ -335,8 +335,12 @@ async def test_copy_data_can_review_the_destination_for_conflicts(clean_env, def
     assert review["stage"] == "review_conflicts"
     assert "1902" in (await _chunk_text(DESTINATION, "When was Wrenfield Quay built")).lower()
     if _support.IS_MOCK:
-        assert review["status"] == "skipped"
-        assert review["reason"] == "no_llm_configured"
+        # Whether the stage runs on the mock depends on the environment: with no
+        # usable key it is skipped, with one the mock answers the review's prompts.
+        # Either way the receipt carries the stage, and nothing errored.
+        assert review["status"] in ("completed", "already_completed", "skipped"), review
+        if review["status"] == "skipped":
+            assert review["reason"] == "no_llm_configured"
     else:
         assert review["status"] == "completed", review
         assert "FactConflict" in await _node_types(destination_id, default_user)
