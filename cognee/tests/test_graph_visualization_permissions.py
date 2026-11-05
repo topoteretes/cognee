@@ -135,9 +135,10 @@ async def test_granting_permission_enables_access(client: AsyncClient, setup_env
     assert response.status_code == 403, (
         "Access to graph visualization should be denied without READ permission."
     )
-    assert (
-        response.json()["detail"]
-        == "Request owner does not have necessary permission: [read] for all datasets requested. [PermissionDeniedError]"
+    assert response.json()["detail"] == (
+        "Request owner does not have necessary permission: [read] "
+        "for all datasets requested. Grants on a deleted dataset are not "
+        "restored when the same id is created again. [PermissionDeniedError]"
     )
     print("✅ Access to graph visualization should be denied without READ permission.")
 
