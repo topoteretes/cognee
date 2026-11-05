@@ -198,3 +198,49 @@ async def test_repository_discovery_reports_each_page_without_claiming_a_total(m
     assert [call.kwargs["completed"] for call in report.await_args_list] == [1, 2]
     assert all("total" not in call.kwargs for call in report.await_args_list)
     assert all("secret" not in str(call.kwargs) for call in report.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_repository_discovery_refuses_a_next_page_off_the_api_host(monkeypatch):
+    """SDK-832: the next link is the one request target taken from a response.
+
+    The installation token rides along with every page, so a link that leaves
+    api.github.com fails the listing instead of being followed (or being
+    skipped, which would silently index a prefix of the installation).
+    """
+    response = MagicMock()
+    response.status = 200
+    response.json = AsyncMock(return_value={"repositories": [{"full_name": "acme/api"}]})
+    response.links = {"next": {"url": "https://api.github.com.evil.example/page2"}}
+    response.__aenter__ = AsyncMock(return_value=response)
+    session = MagicMock()
+    session.get.return_value = response
+    session.__aenter__ = AsyncMock(return_value=session)
+    monkeypatch.setattr(sync_module.aiohttp, "ClientSession", lambda **kwargs: session)
+    monkeypatch.setattr(sync_module, "report_sync_progress", AsyncMock())
+
+    with pytest.raises(RuntimeError, match="paged off"):
+        await sync_module.list_installation_repositories("secret")
+
+    assert session.get.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("url", "same"),
+    [
+        ("https://api.github.com/installation/repositories?page=2", True),
+        ("https://api.github.com:443/installation/repositories?page=2", True),
+        ("https://api.github.com:8443/installation/repositories?page=2", False),
+        ("http://api.github.com/installation/repositories?page=2", False),
+        ("https://user:pw@api.github.com/installation/repositories", False),
+        ("https://token@api.github.com/installation/repositories", False),
+        ("https://api.github.com.evil.example/page2", False),
+        ("https://evil.example/api.github.com/page2", False),
+        ("https://api.github.com:notaport/page2", False),
+        ("not a url", False),
+        ("", False),
+    ],
+)
+def test_pagination_stays_on_the_exact_api_origin(url, same):
+    """SDK-832 review: scheme, host and effective port, and never userinfo."""
+    assert sync_module._same_origin(url, sync_module.API_BASE_URL) is same

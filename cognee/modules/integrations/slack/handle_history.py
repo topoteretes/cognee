@@ -8,6 +8,7 @@ import aiohttp
 from pydantic import ValidationError
 
 from cognee.modules.integrations.credentials import decrypt_token_payload
+from cognee.modules.integrations.outbound import client_session
 from cognee.modules.integrations.slack.history_models import (
     SlackHistoryError,
     SlackHistoryRequest,
@@ -139,7 +140,7 @@ async def _open_view(credential, trigger_id, view):
     token = decrypt_token_payload(credential).get("access_token")
     try:
         async with (
-            aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2)) as session,
+            client_session("slack", timeout=aiohttp.ClientTimeout(total=2)) as session,
             session.post(
                 "https://slack.com/api/views.open",
                 headers={"Authorization": f"Bearer {token}"},

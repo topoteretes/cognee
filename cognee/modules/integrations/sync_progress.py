@@ -21,6 +21,7 @@ from sqlalchemy import func, select, update
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.integrations.credentials import CredentialInactiveError
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
+from cognee.modules.integrations.outbound import require_outbound_http
 from cognee.modules.pipelines.models.PipelineRun import PipelineRun
 
 # The structlog exception wrapper can attach the current exception even with
@@ -338,7 +339,11 @@ async def track_sync(
     Call ``finish('partial', ...)`` for handled failures. No explicit finish means
     success on normal context exit. ContextVar propagation includes child async tasks;
     their updates after completion cannot reopen a finished run.
+
+    Every sync starts here, so this is where ``ALLOW_HTTP_REQUESTS=false`` stops
+    it: the run is refused before anything is published or fetched.
     """
+    require_outbound_http(provider)
     reporter = SyncProgressReporter(provider, credential, dataset_id, sink)
     token = _current.set(reporter)
     _active[reporter.progress.run_id] = reporter
