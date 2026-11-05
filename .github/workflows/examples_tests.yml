@@ -296,7 +296,8 @@ jobs:
   # Guards the slim docling profile (COG-5924): the loader must convert
   # office/web formats on `--extra docling` without torch installed.
   # Needs no LLM secrets - it drives DoclingLoader directly.
-  # Also runs the Google Drive Office format tests, which need the same extra.
+  # Also runs the Google Drive Office format tests, which need the same extra, and the
+  # legacy .doc/.xls/.ppt tests, which also need LibreOffice (installed below).
   test_docling_slim:
     name: Run Docling Slim Loader Test
     runs-on: ubuntu-22.04
@@ -322,3 +323,17 @@ jobs:
         env:
           ENV: 'dev'
         run: uv run pytest cognee/tests/integration/tasks/connectors/test_google_drive_formats.py -v
+
+      - name: Install LibreOffice for legacy Office files
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-calc libreoffice-impress
+
+      - name: Run Drive Legacy Office Tests
+        env:
+          ENV: 'dev'
+        run: |
+          # The test file skips when either is missing; fail here instead of passing on skips.
+          command -v soffice
+          uv run python -c "import docling"
+          uv run pytest cognee/tests/integration/tasks/connectors/test_google_drive_legacy_office.py -v

@@ -122,6 +122,9 @@ def test_is_supported_mime_type():
         "application/json",
         "application/xml",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+        "application/vnd.ms-excel",
+        "application/vnd.ms-powerpoint",
     ):
         assert is_supported_mime_type(mime)
     for mime in (
@@ -129,7 +132,6 @@ def test_is_supported_mime_type():
         "application/vnd.google-apps.form",
         "image/png",
         "application/zip",
-        "application/msword",
     ):
         assert not is_supported_mime_type(mime)
 
@@ -208,7 +210,7 @@ class _FakeLoaderEngine:
         return ["fake"] if self.registered else []
 
     def get_loader_info(self, loader_name):
-        return {"extensions": ["docx"]}
+        return {"extensions": ["docx", "doc", "xls", "ppt"]}
 
     def get_loader(self, file_path, preferred_loaders):
         return object() if self.loader_available else None
@@ -255,6 +257,55 @@ def test_missing_loader_is_a_named_error_not_a_skip(loader_engine):
     service = _FakeService(_FakeFiles(media_result=b"x"))
     with pytest.raises(LoaderUnavailableError, match="docling"):
         extract_file_content(service, "d", DOCX, "report.docx")
+
+
+@pytest.mark.parametrize(
+    ("mime", "suffix"),
+    [
+        ("application/msword", ".doc"),
+        ("application/vnd.ms-excel", ".xls"),
+        ("application/vnd.ms-powerpoint", ".ppt"),
+    ],
+)
+def test_legacy_office_file_goes_through_the_loader_engine(
+    loader_engine, monkeypatch, mime, suffix
+):
+    monkeypatch.setattr(gd_source, "_libreoffice_available", lambda: True)
+    service = _FakeService(_FakeFiles(media_result=b"OLE-bytes"))
+    assert extract_file_content(service, "d", mime, "old" + suffix) == "from the loader"
+    assert loader_engine.seen["suffix"] == suffix
+
+
+@pytest.mark.parametrize("mime", ["application/msword", "application/vnd.ms-powerpoint"])
+def test_legacy_office_without_libreoffice_is_a_named_error_before_the_download(
+    loader_engine, monkeypatch, mime
+):
+    monkeypatch.setattr(gd_source, "_libreoffice_available", lambda: False)
+    downloads = []
+    monkeypatch.setattr(
+        gd_source, "_download_file", lambda *args: downloads.append(args) or pytest.fail("download")
+    )
+    service = _FakeService(_FakeFiles(media_result=b"x"))
+    with pytest.raises(LoaderUnavailableError, match="LibreOffice"):
+        extract_file_content(service, "d", mime, "old")
+    assert downloads == []
+
+
+def test_only_the_binary_formats_need_libreoffice(loader_engine, monkeypatch):
+    monkeypatch.setattr(gd_source, "_libreoffice_available", lambda: False)
+    service = _FakeService(_FakeFiles(media_result=b"PK-docx-bytes"))
+    assert extract_file_content(service, "d", DOCX, "report.docx") == "from the loader"
+
+
+@pytest.mark.parametrize(
+    ("on_path", "expected"),
+    [({"soffice"}, True), ({"libreoffice"}, True), (set(), False)],
+)
+def test_libreoffice_is_found_by_either_executable_name(monkeypatch, on_path, expected):
+    monkeypatch.setattr(
+        gd_source.shutil, "which", lambda name: f"/usr/bin/{name}" if name in on_path else None
+    )
+    assert gd_source._libreoffice_available() is expected
 
 
 def test_a_missing_loader_is_found_before_the_download(loader_engine, monkeypatch):

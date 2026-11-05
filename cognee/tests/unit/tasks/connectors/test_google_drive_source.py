@@ -1440,6 +1440,9 @@ def test_zero_workers_from_the_environment_is_an_error_not_the_default(monkeypat
         DOCX_MIME,
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/msword",
+        "application/vnd.ms-excel",
+        "application/vnd.ms-powerpoint",
         gd_source.GOOGLE_SLIDES_MIME_TYPE,
     ],
 )
@@ -1470,6 +1473,27 @@ def test_format_upgrade_backfills_unchanged_files_once(
     fake_content_extraction.clear()
     assert list(gd_source._iter_rows(service, _config(), state)) == []
     assert service.list_calls == fake_content_extraction == []
+    assert state["page_token"] == "t2"
+
+
+def test_a_folder_already_scanned_for_version_one_backfills_the_legacy_formats(
+    fake_content_extraction,
+):
+    existing = _file_meta("existing", mime_type=DOCX_MIME)
+    legacy = _file_meta("legacy", mime_type="application/msword")
+    service = FakeDriveService(
+        {"root": [existing, legacy]}, {"existing": existing, "legacy": legacy}, start_token="t2"
+    )
+    state = {
+        "page_token": "t1",
+        "format_version": 1,
+        "known_ids": ["existing"],
+        "versions": {"existing": existing["modifiedTime"]},
+    }
+    rows = list(gd_source._iter_rows(service, _config(), state))
+    assert [row["id"] for row in rows] == ["legacy"]
+    assert fake_content_extraction == ["legacy"]
+    assert state["format_version"] == gd_source.FORMAT_SUPPORT_VERSION == 2
     assert state["page_token"] == "t2"
 
 
@@ -1601,6 +1625,37 @@ def test_registered_loader_extensions_lists_only_what_a_loader_handles(monkeypat
         lambda: _Engine(),
     )
     assert gd_source._registered_loader_extensions() == [".docx"]
+
+
+@pytest.mark.parametrize(
+    ("libreoffice", "expected"),
+    [(False, [".docx", ".pdf"]), (True, [".doc", ".docx", ".pdf"])],
+)
+def test_legacy_formats_count_as_readable_only_with_libreoffice(monkeypatch, libreoffice, expected):
+    monkeypatch.undo()  # the autouse fixture replaces the function under test
+    import sys
+
+    import cognee.infrastructure.loaders.get_loader_engine
+
+    class _Engine:
+        def get_available_loaders(self):
+            return ["office"]
+
+        def get_loader_info(self, _name):
+            return {"extensions": ["doc", "docx", "pdf"]}
+
+    monkeypatch.setattr(
+        sys.modules["cognee.infrastructure.loaders.get_loader_engine"],
+        "get_loader_engine",
+        lambda: _Engine(),
+    )
+    monkeypatch.setattr(gd_source, "_libreoffice_available", lambda: libreoffice)
+    monkeypatch.setattr(
+        gd_source,
+        "_LOADER_EXTENSIONS",
+        {"a": ".doc", "b": ".docx", "c": ".pdf"},
+    )
+    assert gd_source._registered_loader_extensions() == expected
 
 
 def test_a_format_no_loader_handles_does_not_keep_the_folder_in_full_scan_mode(monkeypatch):
