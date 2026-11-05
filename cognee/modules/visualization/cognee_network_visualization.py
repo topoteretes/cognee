@@ -141,9 +141,25 @@ _TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "template.html")
 
 
 def _safe_json_embed(obj) -> str:
-    """JSON-encode while neutralising ``</`` so the result is safe to
-    embed inside a ``<script>`` element."""
-    return json.dumps(obj).replace("</", "<\\/")
+    """JSON-encode while neutralising ``<`` so the result is safe to embed
+    inside a ``<script>`` element — and still valid JSON.
+
+    ``json.dumps`` does not escape ``<``, so both HTML script-data breakout
+    sequences reach the page verbatim: ``</`` (a premature end tag) and
+    ``<!--`` (which drives the HTML tokenizer into script-data-escaped state,
+    after which a later ``<script`` makes the element's real ``</script>``
+    unrecognised, so the browser swallows the rest of the document). A single
+    ``<!--`` in embedded node/edge/document text is therefore enough to leave
+    the graph view hung with no console error.
+
+    Escaping every ``<`` as ``\\u003c`` neutralises both at once: no ``<``
+    survives to start either token. ``\\u003c`` is a legal escape in JSON *and*
+    in JS, so the embedded values are byte-for-byte unchanged once the script
+    runs and the output still parses with ``json.loads`` — which per-sequence
+    escapes like ``<\\!--`` would break (``\\!`` is a JS identity escape but not
+    a JSON one).
+    """
+    return json.dumps(obj).replace("<", "\\u003c")
 
 
 def _read_template() -> str:
