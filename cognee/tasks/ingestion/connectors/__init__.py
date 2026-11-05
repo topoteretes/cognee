@@ -34,3 +34,6 @@ __all__ = [
     "obsidian_source",
     "onenote_source",
 ]
+from .calendly import calendly_source
+
+__all__.append("calendly_source")
