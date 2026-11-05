@@ -1,5 +1,6 @@
 from .PipelineContext import PipelineContext
 from .PipelineRun import OperationOutcome, PipelineRun, PipelineRunStatus
+from .PipelineRunSession import PipelineRunSession
 from .PipelineRunInfo import (
     PipelineRunInfo,
     PipelineRunStarted,

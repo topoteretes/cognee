@@ -33,6 +33,12 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     reset_password_token_secret = get_auth_secret("FASTAPI_USERS_RESET_PASSWORD_TOKEN_SECRET")
     verification_token_secret = get_auth_secret("FASTAPI_USERS_VERIFICATION_TOKEN_SECRET")
 
+    async def on_before_delete(self, user: User, request: Request | None = None) -> None:
+        # Imported here: the agents package imports the users package, which imports this module.
+        from cognee.modules.agents.delete_agents_of_user import delete_agents_of_user
+
+        await delete_agents_of_user(self.user_db.session, user.id)
+
     async def on_after_login(
         self, user: User, request: Request | None = None, response: Response | None = None
     ):

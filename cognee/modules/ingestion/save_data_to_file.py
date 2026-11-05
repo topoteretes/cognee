@@ -1,4 +1,3 @@
-import hashlib
 from dataclasses import dataclass
 from typing import BinaryIO
 
@@ -8,6 +7,7 @@ from cognee.infrastructure.files.storage import get_file_storage, get_storage_co
 # extension-less document name stored on ``Data.name``. Reusing it here keeps
 # the name identical to the one the old read-it-back-from-storage path produced.
 from cognee.infrastructure.files.utils.get_file_metadata import FileMetadata, _derive_basename
+from cognee.modules.data.content_hash import compute_content_hash
 
 from .classify import classify
 from .data_types import TextData
@@ -74,9 +74,7 @@ async def save_data_to_file_detailed(
 
     async with classified_data.get_data() as payload:
         if "name" not in file_metadata or file_metadata["name"] is None:
-            data_contents = payload.encode("utf-8")
-            hash_contents = hashlib.md5(data_contents).hexdigest()
-            file_metadata["name"] = "text_" + hash_contents + ".txt"
+            file_metadata["name"] = "text_" + compute_content_hash(payload) + ".txt"
 
         file_name = file_metadata["name"]
 

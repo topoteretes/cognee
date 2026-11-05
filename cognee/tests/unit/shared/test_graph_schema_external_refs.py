@@ -127,3 +127,16 @@ def test_generator_is_told_not_to_follow_remote_refs(monkeypatch):
     monkeypatch.setattr(graph_model_utils, "generate", spy_generate)
     graph_schema_to_graph_model(IN_DOCUMENT_SCHEMA)
     assert seen["allow_remote_refs"] is False
+
+
+def test_installed_generator_supports_allow_remote_refs():
+    """``GenerateConfig(allow_remote_refs=...)`` exists from datamodel-code-generator
+    0.56.0. With 0.54.x or 0.55.x the config raises ``extra_forbidden`` and every custom
+    graph_model is rejected with HTTP 400 before ingestion (SDK-1131, CLO-1271).
+    pyproject pins ``>=0.56.0``; this guards against the floor being lowered again.
+    """
+    from importlib.metadata import version
+
+    from packaging.version import Version
+
+    assert Version(version("datamodel-code-generator")) >= Version("0.56.0")

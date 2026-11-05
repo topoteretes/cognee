@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, UUID, Column, DateTime, Float, Index, Integer, String, text
+from sqlalchemy import JSON, Column, DateTime, Float, Index, Integer, String, Uuid, text
 from sqlalchemy.ext.mutable import MutableDict
 
 from cognee.infrastructure.databases.relational import Base
@@ -30,7 +30,7 @@ class Data(Base):
         ),
     )
 
-    id = Column(UUID, primary_key=True, default=uuid4)
+    id = Column(Uuid, primary_key=True, default=uuid4)
     label = Column(String, nullable=True)
     name = Column(String)
     extension = Column(String)
@@ -40,21 +40,21 @@ class Data(Base):
     loader_engine = Column(String)
     raw_data_location = Column(String)
     original_data_location = Column(String)
-    owner_id = Column(UUID, index=True)
-    tenant_id = Column(UUID, index=True, nullable=True)
+    owner_id = Column(Uuid, index=True)
+    tenant_id = Column(Uuid, index=True, nullable=True)
     # Dataset that owns this content row. Rows are dataset-scoped: the same
     # content in two datasets is two rows with two ids, so updating one
     # document can never touch another dataset's data. Nullable only for the
     # upgrade window: the startup backfill (alembic d6e8f0a2b4c6) stamps every
     # legacy row's dataset (splitting rows shared by several datasets), so no
     # NULL rows exist after it runs.
-    dataset_id = Column(UUID, index=True, nullable=True)
+    dataset_id = Column(Uuid, index=True, nullable=True)
     # The pre-refactor data_id this row's identity descends from. Written by
     # exactly one thing — the backfill split of a shared legacy row — and only
     # preserved afterwards (update() re-ingests under the row's own id), so
     # alias chains cannot form and every id ever issued keeps resolving.
     # NULL for rows whose id never changed.
-    legacy_id = Column(UUID, index=True, nullable=True)
+    legacy_id = Column(Uuid, index=True, nullable=True)
     content_hash = Column(String)
     raw_content_hash = Column(String)
     external_metadata = Column(JSON)

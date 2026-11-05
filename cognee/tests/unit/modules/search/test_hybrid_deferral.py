@@ -74,9 +74,12 @@ def test_node_type_none_with_node_name_defers():
 
 
 @pytest.mark.asyncio
-async def test_missing_document_chunk_collection_defers():
+async def test_missing_chunk_collections_defer():
+    """No document chunks and no DLT rows: hybrid has nothing to search."""
     engine = AsyncMock()
-    engine.has_collection = AsyncMock(side_effect=lambda name: name != "DocumentChunk_text")
+    engine.has_collection = AsyncMock(
+        side_effect=lambda name: name not in ("DocumentChunk_text", "DltRow_text")
+    )
 
     with patch(
         "cognee.modules.search.methods.hybrid_deferral.get_vector_engine_async",
@@ -85,8 +88,27 @@ async def test_missing_document_chunk_collection_defers():
     ):
         reason = await hybrid_deferral_reason({}, graph_is_empty=False)
 
-    assert reason == "DocumentChunk_text collection missing"
-    engine.has_collection.assert_awaited_once_with("DocumentChunk_text")
+    assert reason == "DocumentChunk_text and DltRow_text collections missing"
+    assert [call.args[0] for call in engine.has_collection.await_args_list] == [
+        "DocumentChunk_text",
+        "DltRow_text",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_dlt_rows_alone_keep_the_request_on_hybrid():
+    """A DLT-only dataset has rows in DltRow_text and no DocumentChunk_text; hybrid serves it."""
+    engine = AsyncMock()
+    engine.has_collection = AsyncMock(side_effect=lambda name: name == "DltRow_text")
+
+    with patch(
+        "cognee.modules.search.methods.hybrid_deferral.get_vector_engine_async",
+        new_callable=AsyncMock,
+        return_value=engine,
+    ):
+        reason = await hybrid_deferral_reason({}, graph_is_empty=False)
+
+    assert reason is None
 
 
 @pytest.mark.asyncio
@@ -102,7 +124,9 @@ async def test_missing_entity_collection_does_not_defer():
         reason = await hybrid_deferral_reason({}, graph_is_empty=False)
 
     assert reason is None
-    engine.has_collection.assert_awaited_once_with("DocumentChunk_text")
+    engine.has_collection.assert_awaited_once_with(
+        "DocumentChunk_text"
+    )  # found; no DLT check needed
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactElement, type RefObject, useEffect, useRef } from "react";
+import { fmtCount } from "@/utils/formatCount";
 
 /**
  * Loads the next page when it scrolls into view.
@@ -106,13 +107,13 @@ export default function ScrollLoader({
         <span>Loading more…</span>
       ) : (
         <span>
-          {loaded.toLocaleString()}{total === null ? " loaded" : ` of ${Math.max(total, loaded).toLocaleString()}`} {noun}
+          {fmtCount(loaded)}{total === null ? " loaded" : ` of ${fmtCount(Math.max(total, loaded))}`} {noun}
         </span>
       )}
 
       {atCap && more && (total === null || loaded < total) && (
         <span style={{ color: "rgba(237,236,234,0.3)", textAlign: "center" }}>
-          This view is limited to {maxLoaded.toLocaleString()} {noun}.
+          This view is limited to {fmtCount(maxLoaded)} {noun}.
         </span>
       )}
 

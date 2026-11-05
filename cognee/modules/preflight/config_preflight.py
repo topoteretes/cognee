@@ -144,7 +144,8 @@ def llm_available(llm_config=None) -> bool:
 
     Zero-network — the same key rule ``check_provider_config`` applies; it does
     not verify that the credentials actually work. Read-side behaviour keys off
-    this (``recall()`` defaults to ``CHUNKS`` when no LLM can write an answer),
+    this (``recall()`` runs completion types with ``only_context=True`` when no
+    LLM can write an answer),
     never off the write-side extractor setting.
     """
     if llm_config is None:

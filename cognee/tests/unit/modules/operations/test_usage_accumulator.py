@@ -98,3 +98,14 @@ async def test_scope_does_not_leak_across_sibling_tasks():
         release.set()
 
     await asyncio.gather(asyncio.create_task(_scoped()), asyncio.create_task(_unscoped()))
+
+
+def test_embedding_tokens_propagate_apart_from_llm_tokens():
+    with operation_usage_scope() as outer:
+        with operation_usage_scope() as inner:
+            inner.add(10, 4)
+            inner.add_embedding(100)
+        outer.add_embedding(5)
+
+    assert (inner.tokens_in, inner.tokens_out, inner.embedding_tokens) == (10, 4, 100)
+    assert (outer.tokens_in, outer.tokens_out, outer.embedding_tokens) == (10, 4, 105)

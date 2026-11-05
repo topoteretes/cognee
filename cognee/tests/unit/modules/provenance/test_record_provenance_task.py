@@ -290,11 +290,8 @@ class TestRecordProvenanceTask:
         assert await record_provenance([]) == []
 
 
-async def _task_names(provenance_flag, contradiction_flag=False):
-    config = CognifyConfig(
-        provenance_tracking=provenance_flag,
-        contradiction_detection=contradiction_flag,
-    )
+async def _task_names(provenance_flag):
+    config = CognifyConfig(provenance_tracking=provenance_flag)
     with patch.object(cognify_module, "get_cognify_config", return_value=config):
         tasks = await get_default_tasks(
             # Non-None config skips the ontology-env branch; explicit chunk_size
@@ -324,7 +321,6 @@ class TestPipelineWiring:
         assert "record_provenance" not in names
 
     @pytest.mark.asyncio
-    async def test_flag_on_splices_after_add_data_points_before_contradictions(self):
-        names = await _task_names(provenance_flag=True, contradiction_flag=True)
+    async def test_flag_on_splices_after_add_data_points(self):
+        names = await _task_names(provenance_flag=True)
         assert names.index("record_provenance") == names.index("add_data_points") + 1
-        assert names.index("record_provenance") < names.index("detect_contradictions")

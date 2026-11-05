@@ -1,0 +1,120 @@
+"""Remember your company's sources: a SQL database, a ticket export and a docs folder.
+
+Each source goes into the dataset `company_qa` under its own node set, and is extracted
+with one graph model (models.py). Nodes with the same identity merge, so a person in the
+database, the assignee of a ticket and a name in the docs become one node. Every source is
+optional; pass the ones you have.
+
+Run alone: uv run python examples/cookbooks/company_brain/company_qa/scripts/ingest.py \
+    [--database URL [--tables a,b]] [--tickets FILE [FILE ...]] [--docs FOLDER]
+"""
+
+import argparse
+import asyncio
+import hashlib
+import os
+import sys
+from pathlib import Path
+
+os.environ.setdefault("LOG_LEVEL", "ERROR")  # quiet cognee's logs; set before importing it
+
+import cognee
+
+sys.path.insert(0, str(Path(__file__).parent.parent))  # models.py sits next to company_qa.py
+from models import EXTRACTION_PROMPT, CompanyGraph
+
+DATASET = "company_qa"  # the same in every script
+
+# A CSV file takes the relational route by default: one row node per line, with no LLM and
+# no graph model, so its people and projects would never merge with the other sources.
+# csv_loader reads it as text instead, which is extracted with the graph model like a doc.
+AS_TEXT = ["csv_loader"]
+
+
+async def remember(data, node_set: str, **kwargs) -> None:
+    await cognee.remember(
+        data,
+        dataset_name=DATASET,
+        node_set=[node_set],
+        graph_model=CompanyGraph,
+        custom_prompt=EXTRACTION_PROMPT,
+        **kwargs,
+    )
+
+
+def as_document(table: str, primary_key: list[str]):
+    """Map a row of ``table`` to the ``id``, ``title`` and ``content`` the document path reads.
+
+    The document path builds each document from those three columns only, so a plain table
+    row would become an empty document. A row that already has ``title`` and ``content``
+    (like the sample's *_profiles views) is kept as it is; any other row is written out as
+    one ``column: value`` line per column.
+    """
+
+    def to_document(row: dict) -> dict:
+        if "title" in row and "content" in row:
+            return row
+        if "id" in row:
+            row_id = row["id"]
+        elif primary_key:
+            row_id = ":".join(str(row[column]) for column in primary_key)
+        else:
+            row_id = hashlib.sha256(repr(sorted(row.items())).encode()).hexdigest()[:16]
+        lines = [f"{column}: {value}" for column, value in row.items() if value is not None]
+        return {"id": row_id, "title": f"{table} {row_id}", "content": "\n".join(lines)}
+
+    return to_document
+
+
+async def ingest_database(url: str, tables: list[str] | None = None) -> None:
+    """Every row of ``tables`` (all tables and views when None) becomes one document."""
+    from dlt.sources.sql_database import sql_database
+
+    database = sql_database(credentials=url, table_names=tables, include_views=True)
+    for name, resource in database.resources.items():
+        columns = resource.compute_table_schema().get("columns", {})
+        primary_key = [column for column, hints in columns.items() if hints.get("primary_key")]
+        resource.add_map(as_document(name, primary_key))
+    # Send rows down the document path, where they are extracted with the graph model.
+    # Without it, rows take the relational path, which builds its own table/row graph and
+    # ignores graph_model, so nothing would link to the other sources.
+    database.cognee_document_source = "database"
+    await remember(database, "database")
+    print(f"[ingest] Remembered the database ({', '.join(tables) if tables else 'all tables'})")
+
+
+async def ingest_tickets(paths: list[Path]) -> None:
+    """Ticket exports: JSON or CSV files."""
+    await remember([str(path.expanduser()) for path in paths], "tickets", preferred_loaders=AS_TEXT)
+    print(f"[ingest] Remembered the tickets in {', '.join(str(path) for path in paths)}")
+
+
+async def ingest_docs(folder: Path) -> None:
+    """Every document in a folder: meeting notes, postmortems, memos."""
+    await remember(str(folder.expanduser()), "docs", preferred_loaders=AS_TEXT)
+    print(f"[ingest] Remembered the docs in {folder}")
+
+
+async def ingest(
+    database: str | None = None,
+    tables: list[str] | None = None,
+    tickets: list[Path] | None = None,
+    docs: Path | None = None,
+) -> None:
+    if database:
+        await ingest_database(database, tables)
+    if tickets:
+        await ingest_tickets(tickets)
+    if docs:
+        await ingest_docs(docs)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--database", help="SQLAlchemy URL, e.g. postgresql://user:pw@host/db")
+    parser.add_argument("--tables", help="comma-separated tables or views (default: all)")
+    parser.add_argument("--tickets", type=Path, nargs="+", help="JSON or CSV ticket exports")
+    parser.add_argument("--docs", type=Path, help="a folder of documents")
+    args = parser.parse_args()
+    tables = args.tables.split(",") if args.tables else None
+    asyncio.run(ingest(args.database, tables, args.tickets, args.docs))

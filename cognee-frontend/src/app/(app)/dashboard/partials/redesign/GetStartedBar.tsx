@@ -7,17 +7,21 @@ interface GetStartedBarProps {
   subtitle: string;
   /** Connector count shown on the right, e.g. 5. */
   connectors: number;
+  /** Telemetry's first poll hasn't answered and nothing sticky is known yet
+   *  — `connectors` is not yet a confirmed zero, so this shows a neutral
+   *  placeholder instead of a confident "0 connectors". */
+  connectorsLoading?: boolean;
   defaultOpen?: boolean;
   children: React.ReactNode;
 }
 
 /**
  * The collapsed "Get started" strip from WO-0 — a single terminal row that
- * expands to reveal the existing agent/brain connection cards. Collapsed by
+ * expands to reveal the existing agent/dataset connection cards. Collapsed by
  * default so returning users land straight on the Overview; the connector count
  * keeps the affordance discoverable.
  */
-export function GetStartedBar({ subtitle, connectors, defaultOpen = false, children }: GetStartedBarProps): React.ReactElement {
+export function GetStartedBar({ subtitle, connectors, connectorsLoading = false, defaultOpen = false, children }: GetStartedBarProps): React.ReactElement {
   const [open, setOpen] = useState(defaultOpen);
 
   return (
@@ -44,7 +48,9 @@ export function GetStartedBar({ subtitle, connectors, defaultOpen = false, child
         <span style={{ marginLeft: 4, fontSize: 13, color: "rgba(237,236,234,0.48)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{subtitle}</span>
         {/* One compact control group: connector count + expand/collapse toggle. */}
         <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 9, flexShrink: 0, background: "rgba(255,255,255,0.04)", border: `1px solid ${T.frame}`, borderRadius: 0, padding: "5px 10px" }}>
-          <span style={{ fontSize: 12, color: T.muted }}>{connectors} connector{connectors === 1 ? "" : "s"}</span>
+          <span style={{ fontSize: 12, color: T.muted }}>
+            {connectorsLoading ? "Checking connectors…" : `${connectors} connector${connectors === 1 ? "" : "s"}`}
+          </span>
           <span style={{ width: 1, height: 12, background: T.frameStrong }} />
           <span style={{ fontSize: 12, fontWeight: 500, color: T.lavender }}>{open ? "Collapse ▴" : "Expand ▾"}</span>
         </span>

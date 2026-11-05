@@ -47,8 +47,8 @@ class TestGraphSummaryCompletionRetriever:
         assert retriever.feedback_influence == 0.15
 
     @pytest.mark.asyncio
-    async def test_resolve_edges_to_text_calls_super_and_summarizes(self, mock_edge):
-        """Test resolve_edges_to_text calls super method and then summarizes."""
+    async def test_resolve_edges_to_text_summarizes_before_appending_conflicts(self, mock_edge):
+        """The stored conflict block must never enter the summarization call."""
         retriever = GraphSummaryCompletionRetriever(
             summarize_prompt_path="custom_summarize.txt",
             system_prompt="Custom system prompt",
@@ -56,20 +56,25 @@ class TestGraphSummaryCompletionRetriever:
 
         with (
             patch(
-                "cognee.modules.retrieval.graph_completion_retriever.GraphCompletionRetriever.resolve_edges_to_text",
+                "cognee.modules.retrieval.graph_summary_completion_retriever.resolve_edges_to_text",
                 new_callable=AsyncMock,
                 return_value="Resolved edges text",
-            ) as mock_super_resolve,
+            ) as mock_resolve,
             patch(
                 "cognee.modules.retrieval.graph_summary_completion_retriever.summarize_text",
                 new_callable=AsyncMock,
                 return_value="Summarized text",
             ) as mock_summarize,
+            patch.object(
+                retriever,
+                "_chunk_conflicts_block",
+                AsyncMock(return_value="## Fact conflicts\n- Bob succeeded Alice."),
+            ),
         ):
             result = await retriever.resolve_edges_to_text([mock_edge])
 
-            assert result == "Summarized text"
-            mock_super_resolve.assert_awaited_once_with([mock_edge])
+            assert result == "Summarized text\n\n## Fact conflicts\n- Bob succeeded Alice."
+            mock_resolve.assert_awaited_once_with([mock_edge])
             mock_summarize.assert_awaited_once_with(
                 "Resolved edges text",
                 "custom_summarize.txt",
@@ -83,7 +88,7 @@ class TestGraphSummaryCompletionRetriever:
 
         with (
             patch(
-                "cognee.modules.retrieval.graph_completion_retriever.GraphCompletionRetriever.resolve_edges_to_text",
+                "cognee.modules.retrieval.graph_summary_completion_retriever.resolve_edges_to_text",
                 new_callable=AsyncMock,
                 return_value="Resolved edges text",
             ),
@@ -108,7 +113,7 @@ class TestGraphSummaryCompletionRetriever:
 
         with (
             patch(
-                "cognee.modules.retrieval.graph_completion_retriever.GraphCompletionRetriever.resolve_edges_to_text",
+                "cognee.modules.retrieval.graph_summary_completion_retriever.resolve_edges_to_text",
                 new_callable=AsyncMock,
                 return_value="",
             ),
@@ -137,7 +142,7 @@ class TestGraphSummaryCompletionRetriever:
 
         with (
             patch(
-                "cognee.modules.retrieval.graph_completion_retriever.GraphCompletionRetriever.resolve_edges_to_text",
+                "cognee.modules.retrieval.graph_summary_completion_retriever.resolve_edges_to_text",
                 new_callable=AsyncMock,
                 return_value="Multiple edges resolved text",
             ),

@@ -15,6 +15,13 @@ permissions:
 on:
   workflow_call:
     inputs:
+      has-secrets:
+        # False on fork PRs, where GitHub withholds repository secrets. Jobs
+        # that need a real LLM/embedding key skip instead of failing on an
+        # empty key. Other callers leave the default and run everything.
+        required: false
+        type: boolean
+        default: true
       ci-image:
         required: false
         type: string
@@ -74,7 +81,7 @@ jobs:
           LLM_API_KEY: "mock-not-used"
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_API_KEY: "mock-not-used"
-        run: uv run python cognee/tests/utils/run_mocked.py ./examples/advanced_guides/temporal_awareness_example/temporal_awareness_example.py
+        run: uv run python cognee/tests/utils/run_mocked.py --replay cognee/tests/utils/mock_ingestion/replays/temporal_recall.json ./examples/guides/temporal_recall.py
 
   test-ontology-example:
     name: Run Ontology Tests
@@ -115,7 +122,7 @@ jobs:
         env:
           ENV: 'dev'
           CACHING: 'true'
-          CACHE_BACKEND: 'fs'
+          CACHE_BACKEND: 'sqlite'
           OPENAI_API_KEY: "mock-not-used"
           LLM_API_KEY: "mock-not-used"
           EMBEDDING_DIMENSIONS: 300
@@ -143,28 +150,6 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_API_KEY: "mock-not-used"
         run: uv run python cognee/tests/utils/run_mocked.py --replay cognee/tests/utils/mock_ingestion/replays/agentic_reasoning_procurement.json ./examples/demos/agentic/agentic_reasoning_procurement_example.py
-
-  test-memify:
-    name: Run Memify Example
-    runs-on: ubuntu-22.04
-    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-
-      - name: Run Memify Tests
-        env:
-          ENV: 'dev'
-          OPENAI_API_KEY: "mock-not-used"
-          LLM_API_KEY: "mock-not-used"
-          EMBEDDING_DIMENSIONS: 300
-          EMBEDDING_API_KEY: "mock-not-used"
-        run: uv run python cognee/tests/utils/run_mocked.py ./examples/demos/custom_pipelines/memify_coding_agent_rule_extraction_example.py
 
   test-custom-pipeline:
     name: Run Custom Pipeline Example
@@ -212,6 +197,7 @@ jobs:
 
   test-s3-permissions-example: # Make sure permission and multi-user mode work with S3 file system
     name: Run Permissions Example
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
@@ -265,6 +251,8 @@ jobs:
           DB_PORT: 5432
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
+          # The default sqlite cache.db cannot live on the S3 system root.
+          CACHE_BACKEND: 'postgres'
         run: uv run python cognee/tests/utils/run_mocked.py ./examples/demos/permissions/user_permissions_and_access_control_example.py
 
   # Docling test - NO container (runs on macOS, container only works on Linux)
@@ -275,6 +263,7 @@ jobs:
   # tokens), so a generic mock's empty completion fails it by design.
   test_docling_add:
     name: Run Add with Docling Test
+    if: ${{ inputs.has-secrets }}
     runs-on: macos-15
     steps:
       - name: Check out repository

@@ -1,32 +1,14 @@
 """Real SQL regressions for refresh/disconnect races in both Google providers."""
 
 import asyncio
-import base64
 from importlib import import_module
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from cognee.modules.integrations import credentials as store
-from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
-
-
-@pytest_asyncio.fixture
-async def credential_db(monkeypatch):
-    monkeypatch.setenv("INTEGRATION_CREDENTIALS_KEY", base64.b64encode(b"0" * 32).decode())
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(IntegrationCredential.__table__.create)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
-    monkeypatch.setattr(
-        store, "get_relational_engine", lambda: SimpleNamespace(get_async_session=sessions)
-    )
-    yield
-    await engine.dispose()
+from cognee.modules.integrations.google import oauth_integration
 
 
 async def install(provider, user_id=None, token="original"):
@@ -40,7 +22,7 @@ async def install(provider, user_id=None, token="original"):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("provider", ["google_drive", "gmail"])
+@pytest.mark.parametrize("provider", ["google_drive", "gmail", "google_calendar"])
 @pytest.mark.parametrize("reconnect", [False, True])
 async def test_refresh_cannot_resurrect_or_overwrite_reconnected_credentials(
     credential_db, monkeypatch, provider, reconnect
@@ -48,7 +30,11 @@ async def test_refresh_cannot_resurrect_or_overwrite_reconnected_credentials(
     adapter = import_module(f"cognee.modules.integrations.{provider}.adapter")
     integration = getattr(
         adapter,
-        "GoogleDriveIntegration" if provider == "google_drive" else "GoogleGmailIntegration",
+        {
+            "google_drive": "GoogleDriveIntegration",
+            "gmail": "GoogleGmailIntegration",
+            "google_calendar": "GoogleCalendarIntegration",
+        }[provider],
     )()
     original = await install(provider)
     started, finish = asyncio.Event(), asyncio.Event()
@@ -58,8 +44,8 @@ async def test_refresh_cannot_resurrect_or_overwrite_reconnected_credentials(
         await finish.wait()
         return {"access_token": "stale-refresh-result", "expires_in": 3600}
 
-    monkeypatch.setattr(adapter, "require", lambda key: "test")
-    monkeypatch.setattr(adapter.client, "refresh_access_token", refresh)
+    monkeypatch.setattr(oauth_integration, "require", lambda settings, key, prefix: "test")
+    monkeypatch.setattr(oauth_integration.client, "refresh_access_token", refresh)
     pending = asyncio.create_task(integration.refresh(original))
     await started.wait()
     await store.revoke_credential_by_account(provider, original.provider_account_id)

@@ -1,0 +1,358 @@
+"""Pipeline and task telemetry events (SDK-775).
+
+Every event of a run carries ``pipeline_run_id``; error events carry the
+exception class and never its message; cancellation and a closed generator
+still emit a terminal event instead of leaving a silent ``Started``.
+"""
+
+import asyncio
+from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
+
+from cognee.modules.pipelines.models import PipelineContext
+from cognee.modules.pipelines.operations import run_tasks_base as base_module
+from cognee.modules.pipelines.operations import run_tasks_data_item as data_item_module
+from cognee.modules.pipelines.operations import run_tasks_with_telemetry as telemetry_module
+from cognee.modules.pipelines.tasks.task import Task
+
+SETTINGS = {
+    "llm": {"provider": "openai", "model": "openai/gpt-5-mini"},
+    "embedding": {"provider": "fastembed", "model": "BAAI/bge-small-en-v1.5"},
+    "graph_extractor": "llm",
+    "graph": {"provider": "kuzu", "url": "/tmp/graph"},
+    "vector": {"provider": "lancedb", "url": "/tmp/vector"},
+    "relational": {"provider": "sqlite", "url": "/tmp/db"},
+}
+# Would leak a dataset name if any event carried the message.
+SECRET_MESSAGE = "Dataset 'customer-secrets-2026' not found."
+USER = SimpleNamespace(id=uuid4(), tenant_id=None)
+
+
+@pytest.fixture
+def events(monkeypatch):
+    captured = []
+
+    def capture(event_name, user=None, additional_properties=None, **_kwargs):
+        captured.append((event_name, dict(additional_properties or {})))
+
+    monkeypatch.setattr(telemetry_module, "send_telemetry", capture)
+    monkeypatch.setattr(base_module, "send_telemetry", capture)
+    monkeypatch.setattr(telemetry_module, "get_current_settings", lambda **_: dict(SETTINGS))
+    return captured
+
+
+def _pipeline_events(events):
+    return [(name, props) for name, props in events if name.startswith("Pipeline Item")]
+
+
+def _task_events(events, suffix):
+    return [(name, props) for name, props in events if name.endswith(f"Task {suffix}")]
+
+
+async def _drain(tasks, ctx):
+    async for _ in telemetry_module.run_tasks_with_telemetry(
+        tasks, [1], USER, "cognify_pipeline", ctx=ctx
+    ):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_started_and_completed_carry_run_id_and_provider_stack(events):
+    run_id = uuid4()
+
+    async def double(data):
+        return [item * 2 for item in data]
+
+    await _drain([Task(double)], PipelineContext(pipeline_run_id=run_id))
+
+    names = [name for name, _ in _pipeline_events(events)]
+    assert names == ["Pipeline Item Started", "Pipeline Item Completed"]
+    for _, props in _pipeline_events(events):
+        assert props["pipeline_run_id"] == str(run_id)
+        assert props["pipeline_name"] == "cognify_pipeline"
+        assert props["embedding"] == SETTINGS["embedding"]
+        assert props["graph_extractor"] == "llm"
+        assert "exception_type" not in props
+    # Task events join to the same run.
+    for _, props in _task_events(events, "Started") + _task_events(events, "Completed"):
+        assert props["pipeline_run_id"] == str(run_id)
+        assert props["task_name"] == "double"
+
+
+@pytest.mark.asyncio
+async def test_errored_carries_exception_type_and_never_the_message(events):
+    async def explode(data):
+        raise ValueError(SECRET_MESSAGE)
+
+    with pytest.raises(ValueError):
+        await _drain([Task(explode)], PipelineContext(pipeline_run_id=uuid4()))
+
+    (pipeline_errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
+    assert pipeline_errored["exception_type"] == "ValueError"
+    ((_, task_errored),) = _task_events(events, "Errored")
+    assert task_errored["exception_type"] == "ValueError"
+    assert task_errored["task_name"] == "explode"
+    for _, props in events:
+        assert SECRET_MESSAGE not in repr(props)
+
+
+@pytest.mark.asyncio
+async def test_root_cause_is_reported_through_a_wrapping_error(events):
+    class Wrapper(Exception):
+        pass
+
+    async def explode(data):
+        wrapper = Wrapper("Pipeline run failed.")
+        wrapper.first_error = KeyError("root")
+        raise wrapper
+
+    with pytest.raises(Wrapper):
+        await _drain([Task(explode)], PipelineContext(pipeline_run_id=uuid4()))
+
+    (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
+    assert errored["exception_type"] == "KeyError"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_run_emits_a_terminal_event(events):
+    async def cancelled(data):
+        raise asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await _drain([Task(cancelled)], PipelineContext(pipeline_run_id=uuid4()))
+
+    names = [name for name, _ in _pipeline_events(events)]
+    assert names == ["Pipeline Item Started", "Pipeline Item Errored"]
+    (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
+    assert errored["exception_type"] == "CancelledError"
+    ((_, task_errored),) = _task_events(events, "Errored")
+    assert task_errored["exception_type"] == "CancelledError"
+
+
+@pytest.mark.asyncio
+async def test_closed_generator_emits_a_terminal_event(events):
+    """A consumer that stops iterating closes the generator with GeneratorExit —
+    a BaseException a bare ``except Exception`` never saw."""
+
+    async def stream(data):
+        yield 1
+        yield 2
+
+    generator = telemetry_module.run_tasks_with_telemetry(
+        [Task(stream)], [1], USER, "cognify_pipeline", ctx=PipelineContext(pipeline_run_id=uuid4())
+    )
+    await generator.__anext__()
+    await generator.aclose()
+
+    names = [name for name, _ in _pipeline_events(events)]
+    assert names == ["Pipeline Item Started", "Pipeline Item Errored"]
+    (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
+    assert errored["exception_type"] == "GeneratorExit"
+
+
+def _stub_task_runner(monkeypatch):
+    """Replace run_tasks_base with a two-result generator; the event is set once it is closed."""
+    closed = asyncio.Event()
+
+    async def run_tasks_base(*_args):
+        try:
+            yield 1
+            yield 2
+        finally:
+            closed.set()
+
+    monkeypatch.setattr(telemetry_module, "run_tasks_base", run_tasks_base)
+    return closed
+
+
+@pytest.mark.asyncio
+async def test_closing_the_generator_closes_the_task_runner_at_once(events, monkeypatch):
+    closed = _stub_task_runner(monkeypatch)
+    generator = telemetry_module.run_tasks_with_telemetry([], [1], USER, "cognify_pipeline")
+
+    await generator.__anext__()
+    await generator.aclose()
+
+    assert closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_no_context_means_no_run_id_but_the_events_still_flow(events):
+    async def identity(data):
+        return data
+
+    await _drain([Task(identity)], ctx=None)
+
+    for _, props in _pipeline_events(events):
+        assert "pipeline_run_id" not in props
+        assert props["pipeline_name"] == "cognify_pipeline"
+
+
+@pytest.mark.asyncio
+async def test_a_nested_failure_is_reported_once_at_the_task_where_it_happened(events):
+    """Tasks nest (a task's loop drives the next task), so one failure unwinds
+    through every upstream handler; only the failing task emits Task Errored."""
+
+    async def first(data):
+        return data
+
+    async def second(data):
+        return data
+
+    async def third(data):
+        raise RuntimeError("rate limited")
+
+    with pytest.raises(RuntimeError):
+        await _drain(
+            [Task(first), Task(second), Task(third)], PipelineContext(pipeline_run_id=uuid4())
+        )
+
+    errored = _task_events(events, "Errored")
+    assert [props["task_name"] for _, props in errored] == ["third"]
+    assert errored[0][1]["exception_type"] == "RuntimeError"
+    assert len([n for n, _ in _pipeline_events(events) if n == "Pipeline Item Errored"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_errored_carries_the_cause_under_the_wrapper_and_the_provider_status(events):
+    """cognee wraps provider errors (``raise LLMQuotaExceededError(...) from error``);
+    the event names the cause and its HTTP status, so a 429 reads as a 429."""
+
+    class RateLimitError(Exception):
+        status_code = 429
+
+    class LLMQuotaExceededError(Exception):
+        pass
+
+    async def extract(data):
+        try:
+            raise RateLimitError(SECRET_MESSAGE)
+        except RateLimitError as error:
+            raise LLMQuotaExceededError("quota") from error
+
+    with pytest.raises(LLMQuotaExceededError):
+        await _drain([Task(extract)], PipelineContext(pipeline_run_id=uuid4()))
+
+    (pipeline_errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
+    ((_, task_errored),) = _task_events(events, "Errored")
+    for props in (pipeline_errored, task_errored):
+        assert props["exception_type"] == "LLMQuotaExceededError"
+        assert props["exception_cause"] == "RateLimitError"
+        assert props["exception_chain"] == ["LLMQuotaExceededError", "RateLimitError"]
+        assert props["status_code"] == 429
+    for _, props in events:
+        assert SECRET_MESSAGE not in repr(props)
+
+
+@pytest.mark.asyncio
+async def test_every_pipeline_event_carries_the_data_item_profile(events):
+    """cognify runs one pipeline per ``Data`` item: its loader, extension, size and
+    token count travel as closed labels on Started, Completed and Errored alike."""
+    item = SimpleNamespace(
+        loader_engine="pypdf_loader",
+        extension=".PDF",
+        data_size=2_500_000,
+        token_count=42_000,
+        name="customer-secrets-2026.pdf",
+    )
+
+    async def identity(data):
+        return data
+
+    async for _ in telemetry_module.run_tasks_with_telemetry(
+        [Task(identity)],
+        [item],
+        USER,
+        "cognify_pipeline",
+        ctx=PipelineContext(pipeline_run_id=uuid4()),
+    ):
+        pass
+
+    for _, props in _pipeline_events(events):
+        assert props["item_count"] == 1
+        assert props["item_loader"] == "pypdf_loader"
+        assert props["item_extension"] == "pdf"
+        assert props["item_size_bucket"] == "1mb_10mb"
+        assert props["item_token_bucket"] == "10k_100k"
+        assert "customer-secrets" not in repr(props)
+
+
+@pytest.mark.parametrize(
+    "data, expected",
+    [
+        ([1], {"item_count": 1}),  # no Data attributes: the count only
+        ([1, 2, 3], {"item_count": 3}),
+        ("not a list", {}),
+        (None, {}),
+        (
+            [SimpleNamespace(loader_engine="My Loader!", extension=".tar.gz", data_size=0)],
+            {
+                "item_count": 1,
+                "item_loader": "other",
+                "item_extension": "other",  # two dots left after the strip
+                "item_size_bucket": "lt_10kb",
+            },
+        ),
+        (
+            [SimpleNamespace(data_size=250_000_000, token_count=3_000_000)],
+            {"item_count": 1, "item_size_bucket": "gt_100mb", "item_token_bucket": "gt_1m"},
+        ),
+        (
+            [SimpleNamespace(data_size="big", token_count=-1)],
+            {"item_count": 1},  # not a count, not a size
+        ),
+    ],
+)
+def test_item_profile_is_closed_labels_or_nothing(data, expected):
+    assert telemetry_module.data_item_telemetry_properties(data) == expected
+
+
+def test_item_profile_survives_an_attribute_that_raises():
+    class Expired:
+        @property
+        def loader_engine(self):
+            raise RuntimeError("detached instance")
+
+        token_count = 12
+
+    assert telemetry_module.data_item_telemetry_properties([Expired()]) == {
+        "item_count": 1,
+        "item_token_bucket": "lt_1k",
+    }
+
+
+def _item_events(tasks):
+    return data_item_module.run_tasks_data_item_regular(
+        data_item=1,
+        dataset=SimpleNamespace(id=uuid4(), name="dataset"),
+        tasks=tasks,
+        pipeline_id="cognify_pipeline",
+        pipeline_run_id=str(uuid4()),
+        ctx=None,
+        user=USER,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_failed_progress_push_closes_the_item_chain_at_once(events, monkeypatch):
+    """Item runner, telemetry wrapper and task close as soon as the drain loop
+    stops, so the item's terminal event goes out now, not at garbage collection."""
+    closed = _stub_task_runner(monkeypatch)
+
+    def broken_push(*_args, **_kwargs):
+        raise RuntimeError("progress queue broken")
+
+    monkeypatch.setattr(data_item_module, "push_to_queue", broken_push)
+
+    with pytest.raises(RuntimeError, match="progress queue broken"):
+        await data_item_module._drain_item_events(
+            _item_events([]), None, [], str(uuid4()), progress_state=None
+        )
+
+    assert closed.is_set()
+    names = [name for name, _ in _pipeline_events(events)]
+    assert names == ["Pipeline Item Started", "Pipeline Item Errored"]
+    (errored,) = [p for n, p in _pipeline_events(events) if n == "Pipeline Item Errored"]
+    assert errored["exception_type"] == "GeneratorExit"

@@ -709,3 +709,187 @@ async def test_administers_tenant_denial_logs_at_debug_not_error(caplog):
 
     assert result is False
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+async def _seed_tenantless_share():
+    """Three users with no tenant: A owns X, B owns Y, and C holds a read grant
+    on both but owns only Z, which has no ACL row at all. The same DB also holds
+    the tenant from ``_seed`` that none of them belongs to."""
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Dataset
+    from cognee.modules.users.models import ACL, User
+
+    owner_a, owner_b, caller = uuid4(), uuid4(), uuid4()
+    shared_x, shared_y, owned_z = uuid4(), uuid4(), uuid4()
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        for user_id in (owner_a, owner_b, caller):
+            session.add(
+                User(
+                    id=user_id,
+                    email=f"{user_id}@example.com",
+                    hashed_password="x",
+                    is_active=True,
+                    is_superuser=False,
+                    is_verified=True,
+                    tenant_id=None,
+                )
+            )
+        await session.flush()
+
+        session.add_all(
+            [
+                Dataset(id=shared_x, name="x", owner_id=owner_a),
+                Dataset(id=shared_y, name="y", owner_id=owner_b),
+                Dataset(id=owned_z, name="z", owner_id=caller),
+            ]
+        )
+        await session.flush()
+
+        read_id = await _permission_id(session, "read")
+        session.add_all(
+            [
+                ACL(principal_id=caller, permission_id=read_id, dataset_id=shared_x),
+                ACL(principal_id=caller, permission_id=read_id, dataset_id=shared_y),
+            ]
+        )
+        await session.commit()
+
+    return {
+        "owner_ids": (owner_a, owner_b),
+        "caller_id": caller,
+        "shared_ids": (shared_x, shared_y),
+        "owned_id": owned_z,
+    }
+
+
+async def _tenantless_caller_graph(seed):
+    from sqlalchemy import select
+
+    from cognee.api.v1.visualize.memory_provenance import get_memory_provenance_graph
+    from cognee.api.v1.visualize.routers.get_schema_router import _provenance_scope
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.users.models import User
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        caller = (
+            (await session.execute(select(User).where(User.id == seed["caller_id"])))
+            .scalars()
+            .one()
+        )
+        tenant_ids, user_ids, dataset_ids = await _provenance_scope(caller)
+
+    nodes, _edges = await get_memory_provenance_graph(
+        scope_tenant_ids=tenant_ids,
+        scope_user_ids=user_ids,
+        scope_dataset_ids=dataset_ids,
+    )
+    by_type: dict[str, set[str]] = {}
+    for node_id, props in nodes:
+        by_type.setdefault(props.get("type"), set()).add(node_id)
+    return by_type
+
+
+@pytest.mark.asyncio
+async def test_tenantless_caller_sees_exactly_the_datasets_shared_with_them():
+    """Issue #5110: with no tenant, the scope used to be ownership, so a caller
+    who owns nothing but holds read grants got no Dataset nodes while
+    `/datasets` and `/visualize/brains` listed every shared dataset.
+
+    The scope is exactly what `/datasets` lists: Z, which the caller owns but
+    holds no read grant on, stays out, and nothing from the unrelated tenant
+    seeded alongside leaks in."""
+    await _seed()  # an unrelated tenant in the same database
+    seed = await _seed_tenantless_share()
+
+    by_type = await _tenantless_caller_graph(seed)
+
+    assert "Tenant" not in by_type
+    expected_datasets = {f"dataset:{dataset_id}" for dataset_id in seed["shared_ids"]}
+    assert by_type.get("Dataset", set()) == expected_datasets
+    expected_users = {f"user:{user_id}" for user_id in (*seed["owner_ids"], seed["caller_id"])}
+    assert by_type.get("User", set()) == expected_users
+
+
+@pytest.mark.asyncio
+async def test_dataset_only_scope_lists_only_the_tenants_of_its_datasets():
+    """Without a tenant scope, the Tenant query is narrowed to the tenants the
+    in-scope datasets belong to; unfiltered it named every tenant in the
+    database."""
+    from cognee.api.v1.visualize.memory_provenance import get_memory_provenance_graph
+
+    in_scope = await _seed()
+    await _seed()  # a second tenant, out of scope
+
+    nodes, _edges = await get_memory_provenance_graph(scope_dataset_ids=[in_scope["dataset_id"]])
+
+    tenants = {node_id for node_id, props in nodes if props.get("type") == "Tenant"}
+    assert tenants == {f"tenant:{in_scope['tenant_id']}"}
+
+
+@pytest.mark.asyncio
+async def test_member_removed_from_tenant_cannot_see_it_through_an_owned_dataset():
+    """remove_user_from_tenant revokes the user's grants on the tenant's
+    datasets but leaves owner_id on the ones they created there. After
+    select_tenant(None), that ownership must not bring the dataset back into
+    scope, and with it the tenant's name, roles, members and grants."""
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Dataset
+    from cognee.modules.users.models import ACL, Role, Tenant, User, UserRole, UserTenant
+
+    tenant_id, tenant_owner, removed, colleague = uuid4(), uuid4(), uuid4(), uuid4()
+    role_id, dataset_id = uuid4(), uuid4()
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        session.add(Tenant(id=tenant_id, name="Acme", owner_id=tenant_owner))
+        for user_id, user_tenant_id in (
+            (tenant_owner, tenant_id),
+            (colleague, tenant_id),
+            # Already removed from the tenant and switched to no tenant.
+            (removed, None),
+        ):
+            session.add(
+                User(
+                    id=user_id,
+                    email=f"{user_id}@example.com",
+                    hashed_password="x",
+                    is_active=True,
+                    is_superuser=False,
+                    is_verified=True,
+                    tenant_id=user_tenant_id,
+                )
+            )
+        await session.flush()
+
+        session.add_all(
+            [
+                UserTenant(user_id=user_id, tenant_id=tenant_id)
+                for user_id in (tenant_owner, colleague)
+            ]
+        )
+        session.add(Role(id=role_id, name="payroll", tenant_id=tenant_id))
+        await session.flush()
+        session.add(UserRole(user_id=colleague, role_id=role_id))
+
+        # Created by `removed` while a member; it stays in the tenant.
+        session.add(Dataset(id=dataset_id, name="plans", owner_id=removed, tenant_id=tenant_id))
+        await session.flush()
+
+        read_id = await _permission_id(session, "read")
+        session.add_all(
+            [
+                ACL(principal_id=role_id, permission_id=read_id, dataset_id=dataset_id),
+                ACL(principal_id=colleague, permission_id=read_id, dataset_id=dataset_id),
+            ]
+        )
+        await session.commit()
+
+    by_type = await _tenantless_caller_graph({"caller_id": removed})
+
+    assert f"dataset:{dataset_id}" not in by_type.get("Dataset", set())
+    assert "Tenant" not in by_type
+    assert "Role" not in by_type
+    assert f"user:{colleague}" not in by_type.get("User", set())

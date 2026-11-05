@@ -106,9 +106,8 @@ async def test_add_and_get_node(adapter):
     kg = _load_demo_kg()
     node = kg.nodes[0]  # Alice
 
-    # Use add_nodes (batch) with a single node — add_node uses a
-    # different Cypher path that has a known Kuzu compatibility issue.
-    await adapter.add_nodes([node])
+    # add_node delegates to add_nodes, so the single-node path is the batch path.
+    await adapter.add_node(node)
 
     result = await adapter.get_node(node.id)
     assert result is not None
@@ -515,6 +514,19 @@ async def test_get_graph_metrics(adapter):
     metrics = await adapter.get_graph_metrics()
     assert metrics["num_nodes"] == len(kg.nodes)
     assert metrics["num_edges"] == len(kg.edges)
+
+
+@pytest.mark.asyncio
+async def test_get_graph_counts(adapter):
+    assert await adapter.get_graph_counts() == (0, 0)
+
+    kg = _load_demo_kg()
+    await adapter.add_nodes(kg.nodes)
+
+    edge_rows = [(e.source_node_id, e.target_node_id, e.relationship_name, {}) for e in kg.edges]
+    await adapter.add_edges(edge_rows)
+
+    assert await adapter.get_graph_counts() == (len(kg.nodes), len(kg.edges))
 
 
 # ---------------------------------------------------------------------------

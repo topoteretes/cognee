@@ -40,7 +40,6 @@ def incremental_env():
         **incremental_test_backend_env(),
         CACHE_BACKEND="sqlite",
         MOCK_EMBEDDING="true",
-        TRIPLET_EMBEDDING="true",
         TELEMETRY_DISABLED="1",
         DATA_ROOT_DIRECTORY=str(root / "data"),
         SYSTEM_ROOT_DIRECTORY=str(root / "system"),

@@ -18,9 +18,10 @@ did not complete or their document is gone, and swept by ``cleanup`` when the
 document or its memory is deleted.
 
 Scope: evidence is captured only where document chunks are stored
-(``add_data_points`` during cognify). Edges from contradiction detection,
-``improve()`` enrichment, session bridging, and the code-graph route carry no
-evidence rows yet; ``evidence_kind`` is the hook for adding them.
+(``add_data_points`` during cognify). Edges from ``improve()`` enrichment,
+session bridging, and the code-graph route carry no
+evidence rows yet; conflict review also writes ``conflict_*`` links and Entity
+descriptions without evidence. ``evidence_kind`` is the hook for adding it.
 """
 
 from .cleanup import delete_edge_evidence

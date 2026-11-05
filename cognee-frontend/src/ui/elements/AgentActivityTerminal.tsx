@@ -4,39 +4,13 @@ import React, { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useUser } from "@/modules/users/UserContext";
-import { SEARCH_SESSION_PREFIX } from "@/modules/sessions/getSessions";
+import { SEARCH_SESSION_PREFIX, sumTokens } from "@/modules/sessions/getSessions";
 
-// `kind` is the backend's own discriminator between a pipeline run
-// (pipeline_name set) and a single memory operation — recall/search/remember/
-// forget/improve/delete/prune — which reports pipeline_name: null instead.
-// Every consumer that only cares about pipelines (the onboarding checklist,
-// the "ran <pipeline>" log line) must branch on `kind`, not on pipeline_name
-// truthiness, so it keeps working if the backend ever adds a third kind.
-export interface PipelineRun {
-  id: string;
-  pipeline_name: string | null;
-  status: string;
-  dataset_id: string | null;
-  dataset_name: string | null;
-  owner_id: string | null;
-  owner_email: string | null;
-  created_at: string | null;
-  pipeline_run_id: string | null;
-  kind: "pipeline" | "operation";
-  operation_name: string | null;
-  origin: string | null;
-  outcome: string | null;
-  // Independently nullable: null means "not measured", 0 means "measured
-  // zero" — never conflate the two when summing or displaying these.
-  tokens_in: number | null;
-  tokens_out: number | null;
-  started_at: string | null;
-  ended_at: string | null;
-  user_id: string | null;
-  session_id: string | null;
-  parent_operation_id: string | null;
-  background: boolean | null;
-}
+// The wire shape of GET /v1/activity/pipeline-runs now lives in the sessions
+// module, alongside SessionRow and this endpoint's other helpers — a module
+// must not import from `@/ui`, and normalizeActivityRows needs the type.
+// Re-exported here so the existing importers of this path keep working.
+
 
 export type Range = "24h" | "7d" | "30d";
 
@@ -44,6 +18,14 @@ export type Range = "24h" | "7d" | "30d";
 // module in. Imported as well as re-exported: a bare `export ... from` would
 // not bring the name into this module's own scope, and it is used below.
 import { timeAgo } from "@/utils/timeAgo";
+import { agentDisplayName } from "@/modules/agents/getAgents";
+import type { PipelineRun } from "@/modules/sessions/getSessions";
+
+/** Re-exported for the importers that predate the type moving into
+ *  getSessions, the OSS panel stubs among them: without this they import a
+ *  name this module declares but does not expose, which fails the synced
+ *  type-check gate rather than anything local. */
+export type { PipelineRun };
 
 export { timeAgo };
 
@@ -53,6 +35,12 @@ function pipelineLabel(name: string): string {
   if (name.includes("search")) return "cognee.search";
   if (name.includes("recall")) return "cognee.recall";
   return name;
+}
+
+/** agentDisplayName, tolerant of a roster miss. Keeps the two session sites in
+ *  this file from disagreeing about whether the field can be absent. */
+function agentDisplayName2(agentType: string | undefined): string | null {
+  return agentType ? agentDisplayName(agentType) : null;
 }
 
 export function ownerDisplayName(email: string | null): string {
@@ -179,7 +167,7 @@ function parseQATime(t: string | null): number | null {
 type DatasetResult = { dataset: string | null; text: string };
 
 // Boilerplate "nothing found" completions returned by datasets that hold no
-// relevant knowledge — dropped so one query only shows brains that answered.
+// relevant knowledge — dropped so one query only shows datasets that answered.
 const NO_ANSWER_PATTERNS = [
   /no (relevant |specific |such )?(information|data|context|knowledge|results?|answer)/i,
   /\b(does not|doesn'?t|do not|don'?t)\b[^.]{0,60}\b(contain|include|provide|mention|have|appear)/i,
@@ -392,7 +380,10 @@ export function AgentActivityTerminal({
   const MAX_AGENTS = 2;
   function agentOf(ev: TermEvent): string | null {
     if (ev.kind === "agentQuery") return ev.label;
-    if (ev.kind === "session") return ev.agent?.agent_type ?? (ev.s.user_id?.includes("@") ? ownerDisplayName(ev.s.user_id) : ev.s.session_id);
+    // agentDisplayName, and no email fallback: a session user_id is a
+    // stringified UUID (SessionRecord.user_id is a UUID column), so the
+    // `includes("@")` branch that used to sit here could never be true.
+    if (ev.kind === "session") return agentDisplayName2(ev.agent?.agent_type) ?? ev.s.session_id;
     if (ev.kind === "run") { const o = ownerDisplayName(ev.r.owner_email); return o === "You" || o === "System" ? null : o; }
     return null; // userQuery — that's "You", never counted as an agent
   }
@@ -860,7 +851,7 @@ export function AgentActivityTerminal({
               // ── Session lifecycle: an actor connected to memory ──
               if (ev.kind === "session") {
                 const s = ev.s;
-                const agentType = ev.agent?.agent_type ?? (s.user_id.includes("@") ? ownerDisplayName(s.user_id) : null);
+                const agentType = agentDisplayName2(ev.agent?.agent_type);
                 const actorName = agentType ?? s.session_id;
                 const isRunning = s.effective_status === "running";
                 const isFailed = s.effective_status === "failed" || s.error_count > 0;
@@ -872,7 +863,7 @@ export function AgentActivityTerminal({
                     <span style={{ color: "#6C7086", flexShrink: 0 }}>{actorName}</span>
                     <span style={{ color: statusColor, flexShrink: 0 }}>{statusLabel}</span>
                     {s.error_count > 0 && <span style={{ color: "#F38BA8", flexShrink: 0 }}>{s.error_count} error{s.error_count !== 1 ? "s" : ""}</span>}
-                    {(s.tokens_in + s.tokens_out) > 0 && <span style={{ color: "#45475A", flexShrink: 0 }}>{(s.tokens_in + s.tokens_out).toLocaleString()} tok</span>}
+                    {(sumTokens(s.tokens_in, s.tokens_out) ?? 0) > 0 && <span style={{ color: "#45475A", flexShrink: 0 }}>{sumTokens(s.tokens_in, s.tokens_out)?.toLocaleString()} tok</span>}
                     {s.last_activity_at && <span style={{ color: "#45475A", flexShrink: 0 }}>{timeAgo(s.last_activity_at)}</span>}
                     <span style={{ flex: 1, height: 1, background: "#2A2A3E", minWidth: 24 }} />
                   </div>
@@ -892,12 +883,12 @@ export function AgentActivityTerminal({
               let reason = "";
               let body: React.ReactNode = null;
               if (ev.kind === "userQuery") {
-                const scope = selectedDataset ? selectedDataset.name : `${datasets.length} ${datasets.length === 1 ? "brain" : "brains"}`;
+                const scope = selectedDataset ? selectedDataset.name : `${datasets.length} ${datasets.length === 1 ? "dataset" : "datasets"}`;
                 if (ev.searching) { outcome = "running"; }
                 else if (ev.error) { outcome = "error"; reason = ev.errorMessage || "check your connection"; }
                 else if (ev.results && ev.results.length > 0) {
                   outcome = "hit";
-                  reason = `${ev.results.length} ${ev.results.length === 1 ? "brain" : "brains"} answered · searched ${scope}`;
+                  reason = `${ev.results.length} ${ev.results.length === 1 ? "dataset" : "datasets"} answered · searched ${scope}`;
                   body = (
                     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                       {ev.results.map((r, i) => (
@@ -908,7 +899,7 @@ export function AgentActivityTerminal({
                       ))}
                     </div>
                   );
-                } else { outcome = "empty"; reason = `no brain returned relevant knowledge · searched ${scope}`; }
+                } else { outcome = "empty"; reason = `no dataset returned relevant knowledge · searched ${scope}`; }
               } else {
                 const isRemember = ev.source === "remember";
                 if (ev.answer && !isNoAnswer(ev.answer)) {

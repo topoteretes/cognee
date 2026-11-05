@@ -1,7 +1,6 @@
 from pydantic_settings import SettingsConfigDict
 
 from cognee.modules.integrations.google.google_settings import GoogleSettings
-from cognee.modules.integrations.google.google_settings import require as _require
 
 
 class GoogleDriveSettings(GoogleSettings):
@@ -10,8 +9,8 @@ class GoogleDriveSettings(GoogleSettings):
     One Google Cloud OAuth client is used by every connecting account; these
     values identify that single client. Secrets default to empty strings
     rather than failing at import so that deployments without Drive configured
-    (and unit tests) still boot — consumers call :func:`require` at use time
-    instead, which fails loudly per missing value.
+    (and unit tests) still boot; each value is checked when used
+    (``GoogleOAuthIntegration._require``), which fails loudly per missing value.
 
     ``client_id``/``client_secret``/``redirect_uri``/``frontend_base_url``
     come from :class:`IntegrationSettings`; the field below is the one thing
@@ -33,13 +32,3 @@ class GoogleDriveSettings(GoogleSettings):
 
 
 google_drive_settings = GoogleDriveSettings()
-
-
-def require(field_name: str) -> str:
-    """Return a settings value, refusing to proceed when it is unset.
-
-    A missing value must never degrade into a token exchange with empty client
-    credentials or a state signed with an empty key — both would fail in
-    confusing, downstream ways instead of naming the actual problem.
-    """
-    return _require(google_drive_settings, field_name, "GOOGLE_DRIVE_")

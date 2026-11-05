@@ -13,8 +13,7 @@ Notes:
   with the same identity values merge into one graph node across chunks and
   runs. Set `"identity_fields": []` on an entity to opt out.
 - Custom graph models skip ontology grounding and the extra dedup passes of
-  the default KnowledgeGraph path, and do not compose with
-  `functional_relationships`.
+  the default KnowledgeGraph path.
 
 Requires a configured LLM (e.g. LLM_API_KEY) for the cognify step.
 """

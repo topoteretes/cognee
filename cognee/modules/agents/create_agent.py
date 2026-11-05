@@ -2,11 +2,24 @@ from sqlalchemy import update
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.api_key.create_api_key import create_api_key
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import create_user
 from cognee.modules.users.models.User import User
 
 
-async def create_agent(name: str, parent_user: User) -> tuple[User, str]:
+async def create_agent(
+    name: str, parent_user: User, *, issue_api_key: bool = True
+) -> tuple[User, str | None]:
+    """Create an agent sub-user of ``parent_user``, with an API key unless told not to.
+
+    ``issue_api_key=False`` returns ``(agent, None)`` for callers that mint the
+    agent's keys themselves (plugin provisioning adds each key through
+    ``add_plugin_agent_key``, under the agent's key cap).
+    """
+    # Agents are one level deep: an agent cannot create agents of its own.
+    if parent_user.parent_user_id is not None:
+        raise PermissionDeniedError("An agent cannot create agents.")
+
     sanitized_name = name.lower().replace(" ", "-")
     internal_email = f"{sanitized_name}+{parent_user.id}@cognee.agent"
 
@@ -23,6 +36,9 @@ async def create_agent(name: str, parent_user: User) -> tuple[User, str]:
             values["tenant_id"] = parent_user.tenant_id
         await session.execute(update(User).where(User.id == agent_user.id).values(**values))
         await session.commit()
+
+    if not issue_api_key:
+        return agent_user, None
 
     agent_api_key = await create_api_key(agent_user, sanitized_name)
 

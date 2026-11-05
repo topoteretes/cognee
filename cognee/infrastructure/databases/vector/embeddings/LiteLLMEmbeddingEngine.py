@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import re
+import warnings
 from urllib.parse import urlparse
 
 import httpx
@@ -17,9 +18,20 @@ from tenacity import (
 
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
+    EmbeddingEncodingError,
     EmbeddingException,
 )
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
+    EmbeddingEngine,
+    EmbeddingResult,
+)
+from cognee.infrastructure.databases.vector.embeddings.encoding import (
+    ENCODING_FORMAT_HINT,
+    EncodingFormat,
+    decode_embedding,
+    rejects_encoding_format,
+    resolve_encoding_format,
+)
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
     litellm_input_limit,
@@ -29,6 +41,7 @@ from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
+    count_input_tokens,
     handle_embedding_response,
     sanitize_embedding_text_inputs,
 )
@@ -39,6 +52,50 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 litellm.set_verbose = False
+
+# litellm dumps the openai SDK response model, whose embedding field is typed
+# list[float], so a base64 reply trips a pydantic serializer warning: one warning per
+# dump, one line per vector. Only a warning made entirely of such lines is ignored, so
+# any other serializer problem, in the same dump or anywhere else in the process, is
+# still shown. Line shapes: pydantic 2.10 ("but got `str`"), 2.11 (no field name) and
+# 2.12+ (field_name='embedding'). Before 2.12 no field is named, so there a base64-looking
+# string in any list[float] field is ignored too. pydantic shortens long values with "...".
+_BASE64_VALUE = r"'[A-Za-z0-9+/=.]+'"
+_BASE64_SERIALIZER_LINE = (
+    r"Expected `list\[float\]` but got `str` with value `" + _BASE64_VALUE + r"` - "
+    r"serialized value may not be as expected"
+    r"|PydanticSerializationUnexpectedValue\(Expected `list\[float\]` - serialized value "
+    r"may not be as expected \[(?:field_name='embedding', )?input_value="
+    + _BASE64_VALUE
+    + r", input_type=str\]\)"
+)
+_BASE64_SERIALIZER_WARNING = (
+    r"Pydantic serializer warnings:(?:\n  (?:" + _BASE64_SERIALIZER_LINE + r"))+\Z"
+)
+
+
+def _ignore_base64_serializer_warning() -> None:
+    """Put the filter for that warning first among the warning filters, unless it is.
+
+    Called before every base64 request rather than once at import. A filter added inside
+    warnings.catch_warnings() is gone when the block exits (pytest runs every test in
+    one), and a filter added after it, such as "error", would win and turn the warning
+    into a failed embedding call.
+    """
+    # With context-aware warnings (Python 3.14), catch_warnings() keeps its filters in a
+    # context variable while warnings.filters stays the outer list: read the list in effect.
+    get_filters = getattr(warnings, "_get_filters", None)
+    filters = get_filters() if get_filters is not None else warnings.filters
+    first = filters[0] if filters else None
+    if (
+        first is not None
+        and first[0] == "ignore"
+        and getattr(first[1], "pattern", None) == _BASE64_SERIALIZER_WARNING
+    ):
+        return
+    warnings.filterwarnings("ignore", message=_BASE64_SERIALIZER_WARNING, category=UserWarning)
+
+
 logger = get_logger("LiteLLMEmbeddingEngine")
 
 observe = get_observe()
@@ -94,7 +151,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     embedding calls.
 
     Public methods:
-    - embed_text: Embed a list of strings into vector representations.
+    - embed_text: Embed a list of strings; returns their vectors and the input-token count.
     - get_vector_size: Retrieve the size of the embedding vectors.
     - get_tokenizer: Load the appropriate tokenizer for the specified model.
     """
@@ -118,6 +175,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         max_completion_tokens: int | None = None,
         batch_size: int = 100,
         input_type: str | None = None,
+        encoding_format: EncodingFormat | None = None,
     ):
         self.api_key = api_key
         self.endpoint = endpoint
@@ -134,6 +192,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         # providers that don't recognize the field (e.g. plain OpenAI).
         self.input_type = input_type
         self._uses_nvidia_nim = _uses_nvidia_nim(self.provider, self.model)
+        self.encoding_format = resolve_encoding_format(model, endpoint, encoding_format)
+        # The hint names a setting, so it only applies when the user set it.
+        self._base64_configured = encoding_format == "base64"
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
@@ -176,6 +237,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         # wrapping hides the class: see embeddings/retry_config.py.
         retry=embedding_retry_condition(
             EmbeddingContextWindowTooSmallError,
+            EmbeddingEncodingError,
             litellm.exceptions.BadRequestError,
             litellm.exceptions.NotFoundError,
             litellm.exceptions.UnprocessableEntityError,
@@ -186,9 +248,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: list[str]) -> list[list[float]]:
+    async def embed_text(self, text: list[str]) -> EmbeddingResult:
         """
-        Embed a list of text strings into vector representations.
+        Embed a list of text strings; returns their vectors and the input-token count.
 
         If the input exceeds the model's context window, the method will recursively split the
         input and combine the results. It handles both mock and live embedding scenarios,
@@ -203,7 +265,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         Returns:
         --------
 
-            - List[List[float]]: A list of vectors representing the embedded texts.
+            - EmbeddingResult: A vector per input text and the input tokens consumed.
         """
 
         sanitized_text_input = sanitize_embedding_text_inputs(text)
@@ -213,7 +275,10 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 response = {
                     "data": [{"embedding": [0.0] * self.dimensions} for _ in sanitized_text_input]
                 }
-                return [data["embedding"] for data in response["data"]]
+                # No provider call, so nothing consumed.
+                return EmbeddingResult(
+                    vectors=[data["embedding"] for data in response["data"]], tokens=0
+                )
             else:
                 async with embedding_rate_limiter_context_manager():
                     embedding_kwargs = {
@@ -224,9 +289,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         "api_version": self.api_version,
                     }
                     # Older LiteLLM releases serialize an omitted encoding format as null,
-                    # which OpenRouter rejects (it only accepts "float"/"base64"). Cognee
-                    # always consumes float vectors, so make the valid format explicit for
-                    # every OpenRouter route: the "openrouter/" model prefix, an explicit
+                    # which OpenRouter rejects (it only accepts "float"/"base64"). Unless
+                    # this engine requests base64 (see embeddings/encoding.py), make
+                    # "float" explicit for every OpenRouter route: the "openrouter/" model prefix, an explicit
                     # provider, or a custom endpoint aimed at openrouter.ai. The last case
                     # (an unprefixed model + endpoint) is driven through litellm's OpenAI
                     # handler -- the branch that historically injected the null -- so it is
@@ -238,7 +303,10 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         or (self.model or "").lower().startswith("openrouter/")
                         or "openrouter.ai" in (self.endpoint or "").lower()
                     )
-                    if routed_to_openrouter:
+                    if self.encoding_format == "base64":
+                        embedding_kwargs["encoding_format"] = "base64"
+                        _ignore_base64_serializer_warning()
+                    elif routed_to_openrouter:
                         embedding_kwargs["encoding_format"] = "float"
 
                     # Pass through target embedding dimensions when supported.
@@ -266,8 +334,14 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         timeout=300.0,
                     )
 
-                embedding_response = [data["embedding"] for data in response.data]
-                return handle_embedding_response(text, embedding_response, self.dimensions)
+                embedding_response = [
+                    decode_embedding(data["embedding"], self.encoding_format)
+                    for data in response.data
+                ]
+                return EmbeddingResult(
+                    vectors=handle_embedding_response(text, embedding_response, self.dimensions),
+                    tokens=count_input_tokens(response, sanitized_text_input, self.tokenizer),
+                )
 
         except litellm.exceptions.BadRequestError as error:
             # A spend cap can arrive as a 400 depending on how the proxy maps it, and this
@@ -292,15 +366,20 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 isinstance(error, litellm.exceptions.ContextWindowExceededError)
                 or _EMBED_LENGTH_ERROR_RE.search(str(error))
             ):
+                if self._base64_configured and rejects_encoding_format(error):
+                    logger.error(ENCODING_FORMAT_HINT)
                 raise
             if isinstance(text, list) and len(text) > 1:
                 mid = math.ceil(len(text) / 2)
                 left, right = text[:mid], text[mid:]
-                left_vecs, right_vecs = await asyncio.gather(
+                left_result, right_result = await asyncio.gather(
                     self.embed_text(left),
                     self.embed_text(right),
                 )
-                return left_vecs + right_vecs
+                return EmbeddingResult(
+                    vectors=left_result + right_result,
+                    tokens=left_result.tokens + right_result.tokens,
+                )
 
                 # If caller passed ONE oversize string split the string itself into
                 # half so we can process it
@@ -315,14 +394,18 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 left_part, right_part = s[: third * 2], s[third:]
 
                 # Recursively embed the split parts in parallel
-                (left_vec,), (right_vec,) = await asyncio.gather(
+                left_result, right_result = await asyncio.gather(
                     self.embed_text([left_part]),
                     self.embed_text([right_part]),
                 )
+                (left_vec,), (right_vec,) = left_result, right_result
 
                 # POOL the two embeddings into one
                 pooled = (np.array(left_vec) + np.array(right_vec)) / 2
-                return [pooled.tolist()]
+                return EmbeddingResult(
+                    vectors=[pooled.tolist()],
+                    tokens=left_result.tokens + right_result.tokens,
+                )
 
             logger.error("Embedding input exceeds the model's max length: %s", str(error))
             raise
@@ -375,6 +458,13 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 str(self.model),
                 str(error),
             )
+            if self._base64_configured and rejects_encoding_format(error):
+                logger.error(ENCODING_FORMAT_HINT)
+            raise
+
+        except EmbeddingEncodingError:
+            # Terminal like the branches above: the route answered in another
+            # format, so a retry gets the same answer. Reaches tenacity unwrapped.
             raise
 
         except Exception as error:

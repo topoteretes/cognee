@@ -29,6 +29,7 @@ from cognee.infrastructure.databases.provenance import (
     GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
     GRAPH_DELETE_MODE_KEY,
 )
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
@@ -76,7 +77,7 @@ def _mock_llm_output(text_input, system_prompt, response_model):
 
 async def _fake_embed(self, text):
     """Deterministic zero vectors — values don't matter, only presence/deletion."""
-    return [[0.0] * (self.dimensions or 8) for _ in text]
+    return EmbeddingResult(vectors=[[0.0] * (self.dimensions or 8) for _ in text], tokens=0)
 
 
 async def _graph_names():
@@ -134,7 +135,7 @@ async def _ingest_single_run():
     d2 = r2.data_ingestion_info[0]["data_id"]
     d3 = r3.data_ingestion_info[0]["data_id"]
 
-    cognify_result = await cognee.cognify()
+    cognify_result = await cognee.cognify(extractor="llm")
     dataset_id = next(iter(cognify_result.keys()))
 
     return dataset_id, d1, d2, d3

@@ -28,8 +28,11 @@ PINNED_TOOLS = {
     "recall",
     "forget",
 }
+# Advertised alongside the memory API so clients can discover it (#5275); the
+# same split as CODE_SEARCH_TOOLS in cognee-mcp/tests/test_mcp_server_hardening.py.
+CODE_SEARCH_TOOLS = {"code_search"}
 SEARCH_TRANSFORM_TOOLS = {"search_tools", "call_tool"}
-EXPECTED_TOOLS = PINNED_TOOLS | SEARCH_TRANSFORM_TOOLS
+EXPECTED_TOOLS = PINNED_TOOLS | CODE_SEARCH_TOOLS | SEARCH_TRANSFORM_TOOLS
 
 # Registered but deliberately not advertised; reachable by name and via search.
 # Not exhaustive on purpose — asserted as a subset, so the catalog can change

@@ -70,6 +70,12 @@ class NaturalLanguageRetriever(BaseRetriever):
     - get_completion: Returns a completion based on the query and context.
     """
 
+    # The caller gets the rows the generated Cypher returned, never an LLM answer, so
+    # the pre-retrieval turn analysis has nothing to feed: it could only rewrite the
+    # question or answer it with an acknowledgement in place of the rows (the same
+    # reason the Cypher and chunk retrievers opt out).
+    supports_session_turn_preparation = False
+
     def __init__(
         self,
         system_prompt_path: str = "natural_language_retriever_system.txt",
@@ -200,11 +206,13 @@ class NaturalLanguageRetriever(BaseRetriever):
         Returns:
         --------
 
-            - Optional[Any]: Returns the context retrieved from the graph database based on the
-              query.
+            - Optional[Any]: Always None. The rows travel as the retrieved objects
+              (``SearchResultPayload.result_object``); ``context`` is typed as text and
+              rejects raw graph rows, which failed every search that found something.
         """
-        # TODO: Do we want to process retrieved_objects into a context string?
-        return retrieved_objects
+        # Same shape as CypherSearchRetriever: the rows are the result, there is no
+        # text context to render them into.
+        return None
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any | None = None
@@ -228,7 +236,8 @@ class NaturalLanguageRetriever(BaseRetriever):
         Returns:
         --------
 
-            - Any: Returns the completion derived from the given query and context.
+            - Any: Always None. This retriever does not generate a completion; the
+              caller reads the rows from the retrieved objects.
         """
         # TODO: Do we want to generate a completion using LLM here?
-        return context
+        return None

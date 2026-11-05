@@ -12,6 +12,7 @@ from cognee.infrastructure.databases.provenance.markers import stores_provenance
 from cognee.infrastructure.databases.relational import with_async_session
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.graph.models import Edge, Node
+from cognee.modules.graph.utils.coerce_graph_uuid import coerce_graph_uuid, coerce_graph_uuid_set
 
 # Graph node types and edge relationship names traversed to build the graph
 # bucketing input. On graph-provenance graphs both edges live in relationship_name
@@ -42,17 +43,6 @@ class DatasetEntityCounts:
 class DatasetGraphEntityInput:
     summary_entities: SummaryEntityLoadResult
     entity_counts: DatasetEntityCounts
-
-
-def coerce_graph_uuid(value: str | UUID, field_name: str) -> UUID:
-    try:
-        return UUID(str(value))
-    except (TypeError, ValueError, AttributeError) as error:
-        raise ValueError(f"{field_name} must be a UUID for graph bucketing: {value!r}.") from error
-
-
-def coerce_graph_uuid_set(values: Iterable[str | UUID], field_name: str) -> set[UUID]:
-    return {coerce_graph_uuid(value, field_name) for value in values}
 
 
 async def _resolve_graph_provenance_engine():

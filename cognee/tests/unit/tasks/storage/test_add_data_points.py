@@ -8,13 +8,10 @@ import pytest
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.processing.document_types.Document import Document
-from cognee.modules.engine.models import Triplet
 from cognee.modules.graph.utils import ensure_default_edge_properties
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.storage.add_data_points import (
     InvalidDataPointsInAddDataPointsError,
-    _create_triplets_from_graph,
-    _extract_embeddable_text_from_datapoint,
     add_data_points,
 )
 
@@ -144,36 +141,6 @@ async def test_a_failed_graph_write_indexes_no_vectors(
 
     mock_index_nodes.assert_not_awaited()
     mock_index_edges.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@patch.object(adp_module, "index_graph_edges")
-@patch.object(adp_module, "index_data_points")
-@patch.object(adp_module, "get_unified_engine")
-@patch.object(adp_module, "deduplicate_nodes_and_edges")
-@patch.object(adp_module, "get_graph_from_model")
-async def test_add_data_points_indexes_triplets_when_enabled(
-    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
-):
-    dp1 = SimplePoint(text="source")
-    dp2 = SimplePoint(text="target")
-
-    edge1 = (str(dp1.id), str(dp2.id), "relates", {"edge_text": "describes"})
-
-    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
-    mock_dedup.side_effect = lambda n, e: (n, e)
-    unified, _graph_engine, _vector_engine = _make_unified_mock()
-    mock_get_unified.return_value = unified
-
-    await add_data_points([dp1, dp2], embed_triplets=True)
-
-    assert mock_index_nodes.await_count == 2
-    nodes_arg = mock_index_nodes.await_args_list[0].args[0]
-    triplets_arg = mock_index_nodes.await_args_list[1].args[0]
-    assert nodes_arg == [dp1, dp2]
-    assert len(triplets_arg) == 1
-    assert isinstance(triplets_arg[0], Triplet)
-    mock_index_edges.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -526,148 +493,8 @@ def test_entity_description_not_in_index_fields():
 
     entity_type = EntityType(name="Person", description="A human being")
     entity = Entity(name="Alice", description="A software engineer", is_a=entity_type)
-    text = _extract_embeddable_text_from_datapoint(entity)
     # description is stored but not indexed — only name is embedded
-    assert "Alice" in text
-    assert "A software engineer" not in text
-
-
-def test_extract_embeddable_text_from_datapoint():
-    dp = SimplePoint(text="hello world")
-    text = _extract_embeddable_text_from_datapoint(dp)
-    assert text == "hello world"
-
-
-def test_extract_embeddable_text_with_multiple_fields():
-    class MultiField(DataPoint):
-        title: str
-        description: str
-        metadata: dict = {"index_fields": ["title", "description"]}
-
-    dp = MultiField(title="Test", description="Description")
-    text = _extract_embeddable_text_from_datapoint(dp)
-    assert text == "Test Description"
-
-
-def test_extract_embeddable_text_with_no_index_fields():
-    class NoIndex(DataPoint):
-        text: str
-        metadata: dict = {"index_fields": []}
-
-    dp = NoIndex(text="ignored")
-    text = _extract_embeddable_text_from_datapoint(dp)
-    assert text == ""
-
-
-def test_create_triplets_from_graph():
-    dp1 = SimplePoint(text="source node")
-    dp2 = SimplePoint(text="target node")
-    edge = (str(dp1.id), str(dp2.id), "connects_to", {"edge_text": "links"})
-
-    triplets = _create_triplets_from_graph([dp1, dp2], [edge])
-
-    assert len(triplets) == 1
-    assert isinstance(triplets[0], Triplet)
-    assert triplets[0].from_node_id == str(dp1.id)
-    assert triplets[0].to_node_id == str(dp2.id)
-    assert "source node" in triplets[0].text
-    assert "target node" in triplets[0].text
-
-
-def test_extract_embeddable_text_with_none_datapoint():
-    text = _extract_embeddable_text_from_datapoint(None)
-    assert text == ""
-
-
-def test_extract_embeddable_text_without_metadata():
-    class NoMetadata(DataPoint):
-        text: str
-
-    dp = NoMetadata(text="test")
-    delattr(dp, "metadata")
-    text = _extract_embeddable_text_from_datapoint(dp)
-    assert text == ""
-
-
-def test_extract_embeddable_text_with_whitespace_only():
-    class WhitespaceField(DataPoint):
-        text: str
-        metadata: dict = {"index_fields": ["text"]}
-
-    dp = WhitespaceField(text="   ")
-    text = _extract_embeddable_text_from_datapoint(dp)
-    assert text == ""
-
-
-def test_create_triplets_skips_short_edge_tuples():
-    dp = SimplePoint(text="node")
-    incomplete_edge = (str(dp.id), str(dp.id))
-
-    triplets = _create_triplets_from_graph([dp], [incomplete_edge])
-
-    assert len(triplets) == 0
-
-
-def test_create_triplets_skips_missing_source_node():
-    dp1 = SimplePoint(text="target")
-    edge = ("missing_id", str(dp1.id), "relates", {})
-
-    triplets = _create_triplets_from_graph([dp1], [edge])
-
-    assert len(triplets) == 0
-
-
-def test_create_triplets_skips_missing_target_node():
-    dp1 = SimplePoint(text="source")
-    edge = (str(dp1.id), "missing_id", "relates", {})
-
-    triplets = _create_triplets_from_graph([dp1], [edge])
-
-    assert len(triplets) == 0
-
-
-def test_create_triplets_skips_none_relationship():
-    dp1 = SimplePoint(text="source")
-    dp2 = SimplePoint(text="target")
-    edge = (str(dp1.id), str(dp2.id), None, {})
-
-    triplets = _create_triplets_from_graph([dp1, dp2], [edge])
-
-    assert len(triplets) == 0
-
-
-def test_create_triplets_uses_relationship_name_when_no_edge_text():
-    dp1 = SimplePoint(text="source")
-    dp2 = SimplePoint(text="target")
-    edge = (str(dp1.id), str(dp2.id), "connects_to", {})
-
-    triplets = _create_triplets_from_graph([dp1, dp2], [edge])
-
-    assert len(triplets) == 1
-    assert "connects_to" in triplets[0].text
-
-
-def test_create_triplets_prevents_duplicates():
-    dp1 = SimplePoint(text="source")
-    dp2 = SimplePoint(text="target")
-    edge = (str(dp1.id), str(dp2.id), "relates", {"edge_text": "links"})
-
-    triplets = _create_triplets_from_graph([dp1, dp2], [edge, edge])
-
-    assert len(triplets) == 1
-
-
-def test_create_triplets_skips_nodes_without_id():
-    class NodeNoId:
-        pass
-
-    dp = SimplePoint(text="valid")
-    node_no_id = NodeNoId()
-    edge = (str(dp.id), "some_id", "relates", {})
-
-    triplets = _create_triplets_from_graph([dp, node_no_id], [edge])
-
-    assert len(triplets) == 0
+    assert entity.metadata["index_fields"] == ["name"]
 
 
 def test_ensure_default_edge_properties_preserves_existing_defaults():

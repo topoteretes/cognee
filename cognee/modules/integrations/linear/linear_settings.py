@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
 from cognee.modules.integrations.base import IntegrationSettings
@@ -24,6 +25,13 @@ class LinearSettings(IntegrationSettings):
     # secret (same doubling-up as Slack's signing_secret and GitHub's
     # webhook_secret). Env: LINEAR_WEBHOOK_SECRET
     webhook_secret: str = ""
+
+    # A first sync of a big workspace outlasts one hour of Linear's quota, so a
+    # run stops cleanly and has to be continued. This worker continues a
+    # connection whose last run was cut short by the rate limit or the request
+    # budget. Env: LINEAR_RESUME_SYNC_ENABLED, LINEAR_RESUME_INTERVAL_SECONDS
+    resume_sync_enabled: bool = True
+    resume_interval_seconds: int = Field(default=600, ge=60)
 
 
 linear_settings = LinearSettings()

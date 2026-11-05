@@ -28,12 +28,16 @@ from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
     EmbeddingException,
 )
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
+    EmbeddingEngine,
+    EmbeddingResult,
+)
 from cognee.infrastructure.databases.vector.embeddings.input_limit import (
     init_input_limit,
     sane_limit,
 )
 from cognee.infrastructure.databases.vector.embeddings.utils import (
+    count_input_tokens,
     handle_embedding_response,
     sanitize_embedding_text_inputs,
 )
@@ -49,18 +53,63 @@ logger = get_logger("FastembedEmbeddingEngine")
 observe = get_observe()
 
 
-def fastembed_model_cached(model: str) -> tuple[bool, str, str | None]:
+def resolve_fastembed_cache_dir() -> str:
+    """The directory fastembed keeps its models in, created if it can be.
+
+    Precedence: ``FASTEMBED_CACHE_PATH`` (fastembed's own variable, taken as
+    given) over the Hugging Face hub cache (``HF_HUB_CACHE``, else
+    ``$HF_HOME/hub``, default ``~/.cache/huggingface/hub``), where the GLiNER
+    model is kept too. fastembed downloads through the hub in the same layout,
+    so both local models share one cache and one variable moves both. Left to
+    itself fastembed would use ``fastembed_cache`` under the system temp
+    directory, which is emptied on many hosts at every restart, so the model was
+    downloaded again each time. When the hub cache cannot be created or written
+    to (a read-only home, a sandbox) the temp location is used after all, with a
+    warning, so an embed never fails over where its model is kept.
+
+    Sharing the hub cache has one side effect: when a hub download fails,
+    fastembed falls back to its own bucket and unpacks into ``tmp/`` and
+    ``fast-<name>/`` at the cache root, which ``hf cache scan`` lists as invalid
+    repos. Both belong to fastembed and are safe to leave or delete.
+    """
+    explicit = os.getenv("FASTEMBED_CACHE_PATH")
+    if explicit:
+        return explicit
+
+    from huggingface_hub import constants
+
+    cache_dir = Path(constants.HF_HUB_CACHE)
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        if os.access(cache_dir, os.W_OK):
+            return str(cache_dir)
+        reason = "not writable"
+    except OSError as error:
+        reason = str(error)
+
+    fallback = os.path.join(tempfile.gettempdir(), "fastembed_cache")
+    logger.warning(
+        "fastembed model cache %s is unusable (%s); using %s instead. The model will be "
+        "downloaded again after a restart that clears the temp directory. Set HF_HOME "
+        "or FASTEMBED_CACHE_PATH to a writable location.",
+        cache_dir,
+        reason,
+        fallback,
+    )
+    return fallback
+
+
+def fastembed_model_cached(
+    model: str, cache_dir: str | None = None
+) -> tuple[bool, str, str | None]:
     """Whether fastembed already holds ``model`` locally, its cache dir, and a size hint.
 
-    fastembed resolves its cache the same way: ``FASTEMBED_CACHE_PATH`` or
-    ``fastembed_cache`` under the system temp dir. A model downloaded from the
-    hub lives under ``models--<repo>``; one fetched from fastembed's own
-    bucket under ``fast-<name>``. Zero-network; unknown models report a
-    download with no size.
+    ``cache_dir`` defaults to ``resolve_fastembed_cache_dir()``, the directory
+    the engine hands fastembed. A model downloaded from the hub lives under
+    ``models--<repo>``; one fetched from fastembed's own bucket under
+    ``fast-<name>``. Zero-network; unknown models report a download with no size.
     """
-    cache_dir = Path(
-        os.getenv("FASTEMBED_CACHE_PATH", os.path.join(tempfile.gettempdir(), "fastembed_cache"))
-    )
+    cache_dir = Path(cache_dir or resolve_fastembed_cache_dir())
     description = next(
         (entry for entry in TextEmbedding.list_supported_models() if entry.get("model") == model),
         None,
@@ -127,16 +176,22 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         self.model = model
         self.dimensions = dimensions
         self.batch_size = batch_size
-        cached, cache_dir, size_hint = fastembed_model_cached(model)
+        cache_dir = resolve_fastembed_cache_dir()
+        cached, cache_dir, size_hint = fastembed_model_cached(model, cache_dir)
         log_model_load(
             logger,
             model=model,
             cached=cached,
             cache_dir=cache_dir,
             size_hint=size_hint,
-            location_var="FASTEMBED_CACHE_PATH",
+            # Name the variable that decided the location: HF_HOME has no effect
+            # while FASTEMBED_CACHE_PATH is set.
+            location_var=(
+                "FASTEMBED_CACHE_PATH" if os.getenv("FASTEMBED_CACHE_PATH") else "HF_HOME"
+            ),
         )
-        self.embedding_model = TextEmbedding(model_name=model)
+        # Passed explicitly: fastembed's own default is the system temp directory.
+        self.embedding_model = TextEmbedding(model_name=model, cache_dir=cache_dir)
         pad_to_batch_longest(self.embedding_model)
         # fastembed truncates input at the model's own limit without an error, so
         # chunks must never be sized past it: see input_limit().
@@ -162,9 +217,9 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: list[str]) -> list[list[float]]:
+    async def embed_text(self, text: list[str]) -> EmbeddingResult:
         """
-        Embed the given text into numerical vectors.
+        Embed the given text into numerical vectors; returns them and the input-token count.
 
         This method generates embeddings for a list of text strings. If mocking is enabled, it
         returns zero vectors instead. It handles exceptions by logging the error and raising an
@@ -178,8 +233,8 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         Returns:
         --------
 
-            - List[List[float]]: A list of embeddings, where each embedding is a list of floats
-              representing the vector form of the input text.
+            - EmbeddingResult: A vector per input text and the input tokens, counted with
+              the model's own tokenizer.
         """
         original_texts = text if isinstance(text, list) else [text]
         sanitized_text = sanitize_embedding_text_inputs(original_texts)
@@ -222,7 +277,11 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 f"Failed to index data points using model {self.model}"
             ) from error
 
-        return handle_embedding_response(original_texts, embeddings, self.dimensions)
+        return EmbeddingResult(
+            vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
+            # A mock embeds nothing; fastembed itself reports no usage.
+            tokens=0 if self.mock else count_input_tokens(None, sanitized_text, self.tokenizer),
+        )
 
     input_limit_source = "fastembed model tokenizer"
 
@@ -256,19 +315,22 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             logger.debug("Could not check input length with the fastembed tokenizer", exc_info=True)
             return False
 
-    async def _embed_in_parts(self, original_texts: list[str]) -> list[list[float]]:
+    async def _embed_in_parts(self, original_texts: list[str]) -> EmbeddingResult:
         """Embed over-length input in parts: a batch is split in two, a single text
         into two overlapping halves whose embeddings are pooled. Each part goes back
         through :meth:`embed_text`, which splits further while it is still too long.
         """
         if len(original_texts) > 1:
             mid = math.ceil(len(original_texts) / 2)
-            left_vecs, right_vecs = await asyncio.gather(
+            left_result, right_result = await asyncio.gather(
                 self.embed_text(original_texts[:mid]),
                 self.embed_text(original_texts[mid:]),
             )
-            return handle_embedding_response(
-                original_texts, left_vecs + right_vecs, self.dimensions
+            return EmbeddingResult(
+                vectors=handle_embedding_response(
+                    original_texts, left_result + right_result, self.dimensions
+                ),
+                tokens=left_result.tokens + right_result.tokens,
             )
 
         s = original_texts[0]
@@ -283,12 +345,19 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             self.max_completion_tokens,
         )
         left_part, right_part = s[: third * 2], s[third:]
-        (left_vec,), (right_vec,) = await asyncio.gather(
+        left_result, right_result = await asyncio.gather(
             self.embed_text([left_part]),
             self.embed_text([right_part]),
         )
+        (left_vec,), (right_vec,) = left_result, right_result
         pooled = (np.array(left_vec) + np.array(right_vec)) / 2
-        return handle_embedding_response(original_texts, [pooled.tolist()], self.dimensions)
+        # Tokens are what the model processed, overlaps included - as the hosted
+        # engines that count what they were billed for; with recursive splitting
+        # this can be several times the text's own count.
+        return EmbeddingResult(
+            vectors=handle_embedding_response(original_texts, [pooled.tolist()], self.dimensions),
+            tokens=left_result.tokens + right_result.tokens,
+        )
 
     def get_vector_size(self) -> int:
         """

@@ -10,7 +10,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from cognee.infrastructure.databases.relational import Base
 from cognee.modules.users.exceptions import PermissionDeniedError, UserNotFoundError
-from cognee.modules.users.models import Role, Tenant, User, UserRole, UserTenant
+from cognee.modules.users.models import (
+    PrincipalCapability,
+    Role,
+    Tenant,
+    User,
+    UserRole,
+    UserTenant,
+)
 from cognee.modules.users.models.Principal import Principal
 from cognee.modules.users.tenants.methods.get_user_roles import get_user_roles
 
@@ -32,7 +39,15 @@ async def role_database(monkeypatch):
                     sync_connection,
                     tables=[
                         model.__table__
-                        for model in (Principal, User, Tenant, Role, UserRole, UserTenant)
+                        for model in (
+                            Principal,
+                            User,
+                            Tenant,
+                            Role,
+                            UserRole,
+                            UserTenant,
+                            PrincipalCapability,
+                        )
                     ],
                 )
             )
@@ -61,6 +76,7 @@ async def role_database(monkeypatch):
         for module_path in (
             "cognee.modules.users.tenants.methods.get_user_roles",
             "cognee.modules.users.permissions.methods.get_tenant",
+            "cognee.modules.users.permissions.methods.get_effective_capabilities",
             "cognee.modules.users.permissions.methods.get_user_role_names_in_tenant",
         ):
             monkeypatch.setattr(

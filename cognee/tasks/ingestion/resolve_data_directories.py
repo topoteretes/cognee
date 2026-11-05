@@ -26,12 +26,14 @@ async def resolve_data_directories(
     include_subdirectories: bool = True,
     user=None,
     dataset_id=None,
+    branch: str | None = None,
 ):
     """
     Resolves directories by replacing them with their contained files.
 
     A GitHub/GitLab repository URL (``code_repo_clone_url``) is shallow-cloned
-    and then resolved exactly like a local code project directory, below.
+    (``branch``, when given, instead of the remote's default) and then resolved
+    exactly like a local code project directory, below.
     Other http(s) URLs pass through untouched and are fetched as web pages by
     ``save_data_item_to_storage``.
 
@@ -49,6 +51,7 @@ async def resolve_data_directories(
         include_subdirectories: Whether to include files in subdirectories recursively.
         user: Owner used to pin repo-manifest data ids (optional).
         dataset_id: Dataset used to pin repo-manifest data ids (optional).
+        branch: Branch to clone for each repository URL in ``data`` (optional).
 
     Returns:
         A list of resolved files, DataItems, and binary streams.
@@ -107,7 +110,7 @@ async def resolve_data_directories(
                 from cognee.tasks.code_graph.code_repo import resolve_code_repository_url
 
                 manifest_item, document_paths, _skipped = await resolve_code_repository_url(
-                    item, user=user, dataset_id=dataset_id
+                    item, user=user, dataset_id=dataset_id, branch=branch
                 )
                 resolved_data.append(manifest_item)
                 resolved_data.extend(str(path) for path in document_paths)

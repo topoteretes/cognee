@@ -46,23 +46,9 @@ class _InMemoryRedisList:
         return self.ttls.get(key, -1)
 
 
-@pytest_asyncio.fixture(params=["fs", "sql", "redis"])
+@pytest_asyncio.fixture(params=["sql", "redis"])
 async def cache_adapter(request, tmp_path):
     """Yield each cache adapter behind the same CacheDBInterface surface."""
-    if request.param == "fs":
-        with patch(
-            "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-            return_value={"data_root_directory": str(tmp_path / "fs")},
-        ):
-            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                FSCacheAdapter,
-            )
-
-            adapter = FSCacheAdapter()
-            yield adapter
-            adapter.cache.close()
-        return
-
     if request.param == "sql":
         from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 
@@ -93,7 +79,10 @@ async def test_qa_collection_methods_return_empty_lists_for_empty_sessions(cache
 
 
 @pytest.mark.asyncio
-async def test_latest_qa_entries_respect_last_n_edges_and_chronological_order(cache_adapter):
+@pytest.mark.parametrize("last_n", [0, -1])
+async def test_latest_qa_entries_respect_last_n_edges_and_chronological_order(
+    cache_adapter, last_n
+):
     for index in range(1, 4):
         await cache_adapter.create_qa_entry(
             "user",
@@ -104,12 +93,12 @@ async def test_latest_qa_entries_respect_last_n_edges_and_chronological_order(ca
             qa_id=f"qa-{index}",
         )
 
-    latest_zero = await cache_adapter.get_latest_qa_entries("user", "session", last_n=0)
+    latest_nonpositive = await cache_adapter.get_latest_qa_entries("user", "session", last_n=last_n)
     latest_one = await cache_adapter.get_latest_qa_entries("user", "session", last_n=1)
     latest_many = await cache_adapter.get_latest_qa_entries("user", "session", last_n=5)
     all_entries = await cache_adapter.get_all_qa_entries("user", "session")
 
-    assert latest_zero == []
+    assert latest_nonpositive == []
     assert [entry.qa_id for entry in latest_one] == ["qa-3"]
     assert [entry.qa_id for entry in latest_many] == ["qa-1", "qa-2", "qa-3"]
     assert [entry.qa_id for entry in all_entries] == ["qa-1", "qa-2", "qa-3"]
@@ -136,7 +125,8 @@ async def test_qa_entries_by_ids_returns_empty_or_chronological_matches(cache_ad
 
 
 @pytest.mark.asyncio
-async def test_agent_trace_collections_share_empty_and_last_n_contract(cache_adapter):
+@pytest.mark.parametrize("last_n", [0, -1])
+async def test_agent_trace_collections_share_empty_and_last_n_contract(cache_adapter, last_n):
     assert await cache_adapter.get_agent_trace_session("user", "missing") == []
     assert await cache_adapter.get_agent_trace_session("user", "missing", last_n=1) == []
     assert await cache_adapter.get_agent_trace_feedback("user", "missing") == []
@@ -151,16 +141,17 @@ async def test_agent_trace_collections_share_empty_and_last_n_contract(cache_ada
             session_feedback=f"feedback-{index}",
         )
 
-    latest_zero = await cache_adapter.get_agent_trace_session(
-        "user", "trace-session", last_n=0
+    latest_nonpositive = await cache_adapter.get_agent_trace_session(
+        "user", "trace-session", last_n=last_n
     )
     latest_one = await cache_adapter.get_agent_trace_session("user", "trace-session", last_n=1)
     latest_many = await cache_adapter.get_agent_trace_session("user", "trace-session", last_n=5)
-    feedback_one = await cache_adapter.get_agent_trace_feedback(
-        "user", "trace-session", last_n=1
-    )
+    feedback_one = await cache_adapter.get_agent_trace_feedback("user", "trace-session", last_n=1)
 
-    assert latest_zero == []
+    assert latest_nonpositive == []
+    assert (
+        await cache_adapter.get_agent_trace_feedback("user", "trace-session", last_n=last_n) == []
+    )
     assert [entry.trace_id for entry in latest_one] == ["trace-3"]
     assert [entry.trace_id for entry in latest_many] == ["trace-1", "trace-2", "trace-3"]
     assert feedback_one == ["feedback-3"]

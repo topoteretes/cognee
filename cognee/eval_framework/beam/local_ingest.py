@@ -42,7 +42,6 @@ os.environ["LOG_LEVEL"] = "ERROR"
 os.environ["COGNEE_LOG_FILE"] = "false"
 os.environ["COGNEE_CLI_MODE"] = "true"
 os.environ.setdefault("CACHING", "true")
-os.environ.setdefault("CACHE_BACKEND", "fs")
 os.environ.setdefault("AUTO_FEEDBACK", "true")
 
 
@@ -185,6 +184,7 @@ async def build_global_context_index(args: argparse.Namespace, dataset_name: str
         user=user,
         dataset=dataset_name,
         run_in_background=False,
+        method=args.global_context_method,
         bucketing_strategy=args.global_context_bucketing_strategy,
         max_bucket_size=args.global_context_max_bucket_size,
         rebuild=args.global_context_rebuild,
@@ -473,6 +473,7 @@ def build_report(
             "candidate_concurrency": args.candidate_concurrency,
             "skip_global_context_index": args.skip_global_context_index,
             "parallel_post_processing": args.parallel_post_processing,
+            "global_context_method": args.global_context_method,
             "global_context_bucketing_strategy": args.global_context_bucketing_strategy,
             "global_context_max_bucket_size": args.global_context_max_bucket_size,
             "global_context_rebuild": args.global_context_rebuild,
@@ -595,6 +596,7 @@ def build_parser() -> argparse.ArgumentParser:
             "index may not include the distillate produced by that same session."
         ),
     )
+    parser.add_argument("--global-context-method", default="llm")
     parser.add_argument("--global-context-bucketing-strategy", default="graph")
     parser.add_argument("--global-context-max-bucket-size", type=int, default=4)
     parser.add_argument("--global-context-rebuild", action="store_true")

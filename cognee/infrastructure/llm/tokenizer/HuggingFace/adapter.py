@@ -33,7 +33,7 @@ def _load(model: str) -> tuple[Callable[[str], list[str]], int]:
                 "which can build the tokenizer from the repo's other files, is not installed",
                 name="transformers",
             ) from error
-        from transformers import AutoTokenizer
+        from transformers import AutoTokenizer  # ty: ignore[unresolved-import]
 
         auto = AutoTokenizer.from_pretrained(model)
         return auto.tokenize, auto.num_special_tokens_to_add(pair=False)

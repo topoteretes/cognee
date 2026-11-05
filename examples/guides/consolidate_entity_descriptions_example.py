@@ -1,5 +1,8 @@
 """Consolidate Entity descriptions and EntityType summaries from the graph.
 
+Deprecated: ``examples/guides/review_conflicts.py`` reviews facts instead and leaves
+descriptions as extracted.
+
 Calls consolidate_entity_descriptions_pipeline(), which rewrites each Entity's
 description from its graph neighborhood, then summarizes each EntityType from
 its member Entities and writes is_a edge text.

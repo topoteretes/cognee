@@ -31,6 +31,7 @@ COUNTER_KEYS = (
     "deleted_chunks",
     "added_chunks",
     "reused_chunks",
+    "redated_chunks",
     "kept_chunks",
     "reindexed_chunks",
     "total_chunks",
@@ -85,6 +86,8 @@ class _Stack:
             patch.object(update_module, "add", self.add),
             patch.object(update_module, "cognify", self.cognify),
             patch.object(update_module, "recorded_chunk_budget", self.recorded_budget),
+            patch.object(update_module, "resolve_extractor", lambda value, config: "llm"),
+            patch.object(update_module, "ensure_extractor_runtime", AsyncMock()),
         )
 
     def __enter__(self):
@@ -171,6 +174,7 @@ async def test_incremental_result_keeps_the_old_summary_keys_and_adds_the_new_on
         "deleted_chunks": 3,
         "added_chunks": 4,
         "reused_chunks": 1,
+        "redated_chunks": 2,
         "kept_chunks": 7,
         "reindexed_chunks": 2,
         "total_chunks": 11,
@@ -182,6 +186,9 @@ async def test_incremental_result_keeps_the_old_summary_keys_and_adds_the_new_on
 
     old_summary = {key: value for key, value in summary.items() if key != "pipeline_run_id"}
     assert {key: result[key] for key in old_summary} == old_summary
+    # The re-dating counter reaches the caller: it is the only way to see why
+    # ``added_chunks`` exceeds the edit (SDK-821).
+    assert result["redated_chunks"] == 2
     assert result["fallback"] is None and result["error"] is None
     assert result["pipeline_run_id"] == run_id
     assert (result["data_id"], result["dataset_id"]) == (data_id, dataset_id)
@@ -197,6 +204,7 @@ async def test_unchanged_content_is_reported_as_unchanged():
         "deleted_chunks": 0,
         "added_chunks": 0,
         "reused_chunks": 0,
+        "redated_chunks": 0,
         "kept_chunks": 9,
         "reindexed_chunks": 0,
         "total_chunks": 9,
@@ -225,6 +233,19 @@ async def test_errored_rebuild_is_a_failed_result_not_an_exception():
     assert (result["data_id"], result["dataset_id"]) == (data_id, dataset_id), (
         "a failed result keeps the ids the caller needs to retry"
     )
+
+
+async def test_a_failed_step_after_the_rebuild_is_reported_not_raised():
+    data_id, dataset_id = uuid4(), uuid4()
+    completed = _run(dataset_id)
+    completed.after_run_error = "RuntimeError: compaction"
+    stack = _Stack(data_id, dataset_id, AsyncMock(), completed)
+
+    result = await _update(stack, data_id, dataset_id, chunk_level_diff=False)
+
+    assert result["status"] == "full_rebuild"
+    assert result["pipeline_run_id"] == completed.pipeline_run_id
+    assert result["after_run_error"] == "RuntimeError: compaction"
 
 
 def test_result_schema_round_trips_through_json():

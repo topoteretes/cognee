@@ -1,0 +1,8536 @@
+[
+ {
+  "conversation_index": 0,
+  "sample_id": "conv-26",
+  "window_turns": 6,
+  "windows": 75,
+  "document_count": 76,
+  "chunk_count": 76,
+  "one_chunk_per_document": true,
+  "graph_nodes": 929,
+  "graph_edges": 2872,
+  "remember_seconds": 205.4,
+  "llm_model": "openai/gpt-5-mini",
+  "window_map": [
+   {
+    "session": 1,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D1:1",
+    "last_dia_id": "D1:6",
+    "words": 138
+   },
+   {
+    "session": 1,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D1:7",
+    "last_dia_id": "D1:12",
+    "words": 135
+   },
+   {
+    "session": 1,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D1:13",
+    "last_dia_id": "D1:18",
+    "words": 127
+   },
+   {
+    "session": 2,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D2:1",
+    "last_dia_id": "D2:6",
+    "words": 205
+   },
+   {
+    "session": 2,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D2:7",
+    "last_dia_id": "D2:12",
+    "words": 213
+   },
+   {
+    "session": 2,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D2:13",
+    "last_dia_id": "D2:17",
+    "words": 136
+   },
+   {
+    "session": 3,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D3:1",
+    "last_dia_id": "D3:6",
+    "words": 394
+   },
+   {
+    "session": 3,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D3:7",
+    "last_dia_id": "D3:12",
+    "words": 238
+   },
+   {
+    "session": 3,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D3:13",
+    "last_dia_id": "D3:18",
+    "words": 202
+   },
+   {
+    "session": 3,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D3:19",
+    "last_dia_id": "D3:23",
+    "words": 117
+   },
+   {
+    "session": 4,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D4:1",
+    "last_dia_id": "D4:6",
+    "words": 250
+   },
+   {
+    "session": 4,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D4:7",
+    "last_dia_id": "D4:12",
+    "words": 177
+   },
+   {
+    "session": 4,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D4:13",
+    "last_dia_id": "D4:18",
+    "words": 247
+   },
+   {
+    "session": 5,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D5:1",
+    "last_dia_id": "D5:6",
+    "words": 248
+   },
+   {
+    "session": 5,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D5:7",
+    "last_dia_id": "D5:12",
+    "words": 155
+   },
+   {
+    "session": 5,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D5:13",
+    "last_dia_id": "D5:16",
+    "words": 92
+   },
+   {
+    "session": 6,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D6:1",
+    "last_dia_id": "D6:6",
+    "words": 174
+   },
+   {
+    "session": 6,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D6:7",
+    "last_dia_id": "D6:12",
+    "words": 228
+   },
+   {
+    "session": 6,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D6:13",
+    "last_dia_id": "D6:16",
+    "words": 146
+   },
+   {
+    "session": 7,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D7:1",
+    "last_dia_id": "D7:6",
+    "words": 249
+   },
+   {
+    "session": 7,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D7:7",
+    "last_dia_id": "D7:12",
+    "words": 273
+   },
+   {
+    "session": 7,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D7:13",
+    "last_dia_id": "D7:18",
+    "words": 201
+   },
+   {
+    "session": 7,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D7:19",
+    "last_dia_id": "D7:24",
+    "words": 119
+   },
+   {
+    "session": 7,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D7:25",
+    "last_dia_id": "D7:27",
+    "words": 59
+   },
+   {
+    "session": 8,
+    "part": 1,
+    "parts": 7,
+    "first_dia_id": "D8:1",
+    "last_dia_id": "D8:6",
+    "words": 213
+   },
+   {
+    "session": 8,
+    "part": 2,
+    "parts": 7,
+    "first_dia_id": "D8:7",
+    "last_dia_id": "D8:12",
+    "words": 269
+   },
+   {
+    "session": 8,
+    "part": 3,
+    "parts": 7,
+    "first_dia_id": "D8:13",
+    "last_dia_id": "D8:18",
+    "words": 172
+   },
+   {
+    "session": 8,
+    "part": 4,
+    "parts": 7,
+    "first_dia_id": "D8:19",
+    "last_dia_id": "D8:24",
+    "words": 209
+   },
+   {
+    "session": 8,
+    "part": 5,
+    "parts": 7,
+    "first_dia_id": "D8:25",
+    "last_dia_id": "D8:30",
+    "words": 183
+   },
+   {
+    "session": 8,
+    "part": 6,
+    "parts": 7,
+    "first_dia_id": "D8:31",
+    "last_dia_id": "D8:36",
+    "words": 166
+   },
+   {
+    "session": 8,
+    "part": 7,
+    "parts": 7,
+    "first_dia_id": "D8:37",
+    "last_dia_id": "D8:39",
+    "words": 66
+   },
+   {
+    "session": 9,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D9:1",
+    "last_dia_id": "D9:6",
+    "words": 190
+   },
+   {
+    "session": 9,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D9:7",
+    "last_dia_id": "D9:12",
+    "words": 154
+   },
+   {
+    "session": 9,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D9:13",
+    "last_dia_id": "D9:17",
+    "words": 152
+   },
+   {
+    "session": 10,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D10:1",
+    "last_dia_id": "D10:6",
+    "words": 228
+   },
+   {
+    "session": 10,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D10:7",
+    "last_dia_id": "D10:12",
+    "words": 247
+   },
+   {
+    "session": 10,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D10:13",
+    "last_dia_id": "D10:18",
+    "words": 210
+   },
+   {
+    "session": 10,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D10:19",
+    "last_dia_id": "D10:24",
+    "words": 189
+   },
+   {
+    "session": 11,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D11:1",
+    "last_dia_id": "D11:6",
+    "words": 265
+   },
+   {
+    "session": 11,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D11:7",
+    "last_dia_id": "D11:12",
+    "words": 281
+   },
+   {
+    "session": 11,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D11:13",
+    "last_dia_id": "D11:17",
+    "words": 164
+   },
+   {
+    "session": 12,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D12:1",
+    "last_dia_id": "D12:6",
+    "words": 224
+   },
+   {
+    "session": 12,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D12:7",
+    "last_dia_id": "D12:12",
+    "words": 190
+   },
+   {
+    "session": 12,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D12:13",
+    "last_dia_id": "D12:18",
+    "words": 158
+   },
+   {
+    "session": 12,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D12:19",
+    "last_dia_id": "D12:21",
+    "words": 56
+   },
+   {
+    "session": 13,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D13:1",
+    "last_dia_id": "D13:6",
+    "words": 282
+   },
+   {
+    "session": 13,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D13:7",
+    "last_dia_id": "D13:12",
+    "words": 189
+   },
+   {
+    "session": 13,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D13:13",
+    "last_dia_id": "D13:18",
+    "words": 154
+   },
+   {
+    "session": 14,
+    "part": 1,
+    "parts": 6,
+    "first_dia_id": "D14:1",
+    "last_dia_id": "D14:6",
+    "words": 213
+   },
+   {
+    "session": 14,
+    "part": 2,
+    "parts": 6,
+    "first_dia_id": "D14:7",
+    "last_dia_id": "D14:12",
+    "words": 276
+   },
+   {
+    "session": 14,
+    "part": 3,
+    "parts": 6,
+    "first_dia_id": "D14:13",
+    "last_dia_id": "D14:18",
+    "words": 240
+   },
+   {
+    "session": 14,
+    "part": 4,
+    "parts": 6,
+    "first_dia_id": "D14:19",
+    "last_dia_id": "D14:24",
+    "words": 237
+   },
+   {
+    "session": 14,
+    "part": 5,
+    "parts": 6,
+    "first_dia_id": "D14:25",
+    "last_dia_id": "D14:30",
+    "words": 219
+   },
+   {
+    "session": 14,
+    "part": 6,
+    "parts": 6,
+    "first_dia_id": "D14:31",
+    "last_dia_id": "D14:35",
+    "words": 135
+   },
+   {
+    "session": 15,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D15:1",
+    "last_dia_id": "D15:6",
+    "words": 268
+   },
+   {
+    "session": 15,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D15:7",
+    "last_dia_id": "D15:12",
+    "words": 228
+   },
+   {
+    "session": 15,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D15:13",
+    "last_dia_id": "D15:18",
+    "words": 157
+   },
+   {
+    "session": 15,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D15:19",
+    "last_dia_id": "D15:24",
+    "words": 180
+   },
+   {
+    "session": 15,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D15:25",
+    "last_dia_id": "D15:28",
+    "words": 108
+   },
+   {
+    "session": 16,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D16:1",
+    "last_dia_id": "D16:6",
+    "words": 312
+   },
+   {
+    "session": 16,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D16:7",
+    "last_dia_id": "D16:12",
+    "words": 248
+   },
+   {
+    "session": 16,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D16:13",
+    "last_dia_id": "D16:18",
+    "words": 251
+   },
+   {
+    "session": 16,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D16:19",
+    "last_dia_id": "D16:20",
+    "words": 54
+   },
+   {
+    "session": 17,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D17:1",
+    "last_dia_id": "D17:6",
+    "words": 213
+   },
+   {
+    "session": 17,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D17:7",
+    "last_dia_id": "D17:12",
+    "words": 230
+   },
+   {
+    "session": 17,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D17:13",
+    "last_dia_id": "D17:18",
+    "words": 227
+   },
+   {
+    "session": 17,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D17:19",
+    "last_dia_id": "D17:24",
+    "words": 183
+   },
+   {
+    "session": 17,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D17:25",
+    "last_dia_id": "D17:26",
+    "words": 57
+   },
+   {
+    "session": 18,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D18:1",
+    "last_dia_id": "D18:6",
+    "words": 252
+   },
+   {
+    "session": 18,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D18:7",
+    "last_dia_id": "D18:12",
+    "words": 119
+   },
+   {
+    "session": 18,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D18:13",
+    "last_dia_id": "D18:18",
+    "words": 133
+   },
+   {
+    "session": 18,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D18:19",
+    "last_dia_id": "D18:24",
+    "words": 160
+   },
+   {
+    "session": 19,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D19:1",
+    "last_dia_id": "D19:6",
+    "words": 235
+   },
+   {
+    "session": 19,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D19:7",
+    "last_dia_id": "D19:12",
+    "words": 228
+   },
+   {
+    "session": 19,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D19:13",
+    "last_dia_id": "D19:15",
+    "words": 91
+   }
+  ]
+ },
+ {
+  "conversation_index": 1,
+  "sample_id": "conv-30",
+  "window_turns": 6,
+  "windows": 68,
+  "document_count": 69,
+  "chunk_count": 69,
+  "one_chunk_per_document": true,
+  "graph_nodes": 695,
+  "graph_edges": 2191,
+  "remember_seconds": 181.6,
+  "llm_model": "openai/gpt-5-mini",
+  "window_map": [
+   {
+    "session": 1,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D1:1",
+    "last_dia_id": "D1:6",
+    "words": 158
+   },
+   {
+    "session": 1,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D1:7",
+    "last_dia_id": "D1:12",
+    "words": 120
+   },
+   {
+    "session": 1,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D1:13",
+    "last_dia_id": "D1:18",
+    "words": 171
+   },
+   {
+    "session": 1,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D1:19",
+    "last_dia_id": "D1:24",
+    "words": 198
+   },
+   {
+    "session": 1,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D1:25",
+    "last_dia_id": "D1:28",
+    "words": 84
+   },
+   {
+    "session": 2,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D2:1",
+    "last_dia_id": "D2:6",
+    "words": 284
+   },
+   {
+    "session": 2,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D2:7",
+    "last_dia_id": "D2:12",
+    "words": 202
+   },
+   {
+    "session": 2,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D2:13",
+    "last_dia_id": "D2:16",
+    "words": 68
+   },
+   {
+    "session": 3,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D3:1",
+    "last_dia_id": "D3:6",
+    "words": 274
+   },
+   {
+    "session": 3,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D3:7",
+    "last_dia_id": "D3:12",
+    "words": 175
+   },
+   {
+    "session": 3,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D3:13",
+    "last_dia_id": "D3:14",
+    "words": 67
+   },
+   {
+    "session": 4,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D4:1",
+    "last_dia_id": "D4:6",
+    "words": 148
+   },
+   {
+    "session": 4,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D4:7",
+    "last_dia_id": "D4:12",
+    "words": 171
+   },
+   {
+    "session": 4,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D4:13",
+    "last_dia_id": "D4:19",
+    "words": 151
+   },
+   {
+    "session": 5,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D5:1",
+    "last_dia_id": "D5:6",
+    "words": 290
+   },
+   {
+    "session": 5,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D5:7",
+    "last_dia_id": "D5:12",
+    "words": 243
+   },
+   {
+    "session": 5,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D5:13",
+    "last_dia_id": "D5:18",
+    "words": 214
+   },
+   {
+    "session": 5,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D5:19",
+    "last_dia_id": "D5:23",
+    "words": 181
+   },
+   {
+    "session": 6,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D6:1",
+    "last_dia_id": "D6:6",
+    "words": 168
+   },
+   {
+    "session": 6,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D6:7",
+    "last_dia_id": "D6:12",
+    "words": 189
+   },
+   {
+    "session": 6,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D6:13",
+    "last_dia_id": "D6:19",
+    "words": 176
+   },
+   {
+    "session": 7,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D7:1",
+    "last_dia_id": "D7:6",
+    "words": 203
+   },
+   {
+    "session": 7,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D7:7",
+    "last_dia_id": "D7:12",
+    "words": 154
+   },
+   {
+    "session": 7,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D7:13",
+    "last_dia_id": "D7:17",
+    "words": 86
+   },
+   {
+    "session": 8,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D8:1",
+    "last_dia_id": "D8:6",
+    "words": 196
+   },
+   {
+    "session": 8,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D8:7",
+    "last_dia_id": "D8:12",
+    "words": 218
+   },
+   {
+    "session": 8,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D8:13",
+    "last_dia_id": "D8:18",
+    "words": 266
+   },
+   {
+    "session": 8,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D8:19",
+    "last_dia_id": "D8:24",
+    "words": 144
+   },
+   {
+    "session": 8,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D8:25",
+    "last_dia_id": "D8:26",
+    "words": 51
+   },
+   {
+    "session": 9,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D9:1",
+    "last_dia_id": "D9:6",
+    "words": 249
+   },
+   {
+    "session": 9,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D9:7",
+    "last_dia_id": "D9:12",
+    "words": 267
+   },
+   {
+    "session": 9,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D9:13",
+    "last_dia_id": "D9:14",
+    "words": 48
+   },
+   {
+    "session": 10,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D10:1",
+    "last_dia_id": "D10:6",
+    "words": 284
+   },
+   {
+    "session": 10,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D10:7",
+    "last_dia_id": "D10:12",
+    "words": 201
+   },
+   {
+    "session": 10,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D10:13",
+    "last_dia_id": "D10:14",
+    "words": 46
+   },
+   {
+    "session": 11,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D11:1",
+    "last_dia_id": "D11:6",
+    "words": 200
+   },
+   {
+    "session": 11,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D11:7",
+    "last_dia_id": "D11:12",
+    "words": 158
+   },
+   {
+    "session": 11,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D11:13",
+    "last_dia_id": "D11:18",
+    "words": 144
+   },
+   {
+    "session": 11,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D11:19",
+    "last_dia_id": "D11:22",
+    "words": 85
+   },
+   {
+    "session": 12,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D12:1",
+    "last_dia_id": "D12:6",
+    "words": 182
+   },
+   {
+    "session": 12,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D12:7",
+    "last_dia_id": "D12:12",
+    "words": 168
+   },
+   {
+    "session": 12,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D12:13",
+    "last_dia_id": "D12:19",
+    "words": 138
+   },
+   {
+    "session": 13,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D13:1",
+    "last_dia_id": "D13:6",
+    "words": 215
+   },
+   {
+    "session": 13,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D13:7",
+    "last_dia_id": "D13:12",
+    "words": 183
+   },
+   {
+    "session": 13,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D13:13",
+    "last_dia_id": "D13:18",
+    "words": 155
+   },
+   {
+    "session": 13,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D13:19",
+    "last_dia_id": "D13:23",
+    "words": 90
+   },
+   {
+    "session": 14,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D14:1",
+    "last_dia_id": "D14:6",
+    "words": 169
+   },
+   {
+    "session": 14,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D14:7",
+    "last_dia_id": "D14:12",
+    "words": 155
+   },
+   {
+    "session": 14,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D14:13",
+    "last_dia_id": "D14:18",
+    "words": 153
+   },
+   {
+    "session": 14,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D14:19",
+    "last_dia_id": "D14:20",
+    "words": 56
+   },
+   {
+    "session": 15,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D15:1",
+    "last_dia_id": "D15:6",
+    "words": 147
+   },
+   {
+    "session": 15,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D15:7",
+    "last_dia_id": "D15:12",
+    "words": 197
+   },
+   {
+    "session": 15,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D15:13",
+    "last_dia_id": "D15:18",
+    "words": 102
+   },
+   {
+    "session": 15,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D15:19",
+    "last_dia_id": "D15:22",
+    "words": 63
+   },
+   {
+    "session": 16,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D16:1",
+    "last_dia_id": "D16:6",
+    "words": 178
+   },
+   {
+    "session": 16,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D16:7",
+    "last_dia_id": "D16:12",
+    "words": 168
+   },
+   {
+    "session": 16,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D16:13",
+    "last_dia_id": "D16:16",
+    "words": 119
+   },
+   {
+    "session": 17,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D17:1",
+    "last_dia_id": "D17:6",
+    "words": 202
+   },
+   {
+    "session": 17,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D17:7",
+    "last_dia_id": "D17:12",
+    "words": 186
+   },
+   {
+    "session": 17,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D17:13",
+    "last_dia_id": "D17:18",
+    "words": 164
+   },
+   {
+    "session": 17,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D17:19",
+    "last_dia_id": "D17:21",
+    "words": 32
+   },
+   {
+    "session": 18,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D18:1",
+    "last_dia_id": "D18:6",
+    "words": 297
+   },
+   {
+    "session": 18,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D18:7",
+    "last_dia_id": "D18:12",
+    "words": 198
+   },
+   {
+    "session": 18,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D18:13",
+    "last_dia_id": "D18:18",
+    "words": 178
+   },
+   {
+    "session": 18,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D18:19",
+    "last_dia_id": "D18:22",
+    "words": 103
+   },
+   {
+    "session": 19,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D19:1",
+    "last_dia_id": "D19:6",
+    "words": 192
+   },
+   {
+    "session": 19,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D19:7",
+    "last_dia_id": "D19:12",
+    "words": 121
+   },
+   {
+    "session": 19,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D19:13",
+    "last_dia_id": "D19:14",
+    "words": 36
+   }
+  ]
+ },
+ {
+  "conversation_index": 2,
+  "sample_id": "conv-41",
+  "window_turns": 6,
+  "windows": 118,
+  "document_count": 119,
+  "chunk_count": 119,
+  "one_chunk_per_document": true,
+  "graph_nodes": 1355,
+  "graph_edges": 4320,
+  "remember_seconds": 300.1,
+  "llm_model": "openai/gpt-5-mini",
+  "window_map": [
+   {
+    "session": 1,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D1:1",
+    "last_dia_id": "D1:6",
+    "words": 142
+   },
+   {
+    "session": 1,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D1:7",
+    "last_dia_id": "D1:12",
+    "words": 161
+   },
+   {
+    "session": 1,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D1:13",
+    "last_dia_id": "D1:16",
+    "words": 99
+   },
+   {
+    "session": 2,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D2:1",
+    "last_dia_id": "D2:6",
+    "words": 183
+   },
+   {
+    "session": 2,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D2:7",
+    "last_dia_id": "D2:12",
+    "words": 200
+   },
+   {
+    "session": 2,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D2:13",
+    "last_dia_id": "D2:18",
+    "words": 169
+   },
+   {
+    "session": 2,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D2:19",
+    "last_dia_id": "D2:24",
+    "words": 204
+   },
+   {
+    "session": 2,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D2:25",
+    "last_dia_id": "D2:28",
+    "words": 116
+   },
+   {
+    "session": 3,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D3:1",
+    "last_dia_id": "D3:6",
+    "words": 257
+   },
+   {
+    "session": 3,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D3:7",
+    "last_dia_id": "D3:12",
+    "words": 202
+   },
+   {
+    "session": 3,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D3:13",
+    "last_dia_id": "D3:17",
+    "words": 131
+   },
+   {
+    "session": 4,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D4:1",
+    "last_dia_id": "D4:6",
+    "words": 187
+   },
+   {
+    "session": 4,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D4:7",
+    "last_dia_id": "D4:12",
+    "words": 170
+   },
+   {
+    "session": 4,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D4:13",
+    "last_dia_id": "D4:18",
+    "words": 156
+   },
+   {
+    "session": 4,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D4:19",
+    "last_dia_id": "D4:24",
+    "words": 164
+   },
+   {
+    "session": 4,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D4:25",
+    "last_dia_id": "D4:26",
+    "words": 48
+   },
+   {
+    "session": 5,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D5:1",
+    "last_dia_id": "D5:6",
+    "words": 297
+   },
+   {
+    "session": 5,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D5:7",
+    "last_dia_id": "D5:12",
+    "words": 220
+   },
+   {
+    "session": 5,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D5:13",
+    "last_dia_id": "D5:16",
+    "words": 128
+   },
+   {
+    "session": 6,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D6:1",
+    "last_dia_id": "D6:6",
+    "words": 278
+   },
+   {
+    "session": 6,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D6:7",
+    "last_dia_id": "D6:12",
+    "words": 274
+   },
+   {
+    "session": 6,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D6:13",
+    "last_dia_id": "D6:18",
+    "words": 166
+   },
+   {
+    "session": 6,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D6:19",
+    "last_dia_id": "D6:22",
+    "words": 120
+   },
+   {
+    "session": 7,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D7:1",
+    "last_dia_id": "D7:6",
+    "words": 238
+   },
+   {
+    "session": 7,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D7:7",
+    "last_dia_id": "D7:12",
+    "words": 162
+   },
+   {
+    "session": 7,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D7:13",
+    "last_dia_id": "D7:17",
+    "words": 151
+   },
+   {
+    "session": 8,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D8:1",
+    "last_dia_id": "D8:6",
+    "words": 216
+   },
+   {
+    "session": 8,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D8:7",
+    "last_dia_id": "D8:12",
+    "words": 188
+   },
+   {
+    "session": 8,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D8:13",
+    "last_dia_id": "D8:18",
+    "words": 243
+   },
+   {
+    "session": 8,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D8:19",
+    "last_dia_id": "D8:24",
+    "words": 175
+   },
+   {
+    "session": 8,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D8:25",
+    "last_dia_id": "D8:26",
+    "words": 95
+   },
+   {
+    "session": 9,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D9:1",
+    "last_dia_id": "D9:6",
+    "words": 176
+   },
+   {
+    "session": 9,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D9:7",
+    "last_dia_id": "D9:12",
+    "words": 187
+   },
+   {
+    "session": 9,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D9:13",
+    "last_dia_id": "D9:18",
+    "words": 178
+   },
+   {
+    "session": 10,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D10:1",
+    "last_dia_id": "D10:6",
+    "words": 227
+   },
+   {
+    "session": 10,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D10:7",
+    "last_dia_id": "D10:12",
+    "words": 263
+   },
+   {
+    "session": 10,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D10:13",
+    "last_dia_id": "D10:18",
+    "words": 250
+   },
+   {
+    "session": 11,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D11:1",
+    "last_dia_id": "D11:6",
+    "words": 227
+   },
+   {
+    "session": 11,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D11:7",
+    "last_dia_id": "D11:12",
+    "words": 214
+   },
+   {
+    "session": 11,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D11:13",
+    "last_dia_id": "D11:18",
+    "words": 186
+   },
+   {
+    "session": 11,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D11:19",
+    "last_dia_id": "D11:21",
+    "words": 78
+   },
+   {
+    "session": 12,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D12:1",
+    "last_dia_id": "D12:6",
+    "words": 250
+   },
+   {
+    "session": 12,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D12:7",
+    "last_dia_id": "D12:12",
+    "words": 219
+   },
+   {
+    "session": 12,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D12:13",
+    "last_dia_id": "D12:18",
+    "words": 166
+   },
+   {
+    "session": 12,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D12:19",
+    "last_dia_id": "D12:23",
+    "words": 117
+   },
+   {
+    "session": 13,
+    "part": 1,
+    "parts": 6,
+    "first_dia_id": "D13:1",
+    "last_dia_id": "D13:6",
+    "words": 185
+   },
+   {
+    "session": 13,
+    "part": 2,
+    "parts": 6,
+    "first_dia_id": "D13:7",
+    "last_dia_id": "D13:12",
+    "words": 168
+   },
+   {
+    "session": 13,
+    "part": 3,
+    "parts": 6,
+    "first_dia_id": "D13:13",
+    "last_dia_id": "D13:18",
+    "words": 238
+   },
+   {
+    "session": 13,
+    "part": 4,
+    "parts": 6,
+    "first_dia_id": "D13:19",
+    "last_dia_id": "D13:24",
+    "words": 194
+   },
+   {
+    "session": 13,
+    "part": 5,
+    "parts": 6,
+    "first_dia_id": "D13:25",
+    "last_dia_id": "D13:30",
+    "words": 210
+   },
+   {
+    "session": 13,
+    "part": 6,
+    "parts": 6,
+    "first_dia_id": "D13:31",
+    "last_dia_id": "D13:37",
+    "words": 195
+   },
+   {
+    "session": 14,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D14:1",
+    "last_dia_id": "D14:6",
+    "words": 265
+   },
+   {
+    "session": 14,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D14:7",
+    "last_dia_id": "D14:12",
+    "words": 168
+   },
+   {
+    "session": 14,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D14:13",
+    "last_dia_id": "D14:18",
+    "words": 205
+   },
+   {
+    "session": 14,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D14:19",
+    "last_dia_id": "D14:23",
+    "words": 170
+   },
+   {
+    "session": 15,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D15:1",
+    "last_dia_id": "D15:6",
+    "words": 195
+   },
+   {
+    "session": 15,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D15:7",
+    "last_dia_id": "D15:12",
+    "words": 163
+   },
+   {
+    "session": 15,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D15:13",
+    "last_dia_id": "D15:19",
+    "words": 203
+   },
+   {
+    "session": 16,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D16:1",
+    "last_dia_id": "D16:6",
+    "words": 281
+   },
+   {
+    "session": 16,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D16:7",
+    "last_dia_id": "D16:12",
+    "words": 144
+   },
+   {
+    "session": 16,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D16:13",
+    "last_dia_id": "D16:19",
+    "words": 120
+   },
+   {
+    "session": 17,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D17:1",
+    "last_dia_id": "D17:6",
+    "words": 243
+   },
+   {
+    "session": 17,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D17:7",
+    "last_dia_id": "D17:12",
+    "words": 195
+   },
+   {
+    "session": 17,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D17:13",
+    "last_dia_id": "D17:16",
+    "words": 83
+   },
+   {
+    "session": 18,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D18:1",
+    "last_dia_id": "D18:6",
+    "words": 272
+   },
+   {
+    "session": 18,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D18:7",
+    "last_dia_id": "D18:12",
+    "words": 143
+   },
+   {
+    "session": 18,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D18:13",
+    "last_dia_id": "D18:18",
+    "words": 181
+   },
+   {
+    "session": 18,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D18:19",
+    "last_dia_id": "D18:23",
+    "words": 138
+   },
+   {
+    "session": 19,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D19:1",
+    "last_dia_id": "D19:6",
+    "words": 233
+   },
+   {
+    "session": 19,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D19:7",
+    "last_dia_id": "D19:12",
+    "words": 224
+   },
+   {
+    "session": 19,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D19:13",
+    "last_dia_id": "D19:18",
+    "words": 197
+   },
+   {
+    "session": 19,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D19:19",
+    "last_dia_id": "D19:24",
+    "words": 277
+   },
+   {
+    "session": 19,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D19:25",
+    "last_dia_id": "D19:26",
+    "words": 83
+   },
+   {
+    "session": 20,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D20:1",
+    "last_dia_id": "D20:6",
+    "words": 262
+   },
+   {
+    "session": 20,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D20:7",
+    "last_dia_id": "D20:12",
+    "words": 178
+   },
+   {
+    "session": 20,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D20:13",
+    "last_dia_id": "D20:18",
+    "words": 119
+   },
+   {
+    "session": 21,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D21:1",
+    "last_dia_id": "D21:6",
+    "words": 189
+   },
+   {
+    "session": 21,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D21:7",
+    "last_dia_id": "D21:12",
+    "words": 155
+   },
+   {
+    "session": 21,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D21:13",
+    "last_dia_id": "D21:18",
+    "words": 150
+   },
+   {
+    "session": 21,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D21:19",
+    "last_dia_id": "D21:24",
+    "words": 183
+   },
+   {
+    "session": 21,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D21:25",
+    "last_dia_id": "D21:29",
+    "words": 122
+   },
+   {
+    "session": 22,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D22:1",
+    "last_dia_id": "D22:6",
+    "words": 264
+   },
+   {
+    "session": 22,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D22:7",
+    "last_dia_id": "D22:12",
+    "words": 157
+   },
+   {
+    "session": 22,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D22:13",
+    "last_dia_id": "D22:18",
+    "words": 236
+   },
+   {
+    "session": 22,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D22:19",
+    "last_dia_id": "D22:21",
+    "words": 53
+   },
+   {
+    "session": 23,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D23:1",
+    "last_dia_id": "D23:6",
+    "words": 208
+   },
+   {
+    "session": 23,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D23:7",
+    "last_dia_id": "D23:12",
+    "words": 158
+   },
+   {
+    "session": 23,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D23:13",
+    "last_dia_id": "D23:14",
+    "words": 81
+   },
+   {
+    "session": 24,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D24:1",
+    "last_dia_id": "D24:6",
+    "words": 232
+   },
+   {
+    "session": 24,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D24:7",
+    "last_dia_id": "D24:12",
+    "words": 190
+   },
+   {
+    "session": 24,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D24:13",
+    "last_dia_id": "D24:17",
+    "words": 122
+   },
+   {
+    "session": 25,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D25:1",
+    "last_dia_id": "D25:6",
+    "words": 240
+   },
+   {
+    "session": 25,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D25:7",
+    "last_dia_id": "D25:12",
+    "words": 159
+   },
+   {
+    "session": 25,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D25:13",
+    "last_dia_id": "D25:18",
+    "words": 153
+   },
+   {
+    "session": 25,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D25:19",
+    "last_dia_id": "D25:20",
+    "words": 58
+   },
+   {
+    "session": 26,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D26:1",
+    "last_dia_id": "D26:6",
+    "words": 262
+   },
+   {
+    "session": 26,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D26:7",
+    "last_dia_id": "D26:12",
+    "words": 178
+   },
+   {
+    "session": 26,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D26:13",
+    "last_dia_id": "D26:17",
+    "words": 132
+   },
+   {
+    "session": 27,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D27:1",
+    "last_dia_id": "D27:6",
+    "words": 235
+   },
+   {
+    "session": 27,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D27:7",
+    "last_dia_id": "D27:12",
+    "words": 156
+   },
+   {
+    "session": 27,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D27:13",
+    "last_dia_id": "D27:16",
+    "words": 104
+   },
+   {
+    "session": 28,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D28:1",
+    "last_dia_id": "D28:6",
+    "words": 194
+   },
+   {
+    "session": 28,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D28:7",
+    "last_dia_id": "D28:12",
+    "words": 164
+   },
+   {
+    "session": 28,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D28:13",
+    "last_dia_id": "D28:19",
+    "words": 137
+   },
+   {
+    "session": 29,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D29:1",
+    "last_dia_id": "D29:6",
+    "words": 316
+   },
+   {
+    "session": 29,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D29:7",
+    "last_dia_id": "D29:12",
+    "words": 198
+   },
+   {
+    "session": 29,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D29:13",
+    "last_dia_id": "D29:18",
+    "words": 141
+   },
+   {
+    "session": 30,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D30:1",
+    "last_dia_id": "D30:6",
+    "words": 221
+   },
+   {
+    "session": 30,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D30:7",
+    "last_dia_id": "D30:12",
+    "words": 217
+   },
+   {
+    "session": 30,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D30:13",
+    "last_dia_id": "D30:18",
+    "words": 172
+   },
+   {
+    "session": 30,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D30:19",
+    "last_dia_id": "D30:23",
+    "words": 152
+   },
+   {
+    "session": 31,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D31:1",
+    "last_dia_id": "D31:6",
+    "words": 220
+   },
+   {
+    "session": 31,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D31:7",
+    "last_dia_id": "D31:12",
+    "words": 219
+   },
+   {
+    "session": 31,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D31:13",
+    "last_dia_id": "D31:18",
+    "words": 139
+   },
+   {
+    "session": 31,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D31:19",
+    "last_dia_id": "D31:23",
+    "words": 123
+   },
+   {
+    "session": 32,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D32:1",
+    "last_dia_id": "D32:6",
+    "words": 185
+   },
+   {
+    "session": 32,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D32:7",
+    "last_dia_id": "D32:12",
+    "words": 192
+   },
+   {
+    "session": 32,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D32:13",
+    "last_dia_id": "D32:17",
+    "words": 179
+   }
+  ]
+ },
+ {
+  "conversation_index": 3,
+  "sample_id": "conv-42",
+  "window_turns": 6,
+  "windows": 111,
+  "document_count": 112,
+  "chunk_count": 112,
+  "one_chunk_per_document": true,
+  "graph_nodes": 1218,
+  "graph_edges": 3719,
+  "remember_seconds": 275.8,
+  "llm_model": "openai/gpt-5-mini",
+  "window_map": [
+   {
+    "session": 1,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D1:1",
+    "last_dia_id": "D1:6",
+    "words": 110
+   },
+   {
+    "session": 1,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D1:7",
+    "last_dia_id": "D1:12",
+    "words": 117
+   },
+   {
+    "session": 1,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D1:13",
+    "last_dia_id": "D1:18",
+    "words": 165
+   },
+   {
+    "session": 1,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D1:19",
+    "last_dia_id": "D1:22",
+    "words": 78
+   },
+   {
+    "session": 2,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D2:1",
+    "last_dia_id": "D2:6",
+    "words": 137
+   },
+   {
+    "session": 2,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D2:7",
+    "last_dia_id": "D2:12",
+    "words": 165
+   },
+   {
+    "session": 2,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D2:13",
+    "last_dia_id": "D2:18",
+    "words": 149
+   },
+   {
+    "session": 2,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D2:19",
+    "last_dia_id": "D2:24",
+    "words": 147
+   },
+   {
+    "session": 2,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D2:25",
+    "last_dia_id": "D2:29",
+    "words": 131
+   },
+   {
+    "session": 3,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D3:1",
+    "last_dia_id": "D3:6",
+    "words": 236
+   },
+   {
+    "session": 3,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D3:7",
+    "last_dia_id": "D3:12",
+    "words": 140
+   },
+   {
+    "session": 3,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D3:13",
+    "last_dia_id": "D3:18",
+    "words": 132
+   },
+   {
+    "session": 3,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D3:19",
+    "last_dia_id": "D3:25",
+    "words": 88
+   },
+   {
+    "session": 4,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D4:1",
+    "last_dia_id": "D4:6",
+    "words": 139
+   },
+   {
+    "session": 4,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D4:7",
+    "last_dia_id": "D4:12",
+    "words": 148
+   },
+   {
+    "session": 4,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D4:13",
+    "last_dia_id": "D4:19",
+    "words": 167
+   },
+   {
+    "session": 5,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D5:1",
+    "last_dia_id": "D5:6",
+    "words": 261
+   },
+   {
+    "session": 5,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D5:7",
+    "last_dia_id": "D5:12",
+    "words": 174
+   },
+   {
+    "session": 5,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D5:13",
+    "last_dia_id": "D5:18",
+    "words": 139
+   },
+   {
+    "session": 5,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D5:19",
+    "last_dia_id": "D5:21",
+    "words": 84
+   },
+   {
+    "session": 6,
+    "part": 1,
+    "parts": 2,
+    "first_dia_id": "D6:1",
+    "last_dia_id": "D6:6",
+    "words": 133
+   },
+   {
+    "session": 6,
+    "part": 2,
+    "parts": 2,
+    "first_dia_id": "D6:7",
+    "last_dia_id": "D6:13",
+    "words": 229
+   },
+   {
+    "session": 7,
+    "part": 1,
+    "parts": 2,
+    "first_dia_id": "D7:1",
+    "last_dia_id": "D7:6",
+    "words": 173
+   },
+   {
+    "session": 7,
+    "part": 2,
+    "parts": 2,
+    "first_dia_id": "D7:7",
+    "last_dia_id": "D7:13",
+    "words": 120
+   },
+   {
+    "session": 8,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D8:1",
+    "last_dia_id": "D8:6",
+    "words": 169
+   },
+   {
+    "session": 8,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D8:7",
+    "last_dia_id": "D8:12",
+    "words": 198
+   },
+   {
+    "session": 8,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D8:13",
+    "last_dia_id": "D8:18",
+    "words": 143
+   },
+   {
+    "session": 8,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D8:19",
+    "last_dia_id": "D8:22",
+    "words": 110
+   },
+   {
+    "session": 9,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D9:1",
+    "last_dia_id": "D9:6",
+    "words": 291
+   },
+   {
+    "session": 9,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D9:7",
+    "last_dia_id": "D9:12",
+    "words": 249
+   },
+   {
+    "session": 9,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D9:13",
+    "last_dia_id": "D9:18",
+    "words": 141
+   },
+   {
+    "session": 10,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D10:1",
+    "last_dia_id": "D10:6",
+    "words": 203
+   },
+   {
+    "session": 10,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D10:7",
+    "last_dia_id": "D10:12",
+    "words": 179
+   },
+   {
+    "session": 10,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D10:13",
+    "last_dia_id": "D10:16",
+    "words": 118
+   },
+   {
+    "session": 11,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D11:1",
+    "last_dia_id": "D11:6",
+    "words": 150
+   },
+   {
+    "session": 11,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D11:7",
+    "last_dia_id": "D11:12",
+    "words": 160
+   },
+   {
+    "session": 11,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D11:13",
+    "last_dia_id": "D11:18",
+    "words": 152
+   },
+   {
+    "session": 11,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D11:19",
+    "last_dia_id": "D11:20",
+    "words": 33
+   },
+   {
+    "session": 12,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D12:1",
+    "last_dia_id": "D12:6",
+    "words": 137
+   },
+   {
+    "session": 12,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D12:7",
+    "last_dia_id": "D12:12",
+    "words": 200
+   },
+   {
+    "session": 12,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D12:13",
+    "last_dia_id": "D12:19",
+    "words": 210
+   },
+   {
+    "session": 13,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D13:1",
+    "last_dia_id": "D13:6",
+    "words": 195
+   },
+   {
+    "session": 13,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D13:7",
+    "last_dia_id": "D13:12",
+    "words": 142
+   },
+   {
+    "session": 13,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D13:13",
+    "last_dia_id": "D13:18",
+    "words": 130
+   },
+   {
+    "session": 13,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D13:19",
+    "last_dia_id": "D13:23",
+    "words": 111
+   },
+   {
+    "session": 14,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D14:1",
+    "last_dia_id": "D14:6",
+    "words": 134
+   },
+   {
+    "session": 14,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D14:7",
+    "last_dia_id": "D14:12",
+    "words": 157
+   },
+   {
+    "session": 14,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D14:13",
+    "last_dia_id": "D14:18",
+    "words": 136
+   },
+   {
+    "session": 14,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D14:19",
+    "last_dia_id": "D14:24",
+    "words": 127
+   },
+   {
+    "session": 14,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D14:25",
+    "last_dia_id": "D14:27",
+    "words": 55
+   },
+   {
+    "session": 15,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D15:1",
+    "last_dia_id": "D15:6",
+    "words": 290
+   },
+   {
+    "session": 15,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D15:7",
+    "last_dia_id": "D15:12",
+    "words": 143
+   },
+   {
+    "session": 15,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D15:13",
+    "last_dia_id": "D15:17",
+    "words": 83
+   },
+   {
+    "session": 16,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D16:1",
+    "last_dia_id": "D16:6",
+    "words": 157
+   },
+   {
+    "session": 16,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D16:7",
+    "last_dia_id": "D16:12",
+    "words": 137
+   },
+   {
+    "session": 16,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D16:13",
+    "last_dia_id": "D16:16",
+    "words": 73
+   },
+   {
+    "session": 17,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D17:1",
+    "last_dia_id": "D17:6",
+    "words": 263
+   },
+   {
+    "session": 17,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D17:7",
+    "last_dia_id": "D17:12",
+    "words": 150
+   },
+   {
+    "session": 17,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D17:13",
+    "last_dia_id": "D17:18",
+    "words": 137
+   },
+   {
+    "session": 17,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D17:19",
+    "last_dia_id": "D17:21",
+    "words": 109
+   },
+   {
+    "session": 18,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D18:1",
+    "last_dia_id": "D18:6",
+    "words": 299
+   },
+   {
+    "session": 18,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D18:7",
+    "last_dia_id": "D18:12",
+    "words": 196
+   },
+   {
+    "session": 18,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D18:13",
+    "last_dia_id": "D18:16",
+    "words": 66
+   },
+   {
+    "session": 19,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D19:1",
+    "last_dia_id": "D19:6",
+    "words": 239
+   },
+   {
+    "session": 19,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D19:7",
+    "last_dia_id": "D19:12",
+    "words": 189
+   },
+   {
+    "session": 19,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D19:13",
+    "last_dia_id": "D19:18",
+    "words": 196
+   },
+   {
+    "session": 19,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D19:19",
+    "last_dia_id": "D19:22",
+    "words": 74
+   },
+   {
+    "session": 20,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D20:1",
+    "last_dia_id": "D20:6",
+    "words": 231
+   },
+   {
+    "session": 20,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D20:7",
+    "last_dia_id": "D20:12",
+    "words": 167
+   },
+   {
+    "session": 20,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D20:13",
+    "last_dia_id": "D20:19",
+    "words": 165
+   },
+   {
+    "session": 21,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D21:1",
+    "last_dia_id": "D21:6",
+    "words": 265
+   },
+   {
+    "session": 21,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D21:7",
+    "last_dia_id": "D21:12",
+    "words": 233
+   },
+   {
+    "session": 21,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D21:13",
+    "last_dia_id": "D21:18",
+    "words": 159
+   },
+   {
+    "session": 21,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D21:19",
+    "last_dia_id": "D21:20",
+    "words": 50
+   },
+   {
+    "session": 22,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D22:1",
+    "last_dia_id": "D22:6",
+    "words": 221
+   },
+   {
+    "session": 22,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D22:7",
+    "last_dia_id": "D22:12",
+    "words": 223
+   },
+   {
+    "session": 22,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D22:13",
+    "last_dia_id": "D22:18",
+    "words": 171
+   },
+   {
+    "session": 22,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D22:19",
+    "last_dia_id": "D22:23",
+    "words": 102
+   },
+   {
+    "session": 23,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D23:1",
+    "last_dia_id": "D23:6",
+    "words": 279
+   },
+   {
+    "session": 23,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D23:7",
+    "last_dia_id": "D23:12",
+    "words": 181
+   },
+   {
+    "session": 23,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D23:13",
+    "last_dia_id": "D23:18",
+    "words": 201
+   },
+   {
+    "session": 23,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D23:19",
+    "last_dia_id": "D23:24",
+    "words": 182
+   },
+   {
+    "session": 23,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D23:25",
+    "last_dia_id": "D23:30",
+    "words": 173
+   },
+   {
+    "session": 24,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D24:1",
+    "last_dia_id": "D24:6",
+    "words": 195
+   },
+   {
+    "session": 24,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D24:7",
+    "last_dia_id": "D24:12",
+    "words": 125
+   },
+   {
+    "session": 24,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D24:13",
+    "last_dia_id": "D24:19",
+    "words": 149
+   },
+   {
+    "session": 25,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D25:1",
+    "last_dia_id": "D25:6",
+    "words": 259
+   },
+   {
+    "session": 25,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D25:7",
+    "last_dia_id": "D25:12",
+    "words": 156
+   },
+   {
+    "session": 25,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D25:13",
+    "last_dia_id": "D25:18",
+    "words": 156
+   },
+   {
+    "session": 25,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D25:19",
+    "last_dia_id": "D25:24",
+    "words": 181
+   },
+   {
+    "session": 25,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D25:25",
+    "last_dia_id": "D25:29",
+    "words": 105
+   },
+   {
+    "session": 26,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D26:1",
+    "last_dia_id": "D26:6",
+    "words": 272
+   },
+   {
+    "session": 26,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D26:7",
+    "last_dia_id": "D26:12",
+    "words": 199
+   },
+   {
+    "session": 26,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D26:13",
+    "last_dia_id": "D26:18",
+    "words": 131
+   },
+   {
+    "session": 26,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D26:19",
+    "last_dia_id": "D26:24",
+    "words": 115
+   },
+   {
+    "session": 27,
+    "part": 1,
+    "parts": 7,
+    "first_dia_id": "D27:1",
+    "last_dia_id": "D27:6",
+    "words": 259
+   },
+   {
+    "session": 27,
+    "part": 2,
+    "parts": 7,
+    "first_dia_id": "D27:7",
+    "last_dia_id": "D27:12",
+    "words": 219
+   },
+   {
+    "session": 27,
+    "part": 3,
+    "parts": 7,
+    "first_dia_id": "D27:13",
+    "last_dia_id": "D27:18",
+    "words": 144
+   },
+   {
+    "session": 27,
+    "part": 4,
+    "parts": 7,
+    "first_dia_id": "D27:19",
+    "last_dia_id": "D27:24",
+    "words": 187
+   },
+   {
+    "session": 27,
+    "part": 5,
+    "parts": 7,
+    "first_dia_id": "D27:25",
+    "last_dia_id": "D27:30",
+    "words": 207
+   },
+   {
+    "session": 27,
+    "part": 6,
+    "parts": 7,
+    "first_dia_id": "D27:31",
+    "last_dia_id": "D27:36",
+    "words": 189
+   },
+   {
+    "session": 27,
+    "part": 7,
+    "parts": 7,
+    "first_dia_id": "D27:37",
+    "last_dia_id": "D27:38",
+    "words": 79
+   },
+   {
+    "session": 28,
+    "part": 1,
+    "parts": 6,
+    "first_dia_id": "D28:1",
+    "last_dia_id": "D28:6",
+    "words": 201
+   },
+   {
+    "session": 28,
+    "part": 2,
+    "parts": 6,
+    "first_dia_id": "D28:7",
+    "last_dia_id": "D28:12",
+    "words": 216
+   },
+   {
+    "session": 28,
+    "part": 3,
+    "parts": 6,
+    "first_dia_id": "D28:13",
+    "last_dia_id": "D28:18",
+    "words": 200
+   },
+   {
+    "session": 28,
+    "part": 4,
+    "parts": 6,
+    "first_dia_id": "D28:19",
+    "last_dia_id": "D28:24",
+    "words": 202
+   },
+   {
+    "session": 28,
+    "part": 5,
+    "parts": 6,
+    "first_dia_id": "D28:25",
+    "last_dia_id": "D28:30",
+    "words": 190
+   },
+   {
+    "session": 28,
+    "part": 6,
+    "parts": 6,
+    "first_dia_id": "D28:31",
+    "last_dia_id": "D28:33",
+    "words": 53
+   },
+   {
+    "session": 29,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D29:1",
+    "last_dia_id": "D29:6",
+    "words": 257
+   },
+   {
+    "session": 29,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D29:7",
+    "last_dia_id": "D29:12",
+    "words": 210
+   },
+   {
+    "session": 29,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D29:13",
+    "last_dia_id": "D29:15",
+    "words": 56
+   }
+  ]
+ },
+ {
+  "conversation_index": 4,
+  "sample_id": "conv-43",
+  "window_turns": 6,
+  "windows": 121,
+  "document_count": 122,
+  "chunk_count": 122,
+  "one_chunk_per_document": true,
+  "graph_nodes": 1429,
+  "graph_edges": 4313,
+  "remember_seconds": 311.4,
+  "llm_model": "openai/gpt-5-mini",
+  "window_map": [
+   {
+    "session": 1,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D1:1",
+    "last_dia_id": "D1:6",
+    "words": 117
+   },
+   {
+    "session": 1,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D1:7",
+    "last_dia_id": "D1:12",
+    "words": 150
+   },
+   {
+    "session": 1,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D1:13",
+    "last_dia_id": "D1:18",
+    "words": 257
+   },
+   {
+    "session": 1,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D1:19",
+    "last_dia_id": "D1:20",
+    "words": 62
+   },
+   {
+    "session": 2,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D2:1",
+    "last_dia_id": "D2:6",
+    "words": 247
+   },
+   {
+    "session": 2,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D2:7",
+    "last_dia_id": "D2:12",
+    "words": 162
+   },
+   {
+    "session": 2,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D2:13",
+    "last_dia_id": "D2:19",
+    "words": 197
+   },
+   {
+    "session": 3,
+    "part": 1,
+    "parts": 6,
+    "first_dia_id": "D3:1",
+    "last_dia_id": "D3:6",
+    "words": 265
+   },
+   {
+    "session": 3,
+    "part": 2,
+    "parts": 6,
+    "first_dia_id": "D3:7",
+    "last_dia_id": "D3:12",
+    "words": 212
+   },
+   {
+    "session": 3,
+    "part": 3,
+    "parts": 6,
+    "first_dia_id": "D3:13",
+    "last_dia_id": "D3:18",
+    "words": 181
+   },
+   {
+    "session": 3,
+    "part": 4,
+    "parts": 6,
+    "first_dia_id": "D3:19",
+    "last_dia_id": "D3:24",
+    "words": 172
+   },
+   {
+    "session": 3,
+    "part": 5,
+    "parts": 6,
+    "first_dia_id": "D3:25",
+    "last_dia_id": "D3:30",
+    "words": 176
+   },
+   {
+    "session": 3,
+    "part": 6,
+    "parts": 6,
+    "first_dia_id": "D3:31",
+    "last_dia_id": "D3:35",
+    "words": 122
+   },
+   {
+    "session": 4,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D4:1",
+    "last_dia_id": "D4:6",
+    "words": 156
+   },
+   {
+    "session": 4,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D4:7",
+    "last_dia_id": "D4:12",
+    "words": 166
+   },
+   {
+    "session": 4,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D4:13",
+    "last_dia_id": "D4:15",
+    "words": 46
+   },
+   {
+    "session": 5,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D5:1",
+    "last_dia_id": "D5:6",
+    "words": 220
+   },
+   {
+    "session": 5,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D5:7",
+    "last_dia_id": "D5:12",
+    "words": 191
+   },
+   {
+    "session": 5,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D5:13",
+    "last_dia_id": "D5:18",
+    "words": 142
+   },
+   {
+    "session": 5,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D5:19",
+    "last_dia_id": "D5:20",
+    "words": 38
+   },
+   {
+    "session": 6,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D6:1",
+    "last_dia_id": "D6:6",
+    "words": 270
+   },
+   {
+    "session": 6,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D6:7",
+    "last_dia_id": "D6:12",
+    "words": 257
+   },
+   {
+    "session": 6,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D6:13",
+    "last_dia_id": "D6:18",
+    "words": 261
+   },
+   {
+    "session": 6,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D6:19",
+    "last_dia_id": "D6:23",
+    "words": 92
+   },
+   {
+    "session": 7,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D7:1",
+    "last_dia_id": "D7:6",
+    "words": 308
+   },
+   {
+    "session": 7,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D7:7",
+    "last_dia_id": "D7:12",
+    "words": 220
+   },
+   {
+    "session": 7,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D7:13",
+    "last_dia_id": "D7:16",
+    "words": 106
+   },
+   {
+    "session": 8,
+    "part": 1,
+    "parts": 6,
+    "first_dia_id": "D8:1",
+    "last_dia_id": "D8:6",
+    "words": 287
+   },
+   {
+    "session": 8,
+    "part": 2,
+    "parts": 6,
+    "first_dia_id": "D8:7",
+    "last_dia_id": "D8:12",
+    "words": 241
+   },
+   {
+    "session": 8,
+    "part": 3,
+    "parts": 6,
+    "first_dia_id": "D8:13",
+    "last_dia_id": "D8:18",
+    "words": 244
+   },
+   {
+    "session": 8,
+    "part": 4,
+    "parts": 6,
+    "first_dia_id": "D8:19",
+    "last_dia_id": "D8:24",
+    "words": 201
+   },
+   {
+    "session": 8,
+    "part": 5,
+    "parts": 6,
+    "first_dia_id": "D8:25",
+    "last_dia_id": "D8:30",
+    "words": 197
+   },
+   {
+    "session": 8,
+    "part": 6,
+    "parts": 6,
+    "first_dia_id": "D8:31",
+    "last_dia_id": "D8:37",
+    "words": 126
+   },
+   {
+    "session": 9,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D9:1",
+    "last_dia_id": "D9:6",
+    "words": 297
+   },
+   {
+    "session": 9,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D9:7",
+    "last_dia_id": "D9:12",
+    "words": 158
+   },
+   {
+    "session": 9,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D9:13",
+    "last_dia_id": "D9:15",
+    "words": 57
+   },
+   {
+    "session": 10,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D10:1",
+    "last_dia_id": "D10:6",
+    "words": 237
+   },
+   {
+    "session": 10,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D10:7",
+    "last_dia_id": "D10:12",
+    "words": 135
+   },
+   {
+    "session": 10,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D10:13",
+    "last_dia_id": "D10:17",
+    "words": 78
+   },
+   {
+    "session": 11,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D11:1",
+    "last_dia_id": "D11:6",
+    "words": 118
+   },
+   {
+    "session": 11,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D11:7",
+    "last_dia_id": "D11:12",
+    "words": 162
+   },
+   {
+    "session": 11,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D11:13",
+    "last_dia_id": "D11:18",
+    "words": 265
+   },
+   {
+    "session": 11,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D11:19",
+    "last_dia_id": "D11:24",
+    "words": 236
+   },
+   {
+    "session": 11,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D11:25",
+    "last_dia_id": "D11:30",
+    "words": 149
+   },
+   {
+    "session": 12,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D12:1",
+    "last_dia_id": "D12:6",
+    "words": 218
+   },
+   {
+    "session": 12,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D12:7",
+    "last_dia_id": "D12:12",
+    "words": 229
+   },
+   {
+    "session": 12,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D12:13",
+    "last_dia_id": "D12:18",
+    "words": 171
+   },
+   {
+    "session": 12,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D12:19",
+    "last_dia_id": "D12:24",
+    "words": 156
+   },
+   {
+    "session": 12,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D12:25",
+    "last_dia_id": "D12:29",
+    "words": 155
+   },
+   {
+    "session": 13,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D13:1",
+    "last_dia_id": "D13:6",
+    "words": 244
+   },
+   {
+    "session": 13,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D13:7",
+    "last_dia_id": "D13:12",
+    "words": 138
+   },
+   {
+    "session": 13,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D13:13",
+    "last_dia_id": "D13:18",
+    "words": 147
+   },
+   {
+    "session": 13,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D13:19",
+    "last_dia_id": "D13:22",
+    "words": 83
+   },
+   {
+    "session": 14,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D14:1",
+    "last_dia_id": "D14:6",
+    "words": 187
+   },
+   {
+    "session": 14,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D14:7",
+    "last_dia_id": "D14:12",
+    "words": 237
+   },
+   {
+    "session": 14,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D14:13",
+    "last_dia_id": "D14:18",
+    "words": 155
+   },
+   {
+    "session": 14,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D14:19",
+    "last_dia_id": "D14:23",
+    "words": 97
+   },
+   {
+    "session": 15,
+    "part": 1,
+    "parts": 7,
+    "first_dia_id": "D15:1",
+    "last_dia_id": "D15:6",
+    "words": 290
+   },
+   {
+    "session": 15,
+    "part": 2,
+    "parts": 7,
+    "first_dia_id": "D15:7",
+    "last_dia_id": "D15:12",
+    "words": 231
+   },
+   {
+    "session": 15,
+    "part": 3,
+    "parts": 7,
+    "first_dia_id": "D15:13",
+    "last_dia_id": "D15:18",
+    "words": 215
+   },
+   {
+    "session": 15,
+    "part": 4,
+    "parts": 7,
+    "first_dia_id": "D15:19",
+    "last_dia_id": "D15:24",
+    "words": 182
+   },
+   {
+    "session": 15,
+    "part": 5,
+    "parts": 7,
+    "first_dia_id": "D15:25",
+    "last_dia_id": "D15:30",
+    "words": 257
+   },
+   {
+    "session": 15,
+    "part": 6,
+    "parts": 7,
+    "first_dia_id": "D15:31",
+    "last_dia_id": "D15:36",
+    "words": 152
+   },
+   {
+    "session": 15,
+    "part": 7,
+    "parts": 7,
+    "first_dia_id": "D15:37",
+    "last_dia_id": "D15:38",
+    "words": 44
+   },
+   {
+    "session": 16,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D16:1",
+    "last_dia_id": "D16:6",
+    "words": 261
+   },
+   {
+    "session": 16,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D16:7",
+    "last_dia_id": "D16:12",
+    "words": 255
+   },
+   {
+    "session": 16,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D16:13",
+    "last_dia_id": "D16:17",
+    "words": 142
+   },
+   {
+    "session": 17,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D17:1",
+    "last_dia_id": "D17:6",
+    "words": 197
+   },
+   {
+    "session": 17,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D17:7",
+    "last_dia_id": "D17:12",
+    "words": 183
+   },
+   {
+    "session": 17,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D17:13",
+    "last_dia_id": "D17:19",
+    "words": 188
+   },
+   {
+    "session": 18,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D18:1",
+    "last_dia_id": "D18:6",
+    "words": 236
+   },
+   {
+    "session": 18,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D18:7",
+    "last_dia_id": "D18:12",
+    "words": 120
+   },
+   {
+    "session": 18,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D18:13",
+    "last_dia_id": "D18:15",
+    "words": 51
+   },
+   {
+    "session": 19,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D19:1",
+    "last_dia_id": "D19:6",
+    "words": 272
+   },
+   {
+    "session": 19,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D19:7",
+    "last_dia_id": "D19:12",
+    "words": 261
+   },
+   {
+    "session": 19,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D19:13",
+    "last_dia_id": "D19:18",
+    "words": 193
+   },
+   {
+    "session": 19,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D19:19",
+    "last_dia_id": "D19:23",
+    "words": 218
+   },
+   {
+    "session": 20,
+    "part": 1,
+    "parts": 7,
+    "first_dia_id": "D20:1",
+    "last_dia_id": "D20:6",
+    "words": 244
+   },
+   {
+    "session": 20,
+    "part": 2,
+    "parts": 7,
+    "first_dia_id": "D20:7",
+    "last_dia_id": "D20:12",
+    "words": 159
+   },
+   {
+    "session": 20,
+    "part": 3,
+    "parts": 7,
+    "first_dia_id": "D20:13",
+    "last_dia_id": "D20:18",
+    "words": 142
+   },
+   {
+    "session": 20,
+    "part": 4,
+    "parts": 7,
+    "first_dia_id": "D20:19",
+    "last_dia_id": "D20:24",
+    "words": 152
+   },
+   {
+    "session": 20,
+    "part": 5,
+    "parts": 7,
+    "first_dia_id": "D20:25",
+    "last_dia_id": "D20:30",
+    "words": 137
+   },
+   {
+    "session": 20,
+    "part": 6,
+    "parts": 7,
+    "first_dia_id": "D20:31",
+    "last_dia_id": "D20:36",
+    "words": 144
+   },
+   {
+    "session": 20,
+    "part": 7,
+    "parts": 7,
+    "first_dia_id": "D20:37",
+    "last_dia_id": "D20:43",
+    "words": 217
+   },
+   {
+    "session": 21,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D21:1",
+    "last_dia_id": "D21:6",
+    "words": 183
+   },
+   {
+    "session": 21,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D21:7",
+    "last_dia_id": "D21:12",
+    "words": 217
+   },
+   {
+    "session": 21,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D21:13",
+    "last_dia_id": "D21:19",
+    "words": 275
+   },
+   {
+    "session": 22,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D22:1",
+    "last_dia_id": "D22:6",
+    "words": 286
+   },
+   {
+    "session": 22,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D22:7",
+    "last_dia_id": "D22:12",
+    "words": 247
+   },
+   {
+    "session": 22,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D22:13",
+    "last_dia_id": "D22:18",
+    "words": 135
+   },
+   {
+    "session": 23,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D23:1",
+    "last_dia_id": "D23:6",
+    "words": 214
+   },
+   {
+    "session": 23,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D23:7",
+    "last_dia_id": "D23:12",
+    "words": 259
+   },
+   {
+    "session": 23,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D23:13",
+    "last_dia_id": "D23:16",
+    "words": 83
+   },
+   {
+    "session": 24,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D24:1",
+    "last_dia_id": "D24:6",
+    "words": 141
+   },
+   {
+    "session": 24,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D24:7",
+    "last_dia_id": "D24:12",
+    "words": 218
+   },
+   {
+    "session": 24,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D24:13",
+    "last_dia_id": "D24:18",
+    "words": 179
+   },
+   {
+    "session": 24,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D24:19",
+    "last_dia_id": "D24:20",
+    "words": 36
+   },
+   {
+    "session": 25,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D25:1",
+    "last_dia_id": "D25:6",
+    "words": 215
+   },
+   {
+    "session": 25,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D25:7",
+    "last_dia_id": "D25:12",
+    "words": 183
+   },
+   {
+    "session": 25,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D25:13",
+    "last_dia_id": "D25:17",
+    "words": 108
+   },
+   {
+    "session": 26,
+    "part": 1,
+    "parts": 7,
+    "first_dia_id": "D26:1",
+    "last_dia_id": "D26:6",
+    "words": 208
+   },
+   {
+    "session": 26,
+    "part": 2,
+    "parts": 7,
+    "first_dia_id": "D26:7",
+    "last_dia_id": "D26:12",
+    "words": 162
+   },
+   {
+    "session": 26,
+    "part": 3,
+    "parts": 7,
+    "first_dia_id": "D26:13",
+    "last_dia_id": "D26:18",
+    "words": 151
+   },
+   {
+    "session": 26,
+    "part": 4,
+    "parts": 7,
+    "first_dia_id": "D26:19",
+    "last_dia_id": "D26:24",
+    "words": 266
+   },
+   {
+    "session": 26,
+    "part": 5,
+    "parts": 7,
+    "first_dia_id": "D26:25",
+    "last_dia_id": "D26:30",
+    "words": 187
+   },
+   {
+    "session": 26,
+    "part": 6,
+    "parts": 7,
+    "first_dia_id": "D26:31",
+    "last_dia_id": "D26:36",
+    "words": 147
+   },
+   {
+    "session": 26,
+    "part": 7,
+    "parts": 7,
+    "first_dia_id": "D26:37",
+    "last_dia_id": "D26:38",
+    "words": 51
+   },
+   {
+    "session": 27,
+    "part": 1,
+    "parts": 7,
+    "first_dia_id": "D27:1",
+    "last_dia_id": "D27:6",
+    "words": 251
+   },
+   {
+    "session": 27,
+    "part": 2,
+    "parts": 7,
+    "first_dia_id": "D27:7",
+    "last_dia_id": "D27:12",
+    "words": 212
+   },
+   {
+    "session": 27,
+    "part": 3,
+    "parts": 7,
+    "first_dia_id": "D27:13",
+    "last_dia_id": "D27:18",
+    "words": 219
+   },
+   {
+    "session": 27,
+    "part": 4,
+    "parts": 7,
+    "first_dia_id": "D27:19",
+    "last_dia_id": "D27:24",
+    "words": 210
+   },
+   {
+    "session": 27,
+    "part": 5,
+    "parts": 7,
+    "first_dia_id": "D27:25",
+    "last_dia_id": "D27:30",
+    "words": 165
+   },
+   {
+    "session": 27,
+    "part": 6,
+    "parts": 7,
+    "first_dia_id": "D27:31",
+    "last_dia_id": "D27:36",
+    "words": 179
+   },
+   {
+    "session": 27,
+    "part": 7,
+    "parts": 7,
+    "first_dia_id": "D27:37",
+    "last_dia_id": "D27:40",
+    "words": 139
+   },
+   {
+    "session": 28,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D28:1",
+    "last_dia_id": "D28:6",
+    "words": 161
+   },
+   {
+    "session": 28,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D28:7",
+    "last_dia_id": "D28:12",
+    "words": 141
+   },
+   {
+    "session": 28,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D28:13",
+    "last_dia_id": "D28:18",
+    "words": 124
+   },
+   {
+    "session": 28,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D28:19",
+    "last_dia_id": "D28:21",
+    "words": 48
+   },
+   {
+    "session": 29,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D29:1",
+    "last_dia_id": "D29:6",
+    "words": 170
+   },
+   {
+    "session": 29,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D29:7",
+    "last_dia_id": "D29:12",
+    "words": 207
+   },
+   {
+    "session": 29,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D29:13",
+    "last_dia_id": "D29:15",
+    "words": 76
+   }
+  ]
+ },
+ {
+  "conversation_index": 5,
+  "sample_id": "conv-44",
+  "window_turns": 6,
+  "windows": 118,
+  "document_count": 119,
+  "chunk_count": 119,
+  "one_chunk_per_document": true,
+  "graph_nodes": 1253,
+  "graph_edges": 4286,
+  "remember_seconds": 304.2,
+  "llm_model": "openai/gpt-5-mini",
+  "window_map": [
+   {
+    "session": 1,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D1:1",
+    "last_dia_id": "D1:6",
+    "words": 140
+   },
+   {
+    "session": 1,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D1:7",
+    "last_dia_id": "D1:12",
+    "words": 136
+   },
+   {
+    "session": 1,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D1:13",
+    "last_dia_id": "D1:18",
+    "words": 144
+   },
+   {
+    "session": 1,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D1:19",
+    "last_dia_id": "D1:24",
+    "words": 99
+   },
+   {
+    "session": 2,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D2:1",
+    "last_dia_id": "D2:6",
+    "words": 187
+   },
+   {
+    "session": 2,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D2:7",
+    "last_dia_id": "D2:12",
+    "words": 166
+   },
+   {
+    "session": 2,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D2:13",
+    "last_dia_id": "D2:18",
+    "words": 190
+   },
+   {
+    "session": 2,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D2:19",
+    "last_dia_id": "D2:24",
+    "words": 137
+   },
+   {
+    "session": 2,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D2:25",
+    "last_dia_id": "D2:26",
+    "words": 53
+   },
+   {
+    "session": 3,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D3:1",
+    "last_dia_id": "D3:6",
+    "words": 218
+   },
+   {
+    "session": 3,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D3:7",
+    "last_dia_id": "D3:12",
+    "words": 163
+   },
+   {
+    "session": 3,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D3:13",
+    "last_dia_id": "D3:18",
+    "words": 153
+   },
+   {
+    "session": 3,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D3:19",
+    "last_dia_id": "D3:24",
+    "words": 143
+   },
+   {
+    "session": 3,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D3:25",
+    "last_dia_id": "D3:31",
+    "words": 165
+   },
+   {
+    "session": 4,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D4:1",
+    "last_dia_id": "D4:6",
+    "words": 232
+   },
+   {
+    "session": 4,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D4:7",
+    "last_dia_id": "D4:12",
+    "words": 141
+   },
+   {
+    "session": 4,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D4:13",
+    "last_dia_id": "D4:18",
+    "words": 214
+   },
+   {
+    "session": 4,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D4:19",
+    "last_dia_id": "D4:24",
+    "words": 218
+   },
+   {
+    "session": 4,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D4:25",
+    "last_dia_id": "D4:30",
+    "words": 152
+   },
+   {
+    "session": 5,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D5:1",
+    "last_dia_id": "D5:6",
+    "words": 231
+   },
+   {
+    "session": 5,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D5:7",
+    "last_dia_id": "D5:12",
+    "words": 202
+   },
+   {
+    "session": 5,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D5:13",
+    "last_dia_id": "D5:18",
+    "words": 112
+   },
+   {
+    "session": 5,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D5:19",
+    "last_dia_id": "D5:22",
+    "words": 61
+   },
+   {
+    "session": 6,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D6:1",
+    "last_dia_id": "D6:6",
+    "words": 292
+   },
+   {
+    "session": 6,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D6:7",
+    "last_dia_id": "D6:12",
+    "words": 156
+   },
+   {
+    "session": 6,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D6:13",
+    "last_dia_id": "D6:16",
+    "words": 77
+   },
+   {
+    "session": 7,
+    "part": 1,
+    "parts": 2,
+    "first_dia_id": "D7:1",
+    "last_dia_id": "D7:6",
+    "words": 252
+   },
+   {
+    "session": 7,
+    "part": 2,
+    "parts": 2,
+    "first_dia_id": "D7:7",
+    "last_dia_id": "D7:13",
+    "words": 163
+   },
+   {
+    "session": 8,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D8:1",
+    "last_dia_id": "D8:6",
+    "words": 267
+   },
+   {
+    "session": 8,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D8:7",
+    "last_dia_id": "D8:12",
+    "words": 200
+   },
+   {
+    "session": 8,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D8:13",
+    "last_dia_id": "D8:18",
+    "words": 139
+   },
+   {
+    "session": 8,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D8:19",
+    "last_dia_id": "D8:24",
+    "words": 125
+   },
+   {
+    "session": 8,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D8:25",
+    "last_dia_id": "D8:28",
+    "words": 100
+   },
+   {
+    "session": 9,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D9:1",
+    "last_dia_id": "D9:6",
+    "words": 200
+   },
+   {
+    "session": 9,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D9:7",
+    "last_dia_id": "D9:12",
+    "words": 126
+   },
+   {
+    "session": 9,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D9:13",
+    "last_dia_id": "D9:18",
+    "words": 164
+   },
+   {
+    "session": 9,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D9:19",
+    "last_dia_id": "D9:24",
+    "words": 222
+   },
+   {
+    "session": 9,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D9:25",
+    "last_dia_id": "D9:27",
+    "words": 76
+   },
+   {
+    "session": 10,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D10:1",
+    "last_dia_id": "D10:6",
+    "words": 251
+   },
+   {
+    "session": 10,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D10:7",
+    "last_dia_id": "D10:12",
+    "words": 195
+   },
+   {
+    "session": 10,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D10:13",
+    "last_dia_id": "D10:18",
+    "words": 275
+   },
+   {
+    "session": 10,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D10:19",
+    "last_dia_id": "D10:24",
+    "words": 200
+   },
+   {
+    "session": 10,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D10:25",
+    "last_dia_id": "D10:29",
+    "words": 125
+   },
+   {
+    "session": 11,
+    "part": 1,
+    "parts": 7,
+    "first_dia_id": "D11:1",
+    "last_dia_id": "D11:6",
+    "words": 272
+   },
+   {
+    "session": 11,
+    "part": 2,
+    "parts": 7,
+    "first_dia_id": "D11:7",
+    "last_dia_id": "D11:12",
+    "words": 199
+   },
+   {
+    "session": 11,
+    "part": 3,
+    "parts": 7,
+    "first_dia_id": "D11:13",
+    "last_dia_id": "D11:18",
+    "words": 113
+   },
+   {
+    "session": 11,
+    "part": 4,
+    "parts": 7,
+    "first_dia_id": "D11:19",
+    "last_dia_id": "D11:24",
+    "words": 135
+   },
+   {
+    "session": 11,
+    "part": 5,
+    "parts": 7,
+    "first_dia_id": "D11:25",
+    "last_dia_id": "D11:30",
+    "words": 166
+   },
+   {
+    "session": 11,
+    "part": 6,
+    "parts": 7,
+    "first_dia_id": "D11:31",
+    "last_dia_id": "D11:36",
+    "words": 148
+   },
+   {
+    "session": 11,
+    "part": 7,
+    "parts": 7,
+    "first_dia_id": "D11:37",
+    "last_dia_id": "D11:38",
+    "words": 53
+   },
+   {
+    "session": 12,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D12:1",
+    "last_dia_id": "D12:6",
+    "words": 263
+   },
+   {
+    "session": 12,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D12:7",
+    "last_dia_id": "D12:12",
+    "words": 139
+   },
+   {
+    "session": 12,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D12:13",
+    "last_dia_id": "D12:17",
+    "words": 103
+   },
+   {
+    "session": 13,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D13:1",
+    "last_dia_id": "D13:6",
+    "words": 275
+   },
+   {
+    "session": 13,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D13:7",
+    "last_dia_id": "D13:12",
+    "words": 309
+   },
+   {
+    "session": 13,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D13:13",
+    "last_dia_id": "D13:16",
+    "words": 127
+   },
+   {
+    "session": 14,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D14:1",
+    "last_dia_id": "D14:6",
+    "words": 290
+   },
+   {
+    "session": 14,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D14:7",
+    "last_dia_id": "D14:12",
+    "words": 169
+   },
+   {
+    "session": 14,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D14:13",
+    "last_dia_id": "D14:18",
+    "words": 240
+   },
+   {
+    "session": 14,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D14:19",
+    "last_dia_id": "D14:24",
+    "words": 209
+   },
+   {
+    "session": 14,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D14:25",
+    "last_dia_id": "D14:27",
+    "words": 87
+   },
+   {
+    "session": 15,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D15:1",
+    "last_dia_id": "D15:6",
+    "words": 333
+   },
+   {
+    "session": 15,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D15:7",
+    "last_dia_id": "D15:12",
+    "words": 141
+   },
+   {
+    "session": 15,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D15:13",
+    "last_dia_id": "D15:19",
+    "words": 167
+   },
+   {
+    "session": 16,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D16:1",
+    "last_dia_id": "D16:6",
+    "words": 270
+   },
+   {
+    "session": 16,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D16:7",
+    "last_dia_id": "D16:12",
+    "words": 152
+   },
+   {
+    "session": 16,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D16:13",
+    "last_dia_id": "D16:19",
+    "words": 142
+   },
+   {
+    "session": 17,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D17:1",
+    "last_dia_id": "D17:6",
+    "words": 278
+   },
+   {
+    "session": 17,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D17:7",
+    "last_dia_id": "D17:12",
+    "words": 178
+   },
+   {
+    "session": 17,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D17:13",
+    "last_dia_id": "D17:18",
+    "words": 106
+   },
+   {
+    "session": 17,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D17:19",
+    "last_dia_id": "D17:21",
+    "words": 59
+   },
+   {
+    "session": 18,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D18:1",
+    "last_dia_id": "D18:6",
+    "words": 262
+   },
+   {
+    "session": 18,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D18:7",
+    "last_dia_id": "D18:12",
+    "words": 201
+   },
+   {
+    "session": 18,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D18:13",
+    "last_dia_id": "D18:18",
+    "words": 167
+   },
+   {
+    "session": 18,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D18:19",
+    "last_dia_id": "D18:22",
+    "words": 74
+   },
+   {
+    "session": 19,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D19:1",
+    "last_dia_id": "D19:6",
+    "words": 268
+   },
+   {
+    "session": 19,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D19:7",
+    "last_dia_id": "D19:12",
+    "words": 272
+   },
+   {
+    "session": 19,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D19:13",
+    "last_dia_id": "D19:18",
+    "words": 182
+   },
+   {
+    "session": 19,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D19:19",
+    "last_dia_id": "D19:24",
+    "words": 142
+   },
+   {
+    "session": 19,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D19:25",
+    "last_dia_id": "D19:30",
+    "words": 161
+   },
+   {
+    "session": 20,
+    "part": 1,
+    "parts": 7,
+    "first_dia_id": "D20:1",
+    "last_dia_id": "D20:6",
+    "words": 242
+   },
+   {
+    "session": 20,
+    "part": 2,
+    "parts": 7,
+    "first_dia_id": "D20:7",
+    "last_dia_id": "D20:12",
+    "words": 152
+   },
+   {
+    "session": 20,
+    "part": 3,
+    "parts": 7,
+    "first_dia_id": "D20:13",
+    "last_dia_id": "D20:18",
+    "words": 197
+   },
+   {
+    "session": 20,
+    "part": 4,
+    "parts": 7,
+    "first_dia_id": "D20:19",
+    "last_dia_id": "D20:24",
+    "words": 152
+   },
+   {
+    "session": 20,
+    "part": 5,
+    "parts": 7,
+    "first_dia_id": "D20:25",
+    "last_dia_id": "D20:30",
+    "words": 118
+   },
+   {
+    "session": 20,
+    "part": 6,
+    "parts": 7,
+    "first_dia_id": "D20:31",
+    "last_dia_id": "D20:36",
+    "words": 175
+   },
+   {
+    "session": 20,
+    "part": 7,
+    "parts": 7,
+    "first_dia_id": "D20:37",
+    "last_dia_id": "D20:40",
+    "words": 108
+   },
+   {
+    "session": 21,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D21:1",
+    "last_dia_id": "D21:6",
+    "words": 180
+   },
+   {
+    "session": 21,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D21:7",
+    "last_dia_id": "D21:12",
+    "words": 184
+   },
+   {
+    "session": 21,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D21:13",
+    "last_dia_id": "D21:18",
+    "words": 75
+   },
+   {
+    "session": 22,
+    "part": 1,
+    "parts": 2,
+    "first_dia_id": "D22:1",
+    "last_dia_id": "D22:6",
+    "words": 355
+   },
+   {
+    "session": 22,
+    "part": 2,
+    "parts": 2,
+    "first_dia_id": "D22:7",
+    "last_dia_id": "D22:13",
+    "words": 233
+   },
+   {
+    "session": 23,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D23:1",
+    "last_dia_id": "D23:6",
+    "words": 228
+   },
+   {
+    "session": 23,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D23:7",
+    "last_dia_id": "D23:12",
+    "words": 269
+   },
+   {
+    "session": 23,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D23:13",
+    "last_dia_id": "D23:18",
+    "words": 205
+   },
+   {
+    "session": 23,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D23:19",
+    "last_dia_id": "D23:24",
+    "words": 257
+   },
+   {
+    "session": 23,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D23:25",
+    "last_dia_id": "D23:28",
+    "words": 100
+   },
+   {
+    "session": 24,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D24:1",
+    "last_dia_id": "D24:6",
+    "words": 227
+   },
+   {
+    "session": 24,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D24:7",
+    "last_dia_id": "D24:12",
+    "words": 153
+   },
+   {
+    "session": 24,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D24:13",
+    "last_dia_id": "D24:18",
+    "words": 163
+   },
+   {
+    "session": 24,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D24:19",
+    "last_dia_id": "D24:22",
+    "words": 73
+   },
+   {
+    "session": 25,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D25:1",
+    "last_dia_id": "D25:6",
+    "words": 339
+   },
+   {
+    "session": 25,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D25:7",
+    "last_dia_id": "D25:12",
+    "words": 215
+   },
+   {
+    "session": 25,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D25:13",
+    "last_dia_id": "D25:16",
+    "words": 65
+   },
+   {
+    "session": 26,
+    "part": 1,
+    "parts": 8,
+    "first_dia_id": "D26:1",
+    "last_dia_id": "D26:6",
+    "words": 207
+   },
+   {
+    "session": 26,
+    "part": 2,
+    "parts": 8,
+    "first_dia_id": "D26:7",
+    "last_dia_id": "D26:12",
+    "words": 170
+   },
+   {
+    "session": 26,
+    "part": 3,
+    "parts": 8,
+    "first_dia_id": "D26:13",
+    "last_dia_id": "D26:18",
+    "words": 161
+   },
+   {
+    "session": 26,
+    "part": 4,
+    "parts": 8,
+    "first_dia_id": "D26:19",
+    "last_dia_id": "D26:24",
+    "words": 137
+   },
+   {
+    "session": 26,
+    "part": 5,
+    "parts": 8,
+    "first_dia_id": "D26:25",
+    "last_dia_id": "D26:30",
+    "words": 156
+   },
+   {
+    "session": 26,
+    "part": 6,
+    "parts": 8,
+    "first_dia_id": "D26:31",
+    "last_dia_id": "D26:36",
+    "words": 179
+   },
+   {
+    "session": 26,
+    "part": 7,
+    "parts": 8,
+    "first_dia_id": "D26:37",
+    "last_dia_id": "D26:42",
+    "words": 119
+   },
+   {
+    "session": 26,
+    "part": 8,
+    "parts": 8,
+    "first_dia_id": "D26:43",
+    "last_dia_id": "D26:47",
+    "words": 78
+   },
+   {
+    "session": 27,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D27:1",
+    "last_dia_id": "D27:6",
+    "words": 295
+   },
+   {
+    "session": 27,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D27:7",
+    "last_dia_id": "D27:12",
+    "words": 254
+   },
+   {
+    "session": 27,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D27:13",
+    "last_dia_id": "D27:18",
+    "words": 134
+   },
+   {
+    "session": 28,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D28:1",
+    "last_dia_id": "D28:6",
+    "words": 247
+   },
+   {
+    "session": 28,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D28:7",
+    "last_dia_id": "D28:12",
+    "words": 207
+   },
+   {
+    "session": 28,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D28:13",
+    "last_dia_id": "D28:18",
+    "words": 196
+   }
+  ]
+ },
+ {
+  "conversation_index": 6,
+  "sample_id": "conv-47",
+  "window_turns": 6,
+  "windows": 121,
+  "document_count": 122,
+  "chunk_count": 122,
+  "one_chunk_per_document": true,
+  "graph_nodes": 1370,
+  "graph_edges": 4189,
+  "remember_seconds": 299.1,
+  "llm_model": "openai/gpt-5-mini",
+  "window_map": [
+   {
+    "session": 1,
+    "part": 1,
+    "parts": 6,
+    "first_dia_id": "D1:1",
+    "last_dia_id": "D1:6",
+    "words": 161
+   },
+   {
+    "session": 1,
+    "part": 2,
+    "parts": 6,
+    "first_dia_id": "D1:7",
+    "last_dia_id": "D1:12",
+    "words": 179
+   },
+   {
+    "session": 1,
+    "part": 3,
+    "parts": 6,
+    "first_dia_id": "D1:13",
+    "last_dia_id": "D1:18",
+    "words": 228
+   },
+   {
+    "session": 1,
+    "part": 4,
+    "parts": 6,
+    "first_dia_id": "D1:19",
+    "last_dia_id": "D1:24",
+    "words": 216
+   },
+   {
+    "session": 1,
+    "part": 5,
+    "parts": 6,
+    "first_dia_id": "D1:25",
+    "last_dia_id": "D1:30",
+    "words": 167
+   },
+   {
+    "session": 1,
+    "part": 6,
+    "parts": 6,
+    "first_dia_id": "D1:31",
+    "last_dia_id": "D1:37",
+    "words": 112
+   },
+   {
+    "session": 2,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D2:1",
+    "last_dia_id": "D2:6",
+    "words": 183
+   },
+   {
+    "session": 2,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D2:7",
+    "last_dia_id": "D2:12",
+    "words": 156
+   },
+   {
+    "session": 2,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D2:13",
+    "last_dia_id": "D2:18",
+    "words": 192
+   },
+   {
+    "session": 2,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D2:19",
+    "last_dia_id": "D2:21",
+    "words": 83
+   },
+   {
+    "session": 3,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D3:1",
+    "last_dia_id": "D3:6",
+    "words": 194
+   },
+   {
+    "session": 3,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D3:7",
+    "last_dia_id": "D3:12",
+    "words": 204
+   },
+   {
+    "session": 3,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D3:13",
+    "last_dia_id": "D3:18",
+    "words": 159
+   },
+   {
+    "session": 3,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D3:19",
+    "last_dia_id": "D3:23",
+    "words": 104
+   },
+   {
+    "session": 4,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D4:1",
+    "last_dia_id": "D4:6",
+    "words": 220
+   },
+   {
+    "session": 4,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D4:7",
+    "last_dia_id": "D4:12",
+    "words": 177
+   },
+   {
+    "session": 4,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D4:13",
+    "last_dia_id": "D4:18",
+    "words": 167
+   },
+   {
+    "session": 4,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D4:19",
+    "last_dia_id": "D4:25",
+    "words": 168
+   },
+   {
+    "session": 5,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D5:1",
+    "last_dia_id": "D5:6",
+    "words": 264
+   },
+   {
+    "session": 5,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D5:7",
+    "last_dia_id": "D5:12",
+    "words": 143
+   },
+   {
+    "session": 5,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D5:13",
+    "last_dia_id": "D5:16",
+    "words": 43
+   },
+   {
+    "session": 6,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D6:1",
+    "last_dia_id": "D6:6",
+    "words": 346
+   },
+   {
+    "session": 6,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D6:7",
+    "last_dia_id": "D6:12",
+    "words": 182
+   },
+   {
+    "session": 6,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D6:13",
+    "last_dia_id": "D6:19",
+    "words": 164
+   },
+   {
+    "session": 7,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D7:1",
+    "last_dia_id": "D7:6",
+    "words": 169
+   },
+   {
+    "session": 7,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D7:7",
+    "last_dia_id": "D7:12",
+    "words": 133
+   },
+   {
+    "session": 7,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D7:13",
+    "last_dia_id": "D7:18",
+    "words": 190
+   },
+   {
+    "session": 7,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D7:19",
+    "last_dia_id": "D7:21",
+    "words": 94
+   },
+   {
+    "session": 8,
+    "part": 1,
+    "parts": 7,
+    "first_dia_id": "D8:1",
+    "last_dia_id": "D8:6",
+    "words": 142
+   },
+   {
+    "session": 8,
+    "part": 2,
+    "parts": 7,
+    "first_dia_id": "D8:7",
+    "last_dia_id": "D8:12",
+    "words": 174
+   },
+   {
+    "session": 8,
+    "part": 3,
+    "parts": 7,
+    "first_dia_id": "D8:13",
+    "last_dia_id": "D8:18",
+    "words": 160
+   },
+   {
+    "session": 8,
+    "part": 4,
+    "parts": 7,
+    "first_dia_id": "D8:19",
+    "last_dia_id": "D8:24",
+    "words": 175
+   },
+   {
+    "session": 8,
+    "part": 5,
+    "parts": 7,
+    "first_dia_id": "D8:25",
+    "last_dia_id": "D8:30",
+    "words": 179
+   },
+   {
+    "session": 8,
+    "part": 6,
+    "parts": 7,
+    "first_dia_id": "D8:31",
+    "last_dia_id": "D8:36",
+    "words": 155
+   },
+   {
+    "session": 8,
+    "part": 7,
+    "parts": 7,
+    "first_dia_id": "D8:37",
+    "last_dia_id": "D8:40",
+    "words": 68
+   },
+   {
+    "session": 9,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D9:1",
+    "last_dia_id": "D9:6",
+    "words": 176
+   },
+   {
+    "session": 9,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D9:7",
+    "last_dia_id": "D9:12",
+    "words": 199
+   },
+   {
+    "session": 9,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D9:13",
+    "last_dia_id": "D9:18",
+    "words": 118
+   },
+   {
+    "session": 9,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D9:19",
+    "last_dia_id": "D9:25",
+    "words": 120
+   },
+   {
+    "session": 10,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D10:1",
+    "last_dia_id": "D10:6",
+    "words": 190
+   },
+   {
+    "session": 10,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D10:7",
+    "last_dia_id": "D10:12",
+    "words": 170
+   },
+   {
+    "session": 10,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D10:13",
+    "last_dia_id": "D10:15",
+    "words": 67
+   },
+   {
+    "session": 11,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D11:1",
+    "last_dia_id": "D11:6",
+    "words": 257
+   },
+   {
+    "session": 11,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D11:7",
+    "last_dia_id": "D11:12",
+    "words": 194
+   },
+   {
+    "session": 11,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D11:13",
+    "last_dia_id": "D11:19",
+    "words": 147
+   },
+   {
+    "session": 12,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D12:1",
+    "last_dia_id": "D12:6",
+    "words": 212
+   },
+   {
+    "session": 12,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D12:7",
+    "last_dia_id": "D12:12",
+    "words": 222
+   },
+   {
+    "session": 12,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D12:13",
+    "last_dia_id": "D12:14",
+    "words": 48
+   },
+   {
+    "session": 13,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D13:1",
+    "last_dia_id": "D13:6",
+    "words": 170
+   },
+   {
+    "session": 13,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D13:7",
+    "last_dia_id": "D13:12",
+    "words": 166
+   },
+   {
+    "session": 13,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D13:13",
+    "last_dia_id": "D13:18",
+    "words": 122
+   },
+   {
+    "session": 13,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D13:19",
+    "last_dia_id": "D13:20",
+    "words": 38
+   },
+   {
+    "session": 14,
+    "part": 1,
+    "parts": 6,
+    "first_dia_id": "D14:1",
+    "last_dia_id": "D14:6",
+    "words": 273
+   },
+   {
+    "session": 14,
+    "part": 2,
+    "parts": 6,
+    "first_dia_id": "D14:7",
+    "last_dia_id": "D14:12",
+    "words": 221
+   },
+   {
+    "session": 14,
+    "part": 3,
+    "parts": 6,
+    "first_dia_id": "D14:13",
+    "last_dia_id": "D14:18",
+    "words": 161
+   },
+   {
+    "session": 14,
+    "part": 4,
+    "parts": 6,
+    "first_dia_id": "D14:19",
+    "last_dia_id": "D14:24",
+    "words": 134
+   },
+   {
+    "session": 14,
+    "part": 5,
+    "parts": 6,
+    "first_dia_id": "D14:25",
+    "last_dia_id": "D14:30",
+    "words": 187
+   },
+   {
+    "session": 14,
+    "part": 6,
+    "parts": 6,
+    "first_dia_id": "D14:31",
+    "last_dia_id": "D14:34",
+    "words": 87
+   },
+   {
+    "session": 15,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D15:1",
+    "last_dia_id": "D15:6",
+    "words": 204
+   },
+   {
+    "session": 15,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D15:7",
+    "last_dia_id": "D15:12",
+    "words": 241
+   },
+   {
+    "session": 15,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D15:13",
+    "last_dia_id": "D15:19",
+    "words": 151
+   },
+   {
+    "session": 16,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D16:1",
+    "last_dia_id": "D16:6",
+    "words": 206
+   },
+   {
+    "session": 16,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D16:7",
+    "last_dia_id": "D16:12",
+    "words": 174
+   },
+   {
+    "session": 16,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D16:13",
+    "last_dia_id": "D16:16",
+    "words": 67
+   },
+   {
+    "session": 17,
+    "part": 1,
+    "parts": 6,
+    "first_dia_id": "D17:1",
+    "last_dia_id": "D17:6",
+    "words": 156
+   },
+   {
+    "session": 17,
+    "part": 2,
+    "parts": 6,
+    "first_dia_id": "D17:7",
+    "last_dia_id": "D17:12",
+    "words": 132
+   },
+   {
+    "session": 17,
+    "part": 3,
+    "parts": 6,
+    "first_dia_id": "D17:13",
+    "last_dia_id": "D17:18",
+    "words": 225
+   },
+   {
+    "session": 17,
+    "part": 4,
+    "parts": 6,
+    "first_dia_id": "D17:19",
+    "last_dia_id": "D17:24",
+    "words": 179
+   },
+   {
+    "session": 17,
+    "part": 5,
+    "parts": 6,
+    "first_dia_id": "D17:25",
+    "last_dia_id": "D17:30",
+    "words": 141
+   },
+   {
+    "session": 17,
+    "part": 6,
+    "parts": 6,
+    "first_dia_id": "D17:31",
+    "last_dia_id": "D17:37",
+    "words": 161
+   },
+   {
+    "session": 18,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D18:1",
+    "last_dia_id": "D18:6",
+    "words": 169
+   },
+   {
+    "session": 18,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D18:7",
+    "last_dia_id": "D18:12",
+    "words": 200
+   },
+   {
+    "session": 18,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D18:13",
+    "last_dia_id": "D18:18",
+    "words": 127
+   },
+   {
+    "session": 18,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D18:19",
+    "last_dia_id": "D18:20",
+    "words": 41
+   },
+   {
+    "session": 19,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D19:1",
+    "last_dia_id": "D19:6",
+    "words": 165
+   },
+   {
+    "session": 19,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D19:7",
+    "last_dia_id": "D19:12",
+    "words": 171
+   },
+   {
+    "session": 19,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D19:13",
+    "last_dia_id": "D19:17",
+    "words": 117
+   },
+   {
+    "session": 20,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D20:1",
+    "last_dia_id": "D20:6",
+    "words": 288
+   },
+   {
+    "session": 20,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D20:7",
+    "last_dia_id": "D20:12",
+    "words": 325
+   },
+   {
+    "session": 20,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D20:13",
+    "last_dia_id": "D20:18",
+    "words": 158
+   },
+   {
+    "session": 20,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D20:19",
+    "last_dia_id": "D20:22",
+    "words": 80
+   },
+   {
+    "session": 21,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D21:1",
+    "last_dia_id": "D21:6",
+    "words": 169
+   },
+   {
+    "session": 21,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D21:7",
+    "last_dia_id": "D21:12",
+    "words": 178
+   },
+   {
+    "session": 21,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D21:13",
+    "last_dia_id": "D21:19",
+    "words": 123
+   },
+   {
+    "session": 22,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D22:1",
+    "last_dia_id": "D22:6",
+    "words": 205
+   },
+   {
+    "session": 22,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D22:7",
+    "last_dia_id": "D22:12",
+    "words": 206
+   },
+   {
+    "session": 22,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D22:13",
+    "last_dia_id": "D22:19",
+    "words": 189
+   },
+   {
+    "session": 23,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D23:1",
+    "last_dia_id": "D23:6",
+    "words": 269
+   },
+   {
+    "session": 23,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D23:7",
+    "last_dia_id": "D23:12",
+    "words": 135
+   },
+   {
+    "session": 23,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D23:13",
+    "last_dia_id": "D23:18",
+    "words": 170
+   },
+   {
+    "session": 23,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D23:19",
+    "last_dia_id": "D23:21",
+    "words": 57
+   },
+   {
+    "session": 24,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D24:1",
+    "last_dia_id": "D24:6",
+    "words": 238
+   },
+   {
+    "session": 24,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D24:7",
+    "last_dia_id": "D24:12",
+    "words": 181
+   },
+   {
+    "session": 24,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D24:13",
+    "last_dia_id": "D24:18",
+    "words": 157
+   },
+   {
+    "session": 24,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D24:19",
+    "last_dia_id": "D24:21",
+    "words": 91
+   },
+   {
+    "session": 25,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D25:1",
+    "last_dia_id": "D25:6",
+    "words": 198
+   },
+   {
+    "session": 25,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D25:7",
+    "last_dia_id": "D25:12",
+    "words": 265
+   },
+   {
+    "session": 25,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D25:13",
+    "last_dia_id": "D25:18",
+    "words": 211
+   },
+   {
+    "session": 25,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D25:19",
+    "last_dia_id": "D25:25",
+    "words": 138
+   },
+   {
+    "session": 26,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D26:1",
+    "last_dia_id": "D26:6",
+    "words": 214
+   },
+   {
+    "session": 26,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D26:7",
+    "last_dia_id": "D26:12",
+    "words": 186
+   },
+   {
+    "session": 26,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D26:13",
+    "last_dia_id": "D26:15",
+    "words": 56
+   },
+   {
+    "session": 27,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D27:1",
+    "last_dia_id": "D27:6",
+    "words": 217
+   },
+   {
+    "session": 27,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D27:7",
+    "last_dia_id": "D27:12",
+    "words": 155
+   },
+   {
+    "session": 27,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D27:13",
+    "last_dia_id": "D27:14",
+    "words": 47
+   },
+   {
+    "session": 28,
+    "part": 1,
+    "parts": 6,
+    "first_dia_id": "D28:1",
+    "last_dia_id": "D28:6",
+    "words": 141
+   },
+   {
+    "session": 28,
+    "part": 2,
+    "parts": 6,
+    "first_dia_id": "D28:7",
+    "last_dia_id": "D28:12",
+    "words": 150
+   },
+   {
+    "session": 28,
+    "part": 3,
+    "parts": 6,
+    "first_dia_id": "D28:13",
+    "last_dia_id": "D28:18",
+    "words": 174
+   },
+   {
+    "session": 28,
+    "part": 4,
+    "parts": 6,
+    "first_dia_id": "D28:19",
+    "last_dia_id": "D28:24",
+    "words": 204
+   },
+   {
+    "session": 28,
+    "part": 5,
+    "parts": 6,
+    "first_dia_id": "D28:25",
+    "last_dia_id": "D28:30",
+    "words": 197
+   },
+   {
+    "session": 28,
+    "part": 6,
+    "parts": 6,
+    "first_dia_id": "D28:31",
+    "last_dia_id": "D28:35",
+    "words": 87
+   },
+   {
+    "session": 29,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D29:1",
+    "last_dia_id": "D29:6",
+    "words": 246
+   },
+   {
+    "session": 29,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D29:7",
+    "last_dia_id": "D29:12",
+    "words": 136
+   },
+   {
+    "session": 29,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D29:13",
+    "last_dia_id": "D29:16",
+    "words": 97
+   },
+   {
+    "session": 30,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D30:1",
+    "last_dia_id": "D30:6",
+    "words": 154
+   },
+   {
+    "session": 30,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D30:7",
+    "last_dia_id": "D30:12",
+    "words": 173
+   },
+   {
+    "session": 30,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D30:13",
+    "last_dia_id": "D30:19",
+    "words": 137
+   },
+   {
+    "session": 31,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D31:1",
+    "last_dia_id": "D31:6",
+    "words": 204
+   },
+   {
+    "session": 31,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D31:7",
+    "last_dia_id": "D31:12",
+    "words": 150
+   },
+   {
+    "session": 31,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D31:13",
+    "last_dia_id": "D31:18",
+    "words": 170
+   },
+   {
+    "session": 31,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D31:19",
+    "last_dia_id": "D31:25",
+    "words": 162
+   }
+  ]
+ },
+ {
+  "conversation_index": 7,
+  "sample_id": "conv-48",
+  "window_turns": 6,
+  "windows": 124,
+  "document_count": 125,
+  "chunk_count": 125,
+  "one_chunk_per_document": true,
+  "graph_nodes": 1434,
+  "graph_edges": 4588,
+  "remember_seconds": 311.0,
+  "llm_model": "openai/gpt-5-mini",
+  "window_map": [
+   {
+    "session": 1,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D1:1",
+    "last_dia_id": "D1:6",
+    "words": 188
+   },
+   {
+    "session": 1,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D1:7",
+    "last_dia_id": "D1:12",
+    "words": 167
+   },
+   {
+    "session": 1,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D1:13",
+    "last_dia_id": "D1:18",
+    "words": 92
+   },
+   {
+    "session": 2,
+    "part": 1,
+    "parts": 6,
+    "first_dia_id": "D2:1",
+    "last_dia_id": "D2:6",
+    "words": 197
+   },
+   {
+    "session": 2,
+    "part": 2,
+    "parts": 6,
+    "first_dia_id": "D2:7",
+    "last_dia_id": "D2:12",
+    "words": 145
+   },
+   {
+    "session": 2,
+    "part": 3,
+    "parts": 6,
+    "first_dia_id": "D2:13",
+    "last_dia_id": "D2:18",
+    "words": 169
+   },
+   {
+    "session": 2,
+    "part": 4,
+    "parts": 6,
+    "first_dia_id": "D2:19",
+    "last_dia_id": "D2:24",
+    "words": 164
+   },
+   {
+    "session": 2,
+    "part": 5,
+    "parts": 6,
+    "first_dia_id": "D2:25",
+    "last_dia_id": "D2:30",
+    "words": 121
+   },
+   {
+    "session": 2,
+    "part": 6,
+    "parts": 6,
+    "first_dia_id": "D2:31",
+    "last_dia_id": "D2:32",
+    "words": 41
+   },
+   {
+    "session": 3,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D3:1",
+    "last_dia_id": "D3:6",
+    "words": 216
+   },
+   {
+    "session": 3,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D3:7",
+    "last_dia_id": "D3:12",
+    "words": 107
+   },
+   {
+    "session": 3,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D3:13",
+    "last_dia_id": "D3:15",
+    "words": 37
+   },
+   {
+    "session": 4,
+    "part": 1,
+    "parts": 8,
+    "first_dia_id": "D4:1",
+    "last_dia_id": "D4:6",
+    "words": 173
+   },
+   {
+    "session": 4,
+    "part": 2,
+    "parts": 8,
+    "first_dia_id": "D4:7",
+    "last_dia_id": "D4:12",
+    "words": 223
+   },
+   {
+    "session": 4,
+    "part": 3,
+    "parts": 8,
+    "first_dia_id": "D4:13",
+    "last_dia_id": "D4:18",
+    "words": 155
+   },
+   {
+    "session": 4,
+    "part": 4,
+    "parts": 8,
+    "first_dia_id": "D4:19",
+    "last_dia_id": "D4:24",
+    "words": 146
+   },
+   {
+    "session": 4,
+    "part": 5,
+    "parts": 8,
+    "first_dia_id": "D4:25",
+    "last_dia_id": "D4:30",
+    "words": 168
+   },
+   {
+    "session": 4,
+    "part": 6,
+    "parts": 8,
+    "first_dia_id": "D4:31",
+    "last_dia_id": "D4:36",
+    "words": 283
+   },
+   {
+    "session": 4,
+    "part": 7,
+    "parts": 8,
+    "first_dia_id": "D4:37",
+    "last_dia_id": "D4:42",
+    "words": 149
+   },
+   {
+    "session": 4,
+    "part": 8,
+    "parts": 8,
+    "first_dia_id": "D4:43",
+    "last_dia_id": "D4:44",
+    "words": 48
+   },
+   {
+    "session": 5,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D5:1",
+    "last_dia_id": "D5:6",
+    "words": 159
+   },
+   {
+    "session": 5,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D5:7",
+    "last_dia_id": "D5:12",
+    "words": 195
+   },
+   {
+    "session": 5,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D5:13",
+    "last_dia_id": "D5:17",
+    "words": 96
+   },
+   {
+    "session": 6,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D6:1",
+    "last_dia_id": "D6:6",
+    "words": 183
+   },
+   {
+    "session": 6,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D6:7",
+    "last_dia_id": "D6:12",
+    "words": 180
+   },
+   {
+    "session": 6,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D6:13",
+    "last_dia_id": "D6:16",
+    "words": 57
+   },
+   {
+    "session": 7,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D7:1",
+    "last_dia_id": "D7:6",
+    "words": 208
+   },
+   {
+    "session": 7,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D7:7",
+    "last_dia_id": "D7:12",
+    "words": 172
+   },
+   {
+    "session": 7,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D7:13",
+    "last_dia_id": "D7:18",
+    "words": 194
+   },
+   {
+    "session": 7,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D7:19",
+    "last_dia_id": "D7:23",
+    "words": 97
+   },
+   {
+    "session": 8,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D8:1",
+    "last_dia_id": "D8:6",
+    "words": 187
+   },
+   {
+    "session": 8,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D8:7",
+    "last_dia_id": "D8:12",
+    "words": 123
+   },
+   {
+    "session": 8,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D8:13",
+    "last_dia_id": "D8:18",
+    "words": 138
+   },
+   {
+    "session": 8,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D8:19",
+    "last_dia_id": "D8:23",
+    "words": 146
+   },
+   {
+    "session": 9,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D9:1",
+    "last_dia_id": "D9:6",
+    "words": 149
+   },
+   {
+    "session": 9,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D9:7",
+    "last_dia_id": "D9:12",
+    "words": 138
+   },
+   {
+    "session": 9,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D9:13",
+    "last_dia_id": "D9:18",
+    "words": 115
+   },
+   {
+    "session": 9,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D9:19",
+    "last_dia_id": "D9:20",
+    "words": 41
+   },
+   {
+    "session": 10,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D10:1",
+    "last_dia_id": "D10:6",
+    "words": 182
+   },
+   {
+    "session": 10,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D10:7",
+    "last_dia_id": "D10:12",
+    "words": 121
+   },
+   {
+    "session": 10,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D10:13",
+    "last_dia_id": "D10:18",
+    "words": 202
+   },
+   {
+    "session": 10,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D10:19",
+    "last_dia_id": "D10:24",
+    "words": 157
+   },
+   {
+    "session": 11,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D11:1",
+    "last_dia_id": "D11:6",
+    "words": 270
+   },
+   {
+    "session": 11,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D11:7",
+    "last_dia_id": "D11:12",
+    "words": 162
+   },
+   {
+    "session": 11,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D11:13",
+    "last_dia_id": "D11:14",
+    "words": 35
+   },
+   {
+    "session": 12,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D12:1",
+    "last_dia_id": "D12:6",
+    "words": 262
+   },
+   {
+    "session": 12,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D12:7",
+    "last_dia_id": "D12:12",
+    "words": 127
+   },
+   {
+    "session": 12,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D12:13",
+    "last_dia_id": "D12:16",
+    "words": 70
+   },
+   {
+    "session": 13,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D13:1",
+    "last_dia_id": "D13:6",
+    "words": 176
+   },
+   {
+    "session": 13,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D13:7",
+    "last_dia_id": "D13:12",
+    "words": 151
+   },
+   {
+    "session": 13,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D13:13",
+    "last_dia_id": "D13:18",
+    "words": 168
+   },
+   {
+    "session": 13,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D13:19",
+    "last_dia_id": "D13:24",
+    "words": 128
+   },
+   {
+    "session": 13,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D13:25",
+    "last_dia_id": "D13:27",
+    "words": 52
+   },
+   {
+    "session": 14,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D14:1",
+    "last_dia_id": "D14:6",
+    "words": 216
+   },
+   {
+    "session": 14,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D14:7",
+    "last_dia_id": "D14:12",
+    "words": 142
+   },
+   {
+    "session": 14,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D14:13",
+    "last_dia_id": "D14:18",
+    "words": 120
+   },
+   {
+    "session": 14,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D14:19",
+    "last_dia_id": "D14:23",
+    "words": 79
+   },
+   {
+    "session": 15,
+    "part": 1,
+    "parts": 7,
+    "first_dia_id": "D15:1",
+    "last_dia_id": "D15:6",
+    "words": 261
+   },
+   {
+    "session": 15,
+    "part": 2,
+    "parts": 7,
+    "first_dia_id": "D15:7",
+    "last_dia_id": "D15:12",
+    "words": 198
+   },
+   {
+    "session": 15,
+    "part": 3,
+    "parts": 7,
+    "first_dia_id": "D15:13",
+    "last_dia_id": "D15:18",
+    "words": 256
+   },
+   {
+    "session": 15,
+    "part": 4,
+    "parts": 7,
+    "first_dia_id": "D15:19",
+    "last_dia_id": "D15:24",
+    "words": 165
+   },
+   {
+    "session": 15,
+    "part": 5,
+    "parts": 7,
+    "first_dia_id": "D15:25",
+    "last_dia_id": "D15:30",
+    "words": 178
+   },
+   {
+    "session": 15,
+    "part": 6,
+    "parts": 7,
+    "first_dia_id": "D15:31",
+    "last_dia_id": "D15:36",
+    "words": 148
+   },
+   {
+    "session": 15,
+    "part": 7,
+    "parts": 7,
+    "first_dia_id": "D15:37",
+    "last_dia_id": "D15:39",
+    "words": 47
+   },
+   {
+    "session": 16,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D16:1",
+    "last_dia_id": "D16:6",
+    "words": 221
+   },
+   {
+    "session": 16,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D16:7",
+    "last_dia_id": "D16:12",
+    "words": 159
+   },
+   {
+    "session": 16,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D16:13",
+    "last_dia_id": "D16:18",
+    "words": 166
+   },
+   {
+    "session": 16,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D16:19",
+    "last_dia_id": "D16:20",
+    "words": 42
+   },
+   {
+    "session": 17,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D17:1",
+    "last_dia_id": "D17:6",
+    "words": 165
+   },
+   {
+    "session": 17,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D17:7",
+    "last_dia_id": "D17:12",
+    "words": 154
+   },
+   {
+    "session": 17,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D17:13",
+    "last_dia_id": "D17:15",
+    "words": 53
+   },
+   {
+    "session": 18,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D18:1",
+    "last_dia_id": "D18:6",
+    "words": 233
+   },
+   {
+    "session": 18,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D18:7",
+    "last_dia_id": "D18:12",
+    "words": 208
+   },
+   {
+    "session": 18,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D18:13",
+    "last_dia_id": "D18:15",
+    "words": 57
+   },
+   {
+    "session": 19,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D19:1",
+    "last_dia_id": "D19:6",
+    "words": 283
+   },
+   {
+    "session": 19,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D19:7",
+    "last_dia_id": "D19:12",
+    "words": 212
+   },
+   {
+    "session": 19,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D19:13",
+    "last_dia_id": "D19:18",
+    "words": 164
+   },
+   {
+    "session": 19,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D19:19",
+    "last_dia_id": "D19:24",
+    "words": 177
+   },
+   {
+    "session": 20,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D20:1",
+    "last_dia_id": "D20:6",
+    "words": 210
+   },
+   {
+    "session": 20,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D20:7",
+    "last_dia_id": "D20:12",
+    "words": 192
+   },
+   {
+    "session": 20,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D20:13",
+    "last_dia_id": "D20:18",
+    "words": 106
+   },
+   {
+    "session": 20,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D20:19",
+    "last_dia_id": "D20:24",
+    "words": 115
+   },
+   {
+    "session": 20,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D20:25",
+    "last_dia_id": "D20:26",
+    "words": 37
+   },
+   {
+    "session": 21,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D21:1",
+    "last_dia_id": "D21:6",
+    "words": 273
+   },
+   {
+    "session": 21,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D21:7",
+    "last_dia_id": "D21:12",
+    "words": 160
+   },
+   {
+    "session": 21,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D21:13",
+    "last_dia_id": "D21:17",
+    "words": 134
+   },
+   {
+    "session": 22,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D22:1",
+    "last_dia_id": "D22:6",
+    "words": 318
+   },
+   {
+    "session": 22,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D22:7",
+    "last_dia_id": "D22:12",
+    "words": 208
+   },
+   {
+    "session": 22,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D22:13",
+    "last_dia_id": "D22:18",
+    "words": 253
+   },
+   {
+    "session": 22,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D22:19",
+    "last_dia_id": "D22:24",
+    "words": 150
+   },
+   {
+    "session": 22,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D22:25",
+    "last_dia_id": "D22:30",
+    "words": 90
+   },
+   {
+    "session": 23,
+    "part": 1,
+    "parts": 6,
+    "first_dia_id": "D23:1",
+    "last_dia_id": "D23:6",
+    "words": 207
+   },
+   {
+    "session": 23,
+    "part": 2,
+    "parts": 6,
+    "first_dia_id": "D23:7",
+    "last_dia_id": "D23:12",
+    "words": 151
+   },
+   {
+    "session": 23,
+    "part": 3,
+    "parts": 6,
+    "first_dia_id": "D23:13",
+    "last_dia_id": "D23:18",
+    "words": 148
+   },
+   {
+    "session": 23,
+    "part": 4,
+    "parts": 6,
+    "first_dia_id": "D23:19",
+    "last_dia_id": "D23:24",
+    "words": 181
+   },
+   {
+    "session": 23,
+    "part": 5,
+    "parts": 6,
+    "first_dia_id": "D23:25",
+    "last_dia_id": "D23:30",
+    "words": 152
+   },
+   {
+    "session": 23,
+    "part": 6,
+    "parts": 6,
+    "first_dia_id": "D23:31",
+    "last_dia_id": "D23:32",
+    "words": 39
+   },
+   {
+    "session": 24,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D24:1",
+    "last_dia_id": "D24:6",
+    "words": 286
+   },
+   {
+    "session": 24,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D24:7",
+    "last_dia_id": "D24:12",
+    "words": 145
+   },
+   {
+    "session": 24,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D24:13",
+    "last_dia_id": "D24:15",
+    "words": 89
+   },
+   {
+    "session": 25,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D25:1",
+    "last_dia_id": "D25:6",
+    "words": 143
+   },
+   {
+    "session": 25,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D25:7",
+    "last_dia_id": "D25:12",
+    "words": 106
+   },
+   {
+    "session": 25,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D25:13",
+    "last_dia_id": "D25:18",
+    "words": 83
+   },
+   {
+    "session": 25,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D25:19",
+    "last_dia_id": "D25:20",
+    "words": 39
+   },
+   {
+    "session": 26,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D26:1",
+    "last_dia_id": "D26:6",
+    "words": 165
+   },
+   {
+    "session": 26,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D26:7",
+    "last_dia_id": "D26:12",
+    "words": 142
+   },
+   {
+    "session": 26,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D26:13",
+    "last_dia_id": "D26:18",
+    "words": 140
+   },
+   {
+    "session": 26,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D26:19",
+    "last_dia_id": "D26:21",
+    "words": 63
+   },
+   {
+    "session": 27,
+    "part": 1,
+    "parts": 2,
+    "first_dia_id": "D27:1",
+    "last_dia_id": "D27:6",
+    "words": 233
+   },
+   {
+    "session": 27,
+    "part": 2,
+    "parts": 2,
+    "first_dia_id": "D27:7",
+    "last_dia_id": "D27:13",
+    "words": 236
+   },
+   {
+    "session": 28,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D28:1",
+    "last_dia_id": "D28:6",
+    "words": 216
+   },
+   {
+    "session": 28,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D28:7",
+    "last_dia_id": "D28:12",
+    "words": 180
+   },
+   {
+    "session": 28,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D28:13",
+    "last_dia_id": "D28:18",
+    "words": 179
+   },
+   {
+    "session": 28,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D28:19",
+    "last_dia_id": "D28:24",
+    "words": 160
+   },
+   {
+    "session": 28,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D28:25",
+    "last_dia_id": "D28:30",
+    "words": 84
+   },
+   {
+    "session": 29,
+    "part": 1,
+    "parts": 6,
+    "first_dia_id": "D29:1",
+    "last_dia_id": "D29:6",
+    "words": 253
+   },
+   {
+    "session": 29,
+    "part": 2,
+    "parts": 6,
+    "first_dia_id": "D29:7",
+    "last_dia_id": "D29:12",
+    "words": 208
+   },
+   {
+    "session": 29,
+    "part": 3,
+    "parts": 6,
+    "first_dia_id": "D29:13",
+    "last_dia_id": "D29:18",
+    "words": 96
+   },
+   {
+    "session": 29,
+    "part": 4,
+    "parts": 6,
+    "first_dia_id": "D29:19",
+    "last_dia_id": "D29:24",
+    "words": 189
+   },
+   {
+    "session": 29,
+    "part": 5,
+    "parts": 6,
+    "first_dia_id": "D29:25",
+    "last_dia_id": "D29:30",
+    "words": 121
+   },
+   {
+    "session": 29,
+    "part": 6,
+    "parts": 6,
+    "first_dia_id": "D29:31",
+    "last_dia_id": "D29:34",
+    "words": 96
+   },
+   {
+    "session": 30,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D30:1",
+    "last_dia_id": "D30:6",
+    "words": 279
+   },
+   {
+    "session": 30,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D30:7",
+    "last_dia_id": "D30:12",
+    "words": 164
+   },
+   {
+    "session": 30,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D30:13",
+    "last_dia_id": "D30:18",
+    "words": 155
+   }
+  ]
+ },
+ {
+  "conversation_index": 8,
+  "sample_id": "conv-49",
+  "window_turns": 6,
+  "windows": 92,
+  "document_count": 93,
+  "chunk_count": 93,
+  "one_chunk_per_document": true,
+  "graph_nodes": 1008,
+  "graph_edges": 3062,
+  "remember_seconds": 227.7,
+  "llm_model": "openai/gpt-5-mini",
+  "window_map": [
+   {
+    "session": 1,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D1:1",
+    "last_dia_id": "D1:6",
+    "words": 157
+   },
+   {
+    "session": 1,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D1:7",
+    "last_dia_id": "D1:12",
+    "words": 160
+   },
+   {
+    "session": 1,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D1:13",
+    "last_dia_id": "D1:18",
+    "words": 134
+   },
+   {
+    "session": 1,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D1:19",
+    "last_dia_id": "D1:22",
+    "words": 78
+   },
+   {
+    "session": 2,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D2:1",
+    "last_dia_id": "D2:6",
+    "words": 211
+   },
+   {
+    "session": 2,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D2:7",
+    "last_dia_id": "D2:12",
+    "words": 239
+   },
+   {
+    "session": 2,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D2:13",
+    "last_dia_id": "D2:17",
+    "words": 84
+   },
+   {
+    "session": 3,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D3:1",
+    "last_dia_id": "D3:6",
+    "words": 244
+   },
+   {
+    "session": 3,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D3:7",
+    "last_dia_id": "D3:12",
+    "words": 132
+   },
+   {
+    "session": 3,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D3:13",
+    "last_dia_id": "D3:18",
+    "words": 149
+   },
+   {
+    "session": 4,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D4:1",
+    "last_dia_id": "D4:6",
+    "words": 203
+   },
+   {
+    "session": 4,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D4:7",
+    "last_dia_id": "D4:12",
+    "words": 210
+   },
+   {
+    "session": 4,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D4:13",
+    "last_dia_id": "D4:18",
+    "words": 131
+   },
+   {
+    "session": 4,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D4:19",
+    "last_dia_id": "D4:20",
+    "words": 42
+   },
+   {
+    "session": 5,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D5:1",
+    "last_dia_id": "D5:6",
+    "words": 294
+   },
+   {
+    "session": 5,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D5:7",
+    "last_dia_id": "D5:12",
+    "words": 189
+   },
+   {
+    "session": 5,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D5:13",
+    "last_dia_id": "D5:18",
+    "words": 151
+   },
+   {
+    "session": 5,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D5:19",
+    "last_dia_id": "D5:25",
+    "words": 102
+   },
+   {
+    "session": 6,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D6:1",
+    "last_dia_id": "D6:6",
+    "words": 248
+   },
+   {
+    "session": 6,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D6:7",
+    "last_dia_id": "D6:12",
+    "words": 144
+   },
+   {
+    "session": 6,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D6:13",
+    "last_dia_id": "D6:19",
+    "words": 197
+   },
+   {
+    "session": 7,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D7:1",
+    "last_dia_id": "D7:6",
+    "words": 320
+   },
+   {
+    "session": 7,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D7:7",
+    "last_dia_id": "D7:12",
+    "words": 174
+   },
+   {
+    "session": 7,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D7:13",
+    "last_dia_id": "D7:16",
+    "words": 91
+   },
+   {
+    "session": 8,
+    "part": 1,
+    "parts": 6,
+    "first_dia_id": "D8:1",
+    "last_dia_id": "D8:6",
+    "words": 152
+   },
+   {
+    "session": 8,
+    "part": 2,
+    "parts": 6,
+    "first_dia_id": "D8:7",
+    "last_dia_id": "D8:12",
+    "words": 179
+   },
+   {
+    "session": 8,
+    "part": 3,
+    "parts": 6,
+    "first_dia_id": "D8:13",
+    "last_dia_id": "D8:18",
+    "words": 220
+   },
+   {
+    "session": 8,
+    "part": 4,
+    "parts": 6,
+    "first_dia_id": "D8:19",
+    "last_dia_id": "D8:24",
+    "words": 174
+   },
+   {
+    "session": 8,
+    "part": 5,
+    "parts": 6,
+    "first_dia_id": "D8:25",
+    "last_dia_id": "D8:30",
+    "words": 175
+   },
+   {
+    "session": 8,
+    "part": 6,
+    "parts": 6,
+    "first_dia_id": "D8:31",
+    "last_dia_id": "D8:33",
+    "words": 76
+   },
+   {
+    "session": 9,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D9:1",
+    "last_dia_id": "D9:6",
+    "words": 247
+   },
+   {
+    "session": 9,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D9:7",
+    "last_dia_id": "D9:12",
+    "words": 246
+   },
+   {
+    "session": 9,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D9:13",
+    "last_dia_id": "D9:19",
+    "words": 142
+   },
+   {
+    "session": 10,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D10:1",
+    "last_dia_id": "D10:6",
+    "words": 238
+   },
+   {
+    "session": 10,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D10:7",
+    "last_dia_id": "D10:12",
+    "words": 220
+   },
+   {
+    "session": 10,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D10:13",
+    "last_dia_id": "D10:14",
+    "words": 59
+   },
+   {
+    "session": 11,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D11:1",
+    "last_dia_id": "D11:6",
+    "words": 271
+   },
+   {
+    "session": 11,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D11:7",
+    "last_dia_id": "D11:12",
+    "words": 182
+   },
+   {
+    "session": 11,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D11:13",
+    "last_dia_id": "D11:18",
+    "words": 203
+   },
+   {
+    "session": 11,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D11:19",
+    "last_dia_id": "D11:20",
+    "words": 73
+   },
+   {
+    "session": 12,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D12:1",
+    "last_dia_id": "D12:6",
+    "words": 253
+   },
+   {
+    "session": 12,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D12:7",
+    "last_dia_id": "D12:12",
+    "words": 152
+   },
+   {
+    "session": 12,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D12:13",
+    "last_dia_id": "D12:17",
+    "words": 91
+   },
+   {
+    "session": 13,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D13:1",
+    "last_dia_id": "D13:6",
+    "words": 205
+   },
+   {
+    "session": 13,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D13:7",
+    "last_dia_id": "D13:12",
+    "words": 192
+   },
+   {
+    "session": 13,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D13:13",
+    "last_dia_id": "D13:16",
+    "words": 77
+   },
+   {
+    "session": 14,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D14:1",
+    "last_dia_id": "D14:6",
+    "words": 298
+   },
+   {
+    "session": 14,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D14:7",
+    "last_dia_id": "D14:12",
+    "words": 182
+   },
+   {
+    "session": 14,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D14:13",
+    "last_dia_id": "D14:16",
+    "words": 76
+   },
+   {
+    "session": 15,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D15:1",
+    "last_dia_id": "D15:6",
+    "words": 159
+   },
+   {
+    "session": 15,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D15:7",
+    "last_dia_id": "D15:12",
+    "words": 147
+   },
+   {
+    "session": 15,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D15:13",
+    "last_dia_id": "D15:18",
+    "words": 108
+   },
+   {
+    "session": 16,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D16:1",
+    "last_dia_id": "D16:6",
+    "words": 181
+   },
+   {
+    "session": 16,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D16:7",
+    "last_dia_id": "D16:12",
+    "words": 223
+   },
+   {
+    "session": 16,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D16:13",
+    "last_dia_id": "D16:18",
+    "words": 216
+   },
+   {
+    "session": 16,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D16:19",
+    "last_dia_id": "D16:24",
+    "words": 160
+   },
+   {
+    "session": 17,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D17:1",
+    "last_dia_id": "D17:6",
+    "words": 265
+   },
+   {
+    "session": 17,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D17:7",
+    "last_dia_id": "D17:12",
+    "words": 138
+   },
+   {
+    "session": 17,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D17:13",
+    "last_dia_id": "D17:18",
+    "words": 152
+   },
+   {
+    "session": 17,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D17:19",
+    "last_dia_id": "D17:24",
+    "words": 121
+   },
+   {
+    "session": 17,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D17:25",
+    "last_dia_id": "D17:28",
+    "words": 70
+   },
+   {
+    "session": 18,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D18:1",
+    "last_dia_id": "D18:6",
+    "words": 231
+   },
+   {
+    "session": 18,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D18:7",
+    "last_dia_id": "D18:12",
+    "words": 140
+   },
+   {
+    "session": 18,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D18:13",
+    "last_dia_id": "D18:15",
+    "words": 60
+   },
+   {
+    "session": 19,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D19:1",
+    "last_dia_id": "D19:6",
+    "words": 223
+   },
+   {
+    "session": 19,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D19:7",
+    "last_dia_id": "D19:12",
+    "words": 189
+   },
+   {
+    "session": 19,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D19:13",
+    "last_dia_id": "D19:15",
+    "words": 66
+   },
+   {
+    "session": 20,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D20:1",
+    "last_dia_id": "D20:6",
+    "words": 172
+   },
+   {
+    "session": 20,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D20:7",
+    "last_dia_id": "D20:12",
+    "words": 185
+   },
+   {
+    "session": 20,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D20:13",
+    "last_dia_id": "D20:17",
+    "words": 148
+   },
+   {
+    "session": 21,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D21:1",
+    "last_dia_id": "D21:6",
+    "words": 157
+   },
+   {
+    "session": 21,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D21:7",
+    "last_dia_id": "D21:12",
+    "words": 235
+   },
+   {
+    "session": 21,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D21:13",
+    "last_dia_id": "D21:18",
+    "words": 201
+   },
+   {
+    "session": 21,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D21:19",
+    "last_dia_id": "D21:22",
+    "words": 121
+   },
+   {
+    "session": 22,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D22:1",
+    "last_dia_id": "D22:6",
+    "words": 196
+   },
+   {
+    "session": 22,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D22:7",
+    "last_dia_id": "D22:12",
+    "words": 176
+   },
+   {
+    "session": 22,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D22:13",
+    "last_dia_id": "D22:18",
+    "words": 133
+   },
+   {
+    "session": 22,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D22:19",
+    "last_dia_id": "D22:21",
+    "words": 98
+   },
+   {
+    "session": 23,
+    "part": 1,
+    "parts": 6,
+    "first_dia_id": "D23:1",
+    "last_dia_id": "D23:6",
+    "words": 180
+   },
+   {
+    "session": 23,
+    "part": 2,
+    "parts": 6,
+    "first_dia_id": "D23:7",
+    "last_dia_id": "D23:12",
+    "words": 182
+   },
+   {
+    "session": 23,
+    "part": 3,
+    "parts": 6,
+    "first_dia_id": "D23:13",
+    "last_dia_id": "D23:18",
+    "words": 189
+   },
+   {
+    "session": 23,
+    "part": 4,
+    "parts": 6,
+    "first_dia_id": "D23:19",
+    "last_dia_id": "D23:24",
+    "words": 146
+   },
+   {
+    "session": 23,
+    "part": 5,
+    "parts": 6,
+    "first_dia_id": "D23:25",
+    "last_dia_id": "D23:30",
+    "words": 145
+   },
+   {
+    "session": 23,
+    "part": 6,
+    "parts": 6,
+    "first_dia_id": "D23:31",
+    "last_dia_id": "D23:33",
+    "words": 52
+   },
+   {
+    "session": 24,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D24:1",
+    "last_dia_id": "D24:6",
+    "words": 120
+   },
+   {
+    "session": 24,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D24:7",
+    "last_dia_id": "D24:12",
+    "words": 269
+   },
+   {
+    "session": 24,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D24:13",
+    "last_dia_id": "D24:18",
+    "words": 201
+   },
+   {
+    "session": 24,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D24:19",
+    "last_dia_id": "D24:24",
+    "words": 197
+   },
+   {
+    "session": 25,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D25:1",
+    "last_dia_id": "D25:6",
+    "words": 247
+   },
+   {
+    "session": 25,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D25:7",
+    "last_dia_id": "D25:12",
+    "words": 177
+   },
+   {
+    "session": 25,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D25:13",
+    "last_dia_id": "D25:18",
+    "words": 188
+   },
+   {
+    "session": 25,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D25:19",
+    "last_dia_id": "D25:20",
+    "words": 52
+   }
+  ]
+ },
+ {
+  "conversation_index": 9,
+  "sample_id": "conv-50",
+  "window_turns": 6,
+  "windows": 100,
+  "document_count": 101,
+  "chunk_count": 101,
+  "one_chunk_per_document": true,
+  "graph_nodes": 1092,
+  "graph_edges": 3429,
+  "remember_seconds": 795.2,
+  "llm_model": "openai/gpt-5-mini",
+  "window_map": [
+   {
+    "session": 1,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D1:1",
+    "last_dia_id": "D1:6",
+    "words": 196
+   },
+   {
+    "session": 1,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D1:7",
+    "last_dia_id": "D1:12",
+    "words": 129
+   },
+   {
+    "session": 1,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D1:13",
+    "last_dia_id": "D1:19",
+    "words": 184
+   },
+   {
+    "session": 2,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D2:1",
+    "last_dia_id": "D2:6",
+    "words": 201
+   },
+   {
+    "session": 2,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D2:7",
+    "last_dia_id": "D2:12",
+    "words": 206
+   },
+   {
+    "session": 2,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D2:13",
+    "last_dia_id": "D2:18",
+    "words": 159
+   },
+   {
+    "session": 2,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D2:19",
+    "last_dia_id": "D2:21",
+    "words": 55
+   },
+   {
+    "session": 3,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D3:1",
+    "last_dia_id": "D3:6",
+    "words": 134
+   },
+   {
+    "session": 3,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D3:7",
+    "last_dia_id": "D3:12",
+    "words": 307
+   },
+   {
+    "session": 3,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D3:13",
+    "last_dia_id": "D3:18",
+    "words": 188
+   },
+   {
+    "session": 4,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D4:1",
+    "last_dia_id": "D4:6",
+    "words": 260
+   },
+   {
+    "session": 4,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D4:7",
+    "last_dia_id": "D4:12",
+    "words": 152
+   },
+   {
+    "session": 4,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D4:13",
+    "last_dia_id": "D4:18",
+    "words": 147
+   },
+   {
+    "session": 4,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D4:19",
+    "last_dia_id": "D4:24",
+    "words": 201
+   },
+   {
+    "session": 4,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D4:25",
+    "last_dia_id": "D4:28",
+    "words": 99
+   },
+   {
+    "session": 5,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D5:1",
+    "last_dia_id": "D5:6",
+    "words": 282
+   },
+   {
+    "session": 5,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D5:7",
+    "last_dia_id": "D5:12",
+    "words": 250
+   },
+   {
+    "session": 5,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D5:13",
+    "last_dia_id": "D5:15",
+    "words": 70
+   },
+   {
+    "session": 6,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D6:1",
+    "last_dia_id": "D6:6",
+    "words": 217
+   },
+   {
+    "session": 6,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D6:7",
+    "last_dia_id": "D6:12",
+    "words": 196
+   },
+   {
+    "session": 6,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D6:13",
+    "last_dia_id": "D6:18",
+    "words": 125
+   },
+   {
+    "session": 7,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D7:1",
+    "last_dia_id": "D7:6",
+    "words": 272
+   },
+   {
+    "session": 7,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D7:7",
+    "last_dia_id": "D7:12",
+    "words": 200
+   },
+   {
+    "session": 7,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D7:13",
+    "last_dia_id": "D7:19",
+    "words": 217
+   },
+   {
+    "session": 8,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D8:1",
+    "last_dia_id": "D8:6",
+    "words": 303
+   },
+   {
+    "session": 8,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D8:7",
+    "last_dia_id": "D8:12",
+    "words": 238
+   },
+   {
+    "session": 8,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D8:13",
+    "last_dia_id": "D8:14",
+    "words": 46
+   },
+   {
+    "session": 9,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D9:1",
+    "last_dia_id": "D9:6",
+    "words": 258
+   },
+   {
+    "session": 9,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D9:7",
+    "last_dia_id": "D9:12",
+    "words": 152
+   },
+   {
+    "session": 9,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D9:13",
+    "last_dia_id": "D9:18",
+    "words": 185
+   },
+   {
+    "session": 9,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D9:19",
+    "last_dia_id": "D9:21",
+    "words": 78
+   },
+   {
+    "session": 10,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D10:1",
+    "last_dia_id": "D10:6",
+    "words": 269
+   },
+   {
+    "session": 10,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D10:7",
+    "last_dia_id": "D10:12",
+    "words": 236
+   },
+   {
+    "session": 10,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D10:13",
+    "last_dia_id": "D10:17",
+    "words": 127
+   },
+   {
+    "session": 11,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D11:1",
+    "last_dia_id": "D11:6",
+    "words": 344
+   },
+   {
+    "session": 11,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D11:7",
+    "last_dia_id": "D11:12",
+    "words": 214
+   },
+   {
+    "session": 11,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D11:13",
+    "last_dia_id": "D11:14",
+    "words": 58
+   },
+   {
+    "session": 12,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D12:1",
+    "last_dia_id": "D12:6",
+    "words": 218
+   },
+   {
+    "session": 12,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D12:7",
+    "last_dia_id": "D12:12",
+    "words": 274
+   },
+   {
+    "session": 12,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D12:13",
+    "last_dia_id": "D12:17",
+    "words": 108
+   },
+   {
+    "session": 13,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D13:1",
+    "last_dia_id": "D13:6",
+    "words": 248
+   },
+   {
+    "session": 13,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D13:7",
+    "last_dia_id": "D13:12",
+    "words": 151
+   },
+   {
+    "session": 13,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D13:13",
+    "last_dia_id": "D13:19",
+    "words": 198
+   },
+   {
+    "session": 14,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D14:1",
+    "last_dia_id": "D14:6",
+    "words": 223
+   },
+   {
+    "session": 14,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D14:7",
+    "last_dia_id": "D14:12",
+    "words": 210
+   },
+   {
+    "session": 14,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D14:13",
+    "last_dia_id": "D14:16",
+    "words": 107
+   },
+   {
+    "session": 15,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D15:1",
+    "last_dia_id": "D15:6",
+    "words": 248
+   },
+   {
+    "session": 15,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D15:7",
+    "last_dia_id": "D15:12",
+    "words": 176
+   },
+   {
+    "session": 15,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D15:13",
+    "last_dia_id": "D15:15",
+    "words": 72
+   },
+   {
+    "session": 16,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D16:1",
+    "last_dia_id": "D16:6",
+    "words": 206
+   },
+   {
+    "session": 16,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D16:7",
+    "last_dia_id": "D16:12",
+    "words": 150
+   },
+   {
+    "session": 16,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D16:13",
+    "last_dia_id": "D16:18",
+    "words": 204
+   },
+   {
+    "session": 16,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D16:19",
+    "last_dia_id": "D16:25",
+    "words": 183
+   },
+   {
+    "session": 17,
+    "part": 1,
+    "parts": 2,
+    "first_dia_id": "D17:1",
+    "last_dia_id": "D17:6",
+    "words": 237
+   },
+   {
+    "session": 17,
+    "part": 2,
+    "parts": 2,
+    "first_dia_id": "D17:7",
+    "last_dia_id": "D17:10",
+    "words": 88
+   },
+   {
+    "session": 18,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D18:1",
+    "last_dia_id": "D18:6",
+    "words": 220
+   },
+   {
+    "session": 18,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D18:7",
+    "last_dia_id": "D18:12",
+    "words": 234
+   },
+   {
+    "session": 18,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D18:13",
+    "last_dia_id": "D18:16",
+    "words": 74
+   },
+   {
+    "session": 19,
+    "part": 1,
+    "parts": 2,
+    "first_dia_id": "D19:1",
+    "last_dia_id": "D19:6",
+    "words": 288
+   },
+   {
+    "session": 19,
+    "part": 2,
+    "parts": 2,
+    "first_dia_id": "D19:7",
+    "last_dia_id": "D19:12",
+    "words": 198
+   },
+   {
+    "session": 20,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D20:1",
+    "last_dia_id": "D20:6",
+    "words": 344
+   },
+   {
+    "session": 20,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D20:7",
+    "last_dia_id": "D20:12",
+    "words": 121
+   },
+   {
+    "session": 20,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D20:13",
+    "last_dia_id": "D20:17",
+    "words": 86
+   },
+   {
+    "session": 21,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D21:1",
+    "last_dia_id": "D21:6",
+    "words": 295
+   },
+   {
+    "session": 21,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D21:7",
+    "last_dia_id": "D21:12",
+    "words": 198
+   },
+   {
+    "session": 21,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D21:13",
+    "last_dia_id": "D21:18",
+    "words": 180
+   },
+   {
+    "session": 22,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D22:1",
+    "last_dia_id": "D22:6",
+    "words": 298
+   },
+   {
+    "session": 22,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D22:7",
+    "last_dia_id": "D22:12",
+    "words": 175
+   },
+   {
+    "session": 22,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D22:13",
+    "last_dia_id": "D22:14",
+    "words": 52
+   },
+   {
+    "session": 23,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D23:1",
+    "last_dia_id": "D23:6",
+    "words": 292
+   },
+   {
+    "session": 23,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D23:7",
+    "last_dia_id": "D23:12",
+    "words": 215
+   },
+   {
+    "session": 23,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D23:13",
+    "last_dia_id": "D23:18",
+    "words": 232
+   },
+   {
+    "session": 24,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D24:1",
+    "last_dia_id": "D24:6",
+    "words": 247
+   },
+   {
+    "session": 24,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D24:7",
+    "last_dia_id": "D24:12",
+    "words": 217
+   },
+   {
+    "session": 24,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D24:13",
+    "last_dia_id": "D24:18",
+    "words": 222
+   },
+   {
+    "session": 24,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D24:19",
+    "last_dia_id": "D24:23",
+    "words": 197
+   },
+   {
+    "session": 25,
+    "part": 1,
+    "parts": 5,
+    "first_dia_id": "D25:1",
+    "last_dia_id": "D25:6",
+    "words": 170
+   },
+   {
+    "session": 25,
+    "part": 2,
+    "parts": 5,
+    "first_dia_id": "D25:7",
+    "last_dia_id": "D25:12",
+    "words": 205
+   },
+   {
+    "session": 25,
+    "part": 3,
+    "parts": 5,
+    "first_dia_id": "D25:13",
+    "last_dia_id": "D25:18",
+    "words": 285
+   },
+   {
+    "session": 25,
+    "part": 4,
+    "parts": 5,
+    "first_dia_id": "D25:19",
+    "last_dia_id": "D25:24",
+    "words": 183
+   },
+   {
+    "session": 25,
+    "part": 5,
+    "parts": 5,
+    "first_dia_id": "D25:25",
+    "last_dia_id": "D25:31",
+    "words": 271
+   },
+   {
+    "session": 26,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D26:1",
+    "last_dia_id": "D26:6",
+    "words": 288
+   },
+   {
+    "session": 26,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D26:7",
+    "last_dia_id": "D26:12",
+    "words": 222
+   },
+   {
+    "session": 26,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D26:13",
+    "last_dia_id": "D26:15",
+    "words": 81
+   },
+   {
+    "session": 27,
+    "part": 1,
+    "parts": 2,
+    "first_dia_id": "D27:1",
+    "last_dia_id": "D27:6",
+    "words": 204
+   },
+   {
+    "session": 27,
+    "part": 2,
+    "parts": 2,
+    "first_dia_id": "D27:7",
+    "last_dia_id": "D27:13",
+    "words": 233
+   },
+   {
+    "session": 28,
+    "part": 1,
+    "parts": 7,
+    "first_dia_id": "D28:1",
+    "last_dia_id": "D28:6",
+    "words": 230
+   },
+   {
+    "session": 28,
+    "part": 2,
+    "parts": 7,
+    "first_dia_id": "D28:7",
+    "last_dia_id": "D28:12",
+    "words": 234
+   },
+   {
+    "session": 28,
+    "part": 3,
+    "parts": 7,
+    "first_dia_id": "D28:13",
+    "last_dia_id": "D28:18",
+    "words": 199
+   },
+   {
+    "session": 28,
+    "part": 4,
+    "parts": 7,
+    "first_dia_id": "D28:19",
+    "last_dia_id": "D28:24",
+    "words": 140
+   },
+   {
+    "session": 28,
+    "part": 5,
+    "parts": 7,
+    "first_dia_id": "D28:25",
+    "last_dia_id": "D28:30",
+    "words": 175
+   },
+   {
+    "session": 28,
+    "part": 6,
+    "parts": 7,
+    "first_dia_id": "D28:31",
+    "last_dia_id": "D28:36",
+    "words": 185
+   },
+   {
+    "session": 28,
+    "part": 7,
+    "parts": 7,
+    "first_dia_id": "D28:37",
+    "last_dia_id": "D28:43",
+    "words": 207
+   },
+   {
+    "session": 29,
+    "part": 1,
+    "parts": 3,
+    "first_dia_id": "D29:1",
+    "last_dia_id": "D29:6",
+    "words": 233
+   },
+   {
+    "session": 29,
+    "part": 2,
+    "parts": 3,
+    "first_dia_id": "D29:7",
+    "last_dia_id": "D29:12",
+    "words": 187
+   },
+   {
+    "session": 29,
+    "part": 3,
+    "parts": 3,
+    "first_dia_id": "D29:13",
+    "last_dia_id": "D29:18",
+    "words": 218
+   },
+   {
+    "session": 30,
+    "part": 1,
+    "parts": 4,
+    "first_dia_id": "D30:1",
+    "last_dia_id": "D30:6",
+    "words": 300
+   },
+   {
+    "session": 30,
+    "part": 2,
+    "parts": 4,
+    "first_dia_id": "D30:7",
+    "last_dia_id": "D30:12",
+    "words": 182
+   },
+   {
+    "session": 30,
+    "part": 3,
+    "parts": 4,
+    "first_dia_id": "D30:13",
+    "last_dia_id": "D30:18",
+    "words": 187
+   },
+   {
+    "session": 30,
+    "part": 4,
+    "parts": 4,
+    "first_dia_id": "D30:19",
+    "last_dia_id": "D30:24",
+    "words": 177
+   }
+  ]
+ }
+]
