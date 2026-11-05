@@ -25,6 +25,9 @@ class HybridCandidates:
     chunk_summaries: dict = field(default_factory=dict)
     entities: list = field(default_factory=list)
     fact_candidates: FactCandidates = field(default_factory=FactCandidates)
+    # The ``## Ontology grounding`` block for the query (empty when no ontology is
+    # configured or nothing resolved); carried as-is through reorders and cuts.
+    ontology_grounding: str = ""
 
     def prioritize(
         self,
@@ -73,12 +76,15 @@ class HybridCandidates:
         fact_candidates = self.fact_candidates
         if entity_edge_budget is not None:
             fact_candidates = replace(fact_candidates, entity_edge_budget=entity_edge_budget)
-        return {
+        result = {
             "chunks": chunks,
             "chunk_summaries": self._summaries_for(self.chunk_summaries, chunks),
             "entities": entities,
             "facts": select_facts_from_candidates(fact_candidates, entities),
         }
+        if self.ontology_grounding:
+            result["ontology_grounding"] = self.ontology_grounding
+        return result
 
     @staticmethod
     def _first(items: list, ids: set[str]) -> list:

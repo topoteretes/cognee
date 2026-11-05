@@ -13,6 +13,15 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
 from cognee.modules.engine.models import DltColumn
 from cognee.modules.engine.utils.timestamp_from_text import timestamp_from_text
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_configured_authoritative_sources,
+    get_configured_ontology_resolver,
+)
+from cognee.modules.ontology.schema_alignment import (
+    SchemaTableSpec,
+    align_tables_with_ontology,
+    column_specs_from,
+)
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.schema.models import SchemaRelationship, SchemaTable
 from cognee.tasks.storage.index_data_points import index_data_points
@@ -37,6 +46,7 @@ async def emit_dlt_schema_graph(
     row_records: list[dict],
     ctx: Optional["PipelineContext"] = None,
     emitted_value_node_ids: set | None = None,
+    ontology_config: dict | None = None,
 ) -> None:
     """Build and persist the DLT schema graph for the given tables and rows.
 
@@ -131,6 +141,33 @@ async def emit_dlt_schema_graph(
                     },
                 )
             )
+
+    # Business-to-technical mapping: with an ontology configured, each table node
+    # realizes the ontology class its name resolves to (see schema_alignment).
+    if table_node_ids:
+        wrapped_config = {"ontology_config": ontology_config} if ontology_config else None
+        try:
+            ontology_resolver = get_configured_ontology_resolver(wrapped_config)
+        except Exception as error:  # an ontology misconfiguration must not block ingestion
+            logger.warning("Skipping ontology alignment of DLT tables: %s", error, exc_info=True)
+            ontology_resolver = None
+        # ``table_node_ids`` is keyed by ``(scope, name)``; ``tables`` by its own key.
+        alignment = align_tables_with_ontology(
+            [
+                SchemaTableSpec(
+                    table_node_ids[
+                        (table_meta.get("scope", ""), table_meta.get("name", table_key))
+                    ],
+                    table_meta.get("name", table_key),
+                    column_specs_from(table_meta.get("schema_info")),
+                )
+                for table_key, table_meta in tables.items()
+            ],
+            ontology_resolver,
+            authoritative_sources=get_configured_authoritative_sources(wrapped_config),
+        )
+        schema_nodes.extend(alignment.nodes)
+        schema_edges.extend(alignment.edges)
 
     # SchemaRelationship nodes for each FK definition
     relationship_count = 0

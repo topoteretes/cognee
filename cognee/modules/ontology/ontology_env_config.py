@@ -34,6 +34,36 @@ def normalize_ontology_mode(mode: "str | None") -> str:
     return normalized_mode
 
 
+def parse_authoritative_sources(raw: "str | dict | None") -> dict:
+    """Accept the env string (JSON object or ``table[=owner]`` csv) or an already-built dict.
+
+    Never raises: a value that cannot be parsed is logged and treated as empty, so a
+    typo in an env var cannot break ingestion.
+    """
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    text = str(raw).strip()
+    if text.startswith("{"):
+        import json
+
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            logger.warning("ONTOLOGY_AUTHORITATIVE_SOURCES is not valid JSON; ignoring it.")
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    sources: dict = {}
+    for entry in text.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        table, _, owner = entry.partition("=")
+        sources[table.strip()] = {"authoritative": True, "owner": owner.strip() or None}
+    return sources
+
+
 def normalize_ontology_reasoning(reasoning: "str | None") -> str:
     """Normalize an ontology reasoning value, falling back to the default with a warning.
 
@@ -65,6 +95,8 @@ class OntologyEnvConfig(BaseSettings):
     - ontology_matching
     - ontology_file_path
     - ontology_mode
+    - ontology_query_grounding
+    - ontology_authoritative_sources
     - ontology_reasoning
     - model_config
     """
@@ -73,6 +105,15 @@ class OntologyEnvConfig(BaseSettings):
     matching_strategy: str = "fuzzy"
     ontology_file_path: str = ""
     ontology_mode: str = DEFAULT_ONTOLOGY_MODE
+    # Read-time use of the ontology: graph-completion and hybrid searches resolve query
+    # terms against the ontology, pin the matched nodes as seeds and tell the LLM what
+    # each term means. Only active when ontology_file_path is set.
+    ontology_query_grounding: bool = True
+    # Which schema tables are the system of record for the concept they realize.
+    # Either a JSON object ({"crm.customers": {"owner": "sales-ops"}, "orders": true})
+    # or a comma list of ``table`` / ``table=owner`` entries. Per-call
+    # ``ontology_config["authoritative_sources"]`` overrides it.
+    ontology_authoritative_sources: str = ""
     # "none" (default) uses the ontology's asserted triples only; "owl_rl" expands the
     # OWL 2 RL closure (inverse/transitive properties, domain/range typing,
     # equivalentClass, sameAs) over the parsed graph before the lookup is built.
@@ -84,6 +125,10 @@ class OntologyEnvConfig(BaseSettings):
     @classmethod
     def _normalize_ontology_mode(cls, value) -> str:
         return normalize_ontology_mode(value)
+
+    def authoritative_sources(self) -> dict:
+        """Parse ``ontology_authoritative_sources`` into the per-call dict shape."""
+        return parse_authoritative_sources(self.ontology_authoritative_sources)
 
     @field_validator("ontology_reasoning", mode="before")
     @classmethod
