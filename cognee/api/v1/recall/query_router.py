@@ -20,7 +20,9 @@ reasoning, context extension) stays reachable only through an explicit
 
 The rules see only the query text. What the deployment can run is applied
 afterwards, in one place, from ``RoutingConstraints``: whether an LLM is
-available and whether Cypher queries are allowed. With no LLM the router still
+available, whether Cypher queries are allowed, and, when the request carries a
+``node_name`` filter, which types can apply it (a pick that cannot resolves to
+the fallback, which applies every filter). With no LLM the router still
 routes, but only to types that can execute without one: retrieval-only types
 run as they are, completion types whose single LLM call is the final answer run
 with ``only_context=True`` (recall returns the assembled prompt, the session
@@ -49,20 +51,32 @@ class RoutingConstraints:
     provider either needs no key, has one, or has a live sampling session.
     ``cypher_allowed`` is the ``ALLOW_CYPHER_QUERY`` gate the retriever factory
     enforces. Both default to True so callers without a deployment in hand (tests,
-    tooling) get the unconstrained router.
+    tooling) get the unconstrained router. ``scoped_types`` is set when the request
+    carries a ``node_name`` filter: the types that can apply it (``node_name_scope``),
+    since a type that cannot refuses the filter with an error. None means no filter.
     """
 
     llm_available: bool = True
     cypher_allowed: bool = True
+    scoped_types: frozenset[SearchType] | None = None
 
     @classmethod
-    def from_config(cls, llm_config=None) -> "RoutingConstraints":
+    def from_config(
+        cls, llm_config=None, node_name: list[str] | None = None
+    ) -> "RoutingConstraints":
+        """Constraints for this deployment and request; ``node_name`` names node sets."""
+        from cognee.modules.engine.models.node_set import NodeSet
         from cognee.modules.preflight import llm_available
         from cognee.modules.search.methods.get_search_type_retriever_instance import (
             cypher_queries_allowed,
         )
+        from cognee.modules.search.methods.node_name_scope import lucky_search_types
 
-        return cls(llm_available=llm_available(llm_config), cypher_allowed=cypher_queries_allowed())
+        return cls(
+            llm_available=llm_available(llm_config),
+            cypher_allowed=cypher_queries_allowed(),
+            scoped_types=lucky_search_types(NodeSet, node_name),
+        )
 
 
 @dataclass(frozen=True)
@@ -267,6 +281,14 @@ def constrain(
     if constraints is None:
         return decision
     search_type = decision.search_type
+
+    # The fallback honours every node_name scope (node_name_scope.SUPPORTED_SCOPES).
+    if constraints.scoped_types is not None and search_type not in constraints.scoped_types:
+        logger.debug(
+            "query_router: %s cannot apply the node_name filter; using fallback",
+            search_type.value,
+        )
+        search_type = ROUTER_FALLBACK_TYPE
 
     if not constraints.cypher_allowed and search_type in CYPHER_TYPES:
         logger.debug(

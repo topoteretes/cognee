@@ -466,3 +466,54 @@ async def test_cloud_client_recall_payload_includes_context_profile(monkeypatch)
     )
 
     assert fake.last_json.get("context_profile") == "agent"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "node_name, expected_type",
+    [
+        (None, SearchType.CHUNKS_LEXICAL),
+        # CHUNKS_LEXICAL cannot apply a node-set filter and would raise, so the
+        # router leaves it for the default, which applies it.
+        (["proj"], SearchType.HYBRID_COMPLETION),
+    ],
+)
+async def test_recall_routes_a_node_name_filter_to_a_type_that_applies_it(
+    monkeypatch, api_recall_mod, node_name, expected_type
+):
+    from cognee.modules import preflight
+    from cognee.modules.recall.config import RecallConfig
+
+    calls = []
+
+    async def dummy_set_session_user_context_variable(_user):
+        return None
+
+    async def dummy_authorized_search(**kwargs):
+        calls.append((kwargs.get("query_type"), kwargs.get("node_name")))
+        return []
+
+    monkeypatch.setattr(
+        api_recall_mod,
+        "set_session_user_context_variable",
+        dummy_set_session_user_context_variable,
+    )
+    monkeypatch.setattr(preflight, "llm_available", lambda _config: True)
+    recall_config_mod = importlib.import_module("cognee.modules.recall.config")
+    config = RecallConfig(_env_file=None, recall_warmup_shortcircuit=False)
+    monkeypatch.setattr(recall_config_mod, "get_recall_config", lambda: config)
+
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    search_methods = importlib.import_module("cognee.modules.search.methods.search")
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+    monkeypatch.setattr(search_methods, "authorized_search", dummy_authorized_search)
+
+    await api_recall_mod.recall(
+        query_text='"radium"',
+        dataset_ids=[uuid4()],
+        node_name=node_name,
+        user=_make_user(),
+    )
+
+    # The first search is the routed one; an empty routed result may retry as the default.
+    assert calls[0] == (expected_type, node_name)
