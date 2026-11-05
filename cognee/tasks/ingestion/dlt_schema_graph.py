@@ -1,7 +1,8 @@
 """Shared emitter for DLT schema graph structure.
 
-Builds and persists SchemaTable/SchemaRelationship nodes and row-level edges
-for DLT-sourced relational data. Used by both extract_dlt_source_edges
+Builds and persists SchemaTable/SchemaRelationship nodes, SchemaColumn anchors
+(``is_column_of`` their table, ``has_value`` each of their values) and row-level
+edges for DLT-sourced relational data. Used by both extract_dlt_source_edges
 (the manifest pipeline).
 """
 
@@ -42,6 +43,7 @@ async def emit_dlt_schema_graph(
     ctx: Optional["PipelineContext"] = None,
     emitted_value_node_ids: set | None = None,
     emitted_column_node_ids: set | None = None,
+    emitted_has_value_edges: set | None = None,
 ) -> None:
     """Build and persist the DLT schema graph for the given tables and rows.
 
@@ -72,11 +74,15 @@ async def emit_dlt_schema_graph(
             anchors. Each column with materialized values has a ``table:column``
             name, an ``is_column_of`` edge to its source-scoped table, and
             ``has_value`` edges to every emitted DltColumn or Timestamp value.
+        emitted_has_value_edges: same run-scoped bookkeeping for ``has_value``
+            edges, keyed ``(column_id, value_id, "has_value")``, so a value that
+            recurs in later batches does not write its column edge again.
 
     Creates SchemaTable nodes (deterministic uuid5 ids, so re-emitting is an
     idempotent upsert), SchemaRelationship nodes with has_foreign_key /
-    references_table edges, is_row_of edges from each row to its table node,
-    and FK-based edges between rows from fk_references.
+    references_table edges, SchemaColumn nodes with is_column_of / has_value
+    edges, is_row_of edges from each row to its table node, and FK-based edges
+    between rows from fk_references.
 
     On a ledger graph the writes are registered in the relational rollback
     ledger; on a graph-provenance graph they are stamped in-graph instead
@@ -98,6 +104,7 @@ async def emit_dlt_schema_graph(
     column_value_nodes = {}  # node id -> ColumnValue, deduped across rows
     column_nodes = {}
     timestamp_nodes = {}  # node id -> Timestamp, deduped across rows and columns
+    has_value_edge_keys = set()  # has_value edges written by this call
 
     def link_column_value(table_name: str, column: str, scope: str, value_id: UUID) -> None:
         column_id = _column_node_id(table_name, column, scope)
@@ -126,8 +133,10 @@ async def emit_dlt_schema_graph(
                 )
             )
         edge_key = (str(column_id), str(value_id), "has_value")
-        if edge_key not in seen_row_edges:
+        already_linked = emitted_has_value_edges is not None and edge_key in emitted_has_value_edges
+        if not already_linked and edge_key not in seen_row_edges:
             seen_row_edges.add(edge_key)
+            has_value_edge_keys.add(edge_key)
             schema_edges.append(
                 (
                     column_id,
@@ -453,3 +462,5 @@ async def emit_dlt_schema_graph(
 
     if emitted_column_node_ids is not None:
         emitted_column_node_ids.update(column_nodes)
+    if emitted_has_value_edges is not None:
+        emitted_has_value_edges.update(has_value_edge_keys)

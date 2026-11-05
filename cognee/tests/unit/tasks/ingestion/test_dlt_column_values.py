@@ -229,6 +229,42 @@ async def test_shared_set_prevents_reembedding_across_batches(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_has_value_edge_is_written_once_across_batches(monkeypatch):
+    """A value recurring in later batches does not write its column edge again;
+    a value that is new to the column still gets one."""
+    graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
+    monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph))
+    monkeypatch.setattr(schema_graph_module, "index_data_points", AsyncMock())
+    monkeypatch.setattr(
+        schema_graph_module,
+        "graph_provenance_write_kwargs",
+        AsyncMock(return_value={"source_ref_key": None}),
+    )
+    scope = str(uuid4())
+    emitted_columns, emitted_values, emitted_has_value = set(), set(), set()
+    for record in [
+        {"column_values": {"status": "active"}, "timestamps": {"created": "2024-01-01"}},
+        {"column_values": {"status": "active"}, "timestamps": {"created": "2024-01-01"}},
+        {"column_values": {"status": "paused"}},
+    ]:
+        await emit_dlt_schema_graph(
+            {},
+            [{"source_id": str(uuid4()), "table_name": "orders", "scope": scope, **record}],
+            emitted_column_node_ids=emitted_columns,
+            emitted_value_node_ids=emitted_values,
+            emitted_has_value_edges=emitted_has_value,
+        )
+
+    edges = [e for call in graph.add_edges.call_args_list for e in call.args[0]]
+    has_value = [(e[0], e[1]) for e in edges if e[2] == "has_value"]
+    status = schema_graph_module._column_node_id("orders", "status", scope)
+    created = schema_graph_module._column_node_id("orders", "created", scope)
+    assert len(has_value) == len(set(has_value)) == 3
+    assert sorted(source for source, _ in has_value) == sorted([status, status, created])
+    assert len(emitted_has_value) == 3
+
+
+@pytest.mark.asyncio
 async def test_columns_link_new_values_in_later_batches_and_are_source_scoped(monkeypatch):
     graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
     monkeypatch.setattr(graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph))
