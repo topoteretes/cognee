@@ -540,8 +540,12 @@ async def list_sessions_for_dataset(dataset_id: UUIDType) -> list[tuple[UUIDType
     return await list_sessions_for_datasets([dataset_id])
 
 
-# Datasets per query: each one adds an OR'd suffix match, and SQLite caps the
-# depth of an expression tree at 1000.
+# The session id SessionManager uses when none is given; with a known dataset
+# it is ``f"{DEFAULT_SESSION_ID}_{dataset_id}"``.
+DEFAULT_SESSION_ID = "default_session"
+
+# Datasets per query, each adding two bound parameters: under every backend's
+# bind-parameter cap.
 _DATASETS_PER_QUERY = 100
 
 
@@ -550,13 +554,12 @@ async def list_sessions_for_datasets(
 ) -> list[tuple[UUIDType, str]]:
     """Return (user_id, session_id) pairs for sessions attributed to any of the datasets.
 
-    Attribution is best-effort by design: ``dataset_id`` is backfilled on the
-    session row (heartbeats and remember() both fill it when they know the
-    dataset), and the per-dataset default session embeds the dataset id in its
-    session_id (``{default_session_id}_{dataset_id}``). Match on either, so
-    rows written before dataset threading existed are still found through
-    their session_id suffix. The suffix match cannot use an index, so the
-    datasets share one query (per 100 of them) instead of a scan each.
+    A session is attributed by the ``dataset_id`` on its row (heartbeats and
+    remember() both fill it when they know the dataset). A row written before
+    dataset threading has none; it counts only when its session_id is
+    exactly the dataset's default session (``default_session_{dataset_id}``).
+    Any other session_id is the client's choice and never attributes a
+    session, so nobody's session is deleted for ending in a dataset's id.
     """
     dataset_ids = list(dict.fromkeys(dataset_ids))
     if not dataset_ids:
@@ -571,9 +574,11 @@ async def list_sessions_for_datasets(
                     select(SessionRecord.user_id, SessionRecord.session_id).where(
                         or_(
                             SessionRecord.dataset_id.in_(chunk),
-                            *(
-                                SessionRecord.session_id.endswith(f"_{dataset_id}")
-                                for dataset_id in chunk
+                            and_(
+                                SessionRecord.dataset_id.is_(None),
+                                SessionRecord.session_id.in_(
+                                    [f"{DEFAULT_SESSION_ID}_{dataset_id}" for dataset_id in chunk]
+                                ),
                             ),
                         )
                     )

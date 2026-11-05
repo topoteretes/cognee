@@ -960,3 +960,32 @@ async def test_provenance_actor_scope_leaves_an_administrator_unscoped():
     from cognee.api.v1.visualize.routers.get_schema_router import _provenance_actor_scope
 
     assert await _provenance_actor_scope(object(), None) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_a_read_only_caller_sees_no_user_who_holds_access_only_by_a_grant():
+    """grant_dataset_ids withholds the ACL edges and role membership of datasets the caller
+    cannot share; the users tied to them only by those grants are withheld as nodes too."""
+    from cognee.api.v1.visualize.memory_provenance import get_memory_provenance_graph
+
+    seed = await _seed()
+    member = f"user:{seed['member_id']}"
+    owner = f"user:{seed['owner_id']}"
+
+    read_only, _ = await get_memory_provenance_graph(
+        scope_tenant_ids=[seed["tenant_id"]],
+        scope_dataset_ids=[seed["dataset_id"]],
+        grant_dataset_ids=[],
+    )
+    shareable, _ = await get_memory_provenance_graph(
+        scope_tenant_ids=[seed["tenant_id"]],
+        scope_dataset_ids=[seed["dataset_id"]],
+        grant_dataset_ids=[seed["dataset_id"]],
+    )
+
+    read_only_ids = {node_id for node_id, _ in read_only}
+    # The member holds a direct grant and a role on the dataset, nothing else.
+    assert member not in read_only_ids
+    # The owner is already named by the Dataset node, so ownership still counts.
+    assert owner in read_only_ids
+    assert member in {node_id for node_id, _ in shareable}

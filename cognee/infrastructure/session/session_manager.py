@@ -32,7 +32,10 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.session_lifecycle.metrics import record_session_activity
+from cognee.modules.session_lifecycle.metrics import (
+    DEFAULT_SESSION_ID,
+    record_session_activity,
+)
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 
@@ -75,7 +78,7 @@ class SessionManager:
         # TODO: this type should be 'CacheDBInterface', but the current code doesn't use this
         # interface and instead calls functions specific to its implementations.
         cache_engine: Any,
-        default_session_id: str = "default_session",
+        default_session_id: str = DEFAULT_SESSION_ID,
         session_history_last_n: int = 10,
         dataset_id: uuid.UUID | None = None,
     ) -> None:

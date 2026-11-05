@@ -64,7 +64,6 @@ def _patches(manager, session_pairs_by_owner, dataset_pairs, deletable_datasets)
         return [pair for dataset_id in dataset_ids for pair in dataset_pairs.get(dataset_id, [])]
 
     return [
-        patch.object(datasets_api, "list_datasets", AsyncMock(return_value=deletable_datasets)),
         patch.object(datasets_api, "delete_all", AsyncMock()),
         patch(
             "cognee.modules.data.methods.get_authorized_existing_datasets",
@@ -315,3 +314,27 @@ async def test_forget_everything_deletes_a_session_whose_owner_no_longer_exists(
     # The recorded dataset's store is still detagged for the deleted owner's session.
     assert entered == [DATASET_SHARED]
     assert set(dataset_detag.await_args.args[0]) == {(str(USER_B), "b_shared")}
+
+
+@pytest.mark.asyncio
+async def test_forget_everything_counts_the_datasets_it_deletes_not_the_ones_it_reads(cache):
+    """delete_all removes only the datasets the user may delete; a read-only one stays and
+    is not reported as removed."""
+    manager = SessionManager(cache)
+    patches = _patches(
+        manager,
+        session_pairs_by_owner={},
+        dataset_pairs={},
+        deletable_datasets=[SimpleNamespace(id=DATASET_SHARED)],
+    )
+    datasets_api = importlib.import_module("cognee.api.v1.datasets.datasets").datasets
+    readable = [SimpleNamespace(id=DATASET_SHARED), SimpleNamespace(id=DATASET_PRIVATE)]
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        stack.enter_context(
+            patch.object(datasets_api, "list_datasets", AsyncMock(return_value=readable))
+        )
+        result = await forget_module._forget_everything(SimpleNamespace(id=USER_A))
+
+    assert result["datasets_removed"] == 1

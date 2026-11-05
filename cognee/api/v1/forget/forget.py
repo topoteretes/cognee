@@ -276,15 +276,16 @@ async def _forget_everything(user: Any) -> dict:
     )
     from cognee.modules.session_lifecycle.delete_session import delete_sessions
 
-    user_datasets = await datasets.list_datasets(user=user)
-    count = len(user_datasets)
+    # The datasets delete_all removes: the ones the user may delete, not
+    # every one they can read.
+    deletable_datasets = await get_authorized_existing_datasets([], "delete", user)
+    count = len(deletable_datasets)
 
     # Resolve the sessions before anything is deleted; nothing to list
     # without session memory (CACHING=false).
     session_manager = get_session_manager()
     session_pairs: list[tuple[UUID, str]] = []
     if session_manager.is_available:
-        deletable_datasets = await get_authorized_existing_datasets([], "delete", user)
         session_pairs.extend(await list_sessions_for_user(user.id))
         session_pairs.extend(
             (user.id, session_id)

@@ -316,15 +316,19 @@ async def test_delete_data_purges_history_when_it_deletes_the_emptied_dataset(
     assert await _row_counts(history_engine) == (0, 0)
 
 
-def _no_sessions():
-    """forget(everything)'s session resolution, stubbed to find none (SDK-1237)."""
+def _no_sessions(deletable=()):
+    """forget(everything)'s dataset and session resolution, stubbed to find no session."""
     return [
         patch(
             "cognee.modules.data.methods.get_authorized_existing_datasets",
-            AsyncMock(return_value=[]),
+            AsyncMock(return_value=list(deletable)),
         ),
         patch(
             "cognee.modules.session_lifecycle.list_sessions_for_user", AsyncMock(return_value=[])
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.list_sessions_for_datasets",
+            AsyncMock(return_value=[]),
         ),
     ]
 
@@ -336,7 +340,6 @@ async def test_forget_everything_purges_the_users_own_history_first():
     user = SimpleNamespace(id=uuid4())
     calls = []
     fake_datasets = SimpleNamespace(
-        list_datasets=AsyncMock(return_value=[object(), object()]),
         delete_all=AsyncMock(side_effect=lambda **_: calls.append("delete_all")),
     )
     delete_user_history = AsyncMock(side_effect=lambda _: calls.append("user_history") or COUNTS)
@@ -349,7 +352,7 @@ async def test_forget_everything_purges_the_users_own_history_first():
         ),
         ExitStack() as stack,
     ):
-        for p in _no_sessions():
+        for p in _no_sessions(deletable=[SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())]):
             stack.enter_context(p)
         result = await forget_mod._forget_everything(user)
 
@@ -396,9 +399,7 @@ async def test_forget_data_item_reports_history_kept():
 @pytest.mark.asyncio
 async def test_history_cleanup_failure_fails_forget_everything_before_the_data_goes():
     user = SimpleNamespace(id=uuid4())
-    fake_datasets = SimpleNamespace(
-        list_datasets=AsyncMock(return_value=[]), delete_all=AsyncMock()
-    )
+    fake_datasets = SimpleNamespace(delete_all=AsyncMock())
 
     with (
         patch.object(datasets_mod, "datasets", fake_datasets),

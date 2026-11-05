@@ -683,7 +683,9 @@ async def get_memory_provenance_graph(
         grant_dataset_ids: when set, ACL grants and role membership are
             projected only for these datasets (the ones the caller may
             ``share``), so a read grant alone does not list who else holds
-            access or who is in a role. An empty list projects none.
+            access or who is in a role: a user tied to the readable datasets
+            only by a grant or role on the others is not a node either. An
+            empty list projects none.
         When neither scope is given the read is global — the OSS local default,
         where the single user owns everything.
     """
@@ -736,18 +738,26 @@ async def get_memory_provenance_graph(
             # one, or belong to a role that does (the role this same scope
             # already keeps). A user reachable only through the tenant-level
             # grant with no personal tie to an in-scope dataset is dropped;
-            # that is the fail-closed half of the rule.
+            # that is the fail-closed half of the rule. The grant and role
+            # ties count only on datasets whose grants the graph shows
+            # (``grant_dataset_ids``), or a read grant would still name, as a
+            # User node, everyone else who holds access.
             from cognee.modules.users.models import ACL as _ACL
             from cognee.modules.users.models import Role as _Role
             from cognee.modules.users.models import UserRole as _UserRole
 
             ds_uuids = [_as_uuid(d) for d in scope_dataset_ids]
+            if grant_dataset_ids is None:
+                grant_uuids = ds_uuids
+            else:
+                shareable_ids = {str(did) for did in grant_dataset_ids}
+                grant_uuids = [d for d in ds_uuids if str(d) in shareable_ids]
             relevant_role_ids = select(_Role.id).where(
-                _Role.id.in_(select(_ACL.principal_id).where(_ACL.dataset_id.in_(ds_uuids)))
+                _Role.id.in_(select(_ACL.principal_id).where(_ACL.dataset_id.in_(grant_uuids)))
             )
             user_stmt = user_stmt.where(
                 User.id.in_(select(Dataset.owner_id).where(Dataset.id.in_(ds_uuids)))
-                | User.id.in_(select(_ACL.principal_id).where(_ACL.dataset_id.in_(ds_uuids)))
+                | User.id.in_(select(_ACL.principal_id).where(_ACL.dataset_id.in_(grant_uuids)))
                 | User.id.in_(
                     select(_UserRole.user_id).where(_UserRole.role_id.in_(relevant_role_ids))
                 )
