@@ -109,7 +109,7 @@ logging.getLogger("alembic.env").info(
 config.set_section_option(
     config.config_ini_section,
     "SQLALCHEMY_DATABASE_URI",
-    db_uri,
+    db_uri.replace("%", "%%"),
 )
 
 
