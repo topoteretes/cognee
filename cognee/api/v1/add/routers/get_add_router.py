@@ -165,6 +165,8 @@ def get_add_router() -> APIRouter:
           version to `PATCH /api/v1/update?data_id=...&dataset_id=...` so the document
           keeps its id. Re-adding identical content is a no-op, not an error.
         - **403 Forbidden**: User doesn't have permission to add to dataset
+          or a server-side path in raw_data while ACCEPT_LOCAL_FILE_PATH is unset or false
+          (IngestionError naming the setting)
 
         ## Notes
         - To add data to datasets not owned by the user, use dataset_id (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)

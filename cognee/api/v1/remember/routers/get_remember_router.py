@@ -380,6 +380,8 @@ def get_remember_router() -> APIRouter:
         - **422 Unprocessable Entity**: A database connection string in raw_data while
           ALLOW_DATABASE_INGESTION is unset or false (DatabaseIngestionDisabled), or one
           that names cognee's own storage (DatabaseSourceRefused, SqliteSourceRefused)
+        - **403 Forbidden**: A server-side path in raw_data while ACCEPT_LOCAL_FILE_PATH is
+          unset or false (IngestionError naming the setting)
         - **409 Conflict**: Error during processing
         """
         # Swagger UI submits an untouched file list as one blank part; treat it
