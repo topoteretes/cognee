@@ -1007,7 +1007,16 @@ def get_integrations_router():
         want provider vocabulary; ``/resources`` is the stable generic path.
         The returned selection is three-state: ``null`` means all resources,
         an empty list means none, and a non-empty list is an allowlist.
-        ``account_id`` picks one of the user's connections (see GET /{provider}/connections).
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **account_id** (Optional[str]): Connection to use (from GET
+          /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
+          An id that is not the caller's returns 404 and never falls back to another
+          connection; a blank id returns 422.
         """
         integration = _integration_or_404(provider)
         if integration.resource_selection_key is None:
@@ -1058,7 +1067,21 @@ def get_integrations_router():
     ) -> IntegrationResourceSelectionResultDTO:
         """Persist a full resource selection for a connected integration.
 
-        ``account_id`` picks one of the user's connections (see GET /{provider}/connections).
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **account_id** (Optional[str]): Connection to use (from GET
+          /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
+          An id that is not the caller's returns 404 and never falls back to another
+          connection; a blank id returns 422.
+
+        ## Request Parameters
+        - **resourceIds** (Optional[List[str]]): Full replacement list of selected resource
+          ids; duplicates are dropped, blank or whitespace-only ids give 422. Null (also the
+          value when omitted) means every resource and is a 422 for providers that do not
+          allow it.
         """
         integration = _integration_or_404(provider)
         selection_key = integration.resource_selection_key
@@ -1098,7 +1121,15 @@ def get_integrations_router():
     ) -> IntegrationSyncResultDTO:
         """Start a provider sync without changing its stored selection.
 
-        ``account_id`` picks one of the user's connections (see GET /{provider}/connections).
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **account_id** (Optional[str]): Connection to use (from GET
+          /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
+          An id that is not the caller's returns 404 and never falls back to another
+          connection; a blank id returns 422.
         """
         integration = _integration_or_404(provider)
         credential = await _credential_or_404(user, integration, account_id)
@@ -1122,9 +1153,6 @@ def get_integrations_router():
     ) -> DisconnectResultDTO:
         """Disconnect the account connected by the requesting user.
 
-        ``account_id`` picks which of the user's connections to disconnect (see GET
-        /{provider}/connections); without it the newest one goes.
-
         Marks the stored installation revoked, and best-effort asks the
         provider to kill the token on its own side via
         ``integration.revoke_remote``. That call is wrapped here too, on top
@@ -1135,6 +1163,18 @@ def get_integrations_router():
         ## Path Parameters
         - **provider** (str): Key of a registered OAuth provider (see GET
           /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **account_id** (Optional[str]): Connection to use (from GET
+          /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
+          An id that is not the caller's returns 404 and never falls back to another
+          connection; a blank id returns 422.
+        - **delete_data** (bool): When true, the integration's dataset is deleted after the
+          connection is revoked. A provider that exposes no deletable dataset returns 400
+          before anything is revoked; a deletion that fails after the disconnect returns
+          502, unless the deletion itself answered with an HTTP error, whose status is kept.
+          Ignored when account_id is omitted and the caller has no connection. Defaults to
+          False.
         """
         with new_span("cognee.integrations.disconnect") as span:
             span.set_attribute("cognee.integrations.provider", provider)

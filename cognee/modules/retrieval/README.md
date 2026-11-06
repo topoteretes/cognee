@@ -9,7 +9,7 @@ together.
 
 | SearchType | Retriever | Module | LLM answer? | Notes |
 |---|---|---|---|---|
-| `HYBRID_COMPLETION` | `HybridRetriever` | `hybrid_retriever.py` | yes | Default. Chunk + entity (+ global-context) lanes. Defers to `GRAPH_COMPLETION` for a custom `node_type`, `node_name` with `node_type=None`, `neighborhood_depth`, `feedback_influence > 0`, or a missing chunk collection (`search/methods/hybrid_deferral.py`) |
+| `HYBRID_COMPLETION` | `HybridRetriever` | `hybrid_retriever.py` | yes | Default. Chunk + entity (+ global-context) lanes. Defers to `GRAPH_COMPLETION` for a custom `node_type`, `neighborhood_depth`, `feedback_influence > 0`, or a missing chunk collection (`search/methods/hybrid_deferral.py`); `node_name` with `node_type=None` raises `QueryValidationError` like on every type (`search/methods/node_name_scope.py`) |
 | `GRAPH_COMPLETION` | `GraphCompletionRetriever` | `graph_completion_retriever.py` | yes | Triplet search + neighbourhood expansion; base for the variants below |
 | `GRAPH_COMPLETION_COT` | `GraphCompletionCotRetriever` | `graph_completion_cot_retriever.py` | yes | Chain-of-thought rounds |
 | `GRAPH_COMPLETION_CONTEXT_EXTENSION` | `GraphCompletionContextExtensionRetriever` | `graph_completion_context_extension_retriever.py` | yes | Iteratively widens context |
@@ -49,6 +49,35 @@ Optional hooks: `extract_context_object_ids` (which nodes/edges fed a session an
 `merge_retrieved_objects` (combine the raw-query and rewritten-query lanes of a session
 turn), `append_references` / `get_context_evidence` (`include_references=True`), and the
 class flags `supports_session_turn_preparation` / `supports_prompt_preview`.
+
+### Explicit typed graph scopes
+
+For `GRAPH_COMPLETION` with an explicit non-`NodeSet` `node_type` and `node_name`,
+triplet retrieval projects that graph scope before scoring vectors. On LanceDB
+(including subprocess mode), PGVector, Turso and Neptune Analytics, `score_by_ids`
+scores only its node and edge-type vectors, without an additional candidate cutoff;
+a query batch is scored with one `score_by_ids_batch` call per collection: LanceDB
+fetches the scoped vectors once and takes every query's distances locally, PGVector and
+Turso run one statement with a distance column per query, so a batch costs about one
+query.
+Unembedded graph members keep the usual missing-distance penalty. Neptune uses
+exact `CosineDistance` through `neptune.algo.vectors.distance.byEmbedding`, rather
+than its ANN top-k search. NodeSet, unscoped, vector-seeded neighbourhood searches
+and supplied memory fragments retain their existing paths. A vector adapter
+without `score_by_ids` scans its collections unfiltered for such a scope and maps
+the distances onto the projected scope, so it ranks the same triplets, only slower;
+the vector `node_name` filter means NodeSet membership and is never applied to a
+typed scope, because it would match nothing and penalise every scoped node.
+
+`CHUNKS` and `RAG_COMPLETION` take the same two steps for a typed scope
+(`cognee/modules/retrieval/utils/scoped_chunk_search.py`): the graph projects the
+named nodes and their one-hop neighbours, the `DocumentChunk` nodes among them are
+the scope (a document's chunks, an entity's mentions), and `score_by_ids` scores
+exactly those chunk ids; an adapter without it scans the chunk collection
+unfiltered and the scope is kept in Python. A search type that cannot apply a
+`node_name` filter raises `QueryValidationError` instead of answering unscoped
+(`cognee/modules/search/methods/node_name_scope.py` lists which type honours which
+scope), and `FEELING_LUCKY` picks only among the types that can.
 
 ## Adding a retriever
 

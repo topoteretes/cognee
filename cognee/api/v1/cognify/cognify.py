@@ -437,12 +437,20 @@ async def cognify(
                 "early_chunk_indexing is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose it locally."
             )
+        if ontology_file_path is not None:
+            # POST /cognify takes no ontology path, and the file is on this
+            # machine, not the server's: forwarding would silently drop it.
+            raise ValueError(
+                "ontology_file_path is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to use the ontology locally."
+            )
         return await client.cognify(
             datasets,
             chunk_size=chunk_size,
             chunks_per_batch=chunks_per_batch,
             custom_prompt=custom_prompt,
             run_in_background=run_in_background,
+            graph_model=graph_model,
         )
 
     # After the argument checks and the remote route: a cognify that raises above,
@@ -743,10 +751,12 @@ async def get_indexing_tasks(
     a dataset answer chunk-based searches before any entity is extracted. No
     task calls the LLM. Its chunking step comes from ``build_chunking_tasks``,
     as the cognify task lists' does, so both runs cut the same chunks and the
-    cognify run finds them in the store instead of embedding them again.
+    cognify run finds them in the store instead of embedding them again. The
+    temporal hints are left out: nothing here reads them, and the cognify run
+    computes its own when it re-chunks.
     """
     return [
-        *build_chunking_tasks(chunker, await resolve_chunk_size(chunk_size)),
+        *build_chunking_tasks(chunker, await resolve_chunk_size(chunk_size), temporal_hints=False),
         # LOAD: chunk and document nodes to the graph, chunk text to the vector
         # store. From here on the dataset is searchable at chunk level.
         Task(
