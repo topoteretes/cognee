@@ -197,7 +197,7 @@ async def test_query_facts_uses_exact_graph_filters_and_raw_fact_properties():
         }
     ]
     engine.get_filtered_graph_data.assert_awaited_once_with(
-        [{"type": [*CODE_NODE_TYPES, "CodeRepository"]}]
+        [{"type": [*CODE_NODE_TYPES, "CodeRepository", "CodeFinding", "ObservedDeclaration"]}]
     )
     # Repository nodes are fetched for the delta operation but stay out of the
     # fact indexes and every fact-facing operation.

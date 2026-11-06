@@ -51,13 +51,16 @@ DEFAULT_TOOLS = [
                                 "flows",
                                 "hubs",
                                 "ask",
+                                "findings",
                             ],
                             "description": (
                                 "ask answers a natural-language question with seeds, flows, "
                                 "a one-hop neighbourhood and file:line citations; search ranks "
                                 "symbols, routes and flows by name, docstring and path; "
                                 "neighbors, subgraph, flows and hubs navigate from there; "
-                                "capabilities reports what the graph and server support"
+                                "findings lists the stored memories about a symbol and the "
+                                "code around it, each marked current, changed, ambiguous or "
+                                "gone; capabilities reports what the graph and server support"
                             ),
                         },
                         "diagram": {
