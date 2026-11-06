@@ -39,7 +39,8 @@ async def extract_dlt_source_edges(
     target row is not written yet. Cross-batch state lives in
     ``ctx.extras``: the rows written so far, a doc's schema nodes are emitted
     (and vector-embedded) only for the first batch that carries its rows, and
-    each unique ColumnValue and SchemaColumn node is persisted and embedded once.
+    each unique ColumnValue and SchemaColumn node is persisted and embedded once,
+    and each ``has_value`` edge is written once.
     ``ctx`` is per data item, and one manifest data item IS one source — that equality is what
     makes ctx.extras the correct scope. If manifests ever stop being
     one-item-per-source, this state needs a new home.
@@ -48,6 +49,7 @@ async def extract_dlt_source_edges(
         emitted_schema_docs = ctx.extras.setdefault("dlt_emitted_schema_docs", set())
         emitted_value_node_ids = ctx.extras.setdefault("dlt_emitted_value_node_ids", set())
         emitted_column_node_ids = ctx.extras.setdefault("dlt_emitted_column_node_ids", set())
+        emitted_has_value_edges = ctx.extras.setdefault("dlt_emitted_has_value_edges", set())
         written_row_ids = ctx.extras.setdefault("dlt_written_row_ids", set())
     else:
         # Direct invocation (unit tests, custom pipelines) without a pipeline
@@ -55,6 +57,7 @@ async def extract_dlt_source_edges(
         emitted_schema_docs = set()
         emitted_value_node_ids = set()
         emitted_column_node_ids = set()
+        emitted_has_value_edges = set()
         written_row_ids = set()
     # Group row chunks in this batch by their source document.
     source_docs = {}  # doc_id -> document
@@ -139,6 +142,7 @@ async def extract_dlt_source_edges(
         ctx,
         emitted_value_node_ids=emitted_value_node_ids,
         emitted_column_node_ids=emitted_column_node_ids,
+        emitted_has_value_edges=emitted_has_value_edges,
     )
 
     emitted_schema_docs.update(newly_emitted_doc_ids)
