@@ -349,16 +349,22 @@ async def test_a_paused_default_holds_every_connection_and_a_paused_row_only_its
     await store.save_sync_policy(owner, owner.id, HOURLY, overriding, now=NOW)
     await store.save_sync_policy(owner, owner.id, HOURLY, other, now=NOW)
 
+    async def levels():
+        return [
+            await store.get_sync_pause_level(credential_id, owner.id)
+            for credential_id in (inheriting, overriding, other)
+        ]
+
     await store.pause_sync_policy(owner, owner.id, other, now=NOW)
+    assert await levels() == [None, None, "connection"]
     await store.require_sync_not_paused(inheriting, owner.id)
-    await store.require_sync_not_paused(overriding, owner.id)
     with pytest.raises(SyncPausedError, match="connection level"):
         await store.require_sync_not_paused(other, owner.id)
 
     await store.pause_sync_policy(owner, owner.id, now=NOW)
-    for credential_id in (inheriting, overriding, other):
-        with pytest.raises(SyncPausedError, match="default level"):
-            await store.require_sync_not_paused(credential_id, owner.id)
+    assert await levels() == ["default", "default", "default"]
+    with pytest.raises(SyncPausedError, match="default level"):
+        await store.require_sync_not_paused(overriding, owner.id)
 
 
 @pytest.mark.asyncio

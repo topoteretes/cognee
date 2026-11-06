@@ -103,7 +103,7 @@ from cognee.modules.integrations.sync_policy import (
     SyncPolicy,
     delete_sync_policy,
     get_caller_effective_sync_policy,
-    get_sync_pause,
+    get_sync_pause_level,
     get_sync_policy,
     pause_sync_policy,
     policy_level,
@@ -234,8 +234,8 @@ def _sync_policy_dto(row: IntegrationSyncPolicy, held_by: str | None = None) -> 
 
 
 async def _connection_policy_dto(row: IntegrationSyncPolicy, credential) -> SyncPolicyDTO:
-    pause = await get_sync_pause(credential.id, owner_principal_id(credential))
-    return _sync_policy_dto(row, held_by=policy_level(pause) if pause is not None else None)
+    held_by = await get_sync_pause_level(credential.id, owner_principal_id(credential))
+    return _sync_policy_dto(row, held_by=held_by)
 
 
 class PluginProvisionDTO(OutDTO):

@@ -261,18 +261,19 @@ async def get_caller_effective_sync_policy(
     return row
 
 
-async def get_sync_pause(credential_id: UUID, principal_id: UUID) -> IntegrationSyncPolicy | None:
-    """The row that holds this connection paused, or None.
+async def get_sync_pause_level(credential_id: UUID, principal_id: UUID) -> str | None:
+    """The level that holds this connection paused, ``default`` or ``connection``, or None.
 
     The owner's paused default comes first: it holds every connection, those with
     their own row too.
     """
     own, default = await _connection_rows(credential_id, principal_id)
-    return next((row for row in (default, own) if row is not None and row.paused), None)
+    pause = next((row for row in (default, own) if row is not None and row.paused), None)
+    return policy_level(pause) if pause is not None else None
 
 
 async def require_sync_not_paused(credential_id: UUID, principal_id: UUID) -> None:
     """Refuse an explicit sync of a paused connection, naming the level that holds it."""
-    pause = await get_sync_pause(credential_id, principal_id)
-    if pause is not None:
-        raise SyncPausedError(policy_level(pause))
+    level = await get_sync_pause_level(credential_id, principal_id)
+    if level is not None:
+        raise SyncPausedError(level)

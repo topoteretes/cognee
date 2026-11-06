@@ -17,7 +17,7 @@ from cognee.shared.logging_utils import get_logger
 
 from .models import IntegrationSyncPolicy
 from .next_due import next_due
-from .store import get_effective_sync_policy, get_sync_pause, stored_policy
+from .store import get_effective_sync_policy, get_sync_pause_level, stored_policy
 
 logger = get_logger("sync_policy_tick")
 
@@ -116,7 +116,7 @@ async def run_due_syncs(
         if (
             connections
             and row.credential_id is not None
-            and await get_sync_pause(row.credential_id, row.principal_id) is not None
+            and await get_sync_pause_level(row.credential_id, row.principal_id) is not None
         ):
             continue
         for credential_id in connections:
