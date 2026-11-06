@@ -23,7 +23,7 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 | [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 43 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
 | [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 28 |
-| [`cookbooks/`](cookbooks/) | Applications you build and keep running: ingest, graph model, UI, live sync, an agent | 6 |
+| [`cookbooks/`](cookbooks/) | Applications you build and keep running: ingest, graph model, UI, live sync, an agent | 7 |
 | [`integrations/`](integrations/) | Connector packages and deployment kits that pair cognee with other systems | 2 |
 
 One line each: **guides teach a feature, advanced guides deepen a feature, demos combine
@@ -133,6 +133,7 @@ with `remember()`, then runs one agent over that memory with `recall()`.
 | [`self_hosted_companion/`](cookbooks/self_hosted_companion/) | A chat companion that remembers your notes folder and every earlier chat |
 | [`import_agent_sessions/`](cookbooks/import_agent_sessions/) | Your Claude Code and Codex session history in one memory, answered over every agent at once and over each alone |
 | [`google_workspace_memory/`](cookbooks/google_workspace_memory/) | Google Calendar + Gmail + Drive memory and an agent that prepares your client meetings: which orders are late or at risk, why, and what to say |
+| [`trustrag/`](cookbooks/trustrag/) | Verifiable financial document intelligence: atomic claim extraction, NLI verification, deterministic fact checks, composite trust scoring, and operational gating |
 
 ### [`company_brain/`](cookbooks/company_brain/) — one memory for a whole company
 | Script | Demonstrates |
