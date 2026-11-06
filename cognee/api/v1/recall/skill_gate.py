@@ -97,11 +97,18 @@ _NEGATION = re.compile(
 )
 _NEGATION_WINDOW = 20
 
+# A negation should only suppress a match within its own clause: "Docker
+# won't start, how do I fix it?" must not be cancelled by the "won't" in the
+# clause before it. Split the lookback window on clause breaks and keep only
+# the tail after the last one.
+_CLAUSE_BREAK = re.compile(r"[,.;:!?—，。；：！？]| - ")
+
 
 def _is_negated(query: str, match: re.Match) -> bool:
-    """True if a negation word sits just before this regex match."""
+    """True if a negation word sits just before this regex match, in the same clause."""
     start = max(0, match.start() - _NEGATION_WINDOW)
     prefix = query[start : match.start()]
+    prefix = _CLAUSE_BREAK.split(prefix)[-1]
     return bool(_NEGATION.search(prefix))
 
 
