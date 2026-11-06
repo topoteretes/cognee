@@ -241,7 +241,7 @@ instructor = ["instructor>=1.9.1,<1.15.3"]
 dev = [
     # The legacy LLM adapters' unit tests build the instructor client.
     "instructor>=1.9.1,<1.15.3",
-    "pytest>=7.4.0,<8",
+    "pytest>=7.4.0,<10",
     "pytest-cov>=6.1.1,<7.0.0",
     "pytest-asyncio>=0.21.1,<0.22",
     "pytest-timeout>=2.3.1,<3",
