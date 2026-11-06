@@ -278,16 +278,18 @@ def _constrain_scope(
     if scoped_types is None or decision.search_type in scoped_types:
         return decision
 
+    # Hybrid honours every scope and includes DLT rows; CHUNKS covers documents only.
+    only_context = decision.only_context or decision.search_type is SearchType.CHUNKS_LEXICAL
     logger.info(
-        "query_router: %s cannot apply the node_name filter; using %s",
+        "query_router: %s cannot apply the node_name filter; using %s%s",
         decision.search_type.value,
         ROUTER_FALLBACK_TYPE.value,
+        " with only_context=True (no answer is generated)" if only_context else "",
     )
-    # Hybrid honours every scope and includes DLT rows; CHUNKS covers documents only.
     return replace(
         decision,
         search_type=ROUTER_FALLBACK_TYPE,
-        only_context=decision.only_context or decision.search_type is SearchType.CHUNKS_LEXICAL,
+        only_context=only_context,
         retriever_config=None,
     )
 
