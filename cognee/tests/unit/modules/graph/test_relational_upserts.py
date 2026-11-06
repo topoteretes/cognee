@@ -208,6 +208,7 @@ async def test_upsert_edges_sanitizes_contains_edge_text_before_insert():
     session.execute.assert_awaited_once_with(statement)
     session.commit.assert_not_called()
 
+
 @pytest.mark.asyncio
 async def test_upsert_edges_normalizes_string_node_ids_before_insert():
     source_id = uuid4()
