@@ -929,7 +929,7 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "1.6.6"
+version = "1.6.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -952,7 +952,6 @@ dependencies = [
     { name = "filetype" },
     { name = "gunicorn" },
     { name = "huggingface-hub" },
-    { name = "instructor" },
     { name = "jinja2" },
     { name = "ladybug", version = "0.17.1", source = { registry = "https://pypi.org/simple" }, marker = "('Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin') or ('Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin')" },
     { name = "ladybug", version = "0.19.0", source = { registry = "https://pypi.org/simple" }, marker = "('Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or sys_platform != 'darwin'" },
@@ -988,9 +987,9 @@ dependencies = [
     { name = "uvicorn" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9b/b1/a53ca62329144c2d2faf54137851b2645f1dc7ac61332b14ed3b7d2af94c/cognee-1.6.6.tar.gz", hash = "sha256:8d0a749f7cbb840a678ca395870a9fa5a6f2544a1355759d78042d82760e50e7", size = 41609939, upload-time = "2026-10-29T21:41:00.795Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e0/f1/ebc0622f8f760cb00f326f34b8d15d1acb416a2c1d6fc58363adba676e65/cognee-1.6.7.tar.gz", hash = "sha256:feee78a5d40880ae1eba909f1a01eaea3973c225e81e3627c133e182da2459bf", size = 41794602, upload-time = "2026-11-06T17:22:49.799Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b3/72/e3c3859a1828948ae649cc3f1acaf80b87764a30cde6daee5355d8e5a773/cognee-1.6.6-py3-none-any.whl", hash = "sha256:bee551bd81c8f619acfc345088a4601b694ff941b80feaee52e4e03a25834408", size = 23094612, upload-time = "2026-10-29T21:40:56.637Z" },
+    { url = "https://files.pythonhosted.org/packages/27/1d/0259fc1ff62ca7c6f25b82b99e09d0f5c4946f47ee19b5360985fe2a84b2/cognee-1.6.7-py3-none-any.whl", hash = "sha256:fdda7a9a58d463ab4631e817748162e084cf806c597da71d38cac13b2c7e2a51", size = 23315255, upload-time = "2026-11-06T17:22:45.844Z" },
 ]
 
 [package.optional-dependencies]
@@ -2446,28 +2445,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/05/18/ceeb4e3ab3aa54495775775b38ae42b10a92f42ce42dfa44da684289b8c8/installer-0.7.0.tar.gz", hash = "sha256:a26d3e3116289bb08216e0d0f7d925fcef0b0194eedfa0c944bcaaa106c4b631", size = 474349, upload-time = "2023-03-17T20:39:38.871Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e5/ca/1172b6638d52f2d6caa2dd262ec4c811ba59eee96d54a7701930726bce18/installer-0.7.0-py3-none-any.whl", hash = "sha256:05d1933f0a5ba7d8d6296bb6d5018e7c94fa473ceb10cf198a92ccea19c27b53", size = 453838, upload-time = "2023-03-17T20:39:36.219Z" },
-]
-
-[[package]]
-name = "instructor"
-version = "1.15.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "docstring-parser" },
-    { name = "jinja2" },
-    { name = "jiter" },
-    { name = "openai" },
-    { name = "pydantic" },
-    { name = "pydantic-core" },
-    { name = "requests" },
-    { name = "rich" },
-    { name = "tenacity" },
-    { name = "typer" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/dc/a4/832cfb15420360e26d2d85bd9d5fe1e4b839d52587574d389bc31284bf6f/instructor-1.15.1.tar.gz", hash = "sha256:c72406469d9025b742e83cf0c13e914b317db2089d08d889944e74fcd659ef94", size = 69948370, upload-time = "2026-04-03T01:51:30.107Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/c8/36c5d9b80aaf40ba9a7084a8fc18c967db6bf248a4cc8d0f0816b14284be/instructor-1.15.1-py3-none-any.whl", hash = "sha256:be81d17ba2b154a04ab4720808f24f9d6b598f80992f82eaf9cc79006099cf6c", size = 178156, upload-time = "2026-04-03T01:51:23.098Z" },
 ]
 
 [[package]]
