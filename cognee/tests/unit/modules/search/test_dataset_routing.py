@@ -104,8 +104,10 @@ class FakeEngine:
 
     async def upsert_raw_vectors(self, collection_name, points, payload_schema=None):
         assert collection_name == DATASET_ROUTE_COLLECTION
+        # No schema: the rows are index rows, copied from the dataset's store as stored.
+        assert payload_schema is None
         for point in points:
-            self.created.append(payload_schema.model_validate(point["payload"]))
+            self.created.append(point["payload"])
             self.vectors[str(point["id"])] = point["vector"]
 
     async def delete_collection(self, collection_name):
@@ -128,17 +130,24 @@ def _patch(monkeypatch, engine, documents, access_control=True):
 
 
 class FakeIndexStore:
-    """The dataset's own store, holding the vectors the index build embedded."""
+    """The dataset's own store, holding the index rows the build embedded."""
 
     def __init__(self, vectors):
         self.vectors = vectors
         self.retrieved = []
 
+    @staticmethod
+    def stored_row(row_id):
+        """The index row as ``index_data_points`` stored it, minus the vector."""
+        return {"id": row_id, "text": f"indexed {row_id}", "belongs_to_set": []}
+
     async def retrieve(self, collection_name, data_point_ids, *, include_vector=False):
         assert collection_name == "GlobalContextSummary_text" and include_vector is True
         self.retrieved.extend(data_point_ids)
         return [
-            ScoredResult(id=UUID(row_id), score=0, payload={"text": "x", "vector": vector})
+            ScoredResult(
+                id=UUID(row_id), score=0, payload={**self.stored_row(row_id), "vector": vector}
+            )
             for row_id, vector in self.vectors.items()
             if row_id in data_point_ids
         ]
@@ -406,18 +415,15 @@ async def test_sync_writes_new_and_changed_rows_and_deletes_the_rest(monkeypatch
 
     assert touched == 3
     assert engine.deleted == [UUID(gone_id)]
-    assert sorted((str(row.id), row.text) for row in engine.created) == sorted(
-        [(kept_id, "kept bucket"), (changed_id, "new bucket text")]
+    # The rows are the index store's rows as stored, payload and vector alike;
+    # nothing was embedded for them.
+    assert sorted(engine.created, key=lambda row: row["id"]) == sorted(
+        [index_store.stored_row(kept_id), index_store.stored_row(changed_id)],
+        key=lambda row: row["id"],
     )
-    # The rows carry the index store's vectors; nothing was embedded for them.
     assert engine.vectors == {kept_id: [1.0, 0.0], changed_id: [0.0, 1.0]}
     assert engine.embedded == []
     assert sorted(index_store.retrieved) == sorted([kept_id, changed_id])
-    assert all(row.dataset_id == str(dataset_id) for row in engine.created)
-    assert {str(row.id): row.is_root for row in engine.created} == {
-        kept_id: False,
-        changed_id: False,
-    }
 
 
 @pytest.mark.asyncio
@@ -437,7 +443,7 @@ async def test_sync_ignores_rows_whose_ids_recall_cannot_derive(monkeypatch):
         FakeIndexStore({root_id: [0.1, 0.2]}),
     )
 
-    assert [str(row.id) for row in engine.created] == [root_id]
+    assert [row["id"] for row in engine.created] == [root_id]
 
 
 @pytest.mark.asyncio

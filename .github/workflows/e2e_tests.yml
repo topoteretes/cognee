@@ -109,6 +109,27 @@ jobs:
           ENV: 'dev'
         run: uv run pytest cognee/tests/e2e/serve_routing/
 
+  run-review-conflicts-ledger-test:
+    name: Review Conflicts Ledger e2e
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      # Mocked LLM and embeddings: no secrets. improve()'s conflict review on a
+      # graph that records its writes in the relational ledger, on SQLite, so the
+      # review's edges reach the relational edges table.
+      - name: Run review conflicts ledger suite
+        env:
+          ENV: 'dev'
+        run: uv run pytest cognee/tests/e2e/review_conflicts/
+
   run-migration-model-lockstep-guard:
     name: Migration/Model Lockstep Guard
     runs-on: ubuntu-22.04

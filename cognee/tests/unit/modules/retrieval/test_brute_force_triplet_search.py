@@ -1,3 +1,4 @@
+from types import MethodType
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
@@ -5,8 +6,10 @@ import pytest
 
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.retrieval.utils.brute_force_triplet_search import (
@@ -14,7 +17,16 @@ from cognee.modules.retrieval.utils.brute_force_triplet_search import (
     format_triplets,
     get_memory_fragment,
 )
-from cognee.tasks.schema.models import SchemaColumn
+from cognee.tasks.schema.models import SchemaTable
+
+
+def vector_engine_mock() -> AsyncMock:
+    """A vector engine mock with the interface defaults a bare mock lacks: every
+    collection exists, and a batch is scored one ``score_by_ids`` call per vector."""
+    engine = AsyncMock()
+    engine.existing_collections = AsyncMock(side_effect=lambda names: list(names))
+    engine.score_by_ids_batch = MethodType(VectorDBInterface.score_by_ids_batch, engine)
+    return engine
 
 
 class MockScoredResult:
@@ -27,32 +39,247 @@ class MockScoredResult:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("node_type", [None, NodeSet, SchemaColumn])
-async def test_typed_anchor_names_are_not_vector_nodeset_filters(node_type):
-    vector = AsyncMock()
-    vector.embedding_engine.embed_text.return_value = [[0.1, 0.2, 0.3]]
-    vector.search.return_value = [MockScoredResult("anchor", 0.1)]
+@pytest.mark.parametrize("batch", [False, True])
+async def test_typed_scope_projects_before_scoring_only_its_node_and_edge_ids(batch):
+    graph = CogneeGraph()
+    anchor, first, second = [Node(name, {"name": name}) for name in ["anchor", "first", "second"]]
+    for node in [anchor, first, second]:
+        graph.add_node(node)
+    for node in [first, second]:
+        graph.add_edge(Edge(anchor, node, {"edge_text": f"contains {node.id}"}))
+    engine = vector_engine_mock()
+    engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]] * (2 if batch else 1)
+
+    async def score(collection_name, data_point_ids, query_vector):
+        if collection_name == "Entity_name":
+            # The unembedded anchor keeps its normal missing-distance penalty.
+            return [MockScoredResult("first", 0.1), MockScoredResult("second", 0.9)]
+        return [MockScoredResult(point_id, 0.2) for point_id in data_point_ids]
+
+    engine.score_by_ids.side_effect = score
     module = "cognee.modules.retrieval.utils.brute_force_triplet_search"
     with (
         patch(
             "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
-            return_value=vector,
+            return_value=engine,
         ),
-        patch(f"{module}._get_top_triplet_importances", new_callable=AsyncMock) as project,
+        patch(f"{module}.get_memory_fragment", return_value=graph) as project,
     ):
-        await brute_force_triplet_search(
-            query="all countries",
-            node_type=node_type,
-            node_name=["customer:country"],
-            collections=["SchemaColumn_name"],
+        results = await brute_force_triplet_search(
+            query=None if batch else "first",
+            query_batch=["first", "second"] if batch else None,
+            node_type=SchemaTable,
+            node_name=["table"],
+            collections=["Entity_name"],
+            top_k=2,
+            feedback_influence=0.0,
         )
-    call = next(
-        c
-        for c in vector.search.call_args_list
-        if c.kwargs["collection_name"] == "SchemaColumn_name"
-    )
-    assert call.kwargs["node_name"] == (None if node_type is SchemaColumn else ["customer:country"])
-    assert project.call_args.args[3:5] == (node_type, ["customer:country"])
+    project.assert_awaited_once()
+    assert project.call_args.kwargs["node_name"] == ["table"]
+    engine.search.assert_not_awaited()
+    engine.batch_search.assert_not_awaited()
+    for call in engine.score_by_ids.call_args_list:
+        expected = (
+            list(graph.nodes)
+            if call.kwargs["collection_name"] == "Entity_name"
+            else list(graph.edges_by_distance_key)
+        )
+        assert call.kwargs["data_point_ids"] == expected
+    for edges in results if batch else [results]:
+        assert [edge.node2.id for edge in edges] == ["first", "second"]
+    assert anchor.attributes["vector_distance"] == [6.5] * (2 if batch else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch", [False, True])
+async def test_empty_typed_scope_does_not_embed_or_search(batch):
+    engine = vector_engine_mock()
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=CogneeGraph(),
+        ),
+    ):
+        results = await brute_force_triplet_search(
+            query=None if batch else "query",
+            query_batch=["first", "second"] if batch else None,
+            node_type=SchemaTable,
+            node_name=["missing"],
+        )
+    assert results == ([[], []] if batch else [])
+    engine.embedding_engine.embed_text.assert_not_awaited()
+    engine.search.assert_not_awaited()
+    engine.score_by_ids.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_typed_scope_keeps_unembedded_edges_with_existing_distance_penalties():
+    graph = CogneeGraph()
+    first, second = Node("first"), Node("second")
+    graph.add_node(first)
+    graph.add_node(second)
+    graph.add_edge(Edge(first, second, {"relationship_type": "has_value"}))
+    engine = vector_engine_mock()
+    engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
+    engine.score_by_ids.return_value = []
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=graph,
+        ),
+    ):
+        results = await brute_force_triplet_search(
+            query="query", node_type=SchemaTable, node_name=["table"], feedback_influence=0.0
+        )
+    assert results == graph.edges
+    assert first.attributes["vector_distance"] == [6.5]
+    assert results[0].attributes["vector_distance"] == [6.5]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode", ["unscoped", "nodeset", "nodeset-subclass", "unsupported", "provided", "neighborhood"]
+)
+async def test_other_search_paths_keep_existing_vector_retrieval(mode):
+    engine = vector_engine_mock()
+    engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
+    engine.search.return_value = [MockScoredResult("hit", 0.1)]
+    if mode == "unsupported":
+        engine.score_by_ids = MethodType(VectorDBInterface.score_by_ids, object())
+    kwargs = {"node_type": SchemaTable, "node_name": ["table"]}
+    if mode == "unscoped":
+        kwargs["node_name"] = None
+    elif mode == "nodeset":
+        kwargs["node_type"] = NodeSet
+    elif mode == "nodeset-subclass":
+
+        class CustomNodeSet(NodeSet):
+            pass
+
+        kwargs["node_type"] = CustomNodeSet
+    elif mode == "provided":
+        kwargs["memory_fragment"] = CogneeGraph()
+    elif mode == "neighborhood":
+        kwargs["neighborhood_depth"] = 1
+    module = "cognee.modules.retrieval.utils.brute_force_triplet_search"
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=engine,
+        ),
+        patch(f"{module}.get_memory_fragment") as project,
+        patch(f"{module}._get_top_triplet_importances", return_value=[]),
+    ):
+        await brute_force_triplet_search(query="query", **kwargs)
+    project.assert_not_awaited()
+    assert engine.search.await_count > 0
+    if mode != "unsupported":
+        engine.score_by_ids.assert_not_awaited()
+
+    # Only the typed-scope fallback drops the NodeSet filter from the vector search.
+    searched_names = [call.kwargs["node_name"] for call in engine.search.await_args_list]
+    if mode in ("unsupported", "unscoped"):
+        assert searched_names == [None] * len(searched_names)
+    else:
+        assert ["table"] in searched_names
+
+
+@pytest.mark.asyncio
+async def test_typed_scope_fallback_scans_unfiltered_and_scopes_through_projection():
+    """An engine without ``score_by_ids`` still scores every node of a typed scope.
+
+    The vector ``node_name`` filter means NodeSet membership, which an Entity scope
+    never has: forwarding it matches nothing and every scoped node is penalised.
+    The fallback scans unfiltered and leaves the scoping to the graph projection.
+    """
+    graph = CogneeGraph()
+    first, second = Node("first"), Node("second")
+    graph.add_node(first)
+    graph.add_node(second)
+    graph.add_edge(Edge(first, second, {"relationship_type": "has_value"}))
+    engine = vector_engine_mock()
+    engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
+    engine.score_by_ids = MethodType(VectorDBInterface.score_by_ids, object())
+
+    async def search(collection_name, **kwargs):
+        if collection_name == "Entity_name":
+            return [MockScoredResult("first", 0.2), MockScoredResult("outside", 0.1)]
+        return []
+
+    engine.search = AsyncMock(side_effect=search)
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=graph,
+        ) as project,
+    ):
+        results = await brute_force_triplet_search(
+            query="query", node_type=SchemaTable, node_name=["table"], feedback_influence=0.0
+        )
+
+    for call in engine.search.await_args_list:
+        assert call.kwargs["node_name"] is None
+        assert call.kwargs["limit"] is None
+    project.assert_awaited_once()
+    assert project.await_args.kwargs["node_type"] is SchemaTable
+    assert project.await_args.kwargs["node_name"] == ["table"]
+    assert results == graph.edges
+    assert first.attributes["vector_distance"] == [0.2]
+    assert second.attributes["vector_distance"] == [6.5]
+    assert "outside" not in graph.nodes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch", [False, True])
+async def test_typed_scope_fallback_keeps_unembedded_scope_when_no_vector_matches(batch):
+    """Without ``score_by_ids``, an all-empty vector result must not drop a typed scope.
+
+    The ID-scoring path keeps such a scope with missing-distance penalties; the
+    fallback has to return the same triplets rather than stopping before projection.
+    """
+    graph = CogneeGraph()
+    first, second = Node("first"), Node("second")
+    graph.add_node(first)
+    graph.add_node(second)
+    graph.add_edge(Edge(first, second, {"relationship_type": "has_value"}))
+    engine = vector_engine_mock()
+    engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
+    engine.score_by_ids = MethodType(VectorDBInterface.score_by_ids, object())
+    engine.search = AsyncMock(return_value=[])
+    engine.batch_search = AsyncMock(return_value=[[], []])
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=graph,
+        ) as project,
+    ):
+        results = await brute_force_triplet_search(
+            query=None if batch else "query",
+            query_batch=["first", "second"] if batch else None,
+            node_type=SchemaTable,
+            node_name=["table"],
+            feedback_influence=0.0,
+        )
+
+    project.assert_awaited_once()
+    assert results == ([graph.edges, graph.edges] if batch else graph.edges)
+    assert first.attributes["vector_distance"] == [6.5] * (2 if batch else 1)
 
 
 @pytest.mark.asyncio
@@ -86,7 +313,7 @@ async def test_brute_force_triplet_search_zero_top_k():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_wide_search_limit_global_search():
     """Test that wide_search_limit is applied for global search (node_name=None)."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[])
@@ -108,7 +335,7 @@ async def test_brute_force_triplet_search_wide_search_limit_global_search():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_wide_search_limit_filtered_search():
     """Test that wide_search_limit is None for filtered search (node_name provided)."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[])
@@ -130,7 +357,7 @@ async def test_brute_force_triplet_search_wide_search_limit_filtered_search():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_wide_search_default():
     """Test that wide_search_top_k defaults to 100."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[])
@@ -148,7 +375,7 @@ async def test_brute_force_triplet_search_wide_search_default():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_default_collections():
     """Test that default collections are used when none provided."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[])
@@ -177,7 +404,7 @@ async def test_brute_force_triplet_search_default_collections():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_custom_collections():
     """Test that custom collections are used when provided."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[])
@@ -199,7 +426,7 @@ async def test_brute_force_triplet_search_custom_collections():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_always_includes_edge_collection():
     """Test that EdgeType_relationship_name is always searched even when not in collections."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[])
@@ -231,7 +458,7 @@ async def test_brute_force_triplet_search_does_not_mutate_caller_collections():
     searches with one configured list — it must never grow or accumulate
     duplicates.
     """
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[])
@@ -257,7 +484,7 @@ async def test_brute_force_triplet_search_does_not_mutate_caller_collections():
 async def test_brute_force_triplet_search_caller_collections_with_edge_not_duplicated():
     """If the caller already includes the edge collection, the list is neither
     mutated nor given a duplicate entry."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[])
@@ -286,7 +513,7 @@ async def test_triplet_context_provider_does_not_mutate_configured_collections()
         TripletSearchContextProvider,
     )
 
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[])
@@ -317,7 +544,7 @@ async def test_triplet_context_provider_does_not_mutate_configured_collections()
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_all_collections_empty():
     """Test that empty list is returned when all collections return no results."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[])
@@ -339,7 +566,7 @@ async def test_brute_force_triplet_search_embeds_query():
     query_text = "test query"
     expected_vector = [0.1, 0.2, 0.3]
 
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[expected_vector])
     mock_vector_engine.search = AsyncMock(return_value=[])
@@ -365,7 +592,7 @@ async def test_brute_force_triplet_search_extracts_node_ids_global_search():
         MockScoredResult("node3", 0.92),
     ]
 
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=scored_results)
@@ -401,7 +628,7 @@ async def test_brute_force_triplet_search_reuses_provided_fragment():
         calculate_top_triplet_importances=AsyncMock(return_value=[]),
     )
 
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[MockScoredResult("n1", 0.95)])
@@ -427,7 +654,7 @@ async def test_brute_force_triplet_search_reuses_provided_fragment():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_creates_fragment_when_not_provided():
     """Test that memory fragment is created when not provided."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[MockScoredResult("n1", 0.95)])
@@ -456,7 +683,7 @@ async def test_brute_force_triplet_search_creates_fragment_when_not_provided():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_passes_top_k_to_importance_calculation():
     """Test that custom top_k is passed to importance calculation."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[MockScoredResult("n1", 0.95)])
@@ -488,7 +715,7 @@ async def test_brute_force_triplet_search_passes_top_k_to_importance_calculation
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_applies_personal_weights():
     """personal_weights are handed to the fragment after distance mapping."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[MockScoredResult("n1", 0.95)])
@@ -524,7 +751,7 @@ async def test_brute_force_triplet_search_applies_personal_weights():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_skips_personal_weights_when_absent():
     """Without personal_weights the fragment is never touched — byte-identical path."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[MockScoredResult("n1", 0.95)])
@@ -664,7 +891,7 @@ async def test_brute_force_triplet_search_deduplicates_node_ids():
         else:
             return []
 
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(side_effect=search_side_effect)
@@ -705,7 +932,7 @@ async def test_brute_force_triplet_search_excludes_edge_collection():
         else:
             return []
 
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(side_effect=search_side_effect)
@@ -757,7 +984,7 @@ async def test_brute_force_triplet_search_skips_nodes_without_ids():
         else:
             return []
 
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(side_effect=search_side_effect)
@@ -798,7 +1025,7 @@ async def test_brute_force_triplet_search_handles_tuple_results():
         else:
             return []
 
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(side_effect=search_side_effect)
@@ -840,7 +1067,7 @@ async def test_brute_force_triplet_search_mixed_empty_collections():
         else:
             return []
 
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(side_effect=search_side_effect)
@@ -948,7 +1175,7 @@ async def test_brute_force_triplet_search_vector_engine_init_error():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_collection_not_found_error():
     """Test brute_force_triplet_search handles CollectionNotFoundError in search (lines 156-157)."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine = mock_embedding_engine
     mock_embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
@@ -981,7 +1208,7 @@ async def test_brute_force_triplet_search_collection_not_found_error():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_generic_exception():
     """Test brute_force_triplet_search handles generic exceptions (lines 209-217)."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine = mock_embedding_engine
     mock_embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
@@ -1001,7 +1228,7 @@ async def test_brute_force_triplet_search_generic_exception():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_with_node_name_sets_relevant_ids_to_none():
     """Test brute_force_triplet_search sets relevant_ids_to_filter to None when node_name is provided (line 191)."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine = mock_embedding_engine
     mock_embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
@@ -1034,7 +1261,7 @@ async def test_brute_force_triplet_search_with_node_name_sets_relevant_ids_to_no
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_collection_not_found_at_top_level():
     """Test brute_force_triplet_search handles CollectionNotFoundError at top level (line 210)."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine = mock_embedding_engine
     mock_embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
@@ -1067,7 +1294,7 @@ async def test_brute_force_triplet_search_collection_not_found_at_top_level():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_single_query_regression():
     """Test that single-query mode maintains legacy behavior (flat list, ID filtering)."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
     mock_vector_engine.search = AsyncMock(return_value=[MockScoredResult("node1", 0.95)])
@@ -1102,7 +1329,7 @@ async def test_brute_force_triplet_search_single_query_regression():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_batch_wiring_happy_path():
     """Test that batch mode returns list-of-lists and skips ID filtering."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.batch_search = AsyncMock(
         return_value=[
@@ -1141,7 +1368,7 @@ async def test_brute_force_triplet_search_batch_wiring_happy_path():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_shape_propagation_to_graph():
     """Test that query_list_length is passed through to graph mapping methods."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.batch_search = AsyncMock(
         return_value=[
@@ -1187,7 +1414,7 @@ async def test_brute_force_triplet_search_shape_propagation_to_graph():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_batch_path_comprehensive():
     """Test batch mode: returns list-of-lists, skips ID filtering, passes None for wide_search_limit."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
 
     def batch_search_side_effect(*args, **kwargs):
@@ -1244,7 +1471,7 @@ async def test_brute_force_triplet_search_batch_path_comprehensive():
 @pytest.mark.asyncio
 async def test_brute_force_triplet_search_batch_error_fallback():
     """Test that CollectionNotFoundError in batch mode returns [[], []] matching batch length."""
-    mock_vector_engine = AsyncMock()
+    mock_vector_engine = vector_engine_mock()
     mock_vector_engine.embedding_engine = AsyncMock()
     mock_vector_engine.batch_search = AsyncMock(
         side_effect=CollectionNotFoundError("Collection not found")
@@ -1312,7 +1539,7 @@ async def test_neighborhood_scores_only_expansion_ids(unsupported):
     neighbor_id = UUID("00000000-0000-0000-0000-000000000002")
     seed = MockScoredResult(seed_id, 0.1)
     neighbor = MockScoredResult(neighbor_id, 0.8)
-    engine = AsyncMock()
+    engine = vector_engine_mock()
     engine.search.return_value = []
     engine.score_by_ids.return_value = [neighbor]
     if unsupported:
