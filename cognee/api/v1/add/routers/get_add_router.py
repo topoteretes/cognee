@@ -54,9 +54,9 @@ def get_add_router() -> APIRouter:
             description=(
                 "Data given as strings instead of uploads, one entry each: raw text to "
                 "ingest, a local file or directory path on the server's filesystem "
-                "(requires ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
-                "ALLOW_HTTP_REQUESTS), or a GitHub/GitLab repository URL, which is "
-                "shallow-cloned and indexed as a code graph by cognify. Combined with "
+                "(requires ACCEPT_LOCAL_FILE_PATH), a web URL to fetch, or a GitHub/GitLab "
+                "repository URL, which is shallow-cloned and indexed as a code graph by "
+                "cognify (both require ALLOW_HTTP_REQUESTS=true on the server). Combined with "
                 "'data': uploads come first, then these entries; labels and "
                 "external_metadata pair with that combined order. Empty entries are "
                 "ignored."
@@ -120,8 +120,9 @@ def get_add_router() -> APIRouter:
         - **raw_data** (Optional[List[str]]): String inputs, one entry each:
           - Raw text to ingest
           - A local file or directory path on the server (requires ACCEPT_LOCAL_FILE_PATH)
-          - A web URL, fetched as a page (requires ALLOW_HTTP_REQUESTS)
+          - A web URL, fetched as a page (requires ALLOW_HTTP_REQUESTS=true on the server)
           - A GitHub/GitLab repository URL, shallow-cloned and indexed as a code graph
+            (same requirement)
           At least one of data or raw_data is required. Uploads come first, then
           raw_data entries; labels and external_metadata pair with that combined order.
         - **labels** (Optional[str]): JSON array of per-item labels, e.g.

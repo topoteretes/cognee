@@ -31,8 +31,8 @@ All cognee functions are async. Without `dataset_name` data goes to
 `data` accepts a string, a list of strings, file paths (absolute, `file://`,
 `s3://`), http(s) URLs, binary streams, or a list mixing them.
 
-- **URLs** are fetched and scraped (needs `ALLOW_HTTP_REQUESTS=true`, the
-  default).
+- **URLs** are fetched and scraped (needs `ALLOW_HTTP_REQUESTS=true`; off by
+  default, on the server when calling over HTTP).
 - **Folders** are ingested file by file. A folder that looks like a code
   project, or a GitHub/GitLab URL, becomes one code repository (needs `git`
   on PATH).
