@@ -60,7 +60,9 @@ async def forget(
 
     Args:
         data_id: UUID of a specific data item to remove.
-            Requires ``dataset`` or ``dataset_id`` to also be set.
+            Requires ``dataset`` or ``dataset_id`` to also be set. Needs
+            ``delete`` on the dataset, or ``write`` when the caller added the
+            item themselves (``memory_only`` always needs ``delete``).
         dataset: Dataset name. When set alone, deletes the
             entire dataset. When set with ``data_id``, deletes that item
             from this dataset.
@@ -222,8 +224,12 @@ async def forget(
             # entry provisions per-dataset database registry rows, a write that
             # must never happen for a caller without delete permission (an
             # unauthorized caller used to surface as a UniqueViolation 500 — or,
-            # for an unprovisioned dataset, actually created rows).
-            resolved_dataset_id = await _resolve_dataset_id(dataset_ref, user)
+            # for an unprovisioned dataset, actually created rows). Removing one
+            # item outright also admits its author with write permission;
+            # memory_only stays delete-only (update() rebuilds through it).
+            resolved_dataset_id = await _resolve_dataset_id(
+                dataset_ref, user, data_id=None if memory_only else data_id
+            )
             operation_context.set_dataset(resolved_dataset_id)
 
             # No database context here: each path below establishes it AFTER
@@ -378,7 +384,7 @@ async def _forget_data_item(data_id: UUID, dataset_ref: str | UUID, user: Any) -
     """
     from cognee.api.v1.datasets.datasets import datasets
 
-    dataset_id = await _resolve_dataset_id(dataset_ref, user)
+    dataset_id = await _resolve_dataset_id(dataset_ref, user, data_id=data_id)
 
     receipt = await datasets.delete_data(
         dataset_id=dataset_id,
@@ -652,12 +658,53 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
     }
 
 
-async def _resolve_dataset_id(dataset_ref: str | UUID, user: Any) -> UUID:
-    """Resolve a dataset name or UUID to a UUID, with permission check."""
+async def _resolve_dataset_id(
+    dataset_ref: str | UUID, user: Any, data_id: UUID | None = None
+) -> UUID:
+    """Resolve a dataset name or UUID to a UUID, with permission check.
+
+    Requires ``delete`` on the dataset. With ``data_id`` (deleting one item),
+    ``write`` also passes when the caller added that item (``Data.owner_id``);
+    otherwise the ``delete`` denial is raised unchanged, so an author check
+    that fails reveals nothing more than a plain denial.
+    """
+    from cognee.modules.data.exceptions import DatasetNotFoundError
+    from cognee.modules.users.exceptions import PermissionDeniedError
+
+    try:
+        return await _authorized_dataset_id(dataset_ref, user, "delete")
+    except (DatasetNotFoundError, PermissionDeniedError, ValueError):
+        if data_id is not None:
+            dataset_id = await _authored_item_dataset_id(dataset_ref, user, data_id)
+            if dataset_id is not None:
+                return dataset_id
+        raise
+
+
+async def _authored_item_dataset_id(
+    dataset_ref: str | UUID, user: Any, data_id: UUID
+) -> UUID | None:
+    """The dataset id if ``user`` has ``write`` on it and added ``data_id`` to it."""
+    from cognee.modules.data.exceptions import DatasetNotFoundError
+    from cognee.modules.data.methods import get_data
+    from cognee.modules.users.exceptions import PermissionDeniedError
+
+    try:
+        dataset_id = await _authorized_dataset_id(dataset_ref, user, "write")
+    except (DatasetNotFoundError, PermissionDeniedError, ValueError):
+        return None
+    data = await get_data(user.id, data_id, dataset_id, verify_owner=False)
+    if data is None or data.owner_id != user.id:
+        return None
+    return dataset_id
+
+
+async def _authorized_dataset_id(dataset_ref: str | UUID, user: Any, permission_type: str) -> UUID:
+    """Resolve a dataset name or UUID to a UUID the user holds ``permission_type`` on."""
     if isinstance(dataset_ref, UUID):
         from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
 
-        dataset = await get_authorized_dataset(user, dataset_ref, "delete")
+        dataset = await get_authorized_dataset(user, dataset_ref, permission_type)
         if not dataset:
             raise ValueError(f"Dataset {dataset_ref} not found or not accessible.")
         return dataset.id
@@ -665,7 +712,7 @@ async def _resolve_dataset_id(dataset_ref: str | UUID, user: Any) -> UUID:
     from cognee.modules.data.exceptions import DatasetNotFoundError
     from cognee.modules.data.methods import get_authorized_dataset_by_name
 
-    dataset = await get_authorized_dataset_by_name(dataset_ref, user, "delete")
+    dataset = await get_authorized_dataset_by_name(dataset_ref, user, permission_type)
     if dataset is None:
         # Same message for missing and unauthorized: the name lookup returns None
         # for both, and distinguishing them would leak which dataset names exist.
