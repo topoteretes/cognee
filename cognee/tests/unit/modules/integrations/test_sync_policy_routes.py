@@ -22,12 +22,21 @@ from cognee.exceptions import CogneeApiError
 from cognee.modules.integrations.base import OAuthIntegration
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 from cognee.modules.integrations.registry import supported_integrations, use_integration
+from cognee.modules.integrations.sync_policy import (
+    SyncPolicy,
+    get_sync_policy,
+    pause_sync_policy,
+    resume_sync_policy,
+    save_sync_policy,
+)
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import Tenant, User
 
 DEFAULT = "/api/v1/integrations/sync/policy"
 CONNECTION = "/api/v1/integrations/fake/sync/policy"
 HOURLY = {"intervalMinutes": 60}
+# The owner holds two connections; this one is its own, not the workspace's.
+OWNED = {"account_id": "OWNER"}
 
 
 class _FakeIntegration(OAuthIntegration):
@@ -97,8 +106,8 @@ def _credential(user_id, account_id, workspace_id=None):
 async def world(database):
     """An owner with an agent and a tenant, a member of that tenant, and a stranger.
 
-    The owner and the stranger each connected one account; the member connected
-    one into the tenant's workspace.
+    The owner and the stranger each connected one account; the member connected one
+    into the tenant's workspace, and so did the owner. Callers are the ``User`` rows.
     """
     owner, stranger, member = _user_row(), _user_row(), _user_row()
     agent = _user_row(parent=owner.id)
@@ -109,13 +118,15 @@ async def world(database):
         _credential(owner.id, "OWNER"),
         _credential(stranger.id, "STRANGER"),
         _credential(member.id, "MEMBER", workspace_id=tenant.id),
+        tenant_connection := _credential(owner.id, "TENANT", workspace_id=tenant.id),
     )
     return SimpleNamespace(
-        owner=SimpleNamespace(id=owner.id),
-        stranger=SimpleNamespace(id=stranger.id),
-        member=SimpleNamespace(id=member.id),
-        agent=SimpleNamespace(id=agent.id),
+        owner=owner,
+        stranger=stranger,
+        member=member,
+        agent=agent,
         tenant_id=tenant.id,
+        tenant_connection_id=tenant_connection.id,
     )
 
 
@@ -160,43 +171,25 @@ async def test_a_saved_policy_comes_back_in_utc_with_the_offered_intervals(api, 
 
 
 @pytest.mark.asyncio
-async def test_another_principals_default_reads_like_a_missing_one(api, world):
+async def test_every_default_route_acts_on_the_callers_own_default_only(api, world):
+    """No default route takes an owner, so none can reach another principal's default:
+    not a stranger's, and not a parent's from its agent."""
     await api(world.owner).put(DEFAULT, json=HOURLY)
-    await api(world.owner).put(DEFAULT, params={"principal_id": str(world.tenant_id)}, json=HOURLY)
-    missing = await api(world.stranger).get(DEFAULT)
+    await api(world.agent).put(DEFAULT, json={"intervalMinutes": 240})
 
-    refused = [
-        (world.stranger, world.owner.id),
-        (world.agent, world.owner.id),
-        (world.member, world.tenant_id),
-    ]
-    for caller, principal_id in refused:
-        for method in ("get", "delete", "post"):
-            url = f"{DEFAULT}/pause" if method == "post" else DEFAULT
-            response = await getattr(api(caller), method)(
-                url, params={"principal_id": str(principal_id)}
-            )
-            assert (response.status_code, response.json()) == (404, missing.json())
+    for method, url in (("get", DEFAULT), ("post", f"{DEFAULT}/pause"), ("delete", DEFAULT)):
+        assert (await getattr(api(world.stranger), method)(url)).status_code == 404
+    agent_paused = (await api(world.agent).post(f"{DEFAULT}/pause")).json()
+    agent_resumed = (await api(world.agent).post(f"{DEFAULT}/resume")).json()
+    deleted = await api(world.agent).delete(DEFAULT)
 
-
-@pytest.mark.asyncio
-async def test_every_default_route_acts_on_the_principal_it_names(api, world):
-    owner, tenant = api(world.owner), {"principal_id": str(world.tenant_id)}
-    await owner.put(DEFAULT, json=HOURLY)
-    await owner.put(DEFAULT, params=tenant, json={"intervalMinutes": 240})
-
-    read = (await owner.get(DEFAULT, params=tenant)).json()
-    paused = (await owner.post(f"{DEFAULT}/pause", params=tenant)).json()
-    resumed = (await owner.post(f"{DEFAULT}/resume", params=tenant)).json()
-    deleted = await owner.delete(DEFAULT, params=tenant)
-
-    assert read["intervalMinutes"] == 240
-    assert (paused["intervalMinutes"], paused["paused"]) == (240, True)
-    assert (resumed["intervalMinutes"], resumed["paused"]) == (240, False)
+    assert (agent_paused["intervalMinutes"], agent_paused["paused"]) == (240, True)
+    assert (agent_resumed["intervalMinutes"], agent_resumed["paused"]) == (240, False)
     assert deleted.status_code == 204
-    assert (await owner.get(DEFAULT, params=tenant)).status_code == 404
-    # The caller's own default was never touched.
-    assert (await owner.get(DEFAULT)).json()["intervalMinutes"] == 60
+    assert (await api(world.agent).get(DEFAULT)).status_code == 404
+    # The owner's default was never touched.
+    untouched = (await api(world.owner).get(DEFAULT)).json()
+    assert (untouched["intervalMinutes"], untouched["paused"]) == (60, False)
 
 
 @pytest.mark.asyncio
@@ -219,11 +212,35 @@ async def test_another_users_connection_reads_like_a_missing_one(api, world):
 
 @pytest.mark.asyncio
 async def test_a_workspace_connection_belongs_to_the_workspace_not_to_who_connected_it(api, world):
-    """The member connected it, but its owner is the tenant, whose policies only the
-    tenant's owner manages."""
-    response = await api(world.member).put(CONNECTION, params={"account_id": "MEMBER"}, json=HOURLY)
+    """The member connected it, but its owner is the tenant, which the member cannot act
+    for. The tenant's owner does not reach it either: a connection route only finds the
+    caller's own connections."""
+    member = await api(world.member).put(CONNECTION, params={"account_id": "MEMBER"}, json=HOURLY)
+    owner = await api(world.owner).put(CONNECTION, params={"account_id": "MEMBER"}, json=HOURLY)
 
-    assert response.status_code == 404
+    assert member.status_code == owner.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_connection_of_the_tenants_owner_is_governed_by_the_tenant(api, world):
+    """Its owner is the tenant, not the user who connected it: the tenant's default holds
+    it, and its own policy is saved, paused and enforced under the tenant."""
+    params = {"account_id": "TENANT"}
+    await save_sync_policy(world.owner, world.tenant_id, SyncPolicy(interval_minutes=60))
+    await pause_sync_policy(world.owner, world.tenant_id)
+    held = (await api(world.owner).get(CONNECTION, params=params)).json()
+    await resume_sync_policy(world.owner, world.tenant_id)
+
+    saved = await api(world.owner).put(CONNECTION, params=params, json={"intervalMinutes": 240})
+    paused = (await api(world.owner).post(f"{CONNECTION}/pause", params=params)).json()
+    refused = await api(world.owner).post("/api/v1/integrations/fake/sync", params=params)
+    own = await get_sync_policy(world.owner, world.tenant_id, world.tenant_connection_id)
+
+    assert (held["level"], held["heldBy"], held["intervalMinutes"]) == ("default", "default", 60)
+    assert (saved.status_code, saved.json()["level"]) == (200, "connection")
+    assert paused["heldBy"] == "connection"
+    assert (refused.status_code, "connection level" in refused.json()["detail"]) == (409, True)
+    assert (own.principal_id, own.interval_minutes) == (world.tenant_id, 240)
 
 
 @pytest.mark.asyncio
@@ -250,11 +267,11 @@ async def test_a_manual_sync_of_a_paused_connection_is_refused_until_resumed(api
     await owner.put(DEFAULT, json=HOURLY)
     paused = (await owner.post(f"{DEFAULT}/pause")).json()
     # Read back from SQLite, which drops the offset: the response is UTC anyway.
-    read_back = (await owner.get(CONNECTION)).json()
+    read_back = (await owner.get(CONNECTION, params=OWNED)).json()
 
-    refused = await owner.post("/api/v1/integrations/fake/sync")
+    refused = await owner.post("/api/v1/integrations/fake/sync", params=OWNED)
     await owner.post(f"{DEFAULT}/resume")
-    accepted = await owner.post("/api/v1/integrations/fake/sync")
+    accepted = await owner.post("/api/v1/integrations/fake/sync", params=OWNED)
 
     assert paused["paused"] is True
     assert paused["pausedBy"] == str(world.owner.id)

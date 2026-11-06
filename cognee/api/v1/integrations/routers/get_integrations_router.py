@@ -522,68 +522,42 @@ def get_integrations_router():
     integrations_router.include_router(APIRouter(lifespan=sync_scheduler_lifespan))
 
     # ------------------------------------------------------------------ #
-    # Sync policies: the owner's default (fixed /sync/policy path, before the
-    # {provider} routes). The owner is the caller, or a principal it may act for:
-    # one of its agents or a tenant it owns. Anyone else's reads as missing.
+    # Sync policies: the caller's own default (fixed /sync/policy path, before the
+    # {provider} routes). Scoped by construction: no route here takes an owner.
     # ------------------------------------------------------------------ #
 
     @integrations_router.get("/sync/policy")
     async def get_default_sync_policy(
-        principal_id: UUID | None = None, user: User = Depends(get_authenticated_user)
+        user: User = Depends(get_authenticated_user),
     ) -> SyncPolicyDTO:
-        """The owner's default sync policy, which every connection without its own inherits.
-
-        ## Query Parameters
-        - **principal_id** (UUID, optional): The owner (a workspace or tenant the caller
-          owns, or one of its agents). Defaults to the caller.
-        """
-        return _sync_policy_dto(await get_sync_policy(user, principal_id or user.id))
+        """The caller's default sync policy, which every connection without its own inherits."""
+        return _sync_policy_dto(await get_sync_policy(user, user.id))
 
     @integrations_router.put("/sync/policy")
     async def set_default_sync_policy(
-        policy: SyncPolicy,
-        principal_id: UUID | None = None,
-        user: User = Depends(get_authenticated_user),
+        policy: SyncPolicy, user: User = Depends(get_authenticated_user)
     ) -> SyncPolicyDTO:
-        """Create or replace the owner's default sync policy. A pause is kept.
-
-        ## Query Parameters
-        - **principal_id** (UUID, optional): As for GET. Defaults to the caller.
-        """
-        return _sync_policy_dto(await save_sync_policy(user, principal_id or user.id, policy))
+        """Create or replace the caller's default sync policy. A pause is kept."""
+        return _sync_policy_dto(await save_sync_policy(user, user.id, policy))
 
     @integrations_router.delete("/sync/policy", status_code=204)
-    async def remove_default_sync_policy(
-        principal_id: UUID | None = None, user: User = Depends(get_authenticated_user)
-    ) -> None:
-        """Remove the owner's default: connections without their own policy stop syncing on schedule.
-
-        ## Query Parameters
-        - **principal_id** (UUID, optional): As for GET. Defaults to the caller.
-        """
-        await delete_sync_policy(user, principal_id or user.id)
+    async def remove_default_sync_policy(user: User = Depends(get_authenticated_user)) -> None:
+        """Remove the caller's default: connections without their own stop syncing on schedule."""
+        await delete_sync_policy(user, user.id)
 
     @integrations_router.post("/sync/policy/pause")
     async def pause_default_sync_policy(
-        principal_id: UUID | None = None, user: User = Depends(get_authenticated_user)
+        user: User = Depends(get_authenticated_user),
     ) -> SyncPolicyDTO:
-        """Pause every connection of the owner, those with their own policy too.
-
-        ## Query Parameters
-        - **principal_id** (UUID, optional): As for GET. Defaults to the caller.
-        """
-        return _sync_policy_dto(await pause_sync_policy(user, principal_id or user.id))
+        """Pause every connection of the caller, those with their own policy too."""
+        return _sync_policy_dto(await pause_sync_policy(user, user.id))
 
     @integrations_router.post("/sync/policy/resume")
     async def resume_default_sync_policy(
-        principal_id: UUID | None = None, user: User = Depends(get_authenticated_user)
+        user: User = Depends(get_authenticated_user),
     ) -> SyncPolicyDTO:
-        """Resume the owner's default; its next slot is the first one after now.
-
-        ## Query Parameters
-        - **principal_id** (UUID, optional): As for GET. Defaults to the caller.
-        """
-        return _sync_policy_dto(await resume_sync_policy(user, principal_id or user.id))
+        """Resume the caller's default; its next slot is the first one after now."""
+        return _sync_policy_dto(await resume_sync_policy(user, user.id))
 
     # ------------------------------------------------------------------ #
     # Aggregate status (fixed /status path — before the {provider} routes)

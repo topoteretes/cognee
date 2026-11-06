@@ -33,24 +33,25 @@ HOURLY = SyncPolicy(interval_minutes=60)
 
 
 def _user():
-    return SimpleNamespace(id=uuid4())
+    """A ``User`` caller, not a stand-in: a scope that read any attribute beyond the id
+    (``parent_user_id``) must be judged on the real model."""
+    return User(id=uuid4(), parent_user_id=None)
 
 
 async def _add_agent(database, parent):
-    """A real agent user: its ``parent_user_id`` is what get_visible_user_ids reads."""
-    agent = _user()
+    """A real agent user row: its ``parent_user_id`` is what get_visible_user_ids reads."""
+    agent_id = uuid4()
+    agent = User(
+        id=agent_id,
+        email=f"{agent_id}@example.com",
+        hashed_password="x",
+        is_active=True,
+        is_verified=True,
+        is_superuser=False,
+        parent_user_id=parent.id,
+    )
     async with database.get_async_session() as session:
-        session.add(
-            User(
-                id=agent.id,
-                email=f"{agent.id}@example.com",
-                hashed_password="x",
-                is_active=True,
-                is_verified=True,
-                is_superuser=False,
-                parent_user_id=parent.id,
-            )
-        )
+        session.add(agent)
         await session.commit()
     return agent
 

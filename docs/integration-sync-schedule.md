@@ -31,13 +31,13 @@ before.
 
 ## Routes
 
-The default. `principal_id` is optional and defaults to the caller; it may name
-one of the caller's agents or a tenant the caller owns, and anything else is a 404:
+The caller's own default. The routes take no owner, so they never reach anyone
+else's default:
 
 ```http
-GET|PUT|DELETE /api/v1/integrations/sync/policy?principal_id=...
-POST /api/v1/integrations/sync/policy/pause?principal_id=...
-POST /api/v1/integrations/sync/policy/resume?principal_id=...
+GET|PUT|DELETE /api/v1/integrations/sync/policy
+POST /api/v1/integrations/sync/policy/pause
+POST /api/v1/integrations/sync/policy/resume
 ```
 
 One connection (`account_id` as for `POST /{provider}/sync`):
@@ -56,9 +56,8 @@ nothing to pause: save one first. The connection routes find the connection amon
 the caller's own, and the caller must be able to act for its owner (a host may set
 `workspace_id`; nothing in the SDK does). Another owner's policy or connection is
 the same 404 as a missing one. Two first saves of one policy at once: the second
-is a 409, read and save again. Query parameters are snake_case (`principal_id`,
-`account_id`); an unknown one such as `principalId` is ignored, so the route acts
-on the caller. Bodies take camelCase or snake_case.
+is a 409, read and save again. `account_id` is snake_case like every query
+parameter here; bodies take camelCase or snake_case.
 
 ```http
 PUT /api/v1/integrations/sync/policy
