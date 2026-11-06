@@ -1,4 +1,3 @@
-import os
 from collections.abc import Callable
 
 from cognee.base_config import get_base_config
@@ -45,13 +44,12 @@ from cognee.modules.search.methods.node_name_scope import (
     reject_unsupported_node_name,
 )
 from cognee.modules.search.operations import select_search_type
+from cognee.modules.search.search_type_policy import CYPHER_SEARCH_TYPES, cypher_queries_allowed
 from cognee.modules.search.types import SearchType
 from cognee.modules.search.types.SearchType import DEPRECATED_SEARCH_TYPES
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
-
-CYPHER_SEARCH_TYPES = (SearchType.CYPHER, SearchType.NATURAL_LANGUAGE)
 
 # Returned to the caller: says what to change, without detailing the risk.
 CYPHER_DISABLED_MESSAGE = "{search_type} search is disabled by default for security reasons."
@@ -67,11 +65,6 @@ CYPHER_DISABLED_LOG_MESSAGE = (
     "database, up to remote code execution on the server. Set ALLOW_CYPHER_QUERY=true only "
     "when every user of this deployment is trusted."
 )
-
-
-def cypher_queries_allowed() -> bool:
-    """Raw Cypher (CYPHER, NATURAL_LANGUAGE) is opt-in through ALLOW_CYPHER_QUERY=true."""
-    return os.getenv("ALLOW_CYPHER_QUERY", "false").strip().lower() in ("true", "1", "yes")
 
 
 def _hybrid_lane_top_k(config: dict, key: str, search_top_k: int | None) -> int | None:

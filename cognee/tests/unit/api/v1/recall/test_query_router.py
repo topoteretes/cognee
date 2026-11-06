@@ -380,10 +380,10 @@ class TestRoutingConstraints:
 
     def test_constraints_come_from_the_shared_predicates(self, monkeypatch):
         from cognee.modules import preflight
-        from cognee.modules.search.methods import get_search_type_retriever_instance as factory
+        from cognee.modules.search import search_type_policy
 
         monkeypatch.setattr(preflight, "llm_available", lambda _config: False)
-        monkeypatch.setattr(factory, "cypher_queries_allowed", lambda: False)
+        monkeypatch.setattr(search_type_policy, "cypher_queries_allowed", lambda: False)
 
         assert RoutingConstraints.from_config(None) == RoutingConstraints(
             llm_available=False, cypher_allowed=False
@@ -471,10 +471,10 @@ class TestNodeNameScopedRouting:
 
     def test_no_filter_means_no_scope_constraint(self, monkeypatch):
         from cognee.modules import preflight
-        from cognee.modules.search.methods import get_search_type_retriever_instance as factory
+        from cognee.modules.search import search_type_policy
 
         monkeypatch.setattr(preflight, "llm_available", lambda _config: True)
-        monkeypatch.setattr(factory, "cypher_queries_allowed", lambda: True)
+        monkeypatch.setattr(search_type_policy, "cypher_queries_allowed", lambda: True)
 
         assert RoutingConstraints.from_config(None).scoped_types is None
         assert RoutingConstraints.from_config(None, node_name=[]).scoped_types is None
