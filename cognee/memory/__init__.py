@@ -1,3 +1,4 @@
+from .code_refs import CodeReference
 from .entries import (
     MemoryEntry,
     QAEntry,
@@ -9,6 +10,7 @@ from .entries import (
 )
 
 __all__ = [
+    "CodeReference",
     "FeedbackEntry",
     "MemoryEntry",
     "QAEntry",

@@ -438,3 +438,97 @@ async def test_cognify_session_failed_step_after_the_run_is_raised_after_every_w
 
     assert mock_cognify.await_count == 2
     assert mock_sm.update_session_context_entry.call_count == 2
+
+
+# ------------------------------------------------------------- findings about code
+
+CODE_REF = {
+    "repo": "httpx",
+    "enola_id": "3dd612bf822d62516cc184abebddf52b",
+    "name": "httpx/_client.Client.send",
+    "file": "httpx/_client.py",
+    "line": 646,
+    "body_hash": "2d5be8556574e8c3",
+    "observed_commit": "a4463d044f370aef186f3c64bd79e236e4df9e2a",
+    "extractor_version": "0.4.38",
+}
+
+
+def _window_with_finding():
+    from cognee.tasks.code_memory import code_finding
+
+    finding = code_finding(
+        user_id="test-user-123",
+        session_id="test_session",
+        entry_id="qa-1",
+        entry_kind="qa",
+        text="send retries once",
+        code_refs=[CODE_REF],
+    )
+    return SessionPersistWindow(
+        user_id="test-user-123",
+        session_id="test_session",
+        text="Session ID: test_session\n\nQuestion: q\n\nAnswer: send retries once",
+        persisted_qa_count=1,
+        code_findings=(finding,),
+    )
+
+
+@pytest.mark.asyncio
+async def test_findings_are_persisted_after_cognify_and_before_the_watermark():
+    from types import SimpleNamespace
+
+    window = _window_with_finding()
+    mock_sm = _mock_session_manager()
+    data_id, run_id = uuid4(), uuid4()
+    order = []
+    persist = AsyncMock(side_effect=lambda *args, **kwargs: order.append("persist"))
+    mock_sm.update_session_context_entry = AsyncMock(
+        side_effect=lambda **kwargs: order.append("watermark") or True
+    )
+
+    with (
+        patch(
+            "cognee.add", new_callable=AsyncMock, return_value=SimpleNamespace(data_ids=[data_id])
+        ),
+        patch(
+            "cognee.cognify",
+            new_callable=AsyncMock,
+            return_value={"123": SimpleNamespace(pipeline_run_id=run_id)},
+        ),
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+        patch.object(cognify_session_module, "persist_code_findings", persist),
+    ):
+        await cognify_session(window, dataset_id="123")
+
+    persist.assert_awaited_once_with(
+        window.code_findings,
+        node_set=["user_sessions_from_cache"],
+        user=None,
+        dataset_id="123",
+        data_id=data_id,
+        pipeline_run_id=run_id,
+    )
+    assert order == ["persist", "watermark"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_persist_of_findings_keeps_the_watermark_put():
+    window = _window_with_finding()
+    mock_sm = _mock_session_manager()
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock),
+        patch("cognee.cognify", new_callable=AsyncMock),
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+        patch.object(
+            cognify_session_module,
+            "persist_code_findings",
+            AsyncMock(side_effect=RuntimeError("graph down")),
+        ),
+        pytest.raises(CogneeSystemError),
+    ):
+        await cognify_session(window, dataset_id="123")
+
+    mock_sm.update_session_context_entry.assert_not_called()
+    mock_sm.create_session_context_entry.assert_not_called()
