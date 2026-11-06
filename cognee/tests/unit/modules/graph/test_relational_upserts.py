@@ -207,3 +207,35 @@ async def test_upsert_edges_sanitizes_contains_edge_text_before_insert():
     }
     session.execute.assert_awaited_once_with(statement)
     session.commit.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_upsert_edges_normalizes_string_node_ids_before_insert():
+    source_id = uuid4()
+    target_id = uuid4()
+    session = AsyncMock()
+    statement = FakeInsertStatement()
+    edge = (
+        str(source_id),
+        str(target_id),
+        "conflict_value",
+        {"edge_text": "reviewed conflict value"},
+    )
+
+    with patch.object(upsert_edges_module, "insert", return_value=statement):
+        await upsert_edges(
+            [edge],
+            tenant_id=uuid4(),
+            user_id=uuid4(),
+            dataset_id=uuid4(),
+            data_id=uuid4(),
+            session=session,
+        )
+
+    payload = statement.values_arg[0]
+    assert payload["source_node_id"] == source_id
+    assert payload["destination_node_id"] == target_id
+    assert isinstance(payload["source_node_id"], UUID)
+    assert isinstance(payload["destination_node_id"], UUID)
+    session.execute.assert_awaited_once_with(statement)
+    session.commit.assert_not_called()
+
