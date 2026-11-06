@@ -57,8 +57,17 @@ def get_settings_router() -> APIRouter:
         - **vector_db**: Vector database configuration (provider, URL, API key)
 
         ## Error Codes
+        - **403 Forbidden**: Caller is not a superuser. The settings are server-wide
+          (provider endpoints, key prefixes), not the caller's own, so they are read
+          by whoever may write them.
         - **500 Internal Server Error**: Error retrieving settings
         """
+        if not user.is_superuser:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Superuser privileges required to read settings"},
+            )
+
         from cognee.modules.settings import get_settings as get_cognee_settings
 
         return get_cognee_settings()
