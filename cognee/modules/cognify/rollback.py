@@ -106,24 +106,60 @@ async def _completed_data_ids(
     return {record.id for record in records if is_item_stamped(record, pipeline_name, dataset_id)}
 
 
+def _this_run_completed_data_ids(data_ingestion_info: Any) -> set[UUID] | None:
+    """Data ids whose per-item result of this run is ``PipelineRunCompleted``;
+    ``None`` when the run's results are absent (startup recovery)."""
+    if data_ingestion_info is None:
+        return None
+    return {
+        data_id
+        for status, entry_data_ids in iter_ingestion_entries(data_ingestion_info)
+        if status == "PipelineRunCompleted"
+        for data_id in entry_data_ids
+    }
+
+
+async def _kept_data_ids(
+    session, target_data_ids: set, dataset_id: Any, pipeline_name: str, data_ingestion_info: Any
+) -> set:
+    """The ids among ``target_data_ids`` the rollback keeps: the run finished them.
+
+    Kept means stamped complete for ``pipeline_name`` in ``dataset_id`` AND, when
+    the run's per-item results are at hand (``run_tasks`` passes every result it
+    has, the raising path included), reported ``PipelineRunCompleted`` by this
+    run. A stamp alone may be an earlier run's: the non-incremental path
+    (``incremental_loading=False, data_cache=False``) never stamps, so an item stamped by an earlier run and failed half-way in this one
+    still carries that stamp, and its writes must go and its stamp be cleared.
+    Startup recovery has no results, so there the stamp is the only evidence and
+    decides alone. An item that completed in a non-incremental run is not
+    stamped, so it is rolled back like the unfinished ones.
+    """
+    kept = await _completed_data_ids(session, target_data_ids, dataset_id, pipeline_name)
+    completed_this_run = _this_run_completed_data_ids(data_ingestion_info)
+    if completed_this_run is not None:
+        kept &= completed_this_run
+    return kept
+
+
 async def cognify_rollback_handler(
     pipeline_run_id: UUID,
     dataset: Any,
     user: Any = None,
     data_ingestion_info: Any = None,
-    keep_completed_data: bool = False,
     pipeline_name: str | None = None,
     **kwargs: Any,
 ) -> None:
-    """Undo what ``pipeline_run_id`` wrote into ``dataset``.
+    """Undo the unfinished work ``pipeline_run_id`` wrote into ``dataset``.
 
-    With ``keep_completed_data`` the documents the run marked complete keep their
-    artifacts and their completed status; only the run's unfinished work is
-    removed. Startup recovery uses that: the run is closed hours later, and a
+    The rollback is per item: the documents this run completed (stamped, and
+    reported ``PipelineRunCompleted`` by its per-item results, see
+    ``_kept_data_ids``) keep their artifacts and their completed status, only
+    the work of the items the run never finished is removed. An item is stamped complete only once all of its
+    tasks have run (``run_tasks_data_item``), so a kept document is never
+    half-written, and the next run re-extracts only what failed instead of the
+    whole run at full LLM cost. Startup recovery relies on the same rule: a
     later run may already have trusted those completed documents and skipped
     them, so deleting them would leave the dataset with holes nothing refills.
-    The inline failure path keeps the default, whole-run rollback: there the
-    redo is immediate.
 
     ``pipeline_name`` is the pipeline whose per-item completion stamps the run
     set (``run_tasks`` passes it): the cognify pipeline by default, or the
@@ -163,14 +199,12 @@ async def cognify_rollback_handler(
             )
             target_data_ids |= _extract_data_ids(data_ingestion_info)
 
-            kept_data_ids = set()
-            if keep_completed_data:
-                async with db_engine.get_async_session() as session:
-                    kept_data_ids = await _completed_data_ids(
-                        session, target_data_ids, dataset_id, pipeline_name
-                    )
+            async with db_engine.get_async_session() as session:
+                kept_data_ids = await _kept_data_ids(
+                    session, target_data_ids, dataset_id, pipeline_name, data_ingestion_info
+                )
             await unified.rollback_by_pipeline_run_id(
-                str(pipeline_run_id), keep_data_ids=kept_data_ids or None
+                str(pipeline_run_id), keep_data_ids=kept_data_ids
             )
 
             async with db_engine.get_async_session() as session:
@@ -223,13 +257,11 @@ async def cognify_rollback_handler(
             | {edge.data_id for edge in target_edges}
             | _extract_data_ids(data_ingestion_info)
         )
-        kept_data_ids = set()
-        if keep_completed_data:
-            kept_data_ids = await _completed_data_ids(
-                session, target_data_ids, dataset_id, pipeline_name
-            )
-            target_nodes = [node for node in target_nodes if node.data_id not in kept_data_ids]
-            target_edges = [edge for edge in target_edges if edge.data_id not in kept_data_ids]
+        kept_data_ids = await _kept_data_ids(
+            session, target_data_ids, dataset_id, pipeline_name, data_ingestion_info
+        )
+        target_nodes = [node for node in target_nodes if node.data_id not in kept_data_ids]
+        target_edges = [edge for edge in target_edges if edge.data_id not in kept_data_ids]
 
         unique_nodes = []
         if target_nodes:

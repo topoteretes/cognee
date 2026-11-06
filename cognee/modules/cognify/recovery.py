@@ -121,7 +121,6 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
                             await rollback_handler(
                                 pipeline_run_id=current.pipeline_run_id,
                                 dataset=dataset,
-                                keep_completed_data=True,
                                 pipeline_name=current.pipeline_name,
                             )
                         await _close_as_abandoned(

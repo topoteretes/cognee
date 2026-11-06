@@ -7,7 +7,11 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunErrored, PipelineRunStarted
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunCompleted,
+    PipelineRunErrored,
+    PipelineRunStarted,
+)
 from cognee.modules.pipelines.tasks.task import Task
 
 run_tasks_module = importlib.import_module("cognee.modules.pipelines.operations.run_tasks")
@@ -203,6 +207,61 @@ async def test_run_tasks_calls_custom_rollback_on_pipeline_failure(monkeypatch):
     assert rollback_payload["data"] == [data_item]
     assert isinstance(rollback_payload["error"], Exception)
     assert rollback_payload["data_ingestion_info"][0]["run_info"].status == "PipelineRunErrored"
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_hands_the_rollback_the_items_completed_before_the_failure(monkeypatch):
+    """A raising item (the non-incremental path, or RAISE_INCREMENTAL_LOADING_ERRORS)
+    ends the gather before the run's results are built. The rollback still gets
+    the results of the items that completed, so it keeps what they finished."""
+    dataset = SimpleNamespace(id=uuid4(), name="dataset-1", owner_id=uuid4())
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    pipeline_run_id = uuid4()
+    done_item, failing_item = SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
+
+    async def _item(data_item, *_args, **_kwargs):
+        if data_item is failing_item:
+            await asyncio.sleep(0.01)  # let the other item finish first
+            raise ValueError("item failed")
+        return {
+            "run_info": PipelineRunCompleted(
+                pipeline_run_id=pipeline_run_id, dataset_id=dataset.id, dataset_name=dataset.name
+            ),
+            "data_id": data_item.id,
+        }
+
+    rollback_calls = []
+
+    async def _rollback_handler(**kwargs):
+        rollback_calls.append(kwargs)
+
+    async def _log_start(*_args, **_kwargs):
+        return SimpleNamespace(pipeline_run_id=pipeline_run_id)
+
+    monkeypatch.setattr(run_tasks_module, "get_relational_engine", lambda: _FakeEngine(dataset))
+    monkeypatch.setattr(run_tasks_module, "generate_pipeline_id", lambda *_args: uuid4())
+    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_start", _log_start)
+    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_error", AsyncMock())
+    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_progress", AsyncMock())
+    monkeypatch.setattr(run_tasks_module, "set_database_global_context_variables", _no_op_context)
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", _item)
+
+    with pytest.raises(ValueError, match="item failed"):
+        async for _ in run_tasks_module.run_tasks(
+            tasks=[Task(lambda x: x)],
+            dataset_id=dataset.id,
+            data=[done_item, failing_item],
+            user=user,
+            pipeline_name="cognify_pipeline",
+            rollback_handler=_rollback_handler,
+        ):
+            pass
+
+    assert len(rollback_calls) == 1
+    assert [
+        (entry["run_info"].status, entry["data_id"])
+        for entry in rollback_calls[0]["data_ingestion_info"]
+    ] == [("PipelineRunCompleted", done_item.id)]
 
 
 @pytest.mark.asyncio

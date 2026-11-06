@@ -285,6 +285,13 @@ async def run_tasks(
                     for future in item_futures:
                         future.cancel()
                     await asyncio.gather(*item_futures, return_exceptions=True)
+                    # The items that finished before the failure still report
+                    # their result, so the rollback keeps what they completed.
+                    results = [
+                        future.result()
+                        for future in item_futures
+                        if not future.cancelled() and future.exception() is None and future.result()
+                    ]
                     # By default (RAISE_INCREMENTAL_LOADING_ERRORS) a failing item raises
                     # its own error here; a cancellation is not an item failure.
                     items_failed = isinstance(gather_error, Exception)
