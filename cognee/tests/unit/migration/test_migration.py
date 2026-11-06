@@ -663,6 +663,51 @@ class TestFormatEmitters:
         assert len(graph.findall(f"{namespace}node")) == 2
         assert len(graph.findall(f"{namespace}edge")) == 1
 
+    def test_graphml_quotes_property_names_containing_a_double_quote(self, tmp_path):
+        """A property name with a quote must still produce a parsable document.
+
+        The key id and the data key reference are attribute values, so a
+        quotation mark in a property name has to be escaped for that context;
+        XML text escaping leaves it alone and the export stops parsing.
+        """
+        destination = tmp_path / "quoted.graphml"
+        write_graphml(
+            [("id-1", {'display"name': "Alice"})],
+            [("id-1", "id-2", "lives_in", {'edge"note': "a note"})],
+            destination,
+        )
+
+        root = ET.parse(destination).getroot()
+        namespace = "{http://graphml.graphdrawing.org/xmlns}"
+        declared = {key.get("id"): key.get("attr.name") for key in root.findall(f"{namespace}key")}
+        assert declared == {'n_display"name': 'display"name', 'e_edge"note': 'edge"note'}
+
+        node = root.find(f"{namespace}graph/{namespace}node")
+        node_data = node.find(f"{namespace}data")
+        assert node_data.get("key") == 'n_display"name'
+        assert node_data.text == "Alice"
+
+        edge = root.find(f"{namespace}graph/{namespace}edge")
+        edge_data = [
+            data for data in edge.findall(f"{namespace}data") if data.get("key") == 'e_edge"note'
+        ]
+        assert len(edge_data) == 1
+        assert edge_data[0].text == "a note"
+
+    def test_graphml_keeps_ampersands_in_property_names(self, tmp_path):
+        """An ampersand in a property name is escaped and reads back unchanged."""
+        destination = tmp_path / "ampersand.graphml"
+        write_graphml([("id-1", {"a&b": "value"})], [], destination)
+
+        root = ET.parse(destination).getroot()
+        namespace = "{http://graphml.graphdrawing.org/xmlns}"
+        declared = {key.get("id"): key.get("attr.name") for key in root.findall(f"{namespace}key")}
+        assert declared == {"n_a&b": "a&b"}
+
+        node_data = root.find(f"{namespace}graph/{namespace}node/{namespace}data")
+        assert node_data.get("key") == "n_a&b"
+        assert node_data.text == "value"
+
     def test_cypher(self, tmp_path):
         destination = tmp_path / "graph.cypher"
         write_cypher(self.NODES, self.EDGES, destination)

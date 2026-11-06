@@ -60,11 +60,11 @@ def write_graphml(nodes: list[Node], edges: list[Edge], destination: Path) -> No
     ]
     for key in node_keys:
         lines.append(
-            f'  <key id="n_{escape(key)}" for="node" attr.name={quoteattr(key)} attr.type="string"/>'
+            f'  <key id={quoteattr("n_" + key)} for="node" attr.name={quoteattr(key)} attr.type="string"/>'
         )
     for key in edge_keys:
         lines.append(
-            f'  <key id="e_{escape(key)}" for="edge" attr.name={quoteattr(key)} attr.type="string"/>'
+            f'  <key id={quoteattr("e_" + key)} for="edge" attr.name={quoteattr(key)} attr.type="string"/>'
         )
     lines.append('  <graph id="cognee" edgedefault="directed">')
 
@@ -73,7 +73,9 @@ def write_graphml(nodes: list[Node], edges: list[Edge], destination: Path) -> No
         for key, value in (properties or {}).items():
             if value is None:
                 continue
-            lines.append(f'      <data key="n_{escape(key)}">{escape(str(_scalar(value)))}</data>')
+            lines.append(
+                f"      <data key={quoteattr('n_' + key)}>{escape(str(_scalar(value)))}</data>"
+            )
         lines.append("    </node>")
 
     for source, target, relationship, properties in edges:
@@ -82,7 +84,9 @@ def write_graphml(nodes: list[Node], edges: list[Edge], destination: Path) -> No
         for key, value in (properties or {}).items():
             if value is None or key in _SKIP_EDGE_KEYS or key == "relationship_name":
                 continue
-            lines.append(f'      <data key="e_{escape(key)}">{escape(str(_scalar(value)))}</data>')
+            lines.append(
+                f"      <data key={quoteattr('e_' + key)}>{escape(str(_scalar(value)))}</data>"
+            )
         lines.append("    </edge>")
 
     lines.append("  </graph>")
