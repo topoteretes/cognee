@@ -10,7 +10,8 @@ of the providers' client libraries.
 import asyncio
 import json
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from importlib import import_module
@@ -450,6 +451,20 @@ def sync_is_running(provider: str, account_id: str) -> bool:
     return (provider, str(account_id)) in _running_syncs
 
 
+@contextmanager
+def exclusive_sync(provider: str, account_id: str) -> Iterator[bool]:
+    """Mark the account as syncing for the block; yields False when one already runs."""
+    key = (provider, str(account_id))
+    if key in _running_syncs:
+        yield False
+        return
+    _running_syncs.add(key)
+    try:
+        yield True
+    finally:
+        _running_syncs.discard(key)
+
+
 async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
     """Serialize each account's DLT cursor and expose actual in-flight state."""
     from cognee.modules.integrations.credentials import (
@@ -458,12 +473,10 @@ async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
     )
     from cognee.modules.integrations.sync_progress import track_sync
 
-    key = (provider, str(credential.provider_account_id))
-    if key in _running_syncs:
-        return
-    _running_syncs.add(key)
-    counts = {"scanned": 0, "skipped": 0, "failed": 0}
-    try:
+    with exclusive_sync(provider, credential.provider_account_id) as acquired:
+        if not acquired:
+            return
+        counts = {"scanned": 0, "skipped": 0, "failed": 0}
         async with track_sync(provider, credential) as progress:
             await progress.report(phase="checking", counts=counts)
             try:
@@ -501,8 +514,6 @@ async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
                     else None
                 ),
             )
-    finally:
-        _running_syncs.discard(key)
 
 
 async def dataset_summary(credential: Any, dataset_name: str) -> tuple[str | None, int]:
