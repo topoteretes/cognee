@@ -125,6 +125,14 @@ async def _retire_forgotten_decisions(
     )
 
 
+async def _get_authorized_dataset_or_none(user, dataset_id: UUID, permission_type: str):
+    """The dataset if ``user`` holds ``permission_type`` on it, else None."""
+    try:
+        return await get_authorized_dataset(user, dataset_id, permission_type)
+    except PermissionDeniedError:
+        return None
+
+
 async def _delete_dataset_if_empty(dataset, requested: bool) -> bool:
     """Drop ``dataset`` when the caller asked for it and no Data row is left.
 
@@ -463,6 +471,12 @@ class datasets:
     ) -> dict:
         """Delete one data item and return a receipt of what was removed.
 
+        Authorization: ``delete`` on the dataset allows deleting any item in
+        it. ``write`` alone allows deleting only an item the caller added
+        (``Data.owner_id == user.id``), so collaborators can remove what they
+        shared. ``delete_dataset_if_empty=True`` always requires ``delete``,
+        since it can drop the dataset.
+
         ``status`` never contradicts the outcome:
 
         - ``"success"``: something was removed and, when a ``Data`` row
@@ -507,10 +521,15 @@ class datasets:
                 user = await get_default_user()
             operation_context.set_user(user)
 
-            try:
-                dataset = await get_authorized_dataset(user, dataset_id, "delete")
-            except PermissionDeniedError:
-                raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
+            # "delete" on the dataset covers every item. Without it, "write" covers
+            # only the items the caller added (checked on the row below), so a
+            # collaborator can remove what they shared. Dropping the dataset
+            # (delete_dataset_if_empty) is a dataset delete: "delete" only.
+            dataset = await _get_authorized_dataset_or_none(user, dataset_id, "delete")
+            author_only = False
+            if dataset is None and not delete_dataset_if_empty:
+                dataset = await _get_authorized_dataset_or_none(user, dataset_id, "write")
+                author_only = dataset is not None
 
             if not dataset:
                 raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
@@ -520,9 +539,14 @@ class datasets:
             async with dataset_lock(dataset.id):
                 # One row lookup scoped to the dataset. Every id ever issued keeps
                 # resolving: exact id first, then the recorded original of a
-                # backfill-split row (legacy_id). Access was granted through the
-                # dataset ACL above, so row ownership is not re-checked here.
+                # backfill-split row (legacy_id). With "delete" the dataset ACL is
+                # the access rule and row ownership is not checked; with "write"
+                # alone the row must be the caller's. A missing row or someone
+                # else's row gets the same denial as an inaccessible dataset, so
+                # the answer does not reveal which ids exist.
                 data = await get_data(user.id, data_id, dataset.id, verify_owner=False)
+                if author_only and (data is None or data.owner_id != user.id):
+                    raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
                 if data is not None:
                     data_id = data.id
 

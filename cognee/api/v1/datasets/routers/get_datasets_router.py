@@ -465,8 +465,8 @@ def get_datasets_router() -> APIRouter:
         Delete a specific data item from a dataset.
 
         This endpoint removes a specific data item from a dataset while keeping
-        the dataset itself intact. The user must have delete permissions on the
-        dataset to perform this operation.
+        the dataset itself intact. The user must have delete permission on the
+        dataset, or write permission when the item is one they added themselves.
 
         ## Path Parameters
         - **dataset_id** (UUID): The unique identifier of the dataset containing the data
@@ -487,7 +487,8 @@ def get_datasets_router() -> APIRouter:
         keeps its historical value.
 
         ## Error Codes
-        - **401 Unauthorized**: Dataset doesn't exist or user lacks delete permission
+        - **401 Unauthorized**: Dataset doesn't exist, or the user lacks delete permission
+          and is not the author of the item (with write permission)
         - **500 Internal Server Error**: The Data row was still present after the delete
           (``DataDeletionIncompleteError``; retry), or another error during deletion
 
