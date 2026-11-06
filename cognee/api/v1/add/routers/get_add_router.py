@@ -119,7 +119,9 @@ def get_add_router() -> APIRouter:
         - **data** (List[UploadFile]): Files to upload.
         - **raw_data** (Optional[List[str]]): String inputs, one entry each:
           - Raw text to ingest
-          - A local file or directory path on the server (requires ACCEPT_LOCAL_FILE_PATH)
+          - A file, directory or s3:// path read with the server's own access: refused
+            over HTTP unless ACCEPT_LOCAL_FILE_PATH=true (then COGNEE_ALLOWED_LOCAL_FILE_ROOTS
+            limits where local paths may point)
           - A web URL, fetched as a page (requires ALLOW_HTTP_REQUESTS)
           - A GitHub/GitLab repository URL, shallow-cloned and indexed as a code graph
           At least one of data or raw_data is required. Uploads come first, then
