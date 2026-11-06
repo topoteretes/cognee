@@ -69,10 +69,8 @@ class RoutingConstraints:
         """Constraints for this deployment and request; ``node_name`` names node sets."""
         from cognee.modules.engine.models.node_set import NodeSet
         from cognee.modules.preflight import llm_available
-        from cognee.modules.search.methods.get_search_type_retriever_instance import (
-            cypher_queries_allowed,
-        )
         from cognee.modules.search.methods.node_name_scope import lucky_search_types
+        from cognee.modules.search.search_type_policy import cypher_queries_allowed
 
         return cls(
             llm_available=llm_available(llm_config),
