@@ -7,6 +7,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.modules.users.models import User
 
 from .models.PayloadSchema import PayloadSchema
+from .models.ScoredResult import ScoredResult
 
 
 def validate_raw_vector_points(points: list[dict], vector_size: int) -> dict[str, dict]:
@@ -203,6 +204,30 @@ class VectorDBInterface(Protocol):
         NotImplementedError on adapters that do not support neighborhood re-scoring.
         """
         raise NotImplementedError("score_by_ids is not implemented for this adapter")
+
+    async def score_by_ids_batch(
+        self, collection_name: str, data_point_ids: list[str], query_vectors: list[list[float]]
+    ) -> list[list[ScoredResult]]:
+        """``score_by_ids`` for several query vectors over the same ids: one result list per
+        vector, in the vectors' order, each with ``score_by_ids``'s contract.
+
+        The default scores the vectors concurrently with ``score_by_ids``. An adapter whose
+        cost is the id filter rather than the distances (LanceDB evaluates ``id IN (...)``
+        per fragment on every call) overrides it to filter once and score every vector
+        from the rows it fetched.
+        """
+        return list(
+            await asyncio.gather(
+                *(
+                    self.score_by_ids(
+                        collection_name=collection_name,
+                        data_point_ids=data_point_ids,
+                        query_vector=query_vector,
+                    )
+                    for query_vector in query_vectors
+                )
+            )
+        )
 
     """ Search """
 

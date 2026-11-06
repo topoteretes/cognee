@@ -116,23 +116,24 @@ class NodeEdgeVectorSearch:
             self.query_vector = None
             query_vectors = await engine.embedding_engine.embed_text(query_batch)
 
-        async def score_vector(collection, ids, vector):
-            if not ids:
-                return []
-            try:
-                return await engine.score_by_ids(
-                    collection_name=collection, data_point_ids=ids, query_vector=vector
-                )
-            except CollectionNotFoundError:
-                return []
-
         async def score_collection(collection):
             ids = ids_by_collection.get(collection, [])
-            # The batch's queries run concurrently, as ``batch_search`` runs them.
-            results = await asyncio.gather(
-                *(score_vector(collection, ids, vector) for vector in query_vectors)
-            )
-            return list(results) if query_batch is not None else results[0]
+            if not ids:
+                return [[] for _ in query_vectors] if query_batch is not None else []
+            try:
+                if query_batch is None:
+                    return await engine.score_by_ids(
+                        collection_name=collection,
+                        data_point_ids=ids,
+                        query_vector=query_vectors[0],
+                    )
+                # One adapter call scores the whole batch: the adapter decides whether
+                # that is concurrent per-vector scoring or a single filtered scan.
+                return await engine.score_by_ids_batch(
+                    collection_name=collection, data_point_ids=ids, query_vectors=query_vectors
+                )
+            except CollectionNotFoundError:
+                return [[] for _ in query_vectors] if query_batch is not None else []
 
         return await asyncio.gather(*(score_collection(collection) for collection in collections))
 

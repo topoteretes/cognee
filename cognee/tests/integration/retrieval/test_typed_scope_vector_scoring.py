@@ -202,3 +202,33 @@ async def test_graph_first_scoring_matches_exhaustive_scoring(stores, batch):
         == []
     )
     assert embeddings.calls == []
+
+
+@pytest.mark.asyncio
+async def test_batch_id_scoring_matches_per_vector_scoring(stores):
+    """``score_by_ids_batch`` must return, per query vector, exactly what ``score_by_ids``
+    returns for it: same ids, same distances. The ids span more than one of LanceDB's
+    id batches, so its single-scan override is checked across the batch boundary."""
+    engine, _ = stores
+    collection = "ScopeValue_name"
+    points = [
+        {
+            "id": str(uuid4()),
+            "vector": [float(i % 7) - 3.0, float(i % 5) - 2.0, 1.0],
+            "payload": {"text": str(i)},
+        }
+        for i in range(1200)
+    ]
+    await engine.vector.upsert_raw_vectors(collection, points, payload_schema=_Payload)
+    ids = [point["id"] for point in points] + [str(uuid4())]  # one id that does not exist
+    queries = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-1.0, -1.0, 2.0]]
+
+    batched = await engine.vector.score_by_ids_batch(collection, ids, queries)
+    single = [await engine.vector.score_by_ids(collection, ids, query) for query in queries]
+
+    assert len(batched) == len(queries)
+    for batch_scores, single_scores in zip(batched, single):
+        assert len(batch_scores) == len(single_scores) == 1200
+        by_id = {str(result.id): result.score for result in single_scores}
+        for result in batch_scores:
+            assert result.score == pytest.approx(by_id[str(result.id)], abs=1e-5)
