@@ -145,6 +145,30 @@ def test_in_memory_database_is_allowed(storage):
     assert _allowed_sqlite_connection_string("sqlite:///") == "sqlite:///"
 
 
+def test_a_missing_file_is_refused_and_not_created(storage, monkeypatch):
+    """The driver creates a missing file when it connects, which would let a
+    caller leave empty files wherever the server can write."""
+    monkeypatch.delenv(ALLOW_DATABASE_INGESTION_ENV, raising=False)
+    target = storage.outside / "new.db"
+
+    with pytest.raises(CogneeValidationError, match="existing database file"):
+        create_dlt_source_from_connection_string(f"sqlite:///{target}")
+
+    assert not target.exists()
+
+
+def test_a_directory_is_refused(storage):
+    with pytest.raises(CogneeValidationError, match="existing database file"):
+        _allowed_sqlite_connection_string(f"sqlite:///{storage.outside}")
+
+
+def test_a_missing_file_in_cognee_storage_is_refused_as_storage(storage):
+    """The storage refusal comes first, so a probe into cognee's storage learns
+    nothing about which files exist there."""
+    with pytest.raises(CogneeValidationError, match="cognee's own storage"):
+        _allowed_sqlite_connection_string(f"sqlite:///{storage.system / 'nothing_here.db'}")
+
+
 def test_a_vector_url_that_is_not_a_sqlalchemy_url_does_not_break_the_check(storage, monkeypatch):
     """Neptune Analytics is configured as `neptune-graph://<id>`, which make_url
     rejects; the internal-roots check must still run (and still refuse)."""
@@ -153,6 +177,7 @@ def test_a_vector_url_that_is_not_a_sqlalchemy_url_does_not_break_the_check(stor
         "get_vectordb_config",
         lambda: SimpleNamespace(vector_db_url="neptune-graph://g-abc123"),
     )
+    _sqlite_file(storage.outside / "shop.db")
     _allowed_sqlite_connection_string(f"sqlite:///{storage.outside / 'shop.db'}")
     with pytest.raises(CogneeValidationError, match="cognee's own storage"):
         _allowed_sqlite_connection_string(f"sqlite:///{storage.system / 'cognee_db'}")

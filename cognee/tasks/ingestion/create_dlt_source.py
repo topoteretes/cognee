@@ -134,8 +134,10 @@ def _allowed_sqlite_connection_string(connection_string: str) -> str:
     raise when the file is one cognee must not read as a source.
 
     A SQLite file has no credentials, so whoever names it reads it. Refused:
-    files inside cognee's own storage (every tenant's users, ACLs and data), and
-    files outside COGNEE_ALLOWED_LOCAL_FILE_ROOTS when that allowlist is set.
+    files inside cognee's own storage (every tenant's users, ACLs and data), files
+    outside COGNEE_ALLOWED_LOCAL_FILE_ROOTS when that allowlist is set, and paths
+    that are not an existing regular file: the driver creates a missing file when
+    it connects, and ingestion must never write one.
     """
     from cognee.exceptions import CogneeValidationError
     from cognee.infrastructure.files.utils.local_path_safety import (
@@ -173,6 +175,12 @@ def _allowed_sqlite_connection_string(connection_string: str) -> str:
             message="This SQLite file is outside COGNEE_ALLOWED_LOCAL_FILE_ROOTS.",
             name="SqliteSourceRefused",
         ) from error
+    # Checked last, so a path cognee refuses anyway tells nothing about the disk.
+    if not os.path.isfile(database_path):
+        raise CogneeValidationError(
+            message="The SQLite connection string must name an existing database file.",
+            name="SqliteSourceRefused",
+        )
 
     return url.set(database=database_path).render_as_string(hide_password=False)
 
@@ -248,7 +256,9 @@ def _require_foreign_database_server(connection_string: str) -> None:
 
     Matched by server (resolved address + port), not database name: the per-dataset
     Postgres handlers keep one database per dataset on the same server, so any
-    database there may belong to another user.
+    database there may belong to another user. Every address of this machine
+    counts as one server, so a cognee database on ``localhost`` is refused under
+    ``127.0.0.2``, ``0.0.0.0``, ``::ffff:127.0.0.1`` or the host's own address too.
 
     The address is resolved here and again by the driver, so a name whose record
     changes in between (DNS rebinding) is not caught; ``ALLOW_DATABASE_INGESTION``
@@ -322,22 +332,81 @@ def get_cognee_database_servers() -> set[tuple[str, int | None]]:
 def _shares_a_server(
     target: set[tuple[str, int | None]], servers: set[tuple[str, int | None]]
 ) -> bool:
-    """True when an address of ``target`` is one of ``servers`` on the same port.
+    """True when an address of ``target`` reaches one of ``servers`` on the same port.
 
-    A ``None`` port on either side matches every port on that address.
+    A ``None`` port on either side matches every port on that address. Addresses
+    are compared as addresses (see :func:`_same_machine`), not as strings: with
+    cognee's server on ``localhost``, ``127.0.0.2``, ``0.0.0.0``,
+    ``::ffff:127.0.0.1`` and this machine's own interface addresses all reach it.
     """
+    local = _this_machine_addresses()
     return any(
-        address == server_address and (port is None or server_port is None or port == server_port)
+        _same_machine(address, server_address, local)
+        and (port is None or server_port is None or port == server_port)
         for address, port in target
         for server_address, server_port in servers
     )
+
+
+def _same_machine(first: str, second: str, local: frozenset) -> bool:
+    """True when two resolved addresses reach the same machine.
+
+    An IPv4-mapped IPv6 address is its IPv4 address. Every loopback address
+    (``127.0.0.0/8``, ``::1``), the unspecified address (``0.0.0.0`` and ``::``,
+    which connect to the local machine) and the addresses in ``local`` are one
+    machine, this one. An address that does not parse is compared as text.
+    """
+    import ipaddress
+
+    try:
+        a = _canonical_address(ipaddress.ip_address(first))
+        b = _canonical_address(ipaddress.ip_address(second))
+    except ValueError:
+        return first == second
+    if a == b:
+        return True
+
+    def is_this_machine(address) -> bool:
+        return address.is_loopback or address.is_unspecified or address in local
+
+    return is_this_machine(a) and is_this_machine(b)
+
+
+def _canonical_address(address):
+    """An IPv4-mapped IPv6 address as its IPv4 address; any other address as is."""
+    if address.version == 6 and address.ipv4_mapped is not None:
+        return address.ipv4_mapped
+    return address
+
+
+def _this_machine_addresses() -> frozenset:
+    """This machine's own interface addresses, as far as resolving its hostname tells.
+
+    The standard library cannot list interfaces, so this is what the hostname
+    resolves to: every interface on macOS, usually the primary address alone on
+    Linux (or only a loopback alias where ``/etc/hosts`` maps the hostname to one).
+    """
+    import ipaddress
+    import socket
+
+    try:
+        infos = socket.getaddrinfo(socket.gethostname(), None)
+    except (socket.gaierror, UnicodeError):
+        return frozenset()
+    addresses = set()
+    for info in infos:
+        try:
+            addresses.add(_canonical_address(ipaddress.ip_address(info[4][0])))
+        except ValueError:
+            continue
+    return frozenset(addresses)
 
 
 def _server_addresses(host: str, port: int | None) -> set[tuple[str, int | None]]:
     """``host`` resolved to its addresses, each paired with ``port``; empty if unresolvable.
 
     Resolving makes ``localhost``, ``127.0.0.1`` and a service name for the same
-    server compare equal.
+    server compare equal; :func:`_shares_a_server` then compares them as addresses.
     """
     import socket
 

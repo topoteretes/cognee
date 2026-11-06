@@ -2,6 +2,7 @@
 databases that resolve to a server cognee itself uses."""
 
 from contextlib import nullcontext
+from ipaddress import ip_address
 from types import SimpleNamespace
 
 import pytest
@@ -16,6 +17,7 @@ from cognee.tasks.ingestion.create_dlt_source import (
     ALLOW_DATABASE_INGESTION_ENV,
     _require_database_ingestion_allowed,
     _require_foreign_database_server,
+    _same_machine,
     create_dlt_source_from_connection_string,
 )
 
@@ -69,6 +71,36 @@ def servers(monkeypatch):
 def test_cognee_database_servers_are_refused(servers, dsn):
     with pytest.raises(CogneeValidationError, match="cognee's own storage"):
         create_dlt_source_from_connection_string(dsn)
+
+
+@pytest.mark.parametrize(
+    "dsn",
+    [
+        "postgresql://u:p@127.0.0.2:5432/other_db",  # another loopback address
+        "postgresql://u:p@0.0.0.0:5432/other_db",  # the unspecified address connects locally
+        "postgresql://u:p@[::ffff:127.0.0.1]:5432/other_db",  # IPv4-mapped IPv6
+        "postgresql://u:p@[::]:5432/other_db",  # the IPv6 unspecified address
+    ],
+    ids=["other-loopback", "unspecified", "ipv4-mapped", "ipv6-unspecified"],
+)
+def test_other_addresses_of_the_same_machine_are_refused(servers, dsn):
+    """Resolved addresses are compared as addresses, not strings: every one of
+    these reaches the Postgres that cognee's settings call ``localhost``."""
+    with pytest.raises(CogneeValidationError, match="cognee's own storage"):
+        create_dlt_source_from_connection_string(dsn)
+
+
+def test_this_machines_own_address_is_cognees_server(servers):
+    """A cognee database on localhost is the same server under the host's own
+    interface address; a foreign address is not, loopback or not."""
+    own = frozenset({ip_address("192.0.2.10")})
+
+    assert _same_machine("192.0.2.10", "127.0.0.1", own)
+    assert _same_machine("::1", "192.0.2.10", own)
+    assert _same_machine("::ffff:192.0.2.10", "192.0.2.10", frozenset())
+    assert not _same_machine("192.0.2.10", "127.0.0.1", frozenset())
+    assert not _same_machine("203.0.113.5", "203.0.113.6", own)
+    assert not _same_machine("203.0.113.5", "::1", own)
 
 
 @pytest.mark.parametrize(
