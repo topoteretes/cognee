@@ -20,8 +20,12 @@ reasoning, context extension) stays reachable only through an explicit
 
 The rules see only the query text. What the deployment can run is applied
 afterwards, in one place, from ``RoutingConstraints``: whether an LLM is
-available and whether Cypher queries are allowed. With no LLM the router still
-routes, but only to types that can execute without one: retrieval-only types
+available, whether Cypher queries are allowed, and, when the request carries a
+``node_name`` filter, which types can apply it (a pick that cannot resolves to
+the fallback, which applies every filter). A scoped lexical pick uses the
+fallback with ``only_context=True`` even when an LLM is available, preserving
+document and DLT retrieval without generating an answer. With no LLM the router
+still routes, but only to types that can execute without one: retrieval-only types
 run as they are, completion types whose single LLM call is the final answer run
 with ``only_context=True`` (recall returns the assembled prompt, the session
 layer is read-only), and types that need an LLM during retrieval resolve to the
@@ -49,26 +53,38 @@ class RoutingConstraints:
     provider either needs no key, has one, or has a live sampling session.
     ``cypher_allowed`` is the ``ALLOW_CYPHER_QUERY`` gate the retriever factory
     enforces. Both default to True so callers without a deployment in hand (tests,
-    tooling) get the unconstrained router.
+    tooling) get the unconstrained router. ``scoped_types`` is set when the request
+    carries a ``node_name`` filter: the types that can apply it (``node_name_scope``),
+    since a type that cannot refuses the filter with an error. None means no filter.
     """
 
     llm_available: bool = True
     cypher_allowed: bool = True
+    scoped_types: frozenset[SearchType] | None = None
 
     @classmethod
-    def from_config(cls, llm_config=None) -> "RoutingConstraints":
+    def from_config(
+        cls, llm_config=None, node_name: list[str] | None = None
+    ) -> "RoutingConstraints":
+        """Constraints for this deployment and request; ``node_name`` names node sets."""
+        from cognee.modules.engine.models.node_set import NodeSet
         from cognee.modules.preflight import llm_available
         from cognee.modules.search.methods.get_search_type_retriever_instance import (
             cypher_queries_allowed,
         )
+        from cognee.modules.search.methods.node_name_scope import lucky_search_types
 
-        return cls(llm_available=llm_available(llm_config), cypher_allowed=cypher_queries_allowed())
+        return cls(
+            llm_available=llm_available(llm_config),
+            cypher_allowed=cypher_queries_allowed(),
+            scoped_types=lucky_search_types(NodeSet, node_name),
+        )
 
 
 @dataclass(frozen=True)
 class RouteDecision:
     """Routing decision: the search type, the rule that picked it, whether the
-    search must run with ``only_context=True`` because no LLM can write the answer,
+    search must return context instead of generating an answer,
     and the retriever config the type needs (CODE: which operation to run)."""
 
     search_type: SearchType
@@ -255,37 +271,59 @@ def pinned_route(query_type: SearchType, constraints: RoutingConstraints) -> Rou
     return RouteDecision(search_type=query_type, rule="pinned", only_context=forced)
 
 
+def _constrain_scope(
+    decision: RouteDecision, scoped_types: frozenset[SearchType] | None
+) -> RouteDecision:
+    """Resolve an unsupported scope while preserving retrieval-only requests."""
+    if scoped_types is None or decision.search_type in scoped_types:
+        return decision
+
+    # Hybrid honours every scope and includes DLT rows; CHUNKS covers documents only.
+    only_context = decision.only_context or decision.search_type is SearchType.CHUNKS_LEXICAL
+    logger.info(
+        "query_router: %s cannot apply the node_name filter; using %s%s",
+        decision.search_type.value,
+        ROUTER_FALLBACK_TYPE.value,
+        " with only_context=True (no answer is generated)" if only_context else "",
+    )
+    return replace(
+        decision,
+        search_type=ROUTER_FALLBACK_TYPE,
+        only_context=only_context,
+        retriever_config=None,
+    )
+
+
+def _constrain_llm(decision: RouteDecision, llm_available: bool) -> RouteDecision:
+    """Restrict execution to what the LLM configuration can run."""
+    if llm_available or decision.search_type in LLM_FREE_TYPES:
+        return decision
+
+    if decision.search_type not in COMPLETION_ONLY_TYPES:
+        logger.debug(
+            "query_router: %s needs an LLM during retrieval and none is available; using fallback",
+            decision.search_type.value,
+        )
+        decision = replace(decision, search_type=ROUTER_FALLBACK_TYPE, retriever_config=None)
+    return replace(decision, only_context=True)
+
+
 def constrain(
     decision: RouteDecision, constraints: RoutingConstraints | None = None
 ) -> RouteDecision:
-    """Resolve a rule's pick against what the deployment can run.
-
-    Applied after the rules so the rules stay about the query text only. The
-    fallback itself is a completion type, so with no LLM it becomes
-    ``HYBRID_COMPLETION`` with ``only_context=True``.
-    """
+    """Apply scope, Cypher, and LLM constraints to a route in that order."""
     if constraints is None:
         return decision
-    search_type = decision.search_type
 
-    if not constraints.cypher_allowed and search_type in CYPHER_TYPES:
+    decision = _constrain_scope(decision, constraints.scoped_types)
+    if not constraints.cypher_allowed and decision.search_type in CYPHER_TYPES:
         logger.debug(
-            "query_router: %s disabled by ALLOW_CYPHER_QUERY; using fallback", search_type.value
+            "query_router: %s disabled by ALLOW_CYPHER_QUERY; using fallback",
+            decision.search_type.value,
         )
-        search_type = ROUTER_FALLBACK_TYPE
+        decision = replace(decision, search_type=ROUTER_FALLBACK_TYPE, retriever_config=None)
 
-    if constraints.llm_available:
-        return RouteDecision(search_type=search_type, rule=decision.rule)
-
-    if search_type in LLM_FREE_TYPES:
-        return RouteDecision(search_type=search_type, rule=decision.rule)
-    if search_type not in COMPLETION_ONLY_TYPES:
-        logger.debug(
-            "query_router: %s needs an LLM during retrieval and none is available; using fallback",
-            search_type.value,
-        )
-        search_type = ROUTER_FALLBACK_TYPE
-    return RouteDecision(search_type=search_type, rule=decision.rule, only_context=True)
+    return _constrain_llm(decision, constraints.llm_available)
 
 
 def route_query(query: str, constraints: RoutingConstraints | None = None) -> RouteDecision:

@@ -9,7 +9,7 @@ together.
 
 | SearchType | Retriever | Module | LLM answer? | Notes |
 |---|---|---|---|---|
-| `HYBRID_COMPLETION` | `HybridRetriever` | `hybrid_retriever.py` | yes | Default. Chunk + entity (+ global-context) lanes. Defers to `GRAPH_COMPLETION` for a custom `node_type`, `node_name` with `node_type=None`, `neighborhood_depth`, `feedback_influence > 0`, or a missing chunk collection (`search/methods/hybrid_deferral.py`) |
+| `HYBRID_COMPLETION` | `HybridRetriever` | `hybrid_retriever.py` | yes | Default. Chunk + entity (+ global-context) lanes. Defers to `GRAPH_COMPLETION` for a custom `node_type`, `neighborhood_depth`, `feedback_influence > 0`, or a missing chunk collection (`search/methods/hybrid_deferral.py`); `node_name` with `node_type=None` raises `QueryValidationError` like on every type (`search/methods/node_name_scope.py`) |
 | `GRAPH_COMPLETION` | `GraphCompletionRetriever` | `graph_completion_retriever.py` | yes | Triplet search + neighbourhood expansion; base for the variants below |
 | `GRAPH_COMPLETION_COT` | `GraphCompletionCotRetriever` | `graph_completion_cot_retriever.py` | yes | Chain-of-thought rounds |
 | `GRAPH_COMPLETION_CONTEXT_EXTENSION` | `GraphCompletionContextExtensionRetriever` | `graph_completion_context_extension_retriever.py` | yes | Iteratively widens context |
@@ -68,6 +68,16 @@ without `score_by_ids` scans its collections unfiltered for such a scope and map
 the distances onto the projected scope, so it ranks the same triplets, only slower;
 the vector `node_name` filter means NodeSet membership and is never applied to a
 typed scope, because it would match nothing and penalise every scoped node.
+
+`CHUNKS` and `RAG_COMPLETION` take the same two steps for a typed scope
+(`cognee/modules/retrieval/utils/scoped_chunk_search.py`): the graph projects the
+named nodes and their one-hop neighbours, the `DocumentChunk` nodes among them are
+the scope (a document's chunks, an entity's mentions), and `score_by_ids` scores
+exactly those chunk ids; an adapter without it scans the chunk collection
+unfiltered and the scope is kept in Python. A search type that cannot apply a
+`node_name` filter raises `QueryValidationError` instead of answering unscoped
+(`cognee/modules/search/methods/node_name_scope.py` lists which type honours which
+scope), and `FEELING_LUCKY` picks only among the types that can.
 
 ## Adding a retriever
 

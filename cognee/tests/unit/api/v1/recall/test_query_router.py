@@ -311,6 +311,16 @@ class TestRoutingConstraints:
         )
         assert default_route(RoutingConstraints(llm_available=False)) == decision
 
+    @pytest.mark.parametrize("llm_available", [True, False])
+    def test_deployment_constraints_preserve_a_context_only_decision(self, llm_available):
+        decision = RouteDecision(
+            search_type=SearchType.HYBRID_COMPLETION,
+            rule="quoted_phrase",
+            only_context=True,
+            retriever_config={"include_external_metadata": True},
+        )
+        assert constrain(decision, RoutingConstraints(llm_available=llm_available)) == decision
+
     def test_no_llm_keeps_llm_free_rules_as_they_are(self):
         no_llm = RoutingConstraints(llm_available=False)
         assert route_query('"polonium and radium"', no_llm) == RouteDecision(
@@ -391,4 +401,88 @@ class TestRoutingConstraints:
         )
         assert pinned_route(SearchType.HYBRID_COMPLETION, RoutingConstraints()) == RouteDecision(
             search_type=SearchType.HYBRID_COMPLETION, rule="pinned"
+        )
+
+
+class TestNodeNameScopedRouting:
+    """With a node_name filter the router picks only types that apply it."""
+
+    @staticmethod
+    def _node_set_scoped(**kwargs) -> RoutingConstraints:
+        from cognee.modules.engine.models.node_set import NodeSet
+        from cognee.modules.search.methods.node_name_scope import lucky_search_types
+
+        return RoutingConstraints(scoped_types=lucky_search_types(NodeSet, ["proj"]), **kwargs)
+
+    @pytest.mark.parametrize(
+        "query, rule",
+        [
+            ("What calls parse_config?", "code_question"),
+            ("How many tickets are open?", "count_question"),
+        ],
+    )
+    def test_a_type_that_cannot_apply_the_filter_resolves_to_the_fallback(self, query, rule):
+        assert route_query(query, self._node_set_scoped()) == RouteDecision(
+            search_type=ROUTER_FALLBACK_TYPE, rule=rule
+        )
+
+    @pytest.mark.parametrize("llm_available", [True, False])
+    def test_a_scoped_quoted_phrase_returns_hybrid_context(self, llm_available):
+        """Hybrid applies the scope and covers DLT rows without generating an answer."""
+        assert route_query(
+            '"polonium and radium"', self._node_set_scoped(llm_available=llm_available)
+        ) == RouteDecision(
+            search_type=SearchType.HYBRID_COMPLETION, rule="quoted_phrase", only_context=True
+        )
+
+    def test_a_lexical_pick_that_applies_the_filter_keeps_its_route(self):
+        constraints = RoutingConstraints(scoped_types=frozenset({SearchType.CHUNKS_LEXICAL}))
+        assert route_query('"radium"', constraints) == RouteDecision(
+            search_type=SearchType.CHUNKS_LEXICAL, rule="quoted_phrase"
+        )
+
+    @pytest.mark.parametrize(
+        "query, search_type",
+        [
+            ("show me the coding rules", SearchType.CODING_RULES),
+            ("What happened in 1898?", SearchType.TEMPORAL),
+            ("Where was Marie Curie born?", SearchType.HYBRID_COMPLETION),
+        ],
+    )
+    def test_a_type_that_applies_the_filter_keeps_its_route(self, query, search_type):
+        assert route_query(query, self._node_set_scoped()).search_type is search_type
+
+    def test_every_routable_type_left_honours_the_filter(self):
+        """The fallback itself must apply every scope, or the guard only moves the error."""
+        from cognee.modules.search.methods.node_name_scope import SUPPORTED_SCOPES, NodeNameScope
+
+        assert set(SUPPORTED_SCOPES[ROUTER_FALLBACK_TYPE]) == set(NodeNameScope)
+
+    def test_composes_with_no_llm(self):
+        """Both the scoped lexical pick and the count return hybrid context with no LLM."""
+        assert route_query('"radium"', self._node_set_scoped(llm_available=False)) == RouteDecision(
+            search_type=ROUTER_FALLBACK_TYPE, rule="quoted_phrase", only_context=True
+        )
+        assert route_query(
+            "How many tickets are open?", self._node_set_scoped(llm_available=False)
+        ) == RouteDecision(
+            search_type=ROUTER_FALLBACK_TYPE, rule="count_question", only_context=True
+        )
+
+    def test_no_filter_means_no_scope_constraint(self, monkeypatch):
+        from cognee.modules import preflight
+        from cognee.modules.search.methods import get_search_type_retriever_instance as factory
+
+        monkeypatch.setattr(preflight, "llm_available", lambda _config: True)
+        monkeypatch.setattr(factory, "cypher_queries_allowed", lambda: True)
+
+        assert RoutingConstraints.from_config(None).scoped_types is None
+        assert RoutingConstraints.from_config(None, node_name=[]).scoped_types is None
+        scoped = RoutingConstraints.from_config(None, node_name=["proj"]).scoped_types
+        assert SearchType.HYBRID_COMPLETION in scoped
+        assert SearchType.CHUNKS_LEXICAL not in scoped
+
+    def test_a_pinned_type_is_not_rerouted_by_the_filter(self):
+        assert pinned_route(SearchType.CHUNKS_LEXICAL, self._node_set_scoped()) == RouteDecision(
+            search_type=SearchType.CHUNKS_LEXICAL, rule="pinned"
         )
