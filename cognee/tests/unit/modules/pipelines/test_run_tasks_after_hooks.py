@@ -286,7 +286,8 @@ async def test_a_failed_hook_does_not_stop_the_next_datasets(monkeypatch):
         if dataset.name != "b":
             raise _hook_failure(dataset)
 
-    monkeypatch.setattr(pipeline_module, "setup_and_check_environment", AsyncMock())
+    monkeypatch.setattr(pipeline_module, "setup_environment", AsyncMock())
+    monkeypatch.setattr(pipeline_module, "check_connections", AsyncMock())
     monkeypatch.setattr(
         pipeline_module,
         "resolve_authorized_user_datasets",
@@ -326,7 +327,8 @@ async def test_a_task_that_raises_a_hook_error_fails_its_run(monkeypatch, runner
             pipeline_name="memify_pipeline",
         )
 
-    monkeypatch.setattr(pipeline_module, "setup_and_check_environment", AsyncMock())
+    monkeypatch.setattr(pipeline_module, "setup_environment", AsyncMock())
+    monkeypatch.setattr(pipeline_module, "check_connections", AsyncMock())
     monkeypatch.setattr(
         pipeline_module,
         "resolve_authorized_user_datasets",
@@ -357,7 +359,8 @@ async def test_failed_steps_are_chained_from_the_first_exception(monkeypatch):
         )
         raise AfterRunHookError([(dataset.id, dataset.name, failures[dataset.name])])
 
-    monkeypatch.setattr(pipeline_module, "setup_and_check_environment", AsyncMock())
+    monkeypatch.setattr(pipeline_module, "setup_environment", AsyncMock())
+    monkeypatch.setattr(pipeline_module, "check_connections", AsyncMock())
     monkeypatch.setattr(
         pipeline_module,
         "resolve_authorized_user_datasets",

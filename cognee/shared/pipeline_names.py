@@ -16,5 +16,8 @@ ADD_PIPELINE_NAME = "add_pipeline"
 INDEXING_PIPELINE_NAME = "indexing_pipeline"
 # 2. Entity/relationship extraction, summaries, the final write: graph search.
 COGNIFY_PIPELINE_NAME = "cognify_pipeline"
-# remember(content_type="code"): the deterministic enola code graph.
+# The name code repository builds ran under before SDK-793 (and the
+# code_graph_example custom pipeline still does); code repositories are built
+# under cognify_pipeline now, and the status readers keep this name as a
+# deprecated alias for it.
 CODE_GRAPH_PIPELINE_NAME = "code_graph_pipeline"

@@ -36,8 +36,19 @@ async def setup_and_check_environment(
     ``needs_llm`` says whether the pipeline ahead contains an LLM task — the
     caller derives it from the tasks themselves (the ``Task.needs_llm`` union,
     ``pipeline_needs_llm``) and this layer never reads cognify config itself.
-    A skipped-because-not-needed probe is never recorded as done.
+    A skipped-because-not-needed probe is never recorded as done. A caller that
+    learns what it runs only after reading its inputs (``run_pipeline``, which
+    resolves directories and repository URLs first) takes the two steps apart:
+    ``setup_environment`` before the read, ``check_connections`` after it.
     """
+    await setup_environment(vector_db_config, graph_db_config)
+    await check_connections(skip_connection_test=skip_connection_test, needs_llm=needs_llm)
+
+
+async def setup_environment(
+    vector_db_config: dict | None = None, graph_db_config: dict | None = None
+) -> None:
+    """Bind the call's database configs and create the database tables."""
     if vector_db_config:
         context_vector_db_config.set(vector_db_config)
     if graph_db_config:
@@ -47,6 +58,9 @@ async def setup_and_check_environment(
     await create_relational_db_and_tables()
     await create_pgvector_db_and_tables()
 
+
+async def check_connections(skip_connection_test: bool = False, needs_llm: bool = True) -> None:
+    """Run the first-use LLM and embedding connection probes (see above)."""
     global _llm_checked, _embeddings_checked
     async with _first_run_lock:
         llm_pending = needs_llm and not _llm_checked

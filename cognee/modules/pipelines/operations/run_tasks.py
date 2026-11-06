@@ -32,7 +32,6 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry, telemetry_exception_properties, telemetry_guard
-from cognee.tasks.ingestion import resolve_data_directories
 
 from ..tasks.task import Task
 from .run_tasks_data_item import run_tasks_data_item
@@ -160,14 +159,6 @@ async def run_tasks(
                 database_ready = True
                 if not isinstance(data, list):
                     data = [data]
-
-                if data_cache or incremental_loading:
-                    data = await resolve_data_directories(
-                        data,
-                        user=user,
-                        dataset_id=dataset.id,
-                        branch=(extras or {}).get("repo_branch"),
-                    )
 
                 # Build (item, item_tasks) work pairs: a resolver picks each
                 # item's task list; a plain list applies uniformly. Validate each

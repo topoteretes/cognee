@@ -59,10 +59,6 @@ def runner_plumbing(monkeypatch):
                 module, "get_graph_engine", AsyncMock(return_value=SimpleNamespace())
             )
 
-        async def _identity(data):
-            return data
-
-        monkeypatch.setattr(module, "resolve_data_directories", _identity)
         return logs
 
     return _wire

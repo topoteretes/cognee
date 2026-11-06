@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from uuid import UUID
 
 from cognee.api.v1.datasets.dto import DataDTO, DeleteDataReceiptDTO
@@ -35,8 +36,60 @@ from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.pipeline_names import CODE_GRAPH_PIPELINE_NAME, COGNIFY_PIPELINE_NAME
 
 logger = get_logger()
+
+
+# Deprecated status alias: code repositories are built under cognify_pipeline
+# (before SDK-793 they ran under code_graph_pipeline). A status query for the
+# old name is a query for cognify_pipeline, with one deprecation warning per
+# process. Items built before the upgrade carry only the code_graph_pipeline
+# stamp, so the processing status under the alias counts either stamp.
+_legacy_alias_warned = False
+
+
+def _warn_legacy_code_graph_alias() -> None:
+    """Warn once per process: pollers hit the alias every few seconds."""
+    global _legacy_alias_warned
+    if _legacy_alias_warned:
+        return
+    _legacy_alias_warned = True
+    logger.warning(
+        "Pipeline status for '%s' is deprecated: code repositories are built under"
+        " cognify_pipeline, so '%s' reports cognify_pipeline's run. Query cognify_pipeline"
+        " instead. Logged once per process.",
+        CODE_GRAPH_PIPELINE_NAME,
+        CODE_GRAPH_PIPELINE_NAME,
+    )
+
+
+def _status_pipeline_name(pipeline_name: str) -> str:
+    """The pipeline a status query reads: the deprecated alias maps to cognify_pipeline."""
+    if pipeline_name != CODE_GRAPH_PIPELINE_NAME:
+        return pipeline_name
+    _warn_legacy_code_graph_alias()
+    return COGNIFY_PIPELINE_NAME
+
+
+async def get_processing_status_with_legacy_alias(dataset_id: UUID, pipeline_name: str) -> dict:
+    """get_dataset_processing_status, honouring the ``code_graph_pipeline`` alias.
+
+    Under the alias an item counts as completed when either stamp is set: a
+    pre-upgrade build left only the ``code_graph_pipeline`` one. The same single
+    read of the rows, with the extra name.
+    """
+    from cognee.modules.data import methods as data_methods
+
+    if pipeline_name != CODE_GRAPH_PIPELINE_NAME:
+        return await data_methods.get_dataset_processing_status(
+            dataset_id, pipeline_name=pipeline_name
+        )
+    return await data_methods.get_dataset_processing_status(
+        dataset_id,
+        pipeline_name=_status_pipeline_name(pipeline_name),
+        also_completed_by=(CODE_GRAPH_PIPELINE_NAME,),
+    )
 
 
 async def _fan_out_by_pipeline(dataset_ids: list[UUID], pipeline_names: list[str] | None, fetch):
@@ -49,19 +102,21 @@ async def _fan_out_by_pipeline(dataset_ids: list[UUID], pipeline_names: list[str
     """
     # Backward-compatible default: cognify-only flat map.
     if not pipeline_names:
-        return await fetch(dataset_ids, pipeline_name="cognify_pipeline")
+        return await fetch(dataset_ids, pipeline_name=COGNIFY_PIPELINE_NAME)
 
     # Preserve order while removing duplicates.
     requested_pipelines = list(dict.fromkeys(pipeline_names))
 
     # For one pipeline, keep flat shape.
     if len(requested_pipelines) == 1:
-        return await fetch(dataset_ids, pipeline_name=requested_pipelines[0])
+        return await fetch(dataset_ids, pipeline_name=_status_pipeline_name(requested_pipelines[0]))
 
     # For multiple pipelines, return nested shape.
     statuses_by_dataset = {str(dataset_id): {} for dataset_id in dataset_ids}
     for pipeline_name in requested_pipelines:
-        pipeline_status = await fetch(dataset_ids, pipeline_name=pipeline_name)
+        pipeline_status = await fetch(
+            dataset_ids, pipeline_name=_status_pipeline_name(pipeline_name)
+        )
         for dataset_id, status in pipeline_status.items():
             statuses_by_dataset.setdefault(dataset_id, {})[pipeline_name] = status
 

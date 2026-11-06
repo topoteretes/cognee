@@ -48,13 +48,6 @@ logger = get_logger("code_graph")
 # dataset of many repositories must not hold its lock for hours on one run.
 CLUSTER_ENOLA_TIMEOUT_CAP_SECONDS = 3600.0
 
-# remember(content_type="code") rebuilds the repositories already in the
-# dataset together with the new ones, so the new ones get their edges to the
-# rest. Beyond this many existing repositories the call builds only the new
-# ones inline and marks the rest for the next cognify() of the dataset, as a
-# delete does, so one remember() stays bounded however large the dataset is.
-CLUSTER_INLINE_REBUILD_LIMIT = 5
-
 
 @dataclass(frozen=True)
 class ClusterMember:
@@ -77,18 +70,6 @@ class DatasetCodeSnapshot:
     snapshot_dir: Path
     members: list[ClusterMember]
     parsed: ParsedSnapshot | None = None
-
-
-@dataclass
-class MemberRun:
-    """What refreshing one repository of a dataset produced."""
-
-    data: Any
-    repo_path: Path
-    label: str | None = None
-    index_vectors: bool = False
-    pipeline_result: Any = None
-    error: Exception | None = field(default=None, repr=False)
 
 
 def code_repo_path(data_item: Any) -> Path | None:
@@ -265,192 +246,12 @@ async def snapshot_dataset_code_repos(
     )
 
 
-@dataclass
-class RefreshPlan:
-    """What rebuilding a dataset's code graph for new repositories will do.
-
-    Decided — and the enola run taken — under the dataset lock, before the
-    new repositories' rows are stored, from their directories and the
-    dataset's other ``code_repo`` rows. ``snapshot`` members for the new repositories carry no Data
-    row yet (``data`` is None); :func:`refresh_dataset_code_graph` binds
-    them to the rows the caller stored, by directory. ``existing`` are the
-    dataset's other rows rebuilt inline; ``deferred`` are the ones left to
-    the next ``cognify()`` because the dataset is large.
-    """
-
-    snapshot: DatasetCodeSnapshot | None
-    existing: list[tuple[Any, Path]] = field(default_factory=list)
-    deferred: list = field(default_factory=list)
-
-
-async def plan_dataset_refresh(
-    dataset: Any,
-    new_repo_paths: list[Path],
-    timeout: float = 600.0,
-) -> RefreshPlan:
-    """Take the cluster snapshot for adding ``new_repo_paths`` to a dataset.
-
-    The dataset's other ``code_repo`` rows join the run (so the new
-    repositories get their edges to them) up to CLUSTER_INLINE_REBUILD_LIMIT;
-    beyond it they are deferred to the next ``cognify()`` of the dataset (as
-    a delete defers them), which rebuilds the whole cluster. A row whose
-    directory is one of the new paths is the same repository remembered
-    again, and counts as new. An enola failure on the cluster raises.
-    """
-    new_paths = set(new_repo_paths)
-    existing = [
-        (row, repo_path)
-        for row in await dataset_code_repo_rows(dataset.id)
-        if (repo_path := code_repo_path(row)) is not None and repo_path not in new_paths
-    ]
-    deferred: list = []
-    if new_paths and len(existing) > CLUSTER_INLINE_REBUILD_LIMIT:
-        logger.info(
-            "Dataset %s holds %d other code repositories (limit %d for an inline rebuild): "
-            "building the %d new one(s) now and marking the rest for the next cognify().",
-            dataset.id,
-            len(existing),
-            CLUSTER_INLINE_REBUILD_LIMIT,
-            len(new_paths),
-        )
-        deferred = [row for row, _repo_path in existing]
-        existing = []
-
-    repos = [(None, repo_path) for repo_path in new_repo_paths] + existing
-    snapshot = await snapshot_dataset_code_repos(dataset.id, repos, timeout=timeout)
-    return RefreshPlan(snapshot=snapshot, existing=existing, deferred=deferred)
-
-
-async def refresh_dataset_code_graph(
-    dataset: Any,
-    user: Any,
-    known_repos: list[tuple[Any, Path]] | None = None,
-    index_vectors: bool = False,
-    timeout: float = 600.0,
-    plan: RefreshPlan | None = None,
-) -> list[MemberRun]:
-    """Rebuild the code graph of every repository in a dataset.
-
-    One ``code_graph_pipeline`` run per repository, over that repository's
-    Data row, so each row owns the nodes of its own repository. With several
-    repositories they all read one cluster snapshot. ``known_repos`` are rows
-    the caller just stored, with their resolved directories; ``plan`` is the
-    snapshot already taken for them (see :func:`plan_dataset_refresh`; taken
-    here when the caller did not), whose members are bound to these rows by
-    directory. The dataset's other ``code_repo`` rows come from the plan.
-
-    ``index_vectors`` is this call's setting and applies to ``known_repos``
-    only. The dataset's other repositories are rebuilt graph-only, as the
-    cognify CODE_REPO route rebuilds them: a rebuild never embeds on behalf
-    of an earlier call, nor demands an embedding key the caller did not opt
-    into.
-
-    The rebuild is bounded: with more than CLUSTER_INLINE_REBUILD_LIMIT other
-    repositories in the dataset, only ``known_repos`` are built here and the
-    others are marked for re-extraction by the next ``cognify()`` of the
-    dataset (as a delete marks them), which then rebuilds the whole cluster —
-    the new repositories' edges to the rest arrive with that run.
-
-    A repository whose run fails is reported on its MemberRun and does not
-    stop the others. A repository whose directory is gone is left out with a
-    warning, never run. An enola failure on the cluster itself raises.
-    """
-    from cognee.modules.data.methods import mark_data_processed
-    from cognee.modules.run_custom_pipeline import run_custom_pipeline
-    from cognee.tasks.code_graph.extract_code_graph import get_code_graph_tasks
-
-    known = list(known_repos or [])
-    known_ids = {getattr(data, "id", None) for data, _repo_path in known}
-    rows_by_path = {repo_path: data for data, repo_path in known}
-    if plan is None:
-        plan = await plan_dataset_refresh(
-            dataset, [repo_path for _data, repo_path in known], timeout=timeout
-        )
-    if plan.deferred:
-        await _mark_rows_for_rebuild(dataset.id, plan.deferred)
-
-    def _member_index_vectors(data: Any) -> bool:
-        return bool(index_vectors) and getattr(data, "id", None) in known_ids
-
-    snapshot = plan.snapshot
-    runs: list[MemberRun] = []
-    if snapshot is not None:
-        for member in snapshot.members:
-            data = member.data if member.data is not None else rows_by_path.get(member.repo_path)
-            if data is None:
-                # Planned as new, but the caller stored no row for it (its
-                # add failed): nothing to own its nodes, so it is not loaded.
-                logger.warning(
-                    "Code repository '%s' has no Data row in dataset %s; not loading it.",
-                    member.repo_path,
-                    dataset.id,
-                )
-                continue
-            runs.append(
-                MemberRun(
-                    data=data,
-                    repo_path=member.repo_path,
-                    label=member.label,
-                    index_vectors=_member_index_vectors(data),
-                )
-            )
-    else:
-        # Not a cluster: each repository on its own. Rows whose directory is
-        # gone are left out here as the snapshot leaves them out of a cluster
-        # — one stale row must not fail every later remember() into the dataset.
-        for data, repo_path in known + plan.existing:
-            if not repo_path.is_dir():
-                logger.warning(
-                    "Code repository '%s' no longer exists; not rebuilding it.", repo_path
-                )
-                continue
-            runs.append(
-                MemberRun(data=data, repo_path=repo_path, index_vectors=_member_index_vectors(data))
-            )
-
-    for run in runs:
-        try:
-            run.pipeline_result = await run_custom_pipeline(
-                tasks=get_code_graph_tasks(
-                    str(run.repo_path),
-                    snapshot_dir=snapshot.snapshot_dir if snapshot is not None else None,
-                    timeout=timeout,
-                    index_vectors=run.index_vectors,
-                    repo_scope=run.label,
-                    snapshot=snapshot.parsed if snapshot is not None else None,
-                ),
-                data=[run.data],
-                dataset=dataset.id,
-                user=user,
-                pipeline_name="code_graph_pipeline",
-                skip_connection_test=not run.index_vectors,
-            )
-            if not pipeline_errored(run.pipeline_result):
-                # The row's graph is built, exactly as the cognify CODE_REPO
-                # route would build it: stamp cognify completion so a later
-                # cognify() of the dataset does not rerun enola for it, and the
-                # code graph pipeline's own slot for per-item status.
-                await mark_data_processed(
-                    run.data.id,
-                    dataset.id,
-                    pipeline_names=("cognify_pipeline", "code_graph_pipeline"),
-                )
-        except Exception as error:
-            logger.exception("Code-graph run failed for '%s'", run.repo_path)
-            run.error = error
-    return runs
-
-
-def pipeline_errored(pipeline_result: Any) -> bool:
-    """Whether a blocking run_custom_pipeline result reports an errored run."""
-    if not isinstance(pipeline_result, dict) or not pipeline_result:
-        return False
-    run_info = next(iter(pipeline_result.values()))
-    return "Errored" in getattr(run_info, "status", "")
-
-
 async def _mark_rows_for_rebuild(dataset_id: UUID, rows: list) -> None:
-    """Drop these ``code_repo`` rows' completion stamps so the next cognify() rebuilds them."""
+    """Drop these ``code_repo`` rows' completion stamps so the next cognify() rebuilds them.
+
+    Both stamps go: repositories built before SDK-793 carry the legacy
+    ``code_graph_pipeline`` stamp, which the status alias still counts as done.
+    """
     from cognee.modules.data.methods.publish_updated_data import reset_data_pipeline_status
 
     for row in rows:
@@ -534,7 +335,9 @@ def _cluster_run(dataset_id: UUID, run_id: Any) -> _ClusterRun:
     return current
 
 
-async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
+async def load_dataset_cluster(
+    ctx: Optional["PipelineContext"], index_vectors: bool = False
+) -> bool:
     """Load the whole cluster of the dataset a CODE_REPO item belongs to.
 
     Returns False when the dataset is not a cluster, and the caller then loads
@@ -543,6 +346,13 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
     the row that did the loading and for the dataset's other rows reaching
     this route in the same pipeline run, which have nothing left to do.
     Without a pipeline run id nothing is remembered between calls.
+    ``index_vectors`` is the run's ``codegraph_config`` setting: with it every
+    member's code facts are embedded as well.
+
+    Failures are the run's: enola failing on the cluster fails every member,
+    since no member has a snapshot to load from, and the first member whose
+    load fails raises out of the load, so the run ends errored and its rollback
+    unstamps the rows for the next cognify to rebuild.
     """
     dataset_id = getattr(getattr(ctx, "dataset", None), "id", None)
     if ctx is None or dataset_id is None:
@@ -566,7 +376,7 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
         try:
             snapshot = await snapshot_dataset_code_repos(dataset_id, repos)
             if snapshot is not None:
-                await _load_cluster_members(snapshot, ctx)
+                await _load_cluster_members(snapshot, ctx, index_vectors=index_vectors)
         except Exception as error:
             # An enola or member-load failure: the run's later rows re-raise
             # it rather than load the whole cluster again, failing the same way.
@@ -578,7 +388,9 @@ async def load_dataset_cluster(ctx: Optional["PipelineContext"]) -> bool:
     return run.is_cluster
 
 
-async def _load_cluster_members(snapshot: DatasetCodeSnapshot, ctx: "PipelineContext") -> None:
+async def _load_cluster_members(
+    snapshot: DatasetCodeSnapshot, ctx: "PipelineContext", index_vectors: bool = False
+) -> None:
     """Load every member of a cluster snapshot, one at a time, each under its own Data row."""
     from cognee.tasks.code_graph.code_repo import code_repo_node_set
     from cognee.tasks.code_graph.extract_code_graph import (
@@ -599,7 +411,9 @@ async def _load_cluster_members(snapshot: DatasetCodeSnapshot, ctx: "PipelineCon
             node_set=node_set,
             snapshot=snapshot.parsed,
         )
-        state = await add_code_graph_data_points(data_points, ctx=member_ctx, graph_only=True)
+        state = await add_code_graph_data_points(
+            data_points, ctx=member_ctx, graph_only=not index_vectors
+        )
         await add_code_graph_edges(
             state,
             repo_path=member.repo_path,

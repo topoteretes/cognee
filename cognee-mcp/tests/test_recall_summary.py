@@ -169,11 +169,9 @@ async def test_api_diagnostics_are_scoped_and_bounded(state):
             )
         assert request.url.path.endswith("/status/progress")
         assert request.url.params.get_list("dataset") == ["target"]
-        assert set(request.url.params.get_list("pipeline")) == {
-            "add_pipeline",
-            "cognify_pipeline",
-            "code_graph_pipeline",
-        }
+        # code_graph_pipeline is a server-side alias for the same cognify run:
+        # requesting it too would report one build as two active runs.
+        assert request.url.params.get_list("pipeline") == ["add_pipeline", "cognify_pipeline"]
         status = (
             "DATASET_PROCESSING_STARTED" if state == "indexing" else "DATASET_PROCESSING_COMPLETED"
         )
@@ -193,6 +191,8 @@ async def test_api_diagnostics_are_scoped_and_bounded(state):
     try:
         result = await client.get_recall_state(["project"])
         assert result.state == state
+        if state == "indexing":
+            assert (result.completed, result.total) == (12, 40)
         assert len(seen) == 2
     finally:
         await client.close()
@@ -216,6 +216,10 @@ async def test_direct_diagnostics_authorize_before_reading(monkeypatch):
     assert (await client.get_recall_state(["project"])).state == "none"
     authorize.assert_awaited_once_with(["project"], "read", user)
     assert all(call.args[0] == [dataset.id] for call in progress.await_args_list)
+    assert [call.args[1] for call in progress.await_args_list] == [
+        "add_pipeline",
+        "cognify_pipeline",
+    ]
     # The graph traversal is gone: locally it was a full per-dataset walk on the
     # first empty recall after a cognify, and it only served the four-way split.
     graph_counts.assert_not_awaited()

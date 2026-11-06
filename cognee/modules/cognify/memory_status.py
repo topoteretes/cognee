@@ -2,8 +2,9 @@
 
 ``cognify()`` builds a dataset's memory in two runs (see
 ``cognee.modules.cognify.memory_pipelines``): ``indexing_pipeline`` makes the
-chunks searchable, then ``cognify_pipeline`` (``code_graph_pipeline`` for
-code) builds the knowledge graph. The per-pipeline statuses the status
+chunks searchable, then ``cognify_pipeline`` builds the knowledge graph
+(code repositories included; ``code_graph_pipeline`` is the name their runs
+carried before SDK-793, still counted as a graph build). The per-pipeline statuses the status
 endpoints report say what each run did; this folds them into the one answer
 users ask for: *can I search this memory, and how good are the answers right
 now?* Every reader of that answer calls this function: the HTTP route, the

@@ -130,6 +130,16 @@ class TestCognifyMakesOneCall:
             patch.object(
                 cognify_module, "get_code_repo_tasks", new=MagicMock(return_value="CODE_REPO_TASKS")
             ),
+            # Every database access is mocked here; the pending-routes read sees
+            # no target dataset, so cognify keeps every check and wires every list.
+            patch(
+                "cognee.modules.data.methods.get_authorized_existing_datasets",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch(
+                "cognee.modules.users.methods.get_default_user",
+                new=AsyncMock(return_value=SimpleNamespace(id=uuid4())),
+            ),
         ):
             result = await cognify_module.cognify(
                 datasets=["ds"],
@@ -245,7 +255,8 @@ async def test_task_resolver_composes_with_pipeline_cache(monkeypatch):
     dataset inside _run_body)."""
     import cognee.modules.pipelines.operations.pipeline as pipeline_module
 
-    monkeypatch.setattr(pipeline_module, "setup_and_check_environment", AsyncMock())
+    monkeypatch.setattr(pipeline_module, "setup_environment", AsyncMock())
+    monkeypatch.setattr(pipeline_module, "check_connections", AsyncMock())
     monkeypatch.setattr(
         pipeline_module,
         "resolve_authorized_user_datasets",

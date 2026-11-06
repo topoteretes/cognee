@@ -13,7 +13,10 @@ from .publish_updated_data import COGNIFY_PIPELINE_NAME
 
 
 async def get_dataset_processing_status(
-    dataset_id: UUID, pipeline_name: str = COGNIFY_PIPELINE_NAME
+    dataset_id: UUID,
+    pipeline_name: str = COGNIFY_PIPELINE_NAME,
+    *,
+    also_completed_by: tuple[str, ...] = (),
 ) -> dict:
     """Report a dataset's items by per-item completion for ``pipeline_name``.
 
@@ -33,25 +36,30 @@ async def get_dataset_processing_status(
     representation). Rows with a ``NULL`` ``pipeline_status`` are pending.
     Per-item errored state is not persisted today, so a pending item may be
     untouched, in progress, or failed.
+
+    ``also_completed_by`` names further pipelines whose stamp also counts an
+    item as completed (the deprecated ``code_graph_pipeline`` status alias
+    accepts either stamp), checked against the same single read of the rows.
     """
     # Imported on use: the pipeline layer imports this package at module
     # scope, so a top-level import here would close a cycle (see
     # publish_updated_data._completed_status for the full story).
-    from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
+    from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed_for
 
     data_items = await get_dataset_data(dataset_id, order_by="created_at")
-    dataset_key = str(dataset_id)
 
-    items = []
-    for item in data_items:
-        status_for_pipeline = (item.pipeline_status or {}).get(pipeline_name) or {}
-        items.append(
-            {
-                "id": item.id,
-                "name": item.name,
-                "completed": is_data_item_completed(status_for_pipeline.get(dataset_key)),
-            }
-        )
+    pipeline_names = (pipeline_name, *also_completed_by)
+
+    items = [
+        {
+            "id": item.id,
+            "name": item.name,
+            "completed": any(
+                is_data_item_completed_for(item, name, dataset_id) for name in pipeline_names
+            ),
+        }
+        for item in data_items
+    ]
 
     total = len(items)
     completed = sum(1 for item in items if item["completed"])

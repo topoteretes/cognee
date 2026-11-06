@@ -11,6 +11,7 @@ from starlette.status import (
 )
 
 from cognee import __version__ as cognee_version
+from cognee.api.codegraph_config_field import validate_codegraph_config_or_400
 from cognee.api.DTO import ErrorResponse, InDTO
 from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
@@ -116,6 +117,16 @@ class CognifyPayloadDTO(InDTO):
         examples=[20],
         description="Maximum number of data items to process concurrently within a dataset.",
     )
+    codegraph_config: dict | None = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Code graph options, the same dict the SDK's cognify(codegraph_config=...) "
+            "takes. cognify reads 'index_vectors': also embed the code facts of the code "
+            "files and repositories this run builds (default false). Unknown keys and "
+            "flags that are not booleans are a 400. Accepted as 'codegraphConfig' too."
+        ),
+    )
 
 
 def get_cognify_router() -> APIRouter:
@@ -205,6 +216,13 @@ def get_cognify_router() -> APIRouter:
                 ).model_dump(),
             )
 
+        # A mistyped option is a 400 (HTTPException) before any run starts.
+        codegraph_config = (
+            validate_codegraph_config_or_400(payload.codegraph_config)
+            if payload.codegraph_config is not None
+            else {}
+        )
+
         from cognee.api.v1.cognify import cognify as cognee_cognify
         from cognee.api.v1.ontologies.ontologies import OntologyService
 
@@ -247,6 +265,7 @@ def get_cognify_router() -> APIRouter:
                 chunk_size=payload.chunk_size,
                 chunks_per_batch=payload.chunks_per_batch,
                 data_per_batch=payload.data_per_batch,
+                codegraph_config=codegraph_config or None,
                 # HTTP contract: clients poll run status from the returned run
                 # info (and /datasets/status); an errored run is a valid
                 # response body here, not an exception.

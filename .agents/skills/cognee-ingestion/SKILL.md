@@ -38,8 +38,14 @@ All cognee functions are async. Without `dataset_name` data goes to
   on PATH).
 - **Code files** (`.py`, `.ts`, `.go`, …) go down the code-graph route: a
   deterministic graph, no LLM calls, searchable only with
-  `SearchType.CODE`. To index a whole repository explicitly, pass
-  `content_type="code"`.
+  `SearchType.CODE`. A repository needs no content type; `codegraph_config`
+  sets its options: `{"treat_as_repository": True}` takes every item as a
+  repository spec (a Bitbucket or self-hosted forge URL without `.git`, an
+  ssh remote, a source tree without a build manifest), `{"include_documents":
+  False}` indexes the code graph only (no README/docs), `{"index_vectors":
+  True}` also embeds the code facts, `{"repo_credentials": token}` clones a
+  private repository. The removed `content_type="code"` is accepted, ignored
+  and warns.
 - **Databases and dlt sources**: a SQL connection string, a dlt
   `DltResource` / `DltSource`, or a CSV. dlt is a core dependency, so no
   extra is needed (`cognee[dlt]` is an empty compatibility extra). Options: `primary_key` (default `"id"`),
@@ -155,10 +161,11 @@ or a remote instance.
   `cognee.update(data_id=..., data=..., dataset_id=...)`, which re-extracts
   only the changed chunks and keeps the document's id. Identical content is
   a no-op.
-- **`content_type` is strict.** Only `None`, `"skills"`, or `"code"`.
-  `"code"` rejects `session_id` and needs repository paths or git URLs;
-  `"skills"` ingests into the target dataset like any other call (default
-  `main_dataset`); pass `dataset_name` to keep skills in their own dataset.
+- **`content_type` is strict.** Only `None` or `"skills"` (`"code"` is
+  accepted, ignored with a `FutureWarning`, and the call runs as a plain
+  remember). `"skills"` ingests into the target dataset like any other call
+  (default `main_dataset`); pass `dataset_name` to keep skills in their own
+  dataset. `codegraph_config` is refused with `session_id` or `content_type`.
 - **Session mode needs `CACHING=true`**, and `extractor` cannot be combined
   with `session_id`.
 - **Remote mode.** After `cognee.serve(url)`, calls go to the server:

@@ -1,6 +1,6 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -81,10 +81,13 @@ StatusPipelineNamesQuery = Annotated[
     Query(
         alias="pipeline",
         description=(
-            "Pipeline names to check: 'add_pipeline', 'indexing_pipeline',"
-            " 'cognify_pipeline' (the two runs cognify makes, in that order), or"
-            " 'code_graph_pipeline' (code ingestion via remember content_type='code')."
-            " Omit to default to cognify_pipeline. For the folded memory state see"
+            "Pipeline names to check: 'add_pipeline', 'indexing_pipeline' or"
+            " 'cognify_pipeline' (the two runs cognify makes, in that order; code"
+            " repositories are built under cognify_pipeline), or a custom pipeline's"
+            " name. Omit to default to cognify_pipeline. 'code_graph_pipeline' is a"
+            " deprecated alias: it reports the dataset's latest code_graph_pipeline or"
+            " cognify_pipeline run (one still in progress first, else the newer), under"
+            " the 'code_graph_pipeline' key. For the folded memory state see"
             " GET /v1/datasets/status/memory."
         ),
         examples=[["cognify_pipeline"]],
@@ -880,10 +883,14 @@ def get_datasets_router() -> APIRouter:
           - If omitted, defaults to **cognify_pipeline** (backward-compatible behavior)
           - If one pipeline is provided, response is a flat map
           - If multiple pipelines are provided, response is nested per dataset and pipeline
-          - **Available options: add_pipeline, indexing_pipeline, cognify_pipeline,
-            code_graph_pipeline**
-          - Note: a background code ingest creates its pipeline run only once the
-            repository is cloned — a dataset missing from the response means the run
+          - **Available options: add_pipeline, indexing_pipeline, cognify_pipeline**
+            (code repositories are built under cognify_pipeline), or a custom
+            pipeline's name
+          - **code_graph_pipeline** is a deprecated alias: it reports the dataset's latest
+            code_graph_pipeline or cognify_pipeline run (one still in progress first, else
+            the newer), keyed as requested
+          - Note: a background remember of a repository URL creates its pipeline run only
+            once the repository is cloned — a dataset missing from the response means the run
             has not started yet, not that it failed
 
         ## Response
@@ -959,9 +966,11 @@ def get_datasets_router() -> APIRouter:
         ## Query Parameters
         - **dataset** (List[UUID]): Dataset UUIDs to check (from GET /api/v1/datasets). Omit to get
           status for all datasets you can read.
-        - **pipeline** (List[str]): Pipeline names to check: 'add_pipeline', 'indexing_pipeline',
-          'cognify_pipeline', or 'code_graph_pipeline' (code ingestion via remember
-          content_type='code'). Omit to default to cognify_pipeline.
+        - **pipeline** (List[str]): Pipeline names to check: 'add_pipeline', 'indexing_pipeline'
+          or 'cognify_pipeline' (code repositories are built under it), or a custom pipeline's
+          name. Omit to default to cognify_pipeline. `code_graph_pipeline` is a deprecated alias
+          that reports the dataset's latest code_graph_pipeline or cognify_pipeline run (one
+          still in progress first, else the newer).
 
         ## Response
         - Single pipeline (default): {dataset_id: {status, progress}}
@@ -1408,7 +1417,10 @@ def get_datasets_router() -> APIRouter:
             "cognify_pipeline",
             description=(
                 "Pipeline whose per-item completion to count: 'cognify_pipeline'"
-                " (default), 'add_pipeline', 'indexing_pipeline', or 'code_graph_pipeline'."
+                " (default), 'add_pipeline', 'indexing_pipeline', or a custom pipeline's"
+                " name. 'code_graph_pipeline' is a deprecated alias that counts an item"
+                " completed when either its code_graph_pipeline or its cognify_pipeline"
+                " stamp is."
             ),
             examples=["cognify_pipeline"],
         ),
@@ -1427,7 +1439,9 @@ def get_datasets_router() -> APIRouter:
 
         ## Query Parameters
         - **pipeline** (str, optional): Pipeline name to inspect. Defaults to
-          `cognify_pipeline`.
+          `cognify_pipeline`. `code_graph_pipeline` is a deprecated alias: an item
+          counts as completed when either its `code_graph_pipeline` (pre-upgrade
+          builds) or its `cognify_pipeline` stamp is.
 
         ## Response
         - **total**: Number of data items in the dataset
@@ -1456,8 +1470,6 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.data.methods import get_dataset_processing_status
-
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
@@ -1470,7 +1482,11 @@ def get_datasets_router() -> APIRouter:
             )
 
         try:
-            return await get_dataset_processing_status(dataset[0].id, pipeline_name=pipeline)
+            from cognee.api.v1.datasets.datasets import get_processing_status_with_legacy_alias
+
+            return await get_processing_status_with_legacy_alias(
+                cast(UUID, dataset[0].id), pipeline
+            )
         except CogneeApiError:
             raise
         except Exception:

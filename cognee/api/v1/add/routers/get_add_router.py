@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from pydantic import WithJsonSchema
 
 from cognee import __version__ as cognee_version
+from cognee.api.codegraph_config_field import codegraph_config_form
 from cognee.api.DTO import ErrorResponse
 from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
 from cognee.api.v1.exceptions import DocumentUpdateRequiredError
@@ -17,6 +18,7 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
+from cognee.tasks.code_graph.config import CodeGraphConfig
 from cognee.tasks.ingestion.data_item import (
     pair_labels_with_data,
     parse_external_metadata,
@@ -105,6 +107,8 @@ def get_add_router() -> APIRouter:
         ),
         node_set: list[str] | None = Form(default=[""], example=[""]),
         run_in_background: bool | None = Form(default=False),
+        # A mistyped option is a 400 before anything is stored.
+        codegraph_config: CodeGraphConfig = Depends(codegraph_config_form),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -213,6 +217,7 @@ def get_add_router() -> APIRouter:
                 node_set=node_set
                 if node_set != [""]
                 else None,  # Transform default node_set endpoint value to None
+                codegraph_config=codegraph_config or None,
             )
 
             if isinstance(add_run, PipelineRunErrored):

@@ -26,12 +26,15 @@ pipeline's incremental check sees it; re-adding a changed repo then resets
 pipeline status through the normal content-change detection. The clear is
 unconditional, so an unchanged repo's small manifest is stored again on every
 add; its cognify stamps are kept and nothing is rebuilt. The
-repository itself is read from its original location at cognify time — like
-``remember(content_type="code")``, the enola run happens in place.
+repository itself is read from its original location at cognify time: the
+enola run happens in place.
 
 A GitHub/GitLab repository URL passed to ``add()`` takes the same path after a
 shallow clone (``resolve_code_repository_url``): the clone directory is the
-"original location" the manifest points at.
+"original location" the manifest points at. A call that declares its items as
+repositories (``codegraph_config={"treat_as_repository": True}``) resolves
+every one of them this way, detected or not
+(``resolve_declared_repositories``).
 """
 
 import hashlib
@@ -43,9 +46,9 @@ from cognee.modules.chunking.external_metadata import decode_external_metadata
 from cognee.modules.engine.models.node_set import validate_node_set_names
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.resolve_repo import (
-    CodeRepositoryError,
     clone_dir,
     code_repo_clone_url,
+    is_remote_repo,
     redact_repo_spec,
     resolve_repo_source,
 )
@@ -273,7 +276,8 @@ async def resolve_code_repository(
     time, text is LLM-chunked at cognify), so they would only fail later. The
     code graph itself never needs one — a key-less repo add still works fully.
     ``include_documents=False`` returns no document paths at all, for callers
-    that index the code graph only (``remember(content_type="code")``).
+    that index the code graph only (``codegraph_config={"include_documents":
+    False}``).
     """
     from cognee.infrastructure.llm.config import get_llm_config
     from cognee.tasks.ingestion.data_item import DataItem
@@ -340,19 +344,27 @@ async def resolve_code_repository(
 
 
 async def resolve_code_repository_url(
-    spec: str, user=None, dataset_id=None, branch: str | None = None
+    spec: str,
+    user=None,
+    dataset_id=None,
+    credentials: str | None = None,
+    include_documents: bool = True,
+    branch: str | None = None,
 ):
     """Clone a hosted repository URL and build its repo-level DataItem.
 
-    ``add()``'s implicit counterpart of ``remember(content_type="code")``: a
-    GitHub/GitLab repository URL (see ``resolve_repo.code_repo_clone_url``) is
-    shallow-cloned into the shared clones directory and then partitioned
-    exactly like a local code project -- one ``code_repo`` manifest for the
-    CODE_REPO cognify route plus the repository's documents as individual
-    items. Returns ``(manifest_item, document_paths, skip_count)``; the
-    manifest carries the credential-free URL as ``repo_url``. ``branch`` clones
-    that branch instead of the remote's default; a dataset still holds one data
-    row per URL, so adding it on another branch replaces that row's code graph.
+    A GitHub/GitLab repository URL passed to ``add()`` (see
+    ``resolve_repo.code_repo_clone_url``) is shallow-cloned into the shared
+    clones directory and then partitioned exactly like a local code project --
+    one ``code_repo`` manifest for the CODE_REPO cognify route plus the
+    repository's documents as individual items. Returns
+    ``(manifest_item, document_paths, skip_count)``; the manifest carries the
+    credential-free URL as ``repo_url``. ``credentials`` authenticates the
+    clone of a private repository (see ``resolve_repo_source``).
+    ``include_documents=False`` returns the manifest alone (see
+    ``resolve_code_repository``). ``branch`` clones that branch instead of the
+    remote's default; a dataset still holds one data row per URL, so adding it
+    on another branch replaces that row's code graph.
     """
     clone_url = code_repo_clone_url(spec)
     if clone_url is None:
@@ -360,13 +372,14 @@ async def resolve_code_repository_url(
             f"'{redact_repo_spec(spec)}' is not a repository URL add() can clone; "
             "expected https://github.com/<owner>/<repo>, a gitlab.com project, or a .git URL."
         )
-    repo_path = await resolve_repo_source(clone_url, branch=branch)
+    repo_path = await resolve_repo_source(clone_url, credentials=credentials, branch=branch)
     source_url = redact_repo_spec(clone_url)
     return await resolve_code_repository(
         repo_path,
         user=user,
         dataset_id=dataset_id,
         source_url=source_url,
+        include_documents=include_documents,
         # Keyed on the default branch's clone, as every URL row was before branches:
         # existing rows keep their ids, and branches of one URL share the row, since
         # their code graphs share the repository's node ids.
@@ -374,67 +387,176 @@ async def resolve_code_repository_url(
     )
 
 
-async def add_code_repository(
-    repo_path: Path,
-    user,
-    dataset,
-    source_url: str | None = None,
-    skip_connection_test: bool = False,
-):
-    """Store a resolved repository as its one code_repo Data row, without cognifying it.
+def _names_no_directory(spec) -> bool:
+    """Whether a local repository spec names nothing a repository could be: no such
+    path, or a file.
 
-    ``remember(content_type="code")`` builds the graph itself (the
-    code_graph_pipeline over this row) and needs the row only for its id and
-    its dataset listing. It is the same manifest item ``add(<repo>)`` ingests,
-    pinned to the same identity, so both routes keep one record per repository.
-    The repository's documents are not ingested. Returns the stored Data row.
+    Read through the containment check every local path takes
+    (``resolve_local_path``: realpath, then the allowed roots when
+    ``COGNEE_ALLOWED_LOCAL_FILE_ROOTS`` is set), so a declared spec is never
+    looked up on the filesystem outside them. A path outside the roots is not
+    judged here: ``resolve_repo_source`` refuses it with the containment error.
     """
-    from cognee.api.v1.add import add
-    from cognee.modules.data.methods import get_data
-    from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
+    from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 
-    manifest_item, _documents, _skipped = await resolve_code_repository(
-        repo_path,
-        user=user,
-        dataset_id=dataset.id,
-        source_url=source_url,
-        include_documents=False,
-    )
-    add_result = await add(
-        manifest_item,
-        dataset_name=dataset.name,
-        dataset_id=dataset.id,
-        user=user,
-        skip_connection_test=skip_connection_test,
-    )
-    # With RAISE_INCREMENTAL_LOADING_ERRORS=false a failed ingest returns an
-    # errored run instead of raising; surface its cause, not a missing row.
-    errored = get_errored_run_info(add_result)
-    if errored is not None:
-        raise CodeRepositoryError(
-            message=f"Could not store code repository '{repo_path}': "
-            f"{errored.error_message or errored.error_class or 'ingestion failed'}"
+    try:
+        return not resolve_local_path(spec, must_exist=True).is_dir()
+    except FileNotFoundError:
+        return True
+    except ValueError:
+        return False
+
+
+def is_repository_spec(spec, *, declared: bool = False) -> bool:
+    """Whether ``add()`` resolves ``spec`` as a code repository.
+
+    The one detection rule, shared by ingestion's resolve, ``remember()``'s
+    preflight and the remote client: a declared call (``treat_as_repository``)
+    takes every item as one; otherwise a GitHub/GitLab repository URL
+    (``code_repo_clone_url``) or a local directory with a project marker
+    (``detect_code_project``, read through ``resolve_local_path`` so nothing
+    outside the allowed roots is looked at). An ssh remote is not detected:
+    ``refuse_undeclared_ssh_spec`` names the fix.
+    """
+    if declared:
+        return True
+    if not isinstance(spec, (str, Path)):
+        return False
+    text = str(spec)
+    if code_repo_clone_url(text) is not None:
+        return True
+    from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+
+    try:
+        path = resolve_local_path(text, must_exist=True)
+    except (OSError, ValueError):
+        # No such path, a name too long to be one (prose), or outside the roots.
+        return False
+    return path.is_dir() and detect_code_project(path)
+
+
+def refuse_local_paths_when_disabled(specs) -> None:
+    """Raise ``IngestionError`` for a local directory or repository path when the
+    server does not accept local paths (``ACCEPT_LOCAL_FILE_PATH=false``).
+
+    The one gate for a directory read in place: a code project resolves to a
+    manifest that never reaches the per-file check, and cognify then reads the
+    directory at build time.
+    """
+    from cognee.modules.ingestion.exceptions import IngestionError
+    from cognee.tasks.ingestion.save_data_item_to_storage import settings as save_data_settings
+
+    if save_data_settings.accept_local_file_path:
+        return
+    if any(not is_remote_repo(spec) for spec in specs):
+        raise IngestionError(
+            message="Local directories and repository paths are not accepted "
+            "(ACCEPT_LOCAL_FILE_PATH=false). Pass a git URL or upload the files instead."
         )
 
-    data = await get_data(user.id, manifest_item.data_id, dataset.id)
-    if data is None:
+
+async def resolve_declared_repositories(
+    data,
+    credentials: str | None = None,
+    include_documents: bool = True,
+    branch: str | None = None,
+    user=None,
+    dataset_id=None,
+):
+    """Resolve every item of ``data`` as a repository spec, sniffing nothing.
+
+    What ``codegraph_config={"treat_as_repository": True}`` means: the caller
+    has said these are repositories, so the conservative detection
+    (:func:`code_repo_clone_url`, :func:`detect_code_project`) is bypassed and
+    every spec goes through :func:`resolve_repo_source` -- a local directory is
+    used in place, any git remote (ssh, Bitbucket, a self-hosted forge with no
+    ``.git`` suffix) is shallow-cloned. Reached through
+    ``resolve_data_directories(treat_as_repository=True)``.
+
+    That breadth is the point: detection has to stay narrow because most
+    http(s) URLs are web pages, so without the declaration a Bitbucket URL
+    would be scraped as one. A spec that resolves to neither a directory nor a
+    clonable remote raises rather than being stored as its own text.
+
+    ``branch`` clones that branch of every remote spec; a local spec rejects
+    it. A remote's row is keyed on its default-branch clone, as on the
+    detected URL path, so a dataset holds one row per URL whatever branch is
+    cloned.
+
+    Returns the manifest items (each followed by its repository's document
+    paths) in input order.
+    """
+    from cognee.modules.ingestion.exceptions import IngestionError
+
+    items = data if isinstance(data, list) else [data]
+    non_specs = [item for item in items if not isinstance(item, (str, Path))]
+    if non_specs or not items:
         raise ValueError(
-            f"Code repository '{repo_path}' was added but its data record "
-            f"{manifest_item.data_id} is missing from dataset {dataset.id}."
+            "codegraph_config treat_as_repository expects repository paths or git "
+            "URLs as data (a single spec or a list of them); got "
+            f"{', '.join(sorted({type(item).__name__ for item in non_specs})) or 'nothing'}. "
+            "Drop treat_as_repository to ingest file uploads or text normally."
         )
-    return data
+    # A string that is neither a git remote nor a directory (a note, a file
+    # path) is a caller mistake, not a repository that failed to resolve.
+    not_a_repository = next(
+        (item for item in items if not is_remote_repo(item) and _names_no_directory(item)),
+        None,
+    )
+    if not_a_repository is not None:
+        raise ValueError(
+            f"codegraph_config treat_as_repository: '{redact_repo_spec(not_a_repository)}' is "
+            "not a repository path or git URL. Drop treat_as_repository to ingest it normally."
+        )
+
+    # A declaration that something is a repository is not a licence to read a
+    # disabled root.
+    refuse_local_paths_when_disabled(items)
+
+    # Checked before anything is cloned: resolve_repo_source rejects a branch
+    # for a local path too, but only when the loop reaches it.
+    if branch is not None:
+        local_spec = next((item for item in items if not is_remote_repo(item)), None)
+        if local_spec is not None:
+            raise IngestionError(
+                message=f"branch is only supported for remote repositories, but '{local_spec}' "
+                "is a local path. Check the branch out in that directory instead."
+            )
+
+    resolved = []
+    for item in items:
+        repo_path = await resolve_repo_source(item, credentials=credentials, branch=branch)
+        # redact: a spec may carry a token in its userinfo, and this is
+        # stored on the row as repo_url.
+        source_url = redact_repo_spec(item) if is_remote_repo(item) else None
+        manifest_item, document_paths, _skipped = await resolve_code_repository(
+            repo_path,
+            user=user,
+            dataset_id=dataset_id,
+            source_url=source_url,
+            include_documents=include_documents,
+            # A remote is keyed on its default-branch clone, as on the detected URL
+            # path: one row per URL whatever branch is cloned. A local repository
+            # keys on its own directory.
+            identity=clone_dir(source_url) if source_url is not None else None,
+        )
+        resolved.append(manifest_item)
+        resolved.extend(str(path) for path in document_paths)
+    return resolved
 
 
 async def extract_code_repo_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
+    index_vectors: bool = False,
 ) -> list:
     """Cognify CODE_REPO-route adapter: one enola run over the whole project.
 
     Reads the stored manifest for the repo path and runs the standard code
     graph tasks on the ORIGINAL directory (enola writes its .enola snapshot
-    there, exactly like remember(content_type="code")). One repository node,
-    cross-file edges, one graph read per repo. No LLM, no embeddings.
+    there). One repository node, cross-file edges, one graph read per repo.
+    No LLM; embeddings only with ``index_vectors``
+    (``cognify(codegraph_config={"index_vectors": True})``).
 
     A dataset holding several repositories is one enola cluster: the first of
     its rows to get here loads all of them from one snapshot, with the edges
@@ -474,13 +596,13 @@ async def extract_code_repo_graph(
                 "its current location."
             )
 
-        if await load_dataset_cluster(ctx):
+        if await load_dataset_cluster(ctx, index_vectors=index_vectors):
             continue
 
         node_set = code_repo_node_set(data_item)
 
         data_points = await extract_code_graph(repo_path=repo_path, node_set=node_set)
-        state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)
+        state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=not index_vectors)
         await add_code_graph_edges(state, repo_path=repo_path, ctx=ctx, node_set=node_set)
 
         logger.info("Code repo graph extracted for %s (%s).", repo_path, data_item.id)
@@ -488,8 +610,8 @@ async def extract_code_repo_graph(
     return data_documents
 
 
-def get_code_repo_tasks() -> list:
+def get_code_repo_tasks(index_vectors: bool = False) -> list:
     """The cognify CODE_REPO-route task list: one adapter task, no LLM stages."""
     from cognee.modules.pipelines.tasks.task import Task
 
-    return [Task(extract_code_repo_graph, needs_llm=False)]
+    return [Task(extract_code_repo_graph, needs_llm=False, index_vectors=index_vectors)]

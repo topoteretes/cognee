@@ -25,3 +25,14 @@ def is_item_stamped(item: Any, pipeline_name: str, dataset_id: Any) -> bool:
     """Whether ``item`` (a ``Data`` row) records ``pipeline_name`` completed in ``dataset_id``."""
     slots = (getattr(item, "pipeline_status", None) or {}).get(pipeline_name) or {}
     return is_data_item_completed(slots.get(str(dataset_id)))
+
+
+def is_data_item_completed_for(data_item, pipeline_name: str, dataset_id) -> bool:
+    """Whether ``data_item`` carries a completed ``pipeline_name`` stamp for ``dataset_id``.
+
+    The one read of a row's stamp: the runner skips an item on it (incremental
+    loading), cognify reads the pending items' routes with it, and the
+    processing status counts with it.
+    """
+    status_for_pipeline = (getattr(data_item, "pipeline_status", None) or {}).get(pipeline_name)
+    return is_data_item_completed((status_for_pipeline or {}).get(str(dataset_id)))

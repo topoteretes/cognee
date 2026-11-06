@@ -1,7 +1,12 @@
 """Build a code knowledge graph with enola + cognee, then query it.
 
 What it shows:
-    - Running the enola-backed code graph pipeline (extract -> load nodes -> load edges)
+    - Building a repository's code graph with one call,
+      cognee.remember(repo, codegraph_config={...}): the repository is declared
+      (no sniffing), its README/docs stay out, and cognify's CODE_REPO route runs
+      the enola-backed code graph pipeline (extract -> load nodes -> load edges)
+    - Optionally (CODE_GRAPH_EXPLICIT_PIPELINE=1), assembling that same pipeline
+      step by step with run_custom_pipeline
     - Querying the resulting graph deterministically with SearchType.CODE
     - Optionally (CODE_GRAPH_DOCS=1), storing the repository's docstrings as
       knowledge-graph chunks linked to the code graph and finding one with
@@ -15,10 +20,15 @@ Requirements:
 
 SearchType.CODE does not require an LLM API key or embedding model.
 
-Prefer a one-liner? cognee.remember(repo_path_or_git_url, content_type="code")
-runs this same pipeline in a single call (it also accepts a list of
-repositories, and index_vectors=True to enable embeddings). This example
-assembles the pipeline explicitly so each step stays visible.
+codegraph_config is the one dict of repository options, on remember(), add()
+and cognify(): {"treat_as_repository": True} takes every item as a repository
+(a git URL is cloned, a directory used in place -- also a Bitbucket or
+self-hosted forge URL without .git, an ssh remote, or a source tree without a
+build manifest), {"include_documents": False} leaves the README and docs out,
+{"index_vectors": True} also embeds the code facts for the completion search
+types, and {"repo_credentials": "<token>"} authenticates a private clone. A
+plain remember(repo_path_or_git_url) detects GitHub/GitLab URLs and project
+directories on its own and ingests their documents too.
 
 For cross-repository paths, generate one Enola append/multi-repository snapshot
 and ingest it into one dataset. Repositories indexed in separate datasets are
@@ -48,17 +58,31 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
 
     print(f"Extracting code graph from: {repo_path}")
-    await cognee.run_custom_pipeline(
-        # Pass index_vectors=True only if these facts should also be available
-        # to semantic/LLM retrievers; SearchType.CODE does not need it.
-        tasks=get_code_graph_tasks(repo_path),
-        data=repo_path,
-        dataset="code_graph_demo",
-        pipeline_name="code_graph_pipeline",
-        # This pipeline is deterministic (no LLM/embedding calls), so skip the
-        # first-run LLM/embedding connection checks and stay truly keyless.
-        skip_connection_test=True,
-    )
+    if os.getenv("CODE_GRAPH_EXPLICIT_PIPELINE"):
+        # The same pipeline, assembled step by step so each stage stays visible.
+        await cognee.run_custom_pipeline(
+            # Pass index_vectors=True only if these facts should also be available
+            # to semantic/LLM retrievers; SearchType.CODE does not need it.
+            tasks=get_code_graph_tasks(repo_path),
+            data=repo_path,
+            dataset="code_graph_demo",
+            pipeline_name="code_graph_pipeline",
+            # This pipeline is deterministic (no LLM/embedding calls), so skip the
+            # first-run LLM/embedding connection checks and stay truly keyless.
+            skip_connection_test=True,
+        )
+    else:
+        # One call: add() stores the repository as one code_repo row and cognify
+        # builds its graph (no LLM, no embeddings: the row is declared a
+        # repository and its documents stay out). self_improvement=False skips
+        # the automatic improve(), which has nothing to enrich on a code graph.
+        result = await cognee.remember(
+            repo_path,
+            dataset_name="code_graph_demo",
+            codegraph_config={"treat_as_repository": True, "include_documents": False},
+            self_improvement=False,
+        )
+        print(f"remember(): {result.status}, {len(result.items)} repository item(s)")
 
     print("Listing the first indexed code facts")
     search_results = await cognee.search(
