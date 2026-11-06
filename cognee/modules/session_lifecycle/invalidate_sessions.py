@@ -67,12 +67,45 @@ async def invalidate_sessions_for_dataset(dataset_id: UUID) -> dict:
             )
 
     if sessions:
+        try:
+            from .delete_session import _delete_session_rows
+
+            normalized_pairs = [
+                (UUID(str(uid)) if not isinstance(uid, UUID) else uid, sid)
+                for uid, sid in sessions
+            ]
+            await _delete_session_rows(normalized_pairs)
+        except Exception as error:
+            logger.debug(
+                "Session invalidation: relational session row cleanup skipped for dataset %s: %s",
+                dataset_id,
+                error,
+                exc_info=True,
+            )
+
         logger.info(
             "Session invalidation: deleted %d/%d session(s) for dataset %s",
             deleted,
             len(sessions),
             dataset_id,
         )
+
+    try:
+        from cognee.modules.agents.registry import invalidate_agent_connections_for_dataset
+
+        await invalidate_agent_connections_for_dataset(
+            dataset_id,
+            session_ids=[sid for _, sid in sessions],
+            user_ids=[uid for uid, _ in sessions],
+        )
+    except Exception as error:
+        logger.debug(
+            "Session invalidation: agent connection cleanup skipped for dataset %s: %s",
+            dataset_id,
+            error,
+            exc_info=True,
+        )
+
     return {"sessions_considered": len(sessions), "sessions_deleted": deleted}
 
 
