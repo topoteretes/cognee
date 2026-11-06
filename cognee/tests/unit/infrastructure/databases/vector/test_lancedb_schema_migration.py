@@ -1189,7 +1189,8 @@ async def _migrate_with_window_writes(
 ):
     """Evolve ``col`` while another connection appends one row and updates another
     between the add-column commit and the swap; optionally crash at ``crash_at``
-    (``"update_config"`` or ``"drop_columns"``) after the swap, or update the
+    after the swap (``"update_config"``: before the window is recorded,
+    ``"merge_insert"``: before the repair, ``"drop_columns"``: after it), or update the
     existing row once more, in the new shape, between the repair's scan and its
     merge (``write_during_repair``)."""
     from cognee_db_workers.lancedb_compaction import open_as_lance
@@ -1309,7 +1310,7 @@ async def test_interrupted_after_the_swap_repairs_the_window_rows_on_the_next_ru
     await _seed(adapter, col, [seeded])
     await _strip_payload_named_field(adapter, col, "external_metadata")
     _, updated_id, appended_id = await _migrate_with_window_writes(
-        adapter, col, db_path, seeded.id, crash_at="drop_columns"
+        adapter, col, db_path, seeded.id, crash_at="merge_insert"
     )
 
     # A write after the swap is in the new shape and must not be touched.
@@ -1322,6 +1323,83 @@ async def test_interrupted_after_the_swap_repairs_the_window_rows_on_the_next_ru
     assert row.payload["text"] == "after the swap"
     schema = await (await adapter.get_collection(col)).schema()
     assert OLD_PAYLOAD_COLUMN not in schema.names
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_interrupted_after_the_record_survives_a_compaction_pass(tmp_path):
+    """Every cognify compacts, and an interrupted table waits for the next version
+    change: compaction leaves it alone while the old column is present, so the
+    recorded window fragments keep their ids and the next run repairs them."""
+    from cognee_db_workers.lancedb_compaction import compact_fragments, open_as_lance
+
+    db_path = str(tmp_path / "db")
+    adapter = LanceDBAdapter(url=db_path, api_key=None, embedding_engine=_FakeEmbeddingEngine())
+    col = "Test_text"
+    seeded = _make_point(str(uuid4()), "before")
+    await _seed(adapter, col, [seeded])
+    await _strip_payload_named_field(adapter, col, "external_metadata")
+    _, updated_id, appended_id = await _migrate_with_window_writes(
+        adapter, col, db_path, seeded.id, crash_at="merge_insert"
+    )
+
+    collection = await adapter.get_collection(col)
+    await collection.checkout_latest()
+    dataset = await open_as_lance(collection)
+    fragments_before = {f.fragment_id for f in dataset.get_fragments()}
+    stats = compact_fragments(dataset, target_rows_per_fragment=1000)
+    assert stats["skipped"] == "payload_migration"
+    assert {f.fragment_id for f in dataset.get_fragments()} == fragments_before
+
+    assert (await adapter.run_migrations())["migrated_collections"] == [col]
+    await _assert_window_rows_survived(adapter, col, updated_id, appended_id)
+    schema = await (await adapter.get_collection(col)).schema()
+    assert OLD_PAYLOAD_COLUMN not in schema.names
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not HAS_LANCEDB, reason="lancedb not installed")
+async def test_window_fragments_rewritten_by_an_older_compactor_keep_the_old_column(tmp_path):
+    """A compactor that does not know about migrations (an older cognee during a
+    rolling deploy) renumbers the window fragments. The repair then finds none of
+    them; the row appended in the window still has no payload, so the next run
+    refuses to drop the old column, where that payload is, and says so."""
+    from lance.optimize import Compaction, CompactionOptions
+
+    from cognee_db_workers.lancedb_compaction import open_as_lance
+
+    db_path = str(tmp_path / "db")
+    adapter = LanceDBAdapter(url=db_path, api_key=None, embedding_engine=_FakeEmbeddingEngine())
+    col = "Test_text"
+    seeded = _make_point(str(uuid4()), "before")
+    await _seed(adapter, col, [seeded])
+    await _strip_payload_named_field(adapter, col, "external_metadata")
+    _, _updated_id, appended_id = await _migrate_with_window_writes(
+        adapter, col, db_path, seeded.id, crash_at="merge_insert"
+    )
+    # A cognify writes, then compacts: the write is a second fragment to fold.
+    await adapter.create_data_points(col, [_make_point(str(uuid4()), "after the swap")])
+
+    collection = await adapter.get_collection(col)
+    await collection.checkout_latest()
+    dataset = await open_as_lance(collection)
+    assert len(dataset.get_fragments()) == 2
+    plan = Compaction.plan(dataset, CompactionOptions(target_rows_per_fragment=1000))
+    Compaction.commit(dataset, [task.execute(dataset) for task in plan.tasks])
+    assert dataset.count_rows() == 3 and len(dataset.get_fragments()) == 1
+
+    with pytest.raises(SchemaEvolutionError, match=f"'{OLD_PAYLOAD_COLUMN}', which is kept"):
+        await adapter.run_migrations()
+    await collection.checkout_latest()
+    schema = await collection.schema()
+    assert OLD_PAYLOAD_COLUMN in schema.names
+    dataset = await open_as_lance(collection)
+    [kept] = (
+        dataset.to_table(columns=[OLD_PAYLOAD_COLUMN], filter=f"id = '{appended_id}'")
+        .column(OLD_PAYLOAD_COLUMN)
+        .to_pylist()
+    )
+    assert kept["text"] == "appended meanwhile"
 
 
 @pytest.mark.asyncio

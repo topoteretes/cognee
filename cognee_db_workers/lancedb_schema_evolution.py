@@ -26,7 +26,11 @@ column is evolved on its own with Lance's schema evolution:
    ``__payload_old`` with the same transform, merged by ``id``. A row another
    process updates after the swap is its writer's: the merge runs without
    Lance's own retry, so Lance refuses it over such a row, and the window
-   fragments are scanned again, where the row no longer is.
+   fragments are scanned again, where the row no longer is. Compaction, the
+   one thing that gives fragments new ids, leaves a table carrying one of the
+   temporary columns alone; should the window fragments have been rewritten
+   anyway, a row written in the window still has no ``payload``, so a null
+   ``payload`` left after the repair refuses the drop and keeps the old column.
 4. ``drop_columns`` removes ``__payload_old``; the record is deleted.
 
 Each step is a committed Lance version and ``payload`` exists at every one of
@@ -295,6 +299,25 @@ def _repair_window_rows(dataset, fragment_ids, stored, target, steps, batch_size
         return repaired
 
 
+def _refuse_unrepaired_rows(dataset) -> None:
+    """Keep ``__payload_old`` while a row has no ``payload``: its payload is there.
+
+    Every row of the swap version has a ``payload`` (the UDF computed one) except
+    the rows appended in the window, and every later write carries one, so after
+    the repair none should be null. One that is sits in a window fragment the
+    repair did not find: compaction gave the fragment a new id.
+    """
+    unrepaired = dataset.count_rows(filter=f"{PAYLOAD_COLUMN} IS NULL")
+    if unrepaired:
+        raise SchemaEvolutionError(
+            f"{unrepaired} row(s) written during the migration are not in its recorded "
+            f"window fragments (a compaction rewrote them) and hold their payload only in "
+            f"'{OLD_PAYLOAD_COLUMN}', which is kept. No data was modified. Restore the rows "
+            f"whose '{PAYLOAD_COLUMN}' is null from the old column by id, then drop it, and "
+            "re-run migration."
+        )
+
+
 def _finish_interrupted(dataset, defaults, required, batch_size) -> int:
     """Bring a table an earlier migration left mid-way back to the start state and
     return the number of window rows repaired on the way.
@@ -328,6 +351,7 @@ def _finish_interrupted(dataset, defaults, required, batch_size) -> int:
         steps = plan_payload_evolution(stored, current, defaults, required)
         window = set(json.loads(record)["window"])
         repaired = _repair_window_rows(dataset, window, stored, current, steps, batch_size)
+        _refuse_unrepaired_rows(dataset)
         dataset.drop_columns([OLD_PAYLOAD_COLUMN])
     if STATE_KEY in dataset.config():
         dataset.delete_config_keys([STATE_KEY])
@@ -402,6 +426,7 @@ def evolve_payload_schema(
     window = sorted(_fragment_ids(dataset) - before)
     dataset.update_config({STATE_KEY: json.dumps({"window": window})})
     repaired += _repair_window_rows(dataset, set(window), stored, target, steps, batch_size)
+    _refuse_unrepaired_rows(dataset)
     dataset.drop_columns([OLD_PAYLOAD_COLUMN])
     dataset.delete_config_keys([STATE_KEY])
 

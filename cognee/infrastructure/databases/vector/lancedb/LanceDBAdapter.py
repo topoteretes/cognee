@@ -872,7 +872,10 @@ class LanceDBAdapter(VectorDBInterface):
         wrote (that pass raises ``PylanceIncompatibleError``, later ones skip).
         A failure on one collection does not stop the pass: the rest are
         compacted, the failed one stays first in line for the next pass, and
-        one error naming every failed collection is raised at the end.
+        one error naming every failed collection is raised at the end. A table
+        in the middle of a payload schema migration is left alone (reported
+        ``skipped``): a rewrite would renumber the fragments the migration
+        repairs by id (see ``cognee_db_workers.lancedb_schema_evolution``).
         """
         options = self._compaction_options()
         reason = self._compaction_skip_reason()
