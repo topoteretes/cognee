@@ -29,31 +29,47 @@ class EdgeEvidenceRecord:
     observed_at: datetime | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class EdgeSupportRecord:
+    edge_id: UUID
+    chunk_id: UUID
+    evidence_kind: str
+    confidence: float | None
+
+
+def _only_active(statement, dataset_id: UUID, edge_ids: list[UUID]):
+    """Restrict an evidence query to the dataset's rows for ``edge_ids`` that
+    count: written without a run, or by a run with a completed record."""
+    return statement.outerjoin(
+        PipelineRun,
+        and_(
+            PipelineRun.pipeline_run_id == ProvenanceEdgeEvidence.pipeline_run_id,
+            PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+        ),
+    ).where(
+        ProvenanceEdgeEvidence.dataset_id == dataset_id,
+        ProvenanceEdgeEvidence.edge_id.in_(edge_ids),
+        or_(ProvenanceEdgeEvidence.pipeline_run_id.is_(None), PipelineRun.id.is_not(None)),
+    )
+
+
 def _active_support(dataset_id: UUID, edge_ids: list[UUID]):
     # A row counts once its run completes and is observed then, the clock
     # get_touched_entity_ids selects by; a row without a run is observed when written.
     return (
-        select(
-            ProvenanceEdgeEvidence.edge_id,
-            ProvenanceEdgeEvidence.data_id,
-            ProvenanceEdgeEvidence.chunk_id,
-            ProvenanceEdgeEvidence.chunk_index,
-            func.min(ProvenanceEdgeEvidence.created_at).label("first_seen_at"),
-            func.max(
-                func.coalesce(PipelineRun.created_at, ProvenanceEdgeEvidence.created_at)
-            ).label("observed_at"),
-        )
-        .outerjoin(
-            PipelineRun,
-            and_(
-                PipelineRun.pipeline_run_id == ProvenanceEdgeEvidence.pipeline_run_id,
-                PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+        _only_active(
+            select(
+                ProvenanceEdgeEvidence.edge_id,
+                ProvenanceEdgeEvidence.data_id,
+                ProvenanceEdgeEvidence.chunk_id,
+                ProvenanceEdgeEvidence.chunk_index,
+                func.min(ProvenanceEdgeEvidence.created_at).label("first_seen_at"),
+                func.max(
+                    func.coalesce(PipelineRun.created_at, ProvenanceEdgeEvidence.created_at)
+                ).label("observed_at"),
             ),
-        )
-        .where(
-            ProvenanceEdgeEvidence.dataset_id == dataset_id,
-            ProvenanceEdgeEvidence.edge_id.in_(edge_ids),
-            or_(ProvenanceEdgeEvidence.pipeline_run_id.is_(None), PipelineRun.id.is_not(None)),
+            dataset_id,
+            edge_ids,
         )
         .group_by(
             ProvenanceEdgeEvidence.edge_id,
@@ -180,6 +196,41 @@ async def get_edge_sources(dataset_id: UUID, edge_ids: Iterable[UUID]) -> list[E
                 if previous is None or record.observed_at > previous.observed_at:
                     records[key] = record
     return list(records.values())
+
+
+async def get_edge_support(dataset_id: UUID, edge_ids: Iterable[UUID]) -> list[EdgeSupportRecord]:
+    """Every active support of the edges: its chunk, how the edge came from it
+    (``extracted`` or ``structural``) and the highest confidence recorded.
+
+    Complete like :func:`get_edge_sources` (an export states all of it), so no
+    result limit and storage errors propagate.
+    """
+    edge_ids = sorted(set(edge_ids))
+    records: list[EdgeSupportRecord] = []
+    async with get_relational_engine().get_async_session() as session:
+        for start in range(0, len(edge_ids), _EDGE_SOURCE_BATCH_SIZE):
+            batch = edge_ids[start : start + _EDGE_SOURCE_BATCH_SIZE]
+            statement = (
+                _only_active(
+                    select(
+                        ProvenanceEdgeEvidence.edge_id,
+                        ProvenanceEdgeEvidence.chunk_id,
+                        ProvenanceEdgeEvidence.evidence_kind,
+                        func.max(ProvenanceEdgeEvidence.confidence),
+                    ),
+                    dataset_id,
+                    batch,
+                )
+                .group_by(
+                    ProvenanceEdgeEvidence.edge_id,
+                    ProvenanceEdgeEvidence.chunk_id,
+                    ProvenanceEdgeEvidence.evidence_kind,
+                )
+                .order_by(ProvenanceEdgeEvidence.edge_id, ProvenanceEdgeEvidence.chunk_id)
+            )
+            rows = (await session.execute(statement)).all()
+            records.extend(EdgeSupportRecord(*row) for row in rows)
+    return records
 
 
 async def get_touched_entity_ids(dataset_id: UUID, since: datetime) -> set[str]:
