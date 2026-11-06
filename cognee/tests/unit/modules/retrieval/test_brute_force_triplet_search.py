@@ -21,9 +21,11 @@ from cognee.tasks.schema.models import SchemaTable
 
 
 def vector_engine_mock() -> AsyncMock:
-    """A vector engine mock that, like the interface default, reports every collection."""
+    """A vector engine mock with the interface defaults a bare mock lacks: every
+    collection exists, and a batch is scored one ``score_by_ids`` call per vector."""
     engine = AsyncMock()
     engine.existing_collections = AsyncMock(side_effect=lambda names: list(names))
+    engine.score_by_ids_batch = MethodType(VectorDBInterface.score_by_ids_batch, engine)
     return engine
 
 
