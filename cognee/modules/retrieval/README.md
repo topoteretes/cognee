@@ -55,7 +55,11 @@ class flags `supports_session_turn_preparation` / `supports_prompt_preview`.
 For `GRAPH_COMPLETION` with an explicit non-`NodeSet` `node_type` and `node_name`,
 triplet retrieval projects that graph scope before scoring vectors. On LanceDB
 (including subprocess mode), PGVector, Turso and Neptune Analytics, `score_by_ids`
-scores only its node and edge-type vectors, without an additional candidate cutoff.
+scores only its node and edge-type vectors, without an additional candidate cutoff;
+a query batch is scored with one `score_by_ids_batch` call per collection: LanceDB
+fetches the scoped vectors once and takes every query's distances locally, PGVector and
+Turso run one statement with a distance column per query, so a batch costs about one
+query.
 Unembedded graph members keep the usual missing-distance penalty. Neptune uses
 exact `CosineDistance` through `neptune.algo.vectors.distance.byEmbedding`, rather
 than its ANN top-k search. NodeSet, unscoped, vector-seeded neighbourhood searches

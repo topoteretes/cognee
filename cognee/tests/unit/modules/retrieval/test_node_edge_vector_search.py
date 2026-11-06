@@ -1,3 +1,4 @@
+import asyncio
 from types import MethodType, SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -9,9 +10,11 @@ from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVecto
 
 
 def vector_engine_mock() -> AsyncMock:
-    """A vector engine mock that, like the interface default, reports every collection."""
+    """A vector engine mock with the interface defaults a bare mock lacks: every
+    collection exists, and a batch is scored one ``score_by_ids`` call per vector."""
     engine = AsyncMock()
     engine.existing_collections = AsyncMock(side_effect=lambda names: list(names))
+    engine.score_by_ids_batch = MethodType(VectorDBInterface.score_by_ids_batch, engine)
     return engine
 
 
@@ -27,7 +30,7 @@ class MockScoredResult:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("batch", [False, True])
 async def test_id_scoring_reuses_embeddings_and_preserves_query_shapes(batch):
-    engine = AsyncMock()
+    engine = vector_engine_mock()
     vectors = [[1.0, 0.0], [0.0, 1.0]] if batch else [[1.0, 0.0]]
     engine.embedding_engine.embed_text.return_value = vectors
 
@@ -83,6 +86,79 @@ async def test_id_scoring_reuses_embeddings_and_preserves_query_shapes(batch):
 
 
 @pytest.mark.asyncio
+async def test_batch_id_scoring_is_one_adapter_call_per_collection():
+    """A batch hands all its query vectors to ``score_by_ids_batch`` once per collection,
+    and each vector's results land in its own slot, in order."""
+    engine = AsyncMock()
+    vectors = [[1.0, 0.0], [0.0, 1.0]]
+    engine.embedding_engine.embed_text.return_value = vectors
+
+    async def score_batch(collection_name, data_point_ids, query_vectors):
+        if collection_name == "Missing_text":
+            raise CollectionNotFoundError("missing")
+        return [
+            [MockScoredResult(point_id, query_vector[0]) for point_id in data_point_ids]
+            for query_vector in query_vectors
+        ]
+
+    engine.score_by_ids_batch.side_effect = score_batch
+    search = NodeEdgeVectorSearch(vector_engine=engine)
+    await search.embed_and_retrieve_distances(
+        query=None,
+        query_batch=["first", "second"],
+        collections=["Entity_name", "Missing_text", "Unrequested_text"],
+        ids_by_collection={"Entity_name": ["a", "b"], "Missing_text": ["m"]},
+    )
+
+    engine.score_by_ids.assert_not_awaited()
+    assert engine.score_by_ids_batch.await_count == 2  # Unrequested_text has no ids
+    for call in engine.score_by_ids_batch.call_args_list:
+        assert call.kwargs["query_vectors"] == vectors
+    assert [[row.score for row in rows] for rows in search.node_distances["Entity_name"]] == [
+        [1.0, 1.0],
+        [0.0, 0.0],
+    ]
+    assert search.node_distances["Missing_text"] == [[], []]
+    assert search.node_distances["Unrequested_text"] == [[], []]
+
+
+@pytest.mark.asyncio
+async def test_default_batch_id_scoring_runs_the_queries_of_a_batch_concurrently():
+    """The interface default behind ``score_by_ids_batch`` scores a batch's query
+    vectors at once, like ``batch_search``, not one after another: on LanceDB each
+    ``score_by_ids`` is a scan, and serial scans multiplied the batch's cost by its size."""
+    engine = vector_engine_mock()
+    vectors = [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]]
+    engine.embedding_engine.embed_text.return_value = vectors
+    in_flight = 0
+    most_in_flight = 0
+
+    async def score(collection_name, data_point_ids, query_vector):
+        nonlocal in_flight, most_in_flight
+        in_flight += 1
+        most_in_flight = max(most_in_flight, in_flight)
+        await asyncio.sleep(0)  # let the other queries of the batch start
+        in_flight -= 1
+        return [MockScoredResult(point_id, query_vector[0]) for point_id in data_point_ids]
+
+    engine.score_by_ids.side_effect = score
+    search = NodeEdgeVectorSearch(vector_engine=engine)
+    await search.embed_and_retrieve_distances(
+        query=None,
+        query_batch=["first", "second", "third"],
+        collections=["Entity_name"],
+        ids_by_collection={"Entity_name": ["a", "b"]},
+    )
+
+    assert most_in_flight == len(vectors)
+    assert [[row.score for row in rows] for rows in search.node_distances["Entity_name"]] == [
+        [1.0, 1.0],
+        [0.0, 0.0],
+        [0.5, 0.5],
+    ]
+
+
+@pytest.mark.asyncio
 async def test_optional_id_scoring_is_detected_before_search():
     inherited = MethodType(VectorDBInterface.score_by_ids, object())
     for engine in [SimpleNamespace(), SimpleNamespace(score_by_ids=inherited)]:
@@ -109,7 +185,7 @@ async def test_optional_id_scoring_detection_survives_engine_leases():
 
 @pytest.mark.asyncio
 async def test_id_scoring_failure_does_not_retry_as_a_global_search():
-    engine = AsyncMock()
+    engine = vector_engine_mock()
     engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
     engine.score_by_ids.side_effect = RuntimeError("store unavailable")
     search = NodeEdgeVectorSearch(vector_engine=engine)

@@ -21,9 +21,11 @@ from cognee.tasks.schema.models import SchemaTable
 
 
 def vector_engine_mock() -> AsyncMock:
-    """A vector engine mock that, like the interface default, reports every collection."""
+    """A vector engine mock with the interface defaults a bare mock lacks: every
+    collection exists, and a batch is scored one ``score_by_ids`` call per vector."""
     engine = AsyncMock()
     engine.existing_collections = AsyncMock(side_effect=lambda names: list(names))
+    engine.score_by_ids_batch = MethodType(VectorDBInterface.score_by_ids_batch, engine)
     return engine
 
 
@@ -237,6 +239,47 @@ async def test_typed_scope_fallback_scans_unfiltered_and_scopes_through_projecti
     assert first.attributes["vector_distance"] == [0.2]
     assert second.attributes["vector_distance"] == [6.5]
     assert "outside" not in graph.nodes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch", [False, True])
+async def test_typed_scope_fallback_keeps_unembedded_scope_when_no_vector_matches(batch):
+    """Without ``score_by_ids``, an all-empty vector result must not drop a typed scope.
+
+    The ID-scoring path keeps such a scope with missing-distance penalties; the
+    fallback has to return the same triplets rather than stopping before projection.
+    """
+    graph = CogneeGraph()
+    first, second = Node("first"), Node("second")
+    graph.add_node(first)
+    graph.add_node(second)
+    graph.add_edge(Edge(first, second, {"relationship_type": "has_value"}))
+    engine = vector_engine_mock()
+    engine.embedding_engine.embed_text.return_value = [[1.0, 0.0]]
+    engine.score_by_ids = MethodType(VectorDBInterface.score_by_ids, object())
+    engine.search = AsyncMock(return_value=[])
+    engine.batch_search = AsyncMock(return_value=[[], []])
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=graph,
+        ) as project,
+    ):
+        results = await brute_force_triplet_search(
+            query=None if batch else "query",
+            query_batch=["first", "second"] if batch else None,
+            node_type=SchemaTable,
+            node_name=["table"],
+            feedback_influence=0.0,
+        )
+
+    project.assert_awaited_once()
+    assert results == ([graph.edges, graph.edges] if batch else graph.edges)
+    assert first.attributes["vector_distance"] == [6.5] * (2 if batch else 1)
 
 
 @pytest.mark.asyncio
@@ -1496,7 +1539,7 @@ async def test_neighborhood_scores_only_expansion_ids(unsupported):
     neighbor_id = UUID("00000000-0000-0000-0000-000000000002")
     seed = MockScoredResult(seed_id, 0.1)
     neighbor = MockScoredResult(neighbor_id, 0.8)
-    engine = AsyncMock()
+    engine = vector_engine_mock()
     engine.search.return_value = []
     engine.score_by_ids.return_value = [neighbor]
     if unsupported:
