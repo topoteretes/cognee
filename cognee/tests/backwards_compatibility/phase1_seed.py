@@ -4,11 +4,9 @@ Backwards Compatibility Test
 Phase 1 -  run with a legacy cognee version
 
 Seeds the database with Lorem Ipsum data: add → cognify → search.
-Also seeds a session (two entries via session-mode remember) and bridges it
-into the graph via improve() — leaving a genuine pre-watermark session cache
-for Phase 2 to take over. The legacy version must be >= v1.2.0: that is the
-earliest release with the SQL session cache (cache.db) the current branch
-reads, and the CI pin never goes below it.
+The v1.6.3 baseline also seeds independent documents with identical content
+in two datasets, a DLT source manifest, and a persisted two-entry session.
+Phase 2 verifies that the current branch preserves those data shapes.
 
 Phase 2 - run with current Cognee branch
 
@@ -19,8 +17,6 @@ persistence watermark takeover (see phase2_verify docstring).
 
 import asyncio
 import sys
-
-from sqlalchemy.exc import StatementError
 
 import cognee
 from cognee.api.v1.search import SearchType
@@ -39,31 +35,25 @@ when an unknown printer scrambled a passage of text to make a type specimen book
 
 SEARCH_QUERY = "What is Lorem Ipsum and where does it come from?"
 
-# Fork seeding: the SAME content added to TWO datasets. Under the legacy
-# version this creates ONE shared Data row (content-derived id) with a
-# membership in each dataset — the exact shape the dataset-scoping backfill
-# later splits into a keeper and a fork row. Phase 2 verifies the pre-fork id
-# keeps resolving in both datasets through the public API. Keep the dataset
-# names in sync with phase2_verify.py.
-FORK_DATASET_A = "fork_shared_a"
-FORK_DATASET_B = "fork_shared_b"
-FORK_TEXT = """
+# v1.6.3 already scopes documents by dataset: identical content must have
+# separate IDs. Keep names and content in sync with phase2_verify.py.
+ISOLATION_DATASET_A = "isolation_a"
+ISOLATION_DATASET_B = "isolation_b"
+ISOLATION_TEXT = """
 The lighthouse keeper Mirna Kalan logged every storm in a leather almanac.
 Her brother Tomaz Kalan ground the lamp lenses from Murano glass.
 """
 
-# Session seeding (only on legacy versions that already have session memory).
+# Session seeding, including the persistence watermark written by improve().
 # The facts carry distinctive markers Phase 2 greps for, so keep them in sync
 # with phase2_verify.py.
 COMPAT_SESSION_ID = "compat_session"
 SESSION_FACT_1 = "The beekeeper Anton Zorman kept blue-marked hives on the Levada terraces."
 SESSION_FACT_2 = "The weaver Ilka Matova dyed her linen with walnut husks and iron water."
 
-# DLT seeding — legacy versions ingest a dlt source as one Data record PER ROW
-# (external_metadata.source == "dlt"). Phase 2 verifies the migration moves
-# that stamp to system_metadata, the tombstone rejects cognifying the legacy
-# rows, and re-adding the source converts it to the manifest model. Markers
-# must stay in sync with phase2_verify.py.
+# v1.6.3 stores a DLT source as one manifest, with three DltRow graph nodes.
+# Phase 2 verifies that the manifest and graph survive the upgrade and re-add.
+# Markers must stay in sync with phase2_verify.py.
 DLT_COMPAT_DATASET = "dlt_compat"
 DLT_COMPAT_SOURCE = "compat_widgets"
 DLT_COMPAT_ROWS = [
@@ -74,38 +64,17 @@ DLT_COMPAT_ROWS = [
 
 
 async def seed_dlt() -> None:
-    """Seed a dlt source the legacy way: one Data record per row.
-
-    Runs on the legacy tag, so this exercises whatever DLT ingestion that
-    version shipped (per-row records since v0.5.5). The dlt extra must be
-    installed — a missing import is a hard failure, not a skip, so the CI
-    workflow and this script cannot silently drift apart.
-    """
+    """Add and cognify a DLT manifest through the v1.6.3 public APIs."""
     import dlt
 
     @dlt.resource(name=DLT_COMPAT_SOURCE, primary_key="id", write_disposition="replace")
     def compat_widgets():
         yield from DLT_COMPAT_ROWS
 
-    print(f"Seeding legacy DLT source '{DLT_COMPAT_SOURCE}' ({len(DLT_COMPAT_ROWS)} rows)...")
+    print(f"Seeding DLT source '{DLT_COMPAT_SOURCE}' ({len(DLT_COMPAT_ROWS)} rows)...")
     await cognee.add([compat_widgets()], dataset_name=DLT_COMPAT_DATASET)
-    try:
-        await cognee.cognify(datasets=[DLT_COMPAT_DATASET])
-        print(f"Seeded and cognified dataset '{DLT_COMPAT_DATASET}'.")
-    except StatementError as error:
-        # EXACTLY ONE known failure is tolerated: v1.2.0's legacy DLT cognify
-        # is broken on SQLite — upsert_edges binds string UUIDs into a UUID
-        # column ("'str' object has no attribute 'hex'"). The tag is
-        # immutable, so tolerate that specific bug: the per-row Data records
-        # with their source == "dlt" stamps ARE the compat surface Phase 2
-        # verifies (migration, tombstone, re-add conversion). Anything else,
-        # including any other StatementError, propagates.
-        if "'str' object has no attribute 'hex'" not in str(error):
-            raise
-        print(
-            f"KNOWN-ISSUE: legacy cognify of '{DLT_COMPAT_DATASET}' hit v1.2.0's "
-            "str-UUID bind bug on this backend; seeded per-row records only."
-        )
+    await cognee.cognify(datasets=[DLT_COMPAT_DATASET])
+    print(f"Seeded and cognified dataset '{DLT_COMPAT_DATASET}'.")
 
 
 async def seed_session() -> None:
@@ -148,11 +117,11 @@ async def main():
     for result in results:
         print(f"  - {result}")
 
-    print("Seeding the shared-row fork shape (same content in two datasets)...")
-    await cognee.add(FORK_TEXT, dataset_name=FORK_DATASET_A)
-    await cognee.add(FORK_TEXT, dataset_name=FORK_DATASET_B)
-    await cognee.cognify(datasets=[FORK_DATASET_A, FORK_DATASET_B])
-    print(f"Seeded '{FORK_DATASET_A}' and '{FORK_DATASET_B}' with identical content.")
+    print("Seeding identical content in two isolated datasets...")
+    await cognee.add(ISOLATION_TEXT, dataset_name=ISOLATION_DATASET_A)
+    await cognee.add(ISOLATION_TEXT, dataset_name=ISOLATION_DATASET_B)
+    await cognee.cognify(datasets=[ISOLATION_DATASET_A, ISOLATION_DATASET_B])
+    print(f"Seeded '{ISOLATION_DATASET_A}' and '{ISOLATION_DATASET_B}' with identical content.")
 
     await seed_dlt()
 
