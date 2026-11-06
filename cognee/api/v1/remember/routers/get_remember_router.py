@@ -124,9 +124,9 @@ def get_remember_router() -> APIRouter:
             description=(
                 "Data given as strings instead of uploads, one entry each: raw text to "
                 "remember, a local file or directory path on the server's filesystem "
-                "(requires ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
-                "ALLOW_HTTP_REQUESTS), or a GitHub/GitLab repository URL, which is "
-                "shallow-cloned and indexed as a code graph. Combined with 'data': "
+                "(requires ACCEPT_LOCAL_FILE_PATH), a web URL to fetch, or a GitHub/GitLab "
+                "repository URL, which is shallow-cloned and indexed as a code graph (both "
+                "require ALLOW_HTTP_REQUESTS=true on the server). Combined with 'data': "
                 "uploads come first, then these entries; labels and external_metadata "
                 "pair with that combined order. Empty entries are ignored. With "
                 "content_type='code' every entry is a repository spec (git URL or "
@@ -313,8 +313,9 @@ def get_remember_router() -> APIRouter:
         - **data** (List[UploadFile]): Files to upload and process.
         - **raw_data** (Optional[List[str]]): String inputs, one entry each: raw text, a
           local file or directory path on the server (requires ACCEPT_LOCAL_FILE_PATH), a
-          web URL fetched as a page (requires ALLOW_HTTP_REQUESTS), or a GitHub/GitLab
-          repository URL, shallow-cloned and indexed as a code graph. Uploads come first,
+          web URL fetched as a page, or a GitHub/GitLab repository URL, shallow-cloned and
+          indexed as a code graph (both require ALLOW_HTTP_REQUESTS=true on the server).
+          Uploads come first,
           then raw_data entries; labels and external_metadata pair with that combined
           order. Normal ingestion only — rejected with content_type. At least one of data
           or raw_data is required for normal ingestion.

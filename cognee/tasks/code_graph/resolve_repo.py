@@ -280,8 +280,8 @@ async def resolve_repo_source(
     Local paths are validated and returned as-is. Remote URLs are cloned with
     ``--depth 1`` into ``clones_dir`` (default :func:`default_clones_dir`); an
     existing clone is reused after a best-effort ``git pull --ff-only``.
-    Remote resolution follows ``ALLOW_HTTP_REQUESTS``: API calls need an
-    explicit opt-in; other surfaces allow it unless explicitly disabled.
+    Remote resolution requires ``ALLOW_HTTP_REQUESTS=true`` (off by default on
+    every surface); the refusal names the setting and reports HTTP 403.
 
     ``branch`` clones that branch instead of the remote's default, into a directory of
     its own (see :func:`_clone_slug`); reusing it fetches and resets, which follows a
@@ -329,7 +329,7 @@ async def resolve_repo_source(
     try:
         require_http_requests_allowed()
     except SSRFProtectionError as error:
-        raise CodeRepositoryError(message=str(error), status_code=error.status_code) from error
+        raise CodeRepositoryError(message=error.message, status_code=error.status_code) from error
 
     url = str(spec)
 
@@ -352,7 +352,7 @@ async def resolve_repo_source(
             await validate_outbound_url(url)
         except SSRFProtectionError as error:
             raise CodeRepositoryError(
-                message=f"Refusing to clone '{redact_repo_spec(url)}': {error}"
+                message=f"Refusing to clone '{redact_repo_spec(url)}': {error.message}"
             ) from error
 
     # Slug, remote, logs, and errors all use the credential-free URL: tokens
