@@ -686,3 +686,54 @@ async def test_strict_cleanup_fails_on_an_unreadable_session_context(
     if failing_read == "initial":
         # forget() and dataset deletes stay best-effort: the same outage is not raised.
         assert await _invalidate_session_entries(session_manager, **cleanup) == (1, 0)
+
+
+@pytest.mark.asyncio
+async def test_invalidate_sessions_for_dataset_cleans_session_rows_and_agent_connections(session_manager):
+    from uuid import UUID
+
+    from cognee.modules.agents.registry import (
+        clear_registered_agent_connections,
+        list_registered_agent_connections,
+        register_agent_connection,
+    )
+
+    dataset_id = uuid4()
+    user_uuid = UUID(USER_ID)
+    await _seed_qa(session_manager, "qa_1", used_node_ids=["node_a"])
+    clear_registered_agent_connections()
+
+    with patch("cognee.modules.agents.registry._persist_agent_connection", new=AsyncMock()):
+        await register_agent_connection(
+            agent_session_name="claude_live_session",
+            connection_type="claude_code",
+            memory_mode="hybrid",
+            user_id=user_uuid,
+            session_id=SESSION_ID,
+            datasets=[{"id": str(dataset_id), "name": "demo_ds", "role": "read_write", "type": "dataset"}],
+        )
+
+    mock_delete_rows = AsyncMock(return_value={(user_uuid, SESSION_ID)})
+    with (
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
+            return_value=session_manager,
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
+            new=AsyncMock(return_value=[(user_uuid, SESSION_ID)]),
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.delete_session._delete_session_rows",
+            new=mock_delete_rows,
+        ),
+    ):
+        result = await invalidate_sessions_for_dataset(dataset_id)
+
+    assert result == {"sessions_considered": 1, "sessions_deleted": 1}
+    mock_delete_rows.assert_awaited_once_with([(user_uuid, SESSION_ID)])
+    conns = list_registered_agent_connections()
+    assert len(conns) == 1
+    assert conns[0].datasets == []
+    assert conns[0].status == "inactive"
+    clear_registered_agent_connections()
