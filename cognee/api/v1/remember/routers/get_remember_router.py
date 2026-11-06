@@ -125,8 +125,11 @@ def get_remember_router() -> APIRouter:
                 "Data given as strings instead of uploads, one entry each: raw text to "
                 "remember, a local file or directory path on the server's filesystem "
                 "(requires ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
-                "ALLOW_HTTP_REQUESTS), or a GitHub/GitLab repository URL, which is "
-                "shallow-cloned and indexed as a code graph. Combined with 'data': "
+                "ALLOW_HTTP_REQUESTS), a GitHub/GitLab repository URL, which is "
+                "shallow-cloned and indexed as a code graph, or a database connection "
+                "string (postgresql://, mysql://, sqlite:///, ...), refused over the "
+                "API with 422 DatabaseIngestionDisabled unless the server sets "
+                "ALLOW_DATABASE_INGESTION=true. Combined with 'data': "
                 "uploads come first, then these entries; labels and external_metadata "
                 "pair with that combined order. Empty entries are ignored. With "
                 "content_type='code' every entry is a repository spec (git URL or "
@@ -313,8 +316,14 @@ def get_remember_router() -> APIRouter:
         - **data** (List[UploadFile]): Files to upload and process.
         - **raw_data** (Optional[List[str]]): String inputs, one entry each: raw text, a
           local file or directory path on the server (requires ACCEPT_LOCAL_FILE_PATH), a
-          web URL fetched as a page (requires ALLOW_HTTP_REQUESTS), or a GitHub/GitLab
-          repository URL, shallow-cloned and indexed as a code graph. Uploads come first,
+          web URL fetched as a page (requires ALLOW_HTTP_REQUESTS), a GitHub/GitLab
+          repository URL, shallow-cloned and indexed as a code graph, or a database
+          connection string (postgresql://, mysql://, sqlite:///, ...). Database
+          ingestion is disabled over the API by default: the request fails with
+          422 DatabaseIngestionDisabled unless the server sets
+          ALLOW_DATABASE_INGESTION=true (the SDK, CLI and MCP server ingest databases
+          without the setting); cognee's own databases are refused either way, and a
+          sqlite:/// path must be an existing file. Uploads come first,
           then raw_data entries; labels and external_metadata pair with that combined
           order. Normal ingestion only — rejected with content_type. At least one of data
           or raw_data is required for normal ingestion.
@@ -368,6 +377,9 @@ def get_remember_router() -> APIRouter:
           combination (no raw_data repository specs, file uploads or session_id with
           content_type="code", index_vectors without it, or local repo paths while
           ACCEPT_LOCAL_FILE_PATH=false)
+        - **422 Unprocessable Entity**: A database connection string in raw_data while
+          ALLOW_DATABASE_INGESTION is unset or false (DatabaseIngestionDisabled), or one
+          that names cognee's own storage (DatabaseSourceRefused, SqliteSourceRefused)
         - **409 Conflict**: Error during processing
         """
         # Swagger UI submits an untouched file list as one blank part; treat it
