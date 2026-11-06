@@ -211,10 +211,12 @@ class VectorDBInterface(Protocol):
         """``score_by_ids`` for several query vectors over the same ids: one result list per
         vector, in the vectors' order, each with ``score_by_ids``'s contract.
 
-        The default scores the vectors concurrently with ``score_by_ids``. An adapter whose
-        cost is the id filter rather than the distances (LanceDB evaluates ``id IN (...)``
-        per fragment on every call) overrides it to filter once and score every vector
-        from the rows it fetched.
+        The default scores the vectors concurrently with ``score_by_ids``. Adapters whose
+        cost is reaching the rows rather than the distances override it to visit the rows
+        once: LanceDB fetches the scoped vectors with one filtered scan and scores every
+        query locally, PGVector and Turso run one statement with a distance column per
+        query. Neptune Analytics keeps the default: its distances are computed server-side
+        by a one-embedding procedure, and no live deployment was available to measure.
         """
         return list(
             await asyncio.gather(

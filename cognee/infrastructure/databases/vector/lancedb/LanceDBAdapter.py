@@ -22,6 +22,9 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.local_scoring import (
+    score_rows_against_queries,
+)
 from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
@@ -1463,38 +1466,23 @@ class LanceDBAdapter(VectorDBInterface):
         fragmented table that filter is the whole cost. Fetching the rows' vectors once and
         taking the cosine distances locally makes a batch cost about one query.
         """
-        import numpy as np
-
         ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
         if not ids or not query_vectors:
             return [[] for _ in query_vectors]
         collection = await self.get_collection(collection_name)
-        queries = np.asarray(query_vectors, dtype=np.float32)
-        queries /= np.linalg.norm(queries, axis=1, keepdims=True)
-        scores: list[list[ScoredResult]] = [[] for _ in query_vectors]
+        rows = []
         for start in range(0, len(ids), self.SCORE_ID_BATCH_SIZE):
             batch = ids[start : start + self.SCORE_ID_BATCH_SIZE]
             literals = ", ".join("'" + point_id.replace("'", "''") + "'" for point_id in batch)
-            rows = await (
+            fetched = await (
                 collection.query()
                 .where(f"id IN ({literals})")
                 .select(["id", "vector"])
                 .limit(len(batch))
                 .to_list()
             )
-            if not rows:
-                continue
-            row_ids = [parse_id(row["id"]) for row in rows]
-            vectors = np.asarray([row["vector"] for row in rows], dtype=np.float32)
-            vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
-            # Cosine distance as LanceDB reports it: 1 - cosine similarity.
-            distances = 1.0 - queries @ vectors.T
-            for query_scores, row_distances in zip(scores, distances):
-                query_scores.extend(
-                    ScoredResult(id=row_id, score=float(distance), payload=None)
-                    for row_id, distance in zip(row_ids, row_distances)
-                )
-        return scores
+            rows.extend((row["id"], row["vector"]) for row in fetched)
+        return score_rows_against_queries(rows, query_vectors)
 
     async def search(
         self,
