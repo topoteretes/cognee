@@ -29,8 +29,6 @@ logger = get_logger("code_graph")
 
 _REMOTE_PREFIXES = ("https://", "http://", "git@", "ssh://")
 
-_FALSEY = {"false", "0", "no", "off"}
-
 _GIT_TIMEOUT_SECONDS = 600
 
 # github.com / gitlab.com repository roots are detected by shape; any other
@@ -282,7 +280,8 @@ async def resolve_repo_source(
     Local paths are validated and returned as-is. Remote URLs are cloned with
     ``--depth 1`` into ``clones_dir`` (default :func:`default_clones_dir`); an
     existing clone is reused after a best-effort ``git pull --ff-only``.
-    Remote resolution honors ``ALLOW_HTTP_REQUESTS=false``.
+    Remote resolution follows ``ALLOW_HTTP_REQUESTS``: API calls need an
+    explicit opt-in; other surfaces allow it unless explicitly disabled.
 
     ``branch`` clones that branch instead of the remote's default, into a directory of
     its own (see :func:`_clone_slug`); reusing it fetches and resets, which follows a
@@ -322,11 +321,15 @@ async def resolve_repo_source(
             )
         return path
 
-    if os.getenv("ALLOW_HTTP_REQUESTS", "true").strip().lower() in _FALSEY:
-        raise CodeRepositoryError(
-            message="Cannot clone a remote repository: outbound HTTP requests are "
-            "disabled (ALLOW_HTTP_REQUESTS=false). Clone it yourself and pass the local path."
-        )
+    from cognee.tasks.web_scraper.ssrf_protection import (
+        SSRFProtectionError,
+        require_http_requests_allowed,
+    )
+
+    try:
+        require_http_requests_allowed()
+    except SSRFProtectionError as error:
+        raise CodeRepositoryError(message=str(error), status_code=error.status_code) from error
 
     url = str(spec)
 
@@ -343,10 +346,7 @@ async def resolve_repo_source(
     # execute) never reach here -- they do not match _REMOTE_PREFIXES and are handled
     # as local paths above.
     if url.lower().startswith(("http://", "https://")):
-        from cognee.tasks.web_scraper.ssrf_protection import (
-            SSRFProtectionError,
-            validate_outbound_url,
-        )
+        from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
 
         try:
             await validate_outbound_url(url)
