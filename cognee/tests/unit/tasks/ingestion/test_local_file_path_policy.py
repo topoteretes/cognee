@@ -143,7 +143,7 @@ async def test_api_refuses_a_file_outside_the_data_root(fresh_settings, tmp_path
 
     with operation_origin_scope(ORIGIN_API):
         for path in (str(outside), outside.as_uri()):
-            with pytest.raises(IngestionError, match="Local files are not accepted"):
+            with pytest.raises(IngestionError, match="not accepted"):
                 await save_data_item_to_storage_detailed(path)
 
 
@@ -156,7 +156,7 @@ async def test_api_refuses_a_path_into_cognees_own_data_root(fresh_settings, dat
 
     with operation_origin_scope(ORIGIN_API):
         for path in (str(stored), stored.as_uri()):
-            with pytest.raises(IngestionError, match="Local files are not accepted"):
+            with pytest.raises(IngestionError, match="not accepted"):
                 await save_data_item_to_storage_detailed(path)
 
 
@@ -166,7 +166,7 @@ async def test_api_refuses_an_s3_object(fresh_settings):
 
     with (
         operation_origin_scope(ORIGIN_API),
-        pytest.raises(IngestionError, match="S3 paths are not accepted"),
+        pytest.raises(IngestionError, match="not accepted"),
     ):
         await save_data_item_to_storage_detailed("s3://cognee-bucket/data/other-tenant.pdf")
 
@@ -190,7 +190,7 @@ async def test_api_refuses_a_directory_before_listing_it(fresh_settings, tmp_pat
 
     with (
         operation_origin_scope(ORIGIN_API),
-        pytest.raises(IngestionError, match="Local files are not accepted"),
+        pytest.raises(IngestionError, match="not accepted"),
     ):
         await resolve_data_directories([str(folder)])
 
@@ -204,7 +204,7 @@ async def test_api_refuses_an_s3_prefix_before_listing_it(fresh_settings):
 
     with (
         operation_origin_scope(ORIGIN_API),
-        pytest.raises(IngestionError, match="S3 paths are not accepted"),
+        pytest.raises(IngestionError, match="not accepted"),
     ):
         await resolve_data_directories(["s3://cognee-bucket/data/"])
 

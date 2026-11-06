@@ -51,10 +51,10 @@ def local_file_paths_accepted() -> bool:
     return get_operation_origin() != ORIGIN_API
 
 
-def require_server_path_access(kind: str) -> None:
-    """Raise unless the gate admits a server-side path; ``kind`` names it in the error."""
+def require_server_path_access() -> None:
+    """Raise unless the gate admits a path read with this server's own access."""
     if not local_file_paths_accepted():
-        raise IngestionError(message=f"{kind} are not accepted.")
+        raise IngestionError(message="Server-side paths are not accepted.")
 
 
 def _resolve_local_file_uri(
@@ -111,7 +111,7 @@ async def save_data_item_to_storage_detailed(
         if parsed_url.scheme == "s3":
             # Read with cognee's own AWS credentials, so it is a server-side
             # path like a local one: same gate.
-            require_server_path_access("S3 paths")
+            require_server_path_access()
             return StoredFile(file_path=data_item)
         elif parsed_url.scheme == "http" or parsed_url.scheme == "https":
             # Guard against SSRF: reject disabled outbound HTTP, non-http(s) schemes,
@@ -123,7 +123,7 @@ async def save_data_item_to_storage_detailed(
             )
         # data is local file path
         elif parsed_url.scheme == "file":
-            require_server_path_access("Local files")
+            require_server_path_access()
             local_uri = _resolve_local_file_uri(url2pathname(parsed_url.path), strict=True)
             if local_uri:
                 return StoredFile(file_path=local_uri)
@@ -148,12 +148,12 @@ async def save_data_item_to_storage_detailed(
             # of becoming a broken file:// URI.
             local_uri = _resolve_local_file_uri(data_item)
             if local_uri:
-                require_server_path_access("Local files")
+                require_server_path_access()
                 return StoredFile(file_path=local_uri)
         # Data is a relative file path
         local_uri = _resolve_local_file_uri(data_item)
         if local_uri:
-            require_server_path_access("Local files")
+            require_server_path_access()
             return StoredFile(file_path=local_uri)
 
         # data is text, save it to data storage and return the file path

@@ -82,7 +82,7 @@ async def resolve_data_directories(
             if urlparse(item).scheme == "s3":
                 # Listed with cognee's own AWS credentials: the same gate as a
                 # local path, before anything is listed.
-                require_server_path_access("S3 paths")
+                require_server_path_access()
                 if fs is not None:
                     if include_subdirectories:
                         base_path = item if item.endswith("/") else item + "/"
@@ -129,7 +129,7 @@ async def resolve_data_directories(
             # turned into a repository manifest, so a refused path is never
             # walked. A string that is not an existing path is text, not a path.
             if local_path is not None:
-                require_server_path_access("Local files")
+                require_server_path_access()
 
             if local_path and local_path.is_dir():  # If it's a directory
                 if include_subdirectories:

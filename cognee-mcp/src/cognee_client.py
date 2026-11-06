@@ -226,7 +226,7 @@ class CogneeClient:
             )
 
             if _resolve_local_file_uri(data) is not None:
-                require_server_path_access("Local files")
+                require_server_path_access()
                 return CogneeClient._path_upload(data)
         return CogneeClient._text_upload(data)
 
