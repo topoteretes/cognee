@@ -50,6 +50,25 @@ Optional hooks: `extract_context_object_ids` (which nodes/edges fed a session an
 turn), `append_references` / `get_context_evidence` (`include_references=True`), and the
 class flags `supports_session_turn_preparation` / `supports_prompt_preview`.
 
+### Explicit typed graph scopes
+
+For `GRAPH_COMPLETION` with an explicit non-`NodeSet` `node_type` and `node_name`,
+triplet retrieval projects that graph scope before scoring vectors. On LanceDB
+(including subprocess mode), PGVector, Turso and Neptune Analytics, `score_by_ids`
+scores only its node and edge-type vectors, without an additional candidate cutoff;
+a query batch is scored with one `score_by_ids_batch` call per collection: LanceDB
+fetches the scoped vectors once and takes every query's distances locally, PGVector and
+Turso run one statement with a distance column per query, so a batch costs about one
+query.
+Unembedded graph members keep the usual missing-distance penalty. Neptune uses
+exact `CosineDistance` through `neptune.algo.vectors.distance.byEmbedding`, rather
+than its ANN top-k search. NodeSet, unscoped, vector-seeded neighbourhood searches
+and supplied memory fragments retain their existing paths. A vector adapter
+without `score_by_ids` scans its collections unfiltered for such a scope and maps
+the distances onto the projected scope, so it ranks the same triplets, only slower;
+the vector `node_name` filter means NodeSet membership and is never applied to a
+typed scope, because it would match nothing and penalise every scoped node.
+
 ## Adding a retriever
 
 1. Subclass `BaseRetriever` (or `GraphCompletionRetriever` for a graph variant) in

@@ -26,6 +26,9 @@ from cognee.infrastructure.databases.vector.exceptions import (
     CollectionNotFoundError,
     StoredVectorWidthMismatchError,
 )
+from cognee.infrastructure.databases.vector.local_scoring import (
+    score_rows_against_queries,
+)
 from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
@@ -1508,6 +1511,33 @@ class LanceDBAdapter(VectorDBInterface):
                 for row in rows
             )
         return scores
+
+    async def score_by_ids_batch(
+        self, collection_name: str, data_point_ids: list[str], query_vectors: list[list[float]]
+    ) -> list[list[ScoredResult]]:
+        """Score the same ids against every query vector with one filtered scan per id batch.
+
+        ``score_by_ids`` pays the ``id IN (...)`` filter once per query vector, and on a
+        fragmented table that filter is the whole cost. Fetching the rows' vectors once and
+        taking the cosine distances locally makes a batch cost about one query.
+        """
+        ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
+        if not ids or not query_vectors:
+            return [[] for _ in query_vectors]
+        collection = await self.get_collection(collection_name)
+        rows = []
+        for start in range(0, len(ids), self.SCORE_ID_BATCH_SIZE):
+            batch = ids[start : start + self.SCORE_ID_BATCH_SIZE]
+            literals = ", ".join("'" + point_id.replace("'", "''") + "'" for point_id in batch)
+            fetched = await (
+                collection.query()
+                .where(f"id IN ({literals})")
+                .select(["id", "vector"])
+                .limit(len(batch))
+                .to_list()
+            )
+            rows.extend((row["id"], row["vector"]) for row in fetched)
+        return score_rows_against_queries(rows, query_vectors)
 
     async def search(
         self,

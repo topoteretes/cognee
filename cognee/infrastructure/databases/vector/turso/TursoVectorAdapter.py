@@ -559,6 +559,38 @@ class TursoVectorAdapter(VectorDBInterface):
             )
         return scores
 
+    async def score_by_ids_batch(
+        self, collection_name: str, data_point_ids: list[str], query_vectors: list[list[float]]
+    ) -> list[list[ScoredResult]]:
+        """One statement per id batch, with a distance column per query vector, so the
+        rows are visited once and the distances are computed in the engine."""
+        ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
+        if not ids or not query_vectors:
+            return [[] for _ in query_vectors]
+        if not await self.has_collection(collection_name):
+            raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")
+        distances = ", ".join(
+            f"vector_distance_cos(vector, vector32(?)) AS distance_{index}"
+            for index in range(len(query_vectors))
+        )
+        literals = [_vector_literal(query_vector) for query_vector in query_vectors]
+        scores: list[list[ScoredResult]] = [[] for _ in query_vectors]
+        for start in range(0, len(ids), QUERY_BATCH_SIZE):
+            batch = ids[start : start + QUERY_BATCH_SIZE]
+            placeholders = ",".join("?" for _ in batch)
+            rows = await self._execute(
+                f'SELECT id, {distances} FROM "{collection_name}" WHERE id IN ({placeholders})',
+                [*literals, *batch],
+                fetch=True,
+            )
+            for row in rows or []:
+                row_id = parse_id(str(row[0]))
+                for index, query_scores in enumerate(scores):
+                    query_scores.append(
+                        ScoredResult(id=row_id, score=float(row[index + 1]), payload=None)
+                    )
+        return scores
+
     async def search(
         self,
         collection_name: str,
