@@ -7,6 +7,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.modules.users.models import User
 
 from .models.PayloadSchema import PayloadSchema
+from .models.ScoredResult import ScoredResult
 
 
 def validate_raw_vector_points(points: list[dict], vector_size: int) -> dict[str, dict]:
@@ -165,9 +166,11 @@ class VectorDBInterface(Protocol):
         and leaves the store untouched; the same id twice in one call is written once,
         last point wins, with the two ``belongs_to_set`` lists unioned.
         The payload is stored in the shape an ingested row of ``payload_schema`` has
-        (for a DataPoint that includes its ``id``); LanceDB requires the schema to shape
-        the table. Adapters that do not support raw vector writes should raise
-        NotImplementedError.
+        (for a DataPoint that includes its ``id``). With no ``payload_schema`` the rows
+        are the adapter's index rows (``IndexSchema``, the shape of every
+        ``<Type>_<field>`` collection ``index_data_points`` writes), so a row read from
+        one of those lands in another as it was. Adapters that do not support raw vector
+        writes should raise NotImplementedError.
         """
         raise NotImplementedError("upsert_raw_vectors is not implemented for this adapter")
 
@@ -201,6 +204,32 @@ class VectorDBInterface(Protocol):
         NotImplementedError on adapters that do not support neighborhood re-scoring.
         """
         raise NotImplementedError("score_by_ids is not implemented for this adapter")
+
+    async def score_by_ids_batch(
+        self, collection_name: str, data_point_ids: list[str], query_vectors: list[list[float]]
+    ) -> list[list[ScoredResult]]:
+        """``score_by_ids`` for several query vectors over the same ids: one result list per
+        vector, in the vectors' order, each with ``score_by_ids``'s contract.
+
+        The default scores the vectors concurrently with ``score_by_ids``. Adapters whose
+        cost is reaching the rows rather than the distances override it to visit the rows
+        once: LanceDB fetches the scoped vectors with one filtered scan and scores every
+        query locally, PGVector and Turso run one statement with a distance column per
+        query. Neptune Analytics keeps the default: its distances are computed server-side
+        by a one-embedding procedure, and no live deployment was available to measure.
+        """
+        return list(
+            await asyncio.gather(
+                *(
+                    self.score_by_ids(
+                        collection_name=collection_name,
+                        data_point_ids=data_point_ids,
+                        query_vector=query_vector,
+                    )
+                    for query_vector in query_vectors
+                )
+            )
+        )
 
     """ Search """
 

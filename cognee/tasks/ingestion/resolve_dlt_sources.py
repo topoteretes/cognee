@@ -1243,7 +1243,7 @@ async def _delete_dlt_orphans(
         if purged:
             try:
                 retired = await retire_forgotten_decisions(dataset, user)
-                await delete_data([orphan for orphan, _ in purged], dataset.id)
+                await delete_data([orphan for orphan, _ in purged], dataset.id, user)
             except Exception:
                 failed.extend(orphan.id for orphan, _ in purged)
                 logger.warning(
