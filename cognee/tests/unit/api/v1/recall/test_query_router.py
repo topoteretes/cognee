@@ -311,6 +311,16 @@ class TestRoutingConstraints:
         )
         assert default_route(RoutingConstraints(llm_available=False)) == decision
 
+    @pytest.mark.parametrize("llm_available", [True, False])
+    def test_deployment_constraints_preserve_a_context_only_decision(self, llm_available):
+        decision = RouteDecision(
+            search_type=SearchType.HYBRID_COMPLETION,
+            rule="quoted_phrase",
+            only_context=True,
+            retriever_config={"include_external_metadata": True},
+        )
+        assert constrain(decision, RoutingConstraints(llm_available=llm_available)) == decision
+
     def test_no_llm_keeps_llm_free_rules_as_they_are(self):
         no_llm = RoutingConstraints(llm_available=False)
         assert route_query('"polonium and radium"', no_llm) == RouteDecision(
