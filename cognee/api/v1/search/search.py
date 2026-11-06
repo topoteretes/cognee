@@ -89,9 +89,9 @@ async def search(
 
         **HYBRID_COMPLETION** (Default):
             Document passages plus entity neighbourhoods, then LLM completion.
-            Defers to GRAPH_COMPLETION for a custom node_type, node_name with
-            node_type=None, neighborhood_depth, feedback_influence > 0, or a
-            missing chunk collection.
+            Defers to GRAPH_COMPLETION for a custom node_type, neighborhood_depth,
+            feedback_influence > 0, or a missing chunk collection. node_name with
+            node_type=None raises QueryValidationError, as on every type.
 
         **GRAPH_COMPLETION**:
             Natural language Q&A using full graph context and LLM reasoning.

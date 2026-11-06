@@ -512,21 +512,21 @@ def get_remember_router() -> APIRouter:
 
             from cognee.tasks.code_graph.resolve_repo import is_remote_repo
             from cognee.tasks.ingestion.save_data_item_to_storage import (
-                settings as save_data_settings,
+                local_file_paths_accepted,
             )
 
             # Local paths are read from the server's own filesystem. That is the
             # intended setup for a local server sharing the caller's checkout, but
             # a server that disables local file ingestion must not hand out a
             # read-any-directory primitive through this route either.
-            if not save_data_settings.accept_local_file_path and any(
+            if not local_file_paths_accepted() and any(
                 not is_remote_repo(spec) for spec in repo_specs
             ):
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        "Local repository paths are disabled on this server "
-                        "(ACCEPT_LOCAL_FILE_PATH=false) — pass a git URL instead."
+                        "Local repository paths are not accepted over HTTP on this server "
+                        "(set ACCEPT_LOCAL_FILE_PATH=true to allow them) — pass a git URL instead."
                     ),
                 )
 

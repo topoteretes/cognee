@@ -7,13 +7,16 @@ same two ``brute_force_triplet_search`` takes for a typed scope:
    nodes of ``node_type`` and their one-hop neighbours; the ``DocumentChunk`` nodes
    among them are the scope. For a document that is its chunks (``is_part_of``),
    for an entity the chunks that mention it (``contains``).
-2. The vector store scores exactly those chunk ids against the query.
+2. The vector store scores exactly those chunk ids against the query
+   (``score_by_ids``). An adapter without it is refused: the alternative is an
+   unlimited scan of the whole collection on every request.
 
 The vector store never learns what a document or an entity is: it only ever gets
 chunk ids. The ``node_name`` vector filter means node-set membership and is never
 applied to a typed scope.
 """
 
+from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.modules.retrieval.utils.node_edge_vector_search import engine_supports_id_scoring
 
@@ -47,7 +50,8 @@ async def search_scoped_chunks(
 ) -> list[ScoredResult]:
     """The scope's chunks nearest to ``query``, with their payloads, nearest first.
 
-    Raises ``CollectionNotFoundError`` like ``search`` does when there are no chunks.
+    Raises ``CollectionNotFoundError`` like ``search`` does when there are no chunks,
+    and ``CogneeConfigurationError`` when the adapter cannot score by id.
     """
     chunk_ids = await scoped_chunk_ids(
         graph_engine, node_type, node_name, node_name_filter_operator
@@ -55,22 +59,26 @@ async def search_scoped_chunks(
     if not chunk_ids:
         return []
 
-    query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
-    if engine_supports_id_scoring(vector_engine):
-        scored = await vector_engine.score_by_ids(CHUNK_COLLECTION, chunk_ids, query_vector)
-    else:
-        # Same fallback as brute_force_triplet_search: an adapter without
-        # ``score_by_ids`` scans the collection unfiltered and the scope is kept
-        # here. Correct, only slower; the adapter's fix is to add score_by_ids.
-        in_scope = set(chunk_ids)
-        scored = [
-            result
-            for result in await vector_engine.search(
-                CHUNK_COLLECTION, query_vector=query_vector, limit=None
-            )
-            if str(result.id) in in_scope
-        ]
+    if not engine_supports_id_scoring(vector_engine):
+        # Without id scoring the only way to score the scope is an unlimited scan of
+        # the whole collection filtered here, which costs the collection's size per
+        # request, and adapters that cap an unlimited read would silently drop
+        # in-scope chunks. Refuse instead; the adapter's fix is to add score_by_ids.
+        adapter = type(vector_engine).__name__
+        raise CogneeConfigurationError(
+            message=(
+                f"A node_name scope on node_type={node_type.__name__} needs a vector adapter "
+                f"that implements score_by_ids; {adapter} does not."
+            ),
+            name="ScopedChunkSearchUnsupported",
+            remediation=(
+                f"Implement VectorDBInterface.score_by_ids on {adapter}, or scope by node set "
+                "(node_type=NodeSet)."
+            ),
+        )
 
+    query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
+    scored = await vector_engine.score_by_ids(CHUNK_COLLECTION, chunk_ids, query_vector)
     scored.sort(key=lambda result: result.score)
     if limit is not None:
         scored = scored[:limit]

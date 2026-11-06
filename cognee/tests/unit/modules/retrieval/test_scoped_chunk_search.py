@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.modules.data.processing.document_types import TextDocument
@@ -93,19 +94,13 @@ class _ScoringEngine(VectorDBInterface):
     async def prune(self, *a, **k): ...
 
 
-class _ScanningEngine(_ScoringEngine):
+class _NoIdScoringEngine(_ScoringEngine):
     """An adapter without score_by_ids: inherits the interface stub."""
 
     score_by_ids = VectorDBInterface.score_by_ids
 
-    async def search(self, collection_name, query_text=None, query_vector=None, limit=15, **kw):
-        self.searched = True
-        assert limit is None, "the fallback must scan the whole collection"
-        assert kw.get("node_name") is None, "a typed scope is never a node-set filter"
-        return [
-            ScoredResult(id=chunk_id, score=score, payload=None)
-            for chunk_id, score in _DISTANCES.items()
-        ]
+    async def search(self, *args, **kwargs):
+        raise AssertionError("an adapter without score_by_ids must not be scanned")
 
 
 @pytest.mark.asyncio
@@ -138,15 +133,14 @@ async def test_limit_cuts_after_ranking():
 
 
 @pytest.mark.asyncio
-async def test_fallback_scans_unfiltered_and_keeps_the_scope():
-    engine = _ScanningEngine()
-    results = await search_scoped_chunks(
-        engine, _GraphEngine(), "apples", TextDocument, ["doc_a"], "OR", limit=10
-    )
-    assert engine.searched is True
-    # The nearest row overall is out of scope and never appears.
-    assert [str(r.id) for r in results] == [CHUNK_A, CHUNK_C, CHUNK_B]
-    assert results[-1].payload == _PAYLOADS[CHUNK_B]
+async def test_an_adapter_without_id_scoring_is_refused_not_scanned():
+    engine = _NoIdScoringEngine()
+    with pytest.raises(CogneeConfigurationError) as excinfo:
+        await search_scoped_chunks(
+            engine, _GraphEngine(), "apples", TextDocument, ["doc_a"], "OR", limit=10
+        )
+    assert "score_by_ids" in str(excinfo.value)
+    assert "_NoIdScoringEngine" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
