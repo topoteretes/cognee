@@ -121,6 +121,7 @@ class RedisAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        code_refs: list[dict] | None = None,
     ) -> dict:
         """Serialize one QA entry into the normalized Redis payload shape."""
         entry = SessionQAEntry(
@@ -134,6 +135,7 @@ class RedisAdapter(CacheDBInterface):
             used_graph_element_ids=used_graph_element_ids,
             memify_metadata=memify_metadata,
             used_session_context_ids=used_session_context_ids,
+            code_refs=code_refs,
         )
         return entry.model_dump()
 
@@ -148,6 +150,7 @@ class RedisAdapter(CacheDBInterface):
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
+        code_refs: list[dict] | None = None,
     ) -> dict:
         """Serialize one agent-trace step into the normalized Redis payload shape."""
         entry = SessionAgentTraceEntry(
@@ -160,6 +163,7 @@ class RedisAdapter(CacheDBInterface):
             method_return_value=method_return_value,
             error_message=error_message,
             session_feedback=session_feedback,
+            code_refs=code_refs,
         )
         return entry.model_dump()
 
@@ -310,6 +314,7 @@ class RedisAdapter(CacheDBInterface):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        code_refs: list[dict] | None = None,
     ) -> None:
         """
         Add a Q/A/context triplet to a Redis list for this session.
@@ -327,6 +332,7 @@ class RedisAdapter(CacheDBInterface):
                 used_graph_element_ids=used_graph_element_ids,
                 memify_metadata=memify_metadata,
                 used_session_context_ids=used_session_context_ids,
+                code_refs=code_refs,
             )
             await self.async_redis.rpush(session_key, json.dumps(qa_entry))
             await self._apply_session_ttl(session_key)
@@ -621,6 +627,7 @@ class RedisAdapter(CacheDBInterface):
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
+        code_refs: list[dict] | None = None,
     ) -> None:
         """Append one trace step to the Redis list for this trace session."""
         try:
@@ -635,6 +642,7 @@ class RedisAdapter(CacheDBInterface):
                 method_return_value=method_return_value,
                 error_message=error_message,
                 session_feedback=session_feedback,
+                code_refs=code_refs,
             )
             await self.async_redis.rpush(trace_key, json.dumps(trace_entry))
             await self._apply_session_ttl(trace_key)

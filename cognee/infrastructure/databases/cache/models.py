@@ -2,6 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from cognee.memory.code_refs import CodeReference
 from cognee.modules.agent_memory.sanitization import (
     MAX_SERIALIZED_VALUE_LENGTH,
     sanitize_value,
@@ -35,6 +36,7 @@ class SessionQAEntry(BaseModel):
             Values are bools, ints (attempt counters), strings (the applied rating's
             source) or lists of str (applied element ids).
         used_session_context_ids: Optional list of session-context entry ids served to this answer.
+        code_refs: Optional list of the declarations the turn is about (``CodeReference`` dumps).
     """
 
     time: str
@@ -47,6 +49,14 @@ class SessionQAEntry(BaseModel):
     used_graph_element_ids: dict[str, list[str]] | None = None
     memify_metadata: dict[str, Any] | None = None
     used_session_context_ids: list[str] | None = None
+    code_refs: list[dict[str, Any]] | None = None
+
+    @field_validator("code_refs")
+    @classmethod
+    def code_refs_are_code_references(cls, v: list | None) -> list[dict[str, Any]] | None:
+        if v is None:
+            return None
+        return [CodeReference.model_validate(ref).model_dump() for ref in v]
 
     @field_validator("used_graph_element_ids")
     @classmethod
@@ -122,6 +132,7 @@ class SessionAgentTraceEntry(BaseModel):
         method_return_value: Serialized method return value for the step.
         error_message: Error details for failed steps.
         session_feedback: Per-step feedback generated from the step only.
+        code_refs: Optional list of the declarations the step is about (``CodeReference`` dumps).
     """
 
     trace_id: str
@@ -133,6 +144,14 @@ class SessionAgentTraceEntry(BaseModel):
     method_return_value: Any = None
     error_message: str = ""
     session_feedback: str = ""
+    code_refs: list[dict[str, Any]] | None = None
+
+    @field_validator("code_refs")
+    @classmethod
+    def code_refs_are_code_references(cls, v: list | None) -> list[dict[str, Any]] | None:
+        if v is None:
+            return None
+        return [CodeReference.model_validate(ref).model_dump() for ref in v]
 
     @field_validator("trace_id", "origin_function", "status")
     @classmethod
