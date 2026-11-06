@@ -1,0 +1,33 @@
+id: cursor
+title: Cognee memory for Cursor
+kind: integration
+stack: agent-runtime
+tags:
+  - cursor
+  - ide-plugin
+  - python
+  - hooks
+  - session-memory
+summary: >-
+  Persistent knowledge-graph memory for Cursor's IDE agent, Cmd+K and the
+  cursor-agent CLI: prompts, tool traces and answers are captured automatically and relevant context returns on future prompts.
+what_youll_build: >-
+  Cursor conversations that are stored into a knowledge graph, so decisions
+  and answers from earlier sessions resurface as context while you work.
+quickstart: |
+  git clone https://github.com/topoteretes/cognee-integrations.git
+  cd cognee-integrations
+  python3 integrations/cursor/scripts/install-cursor-hooks.py
+  mkdir -p ~/.cognee
+  printf 'LLM_API_KEY="sk-your_openai_key"\n' >> ~/.cognee/.env
+  # In Cursor: Settings -> Agents -> Third-Party Imports -> include third-party plugins,
+  # then start a conversation and run one tool.
+  tail -n 20 ~/.cognee-plugin/cursor/hook.log
+expected_output: >-
+  hook.log registers the session, records trace_stored after tool calls and
+  stop_stored after answers, and a "Cognee memory:" block is injected on the
+  next turn's first tool call.
+difficulty: medium
+repo: topoteretes/cognee-integrations
+path: integrations/cursor
+inventory_slug: cursor
