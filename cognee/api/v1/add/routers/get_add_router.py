@@ -53,8 +53,9 @@ def get_add_router() -> APIRouter:
             examples=[[]],
             description=(
                 "Data given as strings instead of uploads, one entry each: raw text to "
-                "ingest, a local file or directory path on the server's filesystem "
-                "(requires ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
+                "ingest, a local file or directory path on the server's filesystem or an "
+                "s3:// object read with the server's AWS credentials (both require "
+                "ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
                 "ALLOW_HTTP_REQUESTS), a GitHub/GitLab repository URL, which is "
                 "shallow-cloned and indexed as a code graph by cognify, or a database "
                 "connection string (postgresql://, mysql://, sqlite:///, ...), refused "
