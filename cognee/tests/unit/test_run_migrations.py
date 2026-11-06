@@ -79,6 +79,37 @@ class TestRunRelationalMigrations(unittest.TestCase):
         # disable the host process's loggers.
         self.assertFalse(alembic_config.attributes.get("configure_logger", True))
 
+    def test_alembic_env_escapes_percent_encoded_db_uri(self):
+        """Percent-encoded characters in DB credentials (e.g. email usernames
+        ``user%40example.com`` or passwords with ``@``/``%``) must be escaped as
+        ``%%`` before ``config.set_section_option`` hands the URL to ConfigParser,
+        so ``%(SQLALCHEMY_DATABASE_URI)s`` interpolates back to the original URL
+        without raising ``ValueError: invalid interpolation syntax`` (#6474)."""
+        import runpy
+        from sqlalchemy.engine import make_url
+
+        startup = importlib.import_module("cognee.modules.migrations.startup")
+        alembic_config = startup._build_alembic_config()
+
+        raw_uri = "postgresql+asyncpg://user%40example.com:p%40ss%25word@localhost:5432/cognee"
+        fake_engine = MagicMock()
+        fake_engine.engine.url = make_url(raw_uri)
+        alembic_config.attributes["relational_engine"] = fake_engine
+
+        mock_context = MagicMock()
+        mock_context.config = alembic_config
+        mock_context.is_offline_mode.return_value = True
+
+        env_py_path = os.path.join(
+            alembic_config.get_main_option("script_location"), "env.py"
+        )
+        with patch.dict("sys.modules", {"alembic.context": mock_context}), patch(
+            "alembic.context", mock_context
+        ):
+            runpy.run_path(env_py_path)
+
+        self.assertEqual(alembic_config.get_main_option("sqlalchemy.url"), raw_uri)
+
 
 class TestMissingBookkeepingTables(unittest.TestCase):
     """run_database_migrations must skip gracefully when the bookkeeping tables
