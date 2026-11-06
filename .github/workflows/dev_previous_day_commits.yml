@@ -13,6 +13,10 @@ on:
         default: ""
   schedule:
     - cron: "59 23 * * *"
+  # TEMP (RES-102): test PR #6562's tools end to end. Revert before merge.
+  pull_request:
+    paths:
+      - .github/workflows/dev_previous_day_commits.yml
 
 permissions:
   contents: read
@@ -23,6 +27,8 @@ env:
 
 jobs:
   prepare-merged-branches:
+    # TEMP (RES-102): only PR #6562 runs this on pull_request. Revert before merge.
+    if: ${{ github.event_name != 'pull_request' || github.head_ref == 'ci/docs-tools-drop-instructor' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     outputs:
@@ -72,6 +78,10 @@ jobs:
           if [ "${{ github.event_name }}" = "schedule" ]; then
             anchor_date="$(date -u -d 'yesterday' +%F)"
           fi
+          # TEMP (RES-102): a pull_request run replays run 270's day. Revert before merge.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            anchor_date="2026-11-05"
+          fi
 
           if [ -n "${anchor_date}" ]; then
             echo "Using anchor date ${anchor_date}"
@@ -95,8 +105,8 @@ jobs:
       - name: Check out core repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # TEMP (RES-102): a manual run of this branch uses its tools/. Revert before merge.
-          ref: ${{ github.ref_name == 'ci/docs-tools-drop-instructor' && github.sha || 'dev' }}
+          # TEMP (RES-102): a pull_request run uses the PR's tools/. Revert before merge.
+          ref: ${{ github.event_name == 'pull_request' && github.sha || 'dev' }}
           fetch-depth: 0
 
       - name: Set up Python
