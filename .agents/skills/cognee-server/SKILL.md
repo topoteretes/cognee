@@ -35,6 +35,14 @@ Behind a TLS-terminating proxy set `AUTH_TOKEN_COOKIE_SECURE=true` so the auth c
 gets the `Secure` attribute; leave it off for plain `http://localhost`, where a browser
 refuses to store a Secure cookie.
 
+### URL ingestion
+
+API requests cannot fetch URLs or clone remote repositories unless the server
+sets `ALLOW_HTTP_REQUESTS=true`. A blocked attempt raises an error naming that
+setting. With the variable unset, SDK, CLI and MCP calls still allow fetching;
+an explicit `false` disables it on every surface. This setting does not disable
+LLM or embedding provider calls.
+
 ## Connecting clients to the running server
 
 - **SDK / CLI against the server** (instead of embedded local mode):

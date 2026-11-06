@@ -10,9 +10,9 @@ This is a classic SSRF (CWE-918).
 This module centralises the outbound-URL policy so every fetch path shares the
 same guard:
 
-* ``ALLOW_HTTP_REQUESTS`` (default ``true``) gates outbound HTTP(S) fetching.
-  Setting it to ``false`` disables remote URL ingestion entirely. Previously
-  this variable was documented but never enforced.
+* ``ALLOW_HTTP_REQUESTS`` gates outbound URL fetching and remote repository
+  cloning. Unset, API requests are refused and SDK/CLI/MCP calls are allowed.
+  An explicit value overrides the default on every surface.
 * Only the ``http`` and ``https`` schemes are permitted.
 * The hostname is resolved and *every* resolved address is checked. A request
   is rejected if any address is loopback, private, link-local, reserved,
@@ -51,8 +51,34 @@ class SSRFProtectionError(CogneeValidationError):
 
 
 def is_http_requests_allowed() -> bool:
-    """Return whether outbound HTTP(S) fetching is enabled via ``ALLOW_HTTP_REQUESTS``."""
-    return os.getenv("ALLOW_HTTP_REQUESTS", "true").strip().lower() not in _FALSEY
+    """Honor an explicit setting; otherwise refuse fetching for API requests.
+
+    The API middleware stamps the request origin, which child tasks inherit.
+    Importing the server alongside SDK calls does not change the SDK default.
+    """
+    configured = os.getenv("ALLOW_HTTP_REQUESTS")
+    if configured is not None:
+        return configured.strip().lower() not in _FALSEY
+
+    from cognee.modules.operations.origin import ORIGIN_API, get_operation_origin
+
+    return get_operation_origin() != ORIGIN_API
+
+
+def require_http_requests_allowed() -> None:
+    """Refuse disabled fetching with the setting needed to enable it."""
+    if is_http_requests_allowed():
+        return
+    reason = (
+        "Outbound HTTP requests are disabled by default for API requests "
+        "because ALLOW_HTTP_REQUESTS is unset."
+        if os.getenv("ALLOW_HTTP_REQUESTS") is None
+        else "Outbound HTTP requests are disabled (ALLOW_HTTP_REQUESTS=false)."
+    )
+    raise SSRFProtectionError(
+        f"{reason} Set ALLOW_HTTP_REQUESTS=true in the Cognee environment "
+        "(on the server for API calls) to enable URL ingestion and remote repository cloning."
+    )
 
 
 def _is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
@@ -94,10 +120,7 @@ async def validate_outbound_url(url: str) -> None:
             ``http``/``https``, the URL has no host, the host cannot be
             resolved, or the host resolves to an internal / reserved address.
     """
-    if not is_http_requests_allowed():
-        raise SSRFProtectionError(
-            "Outbound HTTP requests are disabled (ALLOW_HTTP_REQUESTS=false)."
-        )
+    require_http_requests_allowed()
 
     parsed = urlparse(url)
     scheme = (parsed.scheme or "").lower()
