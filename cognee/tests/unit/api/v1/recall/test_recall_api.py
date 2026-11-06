@@ -474,8 +474,8 @@ async def test_cloud_client_recall_payload_includes_context_profile(monkeypatch)
     [
         (None, SearchType.CHUNKS_LEXICAL),
         # CHUNKS_LEXICAL cannot apply a node-set filter and would raise, so the
-        # router leaves it for the default, which applies it.
-        (["proj"], SearchType.HYBRID_COMPLETION),
+        # router takes its stand-in, CHUNKS, which applies it and costs no LLM call.
+        (["proj"], SearchType.CHUNKS),
     ],
 )
 async def test_recall_routes_a_node_name_filter_to_a_type_that_applies_it(

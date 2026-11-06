@@ -207,8 +207,10 @@ That is why these are *not* auto-routed, even though they are valid
 
 The router picks only a type that can apply the filter (`node_name_scope` in
 `cognee/modules/search/methods/`). `CHUNKS_LEXICAL`, `CODE` and `BROAD` cannot,
-and with a filter they would raise `QueryValidationError`, so a quoted phrase, a
-code question or a count resolves to `HYBRID_COMPLETION`, which applies it.
+and with a filter they would raise `QueryValidationError`. A quoted phrase
+resolves to `CHUNKS`, which applies a node-set filter and, like the lexical
+search, makes no LLM call; a code question or a count resolves to
+`HYBRID_COMPLETION`, which applies it. The router logs the swap at info.
 `CODING_RULES` and `TEMPORAL` keep their routes. A pinned `query_type` is not
 rerouted: a type that cannot apply the filter raises.
 

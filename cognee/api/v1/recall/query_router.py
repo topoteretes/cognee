@@ -22,7 +22,8 @@ The rules see only the query text. What the deployment can run is applied
 afterwards, in one place, from ``RoutingConstraints``: whether an LLM is
 available, whether Cypher queries are allowed, and, when the request carries a
 ``node_name`` filter, which types can apply it (a pick that cannot resolves to
-the fallback, which applies every filter). With no LLM the router still
+its stand-in in ``SCOPED_STAND_INS`` when that applies the filter, else to the
+fallback, which applies every filter). With no LLM the router still
 routes, but only to types that can execute without one: retrieval-only types
 run as they are, completion types whose single LLM call is the final answer run
 with ``only_context=True`` (recall returns the assembled prompt, the session
@@ -175,8 +176,13 @@ _CODE_QUESTION = re.compile(rf"{_CODE_VERB_QUESTION}|{_CODE_DEFINITION}|{_CODE_U
 # routed type that is not in COMPLETION_ONLY_TYPES resolves to the fallback, so a new
 # LLM-free rule target must be added here to keep its own type on a keyless install.
 LLM_FREE_TYPES: frozenset[SearchType] = frozenset(
-    {SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES, SearchType.CODE}
+    {SearchType.CHUNKS_LEXICAL, SearchType.CHUNKS, SearchType.CODING_RULES, SearchType.CODE}
 )
+# A routed type that cannot apply the request's node_name filter resolves to its
+# stand-in here when the stand-in can, so the pick keeps its cost: a quoted phrase
+# stays an LLM-free chunk search instead of becoming a completion. Types without a
+# stand-in resolve to the fallback.
+SCOPED_STAND_INS: dict[SearchType, SearchType] = {SearchType.CHUNKS_LEXICAL: SearchType.CHUNKS}
 # The only LLM call is the final completion: runs with only_context=True with no LLM,
 # returning the prompt the completion would have received.
 COMPLETION_ONLY_TYPES: frozenset[SearchType] = frozenset(
@@ -284,11 +290,15 @@ def constrain(
 
     # The fallback honours every node_name scope (node_name_scope.SUPPORTED_SCOPES).
     if constraints.scoped_types is not None and search_type not in constraints.scoped_types:
-        logger.debug(
-            "query_router: %s cannot apply the node_name filter; using fallback",
+        stand_in = SCOPED_STAND_INS.get(search_type)
+        if stand_in not in constraints.scoped_types:
+            stand_in = ROUTER_FALLBACK_TYPE
+        logger.info(
+            "query_router: %s cannot apply the node_name filter; using %s",
             search_type.value,
+            stand_in.value,
         )
-        search_type = ROUTER_FALLBACK_TYPE
+        search_type = stand_in
 
     if not constraints.cypher_allowed and search_type in CYPHER_TYPES:
         logger.debug(
