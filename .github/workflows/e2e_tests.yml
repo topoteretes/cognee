@@ -2130,12 +2130,11 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      # Earliest version whose session mechanism is testable against the
-      # current branch: improve() exists from v1.0, but the SQL session cache
-      # (cache.db) only shipped in v1.2.0 — older tags stored sessions in
-      # Redis, which this job neither runs nor reads. v1.2.0 exercises both
-      # the data migrations and the session persistence watermark takeover.
-      COGNEE_COMPATIBILITY_TEST_VERSION: v1.2.0
+      # v1.6.3 includes the DLT UUID fix and drains sibling tasks before
+      # rollback, avoiding the orphan SchemaTable left by the v1.2.0 seed.
+      # Its fixtures use dataset-scoped documents, DLT manifests and session
+      # persistence watermarks.
+      COGNEE_COMPATIBILITY_TEST_VERSION: v1.6.3
 
       # Phase 1/2 run real dlt pipelines; dlt's telemetry thread (default ON,
       # posts to telemetry.scalevector.ai) is non-daemon and a wedged call
@@ -2224,7 +2223,7 @@ jobs:
 
     env:
       # Same pin as the sqlite job — see the comment there.
-      COGNEE_COMPATIBILITY_TEST_VERSION: v1.2.0
+      COGNEE_COMPATIBILITY_TEST_VERSION: v1.6.3
 
       # Phase 1/2 run real dlt pipelines; dlt's telemetry thread (default ON,
       # posts to telemetry.scalevector.ai) is non-daemon and a wedged call
