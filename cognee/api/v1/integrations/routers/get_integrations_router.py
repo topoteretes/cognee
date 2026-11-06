@@ -70,6 +70,7 @@ from cognee.modules.integrations.credentials import (
     get_active_credential_for_user,
     list_active_credentials_for_provider,
     list_active_credentials_for_user,
+    owner_principal_id,
     revoke_credential_by_account,
     update_provider_metadata,
 )
@@ -95,10 +96,7 @@ from cognee.modules.integrations.plugin_status import (
 )
 from cognee.modules.integrations.plugins import KNOWN_PLUGINS, get_plugin
 from cognee.modules.integrations.registry import get_integration, supported_integrations
-from cognee.modules.integrations.scheduled_sync import (
-    owner_principal_id,
-    sync_scheduler_lifespan,
-)
+from cognee.modules.integrations.scheduled_sync import sync_scheduler_lifespan
 from cognee.modules.integrations.sync_policy import (
     CUSTOM_HOURS,
     INTERVAL_PRESETS,

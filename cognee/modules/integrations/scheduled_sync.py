@@ -12,12 +12,14 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy import and_, or_, select
 
 from cognee.infrastructure.background_tasks import register_background_task
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.integrations.background import spawn_background
-from cognee.modules.integrations.credentials import STATUS_ACTIVE
+from cognee.modules.integrations.credentials import (
+    STATUS_ACTIVE,
+    list_active_credential_ids_for_owner,
+)
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 from cognee.modules.integrations.registry import get_integration
 from cognee.modules.integrations.sync_policy import run_due_syncs
@@ -35,29 +37,6 @@ class ScheduledSyncSettings(BaseSettings):
 
     # Env: INTEGRATIONS_SYNC_SCHEDULER_ENABLED
     sync_scheduler_enabled: bool = False
-
-
-def owner_principal_id(credential: IntegrationCredential) -> UUID:
-    """``workspace_id`` when set, else ``user_id``: the owner ``upsert_credential`` keys on."""
-    return credential.workspace_id or credential.user_id
-
-
-async def owned_credential_ids(principal_id: UUID) -> list[UUID]:
-    """The active connections ``owner_principal_id`` assigns to ``principal_id``."""
-    async with get_relational_engine().get_async_session() as session:
-        rows = await session.execute(
-            select(IntegrationCredential.id).where(
-                IntegrationCredential.status == STATUS_ACTIVE,
-                or_(
-                    IntegrationCredential.workspace_id == principal_id,
-                    and_(
-                        IntegrationCredential.workspace_id.is_(None),
-                        IntegrationCredential.user_id == principal_id,
-                    ),
-                ),
-            )
-        )
-        return [row.id for row in rows]
 
 
 async def _sync(credential_id: UUID) -> None:
@@ -101,7 +80,9 @@ async def _tick_until(stop: asyncio.Event) -> None:
         try:
             # Recorded as background work; the syncs it starts inherit the scope.
             with operation_origin_scope(ORIGIN_BACKGROUND):
-                await run_due_syncs(datetime.now(timezone.utc), owned_credential_ids, start_sync)
+                await run_due_syncs(
+                    datetime.now(timezone.utc), list_active_credential_ids_for_owner, start_sync
+                )
         except Exception:
             # No caller receives the worker's errors, and a database restart raises driver
             # errors SQLAlchemy does not wrap (asyncpg's CannotConnectNowError, a refused

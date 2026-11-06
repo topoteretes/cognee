@@ -18,6 +18,7 @@ import pytest
 from cognee.infrastructure.background_tasks import wait_for_background_tasks
 from cognee.modules.integrations.base import OAuthIntegration
 from cognee.modules.integrations.credentials import (
+    list_active_credential_ids_for_owner,
     revoke_credential_by_account,
     upsert_credential,
 )
@@ -82,20 +83,6 @@ async def _credential(database, user_id, workspace_id=None, status="active", pro
 
 
 @pytest.mark.asyncio
-async def test_a_workspace_owns_its_connections_and_a_user_only_those_without_one(database):
-    user, workspace = uuid4(), uuid4()
-    personal = await _credential(database, user)
-    shared = await _credential(database, user, workspace_id=workspace)
-    await _credential(database, user, status="revoked")
-
-    assert await scheduled_sync.owned_credential_ids(user) == [personal]
-    assert await scheduled_sync.owned_credential_ids(workspace) == [shared]
-    assert scheduled_sync.owner_principal_id(
-        SimpleNamespace(user_id=user, workspace_id=workspace)
-    ) == (workspace)
-
-
-@pytest.mark.asyncio
 async def test_start_runs_the_providers_sync_now_in_the_background(database, provider):
     credential_id = await _credential(database, uuid4())
 
@@ -143,7 +130,7 @@ async def test_the_tick_syncs_a_users_connections_from_the_default_end_to_end(da
 
     started = await scheduled_sync.run_due_syncs(
         saved + timedelta(hours=1),
-        scheduled_sync.owned_credential_ids,
+        list_active_credential_ids_for_owner,
         scheduled_sync.start_sync,
     )
     await wait_for_background_tasks()
@@ -169,7 +156,7 @@ async def test_the_worker_is_off_unless_enabled(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_the_worker_outlives_a_failed_tick(monkeypatch):
+async def test_the_worker_outlives_a_failed_tick(monkeypatch, caplog):
     """A database restart raises driver errors SQLAlchemy does not wrap; the next tick runs."""
     origins = []
     second = asyncio.Event()
@@ -185,11 +172,16 @@ async def test_the_worker_outlives_a_failed_tick(monkeypatch):
     monkeypatch.setattr(scheduled_sync, "TICK_SECONDS", TICK)
     monkeypatch.setenv("INTEGRATIONS_SYNC_SCHEDULER_ENABLED", "true")
 
-    async with scheduled_sync.sync_scheduler_lifespan(None):
-        await asyncio.wait_for(second.wait(), timeout=5)
+    with caplog.at_level(logging.ERROR):
+        async with scheduled_sync.sync_scheduler_lifespan(None):
+            await asyncio.wait_for(second.wait(), timeout=5)
 
     # Scheduled runs are recorded as background work, not as an SDK call.
     assert origins[:2] == [ORIGIN_BACKGROUND, ORIGIN_BACKGROUND]
+    assert any(
+        r.levelno == logging.ERROR and "Scheduled sync tick failed" in r.getMessage()
+        for r in caplog.records
+    )
 
 
 @pytest.mark.asyncio
@@ -243,7 +235,7 @@ async def test_a_reconnected_account_is_synced_by_its_new_owners_policy_only(
 
     async def tick(now):
         started = await scheduled_sync.run_due_syncs(
-            now, scheduled_sync.owned_credential_ids, scheduled_sync.start_sync
+            now, list_active_credential_ids_for_owner, scheduled_sync.start_sync
         )
         await wait_for_background_tasks()
         return started

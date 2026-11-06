@@ -52,6 +52,8 @@ async def claim_due_slot(row: IntegrationSyncPolicy, now: datetime) -> bool:
 
 
 async def _due_rows(now: datetime) -> list[IntegrationSyncPolicy]:
+    # NOT paused here as well as in the claim: a paused row's slot never moves, so this
+    # keeps it out of every scan, and it is the partial index ix_integration_sync_policies_due.
     async with get_relational_engine().get_async_session() as session:
         return list(
             (

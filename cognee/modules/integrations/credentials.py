@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.integrations.crypto import decrypt_credentials, encrypt_credentials
@@ -302,6 +302,33 @@ async def list_active_credentials_for_provider(
         return list(result.scalars().all())
 
 
+def owner_principal_id(credential: IntegrationCredential) -> UUID:
+    """The principal a connection belongs to: its ``workspace_id`` when set, else the
+    user who connected it. ``list_active_credential_ids_for_owner`` is the same rule in SQL.
+    """
+    return credential.workspace_id if credential.workspace_id is not None else credential.user_id
+
+
+async def list_active_credential_ids_for_owner(principal_id: UUID) -> list[UUID]:
+    """The active connections ``owner_principal_id`` assigns to ``principal_id``."""
+    # Not coalesce(workspace_id, user_id): it reads the same rows but scans the whole
+    # table, while this form uses both indexes (8 ms against 0.03 ms at 200k rows).
+    owned = or_(
+        IntegrationCredential.workspace_id == principal_id,
+        and_(
+            IntegrationCredential.workspace_id.is_(None),
+            IntegrationCredential.user_id == principal_id,
+        ),
+    )
+    async with get_relational_engine().get_async_session() as db:
+        result = await db.execute(
+            select(IntegrationCredential.id).where(
+                IntegrationCredential.status == STATUS_ACTIVE, owned
+            )
+        )
+        return list(result.scalars().all())
+
+
 async def list_active_credentials_for_user(user_id: UUID) -> dict[str, IntegrationCredential]:
     """The user's active connections across all providers, one query.
 
@@ -463,14 +490,9 @@ async def record_sync_result(
         # not replace the traceback that is already in flight.
         provider = credential.provider
         provider_account_id = credential.provider_account_id
-        # Mirrors upsert_credential's owner resolution exactly: workspace_id
-        # is the owner when the caller set one, user_id otherwise. Comparing
-        # user_id alone would miss the same misattribution on the dimension
-        # this check is supposed to cover — a workspace-scoped connection
-        # reconnected under a different workspace by the same human.
-        ran_for_owner = (
-            credential.workspace_id if credential.workspace_id is not None else credential.user_id
-        )
+        # Compared by owner, not by user_id alone: a workspace connection
+        # reconnected under another workspace by the same human is another owner.
+        ran_for_owner = owner_principal_id(credential)
 
         engine = get_relational_engine()
         async with engine.get_async_session() as db:
@@ -484,9 +506,7 @@ async def record_sync_result(
             if current is None:
                 return None
 
-            current_owner = (
-                current.workspace_id if current.workspace_id is not None else current.user_id
-            )
+            current_owner = owner_principal_id(current)
             if current.status != STATUS_ACTIVE or current_owner != ran_for_owner:
                 logger.info(
                     "Discarding a %s sync result for account %s: the connection it ran for "

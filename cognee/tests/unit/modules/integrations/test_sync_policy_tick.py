@@ -6,9 +6,11 @@ host: ``start`` records the connection and no provider is involved.
 
 import asyncio
 import importlib
+import logging
 import subprocess
 import sys
 import textwrap
+import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -27,6 +29,8 @@ SAVED = datetime(2026, 11, 5, 14, 0, tzinfo=timezone.utc)
 NOW = SAVED + timedelta(days=2)
 HOURLY = SyncPolicy(interval_minutes=60)
 RACERS = 6
+# Each racer imports cognee, a few seconds; the deadline only stops a hung one.
+READY_SECONDS = 120
 
 
 class _Host:
@@ -35,8 +39,10 @@ class _Host:
     def __init__(self, owned=()):
         self.owned = list(owned)
         self.started = []
+        self.listed = []
 
     async def owned_credential_ids(self, principal_id):
+        self.listed.append(principal_id)
         return self.owned
 
     async def start(self, credential_id):
@@ -94,6 +100,8 @@ async def test_a_paused_row_is_not_claimed_and_its_slot_waits(database):
     host = _Host(owned=[row.credential_id])
 
     assert await host.tick() == 0
+    # Not even read: a paused row's slot never moves, so the scan keeps it out every tick.
+    assert host.listed == []
     assert await _next_due(database, row.id) == datetime(2026, 11, 5, 15, 0, tzinfo=timezone.utc)
 
     await store.resume_sync_policy(owner, owner.id, row.credential_id, now=NOW)
@@ -191,20 +199,27 @@ async def test_a_failed_read_of_the_connections_leaves_the_slot_due(database):
 
 
 @pytest.mark.asyncio
-async def test_an_invalid_row_is_skipped_and_the_others_still_run(database):
-    owner = _owner()
+async def test_an_invalid_row_is_reported_every_tick_and_the_others_still_run(database, caplog):
+    owner, invalid = _owner(), uuid4()
     valid = await store.save_sync_policy(owner, owner.id, HOURLY, uuid4(), now=SAVED)
     database.execute(
         "INSERT INTO integration_sync_policies (id, principal_id, credential_id,"
         " interval_minutes, weekdays, timezone, paused, next_due_at, created_at, updated_at)"
         " VALUES (?, ?, ?, 0, '[0]', 'UTC', 0, '2026-11-05 00:00:00.000000',"
         " '2026-11-05 00:00:00', '2026-11-05 00:00:00')",
-        (uuid4().hex, owner.id.hex, uuid4().hex),
+        (invalid.hex, owner.id.hex, uuid4().hex),
     )
     host = _Host(owned=[valid.credential_id])
 
-    assert await host.tick() == 1
+    with caplog.at_level(logging.ERROR):
+        assert await host.tick() == 1
+        assert await host.tick() == 0
+
     assert host.started == [valid.credential_id]
+    reports = [
+        r for r in caplog.records if r.levelno == logging.ERROR and str(invalid) in r.getMessage()
+    ]
+    assert len(reports) == 2
 
 
 _RACER = textwrap.dedent(
@@ -254,10 +269,12 @@ async def test_racing_processes_claim_one_slot_exactly_once(database, tmp_path):
         for flag in ready
     ]
     try:
-        # Each racer exits on an error, so waiting for its flag cannot outlive it.
+        # A racer that fails exits; one that hangs is caught by the deadline.
+        deadline = time.monotonic() + READY_SECONDS
         while not all(flag.exists() for flag in ready):
             if any(racer.poll() is not None for racer in racers):
                 break
+            assert time.monotonic() < deadline, "racers did not get ready"
             await asyncio.sleep(0.05)
         go.touch()
         outputs = [racer.communicate(timeout=120)[0].strip() for racer in racers]

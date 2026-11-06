@@ -216,7 +216,7 @@ def policy_level(row: IntegrationSyncPolicy) -> str:
 
 
 async def _connection_rows(
-    credential_id: UUID, owner_principal_id: UUID
+    credential_id: UUID, principal_id: UUID
 ) -> tuple[IntegrationSyncPolicy | None, IntegrationSyncPolicy | None]:
     """The connection's own row and its owner's default row, each None when absent."""
     async with get_relational_engine().get_async_session() as session:
@@ -224,7 +224,7 @@ async def _connection_rows(
             (
                 await session.execute(
                     select(IntegrationSyncPolicy).where(
-                        IntegrationSyncPolicy.principal_id == owner_principal_id,
+                        IntegrationSyncPolicy.principal_id == principal_id,
                         (IntegrationSyncPolicy.credential_id == credential_id)
                         | IntegrationSyncPolicy.credential_id.is_(None),
                     )
@@ -239,42 +239,40 @@ async def _connection_rows(
 
 
 async def get_effective_sync_policy(
-    credential_id: UUID, owner_principal_id: UUID
+    credential_id: UUID, principal_id: UUID
 ) -> IntegrationSyncPolicy | None:
     """The connection's own row, else its owner's default, else None (no schedule).
 
     Not scoped to a caller: the tick reads it for every due connection. Routes
     use ``get_caller_effective_sync_policy``.
     """
-    own, default = await _connection_rows(credential_id, owner_principal_id)
+    own, default = await _connection_rows(credential_id, principal_id)
     return own or default
 
 
 async def get_caller_effective_sync_policy(
-    user: User, owner_principal_id: UUID, credential_id: UUID
+    user: User, principal_id: UUID, credential_id: UUID
 ) -> IntegrationSyncPolicy:
     """``get_effective_sync_policy`` for a caller who may act for the owner; none raises."""
-    await _require_actable(user, owner_principal_id)
-    row = await get_effective_sync_policy(credential_id, owner_principal_id)
+    await _require_actable(user, principal_id)
+    row = await get_effective_sync_policy(credential_id, principal_id)
     if row is None:
         raise SyncPolicyNotFoundError()
     return row
 
 
-async def get_sync_pause(
-    credential_id: UUID, owner_principal_id: UUID
-) -> IntegrationSyncPolicy | None:
+async def get_sync_pause(credential_id: UUID, principal_id: UUID) -> IntegrationSyncPolicy | None:
     """The row that holds this connection paused, or None.
 
     The owner's paused default comes first: it holds every connection, those with
     their own row too.
     """
-    own, default = await _connection_rows(credential_id, owner_principal_id)
+    own, default = await _connection_rows(credential_id, principal_id)
     return next((row for row in (default, own) if row is not None and row.paused), None)
 
 
-async def require_sync_not_paused(credential_id: UUID, owner_principal_id: UUID) -> None:
+async def require_sync_not_paused(credential_id: UUID, principal_id: UUID) -> None:
     """Refuse an explicit sync of a paused connection, naming the level that holds it."""
-    pause = await get_sync_pause(credential_id, owner_principal_id)
+    pause = await get_sync_pause(credential_id, principal_id)
     if pause is not None:
         raise SyncPausedError(policy_level(pause))
