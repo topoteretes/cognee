@@ -4,6 +4,7 @@ from typing import Any, BinaryIO
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
+from fastapi import status
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
@@ -52,9 +53,21 @@ def local_file_paths_accepted() -> bool:
 
 
 def require_server_path_access() -> None:
-    """Raise unless the gate admits a path read with this server's own access."""
-    if not local_file_paths_accepted():
-        raise IngestionError(message="Server-side paths are not accepted.")
+    """Raise unless the gate admits a path read with this server's own access.
+
+    The message says which setting refused the path and how to change it; the
+    status is 403, a policy refusal, not a problem with the data itself.
+    """
+    if local_file_paths_accepted():
+        return
+    if local_file_paths_configured():
+        message = "Server-side paths are not accepted (ACCEPT_LOCAL_FILE_PATH=false)."
+    else:
+        message = (
+            "Server-side paths are not accepted for HTTP requests on this server "
+            "(set ACCEPT_LOCAL_FILE_PATH=true to allow them)."
+        )
+    raise IngestionError(message=message, status_code=status.HTTP_403_FORBIDDEN)
 
 
 def _resolve_local_file_uri(

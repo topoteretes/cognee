@@ -1,5 +1,6 @@
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.modules.search.search_type_policy import CYPHER_SEARCH_TYPES, cypher_queries_allowed
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
 
@@ -22,7 +23,7 @@ async def select_search_type(
             so the LLM's choice can never drop the filter.
 
     Returns:
-        The best search type given by the LLM.
+        An enabled search type that can serve the request.
     """
     default_search_type = SearchType.RAG_COMPLETION
     if allowed_search_types is not None and default_search_type not in allowed_search_types:
@@ -32,6 +33,8 @@ async def select_search_type(
     # their own: CODE runs one exact graph operation driven by a structured
     # code_query, which FEELING_LUCKY has no way to construct.
     excluded_search_types = {SearchType.CODE}
+    if not cypher_queries_allowed():
+        excluded_search_types.update(CYPHER_SEARCH_TYPES)
     if allowed_search_types is not None:
         excluded_search_types |= set(SearchType) - allowed_search_types
     system_prompt = read_query_prompt(system_prompt_path)

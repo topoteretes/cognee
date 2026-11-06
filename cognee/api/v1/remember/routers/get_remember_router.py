@@ -123,8 +123,9 @@ def get_remember_router() -> APIRouter:
             examples=[[]],
             description=(
                 "Data given as strings instead of uploads, one entry each: raw text to "
-                "remember, a local file or directory path on the server's filesystem "
-                "(requires ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
+                "remember, a local file or directory path on the server's filesystem or an "
+                "s3:// object read with the server's AWS credentials (both require "
+                "ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
                 "ALLOW_HTTP_REQUESTS), a GitHub/GitLab repository URL, which is "
                 "shallow-cloned and indexed as a code graph, or a database connection "
                 "string (postgresql://, mysql://, sqlite:///, ...), refused over the "
@@ -315,8 +316,9 @@ def get_remember_router() -> APIRouter:
         ## Request Parameters
         - **data** (List[UploadFile]): Files to upload and process.
         - **raw_data** (Optional[List[str]]): String inputs, one entry each: raw text, a
-          local file or directory path on the server (requires ACCEPT_LOCAL_FILE_PATH), a
-          web URL fetched as a page (requires ALLOW_HTTP_REQUESTS), a GitHub/GitLab
+          local file or directory path on the server or an s3:// object read with the
+          server's AWS credentials (both require ACCEPT_LOCAL_FILE_PATH), a web URL
+          fetched as a page (requires ALLOW_HTTP_REQUESTS), a GitHub/GitLab
           repository URL, shallow-cloned and indexed as a code graph, or a database
           connection string (postgresql://, mysql://, sqlite:///, ...). Database
           ingestion is disabled over the API by default: the request fails with
@@ -380,6 +382,8 @@ def get_remember_router() -> APIRouter:
         - **422 Unprocessable Entity**: A database connection string in raw_data while
           ALLOW_DATABASE_INGESTION is unset or false (DatabaseIngestionDisabled), or one
           that names cognee's own storage (DatabaseSourceRefused, SqliteSourceRefused)
+        - **403 Forbidden**: A server-side path in raw_data while ACCEPT_LOCAL_FILE_PATH is
+          unset or false (IngestionError naming the setting)
         - **409 Conflict**: Error during processing
         """
         # Swagger UI submits an untouched file list as one blank part; treat it
