@@ -17,7 +17,7 @@ from cognee.shared.logging_utils import get_logger
 
 from .models import IntegrationSyncPolicy
 from .next_due import next_due
-from .store import get_effective_sync_policy, get_sync_pause_level, stored_policy
+from .store import get_sync_pause_level, inheriting_credential_ids, stored_policy
 
 logger = get_logger("sync_policy_tick")
 
@@ -80,12 +80,9 @@ async def _connections_of(
         return [row.credential_id]
     # A default row starts the owner's connections that inherit it: not those with a
     # row of their own, which schedules or pauses them.
-    connections = []
-    for credential_id in await owned_credential_ids(row.principal_id):
-        effective = await get_effective_sync_policy(credential_id, row.principal_id)
-        if effective is not None and effective.id == row.id:
-            connections.append(credential_id)
-    return connections
+    return await inheriting_credential_ids(
+        row.principal_id, await owned_credential_ids(row.principal_id)
+    )
 
 
 async def run_due_syncs(

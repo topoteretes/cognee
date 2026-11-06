@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from cognee.modules.integrations.sync_policy import SyncPolicy
 from cognee.modules.integrations.sync_policy.models import IntegrationSyncPolicy
@@ -77,6 +77,35 @@ async def test_a_due_default_starts_the_connections_without_their_own_row(databa
 
     assert await host.tick() == 1
     assert host.started == [inheriting]
+
+
+@pytest.mark.asyncio
+async def test_a_due_default_costs_the_same_queries_however_many_connections_it_covers(
+    database,
+):
+    """A due default reads its connections' policies once, however many it covers.
+
+    Counted per SQL statement, so a loop of reads inside one session fails too.
+    """
+    statements = []
+
+    def count(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(database.engine.sync_engine, "before_cursor_execute", count)
+
+    async def queries_for(connections):
+        owner = _owner()
+        await store.save_sync_policy(owner, owner.id, HOURLY, now=SAVED)
+        host = _Host(owned=[uuid4() for _ in range(connections)])
+        statements.clear()
+        assert await host.tick() == connections
+        return len(statements)
+
+    try:
+        assert await queries_for(1) == await queries_for(20)
+    finally:
+        event.remove(database.engine.sync_engine, "before_cursor_execute", count)
 
 
 @pytest.mark.asyncio

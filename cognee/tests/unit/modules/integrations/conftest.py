@@ -55,6 +55,7 @@ class _Database:
     """
 
     def __init__(self, engine, path):
+        self.engine = engine
         self.path = path
         self.before_commit = None
         self.after_commit = None

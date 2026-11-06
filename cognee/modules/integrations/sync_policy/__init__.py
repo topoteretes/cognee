@@ -11,7 +11,6 @@ from .policy import CUSTOM_HOURS, INTERVAL_PRESETS, SyncPolicy
 from .store import (
     delete_sync_policy,
     get_caller_effective_sync_policy,
-    get_effective_sync_policy,
     get_sync_pause_level,
     get_sync_policy,
     pause_sync_policy,
@@ -31,7 +30,6 @@ __all__ = [
     "SyncPolicyNotFoundError",
     "delete_sync_policy",
     "get_caller_effective_sync_policy",
-    "get_effective_sync_policy",
     "get_sync_pause_level",
     "get_sync_policy",
     "next_due",

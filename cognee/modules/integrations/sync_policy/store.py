@@ -238,24 +238,32 @@ async def _connection_rows(
     return own, default
 
 
-async def get_effective_sync_policy(
-    credential_id: UUID, principal_id: UUID
-) -> IntegrationSyncPolicy | None:
-    """The connection's own row, else its owner's default, else None (no schedule).
-
-    Not scoped to a caller: the tick reads it for every due connection. Routes
-    use ``get_caller_effective_sync_policy``.
-    """
-    own, default = await _connection_rows(credential_id, principal_id)
-    return own or default
+async def inheriting_credential_ids(principal_id: UUID, credential_ids: list[UUID]) -> list[UUID]:
+    """Those of ``credential_ids`` with no row of their own under ``principal_id``: the ones
+    a default of that principal covers. ``get_caller_effective_sync_policy`` is the same
+    rule for one connection."""
+    async with get_relational_engine().get_async_session() as session:
+        own = set(
+            (
+                await session.execute(
+                    select(IntegrationSyncPolicy.credential_id).where(
+                        IntegrationSyncPolicy.principal_id == principal_id,
+                        IntegrationSyncPolicy.credential_id.is_not(None),
+                    )
+                )
+            ).scalars()
+        )
+    return [credential_id for credential_id in credential_ids if credential_id not in own]
 
 
 async def get_caller_effective_sync_policy(
     user: User, principal_id: UUID, credential_id: UUID
 ) -> IntegrationSyncPolicy:
-    """``get_effective_sync_policy`` for a caller who may act for the owner; none raises."""
+    """The connection's own row, else its owner's default, for a caller who may act for
+    the owner. No policy at either level raises ``SyncPolicyNotFoundError``."""
     await _require_actable(user, principal_id)
-    row = await get_effective_sync_policy(credential_id, principal_id)
+    own, default = await _connection_rows(credential_id, principal_id)
+    row = own or default
     if row is None:
         raise SyncPolicyNotFoundError()
     return row

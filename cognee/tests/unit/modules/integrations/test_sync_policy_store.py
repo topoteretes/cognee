@@ -158,13 +158,15 @@ async def test_effective_policy_is_own_row_then_default_then_none(database):
     tenant_id = await _add_tenant(database, owner)
     own_credential, inheriting_credential = uuid4(), uuid4()
 
-    assert await store.get_effective_sync_policy(inheriting_credential, tenant_id) is None
+    effective = store.get_caller_effective_sync_policy
+    with pytest.raises(SyncPolicyNotFoundError):
+        await effective(owner, tenant_id, inheriting_credential)
 
     await store.save_sync_policy(owner, tenant_id, DAILY, now=NOW)
     await store.save_sync_policy(owner, tenant_id, HOURLY, own_credential, now=NOW)
 
-    own = await store.get_effective_sync_policy(own_credential, tenant_id)
-    inherited = await store.get_effective_sync_policy(inheriting_credential, tenant_id)
+    own = await effective(owner, tenant_id, own_credential)
+    inherited = await effective(owner, tenant_id, inheriting_credential)
     assert own.interval_minutes == 60
     assert inherited.interval_minutes == 1440
     assert inherited.credential_id is None
@@ -178,7 +180,9 @@ async def test_deleting_a_connection_row_returns_it_to_the_default(database):
 
     await store.delete_sync_policy(user, user.id, credential_id)
 
-    assert (await store.get_effective_sync_policy(credential_id, user.id)).credential_id is None
+    assert (
+        await store.get_caller_effective_sync_policy(user, user.id, credential_id)
+    ).credential_id is None
     with pytest.raises(SyncPolicyNotFoundError):
         await store.delete_sync_policy(user, user.id, credential_id)
 
