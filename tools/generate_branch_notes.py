@@ -64,7 +64,6 @@ def collect_branch_payload(
 async def generate_notes_with_llm(payload: dict[str, Any]) -> Any:
     try:
         from pydantic import BaseModel, Field
-        from structured_llm import structured_completion
     except ImportError as exc:
         raise RuntimeError(f"Required dependencies not available: {exc}") from exc
 
@@ -89,15 +88,15 @@ async def generate_notes_with_llm(payload: dict[str, Any]) -> Any:
     )
 
     try:
-        return await structured_completion(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_model=BranchNotes,
-            api_key=api_key,
-            max_retries=2,
+        # Imported here, after LLM_API_KEY / LLM_MODEL are read: importing cognee
+        # loads a local .env over the environment.
+        from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+            NativeLiteLLMAdapter,
+        )
+
+        adapter = NativeLiteLLMAdapter(api_key=api_key, model=model, max_completion_tokens=16384)
+        return await adapter.acreate_structured_output(
+            text_input=user_prompt, system_prompt=system_prompt, response_model=BranchNotes
         )
     except Exception as exc:
         raise RuntimeError(f"LLM generation failed: {exc}") from exc

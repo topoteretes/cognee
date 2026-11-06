@@ -5,8 +5,9 @@ Generate human-friendly release notes by analyzing git diff with LLM.
 This script compares changes between two branches (typically main and dev)
 and uses an LLM to generate readable, user-focused release notes.
 
-Uses litellm directly to avoid cognee's dotenv.load_dotenv(override=True)
-which can overwrite CI environment variables with .env file placeholders.
+Calls cognee's NativeLiteLLMAdapter directly, with LLM_API_KEY / LLM_MODEL read
+from the environment before cognee is imported: importing cognee loads a local
+.env with override=True, which would replace them with .env placeholders.
 """
 
 import argparse
@@ -210,17 +211,16 @@ async def generate_release_notes_with_llm(
 ) -> Any:
     """Use LLM to generate human-friendly release notes.
 
-    Uses litellm directly instead of cognee's LLM client
-    to avoid cognee's dotenv.load_dotenv(override=True) overwriting
-    CI environment variables.
+    Uses cognee's NativeLiteLLMAdapter with the credentials read before
+    cognee is imported, since that import loads a local .env over the
+    environment.
     """
     try:
         from pydantic import BaseModel, Field
-        from structured_llm import structured_completion
     except ImportError as e:
         print(f"Error: Required dependencies not available: {e}", file=sys.stderr)
         print(
-            "Please ensure litellm and pydantic are installed.",
+            "Please ensure pydantic is installed.",
             file=sys.stderr,
         )
         return None
@@ -320,15 +320,15 @@ Create engaging release notes that help users understand what's new and improved
 """
 
     try:
-        response = await structured_completion(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text_input},
-            ],
-            response_model=ReleaseNotes,
-            api_key=api_key,
-            max_retries=2,
+        # Imported here, after LLM_API_KEY / LLM_MODEL are read: importing cognee
+        # loads a local .env over the environment.
+        from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+            NativeLiteLLMAdapter,
+        )
+
+        adapter = NativeLiteLLMAdapter(api_key=api_key, model=model, max_completion_tokens=16384)
+        response = await adapter.acreate_structured_output(
+            text_input=text_input, system_prompt=system_prompt, response_model=ReleaseNotes
         )
         return response
     except Exception as e:
