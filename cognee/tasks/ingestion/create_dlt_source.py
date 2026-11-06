@@ -254,15 +254,24 @@ def _parse_connection_string(connection_string: str):
 def _require_foreign_database_server(connection_string: str) -> None:
     """Raise when a network connection string targets a server cognee itself uses.
 
-    Matched by server (resolved address + port), not database name: the per-dataset
-    Postgres handlers keep one database per dataset on the same server, so any
-    database there may belong to another user. Every address of this machine
-    counts as one server, so a cognee database on ``localhost`` is refused under
-    ``127.0.0.2``, ``0.0.0.0``, ``::ffff:127.0.0.1`` or the host's own address too.
+    Two checks, by server and not by database name: the per-dataset Postgres
+    handlers keep one database per dataset on the same server, so any database
+    there may belong to another user.
 
-    The address is resolved here and again by the driver, so a name whose record
-    changes in between (DNS rebinding) is not caught; ``ALLOW_DATABASE_INGESTION``
-    is the control for callers who could do that.
+    1. Credentials. A string that carries one of cognee's own username/password
+       pairs is refused whatever host it names. This needs no address, so it holds
+       under any alias of the server (the host's LAN address behind compose's
+       ``host.docker.internal``, a name whose record changes between this check
+       and the driver's connect). It cannot cover a server that admits clients
+       without a password, or another role with access to cognee's databases.
+    2. Address. The host resolved to its addresses, each compared with cognee's
+       servers' on the same port. Best-effort: it knows every loopback, unspecified
+       and IPv4-mapped alias, and of this machine's own addresses what its
+       hostname resolves to, but cannot list every address of this machine or of
+       another host.
+
+    ``ALLOW_DATABASE_INGESTION`` and network egress rules are the controls; these
+    checks are the layer underneath for the deployments they do cover.
     """
     from cognee.exceptions import CogneeValidationError
 
@@ -273,6 +282,12 @@ def _require_foreign_database_server(connection_string: str) -> None:
         raise CogneeValidationError(
             message="Database connection strings must name the server as the URL's "
             f"host; the only options accepted are {', '.join(sorted(_ALLOWED_OPTIONS))}.",
+            name="DatabaseSourceRefused",
+        )
+    if (url.username or "", url.password or "") in get_cognee_database_credentials():
+        raise CogneeValidationError(
+            message="This connection string carries cognee's own database credentials and "
+            "cannot be ingested as a source.",
             name="DatabaseSourceRefused",
         )
     target = _server_addresses(url.host, url.port or _DEFAULT_PORTS.get(url.get_backend_name()))
@@ -287,6 +302,43 @@ def _require_foreign_database_server(connection_string: str) -> None:
             "ingested as a source.",
             name="DatabaseSourceRefused",
         )
+
+
+def get_cognee_database_credentials() -> set[tuple[str, str]]:
+    """Every ``(username, password)`` pair cognee's own database settings use.
+
+    Read from the relational, vector and graph settings' username and password
+    fields and from the vector, graph and session-cache URLs. A pair without a
+    password is left out: there is nothing to match, and a server that admits
+    clients without one is not covered by this check.
+    """
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.exc import ArgumentError
+
+    from cognee.infrastructure.databases.cache.config import get_cache_config
+    from cognee.infrastructure.databases.graph.config import get_graph_config
+    from cognee.infrastructure.databases.relational.config import get_relational_config
+    from cognee.infrastructure.databases.vector.config import get_vectordb_config
+
+    relational = get_relational_config()
+    vector = get_vectordb_config()
+    graph = get_graph_config()
+
+    pairs: list[tuple[str | None, str | None]] = [
+        (relational.db_username, relational.db_password),
+        (vector.vector_db_username, vector.vector_db_password),
+        (graph.graph_database_username, graph.graph_database_password),
+    ]
+    for value in (vector.vector_db_url, graph.graph_database_url, get_cache_config().cache_db_url):
+        if not value or "://" not in value:
+            continue
+        try:
+            url = make_url(value)
+        except ArgumentError:
+            continue
+        pairs.append((url.username, url.password))
+
+    return {(username or "", password) for username, password in pairs if password}
 
 
 def get_cognee_database_servers() -> set[tuple[str, int | None]]:
@@ -337,7 +389,9 @@ def _shares_a_server(
     A ``None`` port on either side matches every port on that address. Addresses
     are compared as addresses (see :func:`_same_machine`), not as strings: with
     cognee's server on ``localhost``, ``127.0.0.2``, ``0.0.0.0``,
-    ``::ffff:127.0.0.1`` and this machine's own interface addresses all reach it.
+    ``::ffff:127.0.0.1`` and the addresses this machine's hostname resolves to
+    all reach it. Other addresses of the same host are not known here; the
+    credential check in :func:`_require_foreign_database_server` covers them.
     """
     local = _this_machine_addresses()
     return any(
@@ -384,7 +438,8 @@ def _this_machine_addresses() -> frozenset:
 
     The standard library cannot list interfaces, so this is what the hostname
     resolves to: every interface on macOS, usually the primary address alone on
-    Linux (or only a loopback alias where ``/etc/hosts`` maps the hostname to one).
+    Linux, and no interface at all on Debian-family hosts, whose ``/etc/hosts``
+    maps the hostname to the loopback alias ``127.0.1.1``.
     """
     import ipaddress
     import socket

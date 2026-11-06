@@ -27,13 +27,16 @@ FOREIGN = "203.0.113.5"
 
 @pytest.fixture
 def servers(monkeypatch):
-    """cognee's own databases: relational on localhost:5432, pgvector on
-    127.0.0.2:5433 (by URL), session cache on 127.0.0.3 (default port)."""
+    """cognee's own databases: relational on localhost:5432 as cognee/cognee,
+    pgvector on 127.0.0.2:5433 (by URL, as vec/vecpass), session cache on
+    127.0.0.3 (default port, as c/c); graph with a user but no password."""
     monkeypatch.delenv(ALLOW_DATABASE_INGESTION_ENV, raising=False)
     monkeypatch.setattr(
         relational_config,
         "get_relational_config",
-        lambda: SimpleNamespace(db_host="localhost", db_port="5432"),
+        lambda: SimpleNamespace(
+            db_host="localhost", db_port="5432", db_username="cognee", db_password="cognee"
+        ),
     )
     monkeypatch.setattr(
         vector_config,
@@ -41,14 +44,20 @@ def servers(monkeypatch):
         lambda: SimpleNamespace(
             vector_db_host="",
             vector_db_port=1234,
-            vector_db_url="postgresql+asyncpg://cognee:cognee@127.0.0.2:5433/cognee_db",
+            vector_db_username="",
+            vector_db_password="",
+            vector_db_url="postgresql+asyncpg://vec:vecpass@127.0.0.2:5433/cognee_db",
         ),
     )
     monkeypatch.setattr(
         graph_config,
         "get_graph_config",
         lambda: SimpleNamespace(
-            graph_database_host="", graph_database_port=123, graph_database_url=""
+            graph_database_host="",
+            graph_database_port=123,
+            graph_database_url="",
+            graph_database_username="neo4j",
+            graph_database_password="",
         ),
     )
     monkeypatch.setattr(
@@ -88,6 +97,41 @@ def test_other_addresses_of_the_same_machine_are_refused(servers, dsn):
     these reaches the Postgres that cognee's settings call ``localhost``."""
     with pytest.raises(CogneeValidationError, match="cognee's own storage"):
         create_dlt_source_from_connection_string(dsn)
+
+
+@pytest.mark.parametrize(
+    "dsn",
+    [
+        f"postgresql://cognee:cognee@{FOREIGN}:5432/cognee_db",  # relational credentials
+        f"postgresql://vec:vecpass@{FOREIGN}/cognee_db",  # pgvector URL credentials
+        f"mysql://c:c@{FOREIGN}/cache",  # session-cache URL credentials, any scheme
+        "postgresql://cognee:cognee@no-such-host.invalid/cognee_db",  # no address needed
+        "postgresql://cognee:cognee@host.docker.internal.invalid:5432/cognee_db",
+    ],
+    ids=["relational", "vector-url", "cache-url", "unresolvable-host", "other-alias"],
+)
+def test_cognees_own_credentials_are_refused_on_any_host(servers, dsn):
+    """The server's other addresses cannot all be known (the host's LAN address
+    behind compose's host.docker.internal, a rebinding name), but every such
+    bypass needs cognee's credentials, which are refused before any resolving."""
+    with pytest.raises(CogneeValidationError, match="cognee's own database credentials"):
+        create_dlt_source_from_connection_string(dsn)
+
+
+@pytest.mark.parametrize(
+    "dsn",
+    [
+        f"postgresql://cognee:other@{FOREIGN}/shop",  # cognee's user name, another password
+        f"postgresql://other:cognee@{FOREIGN}/shop",  # cognee's password, another user
+        f"postgresql://neo4j@{FOREIGN}/shop",  # a cognee user configured without a password
+        f"postgresql://neo4j:anything@{FOREIGN}/shop",
+    ],
+    ids=["same-user", "same-password", "passwordless-pair", "passwordless-pair-with-password"],
+)
+def test_other_credentials_are_allowed(servers, dsn):
+    """Matched as a pair, so a server that merely shares a user name or a password
+    with cognee's is not refused, and a cognee pair without a password matches nothing."""
+    _require_foreign_database_server(dsn)
 
 
 def test_this_machines_own_address_is_cognees_server(servers):
