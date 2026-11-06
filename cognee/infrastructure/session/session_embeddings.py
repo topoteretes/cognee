@@ -3,6 +3,7 @@
 from collections.abc import Iterable
 from uuid import UUID
 
+from cognee.context_global_variables import read_only_dataset_context
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import get_logger
@@ -99,6 +100,8 @@ async def index_session_qa(
     answer: str,
 ) -> None:
     """Index one cached QA turn for vector-engine-backed session recall. Fail-open."""
+    if read_only_dataset_context.get():
+        return
     text = qa_vector_text(question, answer)
     if not text:
         return
@@ -124,7 +127,7 @@ async def search_session_qa_ids(
     limit: int = VECTOR_RECALL_TOP_K,
 ) -> list[str]:
     """Search the session QA vector index and return matching QA ids. Fail-open."""
-    if limit <= 0 or not query_text:
+    if limit <= 0 or not query_text or read_only_dataset_context.get():
         return []
 
     try:

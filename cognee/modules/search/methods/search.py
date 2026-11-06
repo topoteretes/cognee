@@ -6,6 +6,8 @@ from cognee import __version__ as cognee_version
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import (
     backend_access_control_enabled,
+    read_only_dataset_context,
+    session_dataset_id,
     set_database_global_context_variables,
 )
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -36,6 +38,46 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry, telemetry_on_error
 
 logger = get_logger()
+
+
+async def _resolve_session_dataset_for_search(dataset: Dataset, user: User) -> tuple[bool, UUID | None]:
+    """Determine whether searching ``dataset`` should isolate session writes from ``dataset``.
+
+    When ``user`` does not own ``dataset`` and holds only ``read`` (not ``write``)
+    permission on it, session records, default session IDs, and session QA vector
+    indexing must not be attributed or written to the shared dataset (#6375).
+    Returns ``(is_read_only, fallback_user_dataset_id)``.
+    """
+    dataset_owner_id = getattr(dataset, "owner_id", None)
+    user_id = getattr(user, "id", None)
+    if dataset_owner_id is None or user_id is None or dataset_owner_id == user_id:
+        return False, getattr(dataset, "id", None)
+
+    try:
+        from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
+
+        writable = await get_specific_user_permission_datasets(user_id, "write", [dataset.id])
+        if writable:
+            return False, dataset.id
+    except Exception:
+        pass
+
+    # User has read-only access to this shared dataset: resolve the user's own
+    # default dataset (if any) without creating one, or fall back to None.
+    try:
+        from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+        from cognee.modules.data.methods import get_datasets, get_datasets_by_name
+
+        default_ds = await get_datasets_by_name([DEFAULT_DATASET_NAME], user_id)
+        if default_ds:
+            return True, default_ds[0].id
+        owned_ds = [ds for ds in (await get_datasets(user_id) or []) if getattr(ds, "owner_id", None) == user_id]
+        if len(owned_ds) == 1:
+            return True, owned_ds[0].id
+    except Exception:
+        pass
+
+    return True, None
 
 
 def _single_dataset_id(dataset_ids: list[UUID] | UUID | None) -> UUID | None:
@@ -469,6 +511,13 @@ async def search_in_datasets_context(
 
                     span.set_attribute("cognee.search.graph_empty", True)
 
+                # Isolate session attribution and vector indexing when the user has
+                # read-only access to a shared dataset (#6375).
+                is_ro_dataset, user_session_ds_id = await _resolve_session_dataset_for_search(
+                    dataset, user
+                )
+                ro_token = read_only_dataset_context.set(is_ro_dataset)
+                sess_ds_token = session_dataset_id.set(user_session_ds_id)
                 # Get retriever output in the context of the current dataset
                 try:
                     return await get_retriever_output(
@@ -493,6 +542,9 @@ async def search_in_datasets_context(
                         neighborhood_seed_top_k=neighborhood_seed_top_k,
                         include_references=include_references,
                     )
+                finally:
+                    read_only_dataset_context.reset(ro_token)
+                    session_dataset_id.reset(sess_ds_token)
                 except NoDataError as error:
                     # The retriever knows its graph (or collection) is empty but not
                     # which dataset it was searching. This frame knows both, so tag
