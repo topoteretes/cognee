@@ -22,9 +22,10 @@ The rules see only the query text. What the deployment can run is applied
 afterwards, in one place, from ``RoutingConstraints``: whether an LLM is
 available, whether Cypher queries are allowed, and, when the request carries a
 ``node_name`` filter, which types can apply it (a pick that cannot resolves to
-its stand-in in ``SCOPED_STAND_INS`` when that applies the filter, else to the
-fallback, which applies every filter). With no LLM the router still
-routes, but only to types that can execute without one: retrieval-only types
+the fallback, which applies every filter). A scoped lexical pick uses the
+fallback with ``only_context=True`` even when an LLM is available, preserving
+document and DLT retrieval without generating an answer. With no LLM the router
+still routes, but only to types that can execute without one: retrieval-only types
 run as they are, completion types whose single LLM call is the final answer run
 with ``only_context=True`` (recall returns the assembled prompt, the session
 layer is read-only), and types that need an LLM during retrieval resolve to the
@@ -83,7 +84,7 @@ class RoutingConstraints:
 @dataclass(frozen=True)
 class RouteDecision:
     """Routing decision: the search type, the rule that picked it, whether the
-    search must run with ``only_context=True`` because no LLM can write the answer,
+    search must return context instead of generating an answer,
     and the retriever config the type needs (CODE: which operation to run)."""
 
     search_type: SearchType
@@ -176,13 +177,8 @@ _CODE_QUESTION = re.compile(rf"{_CODE_VERB_QUESTION}|{_CODE_DEFINITION}|{_CODE_U
 # routed type that is not in COMPLETION_ONLY_TYPES resolves to the fallback, so a new
 # LLM-free rule target must be added here to keep its own type on a keyless install.
 LLM_FREE_TYPES: frozenset[SearchType] = frozenset(
-    {SearchType.CHUNKS_LEXICAL, SearchType.CHUNKS, SearchType.CODING_RULES, SearchType.CODE}
+    {SearchType.CHUNKS_LEXICAL, SearchType.CODING_RULES, SearchType.CODE}
 )
-# A routed type that cannot apply the request's node_name filter resolves to its
-# stand-in here when the stand-in can, so the pick keeps its cost: a quoted phrase
-# stays an LLM-free chunk search instead of becoming a completion. Types without a
-# stand-in resolve to the fallback.
-SCOPED_STAND_INS: dict[SearchType, SearchType] = {SearchType.CHUNKS_LEXICAL: SearchType.CHUNKS}
 # The only LLM call is the final completion: runs with only_context=True with no LLM,
 # returning the prompt the completion would have received.
 COMPLETION_ONLY_TYPES: frozenset[SearchType] = frozenset(
@@ -281,24 +277,25 @@ def constrain(
     """Resolve a rule's pick against what the deployment can run.
 
     Applied after the rules so the rules stay about the query text only. The
-    fallback itself is a completion type, so with no LLM it becomes
-    ``HYBRID_COMPLETION`` with ``only_context=True``.
+    fallback is ``HYBRID_COMPLETION`` with ``only_context=True`` when no LLM
+    is available or when a lexical pick cannot apply the requested scope.
     """
     if constraints is None:
         return decision
     search_type = decision.search_type
+    only_context = False
 
     # The fallback honours every node_name scope (node_name_scope.SUPPORTED_SCOPES).
     if constraints.scoped_types is not None and search_type not in constraints.scoped_types:
-        stand_in = SCOPED_STAND_INS.get(search_type)
-        if stand_in not in constraints.scoped_types:
-            stand_in = ROUTER_FALLBACK_TYPE
+        # CHUNKS covers only documents; hybrid also retrieves DLT rows. Keep a
+        # scoped lexical query retrieval-only even when an LLM is available.
+        only_context = search_type is SearchType.CHUNKS_LEXICAL
         logger.info(
             "query_router: %s cannot apply the node_name filter; using %s",
             search_type.value,
-            stand_in.value,
+            ROUTER_FALLBACK_TYPE.value,
         )
-        search_type = stand_in
+        search_type = ROUTER_FALLBACK_TYPE
 
     if not constraints.cypher_allowed and search_type in CYPHER_TYPES:
         logger.debug(
@@ -307,7 +304,7 @@ def constrain(
         search_type = ROUTER_FALLBACK_TYPE
 
     if constraints.llm_available:
-        return RouteDecision(search_type=search_type, rule=decision.rule)
+        return RouteDecision(search_type=search_type, rule=decision.rule, only_context=only_context)
 
     if search_type in LLM_FREE_TYPES:
         return RouteDecision(search_type=search_type, rule=decision.rule)

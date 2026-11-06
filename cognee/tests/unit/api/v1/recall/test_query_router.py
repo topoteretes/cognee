@@ -416,16 +416,20 @@ class TestNodeNameScopedRouting:
             search_type=ROUTER_FALLBACK_TYPE, rule=rule
         )
 
-    def test_a_quoted_phrase_stays_an_llm_free_chunk_search(self):
-        """CHUNKS_LEXICAL cannot apply node sets; CHUNKS can, and costs no LLM call either."""
-        assert route_query('"polonium and radium"', self._node_set_scoped()) == RouteDecision(
-            search_type=SearchType.CHUNKS, rule="quoted_phrase"
+    @pytest.mark.parametrize("llm_available", [True, False])
+    def test_a_scoped_quoted_phrase_returns_hybrid_context(self, llm_available):
+        """Hybrid applies the scope and covers DLT rows without generating an answer."""
+        assert route_query(
+            '"polonium and radium"', self._node_set_scoped(llm_available=llm_available)
+        ) == RouteDecision(
+            search_type=SearchType.HYBRID_COMPLETION, rule="quoted_phrase", only_context=True
         )
 
-    def test_a_stand_in_that_cannot_apply_the_filter_is_not_used(self):
-        """Only CHUNKS_LEXICAL has a stand-in, and only while CHUNKS honours the scope."""
-        constraints = RoutingConstraints(scoped_types=frozenset({SearchType.HYBRID_COMPLETION}))
-        assert route_query('"radium"', constraints).search_type is ROUTER_FALLBACK_TYPE
+    def test_a_lexical_pick_that_applies_the_filter_keeps_its_route(self):
+        constraints = RoutingConstraints(scoped_types=frozenset({SearchType.CHUNKS_LEXICAL}))
+        assert route_query('"radium"', constraints) == RouteDecision(
+            search_type=SearchType.CHUNKS_LEXICAL, rule="quoted_phrase"
+        )
 
     @pytest.mark.parametrize(
         "query, search_type",
@@ -445,9 +449,9 @@ class TestNodeNameScopedRouting:
         assert set(SUPPORTED_SCOPES[ROUTER_FALLBACK_TYPE]) == set(NodeNameScope)
 
     def test_composes_with_no_llm(self):
-        """The stand-in is LLM-free, so it runs as it is; the fallback runs only_context."""
+        """Both the scoped lexical pick and the count return hybrid context with no LLM."""
         assert route_query('"radium"', self._node_set_scoped(llm_available=False)) == RouteDecision(
-            search_type=SearchType.CHUNKS, rule="quoted_phrase"
+            search_type=ROUTER_FALLBACK_TYPE, rule="quoted_phrase", only_context=True
         )
         assert route_query(
             "How many tickets are open?", self._node_set_scoped(llm_available=False)

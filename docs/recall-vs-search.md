@@ -208,9 +208,12 @@ That is why these are *not* auto-routed, even though they are valid
 The router picks only a type that can apply the filter (`node_name_scope` in
 `cognee/modules/search/methods/`). `CHUNKS_LEXICAL`, `CODE` and `BROAD` cannot,
 and with a filter they would raise `QueryValidationError`. A quoted phrase
-resolves to `CHUNKS`, which applies a node-set filter and, like the lexical
-search, makes no LLM call; a code question or a count resolves to
-`HYBRID_COMPLETION`, which applies it. The router logs the swap at info.
+resolves to `HYBRID_COMPLETION` with `only_context=True`, whether an LLM is
+available or not. Hybrid applies the filter and retrieves both document chunks
+and DLT rows; `CHUNKS` would exclude the rows. The response contains hybrid's
+assembled context/prompt instead of a generated answer. A code question or a
+count resolves to `HYBRID_COMPLETION` normally (with `only_context=True` only
+when no LLM is available). The router logs the swap at info.
 `CODING_RULES` and `TEMPORAL` keep their routes. A pinned `query_type` is not
 rerouted: a type that cannot apply the filter raises.
 

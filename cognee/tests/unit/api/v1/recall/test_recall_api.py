@@ -469,17 +469,21 @@ async def test_cloud_client_recall_payload_includes_context_profile(monkeypatch)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("llm_available", [True, False])
 @pytest.mark.parametrize(
-    "node_name, expected_type",
+    "query_text, node_name, expected_type, scoped_lexical",
     [
-        (None, SearchType.CHUNKS_LEXICAL),
+        ('"radium"', None, SearchType.CHUNKS_LEXICAL, False),
+        ('"radium"', [], SearchType.CHUNKS_LEXICAL, False),
         # CHUNKS_LEXICAL cannot apply a node-set filter and would raise, so the
-        # router takes its stand-in, CHUNKS, which applies it and costs no LLM call.
-        (["proj"], SearchType.CHUNKS),
+        # router returns hybrid context, including DLT rows, without an LLM answer.
+        ('"radium"', ["proj"], SearchType.HYBRID_COMPLETION, True),
+        ("What calls parse_config?", ["proj"], SearchType.HYBRID_COMPLETION, False),
+        ("How many tickets are open?", ["proj"], SearchType.HYBRID_COMPLETION, False),
     ],
 )
 async def test_recall_routes_a_node_name_filter_to_a_type_that_applies_it(
-    monkeypatch, api_recall_mod, node_name, expected_type
+    monkeypatch, api_recall_mod, query_text, node_name, expected_type, scoped_lexical, llm_available
 ):
     from cognee.modules import preflight
     from cognee.modules.recall.config import RecallConfig
@@ -490,7 +494,9 @@ async def test_recall_routes_a_node_name_filter_to_a_type_that_applies_it(
         return None
 
     async def dummy_authorized_search(**kwargs):
-        calls.append((kwargs.get("query_type"), kwargs.get("node_name")))
+        calls.append(
+            (kwargs.get("query_type"), kwargs.get("node_name"), kwargs.get("only_context"))
+        )
         return []
 
     monkeypatch.setattr(
@@ -498,7 +504,7 @@ async def test_recall_routes_a_node_name_filter_to_a_type_that_applies_it(
         "set_session_user_context_variable",
         dummy_set_session_user_context_variable,
     )
-    monkeypatch.setattr(preflight, "llm_available", lambda _config: True)
+    monkeypatch.setattr(preflight, "llm_available", lambda _config: llm_available)
     recall_config_mod = importlib.import_module("cognee.modules.recall.config")
     config = RecallConfig(_env_file=None, recall_warmup_shortcircuit=False)
     monkeypatch.setattr(recall_config_mod, "get_recall_config", lambda: config)
@@ -509,11 +515,14 @@ async def test_recall_routes_a_node_name_filter_to_a_type_that_applies_it(
     monkeypatch.setattr(search_methods, "authorized_search", dummy_authorized_search)
 
     await api_recall_mod.recall(
-        query_text='"radium"',
+        query_text=query_text,
         dataset_ids=[uuid4()],
         node_name=node_name,
         user=_make_user(),
     )
 
     # The first search is the routed one; an empty routed result may retry as the default.
-    assert calls[0] == (expected_type, node_name)
+    expected_only_context = scoped_lexical or (
+        not llm_available and expected_type is SearchType.HYBRID_COMPLETION
+    )
+    assert calls[0] == (expected_type, node_name, expected_only_context)
