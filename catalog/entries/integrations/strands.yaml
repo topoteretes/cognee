@@ -1,0 +1,32 @@
+id: strands
+title: Cognee memory for Strands agents
+kind: integration
+stack: framework
+tags:
+  - strands
+  - python
+  - tools
+  - session-management
+  - memory-tiers
+summary: >-
+  Drop-in Strands tools backed by Cognee with two memory tiers: a permanent
+  knowledge graph plus a fast session cache you promote with cognee.improve().
+what_youll_build: >-
+  A Strands agent that captures context cheaply in the session cache during
+  runs, then persists the useful parts into the permanent knowledge graph.
+quickstart: |
+  pip install cognee-integration-strands
+  export LLM_API_KEY=your_openai_key
+  # in your agent code:
+  from cognee_integration_strands import cognee_tools
+  from strands import Agent
+  agent = Agent(model=model, tools=cognee_tools())
+  agent("Remember that we signed a contract with Meditech Solutions for 1.2M.")
+  agent("What is the value of the Meditech Solutions contract?")
+expected_output: >-
+  The second agent call answers the contract value from the permanent graph
+  even from a fresh agent instance.
+difficulty: medium
+repo: topoteretes/cognee-integrations
+path: integrations/strands
+inventory_slug: strands
