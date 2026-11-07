@@ -251,6 +251,35 @@ class TestSessionManager:
         )
 
     @pytest.mark.asyncio
+    async def test_add_agent_trace_step_skips_extraction_in_coding_mode(
+        self, sm, mock_cache, monkeypatch
+    ):
+        """DISTILLATION_MODE=coding extracts once per unit from improve(), never per trace."""
+        import cognee.infrastructure.session.agent_context_extraction as ace
+        import cognee.modules.improve.config as improve_config
+
+        live_spy = AsyncMock(return_value=[])
+        pending_spy = AsyncMock(return_value=[])
+        monkeypatch.setattr(ace, "extract_live_agent_context", live_spy)
+        monkeypatch.setattr(ace, "extract_pending_agent_context", pending_spy)
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
+        monkeypatch.setattr(improve_config, "coding_distillation_enabled", lambda: True)
+
+        trace_id = await sm.add_agent_trace_step(
+            user_id="u1",
+            origin_function="Edit",
+            status="error",
+            session_id="s1",
+            error_message="No changes to make",
+            generate_feedback_with_llm=False,
+        )
+
+        assert trace_id
+        mock_cache.append_agent_trace_step.assert_awaited_once()
+        live_spy.assert_not_awaited()
+        pending_spy.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_add_agent_trace_step_skips_extraction_when_disabled(
         self, sm, mock_cache, monkeypatch
     ):

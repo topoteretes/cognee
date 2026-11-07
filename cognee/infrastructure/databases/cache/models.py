@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -18,12 +19,33 @@ def _validate_list_of_str(value: object, key: str) -> list[str]:
     return value
 
 
+def normalize_event_time(value: str) -> str:
+    """An ISO-8601 event time as the cache stores it: timezone-aware, in UTC.
+
+    The client's clock stamps the event (the plugin's Stop hook for an answer, its
+    PostToolUse hook for a trace), so a session's entries compare on one clock
+    whatever order they arrived in. A naive or unparsable value is refused.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("time must be a non-empty ISO-8601 string")
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError(f"time is not an ISO-8601 timestamp: {value!r}") from error
+    if parsed.tzinfo is None:
+        raise ValueError("time must carry a timezone offset")
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
 class SessionQAEntry(BaseModel):
     """
     Canonical format for a QA entry stored in session cache.
 
     Fields:
-        time: ISO format timestamp when the QA was created.
+        time: ISO format timestamp of the turn's end (the client's event time when it
+            sent one, else the time the entry was stored).
+        prompt_time: ISO format timestamp of the turn's start, the prompt's submission,
+            when the client sent one; "" otherwise.
         qa_id: Unique identifier for the entry (required for update/delete).
         question: User's question.
         context: Context used to generate the answer.
@@ -42,6 +64,7 @@ class SessionQAEntry(BaseModel):
     context: str
     answer: str
     qa_id: str | None = None
+    prompt_time: str = ""
     feedback_text: str | None = None
     feedback_score: int | None = None
     used_graph_element_ids: dict[str, list[str]] | None = None
@@ -122,11 +145,14 @@ class SessionAgentTraceEntry(BaseModel):
         method_return_value: Serialized method return value for the step.
         error_message: Error details for failed steps.
         session_feedback: Per-step feedback generated from the step only.
+        time: ISO format timestamp of the step (the client's event time when it sent
+            one, else the time the entry was stored); "" on rows written before it existed.
     """
 
     trace_id: str
     origin_function: str
     status: str
+    time: str = ""
     memory_query: str = ""
     memory_context: str = ""
     method_params: dict[str, Any] = Field(default_factory=dict)

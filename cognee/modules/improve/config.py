@@ -19,12 +19,13 @@ Environment variables (prefix ``IMPROVE_``)::
     IMPROVE_TRACE_WINDOW_STEPS=0       # agent trace steps per persisted document; 0 = all pending
     IMPROVE_TRACE_WINDOWS_PER_RUN=0    # max agent trace documents per run; 0 = drain
     IMPROVE_DISTILL_MAX_BATCHES_PER_RUN=0  # curator batches per distill run; 0 = uncapped
+    DISTILLATION_MODE=coding           # unset (default) or ``coding``; no IMPROVE_ prefix
 """
 
 from functools import lru_cache
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from cognee.shared.logging_utils import get_logger
@@ -68,8 +69,29 @@ class ImproveConfig(BaseSettings):
     # A cap curates only the most relevant entries that fit in this many curator
     # batches and seals the rest uncurated; 0 means no cap.
     distill_max_batches_per_run: int = 0
+    # ``coding`` switches agent-trace extraction and session distillation to the
+    # coding-agent path (SDK-1335): nothing is extracted while traces arrive,
+    # improve() extracts one unit of work at a time with tool inputs and the
+    # final answer, and lessons are typed documents with a ``State-Key``. Unset,
+    # every prompt, input and document is the one the default path has always
+    # produced. Read from the bare ``DISTILLATION_MODE``, without the prefix.
+    distillation_mode: Literal["", "coding"] = Field(
+        default="",
+        validation_alias=AliasChoices("DISTILLATION_MODE", "distillation_mode"),
+    )
 
     model_config = SettingsConfigDict(env_prefix="IMPROVE_", extra="ignore")
+
+    @property
+    def coding_distillation(self) -> bool:
+        return self.distillation_mode == "coding"
+
+    @field_validator("distillation_mode", mode="before")
+    @classmethod
+    def _normalize_mode(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip().lower()
 
     @field_validator("stages_disabled", mode="before")
     @classmethod
@@ -121,6 +143,15 @@ class ImproveConfig(BaseSettings):
         if value < 0:
             raise ValueError("debounce_seconds must be >= 0")
         return value
+
+
+def coding_distillation_enabled() -> bool:
+    """True when ``DISTILLATION_MODE=coding`` is set.
+
+    Read fresh, not through the cached config: the mode is toggled after
+    ``import cognee`` in tests and demos, and the gates must see the live env.
+    """
+    return ImproveConfig().coding_distillation
 
 
 @lru_cache

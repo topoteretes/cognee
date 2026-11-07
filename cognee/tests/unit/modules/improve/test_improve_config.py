@@ -97,6 +97,7 @@ def test_config_declares_no_shared_knobs():
         "trace_window_steps",
         "trace_windows_per_run",
         "distill_max_batches_per_run",
+        "distillation_mode",
     }
     for shared in ("triplet_embedding", "caching", "auto_feedback", "personalization_enabled"):
         assert shared not in fields
@@ -104,3 +105,24 @@ def test_config_declares_no_shared_knobs():
 
 def test_getter_is_cached():
     assert get_improve_config() is get_improve_config()
+
+
+def test_distillation_mode_reads_the_bare_env_name(monkeypatch):
+    monkeypatch.delenv("DISTILLATION_MODE", raising=False)
+    assert ImproveConfig(_env_file=None).distillation_mode == ""
+    assert ImproveConfig(_env_file=None).coding_distillation is False
+
+    monkeypatch.setenv("DISTILLATION_MODE", " Coding ")
+    config = ImproveConfig(_env_file=None)
+    assert config.distillation_mode == "coding"
+    assert config.coding_distillation is True
+
+    monkeypatch.setenv("IMPROVE_DISTILLATION_MODE", "coding")
+    monkeypatch.delenv("DISTILLATION_MODE")
+    assert ImproveConfig(_env_file=None).distillation_mode == ""  # the prefix is not read
+
+
+def test_distillation_mode_rejects_unknown_values(monkeypatch):
+    monkeypatch.setenv("DISTILLATION_MODE", "research")
+    with pytest.raises(ValidationError):
+        ImproveConfig(_env_file=None)

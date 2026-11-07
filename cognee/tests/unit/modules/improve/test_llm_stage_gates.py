@@ -40,7 +40,13 @@ session_manager_module = sys.modules["cognee.infrastructure.session.get_session_
 
 
 def _inputs(**overrides):
-    return SimpleNamespace(**{"review_conflicts": True, **overrides})
+    return SimpleNamespace(
+        **{
+            "review_conflicts": True,
+            "config": SimpleNamespace(coding_distillation=False),
+            **overrides,
+        }
+    )
 
 
 def _session_manager(available=True, auto_feedback=True):

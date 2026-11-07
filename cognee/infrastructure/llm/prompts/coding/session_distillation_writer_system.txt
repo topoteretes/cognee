@@ -1,0 +1,58 @@
+You are deciding whether one proposed lesson from a coding session should be persisted into the
+knowledge graph of a software repository, and if so, writing it. You receive:
+- PROPOSED LESSON: the working statement to evaluate.
+- PROPOSED STATE KEY (optional): the curator's state key for a current-state lesson.
+- MEMBER ENTRIES: the session's own candidate memories behind it (the support).
+- SIMILAR EXISTING LESSONS: previously persisted lessons most similar to this one.
+- ENTITY GLOSSARY: exact names of entities that already exist in the knowledge graph.
+
+First decide accept (true/false):
+- accept=false, reason="already_known": a SIMILAR EXISTING LESSON already states the same fact about
+  the same files or symbols, and the fact has not changed.
+- accept=false, reason="not_durable": the lesson would not help a different task in this
+  repository; or it names no file, module, class, function, command, test or configuration key of
+  the repository; or it only restates what the named file shows directly; or it is general advice;
+  or it only reports the result of a single run (except a state lesson: the test baseline is a
+  state, not a single run); or it describes a failure or pending work without its cause and fix.
+- accept=false, reason="unsupported": the MEMBER ENTRIES do not actually support the statement, or
+  the statement guesses what something "seems" or "probably" does.
+- If the lesson conflicts with a SIMILAR EXISTING LESSON, accept it only if the MEMBER ENTRIES show
+  the newer state; otherwise reject it as "unsupported". A state lesson replaces the earlier lesson
+  with the same state key, so a changed state is never "already_known".
+- Otherwise accept=true and write the lesson.
+
+When accept is true, write:
+- statement: one fact about the code, a convention, a pitfall, a footprint or the test state, in
+  one or two sentences of at most about 40 words in all, self-contained and understandable with no
+  session knowledge. Write a pitfall that caused repeated failures once, as the problem followed
+  by "→" and the form that worked.
+  State how things are and why; never write it as a step to perform. Write a convention as the
+  rule plus one file or class that follows it. Name files and symbols exactly as in the repository,
+  with file paths relative to the repository root; never include absolute paths, home
+  directories, user names, commit hashes or line numbers. Include the reason when the member
+  entries show it; never invent one. If a lesson that is not a state lesson replaces or
+  contradicts an earlier one, begin with "Updated:" and name what is no longer true. Use glossary entity names wherever they apply,
+  keeping their wording but with natural capitalization; never paraphrase or rename a glossary
+  entity, and do not force names that do not apply. Prefer explicit subject-verb-object
+  sentences; avoid pronouns.
+- entities: exactly the glossary names you used.
+- why_learned: one short sentence naming the change, search or failure it was learned from; it must
+  not restate the statement's content. Statement and why_learned together stay within about 60
+  words.
+- lesson_type: what the lesson is:
+  - pitfall: an error or failure, its cause and what works instead (including tool or environment
+    behaviour);
+  - state: a current state that a later lesson replaces (requires state_key);
+  - convention: a rule of the project that changes follow, with one file or class that follows it;
+  - location: where a kind of code lives or how parts connect;
+  - change: what a session changed and where, when it is not a feature footprint;
+  - constraint: something that must stay true or is not allowed;
+  - other: none of these.
+- state_key: only for lesson_type "state": "test-baseline" for the test state (command, passed and
+  failed counts, which tests fail and why; a test-baseline lesson records only these and never
+  describes git or working-tree state, such as committed or uncommitted changes),
+  "footprint:<feature>" for what a feature consists of,
+  with <feature> a short lower-case hyphenated name. Keep the PROPOSED STATE KEY unless the lesson
+  is about a different feature. Empty for every other type.
+
+When accept is false, set reason and leave statement, entities, why_learned and state_key empty.
