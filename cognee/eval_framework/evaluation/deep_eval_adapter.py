@@ -30,6 +30,7 @@ class DeepEvalAdapter(BaseEvalAdapter):
     def _calculate_metric(self, metric: str, test_case: LLMTestCase) -> dict[str, Any]:
         """Calculate a single metric for a test case with retry logic."""
         metric_to_calculate = self.g_eval_metrics[metric]
+        last_error: Exception | None = None
 
         for attempt in range(self.n_retries):
             try:
@@ -39,6 +40,7 @@ class DeepEvalAdapter(BaseEvalAdapter):
                     "reason": metric_to_calculate.reason,
                 }
             except Exception as e:
+                last_error = e
                 logger.warning(
                     f"Attempt {attempt + 1}/{self.n_retries} failed for metric '{metric}': {e}"
                 )
@@ -49,9 +51,12 @@ class DeepEvalAdapter(BaseEvalAdapter):
                         f"All {self.n_retries} attempts failed for metric '{metric}'. Returning None values."
                     )
 
+        # The score stays None (not 0) so it is excluded from means; the error says why, and
+        # MetricCoverage / the run manifest report how many questions ended up unscored.
         return {
             "score": None,
             "reason": None,
+            "error": f"{type(last_error).__name__}: {last_error}",
         }
 
     async def evaluate_answers(
