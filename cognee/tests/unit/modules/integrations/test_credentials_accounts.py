@@ -82,3 +82,26 @@ async def test_the_connections_come_back_newest_first_for_one_provider_only(cred
     listed = await store.list_active_credentials_for_provider(user_id, "notion")
 
     assert [credential.provider_account_id for credential in listed] == ["ws-2", "ws-1"]
+
+
+@pytest.mark.asyncio
+async def test_the_owner_is_the_workspace_when_set_else_the_user_in_python_and_in_sql(
+    credential_db,
+):
+    """One rule in two forms: the owner of a row, and the SQL listing a principal's rows,
+    must agree, or routes save a policy under one owner that the scheduler never runs."""
+    user_id, workspace_id = uuid4(), uuid4()
+    personal = await connect(user_id, "personal", "Personal")
+    shared = await store.upsert_credential(
+        provider="notion",
+        provider_account_id="shared",
+        user_id=user_id,
+        workspace_id=workspace_id,
+        token_payload={"access_token": "token-shared"},
+    )
+    await connect(user_id, "gone", "Gone")
+    await store.revoke_credential_by_account("notion", "gone")
+
+    assert [store.owner_principal_id(c) for c in (personal, shared)] == [user_id, workspace_id]
+    assert await store.list_active_credential_ids_for_owner(user_id) == [personal.id]
+    assert await store.list_active_credential_ids_for_owner(workspace_id) == [shared.id]

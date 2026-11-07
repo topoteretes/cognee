@@ -113,3 +113,36 @@ def test_parse_installation_stores_no_token_material():
 def test_parse_installation_without_id_raises():
     with pytest.raises(ValueError, match="no id"):
         GithubIntegration().parse_installation({"account": {"login": "acme-org"}})
+
+
+@pytest.mark.asyncio
+async def test_a_full_sync_while_one_runs_is_dropped_and_marked_running(monkeypatch):
+    """A schedule shorter than a sync would otherwise stack one more clone of every
+    repository per slot; the manual route reads the same mark to say it did not start."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from cognee.modules.integrations import ingestion
+    from cognee.modules.integrations.github import adapter as adapter_module
+
+    entered, release, calls = asyncio.Event(), asyncio.Event(), []
+
+    async def sync_repositories(credential):
+        calls.append(credential)
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(adapter_module, "sync_repositories", sync_repositories)
+    integration, credential = GithubIntegration(), SimpleNamespace(provider_account_id="42")
+
+    first = asyncio.create_task(integration.sync_now(credential))
+    await entered.wait()
+    assert ingestion.sync_is_running("github", "42")
+    # Dropped calls return at once; one that slipped past the guard would wait on `release`.
+    await asyncio.wait_for(integration.sync_now(credential), timeout=1)
+    await asyncio.wait_for(integration.on_installed(credential), timeout=1)
+    release.set()
+    await first
+
+    assert calls == [credential]
+    assert not ingestion.sync_is_running("github", "42")

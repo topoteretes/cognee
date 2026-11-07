@@ -440,16 +440,30 @@ def test_ids_are_stored_as_given_and_deduplicated(client, monkeypatch):
     update.assert_awaited_once_with("fake", "ACC1", {"picked": ["b", " a "]})
 
 
+def _sync_credential(account_id):
+    return type(
+        "Cred",
+        (),
+        {
+            "id": uuid4(),
+            "user_id": USER_ID,
+            "workspace_id": None,
+            "provider_account_id": account_id,
+        },
+    )()
+
+
 def test_a_manual_sync_is_not_accepted_while_one_is_running(client):
     from cognee.modules.integrations import ingestion
 
-    credential = type("Cred", (), {"provider_account_id": "ACC1"})()
+    credential = _sync_credential("ACC1")
     integration = supported_integrations["fake"]
     sync_now = AsyncMock()
     with (
         patch.object(
             _router_module, "get_active_credential_for_user", new=AsyncMock(return_value=credential)
         ),
+        patch.object(_router_module, "require_sync_not_paused", new=AsyncMock()),
         patch.object(integration, "sync_now", sync_now),
     ):
         ingestion._running_syncs.add(("fake", "ACC1"))
@@ -669,10 +683,8 @@ async def test_spawned_integration_work_is_registered_for_the_shutdown_drain():
     import asyncio
 
     from cognee.infrastructure import background_tasks
+    from cognee.modules.integrations.background import spawn_background
 
-    router_module = importlib.import_module(
-        "cognee.api.v1.integrations.routers.get_integrations_router"
-    )
     gate, finished = asyncio.Event(), []
 
     async def work():
@@ -680,7 +692,7 @@ async def test_spawned_integration_work_is_registered_for_the_shutdown_drain():
         finished.append(True)
 
     before = set(background_tasks._BACKGROUND_TASKS)
-    router_module._spawn_background(work(), description="test work")
+    spawn_background(work(), description="test work")
     assert len(background_tasks._BACKGROUND_TASKS - before) == 1
     gate.set()
     assert await background_tasks.wait_for_background_tasks(timeout=2)
@@ -717,11 +729,17 @@ _ACCOUNT_ROUTES = [
     ("put", "/api/v1/integrations/fake/resources"),
     ("post", "/api/v1/integrations/fake/sync"),
     ("delete", "/api/v1/integrations/fake/connection"),
+    ("get", "/api/v1/integrations/fake/sync/policy"),
+    ("put", "/api/v1/integrations/fake/sync/policy"),
+    ("delete", "/api/v1/integrations/fake/sync/policy"),
+    ("post", "/api/v1/integrations/fake/sync/policy/pause"),
+    ("post", "/api/v1/integrations/fake/sync/policy/resume"),
 ]
 
 
 def _call(client, method, url, **params):
-    kwargs = {"json": {"resource_ids": ["a"]}} if method == "put" else {}
+    body = {"interval_minutes": 60} if url.endswith("/sync/policy") else {"resource_ids": ["a"]}
+    kwargs = {"json": body} if method == "put" else {}
     return getattr(client, method)(url, params=params, **kwargs)
 
 
@@ -760,12 +778,13 @@ def test_without_an_account_id_the_lookup_is_the_newest_connection_as_before(cli
 
 
 def test_a_manual_sync_runs_for_the_named_account(client):
-    credential = type("Cred", (), {"provider_account_id": "ACC2"})()
+    credential = _sync_credential("ACC2")
     integration = supported_integrations["fake"]
     sync_now = AsyncMock()
     lookup = AsyncMock(return_value=credential)
     with (
         patch.object(_router_module, "get_active_credential_for_user", new=lookup),
+        patch.object(_router_module, "require_sync_not_paused", new=AsyncMock()),
         patch.object(integration, "sync_now", sync_now),
     ):
         response = client.post("/api/v1/integrations/fake/sync", params={"account_id": "ACC2"})
