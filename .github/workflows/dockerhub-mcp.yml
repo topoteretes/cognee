@@ -1,5 +1,11 @@
 name: build | Build and Push Cognee MCP Docker Image to dockerhub
 
+# Prevent overlapping runs from the same branch from publishing out-of-order and
+# leaving `latest`/`main` pointing at an older build. See #6075.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   push:
     branches:
