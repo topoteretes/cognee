@@ -64,6 +64,11 @@ async def ensure_embedding_model_matches(dataset_database: DatasetDatabase) -> N
     embedding_record = embedding_model_record()
     configured_model = embedding_record[MODEL_KEY]
     configured_dimensions = embedding_record[DIMENSIONS_KEY]
+    if configured_dimensions is None:
+        # No configured size (EMBEDDING_PROVIDER=embedding_worker without
+        # EMBEDDING_DIMENSIONS): the engine knows it from the worker.
+        configured_dimensions = await _engine_vector_size()
+        embedding_record = {**embedding_record, DIMENSIONS_KEY: configured_dimensions}
     info = dataset_database.vector_database_connection_info or {}
     stored_dimensions = info.get(DIMENSIONS_KEY)
 
@@ -91,6 +96,14 @@ async def ensure_embedding_model_matches(dataset_database: DatasetDatabase) -> N
         configured_model=configured_model,
         configured_dimensions=configured_dimensions,
     )
+
+
+async def _engine_vector_size() -> int:
+    embedding_engine = (await get_vector_engine_async()).embedding_engine
+    resolve = getattr(embedding_engine, "resolve_vector_size", None)
+    if resolve is not None:
+        return await resolve()
+    return embedding_engine.get_vector_size()
 
 
 async def _record_embedding_model(dataset_database: DatasetDatabase, record: dict) -> None:
