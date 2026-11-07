@@ -1,3 +1,4 @@
+from typing import cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Form, Path
@@ -91,11 +92,13 @@ def get_configuration_router() -> APIRouter:
         ## Response
         Returns the stored configuration data as a JSON object. The id may name a
         configuration of the authenticated user or of an agent user they are the parent
-        of. Returns an empty object {} with HTTP 200 (not 404) when neither has a
-        configuration with that id, including when the id belongs to another user's
-        configuration.
+        of. A caller with user-management permission in their current tenant can
+        also read configurations owned by users in that tenant. Returns an empty
+        object {} with HTTP 200 (not 404) for missing or unauthorized configurations.
         """
-        return await method_get_principal_configuration(config_id=config_id, principal_id=user.id)
+        return await method_get_principal_configuration(
+            config_id=config_id, principal_id=cast(UUID, user.id)
+        )
 
     @router.get("/get_user_configuration/", response_model=list)
     async def get_user_all_configuration(

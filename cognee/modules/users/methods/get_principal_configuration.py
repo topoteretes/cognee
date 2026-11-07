@@ -1,10 +1,16 @@
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods.get_visible_user_ids import get_visible_user_ids
 from cognee.modules.users.models.PrincipalConfiguration import PrincipalConfiguration
+from cognee.modules.users.models.User import User
+from cognee.modules.users.permissions.methods.has_user_management_permission import (
+    has_user_management_permission,
+)
 
 
 async def get_principal_configuration(config_id: UUID, principal_id: UUID) -> dict:
@@ -15,12 +21,13 @@ async def get_principal_configuration(config_id: UUID, principal_id: UUID) -> di
     the agent users it is the parent of (``get_visible_user_ids``), so a human
     user can read the configuration of an agent they provisioned. Visibility runs
     downward only — an agent cannot read its parent's configuration. Any other
-    owner's configuration is treated exactly like a missing one, so a caller
-    cannot read, or probe for, configurations that are not theirs.
+    owner's configuration is visible to a caller with user-management permission
+    in their current tenant only if the owner is also a user of that tenant.
+    Other configurations are treated exactly like missing ones.
 
     Args:
         config_id (UUID): The unique identifier of the config.
-        principal_id (UUID): The caller; the config must belong to it or to one of its agents.
+        principal_id (UUID): The authenticated caller requesting the configuration.
 
     Returns:
         dict: The configuration data if visible to this principal, otherwise an empty dictionary.
@@ -36,8 +43,28 @@ async def get_principal_configuration(config_id: UUID, principal_id: UUID) -> di
         result = await session.execute(query)
         config_record = result.scalars().first()
 
-        # Return the configuration dictionary if the record exists, otherwise an empty dict
-        return config_record.configuration if config_record else {}
+        if config_record:
+            return cast(dict, config_record.configuration)
+
+        tenant_id = await session.scalar(select(User.tenant_id).where(User.id == principal_id))
+
+    if tenant_id is None:
+        return {}
+
+    try:
+        await has_user_management_permission(principal_id, tenant_id, log_level="DEBUG")
+    except PermissionDeniedError:
+        return {}
+
+    async with relational_engine.get_async_session() as session:
+        managed_owner_ids = select(User.id).where(User.tenant_id == tenant_id)
+        query = select(PrincipalConfiguration).where(
+            PrincipalConfiguration.id == config_id,
+            PrincipalConfiguration.owner_id.in_(managed_owner_ids),
+        )
+        result = await session.execute(query)
+        config_record = result.scalars().first()
+        return cast(dict, config_record.configuration) if config_record else {}
 
 
 async def get_principal_all_configuration(principal_id: UUID) -> list[dict[str, dict]]:
