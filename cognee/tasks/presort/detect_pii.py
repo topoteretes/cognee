@@ -16,6 +16,7 @@ raw matched text never enters the report.
 
 import asyncio
 import re
+from codecs import BOM_UTF16_BE, BOM_UTF16_LE, BOM_UTF32_BE, BOM_UTF32_LE
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -180,10 +181,18 @@ class PiiAssessment(BaseModel):
 def _read_sample(record: FileRecord, max_sample_bytes: int) -> str | None:
     try:
         with open(record.path, "rb") as file:
-            return file.read(max_sample_bytes).decode("utf-8", errors="replace")
+            sample = file.read(max_sample_bytes)
     except OSError as error:
         record.warnings.append(f"could not read sample for PII scan: {error}")
         return None
+    # A BOM pins the decoding; UTF-32 must be probed before UTF-16 because its
+    # LE BOM (FF FE 00 00) starts with the UTF-16 LE BOM. Samples truncated
+    # mid-codepoint decode fine with errors="replace".
+    if sample.startswith((BOM_UTF32_LE, BOM_UTF32_BE)):
+        return sample.decode("utf-32", errors="replace")
+    if sample.startswith((BOM_UTF16_LE, BOM_UTF16_BE)):
+        return sample.decode("utf-16", errors="replace")
+    return sample.decode("utf-8", errors="replace")
 
 
 async def _llm_assess(record: FileRecord, text: str) -> list[PiiFinding]:
