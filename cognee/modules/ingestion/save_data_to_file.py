@@ -76,7 +76,9 @@ async def save_data_to_file_detailed(
         if "name" not in file_metadata or file_metadata["name"] is None:
             file_metadata["name"] = "text_" + compute_content_hash(payload) + ".txt"
 
-        file_name = file_metadata["name"]
+        # A caller-supplied filename names the payload, not the stream's own .name: an
+        # upload spooled to disk (over 1 MiB) is a tmpXXXX file on Windows.
+        file_name = classified_data.name if filename and not is_text else file_metadata["name"]
 
         if file_extension is not None:
             extension = file_extension.lstrip(".")
