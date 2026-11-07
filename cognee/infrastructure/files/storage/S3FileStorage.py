@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, BinaryIO
 
 from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
+from cognee.infrastructure.locks import pin_stored_file
 from cognee.infrastructure.utils.run_async import run_async
 from cognee.shared.logging_utils import get_logger
 
@@ -73,6 +74,9 @@ class S3FileStorage(Storage):
                 config_kwargs=config_kwargs,
             )
 
+    def stored_file_key(self, file_path: str) -> str:
+        return os.path.join(self.storage_path.replace("s3://", ""), file_path)
+
     async def store(self, file_path: str, data: BinaryIO | str, overwrite: bool = False) -> str:
         """
         Store data into a specified file path. The data can be either a string or a binary
@@ -90,7 +94,12 @@ class S3FileStorage(Storage):
               binary stream.
             - overwrite (bool): If True, overwrite the existing file.
         """
-        full_file_path = os.path.join(self.storage_path.replace("s3://", ""), file_path)
+        full_file_path = self.stored_file_key(file_path)
+
+        # Before the existence check and the write: a cleanup removing this
+        # shared, content-addressed object must not take it after we decide to
+        # skip or make the write.
+        await pin_stored_file(full_file_path)
 
         file_dir_path = os.path.dirname(full_file_path)
 

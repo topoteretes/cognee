@@ -17,6 +17,7 @@ from sqlalchemy import or_, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.locks import stored_file_pin_scope
 from cognee.modules import ingestion
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.models import PipelineContext
@@ -517,7 +518,11 @@ async def run_tasks_data_item(
         )
 
     try:
-        result = await _drain_item_events(events, ctx, tasks, pipeline_run_id, progress_state)
+        # The incremental path stores the item before ingest_data runs and
+        # hands it on; the pin scope covers that store through ingest_data's
+        # commit, so a delete elsewhere cannot reclaim the shared file between.
+        async with stored_file_pin_scope():
+            result = await _drain_item_events(events, ctx, tasks, pipeline_run_id, progress_state)
     except Exception:
         # Preserve the original pipeline exception if flushing already-written
         # edge evidence also fails; rollback still has graph-native run refs.

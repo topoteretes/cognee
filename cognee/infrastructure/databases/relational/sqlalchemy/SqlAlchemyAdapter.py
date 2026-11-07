@@ -15,6 +15,7 @@ from sqlalchemy.orm import joinedload
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.locks import stored_file_removal
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.modules.data.models.Data import Data
 from cognee.shared.logging_utils import get_logger
@@ -454,6 +455,11 @@ class SQLAlchemyAdapter:
         external s3:// URL) and is never touched. Content-addressed keys are
         shared by design — two rows with identical payloads point at one object
         — so the reference count spans both location columns of every dataset.
+
+        An ingest that has written the file but not yet committed its row has
+        pinned it (see ``stored_file_pins``); the count cannot see that
+        reference, so a pinned file is left alone. The count and the removal run
+        under the file's lock, so a writer cannot pin it between the two.
         """
         if not file_location:
             return
@@ -463,23 +469,6 @@ class SQLAlchemyAdapter:
         if data_root not in file_location:
             return
 
-        async with self.get_async_session() as session:
-            references = (
-                await session.execute(
-                    select(func.count())
-                    .select_from(Data)
-                    .where(
-                        or_(
-                            Data.raw_data_location == file_location,
-                            Data.original_data_location == file_location,
-                        )
-                    )
-                )
-            ).scalar()
-
-        if references:
-            return
-
         relative_path = file_location.split(data_root, 1)[1].lstrip("/\\")
         if file_location.startswith("file://"):
             # file:// locations carry percent-encoding (spaces as %20); storage
@@ -487,10 +476,36 @@ class SQLAlchemyAdapter:
             relative_path = unquote(relative_path)
 
         file_storage = get_file_storage(data_root)
-        if await file_storage.file_exists(relative_path):
-            await file_storage.remove(relative_path)
-        else:
-            logger.warning("Stored file to clean up was already gone: %s", file_location)
+
+        async with stored_file_removal(file_storage.stored_file_key(relative_path)) as removable:
+            if not removable:
+                logger.debug(
+                    "Stored file is pinned by an in-flight ingest, not removed: %s",
+                    file_location,
+                )
+                return
+
+            async with self.get_async_session() as session:
+                references = (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(Data)
+                        .where(
+                            or_(
+                                Data.raw_data_location == file_location,
+                                Data.original_data_location == file_location,
+                            )
+                        )
+                    )
+                ).scalar()
+
+            if references:
+                return
+
+            if await file_storage.file_exists(relative_path):
+                await file_storage.remove(relative_path)
+            else:
+                logger.warning("Stored file to clean up was already gone: %s", file_location)
 
     async def get_table(self, table_name: str, schema_name: str | None = "public") -> Table:
         """

@@ -13,6 +13,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.locks import stored_file_pin_scope
 from cognee.modules import ingestion
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
@@ -660,11 +661,17 @@ async def ingest_data(
     # same-content race there can produce two rows, which under document
     # semantics are simply two documents. File writes are content-addressed,
     # so re-running is idempotent.
-    try:
-        return await store_data_to_dataset(
-            data, dataset_name, user, node_set, dataset_id, preferred_loaders
-        )
-    except IntegrityError:
-        return await store_data_to_dataset(
-            data, dataset_name, user, node_set, dataset_id, preferred_loaders
-        )
+    #
+    # The pin scope keeps the files this call stores from being reclaimed by a
+    # delete elsewhere (they are shared across datasets) before the rows that
+    # reference them are committed. A pipeline wrapper that stored the item
+    # earlier has opened it already; this one is then a no-op.
+    async with stored_file_pin_scope():
+        try:
+            return await store_data_to_dataset(
+                data, dataset_name, user, node_set, dataset_id, preferred_loaders
+            )
+        except IntegrityError:
+            return await store_data_to_dataset(
+                data, dataset_name, user, node_set, dataset_id, preferred_loaders
+            )
