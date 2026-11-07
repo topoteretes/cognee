@@ -74,7 +74,9 @@ dependencies = [
     # warning instead of writing to the tables. pylance 12 requires
     # lance-namespace<0.12, so the lockfile holds lance-namespace at 0.11.x.
     "lancedb>=0.39.0,<0.40.0",
-    "dateparser>=1.2,<2",  # temporal hints and date normalization in default graph extraction
+    # Temporal hints and date normalization in default graph extraction. They can parse on
+    # two threads at once (the CPU worker and the event loop); 1.4.3 made that thread-safe.
+    "dateparser>=1.4.3,<2",
     "nbformat>=5.7.0,<6.0.0",
     "alembic>=1.13.3,<2",
     "limits>=4.4.1,<6",

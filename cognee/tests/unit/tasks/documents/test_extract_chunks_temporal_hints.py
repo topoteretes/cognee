@@ -1,6 +1,8 @@
 """The chunk task's temporal hint pass is opt-out: the indexing pipeline skips it."""
 
+import asyncio
 import importlib
+import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -80,3 +82,40 @@ async def test_indexing_task_list_turns_the_hints_off():
     chunk_task = tasks[1]
     assert chunk_task.executable is task_module.extract_chunks_from_documents
     assert chunk_task.default_params["kwargs"]["temporal_hints"] is False
+
+
+@pytest.mark.asyncio
+async def test_hint_pass_runs_off_the_event_loop(monkeypatch):
+    """dateparser is CPU-bound for seconds per document, so it must not hold the loop.
+
+    The fake hint_lines blocks until the loop has run again; called on the loop
+    thread that could never happen and the wait times out. The rolling base
+    still travels from one chunk to the next.
+    """
+    monkeypatch.setattr(task_module, "update_document_token_count", AsyncMock())
+    loop_ran = threading.Event()
+    hint_threads = []
+
+    def blocking_hint_lines(text, base):
+        hint_threads.append(threading.current_thread())
+        assert loop_ran.wait(timeout=5), "hint_lines held the event loop"
+        return [f"hint {base}"], (base or 0) + 1
+
+    monkeypatch.setattr(task_module, "hint_lines", blocking_hint_lines)
+
+    async def collect():
+        return [
+            chunk
+            async for chunk in task_module.extract_chunks_from_documents(
+                [_Document()], max_chunk_size=10, chunker=_Chunker
+            )
+        ]
+
+    reading = asyncio.create_task(collect())
+    await asyncio.sleep(0)  # the task starts and hands the first hint pass to a worker
+    loop_ran.set()
+    chunks = await reading
+
+    assert [chunk._temporal_hints for chunk in chunks] == [["hint None"], ["hint 1"]]
+    assert len(hint_threads) == 2
+    assert all(thread is not threading.current_thread() for thread in hint_threads)
