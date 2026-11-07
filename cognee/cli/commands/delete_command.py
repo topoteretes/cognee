@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import json
 
 import cognee.cli.echo as fmt
 from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
@@ -30,6 +31,11 @@ Be careful with deletion operations as they are irreversible.
             "--all", action="store_true", help="Delete all data (requires confirmation)"
         )
         parser.add_argument("--force", "-f", action="store_true", help="Skip confirmation prompts")
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Preview what would be deleted without deleting anything",
+        )
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -40,6 +46,10 @@ Be careful with deletion operations as they are irreversible.
                 ]
             ):
                 fmt.error("Please specify what to delete: --dataset-name or --all")
+                return
+
+            if getattr(args, "dry_run", False):
+                self._run_dry_run(args)
                 return
 
             # If --force is used, skip the preview and go straight to deletion
@@ -109,3 +119,35 @@ Be careful with deletion operations as they are irreversible.
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
             raise CliCommandException(f"Error deleting data: {e!s}", error_code=1) from e
+
+    def _run_dry_run(self, args: argparse.Namespace) -> None:
+        """Preview the deletion scope: run the same resolution path with
+        dry_run=True and print the report. No confirmation, no deletion."""
+
+        async def run_preview():
+            try:
+                from cognee.cli.user_resolution import resolve_cli_user
+
+                user = await resolve_cli_user(getattr(args, "user_id", None))
+
+                if getattr(args, "all", False):
+                    return await cognee_datasets.delete_all(user=user, dry_run=True)
+
+                if getattr(args, "dataset_name", None):
+                    matched_datasets = await get_datasets_by_name(
+                        args.dataset_name, user_id=user.id
+                    )
+                    if not matched_datasets:
+                        raise CliCommandException(
+                            f"No dataset found for name '{args.dataset_name}'."
+                        )
+                    return await cognee_datasets.empty_dataset(
+                        dataset_id=matched_datasets[0].id, user=user, dry_run=True
+                    )
+            except Exception as e:
+                raise CliCommandInnerException(f"Failed to preview deletion: {e!s}") from e
+
+        report = asyncio.run(run_preview())
+
+        fmt.echo("Dry run — nothing was deleted. Operations that would run:")
+        fmt.echo(json.dumps(report, indent=2, default=str))
