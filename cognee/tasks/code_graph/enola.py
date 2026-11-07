@@ -341,6 +341,7 @@ def parse_enola_snapshot(
                 corrupt_lines += 1
                 logger.warning("Skipping non-object fact on line %d of %s", line_number, facts_path)
                 continue
+            _strip_repo_prefix(fact, facts_path)
             facts.append(fact)
 
     if corrupt_lines:
@@ -372,6 +373,38 @@ def parse_enola_snapshot(
         facts_path,
     )
     return facts, receipt
+
+
+def _strip_repo_prefix(fact: dict, facts_path: Path) -> None:
+    """Make ``file`` repository-relative where a multi-repo snapshot put the repo label in front.
+
+    enola (0.4.39 and later) marks such a fact ``repo_prefixed`` and leaves the
+    prefix out of the fact id, so a declaration has one id alone and in any
+    cluster. Cognee names modules, keys nodes and reads source by the
+    repository-relative path, so the prefix comes off here, once, for every
+    reader of the snapshot; a solo snapshot and a cluster snapshot of the same
+    repository then map to the same nodes. A fact marked prefixed whose file
+    does not start with its repo label breaks the contract and is refused.
+    """
+    if fact.get("repo_prefixed") is not True:
+        return
+    repo, file_path = fact.get("repo"), fact.get("file")
+    if not isinstance(repo, str) or not repo or not isinstance(file_path, str):
+        raise EnolaSnapshotError(
+            message=f"Fact {fact.get('name')!r} in '{facts_path}' is repo_prefixed without a repo and file."
+        )
+    if file_path == repo:
+        fact["file"] = "."
+    elif file_path.startswith(repo + "/"):
+        fact["file"] = file_path[len(repo) + 1 :]
+    else:
+        raise EnolaSnapshotError(
+            message=(
+                f"Fact {fact.get('name')!r} in '{facts_path}' is repo_prefixed but its file "
+                f"{file_path!r} does not start with its repo label {repo!r}."
+            )
+        )
+    del fact["repo_prefixed"]
 
 
 def validate_receipt(

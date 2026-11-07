@@ -70,9 +70,19 @@ class CodeSymbol(CodeGraphEntity):
     symbol_kind is one of the contract values function, method, getter, struct,
     interface, type, class, variable, constant, enum — plus descriptive values
     newer extractors add (e.g. document/section for markdown pages).
+
+    declarations lists every versioned declaration behind the node, in
+    snapshot order, each as enola emitted it: the fact ``id``, ``file``,
+    ``line``, ``end_line``, ``body_hash`` (the version of its code, enola >=
+    0.4.37), ``decl_hash`` (tells apart declarations sharing an id, such as a
+    getter and its setter, enola >= 0.4.38) and ``span_start``. The node's own
+    file, line and fact_properties come from the first declaration only (see
+    fact_node_id), so this is where the others survive. A snapshot without
+    body hashes leaves it empty.
     """
 
     symbol_kind: str | None = None
+    declarations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ApiEndpoint(CodeGraphEntity):
