@@ -153,9 +153,13 @@ async def add(
                            DLT orphan cleanup is skipped; propagating upstream deletions
                            requires a successful foreground sync.
                            If False (default), waits for completion before returning.
-        extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
-        tavily_config: Optional configuration for Tavily API, including API key and extraction settings
-        soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
+        extraction_rules, tavily_config, soup_crawler_config: Accepted and **ignored**.
+                           ``add()`` forwards ``**kwargs`` to the DLT resolver, which keeps
+                           only the dlt option names, so these three never reach a crawler.
+                           Pass scraping options through the loader instead, e.g.
+                           ``preferred_loaders={"beautiful_soup_loader": {"extraction_rules": {...}}}``
+                           with the ``scraping`` extra installed; without it the rules are
+                           ignored as well.
         branch: Branch to clone for the GitHub/GitLab repository URL(s) in ``data``, instead of
                 the remote's default. Each branch is cloned into its own directory, so adds on
                 different branches never touch each other's clone. A dataset holds one branch of
