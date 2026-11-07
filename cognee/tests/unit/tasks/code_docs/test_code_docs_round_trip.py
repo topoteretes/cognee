@@ -20,12 +20,7 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.graph.utils.resolve_edges_to_text import resolve_edges_to_text
 from cognee.tasks.code_docs import add_code_doc_edges, code_document_id, extract_code_docs
 from cognee.tasks.code_docs.models import CodeDocument
-from cognee.tasks.code_graph.extract_code_graph import (
-    add_code_graph_data_points,
-    add_code_graph_edges,
-    extract_code_graph,
-    fact_node_id,
-)
+from cognee.tasks.code_graph.extract_code_graph import fact_node_id, load_code_graph
 from cognee.tasks.storage.add_data_points import add_data_points
 
 extract_module = importlib.import_module("cognee.tasks.code_docs.extract_code_docs")
@@ -188,10 +183,8 @@ def repos(tmp_path):
 
 
 async def _sync_code_graph(repo_path, snapshot_dir):
-    """The enola code graph tasks, in get_code_graph_tasks order."""
-    data_points = await extract_code_graph(repo_path=str(repo_path), snapshot_dir=snapshot_dir)
-    state = await add_code_graph_data_points(data_points)
-    await add_code_graph_edges(state, repo_path=str(repo_path), snapshot_dir=snapshot_dir)
+    """The enola code graph load."""
+    await load_code_graph(repo_path=str(repo_path), snapshot_dir=snapshot_dir)
 
 
 async def _sync_both_code_graphs(repos):

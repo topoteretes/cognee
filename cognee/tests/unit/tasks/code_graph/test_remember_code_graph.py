@@ -80,7 +80,7 @@ async def test_single_repo_runs_code_graph_pipeline(code_remember_env):
     assert call.kwargs["dataset"] == code_remember_env["dataset"].id
     assert call.kwargs["pipeline_name"] == "code_graph_pipeline"
     assert call.kwargs["data"] == [code_remember_env["data_row"]]
-    assert len(call.kwargs["tasks"]) == 3
+    assert len(call.kwargs["tasks"]) == 1
 
     assert result.status == "completed"
     assert result.items_processed == 1
@@ -154,7 +154,7 @@ async def test_index_vectors_is_forwarded_to_tasks(code_remember_env):
     await remember("/some/repo", content_type="code", index_vectors=True)
 
     tasks = code_remember_env["pipeline"].await_args.kwargs["tasks"]
-    assert tasks[1].default_params["kwargs"]["graph_only"] is False
+    assert tasks[0].default_params["kwargs"]["graph_only"] is False
 
 
 @pytest.mark.asyncio
@@ -162,7 +162,7 @@ async def test_code_defaults_to_graph_only(code_remember_env):
     await remember("/some/repo", content_type="code")
 
     tasks = code_remember_env["pipeline"].await_args.kwargs["tasks"]
-    assert tasks[1].default_params["kwargs"]["graph_only"] is True
+    assert tasks[0].default_params["kwargs"]["graph_only"] is True
 
 
 @pytest.mark.asyncio
