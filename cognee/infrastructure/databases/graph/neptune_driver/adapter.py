@@ -679,10 +679,6 @@ class NeptuneGraphDB(GraphDBInterface):
     async def delete_graph(self) -> None:
         """
         Delete all nodes and edges from the graph database.
-
-        Returns:
-        --------
-            The result of the query execution, typically indicating success or failure.
         """
         try:
             # Build openCypher query to delete the graph

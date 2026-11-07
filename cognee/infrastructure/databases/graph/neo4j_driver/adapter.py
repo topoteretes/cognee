@@ -1761,11 +1761,6 @@ class Neo4jAdapter(GraphDBInterface):
     async def delete_graph(self):
         """
         Delete all nodes and edges from the graph database.
-
-        Returns:
-        --------
-
-            The result of the query execution, typically indicating success or failure.
         """
         # query = """MATCH (node)
         #         DETACH DELETE node;"""
