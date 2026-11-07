@@ -414,7 +414,12 @@ class datasets:
         return await get_memory_status(dataset_ids)
 
     @staticmethod
-    async def empty_dataset(dataset_id: UUID, user: User | None = None):
+    async def empty_dataset(
+        dataset_id: UUID,
+        user: User | None = None,
+        *,
+        keep_acls: bool = False,
+    ):
         from cognee.modules.data.methods import delete_data, delete_dataset
         from cognee.modules.search.operations import delete_dataset_search_history
 
@@ -432,6 +437,30 @@ class datasets:
             dataset_lock(dataset.id),
             set_database_global_context_variables(dataset.id, dataset.owner_id),
         ):
+            saved_acls: list[tuple[UUID, str]] = []
+            saved_dataset_meta = (
+                dataset.id,
+                dataset.name,
+                dataset.owner_id,
+                getattr(dataset, "tenant_id", None),
+            )
+            if keep_acls:
+                from sqlalchemy import select
+
+                from cognee.infrastructure.databases.relational import get_relational_engine
+                from cognee.modules.users.models import ACL, Permission
+
+                db_engine = get_relational_engine()
+                async with db_engine.get_async_session() as session:
+                    acl_rows = (
+                        await session.execute(
+                            select(ACL.principal_id, Permission.name)
+                            .join(Permission, ACL.permission_id == Permission.id)
+                            .where(ACL.dataset_id == dataset.id)
+                        )
+                    ).all()
+                    saved_acls = [(row[0], row[1]) for row in acl_rows]
+
             # Every user's search history on the dataset keeps answer text that
             # can quote its chunks. Purged first and not caught: if it fails,
             # nothing is deleted yet and the same delete can be retried.
@@ -450,6 +479,31 @@ class datasets:
             # delete_dataset removes the dataset's scoped Data rows
             # (files refcounted by raw_data_location) with the record.
             result = await delete_dataset(dataset)
+
+            if keep_acls:
+                from cognee.infrastructure.databases.relational import get_relational_engine
+                from cognee.modules.data.models import Dataset
+                from cognee.modules.users.permissions.methods import (
+                    get_principal,
+                    give_permission_on_dataset,
+                )
+
+                ds_id, ds_name, ds_owner_id, ds_tenant_id = saved_dataset_meta
+                db_engine = get_relational_engine()
+                async with db_engine.get_async_session() as session:
+                    recreated = Dataset(
+                        id=ds_id,
+                        name=ds_name,
+                        owner_id=ds_owner_id,
+                        tenant_id=ds_tenant_id,
+                    )
+                    session.add(recreated)
+                    await session.commit()
+
+                for principal_id, permission_name in saved_acls:
+                    principal = await get_principal(principal_id)
+                    if principal is not None:
+                        await give_permission_on_dataset(principal, ds_id, permission_name)
 
         return result
 

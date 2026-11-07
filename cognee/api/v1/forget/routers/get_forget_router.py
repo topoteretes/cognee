@@ -57,6 +57,13 @@ class ForgetPayloadDTO(InDTO):
         "data is deleted. Dataset and everything forgets purge the deleted datasets' "
         "history regardless of this flag.",
     )
+    keep_acls: bool = Field(
+        default=False,
+        description="When true on a dataset forget, preserve the dataset record and all "
+        "ACL grants (including non-owner user, role, tenant, and agent grants) after "
+        "deleting all data, graph elements, vector embeddings, sessions, and search "
+        "history. Defaults to false (deletes the dataset record and cascades its ACLs).",
+    )
 
 
 def get_forget_router() -> APIRouter:
@@ -81,6 +88,9 @@ def get_forget_router() -> APIRouter:
 
         - Set `everything: true` to delete all user data.
         - Set `dataset` or `datasetId` alone to delete an entire dataset.
+        - Set `dataset`/`datasetId` + `keepAcls: true` to clear all dataset data, graph,
+          vector embeddings, sessions, and search history while preserving the dataset
+          record and non-owner ACL grants.
         - Set `dataset`/`datasetId` + `dataId` to delete a single item.
         - Set `dataset`/`datasetId` + `memoryOnly: true` to clear memory
           (graph + vector), preserving raw files so the dataset can be re-cognified.
@@ -102,9 +112,12 @@ def get_forget_router() -> APIRouter:
         - **cleanHistory** (bool): When true, also delete the caller's own search and
           recall history before the data is deleted (default: false). Forgetting a dataset
           or everything purges that data's history regardless.
+        - **keepAcls** (bool): When true on a dataset forget, preserve the dataset record
+          and its ACL grants (including shared principals) after clearing all data and
+          memory (default: false).
 
         Provide either `dataset` or `datasetId`, not both. Field names are shown camelCased
-        in the schema; snake_case aliases (`data_id`, `dataset_id`, `memory_only`, `clean_history`) are also
+        in the schema; snake_case aliases (`data_id`, `dataset_id`, `memory_only`, `clean_history`, `keep_acls`) are also
         accepted.
 
         ## Response
@@ -142,6 +155,7 @@ def get_forget_router() -> APIRouter:
                 everything=payload.everything,
                 memory_only=payload.memory_only,
                 clean_history=payload.clean_history,
+                keep_acls=payload.keep_acls,
                 user=user,
             )
             return result

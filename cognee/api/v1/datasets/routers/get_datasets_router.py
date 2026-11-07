@@ -308,9 +308,11 @@ def get_datasets_router() -> APIRouter:
 
         ## Response
         Returns a list of dataset objects containing:
-        - **id**: Unique dataset identifier
+        - **id**: Unique dataset identifier (deterministic per `(name, owner_id, tenant_id)`;
+          reused if the dataset is deleted and recreated under the same name)
         - **name**: Dataset name
-        - **created_at**: When the dataset was created
+        - **created_at**: When this dataset incarnation was created (changes on every
+          re-creation; clients caching ACL grants must key on `(id, created_at)`, not `id` alone)
         - **updated_at**: When the dataset was last updated
         - **owner_id**: ID of the dataset owner
 
@@ -351,6 +353,12 @@ def get_datasets_router() -> APIRouter:
         with the same name already exists for the user, it returns the existing
         dataset instead of creating a duplicate. The user is automatically granted
         all permissions (read, write, share, delete) on the created dataset.
+
+        Note: dataset `id` is deterministic per `(name, owner_id, tenant_id)`. If a
+        dataset was previously deleted (which cascades and removes all ACL rows) and
+        is recreated under the same name, it receives the same `id` with a new
+        `created_at` timestamp and only the owner's ACLs. Clients that cache grants
+        must key on `(id, created_at)` rather than `id` alone.
 
         ## Request Parameters
         - **dataset_data** (DatasetCreationPayload): Dataset creation parameters containing:

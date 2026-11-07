@@ -60,6 +60,12 @@ def get_permissions_router() -> APIRouter:
         to a principal (which can be a user or role). The authenticated user must
         have appropriate permissions to grant access to the specified datasets.
 
+        Note: deleting a dataset (`DELETE /api/v1/datasets/{id}` or `POST /api/v1/forget`
+        without `keepAcls: true`) cascades and removes all ACL rows for that dataset. If
+        the owner later recreates a dataset with the same name, it receives the same
+        deterministic `id` with a new `created_at` timestamp and only the owner's ACLs.
+        Clients caching grants must key on `(id, created_at)` rather than `id` alone.
+
         ## Path Parameters
         - **principal_id** (UUID): The UUID of the principal (user or role) to grant permission to
 
