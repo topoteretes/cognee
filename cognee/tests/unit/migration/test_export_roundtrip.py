@@ -162,7 +162,7 @@ class TestReExport:
             ("facts.jsonl", "fact"),
             ("nodes.jsonl", "raw_node"),
         ):
-            lines = (destination / file_name).read_text().splitlines()
+            lines = (destination / file_name).read_text(encoding="utf-8").splitlines()
             assert len(lines) == manifest.counts[kind]
 
         result = translate_records(read_archive(destination), "preserve")
@@ -255,7 +255,7 @@ class TestManifest:
 
     def _tamper_version(self, destination, version):
         manifest_path = destination / "manifest.json"
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["cogx_version"] = version
         manifest_path.write_text(json.dumps(manifest))
 

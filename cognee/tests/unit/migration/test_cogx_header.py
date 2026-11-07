@@ -219,13 +219,13 @@ class TestExportHeader:
     def test_legacy_0_1_archive_still_reads(self, tmp_path):
         destination, _ = export(tmp_path)
         manifest_path = destination / "manifest.json"
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["cogx_version"] = "0.1"
         manifest.pop("coverage")
         manifest_path.write_text(json.dumps(manifest))
         assert read_manifest(destination).coverage == {}
         # 0.1 records have none of the header fields; they parse untouched.
-        for line in (destination / "entities.jsonl").read_text().splitlines():
+        for line in (destination / "entities.jsonl").read_text(encoding="utf-8").splitlines():
             row = json.loads(line)
             for key in ("origin", "subject", "evidence"):
                 row.pop(key, None)
