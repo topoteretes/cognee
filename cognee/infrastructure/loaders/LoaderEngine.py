@@ -21,9 +21,6 @@ class LoaderEngine:
     def __init__(self) -> None:
         """
         Initialize the loader engine.
-
-        Args:
-            default_loader_priority: Priority order for loader selection
         """
         self._loaders: dict[str, LoaderInterface] = {}
         self._extension_map: dict[str, list[LoaderInterface]] = {}

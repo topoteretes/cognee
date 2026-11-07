@@ -13,9 +13,6 @@ def create_loader_engine() -> LoaderEngine:
     Follows cognee's pattern for engine creation functions used
     in database adapters.
 
-    Args:
-        default_loader_priority: Priority order for loader selection
-
     Returns:
         Configured LoaderEngine instance
     """
