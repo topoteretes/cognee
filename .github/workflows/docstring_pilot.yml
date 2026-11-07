@@ -93,13 +93,13 @@ jobs:
 
     steps:
       - name: Check out dev
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: dev
           persist-credentials: false
 
       - name: Check out pilot machinery from the triggering ref
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: automation-src
           persist-credentials: false
@@ -219,13 +219,13 @@ jobs:
       # Checkout does not persist credentials. Claude configures its read-only
       # token in Git; only validated, non-dry publication receives the write PAT.
       - name: Check out dev
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: dev
           persist-credentials: false
 
       - name: Check out pilot machinery from the triggering ref
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: automation-src
           persist-credentials: false
@@ -360,7 +360,7 @@ jobs:
       # satisfy itself. The author also has no Write — it produces docstrings,
       # not the ledger, so there is nothing for it to write outside the target.
       - name: Pass 1 — author docstrings with Claude
-        uses: anthropics/claude-code-action@db77d4d3c98f3f6380e7cd45ffba2342a3dbde3c
+        uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -410,7 +410,7 @@ jobs:
           cat docstring_pilot_diff.patch
 
       - name: Pass 2 — verify claims and write the ledger with Claude
-        uses: anthropics/claude-code-action@db77d4d3c98f3f6380e7cd45ffba2342a3dbde3c
+        uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
