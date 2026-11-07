@@ -94,6 +94,36 @@ async def test_a_comment_only_edit_replaces_just_that_issue(clean_environment):
 
 
 @pytest.mark.asyncio
+async def test_trashing_an_issue_or_project_forgets_its_document(clean_environment):
+    team = _team()
+    await _sync(team)
+    before = {d.system_metadata["external_id"]: d.id for d in await _linear_data()}
+
+    team.trash(team.issues, "i2", 30)  # updatedAt does not move, as in Linear
+    team.trash(team.projects, "p1", 30)
+    source = await _sync(team)
+
+    assert source.cognee_sync_stats["deleted"] == 2
+    after = {d.system_metadata["external_id"]: d.id for d in await _linear_data()}
+    assert after == {"issue:i1": before["issue:i1"]}
+
+
+@pytest.mark.asyncio
+async def test_an_issue_already_trashed_on_the_first_sync_is_never_stored(clean_environment):
+    team = _team()
+    team.add_issue("i3", 5)
+    team.trash(team.issues, "i3", 6)
+    source = await _sync(team)
+
+    assert source.cognee_sync_stats["failed"] == 0
+    assert {d.system_metadata["external_id"] for d in await _linear_data()} == {
+        "issue:i1",
+        "issue:i2",
+        "project:p1",
+    }
+
+
+@pytest.mark.asyncio
 async def test_a_rate_limited_first_sync_resumes_without_losing_documents(clean_environment):
     from cognee.tasks.ingestion.connectors.linear import LinearRateLimitedError
 
