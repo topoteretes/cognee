@@ -39,6 +39,30 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
         await delete_agents_of_user(self.user_db.session, user.id)
 
+    async def update(
+        self,
+        user_update,
+        user: User,
+        safe: bool = False,
+        request: Request | None = None,
+    ) -> User:
+        """Apply a user update, keeping an agent's email server-owned.
+
+        An agent (a child user, ``parent_user_id`` set) carries its plugin
+        identity in its email, which telemetry, the integrations status and
+        plugin disconnect read as the one signal the agent cannot forge
+        (:func:`cognee.modules.integrations.agent_identity.plugin_key_from_agent_email`).
+        fastapi-users' ``PATCH /users/me`` would let the agent's own key
+        rewrite it, so an email change on an agent row is refused here, on
+        every update path. Humans keep changing their email as before.
+        """
+        if user.parent_user_id is not None and user_update.email not in (None, user.email):
+            raise HTTPException(
+                status_code=403,
+                detail="An agent's email is assigned by the server and cannot be changed.",
+            )
+        return await super().update(user_update, user, safe=safe, request=request)
+
     async def on_after_login(
         self, user: User, request: Request | None = None, response: Response | None = None
     ):

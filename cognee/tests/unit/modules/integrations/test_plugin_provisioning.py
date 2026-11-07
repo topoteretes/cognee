@@ -2,8 +2,10 @@
 
 Agent plugins (claude-code, codex, ...) are not OAuth providers — each
 connected plugin gets its own agent sub-user, with one API key per machine. These tests
-exercise the router's provisioning logic (idempotent get-or-create, one
-added key per provision, unknown-plugin 404, disconnect-revokes-keys) with
+exercise the router's provisioning logic (idempotent get-or-create that
+resolves an existing agent — tagged or pre-tag plain email — before creating
+one, one added key per provision, any well-formed key provisions and a
+malformed one is a 422 (SDK-646), disconnect-revokes-keys) with
 the DB-facing collaborators mocked at module level, the same way
 test_get_integrations_router.py mocks the OAuth credential layer. The
 throttled UserApiKey.last_used_at write that provisioned keys rely on for
@@ -24,6 +26,7 @@ from sqlalchemy.exc import IntegrityError
 
 from cognee.api.v1.integrations.routers.get_integrations_router import get_integrations_router
 from cognee.modules.agents.registry import AGENT_CONFIG_NAME, build_agent_connection_id
+from cognee.modules.integrations.agent_identity import agent_email, plugin_agent_email
 from cognee.modules.users.get_user_manager import UserManager
 from cognee.modules.users.methods import get_authenticated_user
 
@@ -50,17 +53,21 @@ class _FakeUser:
     tenant_id = None
 
 
-def _fake_agent_user(plugin_key: str = "claude-code", agent_id=AGENT_ID):
+def _fake_agent_user(plugin_key: str = "claude-code", agent_id=AGENT_ID, *, tagged=True):
+    """A plugin agent; ``tagged=False`` is the plain email form of agents
+    provisioned before the provision route tagged its emails."""
     return SimpleNamespace(
         id=agent_id,
-        email=f"{plugin_key}+{USER_ID}@cognee.agent",
+        email=(
+            plugin_agent_email(plugin_key, USER_ID) if tagged else agent_email(plugin_key, USER_ID)
+        ),
         tenant_id=None,
     )
 
 
-def _fake_agent_info(plugin_key: str = "claude-code", agent_id=AGENT_ID):
+def _fake_agent_info(plugin_key: str = "claude-code", agent_id=AGENT_ID, *, tagged=True):
     return SimpleNamespace(
-        user=_fake_agent_user(plugin_key, agent_id), api_key_label="abcd1234****"
+        user=_fake_agent_user(plugin_key, agent_id, tagged=tagged), api_key_label="abcd1234****"
     )
 
 
@@ -72,9 +79,87 @@ def client():
     yield TestClient(app)
 
 
-def test_unknown_plugin_404s_on_every_route(client):
-    assert client.post("/api/v1/integrations/plugins/notreal/provision").status_code == 404
-    assert client.delete("/api/v1/integrations/plugins/notreal").status_code == 404
+@pytest.fixture(autouse=True)
+def no_child_agents():
+    """Provisioning resolves the user's child agents before creating one; by
+    default there are none. Tests with existing agents patch ``list_agents``
+    again inside their own block, which takes precedence while it is active."""
+    with patch.object(_router_module, "list_agents", new=AsyncMock(return_value=[])):
+        yield
+
+
+@pytest.mark.parametrize(
+    "plugin_key",
+    ["Not%20A%20Plugin", "Hermes", "a+b", "-leading", "trailing-", "a--b", "x" * 65],
+)
+def test_malformed_plugin_key_422s_on_every_route(client, plugin_key):
+    """The server keeps no plugin list (SDK-646): the only check is the key grammar."""
+    base = f"/api/v1/integrations/plugins/{plugin_key}"
+    assert client.post(f"{base}/provision").status_code == 422
+    assert client.get(f"{base}/keys").status_code == 422
+    assert client.delete(f"{base}/keys/{uuid4()}").status_code == 422
+    assert client.delete(base).status_code == 422
+
+
+def test_any_well_formed_key_provisions_with_its_self_description(client):
+    """A plugin the server has never heard of names and describes itself."""
+    agent_user = _fake_agent_user("hermes-agent")
+    with (
+        patch.object(
+            _router_module, "create_agent", new=AsyncMock(return_value=(agent_user, None))
+        ) as create_agent,
+        patch.object(
+            _router_module,
+            "add_plugin_agent_key",
+            new=AsyncMock(return_value=SimpleNamespace(id=KEY_ID, api_key="raw-key")),
+        ) as add_key,
+        patch.object(
+            _router_module, "get_principal_all_configuration", new=AsyncMock(return_value=[])
+        ),
+        patch.object(
+            _router_module, "store_principal_configuration", new=AsyncMock()
+        ) as store_config,
+        patch.object(
+            _router_module, "register_agent_connection", new=AsyncMock()
+        ) as register_connection,
+    ):
+        response = client.post(
+            "/api/v1/integrations/plugins/hermes-agent/provision",
+            json={"label": "  Hermes Agent ", "connection_type": "hermes_agent"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["pluginKey"] == "hermes-agent"
+    # The agent is minted as a plugin identity (tagged email), named after the key.
+    assert create_agent.await_args.args[0] == "hermes-agent"
+    assert create_agent.await_args.kwargs == {"issue_api_key": False, "plugin_identity": True}
+    add_key.assert_awaited_once_with(AGENT_ID, "hermes-agent")
+    # The self-description is what the status page will show, label stripped.
+    plugin_entry = store_config.await_args.kwargs["configuration"]["plugin"]
+    assert plugin_entry["key"] == "hermes-agent"
+    assert plugin_entry["label"] == "Hermes Agent"
+    assert plugin_entry["connection_type"] == "hermes_agent"
+    # The connection carries the declared type and names the plugin.
+    register_kwargs = register_connection.await_args.kwargs
+    assert register_kwargs["agent_session_name"] == "plugin:hermes-agent"
+    assert register_kwargs["connection_type"] == "hermes_agent"
+    assert register_kwargs["metadata"] == {"plugin_key": "hermes-agent"}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"label": "x" * 65},
+        {"connection_type": "Hermes Agent"},
+        {"connection_type": "hermes-agent"},
+    ],
+)
+def test_provision_rejects_a_malformed_self_description(client, body):
+    with patch.object(_router_module, "create_agent", new=AsyncMock()) as create_agent:
+        response = client.post("/api/v1/integrations/plugins/hermes-agent/provision", json=body)
+
+    assert response.status_code == 422
+    create_agent.assert_not_awaited()
 
 
 @pytest.mark.skipif(
@@ -129,10 +214,12 @@ def test_provision_creates_agent_key_and_plugin_record(client):
     assert create_agent.await_args.args[0] == "claude-code"
     assert create_agent.await_args.args[1].id == USER_ID
     # Every key goes through add_plugin_agent_key, on the agent, named after the plugin.
-    assert create_agent.await_args.kwargs == {"issue_api_key": False}
+    assert create_agent.await_args.kwargs == {"issue_api_key": False, "plugin_identity": True}
     add_key.assert_awaited_once_with(AGENT_ID, "claude-code")
 
-    # plugin_key recorded in the agent's principal configuration blob.
+    # plugin_key recorded in the agent's principal configuration blob. No body
+    # (a plugin from before the self-description): no label, and the
+    # connection type is derived from the key.
     store_config.assert_awaited_once()
     store_kwargs = store_config.await_args.kwargs
     assert store_kwargs["principal_id"] == AGENT_ID
@@ -140,6 +227,8 @@ def test_provision_creates_agent_key_and_plugin_record(client):
     plugin_entry = store_kwargs["configuration"]["plugin"]
     assert plugin_entry["key"] == "claude-code"
     assert plugin_entry["provisioned_at"]
+    assert plugin_entry["label"] is None
+    assert plugin_entry["connection_type"] == "claude_code"
 
     # Registered so /agents/connections sees the plugin before first traffic.
     register_connection.assert_awaited_once()
@@ -196,11 +285,7 @@ def test_second_provision_adds_a_key_to_the_same_agent_and_revokes_nothing(clien
     # the claude-code agent by its deterministic email, not the first child.
     codex_agent_id = uuid4()
     with (
-        patch.object(
-            _router_module,
-            "create_agent",
-            new=AsyncMock(side_effect=UserAlreadyExists()),
-        ),
+        patch.object(_router_module, "create_agent", new=AsyncMock()) as create_agent,
         patch.object(
             _router_module,
             "list_agents",
@@ -228,10 +313,130 @@ def test_second_provision_adds_a_key_to_the_same_agent_and_revokes_nothing(clien
     assert body["agentId"] == str(AGENT_ID)
     assert body["apiKey"] == "added-key"
 
-    # One key added to the claude-code agent (never the codex one), none revoked.
+    # One key added to the claude-code agent (never the codex one), none revoked,
+    # and no second agent created.
     add_key.assert_awaited_once_with(AGENT_ID, "claude-code")
+    create_agent.assert_not_awaited()
     delete_key.assert_not_awaited()
     revoke_keys.assert_not_awaited()
+
+
+def test_reprovision_finds_an_agent_provisioned_before_the_email_tag(client):
+    """An agent minted before the provision route tagged its emails carries the
+    plain form, which never collides with the tagged email a create would
+    mint. The route must resolve it before creating, or an upgrade leaves the
+    user with two agents for one plugin: keys, sessions and grants split."""
+    with (
+        patch.object(_router_module, "create_agent", new=AsyncMock()) as create_agent,
+        patch.object(
+            _router_module,
+            "list_agents",
+            new=AsyncMock(return_value=[_fake_agent_info("claude-code", tagged=False)]),
+        ),
+        patch.object(
+            _router_module,
+            "add_plugin_agent_key",
+            new=AsyncMock(return_value=SimpleNamespace(id=KEY_ID, api_key="added-key")),
+        ) as add_key,
+        patch.object(
+            _router_module, "get_principal_all_configuration", new=AsyncMock(return_value=[])
+        ),
+        patch.object(_router_module, "store_principal_configuration", new=AsyncMock()),
+        patch.object(_router_module, "register_agent_connection", new=AsyncMock()),
+    ):
+        response = client.post("/api/v1/integrations/plugins/claude-code/provision")
+
+    assert response.status_code == 200
+    assert response.json()["created"] is False
+    assert response.json()["agentId"] == str(AGENT_ID)
+    add_key.assert_awaited_once_with(AGENT_ID, "claude-code")
+    create_agent.assert_not_awaited()
+
+
+def test_reprovision_prefers_the_tagged_agent_when_both_forms_exist(client):
+    """Both a plain-email and a tagged agent under one built-in key: the
+    tagged one is the one this route minted, so it wins — never whichever
+    child happens to be listed first."""
+    legacy_id = uuid4()
+    with (
+        patch.object(_router_module, "create_agent", new=AsyncMock()) as create_agent,
+        patch.object(
+            _router_module,
+            "list_agents",
+            new=AsyncMock(
+                return_value=[
+                    _fake_agent_info("claude-code", legacy_id, tagged=False),
+                    _fake_agent_info("claude-code", AGENT_ID),
+                ]
+            ),
+        ),
+        patch.object(
+            _router_module,
+            "add_plugin_agent_key",
+            new=AsyncMock(return_value=SimpleNamespace(id=KEY_ID, api_key="added-key")),
+        ) as add_key,
+        patch.object(
+            _router_module, "get_principal_all_configuration", new=AsyncMock(return_value=[])
+        ),
+        patch.object(_router_module, "store_principal_configuration", new=AsyncMock()),
+        patch.object(_router_module, "register_agent_connection", new=AsyncMock()),
+        patch.object(
+            _router_module, "revoke_plugin_agent_keys", new=AsyncMock(return_value=1)
+        ) as revoke_keys,
+        patch.object(_router_module, "deactivate_agent_connection", new=AsyncMock()),
+    ):
+        provision = client.post("/api/v1/integrations/plugins/claude-code/provision")
+        disconnect = client.delete("/api/v1/integrations/plugins/claude-code")
+
+    assert provision.json()["agentId"] == str(AGENT_ID)
+    add_key.assert_awaited_once_with(AGENT_ID, "claude-code")
+    create_agent.assert_not_awaited()
+    assert disconnect.json() == {"disconnected": True}
+    revoke_keys.assert_awaited_once_with(AGENT_ID)
+
+
+def test_custom_agent_named_after_a_plugin_is_never_the_plugin(client):
+    """A custom agent the user created as ``hermes-agent`` carries the plain
+    email form. Only built-in keys could provision before the tag, so under
+    any other key the plain form is a custom agent: provisioning creates the
+    plugin's own agent, and disconnecting the plugin before it exists revokes
+    nothing — least of all the custom agent's keys."""
+    custom_agent_id = uuid4()
+    plugin_agent = _fake_agent_user("hermes-agent")
+    with (
+        patch.object(
+            _router_module, "create_agent", new=AsyncMock(return_value=(plugin_agent, None))
+        ) as create_agent,
+        patch.object(
+            _router_module,
+            "list_agents",
+            new=AsyncMock(
+                return_value=[_fake_agent_info("hermes-agent", custom_agent_id, tagged=False)]
+            ),
+        ),
+        patch.object(
+            _router_module,
+            "add_plugin_agent_key",
+            new=AsyncMock(return_value=SimpleNamespace(id=KEY_ID, api_key="raw-key")),
+        ) as add_key,
+        patch.object(
+            _router_module, "get_principal_all_configuration", new=AsyncMock(return_value=[])
+        ),
+        patch.object(_router_module, "store_principal_configuration", new=AsyncMock()),
+        patch.object(_router_module, "register_agent_connection", new=AsyncMock()),
+        patch.object(_router_module, "revoke_plugin_agent_keys", new=AsyncMock()) as revoke_keys,
+        patch.object(_router_module, "deactivate_agent_connection", new=AsyncMock()),
+    ):
+        disconnect = client.delete("/api/v1/integrations/plugins/hermes-agent")
+        provision = client.post("/api/v1/integrations/plugins/hermes-agent/provision")
+
+    assert disconnect.json() == {"disconnected": False}
+    revoke_keys.assert_not_awaited()
+    assert provision.status_code == 200
+    assert provision.json()["created"] is True
+    assert provision.json()["agentId"] == str(AGENT_ID)
+    create_agent.assert_awaited_once()
+    add_key.assert_awaited_once_with(AGENT_ID, "hermes-agent")
 
 
 def test_provision_race_integrity_error_takes_the_add_path(client):
@@ -247,7 +452,8 @@ def test_provision_race_integrity_error_takes_the_add_path(client):
         patch.object(
             _router_module,
             "list_agents",
-            new=AsyncMock(return_value=[_fake_agent_info()]),
+            # Nothing to resolve before the create; the winner's agent after it.
+            new=AsyncMock(side_effect=[[], [_fake_agent_info()]]),
         ),
         patch.object(
             _router_module,

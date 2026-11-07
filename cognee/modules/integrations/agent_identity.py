@@ -16,28 +16,56 @@ Import-light (stdlib plus the import-free plugin registry) so
 import logging
 from uuid import UUID
 
-from cognee.modules.integrations.plugins import KNOWN_PLUGINS
+from cognee.modules.integrations.plugins import BUILTIN_PLUGINS, is_plugin_key
 
 logger = logging.getLogger(__name__)
 
-# Agents created under a name that is not a known plugin key. Their name is
+# Agents created under a name that is not a plugin key. Their name is
 # free text typed by a user, so telemetry never carries it.
 CUSTOM_AGENT_PLUGIN = "custom"
+
+# Marker the provision route puts in the email of every agent it creates:
+# ``<plugin_key>+plugin.<parent_id>@cognee.agent``. It sits after the ``+``,
+# where ``create_agent`` appends its own segment, so a user-typed agent name
+# can never produce it, and the agents listing (which strips everything after
+# the ``+``) displays both forms the same way.
+PLUGIN_EMAIL_TAG = "plugin."
+AGENT_EMAIL_DOMAIN = "cognee.agent"
+
+
+def plugin_agent_email(plugin_key: str, parent_id: UUID | str) -> str:
+    """The email the provision route mints for ``(parent, plugin_key)``."""
+    return f"{plugin_key}+{PLUGIN_EMAIL_TAG}{parent_id}@{AGENT_EMAIL_DOMAIN}"
+
+
+def agent_email(name: str, parent_id: UUID | str) -> str:
+    """``create_agent``'s plain form: custom agents, and plugins provisioned before the tag."""
+    return f"{name}+{parent_id}@{AGENT_EMAIL_DOMAIN}"
 
 
 def plugin_key_from_agent_email(email: str | None, parent_id: UUID | str) -> str | None:
     """Plugin key encoded in a child agent's server-assigned email, if any.
 
-    ``create_agent`` mints ``<plugin_key>+<parent_id>@cognee.agent``
-    deterministically, so the email is the one identity signal a child
-    agent cannot rewrite — unlike its principal-configuration blob.
-    Returns ``None`` for agents that aren't a known plugin identity.
+    The email is the one identity signal a child agent cannot rewrite —
+    unlike its principal-configuration blob. Two forms resolve:
+
+    * ``<key>+plugin.<parent_id>@cognee.agent`` — minted by the provision
+      route, so any well-formed key is a plugin identity (SDK-646).
+    * ``<key>+<parent_id>@cognee.agent`` — ``create_agent``'s plain form,
+      shared by custom agents (user-typed names) and by plugins provisioned
+      before the tag existed. Only the frozen :data:`BUILTIN_PLUGINS` keys
+      count here; anything else is a custom agent and returns ``None``.
     """
-    suffix = f"+{parent_id}@cognee.agent"
-    if not (email or "").endswith(suffix):
-        return None
-    plugin_key = email[: -len(suffix)]
-    return plugin_key if plugin_key in KNOWN_PLUGINS else None
+    email = email or ""
+    tagged_suffix = f"+{PLUGIN_EMAIL_TAG}{parent_id}@{AGENT_EMAIL_DOMAIN}"
+    if email.endswith(tagged_suffix):
+        plugin_key = email[: -len(tagged_suffix)]
+        return plugin_key if is_plugin_key(plugin_key) else None
+    legacy_suffix = f"+{parent_id}@{AGENT_EMAIL_DOMAIN}"
+    if email.endswith(legacy_suffix):
+        plugin_key = email[: -len(legacy_suffix)]
+        return plugin_key if plugin_key in BUILTIN_PLUGINS else None
+    return None
 
 
 def agent_telemetry_properties(user) -> dict:

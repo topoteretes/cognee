@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -40,14 +42,48 @@ async def get_principal_configuration(config_id: UUID, principal_id: UUID) -> di
         return config_record.configuration if config_record else {}
 
 
+async def get_principals_all_configuration(
+    principal_ids: Iterable[UUID],
+) -> dict[UUID, list[dict[str, dict]]]:
+    """
+    Retrieves all Cognee configurations of several principals in one query.
+
+    Returns ``{principal_id: [configuration records]}``; a principal with no
+    records is absent. Not widened to child agents: callers name exactly the
+    owners whose records they want (the agent registry and the integrations
+    status read every child agent of a user in one call here, rather than
+    one query per agent). The configuration router widens over
+    ``get_visible_user_ids`` itself.
+
+    Args:
+        principal_ids (Iterable[UUID]): The owners (users/groups) to read.
+
+    Returns:
+        dict[UUID, list[dict]]: Configuration records grouped by owner.
+    """
+    owner_ids = list(principal_ids)
+    if not owner_ids:
+        return {}
+
+    relational_engine = get_relational_engine()
+
+    async with relational_engine.get_async_session() as session:
+        query = select(PrincipalConfiguration).where(PrincipalConfiguration.owner_id.in_(owner_ids))
+        config_records = (await session.execute(query)).scalars().all()
+
+    by_owner: dict[UUID, list[dict[str, dict]]] = {}
+    for record in config_records:
+        # The legacy Column type hides that this is a UUID at runtime.
+        owner_id = cast(UUID, record.owner_id)
+        by_owner.setdefault(owner_id, []).append(record.to_json())
+    return by_owner
+
+
 async def get_principal_all_configuration(principal_id: UUID) -> list[dict[str, dict]]:
     """
     Retrieves all Cognee configurations owned by exactly one principal.
 
-    Deliberately not widened to child agents: the agent registry and the
-    integrations surfaces call this per agent user and rely on getting that
-    agent's records only. The configuration router widens over
-    ``get_visible_user_ids`` itself.
+    The single-owner form of :func:`get_principals_all_configuration`.
 
     Args:
         principal_id (UUID): The unique identifier of the owner (user/group).
@@ -55,17 +91,4 @@ async def get_principal_all_configuration(principal_id: UUID) -> list[dict[str, 
     Returns:
         list[dict]: A list of configuration dictionaries. Returns an empty list if none are found.
     """
-    relational_engine = get_relational_engine()
-
-    async with relational_engine.get_async_session() as session:
-        # Select all records belonging to the principal
-        query = select(PrincipalConfiguration).where(
-            PrincipalConfiguration.owner_id == principal_id
-        )
-
-        result = await session.execute(query)
-        # Fetch all records from the result
-        config_records = result.scalars().all()
-
-        # Extract the configuration dictionary from each record
-        return [config_records.to_json() for config_records in config_records]
+    return (await get_principals_all_configuration([principal_id])).get(principal_id, [])
