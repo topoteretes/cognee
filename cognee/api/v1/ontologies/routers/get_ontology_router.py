@@ -69,7 +69,7 @@ def get_ontology_router() -> APIRouter:
 
         ## Request Parameters
         - **ontology_key** (str): Unique, user-defined identifier for the ontology (plain string — values starting with '[' or '{' are rejected; duplicate keys return 400). Use this key later as the `ontology_key` parameter in /api/v1/cognify or /api/v1/remember.
-        - **ontology_file** (UploadFile): Single ontology file in any RDF serialization rdflib parses (RDF/XML, Turtle, N3, JSON-LD, N-Triples, N-Quads, TriG). The accepted filename extensions and, for filenames without one of them, the accepted Content-Types are listed on the parameter itself; both come from `EXTENSION_FORMATS` / `CONTENT_TYPE_FORMATS` in `RDFLibOntologyResolver`.
+        - **ontology_file** (UploadFile): Single ontology file in any RDF serialization rdflib parses (RDF/XML, Turtle, N3, JSON-LD, N-Triples, N-Quads, TriG). The accepted filename extensions and, for filenames without one of them, the accepted Content-Types are listed on the parameter itself.
         - **description** (Optional[str]): Optional description for the ontology (plain string; values starting with '[' or '{' are rejected).
 
         ## Response

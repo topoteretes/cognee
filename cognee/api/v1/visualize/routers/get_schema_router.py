@@ -238,10 +238,9 @@ def get_schema_router() -> APIRouter:
 
         A tenant administrator sees the whole workspace; any other member sees
         only the datasets they hold a read grant on and the files hanging off
-        them (see ``_provenance_scope``), the agent connections and sessions
-        of themselves and their child agents, and the grants and role
-        membership of the datasets they may share (see
-        ``_provenance_actor_scope``).
+        them, the agent connections and sessions of themselves and their
+        child agents, and the grants and role membership of the datasets they
+        may share.
 
         Query parameters:
             include_memory: when true, also folds the extracted memory

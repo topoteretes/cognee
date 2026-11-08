@@ -60,7 +60,7 @@ def get_activity_router() -> APIRouter:
     ):
         """Recent `pipeline_runs` rows, newest first, with dataset owner info.
 
-        The table records both pipeline runs and — since SDK-399 — one row per
+        The table records both pipeline runs and one row per
         non-pipeline operation (`search`, `recall`, `remember`, `forget`,
         `delete`, `prune`). Use the **kind** field to tell them apart:
 
@@ -98,9 +98,10 @@ def get_activity_router() -> APIRouter:
         ## Response
         A JSON array. Alongside the original `id`, `pipeline_name`, `status`,
         `dataset_id`, `dataset_name`, `owner_id`, `owner_email`, `created_at`
-        and `pipeline_run_id` keys, each row carries the SDK-399 operation
-        columns. **Every one of them is nullable**: rows written before SDK-399
-        were not backfilled, and each writer sets only the subset it knows.
+        and `pipeline_run_id` keys, each row carries the operation columns
+        below. **Every one of them is nullable** except `kind` and
+        `session_ids`: rows written before these columns existed were not
+        backfilled, and each writer sets only the subset it knows.
 
         - **kind** (str): `"pipeline"` or `"operation"` (never null).
         - **operation_name** (str|null): Operation name; for pipeline rows this
@@ -120,7 +121,10 @@ def get_activity_router() -> APIRouter:
         - **embedding_tokens** (int|null): Embedding token count, same NULL/0 convention.
         - **started_at** / **ended_at** (str|null): ISO-8601 timestamps.
         - **user_id** (str|null): Triggering user.
-        - **session_id** (str|null): Session-cache id; joins `session_model_usage`.
+        - **session_ids** (list[str]): Every session-cache id the row belongs to:
+          one for a session-bound search, recall or remember, several for an
+          improve or remember given several sessions, `[]` for most rows.
+          Never null. Replaces the former single `session_id` field.
         - **parent_operation_id** (str|null): Parent's `pipeline_run_id`.
 
         ## Aggregation caveats (append-only table)

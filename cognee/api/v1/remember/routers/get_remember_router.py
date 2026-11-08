@@ -317,7 +317,8 @@ def get_remember_router() -> APIRouter:
         - **data** (List[UploadFile]): Files to upload and process.
         - **raw_data** (Optional[List[str]]): String inputs, one entry each: raw text, a
           local file or directory path on the server or an s3:// object read with the
-          server's AWS credentials (both require ACCEPT_LOCAL_FILE_PATH), a web URL
+          server's AWS credentials (both refused over HTTP unless the server sets
+          ACCEPT_LOCAL_FILE_PATH=true), a web URL
           fetched as a page (requires ALLOW_HTTP_REQUESTS), a GitHub/GitLab
           repository URL, shallow-cloned and indexed as a code graph, or a database
           connection string (postgresql://, mysql://, sqlite:///, ...). Database
@@ -362,8 +363,6 @@ def get_remember_router() -> APIRouter:
         - **index_vectors** (Optional[bool]): content_type="code" only — also embed the
           extracted code facts for semantic retrievers (default false, no LLM/embedding
           calls otherwise).
-
-        Either datasetName or datasetId must be provided.
         - **import_mode** (Optional[str]): COGX archive imports only: 'preserve' (default),
           'hybrid', or 're-derive'.
         - **skill_name** (Optional[str]): content_type='skills' + skills_text only: name/slug for
@@ -373,12 +372,14 @@ def get_remember_router() -> APIRouter:
           written to a temporary SKILL.md and ingested via the normal skills pipeline. Pair with
           skill_name to control the resulting skill name.
 
+        Either datasetName or datasetId must be provided.
+
         ## Error Codes
         - **400 Bad Request**: Neither datasetId nor datasetName provided, unsupported
           content_type, invalid graph_model JSON/schema, or invalid code-ingestion
           combination (no raw_data repository specs, file uploads or session_id with
-          content_type="code", index_vectors without it, or local repo paths while
-          ACCEPT_LOCAL_FILE_PATH=false)
+          content_type="code", index_vectors without it, or local repo paths unless
+          the server sets ACCEPT_LOCAL_FILE_PATH=true)
         - **422 Unprocessable Entity**: A database connection string in raw_data while
           ALLOW_DATABASE_INGESTION is unset or false (DatabaseIngestionDisabled), or one
           that names cognee's own storage (DatabaseSourceRefused, SqliteSourceRefused)
