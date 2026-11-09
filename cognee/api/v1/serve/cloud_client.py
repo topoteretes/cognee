@@ -42,6 +42,19 @@ def remote_graph_schema(graph_model: Any) -> dict | None:
     return graph_model_to_graph_schema(graph_model)
 
 
+def _node_type_name(node_type: Any) -> str | None:
+    """The ``node_type`` wire form: the class name, or None for the NodeSet default.
+
+    Omitting the field is how the server is told "node-set tags", so the default
+    travels as nothing and only a typed graph scope names its class.
+    """
+    from cognee.modules.engine.models.node_set import NodeSet
+
+    if node_type is None or node_type is NodeSet:
+        return None
+    return node_type.__name__
+
+
 def _failed_update_result(body: str) -> dict | None:
     """Parse a 500 body as an update result when it is one with status "failed"."""
     from cognee.api.v1.update.result import UpdateResult
@@ -313,6 +326,9 @@ class CloudClient:
             payload["top_k"] = kwargs["top_k"]
         if kwargs.get("system_prompt"):
             payload["system_prompt"] = kwargs["system_prompt"]
+        node_type_name = _node_type_name(kwargs.get("node_type"))
+        if node_type_name is not None:
+            payload["node_type"] = node_type_name
         if kwargs.get("node_name"):
             payload["node_name"] = kwargs["node_name"]
         if kwargs.get("only_context"):
@@ -702,6 +718,9 @@ class CloudClient:
             payload["topK"] = kwargs["top_k"]
         if kwargs.get("system_prompt"):
             payload["systemPrompt"] = kwargs["system_prompt"]
+        node_type_name = _node_type_name(kwargs.get("node_type"))
+        if node_type_name is not None:
+            payload["nodeType"] = node_type_name
         if kwargs.get("node_name"):
             payload["nodeName"] = kwargs["node_name"]
         if kwargs.get("only_context") is not None:

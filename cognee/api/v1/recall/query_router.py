@@ -64,18 +64,28 @@ class RoutingConstraints:
 
     @classmethod
     def from_config(
-        cls, llm_config=None, node_name: list[str] | None = None
+        cls,
+        llm_config=None,
+        node_type: type | None = None,
+        node_name: list[str] | None = None,
     ) -> "RoutingConstraints":
-        """Constraints for this deployment and request; ``node_name`` names node sets."""
+        """Constraints for this deployment and request.
+
+        ``node_type`` says what ``node_name`` names (``NodeSet``, the default when
+        omitted, means node-set tags; another graph node type means a typed graph
+        scope), so the scoped types are the ones that honour that scope.
+        """
         from cognee.modules.engine.models.node_set import NodeSet
         from cognee.modules.preflight import llm_available
         from cognee.modules.search.methods.node_name_scope import lucky_search_types
         from cognee.modules.search.search_type_policy import cypher_queries_allowed
 
+        if node_type is None:
+            node_type = NodeSet
         return cls(
             llm_available=llm_available(llm_config),
             cypher_allowed=cypher_queries_allowed(),
-            scoped_types=lucky_search_types(NodeSet, node_name),
+            scoped_types=lucky_search_types(node_type, node_name),
         )
 
 

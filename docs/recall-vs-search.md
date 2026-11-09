@@ -57,8 +57,9 @@ There is no off switch: an unscoped search is always routed.
 ## When to call search() directly
 
 - You need the agentic extras as first-class parameters: `skills`, `tools`, `max_iter`,
-  `code_query`, `node_type`. (`recall()` reaches most of these through
-  `retriever_specific_config={...}`, which you assemble yourself.)
+  `code_query`. (`recall()` reaches most of these through
+  `retriever_specific_config={...}`, which you assemble yourself. `node_type` is on
+  both: see "With a `node_name` filter" below.)
 - You want raw `SearchResult` objects rather than `source`-tagged entries.
 - You want a pinned `query_type` with no router and no session layer in the path, for
   example when benchmarking one retriever.
@@ -216,6 +217,37 @@ count resolves to `HYBRID_COMPLETION` normally (with `only_context=True` only
 when no LLM is available). The router logs the swap at info.
 `CODING_RULES` and `TEMPORAL` keep their routes. A pinned `query_type` is not
 rerouted: a type that cannot apply the filter raises.
+
+`node_type` says what the names are, on `recall()` exactly as on `search()`:
+`NodeSet` (the default) means node-set tags; any other graph node type
+(`SchemaColumn`, `TextDocument`, `Entity`, ...) means the named nodes of that
+type and their one-hop neighbours, a typed graph scope. With a typed scope the
+router picks only a type that applies one, so `CODING_RULES` and `TEMPORAL`
+lose their routes too (both apply node sets only) and a date question lands on
+`HYBRID_COMPLETION`, which defers to `GRAPH_COMPLETION` for the scope. Session
+sources are never scoped by `node_name`.
+
+Over HTTP (`POST /api/v1/search`, `POST /api/v1/recall`) the field is `nodeType`,
+the class name as a string (`"SchemaColumn"`); omitted means node-set tags, and an
+unknown name is a 422 naming the value. The server resolves the name to the class
+(`resolve_node_type` in `cognee/modules/search/methods/node_type_resolution.py`)
+before calling the SDK, so the search is the one a local caller would run.
+`cognee.serve()` sends the class name the same way. A class built at runtime from
+a `graph_model` JSON schema exists only for the cognify call that built it, so its
+name does not resolve over HTTP.
+
+```python
+# The DLT column anchors of SDK-1429, locally and over HTTP.
+await cognee.recall(
+    "Which genres sell best?",
+    query_type=SearchType.GRAPH_COMPLETION,
+    node_type=SchemaColumn,
+    node_name=["genre:name"],
+)
+# POST /api/v1/recall
+# {"query": "...", "searchType": "GRAPH_COMPLETION",
+#  "nodeType": "SchemaColumn", "nodeName": ["genre:name"]}
+```
 
 ### When a routed strategy comes up empty
 

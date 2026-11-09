@@ -57,12 +57,24 @@ class SearchPayloadDTO(InDTO):
     system_prompt: str | None = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
+    node_type: str | None = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "What the names in node_name are. Omitted: node-set tags (the node_set values"
+            " used during add/remember). Otherwise the class name of a graph node type,"
+            " such as 'SchemaColumn', 'TextDocument' or 'Entity': the search is scoped to"
+            " the named nodes of that type and their one-hop neighbours. Case-sensitive;"
+            " an unknown name is a 422."
+        ),
+    )
     node_name: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
-            "Restrict results to nodes in these node_sets"
-            " (the node_set values used during add/remember)."
+            "Names to scope the search to, read according to node_type: node-set tags"
+            " when node_type is omitted, else the names of nodes of that type"
+            " (for SchemaColumn, '<table>:<column>')."
         ),
     )
     top_k: int | None = Field(default=15)
@@ -259,7 +271,8 @@ def get_search_router() -> APIRouter:
         - **dataset_ids** (Optional[List[UUID]]): List of dataset UUIDs to search within
         - **query** (str): The search query string
         - **system_prompt** Optional[str]: System prompt to be used for Completion type searches in Cognee
-        - **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).
+        - **node_type** (Optional[str]): What node_name names. Omitted: node-set tags. Otherwise the class name of a graph node type ('SchemaColumn', 'TextDocument', 'Entity'): the named nodes of that type and their one-hop neighbours. An unknown name is a 422.
+        - **node_name** Optional[list[str]]: Names to scope the search to, read according to node_type (node-set tags by default).
         - **top_k** (Optional[int]): Maximum number of results to return (default: 15)
         - **only_context** bool: Return what the LLM would have received instead of its answer. For completion type searches the result is the user prompt (conversation history, then question plus retrieval context through the retriever's template, then the session guidance block); the system prompt (the retriever's task template) is `system_prompt_result` with verbose=true. Retrieval-only types return their context. No LLM call is made.
         - **session_id** (Optional[str]): Session whose history and guidance feed the completion or the only_context prompt; the default session when omitted.
@@ -296,6 +309,8 @@ def get_search_router() -> APIRouter:
                 # endpoint's convention (see recall.py telemetry).
                 "query": len(payload.query or ""),
                 "system_prompt": len(payload.system_prompt or ""),
+                # A class name, not user content.
+                "node_type": payload.node_type,
                 "node_name": len(payload.node_name or []),
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
@@ -311,6 +326,7 @@ def get_search_router() -> APIRouter:
         )
 
         from cognee.api.v1.search import search as cognee_search
+        from cognee.modules.search.methods.node_type_resolution import resolve_node_type
 
         try:
             results = await cognee_search(
@@ -322,6 +338,8 @@ def get_search_router() -> APIRouter:
                 else None,  # If dataset_ids are provided, ignore datasets by name to avoid confusion and potential mismatches.
                 dataset_ids=payload.dataset_ids,
                 system_prompt=payload.system_prompt,
+                # The wire carries the class name; the SDK takes the class.
+                node_type=resolve_node_type(payload.node_type),
                 node_name=payload.node_name,
                 top_k=payload.top_k,
                 verbose=payload.verbose,
