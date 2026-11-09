@@ -14,7 +14,8 @@ from cognee.modules.graph.utils.fact_conflicts import (
     status_label,
     user_selected_facts,
 )
-from cognee.modules.ontology.query_grounding import ONTOLOGY_CLASS_CATEGORY, QueryGrounding
+from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY
+from cognee.modules.ontology.query_grounding import QueryGrounding
 from cognee.modules.retrieval.hybrid.chunks import search_collections
 from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
 from cognee.modules.retrieval.hybrid.results import payload_matches_node_filter

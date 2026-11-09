@@ -1,6 +1,9 @@
 """The string-level guards shared by query grounding, cognify and schema alignment."""
 
+from types import SimpleNamespace
+
 from cognee.modules.ontology.term_matching import (
+    compact_key_index,
     find_class_named_in,
     head_phrase_tokens,
     multiword_match_is_sound,
@@ -23,7 +26,10 @@ def test_head_phrase_stops_at_the_first_preposition():
 
 
 def test_find_class_named_in_requires_the_class_to_be_the_head_noun():
-    classes = ["customer", "creditexposure", "company", "form"]
+    resolver = SimpleNamespace(
+        lookup={"classes": dict.fromkeys(["customer", "creditexposure", "company", "form"])}
+    )
+    classes = compact_key_index(resolver, "classes")
     assert find_class_named_in("credit exposure to acme corporation", classes) == "creditexposure"
     assert find_class_named_in("credit exposures", classes) == "creditexposure"
     assert find_class_named_in("acme customer", classes) == "customer"

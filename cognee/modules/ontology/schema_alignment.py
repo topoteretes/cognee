@@ -27,14 +27,13 @@ from uuid import UUID
 from cognee.modules.engine.models import EntityType
 from cognee.modules.engine.utils import generate_edge_name, generate_node_name
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
-from cognee.modules.ontology.models import AttachedOntologyNode
+from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY, AttachedOntologyNode
 from cognee.modules.ontology.term_matching import multiword_match_is_sound
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ontology_schema_alignment")
 
 REALIZES_RELATIONSHIP = "realizes"
-_CLASS_CATEGORY = "classes"
 
 EdgeTuple = tuple[UUID, UUID, str, dict[str, Any]]
 Subgraph = tuple[list[AttachedOntologyNode], list[tuple[str, str, str]], AttachedOntologyNode]
@@ -200,9 +199,9 @@ def _add_class_subgraph(alignment: SchemaOntologyAlignment, subgraph: Subgraph) 
     class_by_key = {
         generate_edge_name(node.name): node
         for node in ontology_nodes
-        if node.category == _CLASS_CATEGORY
+        if node.category == ONTOLOGY_CLASS_CATEGORY
     }
-    if root.category == _CLASS_CATEGORY:
+    if root.category == ONTOLOGY_CLASS_CATEGORY:
         class_by_key.setdefault(generate_edge_name(root.name), root)
 
     for node in class_by_key.values():
@@ -247,7 +246,7 @@ def align_tables_with_ontology(
     for table in specs:
         authority = authority_for(table.name, authoritative_sources)
         table_subgraph = _resolve(
-            table_lookup_names(table.name), _CLASS_CATEGORY, resolver, f"table {table.name}"
+            table_lookup_names(table.name), ONTOLOGY_CLASS_CATEGORY, resolver, f"table {table.name}"
         )
         if table_subgraph is not None:
             root = table_subgraph[2]

@@ -23,15 +23,19 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 
 from cognee.modules.engine.models import Entity, EntityType
-from cognee.modules.ontology import term_matching
+from cognee.modules.engine.utils import generate_edge_name
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY, ONTOLOGY_INDIVIDUAL_CATEGORY
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
+from cognee.modules.ontology.term_matching import (
+    MIN_TOKEN_LENGTH,
+    STOPWORDS,
+    TOKEN_PATTERN,
+    multiword_match_is_sound,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ontology_query_grounding")
-
-ONTOLOGY_CLASS_CATEGORY = "classes"
-ONTOLOGY_INDIVIDUAL_CATEGORY = "individuals"
 
 # Vector collections the pinned node ids belong to, by ontology category. Both are
 # already part of every graph-completion search, so a pinned id lands in a
@@ -46,9 +50,6 @@ DEFAULT_MAX_NGRAM = 3
 _MAX_CANDIDATE_TERMS = 60
 _MAX_PARENTS = 4
 _MAX_RELATIONS = 5
-_MIN_TOKEN_LENGTH = term_matching._MIN_TOKEN_LENGTH
-_STOPWORDS = term_matching.STOPWORDS
-_TOKEN_PATTERN = term_matching.TOKEN_PATTERN
 
 
 @dataclass(frozen=True)
@@ -119,7 +120,7 @@ def extract_candidate_terms(query: str, max_ngram: int = DEFAULT_MAX_NGRAM) -> l
     stopwords at n-gram boundaries, and capped so a long query cannot turn into
     hundreds of fuzzy lookups.
     """
-    tokens = _TOKEN_PATTERN.findall(query.lower())
+    tokens = TOKEN_PATTERN.findall(query.lower())
     if not tokens:
         return []
 
@@ -128,9 +129,9 @@ def extract_candidate_terms(query: str, max_ngram: int = DEFAULT_MAX_NGRAM) -> l
     for size in range(min(max_ngram, len(tokens)), 0, -1):
         for start in range(len(tokens) - size + 1):
             window = tokens[start : start + size]
-            if window[0] in _STOPWORDS or window[-1] in _STOPWORDS:
+            if window[0] in STOPWORDS or window[-1] in STOPWORDS:
                 continue
-            if size == 1 and len(window[0]) < _MIN_TOKEN_LENGTH:
+            if size == 1 and len(window[0]) < MIN_TOKEN_LENGTH:
                 continue
             term = "_".join(window)
             if term in seen:
@@ -140,10 +141,6 @@ def extract_candidate_terms(query: str, max_ngram: int = DEFAULT_MAX_NGRAM) -> l
             if len(candidates) >= _MAX_CANDIDATE_TERMS:
                 return candidates
     return candidates
-
-
-_normalize_key = term_matching.normalize_key
-_multiword_match_is_sound = term_matching.multiword_match_is_sound
 
 
 # ``is_a`` targets that say nothing about the business: the OWL meta-classes the
@@ -159,8 +156,8 @@ def _concept_from_subgraph(
     edges: list[tuple[str, str, str]],
 ) -> GroundedConcept:
     """Build a GroundedConcept from what ``get_subgraph`` returned for one term."""
-    root_key = _normalize_key(root.name)
-    display_name_by_key = {_normalize_key(node.name): node.name for node in nodes}
+    root_key = generate_edge_name(root.name)
+    display_name_by_key = {generate_edge_name(node.name): node.name for node in nodes}
 
     def display(label: str) -> str:
         return display_name_by_key.get(label, label)
@@ -230,7 +227,7 @@ def ground_query(
                     "Ontology lookup failed for %r (%s): %s", term, category, error, exc_info=True
                 )
                 continue
-            if root is None or not _multiword_match_is_sound(term, root.name):
+            if root is None or not multiword_match_is_sound(term, root.name):
                 continue
             node_key = (category, root.name)
             if node_key in matched_nodes:

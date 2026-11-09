@@ -15,7 +15,7 @@ from cognee.modules.ontology.ontology_env_config import (
     normalize_ontology_mode,
 )
 from cognee.modules.ontology.term_matching import (
-    compact_class_index,
+    compact_key_index,
     find_class_named_in,
     multiword_match_is_sound,
 )
@@ -111,15 +111,6 @@ def _find_ontology_match(
     )
 
 
-def _ontology_class_index(ontology_resolver: BaseOntologyResolver) -> dict[str, str]:
-    """The resolver's class keys by compact form; empty for resolvers with no ``lookup``."""
-    lookup = getattr(ontology_resolver, "lookup", None)
-    if not isinstance(lookup, dict):
-        return {}
-    classes = lookup.get(_ONTOLOGY_CLASS_CATEGORY)
-    return compact_class_index(classes.keys()) if isinstance(classes, dict) else {}
-
-
 def _find_class_named_in_entity(
     ontology_resolver: BaseOntologyResolver,
     class_keys: dict[str, str],
@@ -157,7 +148,7 @@ def _find_ontology_matches_for_extracted_graphs(
     names it contains, stored under ``_CLASS_BY_NAME_LOOKUP``.
     """
     ontology_match_lookup: OntologyMatchLookup = {}
-    class_keys = _ontology_class_index(ontology_resolver)
+    class_keys = compact_key_index(ontology_resolver, _ONTOLOGY_CLASS_CATEGORY)
     for data_chunk, extracted_graph in zip(data_chunks, extracted_graphs):
         if not extracted_graph:
             continue

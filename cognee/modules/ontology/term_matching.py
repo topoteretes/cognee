@@ -14,15 +14,18 @@ those callers share:
   Acme`` → ``CreditExposure``) is grounded in that class even when its LLM-assigned
   *type* (``financial metric``) never fuzzy-matches anything.
 
-No LLM, no I/O; every function is pure over strings.
+No LLM, no I/O; every function is pure over strings (``compact_key_index`` reads the
+resolver's in-memory lookup table).
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 
-_MIN_TOKEN_LENGTH = 3
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+
+MIN_TOKEN_LENGTH = 3
 
 # Short function-word list: enough to keep "the", "our", "which" out of fuzzy matching
 # without pulling in a stopword dependency. Words inside an n-gram are kept ("line of
@@ -51,11 +54,6 @@ _PHRASE_BREAKERS = frozenset(
 TOKEN_PATTERN = re.compile(r"[a-z0-9]+(?:['\-][a-z0-9]+)*")
 
 
-def normalize_key(name: str) -> str:
-    """The resolver's key form: lowercase, spaces to underscores."""
-    return name.lower().replace(" ", "_").strip()
-
-
 def compact(name: str) -> str:
     """Strip every separator so ``credit_exposure`` and ``CreditExposure`` compare equal."""
     return re.sub(r"[^a-z0-9]", "", name.lower())
@@ -69,7 +67,7 @@ def tokens_of(name: str) -> list[str]:
 
 def singular(token: str) -> str:
     """A cheap singular form good enough for suffix comparison (never for display)."""
-    if len(token) <= _MIN_TOKEN_LENGTH:
+    if len(token) <= MIN_TOKEN_LENGTH:
         return token
     if token.endswith("ies"):
         return token[:-3] + "y"
@@ -111,17 +109,25 @@ def head_phrase_tokens(name: str) -> list[str]:
     return head
 
 
-def compact_class_index(class_keys: Iterable[str]) -> dict[str, str]:
-    """``{compact form: key}`` for :func:`find_class_named_in`; build once per run."""
-    compact_keys: dict[str, str] = {}
-    for key in class_keys:
+def compact_key_index(resolver: BaseOntologyResolver, category: str) -> dict[str, str]:
+    """``{compact form: resolver key}`` for one lookup category; build once per use.
+
+    ``lookup`` is read the way ``ensure_ontology_usable_in_strict_mode`` reads it: a
+    custom resolver without a ``lookup`` dict gets an empty index.
+    """
+    lookup = getattr(resolver, "lookup", None)
+    keys = lookup.get(category) if isinstance(lookup, dict) else None
+    if not isinstance(keys, dict):
+        return {}
+    index: dict[str, str] = {}
+    for key in keys:
         compact_key = compact(key)
-        if len(compact_key) >= _MIN_TOKEN_LENGTH:
-            compact_keys.setdefault(compact_key, key)
-    return compact_keys
+        if len(compact_key) >= MIN_TOKEN_LENGTH:
+            index.setdefault(compact_key, key)
+    return index
 
 
-def find_class_named_in(name: str, class_keys: Iterable[str] | Mapping[str, str]) -> str | None:
+def find_class_named_in(name: str, class_index: Mapping[str, str]) -> str | None:
     """Return the class key that ends the head noun phrase of ``name``, if any.
 
     The class must be a *suffix* of the head phrase, token-aligned: the head noun is
@@ -129,17 +135,13 @@ def find_class_named_in(name: str, class_keys: Iterable[str] | Mapping[str, str]
     ``Customer`` (its head is ``form``), while ``"acme customer"`` and ``"credit
     exposure to acme"`` do ground in ``Customer`` / ``CreditExposure``. The longest
     class wins; a class shorter than one content token of three characters is ignored.
-    ``class_keys`` may be a prebuilt :func:`compact_class_index`.
+    ``class_index`` is the classes' :func:`compact_key_index`.
     """
     head = head_phrase_tokens(name)
     if not head:
         return None
     if head[-1] in STOPWORDS:
         return None
-
-    compact_keys = (
-        class_keys if isinstance(class_keys, Mapping) else compact_class_index(class_keys)
-    )
 
     best_key: str | None = None
     best_length = 0
@@ -152,7 +154,7 @@ def find_class_named_in(name: str, class_keys: Iterable[str] | Mapping[str, str]
             "".join(suffix[:-1]) + singular(suffix[-1]),
         ):
             candidate = compact(candidate)
-            key = compact_keys.get(candidate)
+            key = class_index.get(candidate)
             if key is not None and len(candidate) > best_length:
                 best_key, best_length = key, len(candidate)
     return best_key
