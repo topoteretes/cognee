@@ -79,6 +79,10 @@ from cognee.modules.integrations.oauth_flow import (
     make_state,
     validate_state,
 )
+from cognee.modules.integrations.outbound import (
+    OutboundHttpDisabledError,
+    require_outbound_http,
+)
 from cognee.modules.integrations.plugin_keys import (
     PluginAgentKeyLimitError,
     add_plugin_agent_key,
@@ -165,6 +169,13 @@ class DisconnectResultDTO(OutDTO):
     disconnected: bool
 
 
+class ConnectionDisconnectResultDTO(DisconnectResultDTO):
+    # True when ALLOW_HTTP_REQUESTS=false kept cognee from asking the provider to
+    # revoke the token: the local connection is gone, the token is still live at
+    # the provider until it expires or the user removes the app there.
+    remote_revoke_skipped: bool = False
+
+
 class ConnectionSummaryDTO(OutDTO):
     provider_account_id: str
     account_label: str | None = None
@@ -248,6 +259,20 @@ class PluginStatusItemDTO(OutDTO):
 class IntegrationsStatusDTO(OutDTO):
     integrations: list[IntegrationStatusItemDTO]
     plugins: list[PluginStatusItemDTO]
+
+
+def _outbound_http_or_503(provider: str) -> None:
+    """Refuse a connect or sync while ``ALLOW_HTTP_REQUESTS=false``.
+
+    Every provider call is already refused at its ``client_session``; here
+    the check answers the caller directly with a 503, instead of a sync
+    accepted into the background that fails where nobody sees it, or an
+    OAuth round trip whose callback cannot complete.
+    """
+    try:
+        require_outbound_http(provider)
+    except OutboundHttpDisabledError as error:
+        raise HTTPException(status_code=503, detail=error.message) from error
 
 
 def _integration_or_404(provider: str) -> OAuthIntegration:
@@ -764,6 +789,7 @@ def get_integrations_router():
         with new_span("cognee.integrations.authorize") as span:
             span.set_attribute("cognee.integrations.provider", provider)
             integration = _integration_or_404(provider)
+            _outbound_http_or_503(provider)
             try:
                 nonce = secrets.token_urlsafe(32)
                 state = make_state(
@@ -1019,6 +1045,7 @@ def get_integrations_router():
           connection; a blank id returns 422.
         """
         integration = _integration_or_404(provider)
+        _outbound_http_or_503(provider)
         if integration.resource_selection_key is None:
             raise HTTPException(status_code=404, detail=f"{provider} has no selectable resources")
         credential = await _credential_or_404(user, integration, account_id)
@@ -1132,6 +1159,7 @@ def get_integrations_router():
           connection; a blank id returns 422.
         """
         integration = _integration_or_404(provider)
+        _outbound_http_or_503(provider)
         credential = await _credential_or_404(user, integration, account_id)
         if credential is None:
             raise HTTPException(status_code=404, detail=f"{provider} is not connected")
@@ -1150,7 +1178,7 @@ def get_integrations_router():
         delete_data: bool = False,
         account_id: str | None = None,
         user: User = Depends(get_authenticated_user),
-    ) -> DisconnectResultDTO:
+    ) -> ConnectionDisconnectResultDTO:
         """Disconnect the account connected by the requesting user.
 
         Marks the stored installation revoked, and best-effort asks the
@@ -1175,13 +1203,19 @@ def get_integrations_router():
           502, unless the deletion itself answered with an HTTP error, whose status is kept.
           Ignored when account_id is omitted and the caller has no connection. Defaults to
           False.
+
+        ## Response
+        - **disconnected** (bool): Whether a connection was revoked locally.
+        - **remoteRevokeSkipped** (bool): True when ``ALLOW_HTTP_REQUESTS=false`` kept the
+          server from asking the provider to revoke the token, which then stays live at the
+          provider until it expires or the user removes the app there.
         """
         with new_span("cognee.integrations.disconnect") as span:
             span.set_attribute("cognee.integrations.provider", provider)
             integration = _integration_or_404(provider)
             credential = await _credential_or_404(user, integration, account_id)
             if credential is None or credential.provider_account_id is None:
-                return DisconnectResultDTO(disconnected=False)
+                return ConnectionDisconnectResultDTO(disconnected=False)
 
             dataset_name = None
             if delete_data:
@@ -1192,14 +1226,28 @@ def get_integrations_router():
                         detail=f"{provider} does not expose a deletable dataset",
                     )
 
+            remote_revoke_skipped = False
             try:
-                await integration.revoke_remote(credential)
-            except Exception:  # a remote-revoke failure must never block disconnect
-                logger.exception(
-                    "%s revoke_remote raised for account %s",
+                require_outbound_http(provider)
+            except OutboundHttpDisabledError:
+                # Not attempted rather than attempted and swallowed: the caller is
+                # told, since the token stays live at the provider.
+                remote_revoke_skipped = True
+                logger.warning(
+                    "%s token for account %s was not revoked at the provider: "
+                    "ALLOW_HTTP_REQUESTS=false",
                     provider,
                     credential.provider_account_id,
                 )
+            else:
+                try:
+                    await integration.revoke_remote(credential)
+                except Exception:  # a remote-revoke failure must never block disconnect
+                    logger.exception(
+                        "%s revoke_remote raised for account %s",
+                        provider,
+                        credential.provider_account_id,
+                    )
 
             await revoke_credential_by_account(integration.provider, credential.provider_account_id)
             if delete_data:
@@ -1219,6 +1267,8 @@ def get_integrations_router():
                         status_code=502,
                         detail=f"{provider} disconnected, but its data could not be deleted",
                     )
-            return DisconnectResultDTO(disconnected=True)
+            return ConnectionDisconnectResultDTO(
+                disconnected=True, remote_revoke_skipped=remote_revoke_skipped
+            )
 
     return integrations_router

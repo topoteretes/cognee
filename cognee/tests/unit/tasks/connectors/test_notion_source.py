@@ -520,7 +520,28 @@ def test_transient_error_aborts_without_tombstones(monkeypatch):
         list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, previous_pages, {}, {}))
 
 
-def test_gone_child_page_is_tombstoned_not_raised():
+def test_a_redirect_answer_is_an_error_not_an_empty_listing(monkeypatch):
+    """SDK-832: redirects are not followed, and a 3xx that carries a JSON body
+    must not be read as a page with nothing below it (which would tombstone its
+    children and index a prefix of the tree)."""
+    fake = _basic_tree()
+    client = _client(fake)
+    state: dict = {}
+    list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, {}, state, {}))
+    previous_pages = dict(state["pages"])
+
+    def redirects_children(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith(f"/blocks/{ROOT_PAGE_ID}/children"):
+            return httpx.Response(
+                301, headers={"Location": "https://elsewhere.example/"}, json={"results": []}
+            )
+        return fake.handler(request)
+
+    client._http = httpx.Client(transport=httpx.MockTransport(redirects_children))
+    with pytest.raises(NotionAPIError) as caught:
+        list(_iter_rows(client, [ROOT_PAGE_ID], [], WORKSPACE_ID, previous_pages, {}, {}))
+    assert caught.value.status_code == 301
+
     fake = _basic_tree()
     client = _client(fake)
     state: dict = {}

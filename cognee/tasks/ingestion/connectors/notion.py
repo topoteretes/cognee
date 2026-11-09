@@ -178,7 +178,10 @@ class _NotionClient:
                 time.sleep(delay)
                 continue
 
-            if response.status_code >= 400:
+            # Only a 200 carries a listing. Redirects are not followed (httpx's
+            # default), and a 3xx answer with a JSON body must not be read as an
+            # empty page, which would tombstone everything below it.
+            if response.status_code != 200:
                 raise NotionAPIError(
                     response.status_code,
                     f"Notion API error {response.status_code} on {path}: {response.text}",

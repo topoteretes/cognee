@@ -69,6 +69,7 @@ from cognee.modules.integrations.linear.sync import (
 )
 from cognee.modules.integrations.linear.verify_linear_signature import LinearWebhookVerifier
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
+from cognee.modules.integrations.outbound import client_session
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,7 @@ async def refresh_access_token(
     code so neither the request nor the response body can reach a log.
     """
     async with (
-        aiohttp.ClientSession(timeout=_REFRESH_TIMEOUT) as session,
+        client_session("linear", timeout=_REFRESH_TIMEOUT) as session,
         session.post(
             _TOKEN_URL,
             data={
@@ -565,7 +566,7 @@ class LinearIntegration(OAuthIntegration):
     async def exchange_code(self, code: str) -> dict[str, Any]:
         """Exchange the OAuth code for the workspace's agent token."""
         async with (
-            aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+            client_session("linear", timeout=_TIMEOUT) as session,
             session.post(
                 _TOKEN_URL,
                 data={
@@ -719,7 +720,7 @@ class LinearIntegration(OAuthIntegration):
                 continue
             try:
                 async with (
-                    aiohttp.ClientSession(timeout=_REVOKE_TIMEOUT) as session,
+                    client_session("linear", timeout=_REVOKE_TIMEOUT) as session,
                     session.post(
                         _REVOKE_URL,
                         data={"token": token, "token_type_hint": token_type},
