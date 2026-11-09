@@ -5,8 +5,8 @@ from uuid import uuid4
 
 import asyncpg
 import pytest
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 
 from cognee.infrastructure.databases.postgres import drop_pg_database_if_exists
 
@@ -29,7 +29,7 @@ async def test_non_superuser_drop_leaves_foreign_role_connected():
         await admin.execute(f"CREATE ROLE \"{foreign}\" LOGIN NOSUPERUSER PASSWORD 'test-only'")
         await admin.execute(f'CREATE DATABASE "{database}" OWNER "{owner}"')
         parsed = make_url(url)
-        params = dict(host=parsed.host, port=parsed.port or 5432, password="test-only")
+        params = {"host": parsed.host, "port": parsed.port or 5432, "password": "test-only"}
         own_connection = await asyncpg.connect(**params, user=owner, database=database)
         foreign_connection = await asyncpg.connect(**params, user=foreign, database=database)
         # The old helper raises 42501 (insufficient privilege) while trying to
