@@ -11,7 +11,7 @@ A coding lesson is one document with two header lines, a title and the statement
 Its ``Data`` row carries the same facts in ``external_metadata`` (the column the
 dataset listing exposes, which is how the Claude Code plugin reads them, SDK-1336):
 ``lesson_type``, ``state_key``, ``session_id``, ``session_date``, ``git_commit``,
-``git_branch``, ``files``, ``seen_sessions`` and ``seen_in_sessions``.
+``git_branch``, ``files``, ``project_node_sets``, ``seen_sessions`` and ``seen_in_sessions``.
 
 A state key names one current fact *per project*: the lessons of one dataset are
 scoped by the project node sets their rows carry (the session's pinned node set, which
