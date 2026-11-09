@@ -15,6 +15,7 @@ from .linear import build_linear_service, linear_source
 from .notion import notion_source
 from .obsidian import obsidian_source
 from .onenote import list_onenote_notebooks, onenote_source
+from .stripe import build_stripe_service, stripe_source
 
 __all__ = [
     "apollo_source",
@@ -25,6 +26,7 @@ __all__ = [
     "build_drive_service_from_access_token",
     "build_gmail_service_from_access_token",
     "build_linear_service",
+    "build_stripe_service",
     "gmail_source",
     "google_calendar_source",
     "google_drive_source",
@@ -33,4 +35,5 @@ __all__ = [
     "notion_source",
     "obsidian_source",
     "onenote_source",
+    "stripe_source",
 ]
