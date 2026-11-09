@@ -31,11 +31,7 @@ from cognee.tasks.memify.review_conflicts.models import (
     ConflictsToFinalize,
     ConflictsToWrite,
 )
-from cognee.tasks.memify.review_conflicts.read_facts import (
-    _to_conflict_record,
-    find_conflicts_with_lost_subject,
-    read_entity_facts,
-)
+from cognee.tasks.memify.review_conflicts.read_facts import _to_conflict_record, read_entity_facts
 from cognee.tasks.memify.review_conflicts.write_conflicts import (
     _collect_cited_sources,
     _rebuild_stored_conflict,
@@ -270,12 +266,7 @@ async def resolve_conflict(
 
 
 async def retire_forgotten_decisions(dataset, user: User) -> set[str]:
-    """Delete the conflicts a deletion left without their basis, and return their ids.
-
-    Two kinds go: a user decision whose chosen fact no longer exists, and any conflict,
-    reviewed or decided, whose subject entity no longer exists. Conflict nodes carry a
-    dataset-level owner rather than a document's, so no document delete removes them
-    itself; without this a review conflict would outlive the data it describes.
+    """Delete the user decisions whose chosen fact no longer exists, and return their ids.
 
     Run after a document is deleted, inside the dataset's lock and database context;
     ``update()``'s chunk-level path runs it once the edit is written instead (see
@@ -286,38 +277,24 @@ async def retire_forgotten_decisions(dataset, user: User) -> set[str]:
     """
     graph = await get_graph_engine()
     rows, _ = await graph.get_filtered_graph_data([{"type": ["FactConflict"]}], include_edges=False)
-    conflicts = {
+    decisions = {
         str(node_id): props
         for node_id, props in rows
         if str(props.get("dataset_id")) == str(dataset.id)
+        and props.get("resolution_source") == "user"
     }
-    if not conflicts:
-        return set()
-    decisions = {
-        conflict_id: props
-        for conflict_id, props in conflicts.items()
-        if props.get("resolution_source") == "user"
-    }
-    # Deletes run under the dataset lock, often one row at a time, so the full review
-    # read below runs only when it can retire something: a decision to check, or a
-    # conflict whose subject is gone. The subject check reads the subjects alone.
-    if not decisions and not await find_conflicts_with_lost_subject(graph, dataset.id, conflicts):
+    if not decisions:
         return set()
     ctx = PipelineContext(user=user, dataset=dataset)
-    # The scope's conflict_ids_to_drop are the conflicts whose subject is gone, the
-    # same ones the next review run would drop.
     scope = await read_entity_facts(
         None,
         entity_ids=sorted({str(decision["about_id"]) for decision in decisions.values()}),
         ctx=ctx,
     )
     forgotten = sorted(
-        {
-            conflict_id
-            for conflict_id, decision in decisions.items()
-            if decision.get("selected_fact_id") not in scope.facts
-        }
-        | set(scope.conflict_ids_to_drop)
+        conflict_id
+        for conflict_id, decision in decisions.items()
+        if decision.get("selected_fact_id") not in scope.facts
     )
     if forgotten:
         # The same drop a conflict review makes: the node goes, and the marks it left

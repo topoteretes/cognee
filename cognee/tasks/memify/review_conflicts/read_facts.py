@@ -166,44 +166,19 @@ async def read_stored_conflicts(
     }
     ids_to_review, ids_to_drop = [], []
     for conflict_id, conflict in conflicts.items():
-        if _has_lost_subject(conflict, existing, dataset_node_ids):
+        subject_id = str(conflict["about_id"])
+        subject = existing.get(subject_id)
+        if (
+            not subject
+            or not _is_reviewable_entity(subject)
+            or (dataset_node_ids is not None and subject_id not in dataset_node_ids)
+        ):
             ids_to_drop.append(conflict_id)
         elif conflict.get("write_pending") or any(
             source not in existing for source in conflict["sources"]
         ):
             ids_to_review.append(conflict_id)
     return StoredConflicts(conflicts, ids_to_review, ids_to_drop)
-
-
-def _has_lost_subject(
-    conflict: dict, existing: dict[str, dict], dataset_node_ids: set[str] | None
-) -> bool:
-    """Whether a conflict's subject is gone, is no longer an entity, or is outside the dataset."""
-    subject_id = str(conflict["about_id"])
-    subject = existing.get(subject_id)
-    return (
-        not subject
-        or not _is_reviewable_entity(subject)
-        or (dataset_node_ids is not None and subject_id not in dataset_node_ids)
-    )
-
-
-async def find_conflicts_with_lost_subject(graph_engine, dataset_id, conflicts) -> list[str]:
-    """The ids of ``conflicts`` (id -> stored properties) a review would drop for their subject.
-
-    The same rule as ``read_stored_conflicts``, with only the subjects read, so a caller
-    that needs nothing else (a document delete) can skip the full review read.
-    """
-    dataset_node_ids = await read_dataset_node_ids(graph_engine, str(dataset_id))
-    subject_ids = sorted({str(conflict["about_id"]) for conflict in conflicts.values()})
-    existing = {
-        str(node["id"]): node for node in await _read_nodes_or_raise(graph_engine, subject_ids)
-    }
-    return sorted(
-        conflict_id
-        for conflict_id, conflict in conflicts.items()
-        if _has_lost_subject(conflict, existing, dataset_node_ids)
-    )
 
 
 # --- choosing the entities and the values their facts name -----------------

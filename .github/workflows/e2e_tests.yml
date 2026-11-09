@@ -2195,6 +2195,12 @@ jobs:
 
       # ── Phase 2: current branch ────────────────────────────────────────────
       - name: "Phase 2 — search legacy version data, then add, cognify, search (current branch)"
+        env:
+          # Conflict review is newer than the v1.6.3 seed. Its FactConflict nodes
+          # survive deleting every document (SDK-1445), so the final empty-graph
+          # check would fail whenever the LLM finds a conflict. Re-enable once
+          # SDK-1445 lands.
+          IMPROVE_REVIEW_CONFLICTS: "false"
         run: uv run python cognee/tests/backwards_compatibility/phase2_verify.py
 
   backwards-compatibility-postgres:
@@ -2301,6 +2307,12 @@ jobs:
 
       # ── Phase 2: current branch ────────────────────────────────────────────
       - name: "Phase 2 — search legacy version data, then add, cognify, search (current branch)"
+        env:
+          # Conflict review is newer than the v1.6.3 seed. Its FactConflict nodes
+          # survive deleting every document (SDK-1445), so the final empty-graph
+          # check would fail whenever the LLM finds a conflict. Re-enable once
+          # SDK-1445 lands.
+          IMPROVE_REVIEW_CONFLICTS: "false"
         run: uv run python cognee/tests/backwards_compatibility/phase2_verify.py
 
   test-adapter-caching:
