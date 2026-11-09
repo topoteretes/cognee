@@ -58,7 +58,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`truth_subspace_reranking.py`](guides/truth_subspace_reranking.py) | Teaching retrieval a preference — truth-weighted reranking on/off |
 | [`temporal_recall.py`](guides/temporal_recall.py) | Time-bounded queries with `SearchType.TEMPORAL` |
 | [`references_example.py`](guides/references_example.py) | `include_references` — answers with evidence |
-| [`nodeset_grouping_example.py`](guides/nodeset_grouping_example.py) | `node_set` grouping for filtered retrieval |
+| [`nodeset_grouping_example.py`](guides/nodeset_grouping_example.py) | `node_set` grouping for filtered retrieval, and moving a document to another node set without reprocessing |
 | [`hybrid_retrieval_recall.py`](guides/hybrid_retrieval_recall.py) | `HYBRID_COMPLETION` — passage-focused vs graph-focused context for the same question |
 
 ### Graph modeling & extraction

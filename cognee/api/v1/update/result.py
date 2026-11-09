@@ -41,7 +41,11 @@ class UpdateResult(BaseModel):
     (``incremental``) or found nothing to change (``unchanged``), the whole
     document was rebuilt (``full_rebuild``), or the rebuild's cognify run
     errored (``failed``, with ``error`` naming the cause so the call can be
-    retried). A rebuild always carries ``fallback``, naming why the chunk-level
+    retried). A metadata-only call (``data=None`` with ``node_set``) answers
+    ``metadata_updated`` when it moved the document to the new node sets, or
+    ``unchanged`` when storage already matched; it runs no pipeline, so its
+    counters, ``pipeline_run_id`` and ``fallback`` are ``None``. A rebuild
+    always carries ``fallback``, naming why the chunk-level
     path did not run or that the caller switched it off, and
     ``duration_seconds`` makes a slow update visible next to its reason.
 
@@ -59,7 +63,7 @@ class UpdateResult(BaseModel):
     compaction or the document structure pass); the rebuild itself succeeded.
     """
 
-    status: Literal["incremental", "unchanged", "full_rebuild", "failed"]
+    status: Literal["incremental", "unchanged", "full_rebuild", "failed", "metadata_updated"]
     regions: int | None = None
     deleted_chunks: int | None = None
     added_chunks: int | None = None

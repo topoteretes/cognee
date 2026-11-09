@@ -561,6 +561,24 @@ class Neo4jAdapter(GraphDBInterface):
         ]
         await self.query(query, {"rows": rows})
 
+    async def update_node(self, node_id: str, values: dict[str, Any]) -> bool:
+        """Merge *values* into an existing node's properties.
+
+        Neo4j stores real node properties, so the patch is a ``SET n += $values``:
+        properties not named in *values* — provenance included — are untouched.
+        A value of None removes that property, as Neo4j stores no nulls. Returns
+        False when the node does not exist or *values* is empty.
+        """
+        if not isinstance(node_id, str) or not node_id or not values:
+            return False
+        query = f"""
+        MATCH (n: `{BASE_LABEL}`{{id: $id}})
+        SET n += $values
+        RETURN n.id AS id
+        """
+        results = await self.query(query, {"id": node_id, "values": values})
+        return bool(results)
+
     async def delete_node(self, node_id: str):
         """
         Remove a node from the database identified by its ID.

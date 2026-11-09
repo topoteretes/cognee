@@ -14,6 +14,7 @@ from cognee.api.v1.update.incremental import (
     incremental_update,
     recorded_chunk_budget,
 )
+from cognee.api.v1.update.node_sets import update_node_sets
 from cognee.api.v1.update.result import Fallback, UpdateError, UpdateResult
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
 from cognee.modules.chunking.TextChunker import TextChunker
@@ -33,7 +34,7 @@ logger = get_logger("update")
 
 async def update(
     data_id: UUID,
-    data: str | list[str] | UploadFile | list[UploadFile],
+    data: str | list[str] | UploadFile | list[UploadFile] | None,
     dataset_id: UUID,
     user: User = None,
     node_set: list[str] | None = None,
@@ -64,6 +65,16 @@ async def update(
     ``UpdateTargetNotFoundError`` (404) — update() never creates documents;
     use add() for that.
 
+    ``data=None`` with a ``node_set`` is a metadata-only update: the document's
+    node sets are replaced in its existing memory (graph membership, vector
+    payloads, the relational row) without an LLM call, re-chunking or
+    re-embedding — chunk ids and vectors stay as they are. ``node_set=[]``
+    clears them, and repeating an assignment is a no-op (``unchanged``).
+    Storage that cannot patch membership in place raises
+    ``NodeSetReassignmentNotSupportedError`` before anything is written; this
+    branch never falls back to the full rebuild. Re-adding the same content
+    with add() does not move it.
+
     Supported Input Types:
         - **Text strings**: Direct text content (str) - any string not starting with "/" or "file://"
         - **File paths**: Local file paths as strings in these formats:
@@ -85,8 +96,9 @@ async def update(
 
     Args:
         data_id: UUID of existing data to update (current or pre-fork)
-        data: The latest version of the data. ``data_id`` names the document, so the
-            replacement may carry any filename; the new name lands on the row. Can be:
+        data: The latest version of the data, or None to change only the document's
+            node sets (``node_set`` is then required). ``data_id`` names the document, so
+            the replacement may carry any filename; the new name lands on the row. Can be:
             - Single text string: "Your text content here"
             - DLT resource or source: replaces a DLT source manifest under the same
               source name (the whole source is re-ingested and re-cognified)
@@ -104,9 +116,10 @@ async def update(
                  external_metadata and node_set of a DataItem, keep their stored values
                  when not passed; an explicit empty value (node_set=[], label="",
                  external_metadata={}) clears them; a value replaces them (the call's
-                 and the item's node_set together, as on add). Passing any of them runs
-                 the full rebuild, since the chunk-level path does not touch document
-                 metadata.
+                 and the item's node_set together, as on add). Passing any of them with
+                 ``data`` runs the full rebuild, since the chunk-level path does not touch
+                 document metadata; with ``data=None`` the node set alone is replaced in
+                 place, without reprocessing.
         vector_db_config: Optional configuration for vector database (for custom setups).
                  Chunk-level incremental updates do not support per-call config
                  forwarding: when provided, the update runs full ingestion
@@ -141,7 +154,9 @@ async def update(
         One dict on every path (schema: ``UpdateResult``), a superset of the
         chunk-level summary returned before:
             - ``status``: "incremental" (chunks replaced), "unchanged" (no content
-              change), "full_rebuild" (memory dropped and rebuilt from the new
+              change, or for ``data=None`` node sets already as requested),
+              "metadata_updated" (``data=None``: node sets replaced in place),
+              "full_rebuild" (memory dropped and rebuilt from the new
               content) or "failed"
               (the rebuild's cognify run errored; ``error`` says why, and the call
               can be retried).
@@ -157,6 +172,11 @@ async def update(
               unsupported parameter, or one of the engine's refusals.
             - ``error``: ``error_class`` and ``message`` when ``status`` is "failed".
     """
+    if data is None and node_set is None:
+        from cognee.api.v1.exceptions import UpdateRequestInvalidError
+
+        raise UpdateRequestInvalidError()
+
     # Route to the remote instance when connected via serve(). This must come
     # before any local work: the paths below resolve the LOCAL default user and
     # delete/re-add locally, which against a remote dataset id fails with
@@ -232,6 +252,19 @@ async def update(
 
         raise UpdateTargetNotFoundError(data_id=data_id, dataset_id=dataset_id)
     pinned_id = resolved_id
+
+    # Metadata-only: replace the node sets in the stored memory and stop. It
+    # runs before any extractor, staging or rebuild decision, and its failures
+    # propagate instead of falling through to the rebuild below.
+    if data is None:
+        if vector_db_config is not None or graph_db_config is not None:
+            from cognee.modules.graph.exceptions import NodeSetReassignmentNotSupportedError
+
+            raise NodeSetReassignmentNotSupportedError(
+                "a node_set-only update resolves its stores through the dataset context; "
+                "per-call vector_db_config/graph_db_config are not supported"
+            )
+        return await update_node_sets(pinned_id, dataset_id, user, node_set)
 
     # Why the chunk-level path is not taken, if it is not. Every full rebuild
     # names its cause in the result, so an update that took far longer than

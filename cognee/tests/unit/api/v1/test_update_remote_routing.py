@@ -239,3 +239,88 @@ async def test_cloud_client_update_returns_a_failed_result_instead_of_raising(mo
 
     assert result == UpdateResult.model_validate(failed).model_dump()
     assert (result["status"], result["error"]["message"]) == ("failed", "cognify failed")
+
+
+# ----- Metadata-only updates (data=None, node_set=...) -----
+
+
+def _field_values(form, name):
+    return [value for options, _headers, value in form._fields if options["name"] == name]
+
+
+@pytest.mark.asyncio
+async def test_node_set_only_update_routes_to_remote_without_data(remote_stub):
+    data_id, dataset_id = uuid4(), uuid4()
+
+    await update_mod.update(data_id, None, dataset_id, node_set=[])
+
+    assert remote_stub.calls == [
+        {
+            "data_id": data_id,
+            "data": None,
+            "dataset_id": dataset_id,
+            "node_set": [],
+            "chunk_level_diff": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_without_data_or_node_set_is_refused_before_routing(remote_stub):
+    from cognee.api.v1.exceptions import UpdateRequestInvalidError
+
+    with pytest.raises(UpdateRequestInvalidError):
+        await update_mod.update(uuid4(), None, uuid4())
+
+    assert remote_stub.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("node_set", "sent"),
+    [(["beta", "gamma"], ["beta", "gamma"]), ([], ["[]"])],
+)
+async def test_cloud_client_node_set_only_update_sends_no_file(monkeypatch, node_set, sent):
+    payload = _result_payload(
+        status="metadata_updated",
+        **dict.fromkeys(
+            (
+                "regions",
+                "deleted_chunks",
+                "added_chunks",
+                "reused_chunks",
+                "kept_chunks",
+                "reindexed_chunks",
+                "total_chunks",
+                "pipeline_run_id",
+            )
+        ),
+    )
+    client, captured = _client_with_fake_patch(monkeypatch, _FakeResponse(payload=payload))
+
+    result = await client.update(data_id=uuid4(), data=None, dataset_id=uuid4(), node_set=node_set)
+
+    assert result == UpdateResult.model_validate(payload).model_dump()
+    assert result["status"] == "metadata_updated"
+    assert _field_names(captured["form"]) == ["node_set"] * len(sent)
+    assert _field_values(captured["form"], "node_set") == sent
+    assert captured["form"]._is_multipart, "the route's form is multipart, file or not"
+
+
+@pytest.mark.asyncio
+async def test_cloud_client_keeps_the_node_set_when_none_is_given(monkeypatch):
+    client, captured = _client_with_fake_patch(monkeypatch, _FakeResponse())
+
+    await client.update(data_id=uuid4(), data="new text", dataset_id=uuid4(), node_set=None)
+
+    assert _field_names(captured["form"]) == ["data"]
+
+
+@pytest.mark.asyncio
+async def test_cloud_client_refuses_an_update_with_nothing_to_send(monkeypatch):
+    client, captured = _client_with_fake_patch(monkeypatch, _FakeResponse())
+
+    with pytest.raises(ValueError, match="node_set"):
+        await client.update(data_id=uuid4(), data=None, dataset_id=uuid4())
+
+    assert captured == {}

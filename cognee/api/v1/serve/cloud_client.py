@@ -449,8 +449,14 @@ class CloudClient:
         Mirrors the route: ``data_id``, ``dataset_id`` and ``chunk_level_diff``
         travel as query params, the new content as the multipart ``data`` file,
         ``node_set`` as repeated form fields. The server keeps the document's
-        id across the update, so this is a real replace.
+        id across the update, so this is a real replace. ``data=None`` sends no
+        file: the server then replaces only the node sets. ``node_set=None``
+        sends no field (keep) and ``[]`` the route's clear value.
         """
+        from cognee.api.v1.update.routers.get_update_router import CLEAR_NODE_SET
+
+        if data is None and node_set is None:
+            raise ValueError("update() needs replacement data, a node_set, or both.")
         # update() replaces exactly one document; the local implementation
         # unwraps single-item lists and DataItem wrappers the same way.
         if isinstance(data, list):
@@ -462,8 +468,11 @@ class CloudClient:
 
         session = await self._get_session()
 
-        form = aiohttp.FormData()
-        if isinstance(data, str):
+        # Always multipart, as the route's file field expects, even without a file.
+        form = aiohttp.FormData(default_to_multipart=True)
+        if data is None:
+            pass
+        elif isinstance(data, str):
             form.add_field(
                 "data",
                 io.BytesIO(data.encode("utf-8")),
@@ -477,9 +486,10 @@ class CloudClient:
             raise TypeError(
                 f"update() over serve() accepts text or a file object; got {type(data)}"
             )
-        for tag in node_set or []:
-            if tag:
-                form.add_field("node_set", str(tag))
+        if node_set is not None:
+            tags = [str(tag) for tag in node_set if tag]
+            for tag in tags or [CLEAR_NODE_SET]:
+                form.add_field("node_set", tag)
 
         params = {
             "data_id": str(data_id),

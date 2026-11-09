@@ -12,5 +12,6 @@ from .exceptions import (
     DataDeletionIncompleteError,
     DocumentSubgraphNotFoundError,
     DocumentUpdateRequiredError,
+    UpdateRequestInvalidError,
     UpdateTargetNotFoundError,
 )

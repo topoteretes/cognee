@@ -137,9 +137,10 @@ class GraphDBInterface(ABC):
 
     # Whether chunk-level incremental updates can run against this backend.
     # The adapter must provide compatible connection shapes, graph provenance,
-    # and a narrow ``update_chunk_index`` implementation. Declared on the
-    # adapter so a runtime-registered backend can participate by satisfying the
-    # full contract.
+    # and narrow ``update_chunk_index`` and ``update_node`` implementations
+    # (the latter patches node-set membership in place for metadata-only
+    # updates). Declared on the adapter so a runtime-registered backend can
+    # participate by satisfying the full contract.
     supports_incremental_chunk_updates: bool = False
 
     @abstractmethod
@@ -1081,8 +1082,9 @@ class GraphDBInterface(ABC):
         named in *values* untouched. Used to patch user preferences without
         rewriting the whole node.
 
-        Optional extension — implemented by LadybugAdapter (the default backend).
-        Other adapters may not support partial node updates yet and raise here.
+        Optional extension — implemented by every adapter that declares
+        ``supports_incremental_chunk_updates`` (Ladybug, Neo4j, Postgres). Other
+        adapters may not support partial node updates yet and raise here.
 
         Parameters:
         -----------
