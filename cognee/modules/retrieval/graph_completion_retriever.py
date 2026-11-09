@@ -117,6 +117,18 @@ class GraphCompletionRetriever(BaseRetriever):
         self.global_context_index_top_k = global_context_index_top_k
         self.include_references = include_references
 
+    def _with_grounding_block(self, query: str | None, graph_context: str) -> str:
+        """Prepend the ``## Ontology grounding`` block for ``query`` to ``graph_context``.
+
+        Only to real graph context: on its own the block names concepts without any
+        facts about them, and an empty context must stay empty so "nothing found"
+        remains detectable.
+        """
+        if not graph_context:
+            return graph_context
+        grounding_block = ground_query(query, get_query_grounding_resolver()).to_context_block()
+        return f"{grounding_block}\n\n{graph_context}" if grounding_block else graph_context
+
     def _use_session_cache(self) -> bool:
         """Check if session caching is enabled for the current user."""
         user = session_user.get()
@@ -357,14 +369,7 @@ class GraphCompletionRetriever(BaseRetriever):
             )
 
         graph_context = await self.resolve_edges_to_text(triplets) if triplets else ""
-
-        # The grounding block only accompanies real graph context: on its own it
-        # names concepts without any facts about them, and an empty context must
-        # stay empty so "nothing found" remains detectable.
-        if graph_context:
-            grounding_block = ground_query(query, get_query_grounding_resolver()).to_context_block()
-            if grounding_block:
-                graph_context = f"{grounding_block}\n\n{graph_context}"
+        graph_context = self._with_grounding_block(query, graph_context)
 
         if not self.include_global_context_index:
             if not triplets:

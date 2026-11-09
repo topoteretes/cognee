@@ -215,6 +215,37 @@ async def test_graph_completion_prepends_grounding_block_only_with_real_context(
     assert empty == ""
 
 
+@pytest.mark.asyncio
+async def test_chain_of_thought_context_carries_the_grounding_block(ontology):
+    from types import SimpleNamespace
+
+    from cognee.modules.retrieval.graph_completion_cot_retriever import (
+        GraphCompletionCotRetriever,
+    )
+
+    state = SimpleNamespace(triplets=None, context_text="")
+    with (
+        patch.object(
+            GraphCompletionCotRetriever,
+            "get_triplets_batch",
+            new_callable=AsyncMock,
+            return_value=[[MagicMock()]],
+        ),
+        patch.object(
+            GraphCompletionCotRetriever,
+            "resolve_edges_to_text",
+            new_callable=AsyncMock,
+            return_value="Node1: CreditExposure -- measured_for -- Acme",
+        ),
+    ):
+        await GraphCompletionCotRetriever()._fetch_initial_triplets_and_context(
+            {"credit exposure of Acme": state}
+        )
+
+    assert state.context_text.startswith("## Ontology grounding\n")
+    assert state.context_text.endswith("Node1: CreditExposure -- measured_for -- Acme")
+
+
 # --- Hybrid ---------------------------------------------------------------------------
 
 

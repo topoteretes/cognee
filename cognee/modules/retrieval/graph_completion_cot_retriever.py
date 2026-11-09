@@ -221,7 +221,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         )
         for q, triplets, context in zip(queries, triplets_batch, context_batch):
             states[q].triplets = triplets
-            states[q].context_text = context
+            states[q].context_text = self._with_grounding_block(q, context)
 
     async def _generate_completions(self, states: dict, session: SessionPrompt | None):
         """Generate completions for all queries in parallel."""
@@ -295,7 +295,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             *[self.resolve_edges_to_text(states[q].triplets) for q in queries]
         )
         for q, context in zip(queries, context_batch):
-            states[q].context_text = context
+            states[q].context_text = self._with_grounding_block(q, context)
 
     def _collect_results(
         self,
