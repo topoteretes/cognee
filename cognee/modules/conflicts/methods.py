@@ -31,7 +31,11 @@ from cognee.tasks.memify.review_conflicts.models import (
     ConflictsToFinalize,
     ConflictsToWrite,
 )
-from cognee.tasks.memify.review_conflicts.read_facts import _to_conflict_record, read_entity_facts
+from cognee.tasks.memify.review_conflicts.read_facts import (
+    _to_conflict_record,
+    find_conflicts_with_lost_subject,
+    read_entity_facts,
+)
 from cognee.tasks.memify.review_conflicts.write_conflicts import (
     _collect_cited_sources,
     _rebuild_stored_conflict,
@@ -294,6 +298,11 @@ async def retire_forgotten_decisions(dataset, user: User) -> set[str]:
         for conflict_id, props in conflicts.items()
         if props.get("resolution_source") == "user"
     }
+    # Deletes run under the dataset lock, often one row at a time, so the full review
+    # read below runs only when it can retire something: a decision to check, or a
+    # conflict whose subject is gone. The subject check reads the subjects alone.
+    if not decisions and not await find_conflicts_with_lost_subject(graph, dataset.id, conflicts):
+        return set()
     ctx = PipelineContext(user=user, dataset=dataset)
     # The scope's conflict_ids_to_drop are the conflicts whose subject is gone, the
     # same ones the next review run would drop.
