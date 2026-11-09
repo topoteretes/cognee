@@ -203,6 +203,20 @@ That is why these are *not* auto-routed, even though they are valid
   `lint`) do not select `CODING_RULES`. That retriever reads only the
   `coding_agent_rules` nodeset and returns nothing on an ordinary graph.
 
+### With a `node_name` filter
+
+The router picks only a type that can apply the filter (`node_name_scope` in
+`cognee/modules/search/methods/`). `CHUNKS_LEXICAL`, `CODE` and `BROAD` cannot,
+and with a filter they would raise `QueryValidationError`. A quoted phrase
+resolves to `HYBRID_COMPLETION` with `only_context=True`, whether an LLM is
+available or not. Hybrid applies the filter and retrieves both document chunks
+and DLT rows; `CHUNKS` would exclude the rows. The response contains hybrid's
+assembled context/prompt instead of a generated answer. A code question or a
+count resolves to `HYBRID_COMPLETION` normally (with `only_context=True` only
+when no LLM is available). The router logs the swap at info.
+`CODING_RULES` and `TEMPORAL` keep their routes. A pinned `query_type` is not
+rerouted: a type that cannot apply the filter raises.
+
 ### When a routed strategy comes up empty
 
 A routed type is a guess, so `recall()` does not let one do worse than the
