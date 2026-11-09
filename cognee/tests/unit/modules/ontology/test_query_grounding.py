@@ -7,12 +7,11 @@ import pytest
 from rdflib import OWL, RDF, RDFS, Graph, Namespace
 
 from cognee.modules.engine.models import Entity, EntityType
-from cognee.modules.ontology import query_grounding
+from cognee.modules.ontology import matching_strategies, query_grounding
 from cognee.modules.ontology.exceptions import OntologyInitializationError
 from cognee.modules.ontology.ontology_env_config import OntologyEnvConfig
 from cognee.modules.ontology.query_grounding import (
     QueryGrounding,
-    extract_candidate_terms,
     ground_query,
 )
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
@@ -28,6 +27,7 @@ def _finance_resolver() -> RDFLibOntologyResolver:
         "Customer",
         "EnterpriseCustomer",
         "Subscription",
+        "LineOfCredit",
     ):
         graph.add((NS[class_name], RDF.type, OWL.Class))
     graph.add((NS.CreditExposure, RDFS.subClassOf, NS.RiskMetric))
@@ -41,15 +41,6 @@ def _finance_resolver() -> RDFLibOntologyResolver:
     resolver.graph = graph
     resolver.build_lookup()
     return resolver
-
-
-def test_extract_candidate_terms_prefers_long_ngrams_and_drops_stopwords():
-    terms = extract_candidate_terms("What is our credit exposure to the customer?")
-
-    assert terms[0] == "credit_exposure"  # longest n-gram with content-word boundaries first
-    assert "the_customer" not in terms  # stopword at an n-gram boundary
-    assert "our" not in terms and "is" not in terms  # bare stopwords / short tokens
-    assert "customer" in terms and "exposure" in terms
 
 
 def test_ground_query_maps_terms_to_graph_node_ids_used_by_cognify():
@@ -85,10 +76,9 @@ def test_ground_query_reports_is_a_chain_and_relations_with_canonical_casing():
     assert "Acme (individual); is a EnterpriseCustomer > Customer" in block
 
 
-def test_multiword_fuzzy_match_cannot_swallow_an_unrelated_token():
-    # "enterprise customer acme" fuzzy-matches EnterpriseCustomer at >80%; accepting
-    # it would consume "acme" and hide the individual. The token check rejects it,
-    # so the class comes from the bigram and Acme still resolves on its own.
+def test_a_longer_run_cannot_swallow_an_unrelated_word():
+    # "enterprise customer acme" is no key, so it cannot consume "acme": the class
+    # comes from the bigram and Acme still resolves on its own.
     grounding = ground_query("enterprise customer acme", _finance_resolver())
 
     terms = {concept.term: concept.canonical_name for concept in grounding.concepts}
@@ -118,6 +108,40 @@ def test_ground_query_respects_max_concepts():
         "credit exposure, enterprise customer, subscription, Acme", _finance_resolver(), 2
     )
     assert len(grounding.concepts) == 2
+
+
+def test_grounding_matches_exact_keys_without_a_fuzzy_scan(monkeypatch):
+    resolver = _finance_resolver()
+    for index in range(5000):
+        resolver.graph.add((NS[f"Generated{index}"], RDF.type, OWL.Class))
+    resolver.build_lookup()
+
+    def no_fuzzy_scan(*_args, **_kwargs):
+        raise AssertionError("difflib.get_close_matches was called")
+
+    monkeypatch.setattr(matching_strategies.difflib, "get_close_matches", no_fuzzy_scan)
+    grounding = ground_query(
+        "Which table stores the credit exposures of our enterprise customers, and who owns "
+        "the customer accounts data in the sales operations team?",
+        resolver,
+    )
+
+    assert [concept.canonical_name for concept in grounding.concepts] == [
+        "CreditExposure",
+        "EnterpriseCustomer",
+        "Customer",
+    ]
+
+
+def test_grounding_keeps_inner_stopwords_and_matches_each_occurrence():
+    resolver = _finance_resolver()
+
+    line_of_credit = ground_query("what is the line of credit for Acme?", resolver)
+    assert [c.canonical_name for c in line_of_credit.concepts] == ["LineOfCredit", "Acme"]
+
+    # The first "customer" is used up by "enterprise customer"; the second still grounds.
+    twice = ground_query("which enterprise customer is our largest customer?", resolver)
+    assert [c.canonical_name for c in twice.concepts] == ["EnterpriseCustomer", "Customer"]
 
 
 # --- loading the configured resolver ------------------------------------------------

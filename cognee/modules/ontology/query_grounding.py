@@ -33,7 +33,9 @@ from cognee.modules.ontology.term_matching import (
     MIN_TOKEN_LENGTH,
     STOPWORDS,
     TOKEN_PATTERN,
-    multiword_match_is_sound,
+    compact,
+    compact_key_index,
+    singular,
 )
 from cognee.shared.logging_utils import get_logger
 
@@ -48,8 +50,6 @@ SEED_COLLECTION_BY_CATEGORY = {
 }
 
 DEFAULT_MAX_CONCEPTS = 5
-DEFAULT_MAX_NGRAM = 3
-_MAX_CANDIDATE_TERMS = 60
 _MAX_PARENTS = 4
 _MAX_RELATIONS = 5
 
@@ -115,36 +115,6 @@ class QueryGrounding:
         return "\n".join(lines)
 
 
-def extract_candidate_terms(query: str, max_ngram: int = DEFAULT_MAX_NGRAM) -> list[str]:
-    """Return lookup terms for a query: longest n-grams first, then shorter ones.
-
-    Terms are lowercased, joined by ``_`` (the resolver's key form), stripped of
-    stopwords at n-gram boundaries, and capped so a long query cannot turn into
-    hundreds of fuzzy lookups.
-    """
-    tokens = TOKEN_PATTERN.findall(query.lower())
-    if not tokens:
-        return []
-
-    candidates: list[str] = []
-    seen: set[str] = set()
-    for size in range(min(max_ngram, len(tokens)), 0, -1):
-        for start in range(len(tokens) - size + 1):
-            window = tokens[start : start + size]
-            if window[0] in STOPWORDS or window[-1] in STOPWORDS:
-                continue
-            if size == 1 and len(window[0]) < MIN_TOKEN_LENGTH:
-                continue
-            term = "_".join(window)
-            if term in seen:
-                continue
-            seen.add(term)
-            candidates.append(term)
-            if len(candidates) >= _MAX_CANDIDATE_TERMS:
-                return candidates
-    return candidates
-
-
 # ``is_a`` targets that say nothing about the business: the OWL meta-classes the
 # resolver reports for individuals, and the universal root.
 _TRIVIAL_PARENTS = frozenset({"class", "thing", "namedindividual", "resource"})
@@ -186,7 +156,7 @@ def _concept_from_subgraph(
 
     data_point_class = EntityType if category == ONTOLOGY_CLASS_CATEGORY else Entity
     return GroundedConcept(
-        term=term.replace("_", " "),
+        term=term,
         canonical_name=root.name,
         category=category,
         node_id=str(data_point_class.id_for(root.name)),
@@ -196,6 +166,21 @@ def _concept_from_subgraph(
     )
 
 
+def _match_run(run: list[str], indexes: list[tuple[str, dict[str, str]]]) -> tuple[str, str] | None:
+    """``(category, resolver key)`` of the first index holding the run, or None.
+
+    The run is compared in compact form as written and with its last word singular,
+    so "credit exposures" finds ``creditexposure``.
+    """
+    forms = (compact("".join(run)), compact("".join(run[:-1]) + singular(run[-1])))
+    for category, index in indexes:
+        for form in forms:
+            key = index.get(form)
+            if key is not None:
+                return category, key
+    return None
+
+
 def ground_query(
     query: str,
     resolver: BaseOntologyResolver | None,
@@ -203,41 +188,48 @@ def ground_query(
 ) -> QueryGrounding:
     """Resolve the terms of ``query`` against ``resolver``.
 
-    Longer n-grams win over the unigrams they contain ("credit exposure" suppresses a
-    separate match on "exposure"); each ontology node is reported once even when
-    several terms match it. Resolver failures are logged and treated as no match.
+    Every run of query words, longest first, whose first and last words are not
+    stopwords is looked up by exact compact key, in the classes and then the
+    individuals. A matched run uses up its words, so "credit exposure" suppresses a
+    separate match on "exposure"; each ontology node is reported once.
     """
     if not query or resolver is None:
         return QueryGrounding(query=query or "")
 
+    indexes = [
+        (category, compact_key_index(resolver, category))
+        for category in (ONTOLOGY_CLASS_CATEGORY, ONTOLOGY_INDIVIDUAL_CATEGORY)
+    ]
+    # A run of more words than the longest key has characters cannot match.
+    longest_key = max((len(key) for _, index in indexes for key in index), default=0)
+    tokens = TOKEN_PATTERN.findall(query.lower())
+
     concepts: list[GroundedConcept] = []
     matched_nodes: set[tuple[str, str]] = set()
-    consumed_tokens: set[str] = set()
+    used_positions: set[int] = set()
 
-    for term in extract_candidate_terms(query):
-        if len(concepts) >= max_concepts:
-            break
-        term_tokens = set(term.split("_"))
-        if term_tokens & consumed_tokens:
-            continue
-
-        for category in (ONTOLOGY_CLASS_CATEGORY, ONTOLOGY_INDIVIDUAL_CATEGORY):
-            try:
-                nodes, edges, root = resolver.get_subgraph(node_name=term, node_type=category)
-            except Exception as error:  # fail open: the retriever must not break
-                logger.debug(
-                    "Ontology lookup failed for %r (%s): %s", term, category, error, exc_info=True
-                )
+    for size in range(min(len(tokens), longest_key), 0, -1):
+        for start in range(len(tokens) - size + 1):
+            if len(concepts) >= max_concepts:
+                break
+            positions = range(start, start + size)
+            run = tokens[start : start + size]
+            if used_positions.intersection(positions):
                 continue
-            if root is None or not multiword_match_is_sound(term, root.name):
+            if run[0] in STOPWORDS or run[-1] in STOPWORDS:
                 continue
-            node_key = (category, root.name)
-            if node_key in matched_nodes:
+            if size == 1 and len(run[0]) < MIN_TOKEN_LENGTH:
                 continue
-            matched_nodes.add(node_key)
-            consumed_tokens |= term_tokens
-            concepts.append(_concept_from_subgraph(term, category, nodes, root, edges))
-            break
+            match = _match_run(run, indexes)
+            if match is None:
+                continue
+            category, key = match
+            used_positions.update(positions)
+            nodes, edges, root = resolver.get_subgraph(node_name=key, node_type=category)
+            if (category, root.name) in matched_nodes:
+                continue
+            matched_nodes.add((category, root.name))
+            concepts.append(_concept_from_subgraph(" ".join(run), category, nodes, root, edges))
 
     if concepts:
         logger.info(
