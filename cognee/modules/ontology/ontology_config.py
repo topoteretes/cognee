@@ -18,7 +18,9 @@ class OntologyConfig(TypedDict, total=False):
             owner, or None for no owner. Stamped on the ``realizes`` edge;
             retrieval prefers authoritative tables when several realize the
             same class. Falls back to ONTOLOGY_AUTHORITATIVE_SOURCES when
-            omitted.
+            omitted. Pass it next to ``ontology_resolver``: a per-call
+            ``ontology_config`` without ``ontology_resolver`` turns the ontology
+            off for the call, so no table is aligned.
         ontology_reasoning: Whether to expand the ontology's OWL 2 RL closure
             before matching — "none" (the default) or "owl_rl" (requires the
             optional ``owlrl`` package). Applies when cognee builds the resolver
