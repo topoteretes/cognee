@@ -13,7 +13,6 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
     get_configured_authoritative_sources,
     get_configured_ontology_resolver,
 )
-from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.schema_alignment import (
     SchemaTableSpec,
     align_tables_with_ontology,
@@ -32,7 +31,7 @@ async def migrate_relational_database(
     migrate_column_data=True,
     schema_only=False,
     ontology_resolver: BaseOntologyResolver | None = None,
-    ontology_config: Config | None = None,
+    authoritative_sources: dict[str, str | None] | None = None,
 ):
     """
     Migrates data from a relational database into a graph database.
@@ -44,13 +43,12 @@ async def migrate_relational_database(
     Then, for every foreign key defined in the schema:
       - Establishes relationships between TableRow nodes based on foreign key relationships
 
-    When an ontology is configured (``ONTOLOGY_FILE_PATH``, or ``ontology_resolver``
-    passed explicitly), each table node also gets a ``realizes`` edge to the ontology
-    class its name resolves to, plus that class's ``is_a`` chain — the link between
-    the technical schema and the business model. ``ontology_config`` is
-    the same dict ``cognify()`` accepts: ``ontology_resolver``, ``ontology_mode`` and
-    ``authoritative_sources`` (which tables are the system of record — stamped on the
-    ``realizes`` edge as ``authoritative`` / ``owner``).
+    When an ontology is configured (``ontology_resolver``, else ``ONTOLOGY_FILE_PATH``),
+    each table node also gets a ``realizes`` edge to the ontology class its name
+    resolves to, plus that class's ``is_a`` chain — the link between the technical
+    schema and the business model. ``authoritative_sources`` (table name to owner,
+    else ``ONTOLOGY_AUTHORITATIVE_SOURCES``) says which tables are the system of
+    record; it is stamped on the ``realizes`` edge as ``authoritative`` / ``owner``.
 
     Both TableType and TableRow inherit from DataPoint to maintain consistency with Cognee data model.
     """
@@ -62,7 +60,9 @@ async def migrate_relational_database(
         node_mapping, edge_mapping = await complete_database_ingestion(schema, migrate_column_data)
 
     if ontology_resolver is None:
-        ontology_resolver = get_configured_ontology_resolver(ontology_config)
+        ontology_resolver = get_configured_ontology_resolver()
+    if authoritative_sources is None:
+        authoritative_sources = get_configured_authoritative_sources()
     alignment = align_tables_with_ontology(
         [
             SchemaTableSpec(node.id, node.name)
@@ -70,7 +70,7 @@ async def migrate_relational_database(
             if isinstance(node, (SchemaTable, TableType))
         ],
         ontology_resolver,
-        authoritative_sources=get_configured_authoritative_sources(ontology_config),
+        authoritative_sources=authoritative_sources,
     )
     for node in alignment.nodes:
         node_mapping.setdefault(str(node.id), node)

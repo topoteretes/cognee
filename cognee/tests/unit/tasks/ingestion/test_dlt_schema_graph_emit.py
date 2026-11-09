@@ -217,3 +217,46 @@ async def test_ontology_alignment_sees_each_scoped_table_under_its_bare_name(mon
         (schema_graph_module._table_node_id("orders", shop), "orders"),
         (schema_graph_module._table_node_id("orders", crm), "orders"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_the_given_resolver_and_sources_align_the_tables(monkeypatch):
+    """The DLT path uses the ontology arguments it is handed and reads no environment."""
+    from rdflib import OWL, RDF, Graph, Namespace
+
+    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+
+    graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
+    _wire(monkeypatch, graph, {"source_ref_key": None, "pipeline_run_id": None})
+    ontology = Graph()
+    ontology.add((Namespace("http://example.org/shop#").Order, RDF.type, OWL.Class))
+    resolver = RDFLibOntologyResolver(ontology_file=None)
+    resolver.graph = ontology
+    resolver.build_lookup()
+
+    await emit_dlt_schema_graph(
+        _tables(), [], _ctx(), ontology_resolver=resolver, authoritative_sources={"orders": "ops"}
+    )
+
+    edges = graph.add_edges.await_args.args[0]
+    realizes = [props for _, _, name, props in edges if name == "realizes"]
+    assert [(props["authoritative"], props["owner"]) for props in realizes] == [(True, "ops")]
+
+
+@pytest.mark.asyncio
+async def test_dlt_tasks_hand_cognifys_ontology_to_the_edge_task():
+    from cognee.api.v1.cognify.cognify import get_dlt_tasks
+
+    resolver = object()
+    tasks = await get_dlt_tasks(
+        config={
+            "ontology_config": {
+                "ontology_resolver": resolver,
+                "authoritative_sources": {"orders": None},
+            }
+        }
+    )
+
+    edge_task = next(t for t in tasks if t.executable.__name__ == "extract_dlt_source_edges")
+    assert edge_task.default_params["kwargs"]["ontology_resolver"] is resolver
+    assert edge_task.default_params["kwargs"]["authoritative_sources"] == {"orders": None}

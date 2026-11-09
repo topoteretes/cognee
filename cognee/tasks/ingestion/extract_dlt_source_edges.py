@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Optional
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.dlt_schema_graph import emit_dlt_schema_graph
 from cognee.tasks.ingestion.dlt_utils import load_dlt_manifest
@@ -24,7 +25,8 @@ def _get_source_document(data_point: DataPoint):
 async def extract_dlt_source_edges(
     data_points: list[DataPoint],
     ctx: Optional["PipelineContext"] = None,
-    ontology_config: dict | None = None,
+    ontology_resolver: BaseOntologyResolver | None = None,
+    authoritative_sources: dict[str, str | None] | None = None,
 ) -> list[DataPoint]:
     """Create graph edges and schema nodes from a DLT source manifest.
 
@@ -144,7 +146,8 @@ async def extract_dlt_source_edges(
         emitted_value_node_ids=emitted_value_node_ids,
         emitted_column_node_ids=emitted_column_node_ids,
         emitted_has_value_edges=emitted_has_value_edges,
-        ontology_config=ontology_config,
+        ontology_resolver=ontology_resolver,
+        authoritative_sources=authoritative_sources,
     )
 
     emitted_schema_docs.update(newly_emitted_doc_ids)

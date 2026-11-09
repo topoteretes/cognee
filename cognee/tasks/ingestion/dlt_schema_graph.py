@@ -14,10 +14,7 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
 from cognee.modules.engine.models import DltColumn
 from cognee.modules.engine.utils.timestamp_from_text import timestamp_from_text
-from cognee.modules.ontology.get_default_ontology_resolver import (
-    get_configured_authoritative_sources,
-    get_configured_ontology_resolver,
-)
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.schema_alignment import (
     SchemaTableSpec,
     align_tables_with_ontology,
@@ -52,7 +49,8 @@ async def emit_dlt_schema_graph(
     emitted_value_node_ids: set | None = None,
     emitted_column_node_ids: set | None = None,
     emitted_has_value_edges: set | None = None,
-    ontology_config: dict | None = None,
+    ontology_resolver: BaseOntologyResolver | None = None,
+    authoritative_sources: dict[str, str | None] | None = None,
 ) -> None:
     """Build and persist the DLT schema graph for the given tables and rows.
 
@@ -86,6 +84,10 @@ async def emit_dlt_schema_graph(
         emitted_has_value_edges: same run-scoped bookkeeping for ``has_value``
             edges, keyed ``(column_id, value_id, "has_value")``, so a value that
             recurs in later batches does not write its column edge again.
+        ontology_resolver: the ontology each table name is aligned with (see
+            ``schema_alignment``); None writes no ``realizes`` edges. The environment
+            is not read here: the caller resolves both ontology arguments.
+        authoritative_sources: table name to owner, stamped on ``realizes`` edges.
 
     Creates SchemaTable nodes (deterministic uuid5 ids, so re-emitting is an
     idempotent upsert), SchemaRelationship nodes with has_foreign_key /
@@ -205,8 +207,6 @@ async def emit_dlt_schema_graph(
     # Business-to-technical mapping: with an ontology configured, each table node
     # realizes the ontology class its name resolves to (see schema_alignment).
     if table_node_ids:
-        wrapped_config = {"ontology_config": ontology_config} if ontology_config else None
-        ontology_resolver = get_configured_ontology_resolver(wrapped_config)
         # ``table_node_ids`` is keyed by ``(scope, name)``; ``tables`` by its own key.
         alignment = align_tables_with_ontology(
             [
@@ -219,7 +219,7 @@ async def emit_dlt_schema_graph(
                 for table_key, table_meta in tables.items()
             ],
             ontology_resolver,
-            authoritative_sources=get_configured_authoritative_sources(wrapped_config),
+            authoritative_sources=authoritative_sources,
         )
         schema_nodes.extend(alignment.nodes)
         schema_edges.extend(alignment.edges)

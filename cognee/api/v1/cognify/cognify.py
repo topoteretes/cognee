@@ -773,13 +773,15 @@ async def get_indexing_tasks(
 async def get_dlt_tasks(
     chunk_size: int | None = None,
     chunks_per_batch: int | None = None,
-    config: Config | None = None,
+    *,
+    config: Config,
 ) -> list[Task]:
     """Deterministic pipeline for DLT-source manifest datasets.
 
     No LLM tasks: each manifest row becomes one DocumentChunk (vector-indexed
     by add_data_points) and the graph structure comes from the relational
-    schema via extract_dlt_source_edges.
+    schema via extract_dlt_source_edges. ``config`` is the one cognify resolved:
+    its ontology resolver and authoritative sources align the tables.
     """
     from cognee.tasks.ingestion.extract_dlt_source_edges import extract_dlt_source_edges
     from cognee.tasks.ingestion.purge_stale_dlt_source_artifacts import (
@@ -816,7 +818,8 @@ async def get_dlt_tasks(
         # source), so these Task objects are safe to share across datasets.
         Task(
             extract_dlt_source_edges,
-            ontology_config=(config or {}).get("ontology_config"),
+            ontology_resolver=config["ontology_config"]["ontology_resolver"],
+            authoritative_sources=config["ontology_config"]["authoritative_sources"],
             needs_llm=False,
         ),
     ]

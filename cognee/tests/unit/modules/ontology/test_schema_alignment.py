@@ -177,3 +177,29 @@ async def test_a_malformed_ontology_file_fails_the_migration(monkeypatch, tmp_pa
 
     with pytest.raises(OntologyInitializationError):
         await migration.migrate_relational_database(MagicMock(), {}, schema_only=True)
+
+
+@pytest.mark.asyncio
+async def test_migration_uses_the_given_resolver_and_sources(monkeypatch):
+    from cognee.modules.engine.models import TableType
+
+    migration = importlib.import_module("cognee.tasks.ingestion.migrate_relational_database")
+    table = TableType(id=uuid4(), name="customers", description="customers table")
+    monkeypatch.setattr(
+        migration, "schema_only_ingestion", AsyncMock(return_value=({"customers": table}, []))
+    )
+    monkeypatch.setattr(migration, "index_data_points", AsyncMock())
+    monkeypatch.setattr(migration, "index_graph_edges", AsyncMock())
+    graph_db = MagicMock(add_nodes=AsyncMock(), add_edges=AsyncMock(), get_graph_data=AsyncMock())
+
+    await migration.migrate_relational_database(
+        graph_db,
+        {},
+        schema_only=True,
+        ontology_resolver=_crm_resolver(),
+        authoritative_sources={"customers": "sales-ops"},
+    )
+
+    edges = graph_db.add_edges.await_args.args[0]
+    realizes = [props for source, _, name, props in edges if name == REALIZES_RELATIONSHIP]
+    assert [(props["authoritative"], props["owner"]) for props in realizes] == [(True, "sales-ops")]
