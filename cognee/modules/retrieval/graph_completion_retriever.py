@@ -10,7 +10,12 @@ from cognee.infrastructure.session.get_session_manager import get_session_manage
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
-from cognee.modules.ontology.query_grounding import get_query_grounding_resolver, ground_query
+from cognee.modules.ontology.query_grounding import (
+    get_query_grounding_resolver,
+    ground_query,
+    grounding_block,
+    seed_node_ids_by_collection,
+)
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
@@ -126,8 +131,8 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         if not graph_context:
             return graph_context
-        grounding_block = ground_query(query, get_query_grounding_resolver()).to_context_block()
-        return f"{grounding_block}\n\n{graph_context}" if grounding_block else graph_context
+        block = grounding_block(ground_query(query, get_query_grounding_resolver()))
+        return f"{block}\n\n{graph_context}" if block else graph_context
 
     def _use_session_cache(self) -> bool:
         """Check if session caching is enabled for the current user."""
@@ -277,10 +282,9 @@ class GraphCompletionRetriever(BaseRetriever):
         # Ontology concepts the query names become pinned seeds: they are projected
         # with the vector hits and rank ahead of them, so "exposure" reaches the
         # CreditExposure class node even when the embedding neighbourhood misses it.
-        pinned_node_ids = (
-            ground_query(query, get_query_grounding_resolver()).seed_node_ids_by_collection()
-            if query_batch is None
-            else {}
+        # Batch mode has no query, so it grounds nothing (the search could not pin anyway).
+        pinned_node_ids = seed_node_ids_by_collection(
+            ground_query(query, get_query_grounding_resolver())
         )
         return await brute_force_triplet_search(
             query,

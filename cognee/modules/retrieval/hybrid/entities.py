@@ -14,7 +14,7 @@ from cognee.modules.graph.utils.fact_conflicts import (
     user_selected_facts,
 )
 from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY
-from cognee.modules.ontology.query_grounding import QueryGrounding
+from cognee.modules.ontology.query_grounding import GroundedConcept
 from cognee.modules.retrieval.hybrid.chunks import search_collections
 from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
 from cognee.modules.retrieval.hybrid.results import payload_matches_node_filter
@@ -71,7 +71,7 @@ async def search_entities(
         return []
 
 
-def pin_grounded_entities(entity_hits: list[Any], grounding: QueryGrounding) -> list[Any]:
+def pin_grounded_entities(entity_hits: list[Any], concepts: list[GroundedConcept]) -> list[Any]:
     """Put the ontology nodes a query resolved to at the head of the entity hits.
 
     Each grounded concept becomes an exact-score hit (0.0) carrying the payload the
@@ -80,15 +80,8 @@ def pin_grounded_entities(entity_hits: list[Any], grounding: QueryGrounding) -> 
     against ``entities_top_k``; ``build_entities`` drops one that has no connection in
     the graph.
     """
-    if not grounding:
-        return entity_hits
-
     pinned: list[Any] = []
-    pinned_ids: set[str] = set()
-    for concept in grounding.concepts:
-        if concept.node_id in pinned_ids:
-            continue
-        pinned_ids.add(concept.node_id)
+    for concept in concepts:
         if concept.category == ONTOLOGY_CLASS_CATEGORY:
             concept_type = "ontology class"
         else:
@@ -105,8 +98,8 @@ def pin_grounded_entities(entity_hits: list[Any], grounding: QueryGrounding) -> 
             )
         )
 
-    remaining = [hit for hit in entity_hits or [] if result_id(hit) not in pinned_ids]
-    return pinned + remaining
+    pinned_ids = {concept.node_id for concept in concepts}
+    return pinned + [hit for hit in entity_hits if result_id(hit) not in pinned_ids]
 
 
 async def build_entities(

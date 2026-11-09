@@ -11,8 +11,9 @@ from cognee.modules.ontology import matching_strategies, query_grounding
 from cognee.modules.ontology.exceptions import GetSubgraphError, OntologyInitializationError
 from cognee.modules.ontology.ontology_env_config import OntologyEnvConfig
 from cognee.modules.ontology.query_grounding import (
-    QueryGrounding,
     ground_query,
+    grounding_block,
+    seed_node_ids_by_collection,
 )
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
@@ -48,14 +49,14 @@ def test_ground_query_maps_terms_to_graph_node_ids_used_by_cognify():
         "What's our credit exposure to the enterprise customer Acme?", _finance_resolver()
     )
 
-    by_name = {concept.canonical_name: concept for concept in grounding.concepts}
+    by_name = {concept.canonical_name: concept for concept in grounding}
     assert set(by_name) == {"CreditExposure", "EnterpriseCustomer", "Acme"}
 
     # Same deterministic ids construct_data_points_and_edges_with_ontology writes.
     assert by_name["CreditExposure"].node_id == str(EntityType.id_for("CreditExposure"))
     assert by_name["Acme"].node_id == str(Entity.id_for("Acme"))
 
-    seeds = grounding.seed_node_ids_by_collection()
+    seeds = seed_node_ids_by_collection(grounding)
     assert set(seeds["EntityType_name"]) == {
         by_name["CreditExposure"].node_id,
         by_name["EnterpriseCustomer"].node_id,
@@ -65,12 +66,12 @@ def test_ground_query_maps_terms_to_graph_node_ids_used_by_cognify():
 
 def test_ground_query_reports_is_a_chain_and_relations_with_canonical_casing():
     grounding = ground_query("credit exposure of Acme", _finance_resolver())
-    by_name = {concept.canonical_name: concept for concept in grounding.concepts}
+    by_name = {concept.canonical_name: concept for concept in grounding}
 
     assert by_name["CreditExposure"].parents == ("RiskMetric",)  # owl:Thing dropped
     assert by_name["Acme"].parents == ("EnterpriseCustomer", "Customer")  # owl:Class dropped
 
-    block = grounding.to_context_block()
+    block = grounding_block(grounding)
     assert block.startswith("## Ontology grounding")
     assert '"credit exposure" refers to CreditExposure (class); is a RiskMetric' in block
     assert "Acme (individual); is a EnterpriseCustomer > Customer" in block
@@ -81,7 +82,7 @@ def test_a_longer_run_cannot_swallow_an_unrelated_word():
     # comes from the bigram and Acme still resolves on its own.
     grounding = ground_query("enterprise customer acme", _finance_resolver())
 
-    terms = {concept.term: concept.canonical_name for concept in grounding.concepts}
+    terms = {concept.term: concept.canonical_name for concept in grounding}
     assert terms == {"enterprise customer": "EnterpriseCustomer", "acme": "Acme"}
 
 
@@ -90,9 +91,9 @@ def test_ground_query_is_empty_without_matches_or_resolver():
 
     assert not ground_query("hello there general", resolver)
     assert not ground_query("credit exposure", None)
-    assert ground_query("", resolver) == QueryGrounding()
-    assert ground_query("hello", resolver).to_context_block() == ""
-    assert ground_query("hello", resolver).seed_node_ids_by_collection() == {}
+    assert ground_query("", resolver) == []
+    assert grounding_block(ground_query("hello", resolver)) == ""
+    assert seed_node_ids_by_collection(ground_query("hello", resolver)) == {}
 
 
 def test_ground_query_raises_resolver_errors():
@@ -122,7 +123,7 @@ def test_grounding_matches_exact_keys_without_a_fuzzy_scan(monkeypatch):
         resolver,
     )
 
-    assert [concept.canonical_name for concept in grounding.concepts] == [
+    assert [concept.canonical_name for concept in grounding] == [
         "CreditExposure",
         "EnterpriseCustomer",
         "Customer",
@@ -133,11 +134,11 @@ def test_grounding_keeps_inner_stopwords_and_matches_each_occurrence():
     resolver = _finance_resolver()
 
     line_of_credit = ground_query("what is the line of credit for Acme?", resolver)
-    assert [c.canonical_name for c in line_of_credit.concepts] == ["LineOfCredit", "Acme"]
+    assert [c.canonical_name for c in line_of_credit] == ["LineOfCredit", "Acme"]
 
     # The first "customer" is used up by "enterprise customer"; the second still grounds.
     twice = ground_query("which enterprise customer is our largest customer?", resolver)
-    assert [c.canonical_name for c in twice.concepts] == ["EnterpriseCustomer", "Customer"]
+    assert [c.canonical_name for c in twice] == ["EnterpriseCustomer", "Customer"]
 
 
 def test_a_name_may_start_or_end_with_a_stopword_but_a_lone_stopword_is_no_name():
@@ -148,7 +149,7 @@ def test_a_name_may_start_or_end_with_a_stopword_but_a_lone_stopword_is_no_name(
     resolver.build_lookup()
 
     def grounded(query: str) -> list[str]:
-        return [concept.canonical_name for concept in ground_query(query, resolver).concepts]
+        return [concept.canonical_name for concept in ground_query(query, resolver)]
 
     assert grounded("what is our off balance sheet exposure?") == ["OffBalanceSheetExposure"]
     assert grounded("how many new customers joined?") == ["NewCustomer"]
@@ -223,4 +224,4 @@ def test_an_edited_ontology_file_is_loaded_again(configured):
     _write_classes(path, "CreditExposure", "LoanFacility", mtime=2_000_000)
     grounding = ground_query("loan facility", query_grounding.get_query_grounding_resolver())
 
-    assert [concept.canonical_name for concept in grounding.concepts] == ["LoanFacility"]
+    assert [concept.canonical_name for concept in grounding] == ["LoanFacility"]

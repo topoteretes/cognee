@@ -8,7 +8,7 @@ from rdflib import OWL, RDF, RDFS, Graph, Namespace
 
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.modules.engine.models import Entity, EntityType
-from cognee.modules.ontology.query_grounding import GroundedConcept, QueryGrounding
+from cognee.modules.ontology.query_grounding import GroundedConcept, grounding_block
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.hybrid.context import format_hybrid_context
@@ -35,25 +35,23 @@ EXPOSURE_ID = str(EntityType.id_for("CreditExposure"))
 ACME_ID = str(Entity.id_for("Acme"))
 
 
-def _grounding() -> QueryGrounding:
-    return QueryGrounding(
-        concepts=(
-            GroundedConcept(
-                term="credit exposure",
-                canonical_name="CreditExposure",
-                category="classes",
-                node_id=EXPOSURE_ID,
-                parents=("RiskMetric",),
-            ),
-            GroundedConcept(
-                term="acme",
-                canonical_name="Acme",
-                category="individuals",
-                node_id=ACME_ID,
-                parents=("Customer",),
-            ),
+def _grounding() -> list[GroundedConcept]:
+    return [
+        GroundedConcept(
+            term="credit exposure",
+            canonical_name="CreditExposure",
+            category="classes",
+            node_id=EXPOSURE_ID,
+            parents=("RiskMetric",),
         ),
-    )
+        GroundedConcept(
+            term="acme",
+            canonical_name="Acme",
+            category="individuals",
+            node_id=ACME_ID,
+            parents=("Customer",),
+        ),
+    ]
 
 
 # --- NodeEdgeVectorSearch.pin_node_ids -------------------------------------------------
@@ -260,28 +258,28 @@ def test_pin_grounded_entities_leads_with_concepts_and_dedupes():
     assert hits[0].payload["name"] == "CreditExposure"
     assert hits[0].payload["type"] == "ontology class"
     assert hits[1].payload["type"] == "Customer"  # an individual is typed by its class
-    assert pin_grounded_entities([other], QueryGrounding()) == [other]
+    assert pin_grounded_entities([other], []) == [other]
 
 
 def test_format_hybrid_context_places_grounding_after_global_context_only_with_content():
-    grounding_block = _grounding().to_context_block()
+    block = grounding_block(_grounding())
 
     with_passages = format_hybrid_context(
         "",
-        {"chunks": [{"text": "Acme owes 3M."}], "ontology_grounding": grounding_block},
+        {"chunks": [{"text": "Acme owes 3M."}], "ontology_grounding": block},
     )
     assert with_passages.startswith("## Ontology grounding")
     assert "## Relevant passages" in with_passages
 
     with_global = format_hybrid_context(
         "## Global context\nroot",
-        {"chunks": [{"text": "Acme owes 3M."}], "ontology_grounding": grounding_block},
+        {"chunks": [{"text": "Acme owes 3M."}], "ontology_grounding": block},
     )
     sections = with_global.split("\n\n")
     assert sections[0].startswith("## Global context")
     assert sections[1].startswith("## Ontology grounding")
 
-    assert format_hybrid_context("", {"ontology_grounding": grounding_block}) == ""
+    assert format_hybrid_context("", {"ontology_grounding": block}) == ""
 
 
 def _graph_engine(nodes: list, edges: list) -> MagicMock:
@@ -299,7 +297,7 @@ async def test_a_pinned_concept_the_graph_does_not_hold_is_not_shown():
     entities, _ = await build_entities(_graph_engine([], []), hits, 10, pinned_ids=PINNED_IDS)
 
     assert entities == []
-    block = _grounding().to_context_block()
+    block = grounding_block(_grounding())
     assert format_hybrid_context("", {"entities": entities, "ontology_grounding": block}) == ""
 
     # Dropped before the entities_top_k cut, so it takes no vector hit's slot.
@@ -331,12 +329,10 @@ async def test_a_pinned_concept_shows_only_neighbours_in_the_node_set():
         (initech_id, customer_id, "is_a", {}),
         (initech_id, globex_id, "supplies", {}),
     ]
-    grounding = QueryGrounding(
-        concepts=(
-            GroundedConcept("customers", "Customer", "classes", customer_id),
-            GroundedConcept("initech", "Initech", "individuals", initech_id),
-        )
-    )
+    grounding = [
+        GroundedConcept("customers", "Customer", "classes", customer_id),
+        GroundedConcept("initech", "Initech", "individuals", initech_id),
+    ]
 
     entities, _ = await build_entities(
         _graph_engine(nodes, edges),

@@ -19,7 +19,7 @@ grounding, and the retriever runs exactly as it did before.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 
 from cognee.modules.engine.models import Entity, EntityType
@@ -53,10 +53,6 @@ class GroundedConcept:
     parents: tuple[str, ...] = ()
     relations: tuple[tuple[str, str], ...] = ()
 
-    @property
-    def seed_collection(self) -> str:
-        return SEED_COLLECTION_BY_CATEGORY[self.category]
-
     def describe(self) -> str:
         kind = "class" if self.category == ONTOLOGY_CLASS_CATEGORY else "individual"
         parts = [f'"{self.term}" refers to {self.canonical_name} ({kind})']
@@ -67,31 +63,21 @@ class GroundedConcept:
         return "; ".join(parts)
 
 
-@dataclass(frozen=True)
-class QueryGrounding:
-    """Ontology matches for one query, plus the seeds and context they translate to."""
+def seed_node_ids_by_collection(concepts: list[GroundedConcept]) -> dict[str, list[str]]:
+    """Graph node ids to pin as exact hits, keyed by vector collection name."""
+    seeds: dict[str, list[str]] = {}
+    for concept in concepts:
+        seeds.setdefault(SEED_COLLECTION_BY_CATEGORY[concept.category], []).append(concept.node_id)
+    return seeds
 
-    concepts: tuple[GroundedConcept, ...] = field(default_factory=tuple)
 
-    def __bool__(self) -> bool:
-        return bool(self.concepts)
-
-    def seed_node_ids_by_collection(self) -> dict[str, list[str]]:
-        """Graph node ids to pin as exact hits, keyed by vector collection name."""
-        seeds: dict[str, list[str]] = {}
-        for concept in self.concepts:
-            ids = seeds.setdefault(concept.seed_collection, [])
-            if concept.node_id not in ids:
-                ids.append(concept.node_id)
-        return seeds
-
-    def to_context_block(self) -> str:
-        """Render the grounding as a context section, or "" when nothing matched."""
-        if not self.concepts:
-            return ""
-        lines = ["## Ontology grounding"]
-        lines.extend(f"- {concept.describe()}" for concept in self.concepts)
-        return "\n".join(lines)
+def grounding_block(concepts: list[GroundedConcept]) -> str:
+    """The ``## Ontology grounding`` context section, or "" when nothing matched."""
+    if not concepts:
+        return ""
+    return "\n".join(
+        ["## Ontology grounding", *(f"- {concept.describe()}" for concept in concepts)]
+    )
 
 
 # ``is_a`` targets that say nothing about the business: the OWL meta-classes the
@@ -154,10 +140,10 @@ def _match_run(run: list[str], indexes: list[tuple[str, dict[str, str]]]) -> tup
 
 
 def ground_query(
-    query: str,
+    query: str | None,
     resolver: BaseOntologyResolver | None,
-) -> QueryGrounding:
-    """Resolve the terms of ``query`` against ``resolver``.
+) -> list[GroundedConcept]:
+    """The ontology nodes the words of ``query`` name in ``resolver``.
 
     Every run of query words, longest first, is looked up by exact compact key, in the
     classes and then the individuals; a lone stopword ("will", "may") is not. A
@@ -165,7 +151,7 @@ def ground_query(
     "exposure"; each ontology node is reported once.
     """
     if not query or resolver is None:
-        return QueryGrounding()
+        return []
 
     indexes = [
         (category, compact_key_index(resolver, category))
@@ -202,7 +188,7 @@ def ground_query(
             len(concepts),
             ", ".join(concept.canonical_name for concept in concepts),
         )
-    return QueryGrounding(concepts=tuple(concepts))
+    return concepts
 
 
 @lru_cache(maxsize=1)
