@@ -18,7 +18,7 @@ entity types — and emits
 That is the business-to-technical mapping: "table ``crm.customers`` (authoritative,
 owned by sales-ops) realizes concept ``Customer``; its column ``cust_id`` realizes
 ``hasCustomerId``". No LLM is involved; a table or column the ontology does not know
-is left alone — the ``mapping`` proposals of ``cognee.modules.proposals`` pick those up.
+is left alone.
 """
 
 from __future__ import annotations
