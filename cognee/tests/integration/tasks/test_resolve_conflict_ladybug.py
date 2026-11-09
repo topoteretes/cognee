@@ -277,3 +277,86 @@ async def test_deleting_every_document_behind_the_chosen_fact_retires_the_decisi
         assert len(remaining) == 1 and not is_rejected_fact(remaining[0][3])
     finally:
         await graph.close()
+
+
+@pytest.mark.asyncio
+async def test_deleting_every_document_behind_a_reviewed_conflict_retires_it(tmp_path, monkeypatch):
+    """A review conflict carries a dataset-level owner, so no document delete removes it.
+
+    It stays while its subject entity exists and goes once the last document behind the
+    subject is deleted, leaving no FactConflict behind.
+    """
+    graph = LadybugAdapter(str(tmp_path / "graph"), kuzu_buffer_pool_size=128 * 1024 * 1024)
+    unified = UnifiedStoreEngine(
+        graph_engine=graph,
+        vector_engine=RecordingVectors(),
+        capabilities=EngineCapability.GRAPH | EngineCapability.VECTOR,
+    )
+    storage = importlib.import_module("cognee.tasks.storage.add_data_points")
+    methods = importlib.import_module("cognee.modules.conflicts.methods")
+
+    async def engine():
+        return unified
+
+    monkeypatch.setattr(storage, "get_unified_engine", engine)
+    monkeypatch.setattr(write_conflicts, "get_unified_engine", engine)
+    monkeypatch.setattr(methods, "get_graph_engine", AsyncMock(return_value=graph))
+    monkeypatch.setattr(read_facts, "get_graph_engine", AsyncMock(return_value=graph))
+    monkeypatch.setattr(read_facts, "get_edge_sources", AsyncMock(return_value=[]))
+    monkeypatch.setattr(read_facts, "backend_access_control_enabled", lambda: True)
+    dataset = SimpleNamespace(id=uuid4())
+    user = SimpleNamespace(id=uuid4())
+    ctx = PipelineContext(dataset=dataset, data_item={})
+    try:
+        await mark_graph_provenance_if_empty(graph)
+        company, alice, bob = [Entity(name=n, description=n) for n in ["Company", "Alice", "Bob"]]
+        facts, documents = {}, []
+        # Each document states one of the two competing values.
+        for value in (alice, bob):
+            fid = str(generate_edge_object_id(str(company.id), str(value.id), "has_ceo"))
+            properties = {"edge_object_id": fid, "edge_text": f"Company has CEO {value.name}"}
+            facts[fid] = {
+                "id": fid,
+                "source": str(company.id),
+                "target": str(value.id),
+                "relationship": "has_ceo",
+                "properties": properties,
+                "effective_date": None,
+                "sources": [],
+            }
+            data_id = uuid4()
+            documents.append(data_id)
+            owner = make_source_ref_key(dataset.id, data_id)
+            await graph.add_nodes([company, value], source_ref_key=owner)
+            await graph.add_edges(
+                [(str(company.id), str(value.id), "has_ceo", properties)],
+                source_ref_key=owner,
+            )
+        conflict = FactConflict(
+            dataset_id=str(dataset.id),
+            about_id=str(company.id),
+            attribute="has_ceo",
+            kind="fixed",
+            status="unresolved",
+            text="Company has two CEOs: Alice and Bob",
+            values=[str(alice.id), str(bob.id)],
+        )
+        accepted = AcceptedConflict(conflict, {fid: "conflicting" for fid in facts})
+        scope = ReviewScope(str(dataset.id), {}, facts)
+        await write_conflicts.write_conflicts(
+            [ConflictsToWrite(scope, [accepted], shown_fact_ids=set(facts))], ctx
+        )
+        await write_conflicts.write_conflicts([ConflictsToFinalize([accepted])], ctx)
+
+        first, second = documents
+        await unified.delete_by_document(str(dataset.id), str(first))
+        assert await methods.retire_forgotten_decisions(dataset, user) == set()
+        conflicts, _ = await graph.get_filtered_graph_data([{"type": ["FactConflict"]}])
+        assert [str(node_id) for node_id, _ in conflicts] == [str(conflict.id)]
+
+        await unified.delete_by_document(str(dataset.id), str(second))
+        assert await methods.retire_forgotten_decisions(dataset, user) == {str(conflict.id)}
+        conflicts, _ = await graph.get_filtered_graph_data([{"type": ["FactConflict"]}])
+        assert conflicts == []
+    finally:
+        await graph.close()

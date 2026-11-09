@@ -2130,10 +2130,9 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      # v1.6.3 includes the DLT UUID fix and drains sibling tasks before
-      # rollback, avoiding the orphan SchemaTable left by the v1.2.0 seed.
-      # Its fixtures use dataset-scoped documents, DLT manifests and session
-      # persistence watermarks.
+      # The oldest release upgrades are tested from. It already writes
+      # dataset-scoped documents, DLT manifests and session persistence
+      # watermarks, so the fixtures check that those shapes survive the upgrade.
       COGNEE_COMPATIBILITY_TEST_VERSION: v1.6.3
 
       # Phase 1/2 run real dlt pipelines; dlt's telemetry thread (default ON,

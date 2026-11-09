@@ -110,9 +110,10 @@ async def _invalidate_sessions_for_deleted_data_nonfatal(
 async def _retire_forgotten_decisions(
     dataset, user, deleted_elements: DeletedGraphElements
 ) -> DeletedGraphElements:
-    """Delete conflict decisions whose chosen fact went with the deleted data.
+    """Delete conflicts the deleted data left without basis: decisions whose chosen
+    fact went with it, and conflicts whose subject entity went with it.
 
-    Returns ``deleted_elements`` plus the retired decision nodes, for session
+    Returns ``deleted_elements`` plus the retired conflict nodes, for session
     invalidation; the receipt keeps counting only the data's own elements. Not
     best-effort: a kept decision would go on presenting the deleted fact as the
     accepted one, so a failure fails the delete before the Data row is removed.

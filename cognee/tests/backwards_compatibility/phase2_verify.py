@@ -10,22 +10,28 @@ session persistence watermarks. Verify those shapes survive the upgrade:
 
 * identical content in two datasets has separate IDs, each resolving only in
   its own dataset and unambiguously without a dataset filter;
-* the DLT manifest and its row nodes survive, and re-adding the same source
-  preserves the document and row IDs without duplicating records;
-* an unchanged session produces no new document and preserves its watermark;
-  growing it persists only the new entry, with every fact stored exactly once;
+* the DLT manifest and its row nodes survive, re-adding the same source
+  preserves the document and row IDs without duplicating records, and a source
+  first cognified on the current branch builds one row node per manifest row;
+* an unchanged session produces no new session document and preserves its
+  watermark; growing it persists only the new entry, with every fact stored in
+  exactly one session document;
 * deleting every document removes its solely-owned artifacts, preserves shared
   artifacts until their last owner is gone, and leaves the graph empty.
 
-Graph checks also reject stale Entity/EntityType IDs and dangling edges. Ledger
-checks reject references to missing graph nodes, and raw CHUNKS retrieval must
+Graph checks also reject stale Entity/EntityType IDs and dangling edges.
+Ownership checks require every document to own graph nodes, read from its
+store's provenance mode (in-graph source refs or the relational ledger), and
+reject ledger references to missing graph nodes. Raw CHUNKS retrieval must
 return the seeded text. Together these checks catch semantically broken stores
 even when a completion search can still return an answer.
 """
 
 import asyncio
+import json
 import sys
 from collections import Counter
+from contextlib import asynccontextmanager
 
 from sqlalchemy import select
 
@@ -41,6 +47,7 @@ from cognee.modules.data.methods.get_dataset_databases import get_dataset_databa
 from cognee.modules.data.models import Data as _ScopedData
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.models import Edge, Node
+from cognee.modules.improve.constants import USER_SESSIONS_NODE_SET
 from cognee.modules.migrations.versions.namespace_entity_type_node_ids import build_id_remap
 from cognee.modules.users.methods import get_default_user
 
@@ -67,8 +74,10 @@ SEARCH_QUERY = "What is Lorem Ipsum and where does it come from?"
 ISOLATION_DATASET_A = "isolation_a"
 ISOLATION_DATASET_B = "isolation_b"
 
-# DLT takeover checks — markers must stay in sync with phase1_seed.py.
+# DLT compatibility checks — markers must stay in sync with phase1_seed.py.
 DLT_COMPAT_DATASET = "dlt_compat"
+# Ingested and cognified on the current branch only (not seeded).
+DLT_CURRENT_DATASET = "dlt_current"
 DLT_COMPAT_SOURCE = "compat_widgets"
 DLT_COMPAT_ROWS = [
     {"id": "1", "name": "anemometer", "shelf": "north"},
@@ -76,7 +85,7 @@ DLT_COMPAT_ROWS = [
     {"id": "3", "name": "hygrometer", "shelf": "south"},
 ]
 
-# Session takeover checks — markers must stay in sync with phase1_seed.py.
+# Session persistence checks — markers must stay in sync with phase1_seed.py.
 COMPAT_SESSION_ID = "compat_session"
 SESSION_FACT_1_MARKER = "Anton Zorman"
 SESSION_FACT_2_MARKER = "Ilka Matova"
@@ -87,6 +96,27 @@ SESSION_FACT_3_MARKER = "Pavle Rossi"
 def _fail(message: str) -> None:
     print(f"ERROR: {message}")
     sys.exit(1)
+
+
+def _parse_ref(stage: str, ref: str):
+    """Decompose a source ref, failing the check with the ref named when it cannot."""
+    from cognee.infrastructure.databases.provenance.source_refs import parse_source_ref_key
+
+    try:
+        return parse_source_ref_key(ref)
+    except ValueError:
+        _fail(f"[{stage}] graph carries a source ref that is not a document or chunk ref: {ref!r}")
+
+
+@asynccontextmanager
+async def _dataset_graph_engine(dataset_id, owner_by_dataset):
+    """The graph engine holding ``dataset_id``; ``owner_by_dataset`` is None with access
+    control off, when every dataset shares one graph."""
+    if owner_by_dataset is None:
+        yield await get_graph_engine()
+        return
+    async with set_database_global_context_variables(dataset_id, owner_by_dataset[dataset_id]):
+        yield await get_graph_engine()
 
 
 def _count_stale_ids(nodes: list) -> int:
@@ -196,27 +226,63 @@ async def _verify_vector_access(stage: str) -> None:
     print(f"  [vector] CHUNKS: {len(results)} result(s) — OK")
 
 
-async def _verify_ledger_access(stage: str, graph_node_ids: set) -> None:
-    """Read the relational delete-ledger (``nodes`` / ``edges``) and verify it
-    still points at the migrated graph.
+async def _verify_ownership(stage: str, graph_node_ids: set) -> None:
+    """Every document must still own graph nodes, read the way its store records it.
 
-    The delete system deletes graph nodes by ``nodes.slug`` and references edges
-    by ``edges.source_node_id`` / ``destination_node_id`` — all graph node ids.
-    If the id migration moved graph nodes but left these stale, a later delete
-    silently misses the migrated nodes (orphans). So this asserts every ledger
-    id that the migration could have moved (Entity/EntityType ``slug`` and every
-    edge endpoint) still resolves to a live graph node.
+    A graph marked for graph provenance keeps ownership in source-ref columns on
+    its nodes; any other graph keeps it in the relational ledger (``nodes`` /
+    ``edges``). Each document must own at least one node in its store's mode, so
+    ownership a migration dropped fails here rather than as orphans after a delete.
 
-    Graph-provenance stores keep ownership in the graph, so an empty ledger
-    is valid. The delete sweep verifies graph ownership too.
+    Ledger rows must also resolve to live graph nodes: the delete system deletes
+    graph nodes by ``nodes.slug`` and references edges by ``edges.source_node_id``
+    / ``destination_node_id``. If the id migration moved graph nodes but left these
+    stale, a later delete silently misses the migrated nodes.
     """
+    from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
+
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         node_rows = (await session.scalars(select(Node))).all()
         edge_rows = (await session.scalars(select(Edge))).all()
+        documents = (
+            await session.execute(
+                select(_ScopedData.id, _ScopedData.dataset_id).where(
+                    _ScopedData.dataset_id.is_not(None)
+                )
+            )
+        ).all()
+    if not documents:
+        _fail(f"[{stage}] no dataset_data rows found — the seed is broken.")
+
+    dataset_rows = await get_dataset_databases()
+    owner_by_dataset = {row.dataset_id: row.owner_id for row in dataset_rows} or None
+    ledger_owners = {(row.dataset_id, row.data_id) for row in node_rows}
+    modes: Counter = Counter()
+    for dataset_id in {dataset_id for _, dataset_id in documents}:
+        async with _dataset_graph_engine(dataset_id, owner_by_dataset) as graph_engine:
+            in_graph = await stores_provenance_in_graph(graph_engine)
+            if in_graph:
+                refs = await graph_engine.find_node_source_refs_by_dataset(str(dataset_id))
+                graph_owners = {
+                    _parse_ref(stage, ref).data_id for keys in refs.values() for ref in keys
+                }
+        mode = "in-graph refs" if in_graph else "ledger"
+        for data_id, document_dataset_id in documents:
+            if document_dataset_id != dataset_id:
+                continue
+            modes[mode] += 1
+            owned = data_id in graph_owners if in_graph else (dataset_id, data_id) in ledger_owners
+            if not owned:
+                _fail(
+                    f"[{stage}] document {data_id} in dataset {dataset_id} owns no graph node "
+                    f"in its store's provenance mode ({mode}) — ownership was lost, so deleting "
+                    "it would leave its nodes behind."
+                )
+    print(f"  [ownership] {len(documents)} document(s) own graph nodes {dict(modes)} — OK")
 
     if not node_rows and not edge_rows:
-        print("  [ledger] empty (ownership may be stored in the graph) — read OK")
+        print("  [ledger] no ledger rows to resolve — OK")
         return
 
     stale_node_slugs = [
@@ -250,11 +316,11 @@ async def _verify_ledger_access(stage: str, graph_node_ids: set) -> None:
 
 
 async def _verify_access(stage: str) -> None:
-    print(f"\n[{stage}] Verifying graph + vector + ledger access")
+    print(f"\n[{stage}] Verifying graph + ownership + vector access")
     nodes, edges = await _collect_graph()
     graph_node_ids = {node_id for node_id, _ in nodes}
     await _verify_graph_access(stage, nodes, edges)
-    await _verify_ledger_access(stage, graph_node_ids)
+    await _verify_ownership(stage, graph_node_ids)
     await _verify_vector_access(stage)
 
     # Smoke-check the completion + summaries paths (must not raise). Not used
@@ -332,18 +398,18 @@ async def _ledger_expectations(data_id, dataset_id, scope_to_dataset: bool):
     return doc_nodes - other_nodes, doc_edges - other_edges
 
 
-async def _graph_provenance_expectations(graph_engine, dataset_id, data_id):
+async def _graph_provenance_expectations(stage, graph_engine, dataset_id, data_id):
     """Ownership expectations read from in-graph provenance columns.
 
     Graph-provenance datasets deliberately have no relational-ledger rows
     (no dual tracking), so the delete oracle must read the same columns the
     delete itself uses: a node/edge is expected to disappear only when this
-    document owns ALL its source refs, including chunk-scoped refs.
+    document owns ALL its source refs, including chunk-scoped refs. A ref that
+    is neither kind fails the check by name.
     """
-    from cognee.infrastructure.databases.provenance.source_refs import parse_source_ref_key
 
     def _solely_owned(raw) -> bool:
-        refs = [parse_source_ref_key(ref) for ref in (raw or "").split("|") if ref]
+        refs = [_parse_ref(stage, ref) for ref in (raw or "").split("|") if ref]
         return bool(refs) and all(
             ref.dataset_id == dataset_id and ref.data_id == data_id for ref in refs
         )
@@ -363,22 +429,16 @@ async def _graph_provenance_expectations(graph_engine, dataset_id, data_id):
     return solely_nodes, solely_edges
 
 
-async def _expectations_for(data_id, dataset_id, owner_by_dataset):
+async def _expectations_for(stage, data_id, dataset_id, owner_by_dataset):
     """Read ownership from each store's actual provenance mode.
 
     The v1.6.3 baseline supports relational-ledger and graph-provenance stores.
     """
     from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 
-    if owner_by_dataset is None:
-        graph_engine = await get_graph_engine()
+    async with _dataset_graph_engine(dataset_id, owner_by_dataset) as graph_engine:
         if await stores_provenance_in_graph(graph_engine):
-            return await _graph_provenance_expectations(graph_engine, dataset_id, data_id)
-    else:
-        async with set_database_global_context_variables(dataset_id, owner_by_dataset[dataset_id]):
-            graph_engine = await get_graph_engine()
-            if await stores_provenance_in_graph(graph_engine):
-                return await _graph_provenance_expectations(graph_engine, dataset_id, data_id)
+            return await _graph_provenance_expectations(stage, graph_engine, dataset_id, data_id)
 
     return await _ledger_expectations(
         data_id, dataset_id, scope_to_dataset=owner_by_dataset is not None
@@ -386,8 +446,19 @@ async def _expectations_for(data_id, dataset_id, owner_by_dataset):
 
 
 async def _session_data_items(user):
+    """The lorem dataset's persisted session Q&A documents.
+
+    improve() also runs its other stages over the dataset (distilled lessons, for
+    one, are stored as documents), so only rows in the session Q&A node set count.
+    """
     datasets = await get_datasets_by_name([DATASET], user.id)
-    return await get_dataset_data(datasets[0].id)
+    items = await get_dataset_data(datasets[0].id)
+    return [item for item in items if USER_SESSIONS_NODE_SET in _node_set(item)]
+
+
+def _node_set(item) -> list:
+    node_set = item.node_set or []
+    return json.loads(node_set) if isinstance(node_set, str) else node_set
 
 
 def _read_raw_document(item) -> str:
@@ -395,14 +466,14 @@ def _read_raw_document(item) -> str:
         return f.read()
 
 
-async def _verify_session_takeover(stage: str) -> None:
+async def _verify_session_persistence(stage: str) -> None:
     """Preserve the seeded session and persist only later entries.
 
     The v1.6.3 watermark must remain 2 after an unchanged improve(). After one
     new entry, improve() must ingest exactly that entry, advance the watermark
-    to 3, and leave every session fact stored exactly once across versions.
+    to 3, and leave every session fact in exactly one session document.
     """
-    print(f"\n[{stage}] Verifying session persistence takeover")
+    print(f"\n[{stage}] Verifying session persistence")
 
     user = await get_default_user()
     user_id = str(user.id)
@@ -431,12 +502,13 @@ async def _verify_session_takeover(stage: str) -> None:
     if new_items:
         _fail(
             f"[{stage}] improve() re-ingested an unchanged legacy session "
-            f"({len(new_items)} new document(s)) — expected content-hash dedup no-op."
+            f"({len(new_items)} new session document(s)) — the persist watermark of 2 "
+            "should have skipped both entries."
         )
     watermark = await get_persisted_qa_count(session_manager, user_id, COMPAT_SESSION_ID)
     if watermark != 2:
         _fail(f"[{stage}] persist watermark should remain 2, got {watermark}.")
-    print("  [session] unchanged session: 0 new documents, watermark preserved at 2 — OK")
+    print("  [session] unchanged session: 0 new session documents, watermark preserved at 2 — OK")
 
     # B: grow the legacy session with the current branch -> only the new entry.
     await cognee.remember(SESSION_FACT_3, session_id=COMPAT_SESSION_ID, self_improvement=False)
@@ -444,7 +516,9 @@ async def _verify_session_takeover(stage: str) -> None:
     after_grown = await _session_data_items(user)
     new_items = [item for item in after_grown if item.id not in {x.id for x in after_unchanged}]
     if len(new_items) != 1:
-        _fail(f"[{stage}] expected exactly 1 new document after growth, got {len(new_items)}.")
+        _fail(
+            f"[{stage}] expected exactly 1 new session document after growth, got {len(new_items)}."
+        )
     window_text = _read_raw_document(new_items[0])
     if SESSION_FACT_3_MARKER not in window_text:
         _fail(f"[{stage}] new session window is missing the new entry: {window_text!r}")
@@ -454,17 +528,18 @@ async def _verify_session_takeover(stage: str) -> None:
     if watermark != 3:
         _fail(f"[{stage}] persist watermark should advance to 3, got {watermark}.")
 
-    # Exactly-once across versions: each fact appears in exactly one document.
+    # Exactly-once across versions: each fact appears in exactly one session
+    # document. A distilled lesson may restate a fact, so lessons are not counted.
     all_texts = [_read_raw_document(item) for item in after_grown]
     for marker in (SESSION_FACT_1_MARKER, SESSION_FACT_2_MARKER, SESSION_FACT_3_MARKER):
         occurrences = sum(text.count(marker) for text in all_texts)
         if occurrences != 1:
             _fail(
-                f"[{stage}] session fact {marker!r} stored {occurrences} times — "
-                "must be exactly once across legacy + current ingestion."
+                f"[{stage}] session fact {marker!r} stored {occurrences} times in session "
+                "documents — must be exactly once across legacy + current ingestion."
             )
     print(
-        "  [session] grown session: 1 new document with ONLY the new entry, "
+        "  [session] grown session: 1 new session document with ONLY the new entry, "
         "watermark 3, all facts stored exactly once — OK"
     )
 
@@ -510,23 +585,32 @@ async def _verify_dataset_isolation(stage: str) -> None:
 
 
 async def _verify_dlt_manifest(stage: str) -> None:
-    """Preserve a v1.6.3 DLT manifest and its row identities through re-add."""
+    """Preserve a v1.6.3 DLT manifest and its row identities through re-add, and
+    cognify a new source on the current branch.
+
+    Re-adding the seeded source is a no-op by design (its record is complete), so
+    it proves idempotency only; the new source is what exercises the current
+    branch's DLT cognify.
+    """
     import dlt
 
     from cognee.tasks.ingestion.dlt_utils import is_dlt_source_manifest, load_dlt_manifest
 
     print(f"\n[{stage}] Verifying DLT manifest compatibility")
     user = await get_default_user()
-    datasets = await get_datasets_by_name([DLT_COMPAT_DATASET], user.id)
-    if not datasets:
-        _fail(f"[{stage}] dataset '{DLT_COMPAT_DATASET}' not found — Phase 1 seeding broke.")
-    dataset = datasets[0]
 
-    async def read_manifest():
+    async def find_dataset(name):
+        datasets = await get_datasets_by_name([name], user.id)
+        if not datasets:
+            _fail(f"[{stage}] dataset '{name}' not found.")
+        return datasets[0]
+
+    async def read_manifest(dataset):
         records = await get_dataset_data(dataset.id)
         if len(records) != 1 or not is_dlt_source_manifest(records[0]):
             _fail(
-                f"[{stage}] expected exactly one DLT source manifest, got {len(records)} records."
+                f"[{stage}] expected exactly one DLT source manifest in '{dataset.name}', "
+                f"got {len(records)} records."
             )
         record = records[0]
         meta = record.system_metadata
@@ -540,19 +624,20 @@ async def _verify_dlt_manifest(stage: str) -> None:
             _fail(f"[{stage}] manifest does not contain the three distinct seeded rows.")
         return record.id, row_ids
 
-    async def verify_graph(expected_row_ids):
+    async def verify_graph(dataset, expected_row_ids):
         dataset_rows = await get_dataset_databases()
         owners = {row.dataset_id: row.owner_id for row in dataset_rows} or None
         node_ids, props, _ = await _snapshot_dataset_graph(dataset.id, owners)
         actual_row_ids = {node_id for node_id in node_ids if props[node_id].get("type") == "DltRow"}
         if actual_row_ids != expected_row_ids:
             _fail(
-                f"[{stage}] DltRow nodes differ from the manifest: "
+                f"[{stage}] DltRow nodes in '{dataset.name}' differ from the manifest: "
                 f"expected {expected_row_ids}, got {actual_row_ids}."
             )
 
-    manifest_id, row_ids = await read_manifest()
-    await verify_graph(row_ids)
+    seeded = await find_dataset(DLT_COMPAT_DATASET)
+    manifest_id, row_ids = await read_manifest(seeded)
+    await verify_graph(seeded, row_ids)
     print("  [dlt] seeded manifest and all row nodes survived the upgrade — OK")
 
     @dlt.resource(name=DLT_COMPAT_SOURCE, primary_key="id", write_disposition="replace")
@@ -560,12 +645,20 @@ async def _verify_dlt_manifest(stage: str) -> None:
         yield from DLT_COMPAT_ROWS
 
     await cognee.add([compat_widgets()], dataset_name=DLT_COMPAT_DATASET)
-    after_id, after_row_ids = await read_manifest()
+    after_id, after_row_ids = await read_manifest(seeded)
     if after_id != manifest_id or after_row_ids != row_ids:
         _fail(f"[{stage}] re-adding the same source changed its document or row identities.")
     await cognee.cognify(datasets=[DLT_COMPAT_DATASET])
-    await verify_graph(row_ids)
+    await verify_graph(seeded, row_ids)
     print("  [dlt] re-add and cognify preserved document/row IDs without duplicates — OK")
+
+    # The same source in a new dataset, ingested and cognified by the current branch.
+    await cognee.add([compat_widgets()], dataset_name=DLT_CURRENT_DATASET)
+    await cognee.cognify(datasets=[DLT_CURRENT_DATASET])
+    current = await find_dataset(DLT_CURRENT_DATASET)
+    _, current_row_ids = await read_manifest(current)
+    await verify_graph(current, current_row_ids)
+    print("  [dlt] current-branch cognify built one row node per manifest row — OK")
 
 
 async def _verify_delete(stage: str) -> None:
@@ -595,7 +688,7 @@ async def _verify_delete(stage: str) -> None:
 
     for index, (data_id, dataset_id, legacy_id) in enumerate(pairs, start=1):
         expected_gone_nodes, expected_gone_edges = await _expectations_for(
-            data_id, dataset_id, owner_by_dataset
+            stage, data_id, dataset_id, owner_by_dataset
         )
         before_nodes, before_props, before_edges = await _snapshot_dataset_graph(
             dataset_id, owner_by_dataset
@@ -616,12 +709,11 @@ async def _verify_delete(stage: str) -> None:
             )
 
         # Derived bookkeeping is exempt from the collateral check: an EdgeType
-        # node is GC'd with its last edge, and the global context index root
-        # (a GlobalContextSummary carrying a dataset-level ref, never a
-        # document's) is dropped with ANY document deletion, since its text
-        # names every document, and written again by the next improve. A
-        # document's own bucket carries the document's ref and is expected
-        # gone above like any other node it owns.
+        # node is GC'd with its last edge, and the global context index
+        # (GlobalContextSummary root and per-document buckets) carries the
+        # build's dataset-level ref, never a document's. A document delete
+        # removes that document's bucket and the root by their derived ids,
+        # then writes the root again from the documents that remain.
         disappeared_nodes = before_nodes - after_nodes
         allowed_gone = expected_gone_nodes | {
             node_id
@@ -729,15 +821,15 @@ async def main():
     # ── Step 3: data must still be accessible after re-cognify ────────────────
     await _verify_access("Step 3 — after re-cognify")
 
-    # ── Step 4: legacy session cache must be taken over incrementally ─────────
+    # ── Step 4: the legacy session must keep persisting incrementally ─────────
     # The seeded session and its persistence watermark must survive.
-    await _verify_session_takeover("Step 4 — session persistence takeover")
+    await _verify_session_persistence("Step 4 — session persistence")
 
-    # ── Step 5: DLT manifests survive and re-add without duplicates ──────────
+    # ── Step 5: DLT manifests survive, re-add without duplicates, cognify ────
     await _verify_dlt_manifest("Step 5 — DLT manifest compatibility")
 
-    # ── Step 6: migrated data must be deletable (ledger-driven hard delete) ───
-    # Destructive on purpose, so it runs last. Includes the DLT manifest from
+    # ── Step 6: migrated data must be deletable (hard delete by ownership) ────
+    # Destructive on purpose, so it runs last. Includes both DLT manifests from
     # Step 5 — the graph must end completely empty.
     await _verify_delete("Step 6 — delete migrated data")
 

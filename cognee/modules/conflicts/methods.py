@@ -266,7 +266,12 @@ async def resolve_conflict(
 
 
 async def retire_forgotten_decisions(dataset, user: User) -> set[str]:
-    """Delete the user decisions whose chosen fact no longer exists, and return their ids.
+    """Delete the conflicts a deletion left without their basis, and return their ids.
+
+    Two kinds go: a user decision whose chosen fact no longer exists, and any conflict,
+    reviewed or decided, whose subject entity no longer exists. Conflict nodes carry a
+    dataset-level owner rather than a document's, so no document delete removes them
+    itself; without this a review conflict would outlive the data it describes.
 
     Run after a document is deleted, inside the dataset's lock and database context;
     ``update()``'s chunk-level path runs it once the edit is written instead (see
@@ -277,24 +282,33 @@ async def retire_forgotten_decisions(dataset, user: User) -> set[str]:
     """
     graph = await get_graph_engine()
     rows, _ = await graph.get_filtered_graph_data([{"type": ["FactConflict"]}], include_edges=False)
-    decisions = {
+    conflicts = {
         str(node_id): props
         for node_id, props in rows
         if str(props.get("dataset_id")) == str(dataset.id)
-        and props.get("resolution_source") == "user"
     }
-    if not decisions:
+    if not conflicts:
         return set()
+    decisions = {
+        conflict_id: props
+        for conflict_id, props in conflicts.items()
+        if props.get("resolution_source") == "user"
+    }
     ctx = PipelineContext(user=user, dataset=dataset)
+    # The scope's conflict_ids_to_drop are the conflicts whose subject is gone, the
+    # same ones the next review run would drop.
     scope = await read_entity_facts(
         None,
         entity_ids=sorted({str(decision["about_id"]) for decision in decisions.values()}),
         ctx=ctx,
     )
     forgotten = sorted(
-        conflict_id
-        for conflict_id, decision in decisions.items()
-        if decision.get("selected_fact_id") not in scope.facts
+        {
+            conflict_id
+            for conflict_id, decision in decisions.items()
+            if decision.get("selected_fact_id") not in scope.facts
+        }
+        | set(scope.conflict_ids_to_drop)
     )
     if forgotten:
         # The same drop a conflict review makes: the node goes, and the marks it left

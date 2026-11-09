@@ -12,7 +12,7 @@ Phase 2 - run with current Cognee branch
 
 Verifies that the current branch can search the legacy cognified data, then adds + cognifies new Lorem Ipsum data with
 the current branch and verifies search again. Also verifies the session
-persistence watermark takeover (see phase2_verify docstring).
+persistence watermark (see phase2_verify docstring).
 """
 
 import asyncio
