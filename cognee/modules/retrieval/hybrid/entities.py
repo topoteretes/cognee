@@ -158,6 +158,7 @@ async def build_entities(
         connections = connections_by_entity_id.get(entity["id"], [])
         _hydrate_entity(entity, connections, scoped=scoped)
         entity["edges"] = _edge_bullets_from_connections(
+            entity["id"],
             connections,
             max_edges_per_entity,
             edge_ranks or {},
@@ -339,13 +340,13 @@ def _entity_type(result_payload: dict) -> str | None:
 
 
 def _edge_bullets_from_connections(
-    connections: list[Any], max_edges: int, edge_ranks: dict[str, int]
+    entity_id: str, connections: list[Any], max_edges: int, edge_ranks: dict[str, int]
 ) -> list[dict]:
     if max_edges <= 0:
         return []
 
     ranked = _deduplicated_bullets(connections)
-    ranked.sort(key=lambda edge_bullet: _edge_sort_key(edge_bullet.bullet, edge_ranks))
+    ranked.sort(key=lambda edge_bullet: _edge_sort_key(edge_bullet.bullet, edge_ranks, entity_id))
     selected = ranked[:max_edges]
     # Inside the window a superseded fact sinks below the ones that still hold.
     # The sort is stable, so everything else keeps the rank order above.
@@ -385,8 +386,9 @@ def _deduplicated_bullets(connections: Any) -> list["_EdgeBullet"]:
     return bullets
 
 
-def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int, int]:
-    """Pinned type edges first, then query-ranked edges, then legacy graph order.
+def _edge_sort_key(edge: dict, edge_ranks: dict[str, int], entity_id: str) -> tuple[int, int, int]:
+    """The entity's own type edges first, then query-ranked edges, then legacy graph
+    order, then type edges pointing into the entity (a class's members say the least).
 
     Within each group an edge from an authoritative source (a ``realizes`` edge
     stamped ``authoritative`` by schema alignment) sorts before the others, so when
@@ -394,7 +396,7 @@ def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int, in
     """
     authority = 0 if edge.get("authoritative") else 1
     if _is_type_edge(edge):
-        return (0, 0, authority)
+        return (0 if edge.get("source_id") == entity_id else 3, 0, authority)
     rank = edge_ranks.get(edge.get("edge_type_id"))
     if rank is None:
         return (2, 0, authority)

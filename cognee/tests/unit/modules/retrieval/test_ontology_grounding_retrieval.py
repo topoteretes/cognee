@@ -320,6 +320,33 @@ async def test_a_pinned_concept_shows_only_neighbours_in_the_node_set():
     assert [edge["source"] for edge in entities[0]["edges"]] == ["Acme"]
 
 
+@pytest.mark.asyncio
+async def test_a_class_keeps_its_realizes_edge_next_to_many_members():
+    customer_id = str(EntityType.id_for("Customer"))
+    member_ids = [str(uuid4()) for _ in range(12)]
+    nodes = [(customer_id, {"name": "customer"}), ("crm", {"name": "crm.customers"})]
+    nodes += [
+        (member_id, {"name": f"customer {index}"}) for index, member_id in enumerate(member_ids)
+    ]
+    edges = [(member_id, customer_id, "is_a", {}) for member_id in member_ids]
+    edges.append(("crm", customer_id, "realizes", {}))
+    hit = ScoredResult(id=UUID(customer_id), score=0.0, payload={"name": "customer"})
+
+    entities, _ = await build_entities(_graph_engine(nodes, edges), [hit], 10)
+
+    assert "crm.customers -- realizes -- customer" in [
+        edge["text"] for edge in entities[0]["edges"]
+    ]
+
+    # An ordinary entity's own is_a edge still comes first.
+    acme_id = member_ids[0]
+    hit = ScoredResult(id=UUID(acme_id), score=0.3, payload={"name": "customer 0"})
+    acme_edges = [("crm", acme_id, "mentions", {}), (acme_id, customer_id, "is_a", {})]
+    entities, _ = await build_entities(_graph_engine(nodes, acme_edges), [hit], 10)
+
+    assert entities[0]["edges"][0]["text"] == "customer 0 -- is_a -- customer"
+
+
 async def _retrieve_hybrid(query: str):
     """Run ``HybridRetriever._retrieve_one`` with every store mocked out.
 
