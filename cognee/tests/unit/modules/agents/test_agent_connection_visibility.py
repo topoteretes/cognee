@@ -164,8 +164,8 @@ async def test_a_connection_stored_in_ones_own_configuration_cannot_name_another
         operations, "list_persisted_agent_connections", registry.list_persisted_agent_connections
     )
 
-    async def configuration(user_id):
-        assert user_id == me
+    async def configuration(user_ids):
+        assert list(user_ids) == [me]
         entries = {
             "mine": {
                 "id": "mine",
@@ -182,9 +182,9 @@ async def test_a_connection_stored_in_ones_own_configuration_cannot_name_another
             },
             "malformed": {"agent_session_name": ["not", "a", "string"]},
         }
-        return [{"name": registry.AGENT_CONFIG_NAME, "configuration": {"agents": entries}}]
+        return {me: [{"name": registry.AGENT_CONFIG_NAME, "configuration": {"agents": entries}}]}
 
-    monkeypatch.setattr(_configuration_module, "get_principal_all_configuration", configuration)
+    monkeypatch.setattr(_configuration_module, "get_principals_all_configuration", configuration)
     user = SimpleNamespace(id=me)
 
     listing = await operations.list_agent_connections(user=user)

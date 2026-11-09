@@ -28,6 +28,7 @@ from cognee.api.v1.integrations.routers.get_integrations_router import get_integ
 from cognee.infrastructure.databases.relational import Base
 from cognee.modules.agents.models import AgentConnection
 from cognee.modules.agents.registry import AGENT_CONFIG_NAME
+from cognee.modules.integrations.agent_identity import agent_email, plugin_agent_email
 from cognee.modules.integrations.base import OAuthInstallation, OAuthIntegration
 from cognee.modules.integrations.plugin_status import (
     SOURCE_IDENTITY,
@@ -35,10 +36,11 @@ from cognee.modules.integrations.plugin_status import (
     PluginStatusRow,
     identity_plugin_statuses,
     legacy_plugin_statuses,
+    load_plugin_agents,
     merge_plugin_statuses,
     registry_plugin_statuses,
 )
-from cognee.modules.integrations.plugins import KNOWN_PLUGINS
+from cognee.modules.integrations.plugins import BUILTIN_PLUGINS
 from cognee.modules.integrations.registry import supported_integrations, use_integration
 from cognee.modules.session_lifecycle.models import SessionRecord
 from cognee.modules.users.methods import get_authenticated_user
@@ -199,7 +201,7 @@ def test_connected_provider_exposes_display_fields_and_no_token_material(client)
 # --------------------------------------------------------------------------- #
 
 
-def test_every_known_plugin_appears_disconnected_by_default(client):
+def test_every_builtin_plugin_card_appears_disconnected_by_default(client):
     with (
         patch.object(
             _router_module, "list_active_credentials_for_user", new=AsyncMock(return_value={})
@@ -209,12 +211,60 @@ def test_every_known_plugin_appears_disconnected_by_default(client):
         response = client.get("/api/v1/integrations/status")
 
     plugins = response.json()["plugins"]
-    assert [p["key"] for p in plugins] == list(KNOWN_PLUGINS)
+    assert [p["key"] for p in plugins] == list(BUILTIN_PLUGINS)
     for plugin in plugins:
         assert plugin["connected"] is False
         assert plugin["agentId"] is None
         assert plugin["sessionCount"] == 0
         assert plugin["source"] is None
+        assert plugin["label"] == BUILTIN_PLUGINS[plugin["key"]]["label"]
+        assert plugin["connectionType"] is None
+
+
+def test_self_registered_plugins_follow_the_builtin_cards(client):
+    """A plugin the server never listed appears once it provisioned or
+    registered, after the built-in cards, with the label it declared (SDK-646)."""
+    hermes = PluginStatusRow(
+        key="hermes-agent",
+        connected=True,
+        agent_id=uuid4(),
+        source=SOURCE_IDENTITY,
+        label="Hermes Agent",
+        connection_type="hermes_agent",
+    )
+    vellum = PluginStatusRow(key="vellum-assistant", connected=True, source=SOURCE_REGISTRY)
+    # A built-in card whose plugin renamed itself on provision keeps its own label.
+    codex = PluginStatusRow(
+        key="codex", connected=True, source=SOURCE_IDENTITY, label="OpenAI Codex"
+    )
+    with (
+        patch.object(
+            _router_module, "list_active_credentials_for_user", new=AsyncMock(return_value={})
+        ),
+        patch.object(
+            _router_module,
+            "identity_plugin_statuses",
+            new=AsyncMock(return_value={"hermes-agent": hermes, "codex": codex}),
+        ),
+        patch.object(_router_module, "legacy_plugin_statuses", new=AsyncMock(return_value={})),
+        patch.object(
+            _router_module,
+            "registry_plugin_statuses",
+            new=AsyncMock(return_value={"vellum-assistant": vellum}),
+        ),
+        patch.object(_router_module, "visible_user_ids", new=AsyncMock(return_value=[USER_ID])),
+    ):
+        response = client.get("/api/v1/integrations/status")
+
+    plugins = response.json()["plugins"]
+    assert [p["key"] for p in plugins] == [*BUILTIN_PLUGINS, "hermes-agent", "vellum-assistant"]
+    by_key = {p["key"]: p for p in plugins}
+    assert by_key["hermes-agent"]["label"] == "Hermes Agent"
+    assert by_key["hermes-agent"]["connectionType"] == "hermes_agent"
+    assert by_key["hermes-agent"]["source"] == "identity"
+    assert by_key["vellum-assistant"]["label"] is None
+    assert by_key["vellum-assistant"]["source"] == "registry"
+    assert by_key["codex"]["label"] == "OpenAI Codex"
 
 
 def test_identity_row_surfaces_through_the_dto(client):
@@ -290,7 +340,7 @@ def test_each_failing_source_degrades_its_section_never_500s(client):
     # Every section is present at its degraded default, not missing.
     assert [i["provider"] for i in body["integrations"]] == ["fake"]
     assert body["integrations"][0]["connected"] is False
-    assert [p["key"] for p in body["plugins"]] == list(KNOWN_PLUGINS)
+    assert [p["key"] for p in body["plugins"]] == list(BUILTIN_PLUGINS)
     assert all(p["connected"] is False for p in body["plugins"])
 
 
@@ -394,18 +444,32 @@ def _session_record(session_id, user_id, last_activity_at):
     )
 
 
-def _identity_config(plugin_key, provisioned_at="2026-08-10T08:00:00+00:00"):
+def _identity_config(plugin_key, provisioned_at="2026-08-10T08:00:00+00:00", **description):
     return [
         {
             "name": AGENT_CONFIG_NAME,
-            "configuration": {"plugin": {"key": plugin_key, "provisioned_at": provisioned_at}},
+            "configuration": {
+                "plugin": {"key": plugin_key, "provisioned_at": provisioned_at, **description}
+            },
         }
     ]
 
 
 def _agent_email(plugin_key, parent_id):
-    """The deterministic internal email ``create_agent`` derives."""
-    return f"{plugin_key}+{parent_id}@cognee.agent"
+    """The plain internal email of an agent provisioned before the email tag."""
+    return agent_email(plugin_key, parent_id)
+
+
+def _agents_config(*connections):
+    """An agent's configuration records holding ``connections``, as the registry stores them."""
+    return [
+        {
+            "name": AGENT_CONFIG_NAME,
+            "configuration": {
+                "agents": {c.id: c.model_dump(mode="json") for c in connections},
+            },
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -439,8 +503,8 @@ async def test_identity_status_joins_keys_and_sessions():
             ),
             patch.object(
                 _status_module,
-                "get_principal_all_configuration",
-                new=AsyncMock(return_value=_identity_config("claude-code")),
+                "get_principals_all_configuration",
+                new=AsyncMock(return_value={agent_id: _identity_config("claude-code")}),
             ),
             patch.object(_status_module, "get_relational_engine", return_value=fake_engine),
         ):
@@ -474,8 +538,8 @@ async def test_identity_status_revoked_key_reports_disconnected():
             ),
             patch.object(
                 _status_module,
-                "get_principal_all_configuration",
-                new=AsyncMock(return_value=_identity_config("codex")),
+                "get_principals_all_configuration",
+                new=AsyncMock(return_value={agent_id: _identity_config("codex")}),
             ),
             patch.object(_status_module, "get_relational_engine", return_value=fake_engine),
         ):
@@ -508,9 +572,9 @@ async def test_identity_status_derives_key_from_email_not_config_blob():
             ),
             patch.object(
                 _status_module,
-                "get_principal_all_configuration",
+                "get_principals_all_configuration",
                 # Tampered blob claims to be the codex plugin.
-                new=AsyncMock(return_value=_identity_config("codex")),
+                new=AsyncMock(return_value={agent_id: _identity_config("codex")}),
             ),
             patch.object(_status_module, "get_relational_engine", return_value=fake_engine),
         ):
@@ -521,6 +585,114 @@ async def test_identity_status_derives_key_from_email_not_config_blob():
     # The row lands on the email-derived key; the claimed key is ignored.
     assert set(statuses) == {"claude-code"}
     assert statuses["claude-code"].agent_id == agent_id
+
+
+@pytest.mark.asyncio
+async def test_identity_status_carries_the_plugins_self_description():
+    """An agent the provision route minted (tagged email) is a plugin identity
+    under any well-formed key, and its stored label and connection type
+    surface on the row (SDK-646)."""
+    parent_id = uuid4()
+    agent_id = uuid4()
+    fake_engine, engine = await _sqlite_engine(UserApiKey, SessionRecord)
+    try:
+        with (
+            patch.object(
+                _status_module,
+                "child_agent_emails",
+                new=AsyncMock(
+                    return_value={agent_id: plugin_agent_email("hermes-agent", parent_id)}
+                ),
+            ),
+            patch.object(
+                _status_module,
+                "get_principals_all_configuration",
+                new=AsyncMock(
+                    return_value={
+                        agent_id: _identity_config(
+                            "hermes-agent", label="Hermes Agent", connection_type="hermes_agent"
+                        )
+                    }
+                ),
+            ),
+            patch.object(_status_module, "get_relational_engine", return_value=fake_engine),
+        ):
+            statuses = await identity_plugin_statuses(parent_id)
+    finally:
+        await engine.dispose()
+
+    row = statuses["hermes-agent"]
+    assert row.agent_id == agent_id
+    assert row.label == "Hermes Agent"
+    assert row.connection_type == "hermes_agent"
+    assert row.source == SOURCE_IDENTITY
+
+
+@pytest.mark.asyncio
+async def test_identity_status_ignores_a_malformed_self_description():
+    """label / connection_type come from the agent-writable blob, like
+    provisioned_at: a tampered value reads as absent, the row survives."""
+    parent_id = uuid4()
+    agent_id = uuid4()
+    fake_engine, engine = await _sqlite_engine(UserApiKey, SessionRecord)
+    try:
+        with (
+            patch.object(
+                _status_module,
+                "child_agent_emails",
+                new=AsyncMock(
+                    return_value={agent_id: plugin_agent_email("hermes-agent", parent_id)}
+                ),
+            ),
+            patch.object(
+                _status_module,
+                "get_principals_all_configuration",
+                new=AsyncMock(
+                    return_value={
+                        agent_id: _identity_config(
+                            "hermes-agent", label="x" * 65, connection_type="Not A Type"
+                        )
+                    }
+                ),
+            ),
+            patch.object(_status_module, "get_relational_engine", return_value=fake_engine),
+        ):
+            statuses = await identity_plugin_statuses(parent_id)
+    finally:
+        await engine.dispose()
+
+    row = statuses["hermes-agent"]
+    assert row.label is None
+    assert row.connection_type is None
+    assert row.agent_id == agent_id
+
+
+@pytest.mark.asyncio
+async def test_identity_status_skips_a_custom_agent_claiming_to_be_a_plugin():
+    """A user-named agent (plain email, not a built-in key) that writes a
+    ``plugin`` entry into its own blob is still not a plugin identity."""
+    parent_id = uuid4()
+    agent_id = uuid4()
+    fake_engine, engine = await _sqlite_engine(UserApiKey, SessionRecord)
+    try:
+        with (
+            patch.object(
+                _status_module,
+                "child_agent_emails",
+                new=AsyncMock(return_value={agent_id: _agent_email("my-bot", parent_id)}),
+            ),
+            patch.object(
+                _status_module,
+                "get_principals_all_configuration",
+                new=AsyncMock(return_value={agent_id: _identity_config("my-bot")}),
+            ),
+            patch.object(_status_module, "get_relational_engine", return_value=fake_engine),
+        ):
+            statuses = await identity_plugin_statuses(parent_id)
+    finally:
+        await engine.dispose()
+
+    assert statuses == {}
 
 
 @pytest.mark.asyncio
@@ -540,9 +712,11 @@ async def test_identity_status_drops_unparseable_provisioned_at():
             ),
             patch.object(
                 _status_module,
-                "get_principal_all_configuration",
+                "get_principals_all_configuration",
                 new=AsyncMock(
-                    return_value=_identity_config("claude-code", provisioned_at="not-a-date")
+                    return_value={
+                        agent_id: _identity_config("claude-code", provisioned_at="not-a-date")
+                    }
                 ),
             ),
             patch.object(_status_module, "get_relational_engine", return_value=fake_engine),
@@ -647,14 +821,23 @@ async def test_registry_status_buckets_by_metadata_and_connection_type():
             status="active",
             last_active_at=seen_at,
         ),
-        # Bogus user-supplied metadata plugin_key: not a known plugin → skipped.
+        # Malformed metadata plugin_key: not a plugin key → skipped.
         AgentConnection(
             id="e",
             agent_session_name="impostor",
             type="unknown",
             status="active",
             last_active_at=seen_at,
-            metadata={"plugin_key": "not-a-plugin"},
+            metadata={"plugin_key": "Not A Plugin!"},
+        ),
+        # A plugin the server never listed names itself: its own row (SDK-646).
+        AgentConnection(
+            id="f",
+            agent_session_name="vellum",
+            type="vellum_assistant",
+            status="active",
+            last_active_at=seen_at,
+            metadata={"plugin_key": "vellum-assistant"},
         ),
     ]
     with (
@@ -667,8 +850,8 @@ async def test_registry_status_buckets_by_metadata_and_connection_type():
     ):
         statuses = await registry_plugin_statuses(uuid4())
 
-    # The workflow and bogus-metadata connections produce no rows at all.
-    assert set(statuses) == {"claude-code", "mcp", "api"}
+    # The workflow and malformed-metadata connections produce no rows at all.
+    assert set(statuses) == {"claude-code", "mcp", "api", "vellum-assistant"}
     assert all(row.connected for row in statuses.values())
     assert statuses["mcp"].last_active_at == seen_at + timedelta(hours=1)
     assert all(row.source == SOURCE_REGISTRY for row in statuses.values())
@@ -684,58 +867,128 @@ async def test_registry_status_pins_child_blob_connections_to_email_identity():
     parent_id = uuid4()
     claude_agent_id = uuid4()
     custom_agent_id = uuid4()
+    hermes_agent_id = uuid4()
     seen_at = datetime(2026, 8, 16, 10, 0, tzinfo=timezone.utc)
 
     connections_by_owner = {
-        parent_id: [],
+        # A self-registered plugin's agent (tagged email): pinned to its own key.
+        hermes_agent_id: AgentConnection(
+            id="hermes",
+            agent_session_name="plugin:hermes-agent",
+            type="hermes_agent",
+            status="active",
+            user_id=hermes_agent_id,
+            last_active_at=seen_at,
+            metadata={"plugin_key": "codex"},  # tampered: ignored
+        ),
         # claude-code agent's blob, tampered to claim codex on both signals.
-        claude_agent_id: [
-            AgentConnection(
-                id="spoof",
-                agent_session_name="plugin:codex",
-                type="codex",
-                status="active",
-                last_active_at=seen_at,
-                metadata={"plugin_key": "codex"},
-            )
-        ],
+        claude_agent_id: AgentConnection(
+            id="spoof",
+            agent_session_name="plugin:codex",
+            type="codex",
+            status="active",
+            user_id=claude_agent_id,
+            last_active_at=seen_at,
+            metadata={"plugin_key": "codex"},
+        ),
         # Manually created non-plugin agent claiming an MCP connection.
-        custom_agent_id: [
-            AgentConnection(
-                id="custom",
-                agent_session_name="my-bot",
-                type="mcp",
-                status="active",
-                last_active_at=seen_at,
-            )
-        ],
+        custom_agent_id: AgentConnection(
+            id="custom",
+            agent_session_name="my-bot",
+            type="mcp",
+            status="active",
+            user_id=custom_agent_id,
+            last_active_at=seen_at,
+        ),
     }
-
-    async def _by_owner(user_ids, active_only=True):
-        (owner,) = user_ids
-        return connections_by_owner[owner]
+    configs_by_owner = {
+        owner: _agents_config(connection) for owner, connection in connections_by_owner.items()
+    }
 
     child_emails = {
-        claude_agent_id: f"claude-code+{parent_id}@cognee.agent",
-        custom_agent_id: f"my-bot+{parent_id}@cognee.agent",
+        claude_agent_id: _agent_email("claude-code", parent_id),
+        custom_agent_id: _agent_email("my-bot", parent_id),
+        hermes_agent_id: plugin_agent_email("hermes-agent", parent_id),
     }
     with (
+        # The caller's own blob holds nothing; the children's come from the batched read.
         patch.object(
-            _status_module,
-            "list_persisted_agent_connections",
-            new=AsyncMock(side_effect=_by_owner),
+            _status_module, "list_persisted_agent_connections", new=AsyncMock(return_value=[])
         ),
         patch.object(
             _status_module, "child_agent_emails", new=AsyncMock(return_value=child_emails)
         ),
+        patch.object(
+            _status_module,
+            "get_principals_all_configuration",
+            new=AsyncMock(return_value=configs_by_owner),
+        ),
     ):
         statuses = await registry_plugin_statuses(parent_id)
 
-    # The spoofed connection lands on the email-derived key, never on codex;
+    # The spoofed connections land on their email-derived keys, never on codex;
     # the non-plugin agent's mcp claim produces no row at all.
-    assert set(statuses) == {"claude-code"}
+    assert set(statuses) == {"claude-code", "hermes-agent"}
     assert statuses["claude-code"].connected is True
     assert statuses["claude-code"].last_active_at == seen_at
+
+
+@pytest.mark.asyncio
+async def test_plugin_agents_are_loaded_once_and_shared_by_both_sources():
+    """Any plugin can register, so a user may hold many plugin agents. Their
+    configuration records are read in one query, custom agents left out, and
+    the identity and registry sources both work from that one result —
+    no query per agent, in either."""
+    parent_id = uuid4()
+    hermes_id, vellum_id, custom_id = uuid4(), uuid4(), uuid4()
+    seen_at = datetime(2026, 8, 16, 10, 0, tzinfo=timezone.utc)
+    child_emails = {
+        hermes_id: plugin_agent_email("hermes-agent", parent_id),
+        vellum_id: plugin_agent_email("vellum-assistant", parent_id),
+        custom_id: _agent_email("my-bot", parent_id),
+    }
+    vellum_connection = AgentConnection(
+        id="vellum",
+        agent_session_name="plugin:vellum-assistant",
+        type="vellum_assistant",
+        status="active",
+        user_id=vellum_id,
+        last_active_at=seen_at,
+    )
+    configs_by_owner = {
+        hermes_id: _identity_config("hermes-agent", label="Hermes"),
+        vellum_id: _identity_config("vellum-assistant") + _agents_config(vellum_connection),
+    }
+    fake_engine, engine = await _sqlite_engine(UserApiKey, SessionRecord)
+    try:
+        with (
+            patch.object(
+                _status_module, "child_agent_emails", new=AsyncMock(return_value=child_emails)
+            ),
+            patch.object(
+                _status_module,
+                "get_principals_all_configuration",
+                new=AsyncMock(return_value=configs_by_owner),
+            ) as read_configs,
+            patch.object(
+                _status_module, "list_persisted_agent_connections", new=AsyncMock(return_value=[])
+            ),
+            patch.object(_status_module, "get_relational_engine", return_value=fake_engine),
+        ):
+            agents = await load_plugin_agents(parent_id)
+            identity = await identity_plugin_statuses(parent_id, agents)
+            registry = await registry_plugin_statuses(parent_id, agents)
+    finally:
+        await engine.dispose()
+
+    # One batched read, for the plugin agents only.
+    read_configs.assert_awaited_once()
+    assert set(read_configs.await_args.args[0]) == {hermes_id, vellum_id}
+    assert {agent.plugin_key for agent in agents} == {"hermes-agent", "vellum-assistant"}
+    assert set(identity) == {"hermes-agent", "vellum-assistant"}
+    assert identity["hermes-agent"].label == "Hermes"
+    assert set(registry) == {"vellum-assistant"}
+    assert registry["vellum-assistant"].last_active_at == seen_at
 
 
 # --------------------------------------------------------------------------- #
@@ -780,6 +1033,20 @@ def test_merge_identity_and_registry_rows_for_same_key():
     assert row.source == SOURCE_IDENTITY
     assert row.session_count == 3
     assert merged["mcp"].source == SOURCE_REGISTRY
+
+
+def test_merge_fills_missing_self_description_from_the_extra_row():
+    base = {"hermes-agent": PluginStatusRow(key="hermes-agent", connected=True)}
+    extra = {
+        "hermes-agent": PluginStatusRow(
+            key="hermes-agent", label="Hermes Agent", connection_type="hermes_agent"
+        )
+    }
+
+    merged = merge_plugin_statuses(base, extra)
+
+    assert merged["hermes-agent"].label == "Hermes Agent"
+    assert merged["hermes-agent"].connection_type == "hermes_agent"
 
 
 def test_merge_ors_connected_for_non_identity_rows():
