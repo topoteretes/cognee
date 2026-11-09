@@ -1,11 +1,13 @@
 [project]
 name = "cognee"
 
-version = "1.6.6"
+version = "1.6.7"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
-    { name = "Boris Arzentar" },
+    { name = "Igor Ilic" },
+    { name = "Nikola Zivkovic" },
+    { name = "Lazar Obradovic" },
 ]
 requires-python = ">=3.10,<3.15"
 readme = "README.md"
@@ -46,7 +48,6 @@ dependencies = [
     # 1.97.0 through 1.100.x do not import on Python 3.10 (BerriAI/litellm#38202, fixed in
     # 1.101.0), so this floor also keeps every supported Python on a working release.
     "litellm>=1.102.2,<2.0.0",
-    "instructor>=1.9.1,<1.15.3",
     "filetype>=1.2.0,<2.0.0",
     "aiohttp>=3.13.5,<4.0.0",
     # >=2026.10.19: earlier bundles still trust the eMudhra intermediates whose
@@ -186,7 +187,9 @@ azure = ["azure-identity>=1.15.0,<2"]
 deepeval = ["deepeval>=3.0.1,<4"]
 posthog = ["posthog>=3.5.0,<4"]
 groq = ["groq>=0.8.0,<1.0.0"]
-llama-cpp = ["llama-cpp-python[server]>=0.3.0,<1.0.0"]
+# The llama.cpp adapter lives on the legacy instructor path (STRUCTURED_OUTPUT_FRAMEWORK=instructor),
+# so the extra carries instructor with it.
+llama-cpp = ["llama-cpp-python[server]>=0.3.0,<1.0.0", "instructor>=1.9.1,<1.15.3"]
 docs = [
     # GHSA-vfmq-68hx-4jfw is fixed in lxml 6.1.0 (see the scraping extra).
     "lxml>=6.1.0,<7",
@@ -234,7 +237,12 @@ google-calendar = [
     "google-auth-oauthlib>=1.1.0,<2",
 ]
 baml = ["baml-py (==0.206.0)"]
+# The legacy structured-output framework (STRUCTURED_OUTPUT_FRAMEWORK=instructor). Not in
+# the default call path, and it caps openai at <3, so it stays out of the core install.
+instructor = ["instructor>=1.9.1,<1.15.3"]
 dev = [
+    # The legacy LLM adapters' unit tests build the instructor client.
+    "instructor>=1.9.1,<1.15.3",
     "pytest>=7.4.0,<8",
     "pytest-cov>=6.1.1,<7.0.0",
     "pytest-asyncio>=0.21.1,<0.22",
@@ -281,6 +289,10 @@ docling-full = ["docling>=2.115,<3", "transformers>=4.55"]
 # for that (gliner2[local] requires the same range). protobuf + sentencepiece are needed
 # by the DeBERTa tokenizer fallback.
 gliner = ["gliner2[local]>=2.0.0,<3", "torch>=2.1,<3", "protobuf>=5.29.6", "sentencepiece>=0.2.0", "psutil>=5.9"]
+# Remote GLiNER worker transports (COGNEE_GLINER_TRANSPORT, gliner_demo/remote). HTTP needs
+# no extra (httpx is a core dependency); neither needs torch or gliner2.
+gliner-remote-grpc = ["grpcio>=1.60,<2", "protobuf>=5.29.6"]
+gliner-remote-amqp = ["aio-pika>=9.4,<10"]
 rapidocr = ["rapidocr-onnxruntime>=1.3.0,<2"]
 
 [project.urls]
@@ -311,6 +323,7 @@ exclude = [
   "/.github",
   "/deployment",
   "/cognee-mcp",
+  "/cognee-connectors",
   "/cognee-frontend",
   "/examples",
   "/helm",
@@ -348,8 +361,8 @@ constraint-dependencies = [
     "scipy>=1.16.1 ; python_version >= '3.14'",
 ]
 [tool.pytest.ini_options]
-# `pytest` with no path collects only the library test tree; cognee-mcp has its
-# own pyproject and suite. See cognee/tests/README.md for layout and credentials.
+# `pytest` with no path collects only the library test tree; cognee-mcp and
+# cognee-connectors have their own pyproject and suite. See cognee/tests/README.md for layout and credentials.
 testpaths = ["cognee/tests"]
 markers = [
     "deployment: smoke tests against a deployed cognee instance (cognee/tests/deployment/)",

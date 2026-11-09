@@ -32,7 +32,10 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.session_lifecycle.metrics import record_session_activity
+from cognee.modules.session_lifecycle.metrics import (
+    DEFAULT_SESSION_ID,
+    record_session_activity,
+)
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 
@@ -75,7 +78,7 @@ class SessionManager:
         # TODO: this type should be 'CacheDBInterface', but the current code doesn't use this
         # interface and instead calls functions specific to its implementations.
         cache_engine: Any,
-        default_session_id: str = "default_session",
+        default_session_id: str = DEFAULT_SESSION_ID,
         session_history_last_n: int = 10,
         dataset_id: uuid.UUID | None = None,
     ) -> None:
@@ -961,45 +964,64 @@ class SessionManager:
         Returns True if deleted, False if session did not exist or cache unavailable.
         """
         session_id = self.resolve_session_id(session_id)
-        self._validate_session_params(user_id=user_id, session_id=session_id)
-        if not self.is_available:
-            logger.debug("SessionManager: cache unavailable, skipping delete_session")
-            return False
+        return (await self.delete_sessions([(user_id, session_id)]))[0]
 
-        # One-release cleanup for graph snapshots written by the removed
-        # graph-to-session sync feature.
-        graph_key = f"graph_knowledge:{user_id}:{session_id}"
+    async def delete_sessions(self, sessions: list[tuple[str, str]]) -> list[bool]:
+        """
+        Delete each (user id, session id) pair whole: cache content and Q&A vectors.
+
+        Returns one flag per pair, True if the session existed in the cache;
+        all False when the cache is unavailable. The Q&A vectors of every pair
+        go in one tag-removal call against the current vector store.
+        """
+        for user_id, session_id in sessions:
+            self._validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping delete_sessions")
+            return [False] * len(sessions)
+
+        existed = await self._cache.delete_sessions(sessions)
+        await self._delete_legacy_graph_snapshots(sessions)
+        # Unconditionally: cache entries expire (session TTL) while their Q&A
+        # vectors, which hold the question and answer text, do not.
+        await delete_session_qa_vectors(sessions)
+        return existed
+
+    async def _delete_legacy_graph_snapshots(self, sessions: list[tuple[str, str]]) -> None:
+        """One-release cleanup for graph snapshots written by the removed
+        graph-to-session sync feature; failures are ignored."""
+        keys = [f"graph_knowledge:{user_id}:{session_id}" for user_id, session_id in sessions]
         try:
-            await self._cache.delete_value(graph_key)
+            await self._cache.delete_values(keys)
         except (NotImplementedError, AttributeError, TypeError):
             # Adapter predates the KV interface (missing, non-async, or
             # different-signature delete_value), fall back to legacy duck-typing
-            try:
-                await self._cache.async_redis.delete(graph_key)
-            except AttributeError:
+            for key in keys:
                 try:
-                    del self._cache._cache[graph_key]
+                    await self._cache.async_redis.delete(key)
+                except AttributeError:
+                    try:
+                        del self._cache._cache[key]
+                    except Exception:
+                        logger.debug(
+                            "Ignoring exception in SessionManager.delete_sessions", exc_info=True
+                        )
                 except Exception:
                     logger.debug(
-                        "Ignoring exception in SessionManager.delete_session", exc_info=True
+                        "Ignoring exception in SessionManager.delete_sessions", exc_info=True
                     )
-            except Exception:
-                logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
         except Exception:
-            logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
+            logger.debug("Ignoring exception in SessionManager.delete_sessions", exc_info=True)
 
-        # Also clear the active session-context list (fail-open; adapter.delete_session may also
-        # clear it, but this guarantees no leak if the adapter does not).
-        try:
-            await self._cache.delete_session_context(user_id, session_id)
-        except Exception:
-            logger.debug("Ignoring exception in SessionManager.delete_session", exc_info=True)
+    async def list_session_ids(self, *, user_id: str) -> list[str]:
+        """
+        Every session id the user has content for in the cache.
 
-        deleted = await self._cache.delete_session(
-            user_id=user_id,
-            session_id=session_id,
-        )
-        # Unconditionally: cache entries expire (session TTL) while their Q&A
-        # vectors, which hold the question and answer text, do not.
-        await delete_session_qa_vectors(user_id=user_id, session_id=session_id)
-        return deleted
+        Reads the cache itself, not the ``session_records`` dashboard rows,
+        which are written best-effort. Raises on cache errors: a caller that
+        deletes what this lists must not read a failure as "no sessions".
+        """
+        self._validate_session_params(user_id=user_id)
+        if not self.is_available:
+            return []
+        return await self._cache.list_session_ids(user_id)

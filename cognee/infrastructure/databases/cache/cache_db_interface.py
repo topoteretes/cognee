@@ -194,6 +194,28 @@ class CacheDBInterface(ABC):
         Returns True if deleted, False if session did not exist.
         """
 
+    @abstractmethod
+    async def list_session_ids(self, user_id: str) -> list[str]:
+        """
+        Return every session id the user has stored content for (QA entries,
+        agent traces or session context), in no particular order.
+        """
+
+    async def delete_sessions(self, sessions: list[tuple[str, str]]) -> list[bool]:
+        """
+        Delete each (user id, session id) pair whole: QA entries, agent traces
+        and session context. One flag per pair, True if any of its data existed.
+
+        Non-abstract so external adapters keep working: the default deletes one
+        session at a time; the in-tree adapters delete in a few round trips.
+        """
+        existed = []
+        for user_id, session_id in sessions:
+            context_existed = await self.delete_session_context(user_id, session_id)
+            session_existed = await self.delete_session(user_id, session_id)
+            existed.append(context_existed or session_existed)
+        return existed
+
     async def get_value(self, key: str) -> str | None:
         """
         Retrieve a raw string value stored under the given key, or None if absent/expired.
@@ -223,6 +245,15 @@ class CacheDBInterface(ABC):
         unimplemented.
         """
         raise NotImplementedError("This cache adapter does not support key/value storage.")
+
+    async def delete_values(self, keys: list[str]) -> None:
+        """
+        Delete the values stored under the given keys, those present.
+
+        The default deletes one key at a time with ``delete_value``.
+        """
+        for key in keys:
+            await self.delete_value(key)
 
     @abstractmethod
     async def append_agent_trace_step(

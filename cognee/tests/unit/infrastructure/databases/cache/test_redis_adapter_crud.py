@@ -1,6 +1,7 @@
 """Unit tests for RedisAdapter CRUD operations."""
 
 import asyncio
+import re
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -23,6 +24,7 @@ class _InMemoryRedisList:
         self.data: dict[str, list[str]] = {}
         self.ttls: dict[str, int] = {}
         self.expire_calls: list[tuple[str, int]] = []
+        self.pipeline_executions = 0
 
     async def rpush(self, key: str, *vals: str):
         self.data.setdefault(key, []).extend(vals)
@@ -54,9 +56,15 @@ class _InMemoryRedisList:
             self.ttls.pop(key, None)
         return len(lst) - len(kept)
 
-    async def delete(self, key: str):
-        self.ttls.pop(key, None)
-        return 1 if self.data.pop(key, None) is not None else 0
+    async def delete(self, *keys: str):
+        deleted = 0
+        for key in keys:
+            self.ttls.pop(key, None)
+            deleted += self.data.pop(key, None) is not None
+        return deleted
+
+    def pipeline(self, transaction: bool = True):
+        return _InMemoryPipeline(self)
 
     async def expire(self, key: str, ttl: int):
         self.ttls[key] = ttl
@@ -72,6 +80,40 @@ class _InMemoryRedisList:
         self.data.clear()
         self.ttls.clear()
         self.expire_calls.clear()
+
+    async def scan_iter(self, match: str, count: int | None = None):
+        """Redis MATCH with backslash escapes and ``*`` (all the adapter uses)."""
+        pattern, escaped = "", False
+        for char in match:
+            if escaped:
+                pattern += re.escape(char)
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == "*":
+                pattern += ".*"
+            else:
+                pattern += re.escape(char)
+        for key in list(self.data):
+            if re.fullmatch(pattern, key):
+                yield key.encode()
+
+
+class _InMemoryPipeline:
+    """Queues commands and runs them in order on execute(), as a Redis pipeline does."""
+
+    def __init__(self, store: _InMemoryRedisList):
+        self.store = store
+        self.commands: list[tuple[str, tuple]] = []
+
+    def delete(self, *keys: str):
+        self.commands.append(("delete", keys))
+        return self
+
+    async def execute(self):
+        results = [await getattr(self.store, name)(*args) for name, args in self.commands]
+        self.store.pipeline_executions += 1
+        return results
 
 
 @pytest.fixture
@@ -605,6 +647,40 @@ async def test_delete_session(adapter):
     assert ok is True
     assert await adapter.get_all_qa_entries("u1", "s1") == []
     assert await adapter.get_agent_trace_session("u1", "s1") == []
+
+
+@pytest.mark.asyncio
+async def test_delete_sessions_deletes_each_pair_whole_in_one_round_trip(adapter, redis_store):
+    """QA, trace and context keys all count; another user's same session id stays."""
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    await adapter.append_agent_trace_step(
+        "u1", "s2", trace_id="t1", origin_function="f", status="success"
+    )
+    await adapter.create_session_context_entry("u1", "s3", {"id": "c1", "kind": "context"})
+    await adapter.create_qa_entry("u2", "s1", "Q", "C", "A", qa_id="id2")
+
+    existed = await adapter.delete_sessions([("u1", "s1"), ("u1", "s2"), ("u1", "s3"), ("u1", "x")])
+
+    assert existed == [True, True, True, False]
+    assert redis_store.pipeline_executions == 1
+    assert await adapter.list_session_ids("u1") == []
+    assert await adapter.list_session_ids("u2") == ["s1"]
+
+
+@pytest.mark.asyncio
+async def test_list_session_ids_lists_only_the_users_sessions(adapter):
+    """QA, trace and context keys all count; another user's, even a prefix-alike, does not."""
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    await adapter.append_agent_trace_step(
+        "u1", "s:2", trace_id="t1", origin_function="f", status="success"
+    )
+    await adapter.create_session_context_entry("u1", "s3", {"id": "c1", "kind": "context"})
+    await adapter.create_qa_entry("u10", "s4", "Q", "C", "A", qa_id="id2")
+    await adapter.create_qa_entry("u*", "s5", "Q", "C", "A", qa_id="id3")
+
+    assert sorted(await adapter.list_session_ids("u1")) == ["s1", "s3", "s:2"]
+    # A glob character in the user id matches only itself.
+    assert await adapter.list_session_ids("u*") == ["s5"]
 
 
 @pytest.mark.asyncio

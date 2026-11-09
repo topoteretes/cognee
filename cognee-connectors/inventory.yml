@@ -1,0 +1,225 @@
+# cognee-connectors inventory: the catalog of every connector package this repository
+# ships or plans, one entry per package under connectors/.
+#
+# scripts/validate_inventory.py checks this file against scripts/inventory.schema.json
+# and against the connectors/ directories (every directory has an entry, every entry
+# that is not "planned" has a directory); scripts/render_inventory.py renders the
+# Connectors table of README.md from it; scripts/new_connector.py appends an entry
+# when it scaffolds a package. Both checks run in .github/workflows/test_connectors.yml.
+#
+# Keep it in plain block YAML: one `- slug:` item per entry, nested keys indented by
+# two spaces, short string lists inline (`[a, b]`), no anchors, no multi-line
+# scalars. The scripts read it without PyYAML.
+#
+# Fields of an entry:
+#   slug          the provider id: the directory name under connectors/ and the
+#                 entry-point name (snake_case, e.g. google_drive)
+#   package       the PyPI distribution name, cognee-connector-<provider> (dashes)
+#   module        the import name, cognee_connector_<provider> (underscores)
+#   directory     connectors/<slug>
+#   display_name  the name shown in the README table and the connector catalog
+#   auth          oauth2 | api_key | local
+#   tier          1 (ConnectorDescriptor), 2 (descriptor plus parse_installation),
+#                 3 (Connector subclass), or null for API-key and local providers
+#   sources       the DLT source factories the package exports, by entry-point name
+#                 (`<name>_source`); [] when the package ships none
+#   hosts         cognee: plugs into a cognee server through cognee_host/
+#                 cloud: consumed by cloud-backend
+#   status        ported | planned | archived
+#   origin        where the code came from: cognee: the path in cognee dev (or null),
+#                 cloud: the path in cloud-backend (or null)
+#   env_vars      every environment variable the package's settings read; the names
+#                 are unchanged from cognee
+connectors:
+  - slug: linear
+    package: cognee-connector-linear
+    module: cognee_connector_linear
+    directory: connectors/linear
+    display_name: "Linear"
+    auth: oauth2
+    tier: 2
+    sources: [linear]
+    hosts:
+      cognee: true
+      cloud: false
+    status: ported
+    origin:
+      cognee: "cognee/modules/integrations/linear, cognee/tasks/ingestion/connectors/linear.py"
+      cloud: null
+    env_vars: [LINEAR_CLIENT_ID, LINEAR_CLIENT_SECRET, LINEAR_REDIRECT_URI, LINEAR_FRONTEND_BASE_URL, LINEAR_WEBHOOK_SECRET, LINEAR_RESUME_SYNC_ENABLED, LINEAR_RESUME_INTERVAL_SECONDS]
+  - slug: google
+    package: cognee-connector-google
+    module: cognee_connector_google
+    directory: connectors/google
+    display_name: "Google"
+    auth: oauth2
+    tier: 2
+    sources: []
+    hosts:
+      cognee: false
+      cloud: false
+    status: ported
+    origin:
+      cognee: "cognee/modules/integrations/google"
+      cloud: "modules/integrations/google"
+    env_vars: []
+  - slug: google-drive
+    package: cognee-connector-google-drive
+    module: cognee_connector_google_drive
+    directory: connectors/google-drive
+    display_name: "Google Drive"
+    auth: oauth2
+    tier: 2
+    sources: [google_drive]
+    hosts:
+      cognee: true
+      cloud: false
+    status: ported
+    origin:
+      cognee: "cognee/modules/integrations/google_drive, cognee/tasks/ingestion/connectors/google_drive.py"
+      cloud: "modules/integrations/google_drive"
+    env_vars: [GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REDIRECT_URI, GOOGLE_DRIVE_FRONTEND_BASE_URL, GOOGLE_DRIVE_STATE_SECRET]
+  - slug: gmail
+    package: cognee-connector-gmail
+    module: cognee_connector_gmail
+    directory: connectors/gmail
+    display_name: "Gmail"
+    auth: oauth2
+    tier: 2
+    sources: [gmail]
+    hosts:
+      cognee: true
+      cloud: false
+    status: ported
+    origin:
+      cognee: "cognee/modules/integrations/gmail, cognee/tasks/ingestion/connectors/gmail.py"
+      cloud: "modules/integrations/gmail"
+    env_vars: [GOOGLE_GMAIL_CLIENT_ID, GOOGLE_GMAIL_CLIENT_SECRET, GOOGLE_GMAIL_REDIRECT_URI, GOOGLE_GMAIL_FRONTEND_BASE_URL, GOOGLE_GMAIL_STATE_SECRET]
+  - slug: google-calendar
+    package: cognee-connector-google-calendar
+    module: cognee_connector_google_calendar
+    directory: connectors/google-calendar
+    display_name: "Google Calendar"
+    auth: oauth2
+    tier: 2
+    sources: [google_calendar]
+    hosts:
+      cognee: true
+      cloud: false
+    status: ported
+    origin:
+      cognee: "cognee/modules/integrations/google_calendar, cognee/tasks/ingestion/connectors/google_calendar.py"
+      cloud: null
+    env_vars: [GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_REDIRECT_URI, GOOGLE_CALENDAR_FRONTEND_BASE_URL, GOOGLE_CALENDAR_STATE_SECRET, GOOGLE_CALENDAR_REFRESH_TOKEN, GOOGLE_CALENDAR_CREDENTIALS_PATH, GOOGLE_CALENDAR_TOKEN_PATH, GOOGLE_CALENDAR_ACCESS_TOKEN, GOOGLE_CALENDAR_IDS]
+  - slug: apollo
+    package: cognee-connector-apollo
+    module: cognee_connector_apollo
+    directory: connectors/apollo
+    display_name: "Apollo"
+    auth: api_key
+    tier: null
+    sources: [apollo]
+    hosts:
+      cognee: true
+      cloud: false
+    status: ported
+    origin:
+      cognee: "cognee/tasks/ingestion/connectors/apollo.py"
+      cloud: null
+    env_vars: []
+  - slug: asana
+    package: cognee-connector-asana
+    module: cognee_connector_asana
+    directory: connectors/asana
+    display_name: "Asana"
+    auth: api_key
+    tier: null
+    sources: [asana]
+    hosts:
+      cognee: true
+      cloud: false
+    status: ported
+    origin:
+      cognee: "cognee/tasks/ingestion/connectors/asana.py"
+      cloud: null
+    env_vars: []
+  - slug: notion
+    package: cognee-connector-notion
+    module: cognee_connector_notion
+    directory: connectors/notion
+    display_name: "Notion"
+    auth: oauth2
+    tier: 2
+    sources: [notion]
+    hosts:
+      cognee: true
+      cloud: false
+    status: ported
+    origin:
+      cognee: "cognee/modules/integrations/notion, cognee/tasks/ingestion/connectors/notion.py"
+      cloud: null
+    env_vars: [NOTION_CLIENT_ID, NOTION_CLIENT_SECRET, NOTION_REDIRECT_URI, NOTION_FRONTEND_BASE_URL, NOTION_STATE_SECRET]
+  - slug: github
+    package: cognee-connector-github
+    module: cognee_connector_github
+    directory: connectors/github
+    display_name: "GitHub"
+    auth: oauth2
+    tier: 3
+    sources: []
+    hosts:
+      cognee: true
+      cloud: false
+    status: ported
+    origin:
+      cognee: "cognee/modules/integrations/github"
+      cloud: null
+    env_vars: [GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_PRIVATE_KEY, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_REDIRECT_URI, GITHUB_FRONTEND_BASE_URL, GITHUB_WEBHOOK_SECRET]
+  - slug: slack
+    package: cognee-connector-slack
+    module: cognee_connector_slack
+    directory: connectors/slack
+    display_name: "Slack"
+    auth: oauth2
+    tier: 1
+    sources: []
+    hosts:
+      cognee: true
+      cloud: false
+    status: ported
+    origin:
+      cognee: "cognee/modules/integrations/slack"
+      cloud: null
+    env_vars: [SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET, SLACK_REDIRECT_URI, SLACK_FRONTEND_BASE_URL, SLACK_HISTORY_SYNC_ENABLED]
+  - slug: obsidian
+    package: cognee-connector-obsidian
+    module: cognee_connector_obsidian
+    directory: connectors/obsidian
+    display_name: "Obsidian"
+    auth: local
+    tier: null
+    sources: [obsidian]
+    hosts:
+      cognee: true
+      cloud: false
+    status: ported
+    origin:
+      cognee: "cognee/tasks/ingestion/connectors/obsidian.py"
+      cloud: null
+    env_vars: []
+  - slug: onenote
+    package: cognee-connector-onenote
+    module: cognee_connector_onenote
+    directory: connectors/onenote
+    display_name: "OneNote"
+    auth: api_key
+    tier: null
+    sources: [onenote]
+    hosts:
+      cognee: true
+      cloud: false
+    status: ported
+    origin:
+      cognee: "cognee/tasks/ingestion/connectors/onenote.py"
+      cloud: null
+    env_vars: []

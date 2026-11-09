@@ -89,9 +89,9 @@ async def search(
 
         **HYBRID_COMPLETION** (Default):
             Document passages plus entity neighbourhoods, then LLM completion.
-            Defers to GRAPH_COMPLETION for a custom node_type, node_name with
-            node_type=None, neighborhood_depth, feedback_influence > 0, or a
-            missing chunk collection.
+            Defers to GRAPH_COMPLETION for a custom node_type, neighborhood_depth,
+            feedback_influence > 0, or a missing chunk collection. node_name with
+            node_type=None raises QueryValidationError, as on every type.
 
         **GRAPH_COMPLETION**:
             Natural language Q&A using full graph context and LLM reasoning.
@@ -161,12 +161,22 @@ async def search(
         top_k: Maximum number of results to return (1-N)
               Higher values provide more comprehensive but potentially noisy results.
 
-        node_type: Filter results to specific entity types (for advanced filtering).
+        node_type: What the names in node_name are. NodeSet (the default) means node-set
+                   tags; any other graph node type (TextDocument, Entity, ...) means the
+                   named nodes of that type and their one-hop neighbours.
 
-        node_name: Filter results to specific named entities (for targeted search).
+        node_name: Names to scope the search to, read according to node_type. Node-set
+                   tags are honoured by CHUNKS, RAG_COMPLETION, HYBRID_COMPLETION, TEMPORAL,
+                   CODING_RULES and the graph-completion family. A graph scope is honoured
+                   by the graph-completion family (it ranks the projected nodes), by CHUNKS
+                   and RAG_COMPLETION (they score the chunks in the projection: a document's
+                   chunks, an entity's mentions) and by HYBRID_COMPLETION (defers to
+                   GRAPH_COMPLETION). A search type that cannot apply the filter raises
+                   QueryValidationError, node_name without a node_type raises too, and
+                   FEELING_LUCKY picks only among the types that can apply it.
 
         node_name_filter_operator: Operator determining how to filter based on node names.
-                                    Possible values: AND, OR (default is OR, i.e. disjunction)
+                                    Possible values: AND, OR (default is OR, i.e. disjunction).
 
         session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
 

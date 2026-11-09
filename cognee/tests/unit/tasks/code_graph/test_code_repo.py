@@ -94,8 +94,12 @@ async def test_directory_with_project_resolves_to_repo_item_plus_documents(tmp_p
 
     resolved = await resolve_data_directories([str(repo)])
 
-    manifest_items = [item for item in resolved if isinstance(item, DataItem)]
-    file_items = [item for item in resolved if isinstance(item, str)]
+    manifest_items = [
+        item for item in resolved if isinstance(item, DataItem) and not item.cognee_path
+    ]
+    # The project's documents are cognee-produced paths, marked so the
+    # server-path gate does not apply to them.
+    file_items = [item.data for item in resolved if isinstance(item, DataItem) and item.cognee_path]
     assert len(manifest_items) == 1
     assert manifest_items[0].system_metadata["source"] == "code_repo"
     assert manifest_items[0].system_metadata["file_count"] == 3
@@ -321,20 +325,22 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
 
     # The clone gets the normalised URL, not the browser one, and the branch asked for.
     assert cloned_specs == [("https://github.com/org/repo", "dev")]
-    manifest_items = [item for item in resolved if isinstance(item, DataItem)]
+    manifest_items = [
+        item for item in resolved if isinstance(item, DataItem) and not item.cognee_path
+    ]
     assert len(manifest_items) == 1
     manifest = manifest_items[0]
     assert manifest.system_metadata["source"] == "code_repo"
     assert manifest.system_metadata["repo_path"] == str(clone)
     assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo"
     assert manifest.system_metadata["file_count"] == 3
-    # The repo's documents ride along individually; unrelated items pass through.
-    string_items = [item for item in resolved if isinstance(item, str)]
-    assert {Path(item).name for item in string_items if item != "plain text note"} == {
-        "README.md",
-        "notes.txt",
-    }
-    assert "plain text note" in string_items
+    # The repo's documents ride along individually, as cognee-produced paths
+    # the server-path gate does not apply to; unrelated items pass through.
+    document_items = [
+        item.data for item in resolved if isinstance(item, DataItem) and item.cognee_path
+    ]
+    assert {Path(item).name for item in document_items} == {"README.md", "notes.txt"}
+    assert "plain text note" in resolved
 
 
 @pytest.mark.asyncio
