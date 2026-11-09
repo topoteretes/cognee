@@ -12,6 +12,8 @@ from typing import Any
 
 import aiohttp
 
+from cognee.modules.integrations.outbound import client_session
+
 logger = logging.getLogger(__name__)
 
 _CHANNELS_URL = "https://slack.com/api/conversations.list"
@@ -38,7 +40,7 @@ async def list_channels(access_token: str) -> list[dict[str, Any]]:
     channels: list[dict[str, Any]] = []
     cursor = ""
 
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
+    async with client_session("slack", timeout=_TIMEOUT) as session:
         while True:
             params = {"types": "public_channel", "limit": _PAGE_LIMIT, "exclude_archived": "true"}
             if cursor:
@@ -74,7 +76,10 @@ async def _fetch_page(
             _CHANNELS_URL,
             headers={"Authorization": f"Bearer {access_token}"},
             params=params,
+            allow_redirects=False,
         ) as response:
+            if 300 <= response.status < 400:
+                raise RuntimeError(f"Slack conversations.list failed: HTTP {response.status}")
             payload = await response.json()
             retry_after = response.headers.get("Retry-After")
 
