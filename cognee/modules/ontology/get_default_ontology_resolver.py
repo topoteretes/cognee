@@ -69,18 +69,19 @@ def get_configured_ontology_mode(config: Config | None = None) -> str:
     return get_ontology_env_config().ontology_mode
 
 
-def get_configured_authoritative_sources(config: Config | None = None) -> dict:
+def get_configured_authoritative_sources(
+    config: Config | None = None,
+) -> dict[str, str | None] | None:
     """Resolve the authoritative-source map: per-call ``ontology_config`` first, then env.
 
-    Always a dict keyed by table name (see ``OntologyConfig.authoritative_sources``);
-    empty when nothing is configured.
+    A per-call ``authoritative_sources`` is returned as given whenever the key is
+    present, so ``{}`` means "none" rather than "use the environment" (see
+    ``OntologyConfig.authoritative_sources``).
     """
-    from cognee.modules.ontology.ontology_env_config import parse_authoritative_sources
-
     if config is not None:
         ontology_config = config.get("ontology_config")
-        if isinstance(ontology_config, dict) and ontology_config.get("authoritative_sources"):
-            return parse_authoritative_sources(ontology_config["authoritative_sources"])
+        if isinstance(ontology_config, dict) and "authoritative_sources" in ontology_config:
+            return ontology_config["authoritative_sources"]
 
     return get_ontology_env_config().authoritative_sources()
 

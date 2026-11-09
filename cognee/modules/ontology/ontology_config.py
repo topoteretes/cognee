@@ -1,4 +1,4 @@
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.matching_strategies import MatchingStrategy
@@ -14,12 +14,11 @@ class OntologyConfig(TypedDict, total=False):
             entities with no ontology grounding). Falls back to the
             ONTOLOGY_MODE environment value when omitted.
         authoritative_sources: Which schema tables are the system of record for
-            the concept they realize, keyed by table name (bare or
-            ``schema.table``). A value is ``True``, an owner string, or a dict
-            ``{"authoritative": bool, "owner": str}``. Stamped on the
-            ``realizes`` edge; retrieval prefers authoritative tables when
-            several realize the same class. Falls back to
-            ONTOLOGY_AUTHORITATIVE_SOURCES when omitted.
+            the concept they realize: table name (bare or ``schema.table``) to
+            owner, or None for no owner. Stamped on the ``realizes`` edge;
+            retrieval prefers authoritative tables when several realize the
+            same class. Falls back to ONTOLOGY_AUTHORITATIVE_SOURCES when
+            omitted.
         ontology_reasoning: Whether to expand the ontology's OWL 2 RL closure
             before matching — "none" (the default) or "owl_rl" (requires the
             optional ``owlrl`` package). Applies when cognee builds the resolver
@@ -30,7 +29,7 @@ class OntologyConfig(TypedDict, total=False):
 
     ontology_resolver: BaseOntologyResolver | None
     ontology_mode: str | None
-    authoritative_sources: dict[str, Any] | None
+    authoritative_sources: dict[str, str | None] | None
     ontology_reasoning: str | None
 
 

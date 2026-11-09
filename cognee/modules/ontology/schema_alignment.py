@@ -98,29 +98,19 @@ def coerce_table_specs(tables: Iterable[Any]) -> list[SchemaTableSpec]:
 
 
 def authority_for(
-    table_name: str, authoritative_sources: Mapping[str, Any] | None
+    table_name: str, authoritative_sources: Mapping[str, str | None] | None
 ) -> SourceAuthority:
     """Look a table up in the authoritative-source map by qualified or bare name.
 
-    Values: ``True`` (authoritative, no owner), an owner string, or
-    ``{"authoritative": bool, "owner": str}``.
+    A listed table is authoritative, and its value is the owner.
     """
     if not authoritative_sources:
         return SourceAuthority()
-    bare = table_name.rsplit(".", 1)[-1]
-    lowered = {str(key).lower(): value for key, value in authoritative_sources.items()}
-    value = lowered.get(table_name.lower(), lowered.get(bare.lower()))
-    if value is None:
-        return SourceAuthority()
-    if isinstance(value, Mapping):
-        owner = value.get("owner")
-        return SourceAuthority(
-            authoritative=bool(value.get("authoritative", True)),
-            owner=str(owner) if owner else None,
-        )
-    if isinstance(value, str):
-        return SourceAuthority(authoritative=True, owner=value or None)
-    return SourceAuthority(authoritative=bool(value))
+    lowered = {key.lower(): owner for key, owner in authoritative_sources.items()}
+    for name in (table_name.lower(), table_name.rsplit(".", 1)[-1].lower()):
+        if name in lowered:
+            return SourceAuthority(authoritative=True, owner=lowered[name])
+    return SourceAuthority()
 
 
 # ---------------------------------------------------------------------- name forms
@@ -222,7 +212,7 @@ def _add_class_subgraph(alignment: SchemaOntologyAlignment, subgraph: Subgraph) 
 def align_tables_with_ontology(
     tables: Iterable[Any],
     resolver: BaseOntologyResolver | None,
-    authoritative_sources: Mapping[str, Any] | None = None,
+    authoritative_sources: Mapping[str, str | None] | None = None,
 ) -> SchemaOntologyAlignment:
     """Resolve each table against the ontology.
 

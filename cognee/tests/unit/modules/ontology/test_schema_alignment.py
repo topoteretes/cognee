@@ -101,7 +101,7 @@ def test_authoritative_sources_are_stamped_on_realizes_edges():
     alignment = align_tables_with_ontology(
         [(crm_id, "crm.customers"), (legacy_id, "legacy.customer")],
         _crm_resolver(),
-        authoritative_sources={"crm.customers": {"owner": "sales-ops"}},
+        authoritative_sources={"crm.customers": "sales-ops"},
     )
     realizes = {
         str(source): props
@@ -115,26 +115,41 @@ def test_authoritative_sources_are_stamped_on_realizes_edges():
     assert realizes[str(legacy_id)]["owner"] is None
 
 
-def test_authority_lookup_accepts_every_value_shape():
-    assert authority_for("crm.customers", {"customers": True}).authoritative is True
+def test_a_listed_table_is_authoritative_by_qualified_or_bare_name():
+    assert authority_for("crm.customers", {"customers": None}).authoritative is True
     assert authority_for("customers", {"customers": "sales-ops"}).owner == "sales-ops"
-    assert (
-        authority_for("customers", {"customers": {"authoritative": False}}).authoritative is False
-    )
-    assert authority_for("orders", {"customers": True}).authoritative is False
+    assert authority_for("orders", {"customers": None}).authoritative is False
     assert authority_for("orders", None).authoritative is False
 
 
-def test_env_authoritative_sources_parse_json_and_csv():
-    assert parse_authoritative_sources('{"crm.customers": {"owner": "sales-ops"}}') == {
-        "crm.customers": {"owner": "sales-ops"}
-    }
+def test_env_authoritative_sources_parse_the_csv_and_reject_a_missing_table():
     assert parse_authoritative_sources("crm.customers=sales-ops, orders") == {
-        "crm.customers": {"authoritative": True, "owner": "sales-ops"},
-        "orders": {"authoritative": True, "owner": None},
+        "crm.customers": "sales-ops",
+        "orders": None,
     }
-    assert parse_authoritative_sources("{not json") == {}
     assert parse_authoritative_sources("") == {}
+    with pytest.raises(ValueError):
+        parse_authoritative_sources("=x")
+
+
+def test_a_per_call_empty_map_overrides_the_environment(monkeypatch):
+    from cognee.modules.ontology import get_default_ontology_resolver as resolver_module
+
+    config = OntologyEnvConfig(ontology_authoritative_sources="crm.customers=sales-ops")
+    monkeypatch.setattr(resolver_module, "get_ontology_env_config", lambda: config)
+    per_call = resolver_module.get_configured_authoritative_sources(
+        {"ontology_config": {"authoritative_sources": {}}}
+    )
+    alignment = align_tables_with_ontology(
+        [(uuid4(), "crm.customers")], _crm_resolver(), authoritative_sources=per_call
+    )
+
+    assert [
+        props["authoritative"]
+        for _, _, name, props in alignment.edges
+        if name == REALIZES_RELATIONSHIP
+    ] == [False]
+    assert resolver_module.get_configured_authoritative_sources() == {"crm.customers": "sales-ops"}
 
 
 # --- errors ---------------------------------------------------------------------------
