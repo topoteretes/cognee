@@ -387,3 +387,37 @@ def test_unsound_multiword_fuzzy_class_match_is_rejected():
     # the extracted type survives untouched.
     assert str(EntityType.id_for("EnterpriseCustomer")) not in data_points_by_id
     assert data_points_by_id[str(Entity.id_for("acme"))].is_a.name == "enterprise customer acme"
+
+
+def _same_name_two_types(first_type: str, second_type: str) -> list[KnowledgeGraph]:
+    """One name in two chunks, typed differently; each chunk links it to a customer."""
+    graphs = []
+    for index, node_type in enumerate((first_type, second_type)):
+        exposure = Node(
+            id=f"e{index}", name="Credit exposure to Acme", type=node_type, description=""
+        )
+        acme = Node(id=f"a{index}", name="Acme", type="EnterpriseCustomer", description="")
+        edge = KGEdge(
+            source_node_id=exposure.id, target_node_id=acme.id, relationship_name="owed_by"
+        )
+        graphs.append(KnowledgeGraph(nodes=[exposure, acme], edges=[edge]))
+    return graphs
+
+
+@pytest.mark.parametrize(
+    "types", [("CreditExposure", "Financial Metric"), ("Financial Metric", "CreditExposure")]
+)
+def test_name_based_class_match_does_not_depend_on_chunk_order(types):
+    graphs = _same_name_two_types(*types)
+    canonicalize_extracted_graphs(
+        [_make_chunk(), _make_chunk()], graphs, _LookupResolver(), strict=False
+    )
+    assert [graph.nodes[0].type for graph in graphs] == ["CreditExposure", "CreditExposure"]
+
+    graphs = _same_name_two_types(*types)
+    canonicalize_extracted_graphs(
+        [_make_chunk(), _make_chunk()], graphs, _LookupResolver(), strict=True
+    )
+    for graph in graphs:
+        assert graph.nodes[0].name == "Credit exposure to Acme"
+        assert len(graph.edges) == 1
