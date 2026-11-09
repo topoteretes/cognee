@@ -10,6 +10,7 @@ from pydantic import Field
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
 from cognee.exceptions import CogneeApiError
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.search.operations import delete_user_search_history, get_history
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
@@ -297,6 +298,14 @@ def get_search_router() -> APIRouter:
         - To search datasets not owned by the request sender, dataset UUID is needed
         - If dataset_ids is provided, the datasets name list is ignored
         """
+        from cognee.modules.search.methods.node_type_resolution import resolve_node_type
+
+        # The wire carries the class name; the SDK takes the class. Resolved before
+        # telemetry so only a validated name is ever recorded: an unknown one is a
+        # 422 through the global handler and no event is sent, like a body that fails
+        # validation.
+        node_type = resolve_node_type(payload.node_type)
+
         send_telemetry(
             "Search API Endpoint Invoked",
             user,
@@ -309,8 +318,8 @@ def get_search_router() -> APIRouter:
                 # endpoint's convention (see recall.py telemetry).
                 "query": len(payload.query or ""),
                 "system_prompt": len(payload.system_prompt or ""),
-                # A class name, not user content.
-                "node_type": payload.node_type,
+                # The resolved class name; None for the node-set default.
+                "node_type": node_type.__name__ if node_type is not NodeSet else None,
                 "node_name": len(payload.node_name or []),
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
@@ -326,7 +335,6 @@ def get_search_router() -> APIRouter:
         )
 
         from cognee.api.v1.search import search as cognee_search
-        from cognee.modules.search.methods.node_type_resolution import resolve_node_type
 
         try:
             results = await cognee_search(
@@ -338,8 +346,7 @@ def get_search_router() -> APIRouter:
                 else None,  # If dataset_ids are provided, ignore datasets by name to avoid confusion and potential mismatches.
                 dataset_ids=payload.dataset_ids,
                 system_prompt=payload.system_prompt,
-                # The wire carries the class name; the SDK takes the class.
-                node_type=resolve_node_type(payload.node_type),
+                node_type=node_type,
                 node_name=payload.node_name,
                 top_k=payload.top_k,
                 verbose=payload.verbose,

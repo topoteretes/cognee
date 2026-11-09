@@ -256,8 +256,13 @@ def test_node_type_is_in_the_openapi_schema_of_the_recall_endpoint():
 
 
 def _router_client(monkeypatch, captured: dict):
+    """The recall router behind the app's real CogneeApiError handler."""
+    from cognee.api.client import exception_handler
+    from cognee.exceptions import CogneeApiError
+
     app = FastAPI()
     app.include_router(recall_router_module.get_recall_router(), prefix="/api/v1/recall")
+    app.add_exception_handler(CogneeApiError, exception_handler)
     app.dependency_overrides[recall_router_module.get_authenticated_user] = lambda: SimpleNamespace(
         id=uuid4(), tenant_id=None
     )
@@ -303,16 +308,17 @@ def test_recall_endpoint_without_node_type_reads_node_name_as_node_sets(monkeypa
     assert captured["node_type"] is NodeSet
 
 
-def test_recall_endpoint_rejects_an_unknown_node_type_with_422_naming_it(monkeypatch):
+@pytest.mark.parametrize("stream", [False, True])
+def test_recall_endpoint_rejects_an_unknown_node_type_with_422_naming_it(monkeypatch, stream):
+    """Resolution runs before the transport is chosen, so streaming answers 422 too."""
     captured = {}
     client = _router_client(monkeypatch, captured)
 
-    # The global error handler lives on the real app; here the validation error
-    # must leave the handler unhandled rather than be turned into the 409 the
-    # handler answers unexpected errors with.
-    with pytest.raises(CogneeValidationError) as error:
-        client.post("/api/v1/recall", json={"query": "q", "nodeType": "Nope", "nodeName": ["x"]})
+    response = client.post(
+        "/api/v1/recall",
+        json={"query": "q", "nodeType": "Nope", "nodeName": ["x"], "stream": stream},
+    )
 
-    assert error.value.status_code == 422
-    assert "'Nope'" in error.value.message
+    assert response.status_code == 422, response.text
+    assert "'Nope'" in response.json()["detail"]
     assert captured == {}

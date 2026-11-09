@@ -24,18 +24,32 @@ search_router_module = importlib.import_module("cognee.api.v1.search.routers.get
 SearchPayloadDTO = search_router_module.SearchPayloadDTO
 
 
-def _client(monkeypatch, fake_search):
+def _client(monkeypatch, fake_search, telemetry: list | None = None):
+    """The search router behind the app's real CogneeApiError handler.
+
+    ``telemetry`` collects the additional_properties of every event the handler
+    sends, so a test can assert what left (or did not leave) as telemetry.
+    """
+    from cognee.api.client import exception_handler
+    from cognee.exceptions import CogneeApiError
+
     app = FastAPI()
     app.include_router(search_router_module.get_search_router(), prefix="/api/v1/search")
+    app.add_exception_handler(CogneeApiError, exception_handler)
     app.dependency_overrides[search_router_module.get_authenticated_user] = lambda: SimpleNamespace(
         id=uuid4(), tenant_id=None
     )
-    monkeypatch.setattr(search_router_module, "send_telemetry", lambda *a, **k: None)
+
+    def record_telemetry(_event, _user, additional_properties=None, **_kwargs):
+        if telemetry is not None:
+            telemetry.append(additional_properties or {})
+
+    monkeypatch.setattr(search_router_module, "send_telemetry", record_telemetry)
 
     import cognee.api.v1.search as search_pkg
 
     monkeypatch.setattr(search_pkg, "search", fake_search)
-    return TestClient(app, raise_server_exceptions=False)
+    return TestClient(app)
 
 
 def _capturing_search(captured: dict):
@@ -101,18 +115,29 @@ def test_search_endpoint_rejects_an_unknown_node_type_with_422_naming_it(monkeyp
     captured = {}
     client = _client(monkeypatch, _capturing_search(captured))
 
-    # The global error handler lives on the real app; here the validation error
-    # must leave the handler unhandled rather than be swallowed into a 500.
-    from cognee.exceptions import CogneeValidationError
+    response = client.post(
+        "/api/v1/search", json={"query": "q", "nodeType": "Nope", "nodeName": ["x"]}
+    )
 
-    with pytest.raises(CogneeValidationError) as error:
-        TestClient(client.app).post(
-            "/api/v1/search", json={"query": "q", "nodeType": "Nope", "nodeName": ["x"]}
-        )
-
-    assert error.value.status_code == 422
-    assert "'Nope'" in error.value.message
+    assert response.status_code == 422, response.text
+    assert "'Nope'" in response.json()["detail"]
     assert captured == {}
+
+
+def test_search_telemetry_records_only_a_validated_node_type(monkeypatch):
+    """A caller-controlled string is recorded only once it resolved to a class."""
+    telemetry = []
+    client = _client(monkeypatch, _capturing_search({}), telemetry)
+
+    rejected = client.post("/api/v1/search", json={"query": "q", "nodeType": "Nope"})
+    assert rejected.status_code == 422
+    assert telemetry == []
+
+    client.post("/api/v1/search", json={"query": "q", "nodeType": "SchemaColumn"})
+    assert telemetry[-1]["node_type"] == "SchemaColumn"
+
+    client.post("/api/v1/search", json={"query": "q", "nodeName": ["proj"]})
+    assert telemetry[-1]["node_type"] is None
 
 
 class _Response:
