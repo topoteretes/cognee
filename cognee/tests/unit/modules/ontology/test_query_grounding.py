@@ -1,8 +1,15 @@
 """Read-time ontology grounding: query terms -> ontology nodes -> seeds + context."""
 
+import os
+from pathlib import Path
+
+import pytest
 from rdflib import OWL, RDF, RDFS, Graph, Namespace
 
 from cognee.modules.engine.models import Entity, EntityType
+from cognee.modules.ontology import query_grounding
+from cognee.modules.ontology.exceptions import OntologyInitializationError
+from cognee.modules.ontology.ontology_env_config import OntologyEnvConfig
 from cognee.modules.ontology.query_grounding import (
     QueryGrounding,
     extract_candidate_terms,
@@ -111,3 +118,72 @@ def test_ground_query_respects_max_concepts():
         "credit exposure, enterprise customer, subscription, Acme", _finance_resolver(), 2
     )
     assert len(grounding.concepts) == 2
+
+
+# --- loading the configured resolver ------------------------------------------------
+
+
+@pytest.fixture
+def configured(monkeypatch, tmp_path):
+    """Point grounding at an ontology file in ``tmp_path``; returns a config setter."""
+    query_grounding._load_resolver.cache_clear()
+    path = tmp_path / "ontology.owl"
+
+    def configure(**settings) -> Path:
+        config = OntologyEnvConfig(ontology_file_path=str(path), **settings)
+        monkeypatch.setattr(query_grounding, "get_ontology_env_config", lambda: config)
+        return path
+
+    yield configure
+    query_grounding._load_resolver.cache_clear()
+
+
+def _write_classes(path: Path, *class_names: str, mtime: int) -> None:
+    graph = Graph()
+    for class_name in class_names:
+        graph.add((NS[class_name], RDF.type, OWL.Class))
+    graph.serialize(str(path), format="xml")
+    os.utime(path, (mtime, mtime))
+
+
+def test_configured_resolver_is_built_with_every_setting(configured, monkeypatch):
+    configured(ontology_reasoning="owl_rl")
+    built = []
+    monkeypatch.setattr(
+        query_grounding, "get_ontology_resolver_from_env", lambda **kwargs: built.append(kwargs)
+    )
+
+    query_grounding.get_query_grounding_resolver()
+
+    assert built[0]["ontology_reasoning"] == "owl_rl"
+
+
+def test_a_load_error_is_raised_and_not_cached(configured, monkeypatch):
+    configured()
+    resolver = object()
+    outcomes = [OntologyInitializationError("half-written file"), resolver]
+
+    def factory(**_kwargs):
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(query_grounding, "get_ontology_resolver_from_env", factory)
+
+    with pytest.raises(OntologyInitializationError):
+        query_grounding.get_query_grounding_resolver()
+    assert query_grounding.get_query_grounding_resolver() is resolver
+
+
+def test_an_edited_ontology_file_is_loaded_again(configured):
+    path = configured()
+    _write_classes(path, "CreditExposure", mtime=1_000_000)
+    first = query_grounding.get_query_grounding_resolver()
+    assert not ground_query("loan facility", first)
+    assert query_grounding.get_query_grounding_resolver() is first
+
+    _write_classes(path, "CreditExposure", "LoanFacility", mtime=2_000_000)
+    grounding = ground_query("loan facility", query_grounding.get_query_grounding_resolver())
+
+    assert [concept.canonical_name for concept in grounding.concepts] == ["LoanFacility"]

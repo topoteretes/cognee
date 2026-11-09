@@ -19,12 +19,14 @@ exactly as it did before.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.engine.utils import generate_edge_name
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.get_default_ontology_resolver import get_ontology_resolver_from_env
 from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY, ONTOLOGY_INDIVIDUAL_CATEGORY
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.modules.ontology.term_matching import (
@@ -246,28 +248,21 @@ def ground_query(
     return QueryGrounding(query=query, concepts=tuple(concepts))
 
 
-@lru_cache(maxsize=8)
-def _load_resolver(ontology_file_path: str) -> BaseOntologyResolver | None:
-    """Parse the configured ontology once per process (RDF parsing is not free)."""
-    from cognee.modules.ontology.get_default_ontology_resolver import (
-        get_ontology_resolver_from_env,
-    )
+@lru_cache(maxsize=1)
+def _load_resolver(file_mtimes: tuple[float | None, ...], **settings: str) -> BaseOntologyResolver:
+    """Parse the configured ontology, exactly as cognify builds it.
 
-    env_config = get_ontology_env_config()
-    try:
-        return get_ontology_resolver_from_env(
-            ontology_resolver=env_config.ontology_resolver,
-            matching_strategy=env_config.matching_strategy,
-            ontology_file_path=ontology_file_path,
-        )
-    except Exception as error:
-        logger.warning(
-            "Ontology query grounding disabled: could not load ontology from %r: %s",
-            ontology_file_path,
-            error,
-            exc_info=True,
-        )
-        return None
+    ``file_mtimes`` is part of the cache key only: an edited file gets a new key and is
+    parsed again, and one entry keeps just the current version in memory. An error is
+    raised, never cached, so the first call after the file is fixed loads it.
+    """
+    return get_ontology_resolver_from_env(**settings)
+
+
+def _file_mtimes(ontology_file_path: str) -> tuple[float | None, ...]:
+    """Modification time of each comma-separated path, ``None`` for a missing file."""
+    paths = [path.strip() for path in ontology_file_path.split(",")]
+    return tuple(os.path.getmtime(path) if os.path.exists(path) else None for path in paths)
 
 
 def get_query_grounding_resolver() -> BaseOntologyResolver | None:
@@ -275,9 +270,9 @@ def get_query_grounding_resolver() -> BaseOntologyResolver | None:
 
     Grounding is on when ``ONTOLOGY_FILE_PATH`` names an ontology and
     ``ONTOLOGY_QUERY_GROUNDING`` (default true) has not turned it off. The resolver
-    is cached per file path for the life of the process.
+    is reloaded when a configured file changes.
     """
     env_config = get_ontology_env_config()
     if not env_config.ontology_query_grounding or not env_config.ontology_file_path:
         return None
-    return _load_resolver(env_config.ontology_file_path)
+    return _load_resolver(_file_mtimes(env_config.ontology_file_path), **env_config.to_dict())
