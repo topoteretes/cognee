@@ -17,7 +17,6 @@ from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.schema_alignment import (
     SchemaTableSpec,
     align_tables_with_ontology,
-    column_specs_from,
 )
 from cognee.tasks.schema.ingest_database_schema import ingest_database_schema
 from cognee.tasks.schema.models import SchemaTable
@@ -48,8 +47,7 @@ async def migrate_relational_database(
     When an ontology is configured (``ONTOLOGY_FILE_PATH``, or ``ontology_resolver``
     passed explicitly), each table node also gets a ``realizes`` edge to the ontology
     class its name resolves to, plus that class's ``is_a`` chain — the link between
-    the technical schema and the business model. Columns whose names resolve to an
-    ontology property get a ``SchemaColumn`` node realizing it. ``ontology_config`` is
+    the technical schema and the business model. ``ontology_config`` is
     the same dict ``cognify()`` accepts: ``ontology_resolver``, ``ontology_mode`` and
     ``authoritative_sources`` (which tables are the system of record — stamped on the
     ``realizes`` edge as ``authoritative`` / ``owner``).
@@ -71,11 +69,7 @@ async def migrate_relational_database(
             ontology_resolver = None
     alignment = align_tables_with_ontology(
         [
-            SchemaTableSpec(
-                node.id,
-                node.name,
-                column_specs_from((schema.get(node.name) or {}).get("columns")),
-            )
+            SchemaTableSpec(node.id, node.name)
             for node in node_mapping.values()
             if isinstance(node, (SchemaTable, TableType))
         ],

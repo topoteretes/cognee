@@ -21,7 +21,6 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
 from cognee.modules.ontology.schema_alignment import (
     SchemaTableSpec,
     align_tables_with_ontology,
-    column_specs_from,
 )
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.schema.models import SchemaColumn, SchemaRelationship, SchemaTable
@@ -220,7 +219,6 @@ async def emit_dlt_schema_graph(
                         (table_meta.get("scope", ""), table_meta.get("name", table_key))
                     ],
                     table_meta.get("name", table_key),
-                    column_specs_from(table_meta.get("schema_info")),
                 )
                 for table_key, table_meta in tables.items()
             ],

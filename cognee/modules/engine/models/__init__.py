@@ -1,7 +1,6 @@
 from .Entity import Entity
 from .EntityType import EntityType
 from .FactConflict import FactConflict
-from .OntologyProperty import OntologyProperty
 from .TableRow import TableRow
 from .TableType import TableType
 from .node_set import NodeSet

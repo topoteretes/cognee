@@ -10,49 +10,34 @@ entity types — and emits
   node,
 * a ``realizes`` edge from the table node to that class, stamped with whether the
   table is the *authoritative* source for the concept and who owns it
-  (``ontology_config["authoritative_sources"]`` / ``ONTOLOGY_AUTHORITATIVE_SOURCES``),
-* and, per column whose name resolves to an ontology property, a ``SchemaColumn`` node
-  with ``table -has_column-> column -realizes-> OntologyProperty`` plus the property's
-  ``domain`` / ``range`` classes.
+  (``ontology_config["authoritative_sources"]`` / ``ONTOLOGY_AUTHORITATIVE_SOURCES``).
 
 That is the business-to-technical mapping: "table ``crm.customers`` (authoritative,
-owned by sales-ops) realizes concept ``Customer``; its column ``cust_id`` realizes
-``hasCustomerId``". No LLM is involved; a table or column the ontology does not know
-is left alone.
+owned by sales-ops) realizes concept ``Customer``". No LLM is involved; a table the
+ontology does not know is left alone.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
-from uuid import NAMESPACE_OID, UUID, uuid5
+from uuid import UUID
 
-from cognee.modules.engine.models import EntityType, OntologyProperty
+from cognee.modules.engine.models import EntityType
 from cognee.modules.engine.utils import generate_edge_name, generate_node_name
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.models import AttachedOntologyNode
-from cognee.modules.ontology.term_matching import compact, multiword_match_is_sound, singular
+from cognee.modules.ontology.term_matching import multiword_match_is_sound
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.schema.models import SchemaColumn
 
 logger = get_logger("ontology_schema_alignment")
 
 REALIZES_RELATIONSHIP = "realizes"
-HAS_COLUMN_RELATIONSHIP = "has_column"
 _CLASS_CATEGORY = "classes"
-_PROPERTY_CATEGORY = "properties"
-_MIN_STEM_LENGTH = 3
 
 EdgeTuple = tuple[UUID, UUID, str, dict[str, Any]]
 Subgraph = tuple[list[AttachedOntologyNode], list[tuple[str, str, str]], AttachedOntologyNode]
-
-
-@dataclass(frozen=True)
-class ColumnSpec:
-    name: str
-    data_type: str = ""
 
 
 @dataclass(frozen=True)
@@ -61,7 +46,6 @@ class SchemaTableSpec:
 
     node_id: UUID
     name: str
-    columns: tuple[ColumnSpec, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -72,14 +56,11 @@ class SourceAuthority:
 
 @dataclass
 class SchemaOntologyAlignment:
-    """Nodes and edges that tie schema tables and columns to the ontology."""
+    """Nodes and edges that tie schema tables to the ontology."""
 
     entity_types: dict[UUID, EntityType] = field(default_factory=dict)
-    properties: dict[UUID, OntologyProperty] = field(default_factory=dict)
-    columns: dict[UUID, SchemaColumn] = field(default_factory=dict)
     edges: list[EdgeTuple] = field(default_factory=list)
     realized_concept_by_table: dict[str, str] = field(default_factory=dict)
-    realized_property_by_column: dict[str, str] = field(default_factory=dict)
     _edge_keys: set[tuple[str, str, str]] = field(default_factory=set, repr=False)
 
     def __bool__(self) -> bool:
@@ -88,7 +69,7 @@ class SchemaOntologyAlignment:
     @property
     def nodes(self) -> list[Any]:
         """Every node to write, in a dependency-friendly order."""
-        return [*self.entity_types.values(), *self.properties.values(), *self.columns.values()]
+        return list(self.entity_types.values())
 
     def add_edge(self, edge: EdgeTuple) -> None:
         """Append an edge once; the same ``is_a`` chain is reached from many tables."""
@@ -102,51 +83,16 @@ class SchemaOntologyAlignment:
 # --------------------------------------------------------------------------- specs
 
 
-def column_specs_from(columns: Any) -> tuple[ColumnSpec, ...]:
-    """Normalise the column shapes the ingestion paths carry.
-
-    Accepts the SQLite list (``[{"name", "type"}]``), the Postgres dict
-    (``{name: {"type": ...}}``), a JSON string of either (``SchemaTable.columns``), or a
-    plain list of names. Anything unreadable yields no columns.
-    """
-    if not columns:
-        return ()
-    if isinstance(columns, str):
-        try:
-            columns = json.loads(columns)
-        except ValueError:
-            return ()
-    specs: list[ColumnSpec] = []
-    if isinstance(columns, Mapping):
-        for name, info in columns.items():
-            data_type = info.get("type", "") if isinstance(info, Mapping) else str(info or "")
-            specs.append(ColumnSpec(str(name), str(data_type or "")))
-    elif isinstance(columns, Iterable):
-        for entry in columns:
-            if isinstance(entry, Mapping):
-                name = entry.get("name") or entry.get("column") or entry.get("column_name")
-                if name:
-                    specs.append(ColumnSpec(str(name), str(entry.get("type") or "")))
-            elif isinstance(entry, str):
-                specs.append(ColumnSpec(entry))
-    return tuple(specs)
-
-
 def coerce_table_specs(tables: Iterable[Any]) -> list[SchemaTableSpec]:
-    """Accept ``SchemaTableSpec`` items or the older ``(node_id, name[, columns])`` tuples."""
+    """Accept ``SchemaTableSpec`` items or the older ``(node_id, name)`` tuples."""
     specs: list[SchemaTableSpec] = []
     for table in tables:
         if isinstance(table, SchemaTableSpec):
             specs.append(table)
             continue
-        node_id, name, *rest = table
-        columns = column_specs_from(rest[0]) if rest else ()
-        specs.append(SchemaTableSpec(node_id, name, columns))
+        node_id, name, *_ = table
+        specs.append(SchemaTableSpec(node_id, name))
     return specs
-
-
-def column_node_id(table_node_id: UUID, column_name: str) -> UUID:
-    return uuid5(NAMESPACE_OID, f"{table_node_id}:column:{column_name}")
 
 
 # ----------------------------------------------------------------------- authority
@@ -200,25 +146,6 @@ def table_lookup_names(table_name: str) -> list[str]:
     return [candidate for candidate in dict.fromkeys(candidates) if candidate]
 
 
-def column_lookup_names(column_name: str, table_class_name: str | None = None) -> list[str]:
-    """Names to try for a column against the ontology's properties, most specific first.
-
-    ``email`` tries ``email`` and ``has_email`` (the ``hasX`` convention). An ``*_id``
-    column whose stem abbreviates the table's class — ``cust_id`` on a table that
-    realizes ``Customer`` — also tries ``has_customer_id`` / ``customer_id``, since
-    ``cust`` alone is too far from ``hascustomerid`` for the fuzzy cutoff.
-    """
-    bare = column_name.strip()
-    lowered = bare.lower()
-    candidates = [bare, f"has_{bare}"]
-    if table_class_name and lowered.endswith("_id"):
-        stem = compact(lowered[:-3])
-        class_key = compact(singular(table_class_name.lower()))
-        if len(stem) >= _MIN_STEM_LENGTH and class_key.startswith(stem) and stem != class_key:
-            candidates.extend((f"has_{class_key}_id", f"{class_key}_id"))
-    return [candidate for candidate in dict.fromkeys(candidates) if candidate]
-
-
 # ------------------------------------------------------------------------- lookups
 
 
@@ -242,18 +169,6 @@ def _entity_type_for(node: AttachedOntologyNode) -> EntityType:
         id=EntityType.id_for(node.name),
         name=normalized_name,
         description=normalized_name,
-        ontology_valid=True,
-        ontology_uri=str(node.uri) if node.uri is not None else None,
-    )
-
-
-def _property_for(node: AttachedOntologyNode, kind: str) -> OntologyProperty:
-    normalized_name = generate_node_name(node.name)
-    return OntologyProperty(
-        id=OntologyProperty.id_for(node.name),
-        name=normalized_name,
-        description=normalized_name,
-        property_kind=kind,
         ontology_valid=True,
         ontology_uri=str(node.uri) if node.uri is not None else None,
     )
@@ -308,123 +223,7 @@ def _add_class_subgraph(alignment: SchemaOntologyAlignment, subgraph: Subgraph) 
         )
 
 
-def _property_class_edges(subgraph: Subgraph) -> dict[str, list[str]]:
-    """``{"domain": [class keys], "range": [class keys]}`` of the subgraph's root property."""
-    _, ontology_edges, root = subgraph
-    root_key = generate_edge_name(root.name)
-    targets: dict[str, list[str]] = {"domain": [], "range": []}
-    for source_name, relationship_name, target_name in ontology_edges:
-        if generate_edge_name(source_name) == root_key and relationship_name in targets:
-            targets[relationship_name].append(generate_edge_name(target_name))
-    return targets
-
-
-def _class_keys_reached(subgraph: Subgraph) -> set[str]:
-    nodes, _, root = subgraph
-    keys = {generate_edge_name(node.name) for node in nodes if node.category == _CLASS_CATEGORY}
-    if root.category == _CLASS_CATEGORY:
-        keys.add(generate_edge_name(root.name))
-    return keys
-
-
-def _guess_property_kind(resolver: BaseOntologyResolver, root: AttachedOntologyNode) -> str:
-    graph = getattr(resolver, "graph", None)
-    if graph is None:
-        return "datatype"
-    try:
-        from rdflib import OWL, RDF
-
-        if (root.uri, RDF.type, OWL.ObjectProperty) in graph:
-            return "object"
-    except Exception:  # rdflib absent or a non-rdflib resolver: kind is cosmetic
-        logger.debug("Could not determine property kind for %r", root.name, exc_info=True)
-    return "datatype"
-
-
 # ----------------------------------------------------------------------- alignment
-
-
-def _align_columns(
-    alignment: SchemaOntologyAlignment,
-    table: SchemaTableSpec,
-    table_subgraph: Subgraph | None,
-    resolver: BaseOntologyResolver,
-    authority: SourceAuthority,
-) -> None:
-    table_class_name = table_subgraph[2].name if table_subgraph else None
-    table_class_keys = _class_keys_reached(table_subgraph) if table_subgraph else set()
-
-    for column in table.columns:
-        resolved = _resolve(
-            column_lookup_names(column.name, table_class_name),
-            _PROPERTY_CATEGORY,
-            resolver,
-            f"column {table.name}.{column.name}",
-        )
-        if resolved is None:
-            continue
-        _, _, root = resolved
-        class_edges = _property_class_edges(resolved)
-        # ``hasName`` with domain Customer says nothing about a column of ``orders``:
-        # when both the property's domain and the table's class are known they must meet.
-        if (
-            class_edges["domain"]
-            and table_class_keys
-            and not table_class_keys.intersection(class_edges["domain"])
-        ):
-            logger.debug(
-                "Skipping %s.%s -> %s: property domain %s does not cover table class %s",
-                table.name,
-                column.name,
-                root.name,
-                class_edges["domain"],
-                table_class_name,
-            )
-            continue
-
-        ontology_property = _property_for(root, _guess_property_kind(resolver, root))
-        alignment.properties.setdefault(ontology_property.id, ontology_property)
-        _add_class_subgraph(alignment, resolved)
-        for relationship_name, class_keys in class_edges.items():
-            for class_key in class_keys:
-                target_id = next(
-                    (
-                        entity_type.id
-                        for entity_type in alignment.entity_types.values()
-                        if generate_edge_name(entity_type.name) == class_key
-                    ),
-                    None,
-                )
-                if target_id is not None:
-                    alignment.add_edge(_edge(ontology_property.id, target_id, relationship_name))
-
-        node_id = column_node_id(table.node_id, column.name)
-        alignment.columns.setdefault(
-            node_id,
-            SchemaColumn(
-                id=node_id,
-                name=f"{table.name}:{column.name}",
-                table_name=table.name,
-                column_name=column.name,
-                description=(
-                    f"Column '{column.name}' of table '{table.name}'"
-                    f"{f' ({column.data_type})' if column.data_type else ''}, "
-                    f"realizing the business property '{root.name}'."
-                ),
-            ),
-        )
-        alignment.add_edge(_edge(table.node_id, node_id, HAS_COLUMN_RELATIONSHIP))
-        alignment.add_edge(
-            _edge(
-                node_id,
-                ontology_property.id,
-                REALIZES_RELATIONSHIP,
-                authoritative=authority.authoritative,
-                owner=authority.owner,
-                ontology_valid=True,
-            )
-        )
-        alignment.realized_property_by_column[f"{table.name}.{column.name}"] = root.name
 
 
 def align_tables_with_ontology(
@@ -432,15 +231,13 @@ def align_tables_with_ontology(
     resolver: BaseOntologyResolver | None,
     authoritative_sources: Mapping[str, Any] | None = None,
 ) -> SchemaOntologyAlignment:
-    """Resolve each table (and its columns) against the ontology.
+    """Resolve each table against the ontology.
 
-    ``tables`` holds ``SchemaTableSpec`` items or ``(table_node_id, table_name[,
-    columns])`` tuples. Returns the ``EntityType`` / ``OntologyProperty`` /
-    ``SchemaColumn`` nodes to add (deduplicated across tables) and the edges:
-    ``table -realizes-> class`` (with ``authoritative`` / ``owner`` from
-    ``authoritative_sources``), ``table -has_column-> column -realizes-> property``,
-    the property's ``domain`` / ``range``, and the ontology's own edges between the
-    classes reached. With no resolver the alignment is empty.
+    ``tables`` holds ``SchemaTableSpec`` items or ``(table_node_id, table_name)``
+    tuples. Returns the ``EntityType`` nodes to add (deduplicated across tables) and
+    the edges: ``table -realizes-> class`` (with ``authoritative`` / ``owner`` from
+    ``authoritative_sources``) and the ontology's own edges between the classes
+    reached. With no resolver the alignment is empty.
     """
     alignment = SchemaOntologyAlignment()
     specs = coerce_table_specs(tables)
@@ -467,22 +264,14 @@ def align_tables_with_ontology(
             )
             alignment.realized_concept_by_table[table.name] = root.name
 
-        if table.columns:
-            _align_columns(alignment, table, table_subgraph, resolver, authority)
-
     if alignment:
         logger.info(
-            "Ontology alignment: %d of %d table(s) realize an ontology class (%s)%s.",
+            "Ontology alignment: %d of %d table(s) realize an ontology class (%s).",
             len(alignment.realized_concept_by_table),
             len(specs),
             ", ".join(
                 f"{table} -> {concept}"
                 for table, concept in alignment.realized_concept_by_table.items()
-            ),
-            (
-                f"; {len(alignment.realized_property_by_column)} column(s) realize a property"
-                if alignment.realized_property_by_column
-                else ""
             ),
         )
     return alignment
