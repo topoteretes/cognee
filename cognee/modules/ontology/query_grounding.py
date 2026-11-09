@@ -12,9 +12,8 @@ counterpart. It resolves the words of a query against the same resolver and retu
 * a short text block telling the LLM what each matched term means in the business
   model (canonical name, ``is_a`` chain, object-property relations).
 
-No LLM call and no embedding call are made. Everything fails open: a resolver error, a
-missing file or an unmatched query yields an empty grounding and the retriever runs
-exactly as it did before.
+No LLM call and no embedding call are made. An unmatched query yields an empty
+grounding, and the retriever runs exactly as it did before.
 """
 
 from __future__ import annotations
@@ -58,7 +57,6 @@ class GroundedConcept:
     canonical_name: str
     category: str
     node_id: str
-    uri: str | None = None
     parents: tuple[str, ...] = ()
     relations: tuple[tuple[str, str], ...] = ()
 
@@ -80,7 +78,6 @@ class GroundedConcept:
 class QueryGrounding:
     """Ontology matches for one query, plus the seeds and context they translate to."""
 
-    query: str
     concepts: tuple[GroundedConcept, ...] = field(default_factory=tuple)
 
     def __bool__(self) -> bool:
@@ -94,13 +91,6 @@ class QueryGrounding:
             if concept.node_id not in ids:
                 ids.append(concept.node_id)
         return seeds
-
-    def seed_node_ids(self) -> list[str]:
-        return [
-            node_id
-            for node_ids in self.seed_node_ids_by_collection().values()
-            for node_id in node_ids
-        ]
 
     def to_context_block(self) -> str:
         """Render the grounding as a context section, or "" when nothing matched."""
@@ -156,7 +146,6 @@ def _concept_from_subgraph(
         canonical_name=root.name,
         category=category,
         node_id=str(data_point_class.id_for(root.name)),
-        uri=str(root.uri) if root.uri is not None else None,
         parents=tuple(parents),
         relations=tuple(relations),
     )
@@ -189,7 +178,7 @@ def ground_query(
     separate match on "exposure"; each ontology node is reported once.
     """
     if not query or resolver is None:
-        return QueryGrounding(query=query or "")
+        return QueryGrounding()
 
     indexes = [
         (category, compact_key_index(resolver, category))
@@ -230,7 +219,7 @@ def ground_query(
             len(concepts),
             ", ".join(concept.canonical_name for concept in concepts),
         )
-    return QueryGrounding(query=query, concepts=tuple(concepts))
+    return QueryGrounding(concepts=tuple(concepts))
 
 
 @lru_cache(maxsize=1)

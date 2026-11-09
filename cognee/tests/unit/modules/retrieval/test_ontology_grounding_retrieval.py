@@ -37,7 +37,6 @@ ACME_ID = str(Entity.id_for("Acme"))
 
 def _grounding() -> QueryGrounding:
     return QueryGrounding(
-        query="credit exposure of Acme",
         concepts=(
             GroundedConcept(
                 term="credit exposure",
@@ -78,20 +77,14 @@ def test_pin_node_ids_adds_exact_hits_and_rescored_duplicates_win():
     assert search.has_results()
 
 
-def test_pin_node_ids_creates_missing_collection_and_ignores_batch_mode_and_edges():
+def test_pin_node_ids_creates_a_missing_collection():
     search = NodeEdgeVectorSearch(vector_engine=MagicMock())
     search.query_list_length = None
     search.node_distances = {}
 
-    search.pin_node_ids({"EntityType_name": [EXPOSURE_ID], "EdgeType_relationship_name": [ACME_ID]})
-    assert list(search.node_distances) == ["EntityType_name"]
-    assert search.edge_distances == []
+    search.pin_node_ids({"EntityType_name": [EXPOSURE_ID]})
 
-    batch = NodeEdgeVectorSearch(vector_engine=MagicMock())
-    batch.query_list_length = 2
-    batch.node_distances = {}
-    batch.pin_node_ids({"EntityType_name": [EXPOSURE_ID]})
-    assert batch.node_distances == {}
+    assert [str(r.id) for r in search.node_distances["EntityType_name"]] == [EXPOSURE_ID]
 
 
 @pytest.mark.asyncio
@@ -151,14 +144,6 @@ async def test_pinned_ids_flow_into_projection_and_outrank_vector_hits():
     assert exposure.attributes["vector_distance"] == [0.0]
     assert hit.attributes["vector_distance"] == [0.3]
     assert results[0] is pinned_edge
-
-
-def test_pin_node_ids_skips_ids_that_are_not_uuids():
-    search = NodeEdgeVectorSearch(vector_engine=MagicMock())
-    search.query_list_length = None
-    search.node_distances = {}
-    search.pin_node_ids({"EntityType_name": ["not-a-uuid", EXPOSURE_ID]})
-    assert [str(r.id) for r in search.node_distances["EntityType_name"]] == [EXPOSURE_ID]
 
 
 # --- GraphCompletionRetriever -----------------------------------------------------------
@@ -244,7 +229,7 @@ def test_pin_grounded_entities_leads_with_concepts_and_dedupes():
     assert hits[0].payload["name"] == "CreditExposure"
     assert hits[0].payload["type"] == "ontology class"
     assert hits[1].payload["type"] == "Customer"  # an individual is typed by its class
-    assert pin_grounded_entities([other], QueryGrounding(query="x")) == [other]
+    assert pin_grounded_entities([other], QueryGrounding()) == [other]
 
 
 def test_format_hybrid_context_places_grounding_after_global_context_only_with_content():

@@ -1,4 +1,3 @@
-import json
 from typing import Any, NamedTuple
 from uuid import UUID
 
@@ -408,7 +407,7 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> _EdgeBullet | None:
         text = f"{source_label} -- {relationship} -- {target_label}"
     if not text:
         return None
-    properties = _edge_properties(edge)
+    properties = edge.get("properties") or {}
     if is_rejected_fact(properties):
         return None
     label = status_label(properties)
@@ -443,17 +442,6 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> _EdgeBullet | None:
         },
         fact_status(properties) == "superseded",
     )
-
-
-def _edge_properties(edge: dict) -> dict:
-    """The edge's property map, whether it arrived as a dict or the stored JSON string."""
-    properties = edge.get("properties") or {}
-    if isinstance(properties, str):
-        try:
-            properties = json.loads(properties)
-        except ValueError:
-            return {}
-    return properties if isinstance(properties, dict) else {}
 
 
 def _edge_dedupe_key(edge: dict) -> tuple[str, str, str] | None:

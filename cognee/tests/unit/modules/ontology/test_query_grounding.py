@@ -8,7 +8,7 @@ from rdflib import OWL, RDF, RDFS, Graph, Namespace
 
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.ontology import matching_strategies, query_grounding
-from cognee.modules.ontology.exceptions import OntologyInitializationError
+from cognee.modules.ontology.exceptions import GetSubgraphError, OntologyInitializationError
 from cognee.modules.ontology.ontology_env_config import OntologyEnvConfig
 from cognee.modules.ontology.query_grounding import (
     QueryGrounding,
@@ -90,17 +90,20 @@ def test_ground_query_is_empty_without_matches_or_resolver():
 
     assert not ground_query("hello there general", resolver)
     assert not ground_query("credit exposure", None)
-    assert ground_query("", resolver) == QueryGrounding(query="")
+    assert ground_query("", resolver) == QueryGrounding()
     assert ground_query("hello", resolver).to_context_block() == ""
     assert ground_query("hello", resolver).seed_node_ids_by_collection() == {}
 
 
-def test_ground_query_fails_open_on_resolver_errors():
+def test_ground_query_raises_resolver_errors():
     class BrokenResolver:
-        def get_subgraph(self, node_name, node_type="individuals", directed=True):
-            raise RuntimeError("boom")
+        lookup = {"classes": {"creditexposure": NS.CreditExposure}, "individuals": {}}
 
-    assert not ground_query("credit exposure", BrokenResolver())
+        def get_subgraph(self, node_name, node_type="individuals", directed=True):
+            raise GetSubgraphError()
+
+    with pytest.raises(GetSubgraphError):
+        ground_query("credit exposure", BrokenResolver())
 
 
 def test_grounding_matches_exact_keys_without_a_fuzzy_scan(monkeypatch):
