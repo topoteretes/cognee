@@ -27,18 +27,26 @@ ingest = importlib.import_module("cognee.tasks.ingestion.ingest_dlt_source")
         ("PG_SALES", "d_pg_sales"),
         # Leading underscores are stripped before the check, so this is a pg_ name too.
         ("_pg_sales", "d_pg_sales"),
+        # The bare name would give dlt a merge staging schema named ``pg_staging``.
+        ("pg", "d_pg"),
+        ("pg_", "d_pg"),
+        ("PG", "d_pg"),
     ],
 )
 def test_a_pg_prefixed_name_is_prefixed(dataset_name, ident):
     assert ingest._to_safe_ident(dataset_name) == ident
 
 
+@pytest.mark.parametrize("dataset_name", ["pg", "pg_", "pg_sales", "PG Sales", "sales"])
+def test_the_merge_staging_schema_is_never_reserved(dataset_name):
+    """dlt derives the merge staging schema as ``<dataset>_staging``."""
+    assert not f"{ingest._to_safe_ident(dataset_name)}_staging".startswith("pg_")
+
+
 @pytest.mark.parametrize(
     "dataset_name",
     [
         # Only the exact ``pg_`` prefix is reserved by Postgres.
-        "pg",
-        "pg_",
         "pgsales",
         "pgvector_data",
         "my_pg_sales",
