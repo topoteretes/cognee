@@ -13,6 +13,7 @@ from cognee.modules.ontology.ontology_env_config import OntologyEnvConfig
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.ontology.schema_alignment import (
     REALIZES_RELATIONSHIP,
+    SchemaTableSpec,
     align_tables_with_ontology,
     table_lookup_names,
 )
@@ -45,7 +46,11 @@ def test_align_tables_emits_realizes_edges_and_the_ontology_subgraph():
     customers_id, companies_id, unknown_id = uuid4(), uuid4(), uuid4()
 
     alignment = align_tables_with_ontology(
-        [(customers_id, "public.customers"), (companies_id, "companies"), (unknown_id, "zz_audit")],
+        [
+            SchemaTableSpec(customers_id, "public.customers"),
+            SchemaTableSpec(companies_id, "companies"),
+            SchemaTableSpec(unknown_id, "zz_audit"),
+        ],
         _crm_resolver(),
     )
 
@@ -77,7 +82,8 @@ def test_align_tables_emits_realizes_edges_and_the_ontology_subgraph():
 
 def test_align_tables_dedupes_shared_ontology_edges_across_tables():
     alignment = align_tables_with_ontology(
-        [(uuid4(), "crm.customers"), (uuid4(), "legacy.customer")], _crm_resolver()
+        [SchemaTableSpec(uuid4(), "crm.customers"), SchemaTableSpec(uuid4(), "legacy.customer")],
+        _crm_resolver(),
     )
     is_a_edges = [edge for edge in alignment.edges if edge[2] == "is_a"]
     assert len(is_a_edges) == 1  # Customer is_a Party appears once, not once per table
@@ -85,9 +91,9 @@ def test_align_tables_dedupes_shared_ontology_edges_across_tables():
 
 
 def test_align_tables_is_empty_without_resolver_or_tables():
-    assert not align_tables_with_ontology([(uuid4(), "customers")], None)
+    assert not align_tables_with_ontology([SchemaTableSpec(uuid4(), "customers")], None)
     assert not align_tables_with_ontology([], _crm_resolver())
-    assert not align_tables_with_ontology([(uuid4(), "zz_audit")], _crm_resolver())
+    assert not align_tables_with_ontology([SchemaTableSpec(uuid4(), "zz_audit")], _crm_resolver())
 
 
 # --- authority ----------------------------------------------------------------------
@@ -99,7 +105,7 @@ from cognee.modules.ontology.schema_alignment import authority_for  # noqa: E402
 def test_authoritative_sources_are_stamped_on_realizes_edges():
     crm_id, legacy_id = uuid4(), uuid4()
     alignment = align_tables_with_ontology(
-        [(crm_id, "crm.customers"), (legacy_id, "legacy.customer")],
+        [SchemaTableSpec(crm_id, "crm.customers"), SchemaTableSpec(legacy_id, "legacy.customer")],
         _crm_resolver(),
         authoritative_sources={"crm.customers": "sales-ops"},
     )
@@ -141,7 +147,7 @@ def test_a_per_call_empty_map_overrides_the_environment(monkeypatch):
         {"ontology_config": {"authoritative_sources": {}}}
     )
     alignment = align_tables_with_ontology(
-        [(uuid4(), "crm.customers")], _crm_resolver(), authoritative_sources=per_call
+        [SchemaTableSpec(uuid4(), "crm.customers")], _crm_resolver(), authoritative_sources=per_call
     )
 
     assert [
@@ -161,7 +167,9 @@ def test_a_failing_ontology_lookup_fails_the_alignment():
             raise GetSubgraphError()
 
     with pytest.raises(GetSubgraphError):
-        align_tables_with_ontology([(uuid4(), "customers")], BrokenResolver(ontology_file=None))
+        align_tables_with_ontology(
+            [SchemaTableSpec(uuid4(), "customers")], BrokenResolver(ontology_file=None)
+        )
 
 
 @pytest.mark.asyncio

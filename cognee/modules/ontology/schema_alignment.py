@@ -28,7 +28,7 @@ from cognee.modules.engine.models import EntityType
 from cognee.modules.engine.utils import generate_edge_name, generate_node_name
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY, AttachedOntologyNode
-from cognee.modules.ontology.term_matching import multiword_match_is_sound
+from cognee.modules.ontology.term_matching import multiword_match_is_sound, singular
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ontology_schema_alignment")
@@ -79,21 +79,6 @@ class SchemaOntologyAlignment:
         self.edges.append(edge)
 
 
-# --------------------------------------------------------------------------- specs
-
-
-def coerce_table_specs(tables: Iterable[Any]) -> list[SchemaTableSpec]:
-    """Accept ``SchemaTableSpec`` items or the older ``(node_id, name)`` tuples."""
-    specs: list[SchemaTableSpec] = []
-    for table in tables:
-        if isinstance(table, SchemaTableSpec):
-            specs.append(table)
-            continue
-        node_id, name, *_ = table
-        specs.append(SchemaTableSpec(node_id, name))
-    return specs
-
-
 # ----------------------------------------------------------------------- authority
 
 
@@ -123,16 +108,8 @@ def table_lookup_names(table_name: str) -> list[str]:
     ``customer_account``; the fuzzy matcher (80% cutoff) covers most plural forms
     on its own but not ``-ies``/``-es`` (``companies`` vs ``company`` is 75%).
     """
-    bare = table_name.rsplit(".", 1)[-1].strip()
-    candidates = [bare]
-    lowered = bare.lower()
-    if lowered.endswith("ies") and len(lowered) > 4:
-        candidates.append(bare[:-3] + "y")
-    elif lowered.endswith(("ses", "xes", "zes", "ches", "shes")) and len(lowered) > 4:
-        candidates.append(bare[:-2])
-    elif lowered.endswith("s") and not lowered.endswith(("ss", "us", "is")) and len(lowered) > 3:
-        candidates.append(bare[:-1])
-    return [candidate for candidate in dict.fromkeys(candidates) if candidate]
+    bare = table_name.rsplit(".", 1)[-1].strip().lower()
+    return [name for name in dict.fromkeys((bare, singular(bare))) if name]
 
 
 # ------------------------------------------------------------------------- lookups
@@ -210,24 +187,22 @@ def _add_class_subgraph(alignment: SchemaOntologyAlignment, subgraph: Subgraph) 
 
 
 def align_tables_with_ontology(
-    tables: Iterable[Any],
+    tables: list[SchemaTableSpec],
     resolver: BaseOntologyResolver | None,
     authoritative_sources: Mapping[str, str | None] | None = None,
 ) -> SchemaOntologyAlignment:
     """Resolve each table against the ontology.
 
-    ``tables`` holds ``SchemaTableSpec`` items or ``(table_node_id, table_name)``
-    tuples. Returns the ``EntityType`` nodes to add (deduplicated across tables) and
+    Returns the ``EntityType`` nodes to add (deduplicated across tables) and
     the edges: ``table -realizes-> class`` (with ``authoritative`` / ``owner`` from
     ``authoritative_sources``) and the ontology's own edges between the classes
     reached. With no resolver the alignment is empty.
     """
     alignment = SchemaOntologyAlignment()
-    specs = coerce_table_specs(tables)
-    if resolver is None or not specs:
+    if resolver is None or not tables:
         return alignment
 
-    for table in specs:
+    for table in tables:
         authority = authority_for(table.name, authoritative_sources)
         table_subgraph = _resolve(table_lookup_names(table.name), ONTOLOGY_CLASS_CATEGORY, resolver)
         if table_subgraph is not None:
@@ -249,7 +224,7 @@ def align_tables_with_ontology(
         logger.info(
             "Ontology alignment: %d of %d table(s) realize an ontology class (%s).",
             len(alignment.realized_concept_by_table),
-            len(specs),
+            len(tables),
             ", ".join(
                 f"{table} -> {concept}"
                 for table, concept in alignment.realized_concept_by_table.items()
