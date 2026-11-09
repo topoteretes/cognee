@@ -172,10 +172,10 @@ def ground_query(
 ) -> QueryGrounding:
     """Resolve the terms of ``query`` against ``resolver``.
 
-    Every run of query words, longest first, whose first and last words are not
-    stopwords is looked up by exact compact key, in the classes and then the
-    individuals. A matched run uses up its words, so "credit exposure" suppresses a
-    separate match on "exposure"; each ontology node is reported once.
+    Every run of query words, longest first, is looked up by exact compact key, in the
+    classes and then the individuals; a lone stopword ("will", "may") is not. A
+    matched run uses up its words, so "credit exposure" suppresses a separate match on
+    "exposure"; each ontology node is reported once.
     """
     if not query or resolver is None:
         return QueryGrounding()
@@ -198,9 +198,7 @@ def ground_query(
             run = tokens[start : start + size]
             if used_positions.intersection(positions):
                 continue
-            if run[0] in STOPWORDS or run[-1] in STOPWORDS:
-                continue
-            if size == 1 and len(run[0]) < MIN_TOKEN_LENGTH:
+            if size == 1 and (run[0] in STOPWORDS or len(run[0]) < MIN_TOKEN_LENGTH):
                 continue
             match = _match_run(run, indexes)
             if match is None:

@@ -39,6 +39,13 @@ def test_find_class_named_in_requires_the_class_to_be_the_head_noun():
     assert find_class_named_in("", classes) is None
 
 
+def test_find_class_named_in_skips_only_a_lone_stopword():
+    resolver = SimpleNamespace(lookup={"classes": dict.fromkeys(["newcustomer", "will"])})
+    classes = compact_key_index(resolver, "classes")
+    assert find_class_named_in("acme new customer", classes) == "newcustomer"
+    assert find_class_named_in("the last will", classes) is None
+
+
 def test_singular_forms():
     assert singular("companies") == "company"
     assert singular("addresses") == "address"

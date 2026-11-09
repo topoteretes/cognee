@@ -27,9 +27,10 @@ from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 
 MIN_TOKEN_LENGTH = 3
 
-# Short function-word list: enough to keep "the", "our", "which" out of fuzzy matching
-# without pulling in a stopword dependency. Words inside an n-gram are kept ("line of
-# credit"), only n-gram boundaries and bare unigrams are filtered.
+# Short function-word list, without a stopword dependency. They are not content words
+# of a fuzzy match (``multiword_match_is_sound``), and one alone never matches a key
+# ("will", "may" are not the classes ``Will`` / ``May``). Inside or at the end of a
+# longer run they stay: an exact key decides ("line of credit", "new york").
 STOPWORDS = frozenset(
     """
     a an the and or but if then else of for to in on at by with from as into onto about
@@ -140,16 +141,11 @@ def find_class_named_in(name: str, class_index: Mapping[str, str]) -> str | None
     ``class_index`` is the classes' :func:`compact_key_index`.
     """
     head = head_phrase_tokens(name)
-    if not head:
-        return None
-    if head[-1] in STOPWORDS:
-        return None
-
     best_key: str | None = None
     best_length = 0
     for start in range(len(head)):
         suffix = head[start:]
-        if suffix[0] in STOPWORDS:
+        if len(suffix) == 1 and suffix[0] in STOPWORDS:
             continue
         for candidate in (
             "".join(suffix),

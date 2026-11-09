@@ -140,6 +140,23 @@ def test_grounding_keeps_inner_stopwords_and_matches_each_occurrence():
     assert [c.canonical_name for c in twice.concepts] == ["EnterpriseCustomer", "Customer"]
 
 
+def test_a_name_may_start_or_end_with_a_stopword_but_a_lone_stopword_is_no_name():
+    resolver = _finance_resolver()
+    for class_name in ("OffBalanceSheetExposure", "NewCustomer", "Will", "City"):
+        resolver.graph.add((NS[class_name], RDF.type, OWL.Class))
+    resolver.graph.add((NS.NewYork, RDF.type, NS.City))
+    resolver.build_lookup()
+
+    def grounded(query: str) -> list[str]:
+        return [concept.canonical_name for concept in ground_query(query, resolver).concepts]
+
+    assert grounded("what is our off balance sheet exposure?") == ["OffBalanceSheetExposure"]
+    assert grounded("how many new customers joined?") == ["NewCustomer"]
+    assert grounded("customers in New York") == ["NewYork", "Customer"]
+    # "will" alone is a verb here, not the class Will.
+    assert grounded("who will sign it?") == []
+
+
 # --- loading the configured resolver ------------------------------------------------
 
 
