@@ -249,13 +249,14 @@ async def drop_pg_database_if_exists(
     username: str,
     password: str,
 ) -> None:
-    """Drop a Postgres database after terminating this role's active backends.
+    """Drop a Postgres database after terminating backends this role can signal.
 
     Connects to the cluster's 'postgres' maintenance database in AUTOCOMMIT
-    mode, terminates this role's other sessions connected to ``db_name``, then
-    runs ``DROP DATABASE IF EXISTS``. Managed database roles cannot terminate
-    arbitrary roles' sessions. If another role is still using the database,
-    DROP must fail visibly so cleanup can be retried once that session closes.
+    mode, terminates permitted sessions connected to ``db_name``, then runs
+    ``DROP DATABASE IF EXISTS``. Superusers can signal all roles; other callers
+    need the target role's privileges or pg_signal_backend, and cannot signal
+    superuser sessions. If an unpermitted session still uses the database, DROP
+    must fail visibly so cleanup can be retried once that session closes.
     """
     engine = create_async_engine(
         _build_maintenance_url(host, port, username, password),
@@ -268,9 +269,13 @@ async def drop_pg_database_if_exists(
             await connection.execute(
                 text(
                     "SELECT pg_terminate_backend(pid) "
-                    "FROM pg_stat_activity "
+                    "FROM pg_stat_activity AS activity "
+                    "JOIN pg_roles AS target_role ON target_role.oid = activity.usesysid "
                     "WHERE datname = :db AND pid <> pg_backend_pid() "
-                    "AND usename = current_user"
+                    "AND (current_setting('is_superuser')::boolean OR "
+                    "(NOT target_role.rolsuper AND "
+                    "(pg_has_role(activity.usesysid, 'USAGE') OR "
+                    "pg_has_role('pg_signal_backend', 'USAGE'))))"
                 ),
                 {"db": db_name},
             )
