@@ -113,10 +113,6 @@ class OntologyEnvConfig(BaseSettings):
     def _normalize_ontology_mode(cls, value) -> str:
         return normalize_ontology_mode(value)
 
-    def authoritative_sources(self) -> dict[str, str | None]:
-        """Parse ``ontology_authoritative_sources`` into the per-call dict shape."""
-        return parse_authoritative_sources(self.ontology_authoritative_sources)
-
     @field_validator("ontology_reasoning", mode="before")
     @classmethod
     def _normalize_ontology_reasoning(cls, value) -> str:

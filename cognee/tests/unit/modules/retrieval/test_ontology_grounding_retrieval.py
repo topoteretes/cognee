@@ -497,6 +497,6 @@ async def test_authoritative_realizes_edges_survive_the_edge_cap_and_say_so():
     bullets = entities[0]["edges"]
     assert len(bullets) == 2
     assert bullets[0]["source"] == "crm.customers"
-    assert bullets[0]["authoritative"] is True and bullets[0]["owner"] == "sales-ops"
+    assert bullets[0]["authoritative"] is True
     assert bullets[0]["text"].endswith("(authoritative source, owner: sales-ops)")
     assert bullets[1]["authoritative"] is False

@@ -430,15 +430,10 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> _EdgeBullet | None:
 
     authoritative = bool(properties.get("authoritative"))
     owner = display_value(properties.get("owner"))
-    if authoritative or owner:
-        qualifiers = [
-            part
-            for part in (
-                "authoritative source" if authoritative else "",
-                f"owner: {owner}" if owner else "",
-            )
-            if part
-        ]
+    qualifiers = ["authoritative source"] if authoritative else []
+    if owner:
+        qualifiers.append(f"owner: {owner}")
+    if qualifiers:
         text = f"{text} ({', '.join(qualifiers)})"
 
     return _EdgeBullet(
@@ -452,7 +447,6 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> _EdgeBullet | None:
             "edge_type_id": connection_edge_type_id(edge),
             "edge_object_id": display_value(properties.get("edge_object_id")),
             "authoritative": authoritative,
-            "owner": owner or None,
         },
         fact_status(properties) == "superseded",
     )

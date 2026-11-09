@@ -9,6 +9,7 @@ from cognee.modules.ontology.ontology_env_config import (
     get_ontology_env_config,
     normalize_ontology_mode,
     normalize_ontology_reasoning,
+    parse_authoritative_sources,
 )
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
@@ -83,7 +84,7 @@ def get_configured_authoritative_sources(
         if isinstance(ontology_config, dict) and "authoritative_sources" in ontology_config:
             return ontology_config["authoritative_sources"]
 
-    return get_ontology_env_config().authoritative_sources()
+    return parse_authoritative_sources(get_ontology_env_config().ontology_authoritative_sources)
 
 
 def get_configured_ontology_reasoning(config: Config | None = None) -> str:
