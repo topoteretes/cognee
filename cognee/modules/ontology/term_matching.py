@@ -135,6 +135,8 @@ def find_class_named_in(name: str, class_index: Mapping[str, str]) -> str | None
     ``Customer`` (its head is ``form``), while ``"acme customer"`` and ``"credit
     exposure to acme"`` do ground in ``Customer`` / ``CreditExposure``. The longest
     class wins; a class shorter than one content token of three characters is ignored.
+    The head ends at the first phrase breaker (``of``, ``to``, ``for``, …), so a class
+    whose name contains one (``LineOfCredit``) is never found inside a name.
     ``class_index`` is the classes' :func:`compact_key_index`.
     """
     head = head_phrase_tokens(name)
