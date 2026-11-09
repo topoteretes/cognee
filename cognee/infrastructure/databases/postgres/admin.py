@@ -249,11 +249,13 @@ async def drop_pg_database_if_exists(
     username: str,
     password: str,
 ) -> None:
-    """Drop a Postgres database after terminating any active backends.
+    """Drop a Postgres database after terminating this role's active backends.
 
     Connects to the cluster's 'postgres' maintenance database in AUTOCOMMIT
-    mode, terminates every backend currently connected to ``db_name`` other
-    than our own, then runs ``DROP DATABASE IF EXISTS``.
+    mode, terminates this role's other sessions connected to ``db_name``, then
+    runs ``DROP DATABASE IF EXISTS``. Managed database roles cannot terminate
+    arbitrary roles' sessions. If another role is still using the database,
+    DROP must fail visibly so cleanup can be retried once that session closes.
     """
     engine = create_async_engine(
         _build_maintenance_url(host, port, username, password),
@@ -267,7 +269,8 @@ async def drop_pg_database_if_exists(
                 text(
                     "SELECT pg_terminate_backend(pid) "
                     "FROM pg_stat_activity "
-                    "WHERE datname = :db AND pid <> pg_backend_pid()"
+                    "WHERE datname = :db AND pid <> pg_backend_pid() "
+                    "AND usename = current_user"
                 ),
                 {"db": db_name},
             )
