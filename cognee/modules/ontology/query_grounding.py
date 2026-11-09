@@ -49,10 +49,6 @@ SEED_COLLECTION_BY_CATEGORY = {
     ONTOLOGY_INDIVIDUAL_CATEGORY: "Entity_name",
 }
 
-DEFAULT_MAX_CONCEPTS = 5
-_MAX_PARENTS = 4
-_MAX_RELATIONS = 5
-
 
 @dataclass(frozen=True)
 class GroundedConcept:
@@ -140,13 +136,13 @@ def _concept_from_subgraph(
         if relationship_name == "is_a":
             if target_label not in _TRIVIAL_PARENTS:
                 is_a_by_source.setdefault(source_label, []).append(target_label)
-        elif source_label == root_key and len(relations) < _MAX_RELATIONS:
+        elif source_label == root_key:
             relations.append((relationship_name, display(target_label)))
 
     parents: list[str] = []
     current = root_key
     visited = {root_key}
-    while len(parents) < _MAX_PARENTS:
+    while True:
         next_parents = [p for p in is_a_by_source.get(current, []) if p not in visited]
         if not next_parents:
             break
@@ -184,7 +180,6 @@ def _match_run(run: list[str], indexes: list[tuple[str, dict[str, str]]]) -> tup
 def ground_query(
     query: str,
     resolver: BaseOntologyResolver | None,
-    max_concepts: int = DEFAULT_MAX_CONCEPTS,
 ) -> QueryGrounding:
     """Resolve the terms of ``query`` against ``resolver``.
 
@@ -210,8 +205,6 @@ def ground_query(
 
     for size in range(min(len(tokens), longest_key), 0, -1):
         for start in range(len(tokens) - size + 1):
-            if len(concepts) >= max_concepts:
-                break
             positions = range(start, start + size)
             run = tokens[start : start + size]
             if used_positions.intersection(positions):

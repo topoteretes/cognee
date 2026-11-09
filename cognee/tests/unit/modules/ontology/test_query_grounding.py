@@ -103,13 +103,6 @@ def test_ground_query_fails_open_on_resolver_errors():
     assert not ground_query("credit exposure", BrokenResolver())
 
 
-def test_ground_query_respects_max_concepts():
-    grounding = ground_query(
-        "credit exposure, enterprise customer, subscription, Acme", _finance_resolver(), 2
-    )
-    assert len(grounding.concepts) == 2
-
-
 def test_grounding_matches_exact_keys_without_a_fuzzy_scan(monkeypatch):
     resolver = _finance_resolver()
     for index in range(5000):
