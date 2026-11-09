@@ -13,10 +13,7 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
     get_configured_authoritative_sources,
     get_configured_ontology_resolver,
 )
-from cognee.modules.ontology.schema_alignment import (
-    SchemaTableSpec,
-    align_tables_with_ontology,
-)
+from cognee.modules.ontology.schema_alignment import align_tables_with_ontology
 from cognee.tasks.schema.ingest_database_schema import ingest_database_schema
 from cognee.tasks.schema.models import SchemaTable
 from cognee.tasks.storage.index_data_points import index_data_points
@@ -63,18 +60,18 @@ async def migrate_relational_database(
         ontology_resolver = get_configured_ontology_resolver()
     if authoritative_sources is None:
         authoritative_sources = get_configured_authoritative_sources()
-    alignment = align_tables_with_ontology(
-        [
-            SchemaTableSpec(node.id, node.name)
+    entity_types, alignment_edges = align_tables_with_ontology(
+        {
+            node.id: node.name
             for node in node_mapping.values()
             if isinstance(node, (SchemaTable, TableType))
-        ],
+        },
         ontology_resolver,
-        authoritative_sources=authoritative_sources,
+        authoritative_sources,
     )
-    for node in alignment.nodes:
-        node_mapping.setdefault(str(node.id), node)
-    edge_mapping.extend(alignment.edges)
+    for entity_type in entity_types:
+        node_mapping.setdefault(str(entity_type.id), entity_type)
+    edge_mapping.extend(alignment_edges)
 
     def _remove_duplicate_edges(edge_mapping):
         seen = set()

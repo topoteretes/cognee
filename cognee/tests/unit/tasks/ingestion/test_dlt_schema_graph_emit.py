@@ -199,9 +199,9 @@ async def test_ontology_alignment_sees_each_scoped_table_under_its_bare_name(mon
     _wire(monkeypatch, graph, {"source_ref_key": None, "pipeline_run_id": None})
     seen = []
 
-    def fake_align(specs, resolver, **kwargs):
-        seen.extend(specs)
-        return SimpleNamespace(nodes=[], edges=[])
+    def fake_align(table_names, resolver, authoritative_sources):
+        seen.extend(table_names.items())
+        return [], []
 
     monkeypatch.setattr(schema_graph_module, "align_tables_with_ontology", fake_align)
     shop, crm = str(uuid4()), str(uuid4())
@@ -213,7 +213,7 @@ async def test_ontology_alignment_sees_each_scoped_table_under_its_bare_name(mon
 
     await emit_dlt_schema_graph(tables, [], _ctx())
 
-    assert [(spec.node_id, spec.name) for spec in seen] == [
+    assert seen == [
         (schema_graph_module._table_node_id("orders", shop), "orders"),
         (schema_graph_module._table_node_id("orders", crm), "orders"),
     ]

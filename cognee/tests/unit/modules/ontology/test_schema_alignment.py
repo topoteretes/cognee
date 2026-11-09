@@ -13,7 +13,6 @@ from cognee.modules.ontology.ontology_env_config import OntologyEnvConfig
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.ontology.schema_alignment import (
     REALIZES_RELATIONSHIP,
-    SchemaTableSpec,
     align_tables_with_ontology,
 )
 
@@ -34,77 +33,82 @@ def _crm_resolver() -> RDFLibOntologyResolver:
     return resolver
 
 
+def _realizes(edges) -> dict:
+    """Table node id -> properties of its ``realizes`` edge."""
+    return {source: props for source, _, name, props in edges if name == REALIZES_RELATIONSHIP}
+
+
 def test_a_table_realizes_the_class_its_name_is_the_exact_key_of():
     resolver = _crm_resolver()
     for class_name in ("Product", "Order", "Address", "CustomerAccount"):
         resolver.graph.add((NS[class_name], RDF.type, OWL.Class))
     resolver.build_lookup()
     names = ["public.companies", "addresses", "customer_accounts", "production", "borders"]
+    table_names = {uuid4(): name for name in names}
 
-    alignment = align_tables_with_ontology(
-        [SchemaTableSpec(uuid4(), name) for name in names], resolver
-    )
+    entity_types, edges = align_tables_with_ontology(table_names, resolver)
 
+    type_names = {entity_type.id: entity_type.name for entity_type in entity_types}
+    realized = {
+        table_names[source]: type_names[target]
+        for source, target, name, _ in edges
+        if name == REALIZES_RELATIONSHIP
+    }
     # A near miss is no match: "production" is not a Product, "borders" not an Order.
-    assert alignment.realized_concept_by_table == {
-        "public.companies": "Company",
-        "addresses": "Address",
-        "customer_accounts": "CustomerAccount",
+    assert realized == {
+        "public.companies": "company",
+        "addresses": "address",
+        "customer_accounts": "customeraccount",
     }
 
 
 def test_align_tables_emits_realizes_edges_and_the_ontology_subgraph():
     customers_id, companies_id, unknown_id = uuid4(), uuid4(), uuid4()
 
-    alignment = align_tables_with_ontology(
-        [
-            SchemaTableSpec(customers_id, "public.customers"),
-            SchemaTableSpec(companies_id, "companies"),
-            SchemaTableSpec(unknown_id, "zz_audit"),
-        ],
+    entity_types, edges = align_tables_with_ontology(
+        {customers_id: "public.customers", companies_id: "companies", unknown_id: "zz_audit"},
         _crm_resolver(),
     )
 
-    assert alignment.realized_concept_by_table == {
-        "public.customers": "Customer",
-        "companies": "Company",
-    }
-
-    edges = {(str(source), str(target), name) for source, target, name, _ in alignment.edges}
-    customer_type_id = str(EntityType.id_for("Customer"))
-    assert (str(customers_id), customer_type_id, REALIZES_RELATIONSHIP) in edges
-    assert (str(companies_id), str(EntityType.id_for("Company")), REALIZES_RELATIONSHIP) in edges
+    triples = {(source, target, name) for source, target, name, _ in edges}
+    customer_type_id = EntityType.id_for("Customer")
+    assert (customers_id, customer_type_id, REALIZES_RELATIONSHIP) in triples
+    assert (companies_id, EntityType.id_for("Company"), REALIZES_RELATIONSHIP) in triples
     # The class's own ontology edges ride along, exactly as cognify writes them.
-    assert (customer_type_id, str(EntityType.id_for("Party")), "is_a") in edges
-    assert (customer_type_id, str(EntityType.id_for("Subscription")), "hassubscription") in edges
-    assert not any(str(unknown_id) == source for source, _, _ in edges)
+    assert (customer_type_id, EntityType.id_for("Party"), "is_a") in triples
+    assert (customer_type_id, EntityType.id_for("Subscription"), "hassubscription") in triples
+    assert not any(source == unknown_id for source, _, _ in triples)
 
     # EntityType nodes carry ontology provenance under cognify's deterministic ids.
-    names = {entity_type.name for entity_type in alignment.entity_types.values()}
-    assert names == {"customer", "party", "subscription", "company"}
-    customer_type = alignment.entity_types[EntityType.id_for("Customer")]
-    assert customer_type.ontology_valid is True
-    assert customer_type.ontology_uri == str(NS.Customer)
+    types_by_id = {entity_type.id: entity_type for entity_type in entity_types}
+    assert {entity_type.name for entity_type in entity_types} == {
+        "customer",
+        "party",
+        "subscription",
+        "company",
+    }
+    assert types_by_id[customer_type_id].ontology_valid is True
+    assert types_by_id[customer_type_id].ontology_uri == str(NS.Customer)
 
-    # Edge attribute dict matches the migration edge-tuple contract.
-    _, _, _, attributes = alignment.edges[0]
-    assert set(attributes) == {"source_node_id", "target_node_id", "relationship_name"}
+    # The attribute dict matches the migration edge-tuple contract.
+    for source, target, name, attributes in edges:
+        assert attributes["source_node_id"] == str(source)
+        assert attributes["target_node_id"] == str(target)
+        assert attributes["relationship_name"] == name
 
 
 def test_align_tables_dedupes_shared_ontology_edges_across_tables():
-    alignment = align_tables_with_ontology(
-        [SchemaTableSpec(uuid4(), "crm.customers"), SchemaTableSpec(uuid4(), "legacy.customer")],
-        _crm_resolver(),
+    _, edges = align_tables_with_ontology(
+        {uuid4(): "crm.customers", uuid4(): "legacy.customer"}, _crm_resolver()
     )
-    is_a_edges = [edge for edge in alignment.edges if edge[2] == "is_a"]
-    assert len(is_a_edges) == 1  # Customer is_a Party appears once, not once per table
-    assert len([edge for edge in alignment.edges if edge[2] == REALIZES_RELATIONSHIP]) == 2
+    assert len([edge for edge in edges if edge[2] == "is_a"]) == 1  # once, not once per table
+    assert len(_realizes(edges)) == 2
 
 
 def test_align_tables_is_empty_without_resolver_or_tables():
-    assert not align_tables_with_ontology([SchemaTableSpec(uuid4(), "customers")], None)
-    assert not align_tables_with_ontology([], _crm_resolver())
-    assert not align_tables_with_ontology([SchemaTableSpec(uuid4(), "zz_audit")], _crm_resolver())
+    assert align_tables_with_ontology({uuid4(): "customers"}, None) == ([], [])
+    assert align_tables_with_ontology({}, _crm_resolver()) == ([], [])
+    assert align_tables_with_ontology({uuid4(): "zz_audit"}, _crm_resolver()) == ([], [])
 
 
 # --- authority ----------------------------------------------------------------------
@@ -115,28 +119,24 @@ from cognee.modules.ontology.schema_alignment import authority_for  # noqa: E402
 
 def test_authoritative_sources_are_stamped_on_realizes_edges():
     crm_id, legacy_id = uuid4(), uuid4()
-    alignment = align_tables_with_ontology(
-        [SchemaTableSpec(crm_id, "crm.customers"), SchemaTableSpec(legacy_id, "legacy.customer")],
+    _, edges = align_tables_with_ontology(
+        {crm_id: "crm.customers", legacy_id: "legacy.customer"},
         _crm_resolver(),
         authoritative_sources={"crm.customers": "sales-ops"},
     )
-    realizes = {
-        str(source): props
-        for source, _, name, props in alignment.edges
-        if name == REALIZES_RELATIONSHIP
-    }
-    assert realizes[str(crm_id)]["authoritative"] is True
-    assert realizes[str(crm_id)]["owner"] == "sales-ops"
-    assert realizes[str(crm_id)]["ontology_valid"] is True
-    assert realizes[str(legacy_id)]["authoritative"] is False
-    assert realizes[str(legacy_id)]["owner"] is None
+    realizes = _realizes(edges)
+    assert realizes[crm_id]["authoritative"] is True
+    assert realizes[crm_id]["owner"] == "sales-ops"
+    assert realizes[crm_id]["ontology_valid"] is True
+    assert realizes[legacy_id]["authoritative"] is False
+    assert realizes[legacy_id]["owner"] is None
 
 
 def test_a_listed_table_is_authoritative_by_qualified_or_bare_name():
-    assert authority_for("crm.customers", {"customers": None}).authoritative is True
-    assert authority_for("customers", {"customers": "sales-ops"}).owner == "sales-ops"
-    assert authority_for("orders", {"customers": None}).authoritative is False
-    assert authority_for("orders", None).authoritative is False
+    assert authority_for("crm.customers", {"customers": None}) == (True, None)
+    assert authority_for("customers", {"customers": "sales-ops"}) == (True, "sales-ops")
+    assert authority_for("orders", {"customers": None}) == (False, None)
+    assert authority_for("orders", None) == (False, None)
 
 
 def test_env_authoritative_sources_parse_the_csv_and_reject_a_missing_table():
@@ -157,15 +157,11 @@ def test_a_per_call_empty_map_overrides_the_environment(monkeypatch):
     per_call = resolver_module.get_configured_authoritative_sources(
         {"ontology_config": {"authoritative_sources": {}}}
     )
-    alignment = align_tables_with_ontology(
-        [SchemaTableSpec(uuid4(), "crm.customers")], _crm_resolver(), authoritative_sources=per_call
+    _, edges = align_tables_with_ontology(
+        {uuid4(): "crm.customers"}, _crm_resolver(), authoritative_sources=per_call
     )
 
-    assert [
-        props["authoritative"]
-        for _, _, name, props in alignment.edges
-        if name == REALIZES_RELATIONSHIP
-    ] == [False]
+    assert [props["authoritative"] for props in _realizes(edges).values()] == [False]
     assert resolver_module.get_configured_authoritative_sources() == {"crm.customers": "sales-ops"}
 
 
@@ -181,7 +177,7 @@ def test_a_failing_ontology_lookup_fails_the_alignment():
     resolver.get_subgraph = broken_get_subgraph
 
     with pytest.raises(GetSubgraphError):
-        align_tables_with_ontology([SchemaTableSpec(uuid4(), "customers")], resolver)
+        align_tables_with_ontology({uuid4(): "customers"}, resolver)
 
 
 @pytest.mark.asyncio

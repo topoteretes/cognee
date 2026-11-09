@@ -15,10 +15,7 @@ from cognee.infrastructure.databases.provenance import graph_provenance_write_kw
 from cognee.modules.engine.models import DltColumn
 from cognee.modules.engine.utils.timestamp_from_text import timestamp_from_text
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
-from cognee.modules.ontology.schema_alignment import (
-    SchemaTableSpec,
-    align_tables_with_ontology,
-)
+from cognee.modules.ontology.schema_alignment import align_tables_with_ontology
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.schema.models import SchemaColumn, SchemaRelationship, SchemaTable
 from cognee.tasks.storage.index_data_points import index_data_points
@@ -205,24 +202,14 @@ async def emit_dlt_schema_graph(
             )
 
     # Business-to-technical mapping: with an ontology configured, each table node
-    # realizes the ontology class its name resolves to (see schema_alignment).
-    if table_node_ids:
-        # ``table_node_ids`` is keyed by ``(scope, name)``; ``tables`` by its own key.
-        alignment = align_tables_with_ontology(
-            [
-                SchemaTableSpec(
-                    table_node_ids[
-                        (table_meta.get("scope", ""), table_meta.get("name", table_key))
-                    ],
-                    table_meta.get("name", table_key),
-                )
-                for table_key, table_meta in tables.items()
-            ],
-            ontology_resolver,
-            authoritative_sources=authoritative_sources,
-        )
-        schema_nodes.extend(alignment.nodes)
-        schema_edges.extend(alignment.edges)
+    # realizes the ontology class its name is the key of (see schema_alignment).
+    entity_types, alignment_edges = align_tables_with_ontology(
+        {node_id: name for (_scope, name), node_id in table_node_ids.items()},
+        ontology_resolver,
+        authoritative_sources,
+    )
+    schema_nodes.extend(entity_types)
+    schema_edges.extend(alignment_edges)
 
     # SchemaRelationship nodes for each FK definition
     relationship_count = 0
