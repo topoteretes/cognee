@@ -164,9 +164,19 @@ def test_pin_node_ids_skips_ids_that_are_not_uuids():
 # --- GraphCompletionRetriever -----------------------------------------------------------
 
 
+@pytest.fixture
+def ontology(monkeypatch):
+    """Both retrievers ground against the test ontology, as with ONTOLOGY_FILE_PATH set."""
+    resolver = _resolver()
+    for module in ("graph_completion_retriever", "hybrid_retriever"):
+        monkeypatch.setattr(
+            f"cognee.modules.retrieval.{module}.get_query_grounding_resolver", lambda: resolver
+        )
+
+
 @pytest.mark.asyncio
-async def test_graph_completion_pins_grounded_nodes_as_seeds():
-    retriever = GraphCompletionRetriever(top_k=5, ontology_resolver=_resolver())
+async def test_graph_completion_pins_grounded_nodes_as_seeds(ontology):
+    retriever = GraphCompletionRetriever(top_k=5)
 
     with patch(
         "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
@@ -180,30 +190,23 @@ async def test_graph_completion_pins_grounded_nodes_as_seeds():
 
 
 @pytest.mark.asyncio
-async def test_graph_completion_passes_no_pins_when_grounding_is_off_or_misses():
+async def test_graph_completion_passes_no_pins_when_grounding_misses(ontology):
     with patch(
         "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
         new_callable=AsyncMock,
         return_value=[],
     ) as mock_search:
-        await GraphCompletionRetriever(
-            ontology_resolver=_resolver(), ontology_grounding=False
-        ).get_triplets("credit exposure")
-        assert mock_search.call_args.kwargs["pinned_node_ids"] is None
-
-        await GraphCompletionRetriever(ontology_resolver=_resolver()).get_triplets("hello there")
+        await GraphCompletionRetriever().get_triplets("hello there")
         assert mock_search.call_args.kwargs["pinned_node_ids"] is None
 
         # Batch mode never pins: the scorer's distances are per-query lists there.
-        await GraphCompletionRetriever(ontology_resolver=_resolver()).get_triplets(
-            query_batch=["credit exposure", "Acme"]
-        )
+        await GraphCompletionRetriever().get_triplets(query_batch=["credit exposure", "Acme"])
         assert mock_search.call_args.kwargs["pinned_node_ids"] is None
 
 
 @pytest.mark.asyncio
-async def test_graph_completion_prepends_grounding_block_only_with_real_context():
-    retriever = GraphCompletionRetriever(ontology_resolver=_resolver())
+async def test_graph_completion_prepends_grounding_block_only_with_real_context(ontology):
+    retriever = GraphCompletionRetriever()
     edge = MagicMock()
 
     with patch.object(
@@ -265,9 +268,13 @@ def test_format_hybrid_context_places_grounding_after_global_context_only_with_c
     assert format_hybrid_context("", {"ontology_grounding": grounding_block}) == ""
 
 
-@pytest.mark.asyncio
-async def test_hybrid_retrieve_one_carries_grounding_and_pins_entity_lane():
-    retriever = HybridRetriever(ontology_resolver=_resolver())
+async def _retrieve_hybrid(query: str):
+    """Run ``HybridRetriever._retrieve_one`` with every store mocked out.
+
+    Returns the result and the ``build_entities`` mock, whose second argument holds
+    the entity hits after pinning.
+    """
+    retriever = HybridRetriever()
     retriever._unified_engine = MagicMock()
     retriever._unified_engine.vector.embedding_engine.embed_text = AsyncMock(
         return_value=[[0.1, 0.2]]
@@ -275,49 +282,31 @@ async def test_hybrid_retrieve_one_carries_grounding_and_pins_entity_lane():
     # Dev reads user conflict resolutions off the graph (SDK-1333); none here.
     retriever._unified_engine.graph.get_filtered_graph_data = AsyncMock(return_value=([], []))
     truth = MagicMock(q_coords=None, truth_state_by_id={}, current_truth_epoch=None)
+    module = "cognee.modules.retrieval.hybrid_retriever"
 
     with (
+        patch(f"{module}.build_truth_context", new_callable=AsyncMock, return_value=truth),
+        patch(f"{module}.load_preference_weights", new_callable=AsyncMock, return_value={}),
+        patch(f"{module}.dlt_rows_indexed", new_callable=AsyncMock, return_value=False),
+        patch(f"{module}.attach_chunk_conflicts", new_callable=AsyncMock),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.build_truth_context",
-            new_callable=AsyncMock,
-            return_value=truth,
-        ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.load_preference_weights",
-            new_callable=AsyncMock,
-            return_value={},
-        ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.dlt_rows_indexed",
-            new_callable=AsyncMock,
-            return_value=False,
-        ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.attach_chunk_conflicts",
-            new_callable=AsyncMock,
-        ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.retrieve_hybrid_chunks",
+            f"{module}.retrieve_hybrid_chunks",
             new_callable=AsyncMock,
             return_value={"chunks": [], "chunk_summaries": {}},
         ),
+        patch(f"{module}.search_entities", new_callable=AsyncMock, return_value=[]),
+        patch(f"{module}.search_collection", new_callable=AsyncMock, return_value=[]),
         patch(
-            "cognee.modules.retrieval.hybrid_retriever.search_entities",
-            new_callable=AsyncMock,
-            return_value=[],
-        ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.search_collection",
-            new_callable=AsyncMock,
-            return_value=[],
-        ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.build_entities",
-            new_callable=AsyncMock,
-            return_value=([], set()),
+            f"{module}.build_entities", new_callable=AsyncMock, return_value=([], set())
         ) as mock_build_entities,
     ):
-        result = await retriever._retrieve_one("What is our credit exposure to Acme?")
+        result = await retriever._retrieve_one(query)
+    return result, mock_build_entities
+
+
+@pytest.mark.asyncio
+async def test_hybrid_retrieve_one_carries_grounding_and_pins_entity_lane(ontology):
+    result, mock_build_entities = await _retrieve_hybrid("What is our credit exposure to Acme?")
 
     pinned_hits = mock_build_entities.call_args.args[1]
     assert [str(hit.id) for hit in pinned_hits] == [EXPOSURE_ID, ACME_ID]
@@ -325,59 +314,41 @@ async def test_hybrid_retrieve_one_carries_grounding_and_pins_entity_lane():
 
 
 @pytest.mark.asyncio
-async def test_hybrid_result_has_no_grounding_key_when_nothing_matches():
-    retriever = HybridRetriever(ontology_resolver=_resolver())
-    retriever._unified_engine = MagicMock()
-    retriever._unified_engine.vector.embedding_engine.embed_text = AsyncMock(
-        return_value=[[0.1, 0.2]]
-    )
-    # Dev reads user conflict resolutions off the graph (SDK-1333); none here.
-    retriever._unified_engine.graph.get_filtered_graph_data = AsyncMock(return_value=([], []))
-    truth = MagicMock(q_coords=None, truth_state_by_id={}, current_truth_epoch=None)
+async def test_hybrid_result_has_no_grounding_key_when_nothing_matches(ontology):
+    result, _ = await _retrieve_hybrid("hello there")
 
-    with (
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.build_truth_context",
-            new_callable=AsyncMock,
-            return_value=truth,
-        ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.load_preference_weights",
-            new_callable=AsyncMock,
-            return_value={},
-        ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.dlt_rows_indexed",
-            new_callable=AsyncMock,
-            return_value=False,
-        ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.attach_chunk_conflicts",
-            new_callable=AsyncMock,
-        ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.retrieve_hybrid_chunks",
-            new_callable=AsyncMock,
-            return_value={"chunks": [], "chunk_summaries": {}},
-        ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.search_entities",
-            new_callable=AsyncMock,
-            return_value=[],
-        ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.search_collection",
-            new_callable=AsyncMock,
-            return_value=[],
-        ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.build_entities",
-            new_callable=AsyncMock,
-            return_value=([], set()),
-        ),
+    assert "ontology_grounding" not in result
+
+
+# --- ONTOLOGY_QUERY_GROUNDING=false -----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_grounding_switched_off_pins_nothing_and_renders_no_block(monkeypatch):
+    from cognee.modules.ontology import query_grounding
+    from cognee.modules.ontology.ontology_env_config import OntologyEnvConfig
+
+    config = OntologyEnvConfig(ontology_file_path="/ontology.owl", ontology_query_grounding=False)
+    monkeypatch.setattr(query_grounding, "get_ontology_env_config", lambda: config)
+
+    with patch(
+        "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
+        new_callable=AsyncMock,
+        return_value=[],
+    ) as mock_search:
+        await GraphCompletionRetriever().get_triplets("credit exposure of Acme")
+    assert mock_search.call_args.kwargs["pinned_node_ids"] is None
+
+    with patch.object(
+        GraphCompletionRetriever, "resolve_edges_to_text", new_callable=AsyncMock, return_value="x"
     ):
-        result = await retriever._retrieve_one("hello there")
+        context = await GraphCompletionRetriever().get_context_from_objects(
+            query="credit exposure of Acme", retrieved_objects=[MagicMock()]
+        )
+    assert context == "x"
 
+    result, mock_build_entities = await _retrieve_hybrid("credit exposure of Acme")
+    assert mock_build_entities.call_args.args[1] == []
     assert "ontology_grounding" not in result
 
 

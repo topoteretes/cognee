@@ -7,7 +7,6 @@ from cognee.modules.ontology.query_grounding import (
     QueryGrounding,
     extract_candidate_terms,
     ground_query,
-    ground_query_with_configured_ontology,
 )
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
@@ -112,20 +111,3 @@ def test_ground_query_respects_max_concepts():
         "credit exposure, enterprise customer, subscription, Acme", _finance_resolver(), 2
     )
     assert len(grounding.concepts) == 2
-
-
-def test_configured_entry_point_honours_explicit_flag_and_resolver(monkeypatch):
-    resolver = _finance_resolver()
-
-    assert ground_query_with_configured_ontology(
-        "credit exposure", resolver=resolver, enabled=False
-    ) == QueryGrounding(query="credit exposure")
-
-    grounded = ground_query_with_configured_ontology("credit exposure", resolver=resolver)
-    assert [concept.canonical_name for concept in grounded.concepts] == ["CreditExposure"]
-
-    # No ontology configured -> nothing to ground against, even when asked to.
-    from cognee.modules.ontology import query_grounding
-
-    monkeypatch.setattr(query_grounding, "get_query_grounding_resolver", lambda: None)
-    assert not ground_query_with_configured_ontology("credit exposure")
