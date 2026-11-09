@@ -353,14 +353,22 @@ async def import_memory_source(
 
     node_set = node_set or [f"import:{source.source_system}"]
 
+    # One receipt per import (OMP draft 3.5.4): the loader notes every
+    # record's outcome and identifier mapping, the source what it verified.
+    from cognee.modules.migration.receipt import ImportReceipt
+
+    receipt = ImportReceipt()
+    source.receipt = receipt
+
     if source.mode == "preserve" and getattr(source, "replayable", False):
         result = await _import_streaming(
-            source, dataset_name, user, run_in_background, node_set, graph_only
+            source, dataset_name, user, run_in_background, node_set, graph_only, receipt
         )
     else:
         result = await _import_buffered(
-            source, dataset_name, user, run_in_background, node_set, graph_only, **kwargs
+            source, dataset_name, user, run_in_background, node_set, graph_only, receipt, **kwargs
         )
+    result.receipt = receipt
 
     # After the rows land: cognee-origin archives may need the migration
     # stamp aligned backward to the SOURCE store's revision (see
@@ -380,6 +388,7 @@ async def _import_streaming(
     run_in_background: bool,
     node_set: list,
     graph_only: bool = False,
+    receipt: Any = None,
 ) -> "RememberResult":
     """Preserve-mode import with bounded memory.
 
@@ -400,6 +409,10 @@ async def _import_streaming(
         data_item = data_item_from_record(record)
         if data_item is not None:
             pending.append(data_item)
+            if receipt is not None:
+                receipt.record(
+                    "accepted", record.external_id, kind=record.kind, local_id=data_item.data_id
+                )
             if len(pending) >= DATA_ITEMS_PER_ADD:
                 await add(pending, dataset_name=dataset_name, user=user, node_set=node_set)
                 data_items_stored += len(pending)
@@ -423,7 +436,9 @@ async def _import_streaming(
         from cognee.modules.run_custom_pipeline import run_custom_pipeline
 
         async def stream_import_graph(items, ctx=None):
-            return await stream_graph_from_source(source, stats, ctx=ctx, graph_only=graph_only)
+            return await stream_graph_from_source(
+                source, stats, ctx=ctx, graph_only=graph_only, receipt=receipt
+            )
 
         pipeline_data_item = DataItem(
             data={"source_system": source.source_system, "kind": "graph_stream"},
@@ -466,6 +481,9 @@ async def _import_streaming(
         "skipped_facts": stats["skipped_facts"],
         "deduped_edges": stats["deduped_edges"],
         "pipeline_run_id": run_id,
+        # A snapshot; the live receipt is result.receipt (it keeps filling
+        # while a background graph import runs).
+        "receipt": receipt.summary() if receipt is not None else None,
     }
     if backgrounded:
         # Graph counts reflect scheduling, not completion: the pipeline is
@@ -490,6 +508,7 @@ async def _import_buffered(
     run_in_background: bool,
     node_set: list,
     graph_only: bool = False,
+    receipt: Any = None,
     **kwargs,
 ) -> "RememberResult":
     """Translate the full record stream, then run data items and graph batches."""
@@ -505,6 +524,7 @@ async def _import_buffered(
         # Cognee-origin archives keep source node UUIDs verbatim; other
         # systems get class-namespaced ids (see _register_entity).
         preserve_source_ids=source.source_system == "cognee",
+        receipt=receipt,
     )
 
     logger.info(
@@ -531,6 +551,7 @@ async def _import_buffered(
         "graph_nodes": graph_nodes,
         "graph_edges": graph_edges,
         "skipped_facts": translation.skipped_facts,
+        "receipt": translation.receipt.summary(),
     }
 
     pipeline_result = None

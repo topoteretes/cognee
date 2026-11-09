@@ -400,7 +400,9 @@ class TestZepSource:
         assert fact.fact_text == "Alice lives in Berlin"
         assert fact.valid_at is not None
         assert fact.invalid_at is None
-        assert fact.provenance == ["ep1"]
+        # The episodes a fact was extracted from are its evidence (OMP 3.1.4).
+        assert [(item.ref, item.relation) for item in fact.evidence] == [("ep1", "inferred")]
+        assert fact.provenance == []
 
     def test_empty_alias_does_not_shadow_the_populated_one(self):
         # A Cypher dump names every collection it queried, so the ones that

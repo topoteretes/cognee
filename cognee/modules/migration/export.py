@@ -7,6 +7,11 @@ Formats:
   objects, losslessly serializable via ``model_dump_json``)
 - ``cogx``    — a COGX archive directory (the canonical portable dump;
   re-importable via :class:`COGXArchiveSource`)
+- ``omp``     — an Open Memory Protocol export (draft v0.6): ``manifest.json``
+  plus ``memories.jsonl``, one memory object per line; ``omp-markdown``
+  writes the same memories as a folder of markdown files with front matter.
+  Both re-import through :class:`OMPSource`, and any OMP-conformant system
+  can read them.
 - ``json``    — full-fidelity nodes/edges JSON
 - ``graphml`` — Gephi/yEd/NetworkX interop
 - ``cypher`` — MERGE script loadable into any Neo4j-compatible database
@@ -14,12 +19,14 @@ Formats:
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.migration.cogx import (
+    COGX_VERSION,
     COGXArchiveWriter,
     COGXConfidence,
     COGXContributor,
@@ -27,6 +34,7 @@ from cognee.modules.migration.cogx import (
     COGXEntity,
     COGXEvidence,
     COGXFact,
+    COGXLink,
     COGXOrigin,
     header_from_graph_properties,
     parse_omp_header,
@@ -34,15 +42,17 @@ from cognee.modules.migration.cogx import (
     write_social_layer,
 )
 from cognee.modules.migration.formats import write_cypher, write_graphml, write_json
+from cognee.modules.migration.omp import OMPManifest, memory_from_record, write_omp_export
 from cognee.modules.migration.snapshot import GraphSnapshot, build_snapshot
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME
 
 logger = get_logger("migration.export")
 
-EXPORT_FORMATS = ("pydantic", "cogx", "json", "graphml", "cypher")
+EXPORT_FORMATS = ("pydantic", "cogx", "omp", "omp-markdown", "json", "graphml", "cypher")
 
 _FORMAT_SUFFIX = {"json": ".json", "graphml": ".graphml", "cypher": ".cypher"}
+_DIRECTORY_SUFFIX = {"cogx": "_cogx", "omp": "_omp", "omp-markdown": "_omp"}
 
 
 @dataclass
@@ -142,61 +152,87 @@ async def _stored_migration_revision(dataset_id) -> str | None:
         return None
 
 
-# What the cognee exporter can state for each OMP header field. Declared in
-# the manifest so an importer never mistakes an absent field for a negative.
+# What the cognee exporter can state for each OMP field (draft v0.6, 1.3 and
+# 3.1). Declared in the manifest so an importer never mistakes an absent field
+# for a negative.
 COGX_EXPORT_COVERAGE = {
+    "identifier": "the cognee node id, or source:relationship:target for a fact edge",
+    "created_at": "the node or edge created_at; the export time where the store recorded none",
+    "media_type": "text/plain for every body; documents keep their mime type",
+    "checksum": "sha256 over the canonical JSON of each exported record, metadata and body",
+    "provenance": "pipeline, task and user stamps on the node (source_pipeline, source_task, source_user): the user instructed, the pipeline authored what a model extracted and imported the rest; the user's kind is human or agent",
+    "accountable": "the stamped user, or the owner of a stamped agent; otherwise not stated",
+    "ai_involvement": "entities: full if cognify extracted them; chunks: none; facts: from their recorded evidence; otherwise as imported or not stated",
+    "evidence": "facts: the chunks the edge evidence records (inferred if extracted, observed if structural); entities: the chunks containing them; no source spans",
+    "links": "omp exports only: a chunk mentions the entities it contains; a fact links its subject and object",
+    "version": "DataPoint version from node properties, comparator integer",
+    "validity": "valid_from/valid_until and invalidated_by read from node and edge properties when present",
+    "weight": "node or edge property only; cognee assigns none",
+    "tags": "node property only",
+    "path": "not stated",
     "origin": "the origin a memory was imported with (a chunk takes its document's); otherwise the cognee node or edge id",
     "content_hash": "sha256 of each record body",
     "subject": "names of the entities a chunk contains, or a fact's endpoints; entity records name themselves",
     "semantic_kind": "node property only; no classification is performed",
-    "validity": "valid_from/valid_to and invalidated_by read from node and edge properties when present",
-    "evidence": "facts: the chunks the edge evidence records (inferred if extracted, observed if structural); entities: the chunks containing them; no source spans",
     "confidence": "facts: the conflict review verdict (contradicted, corrected, confirmed) with the edge's confidence score; otherwise as imported, or the score alone",
-    "version": "DataPoint version from node properties",
-    "content_type": "text/plain for every body; documents keep their mime type",
-    "checksum": "sha256 over each exported record, header and body",
-    "tags": "node property only",
-    "contributors": "pipeline, task and user stamps on the node (source_pipeline, source_task, source_user); the user's kind is human or agent",
-    "accountable": "the stamped user, or the owner of a stamped agent; otherwise not stated",
-    "ai_involvement": "entities: full if cognify extracted them; chunks: none; facts: from their recorded evidence; otherwise as imported or not stated",
 }
 
 
-def _contributors(properties: dict, actors: dict[str, "Actor"]) -> dict:
-    """Provenance list and accountable human from a node's pipeline stamps."""
+def _contributors(properties: dict, actors: dict[str, "Actor"], authored: bool) -> dict:
+    """Provenance list (OMP 3.1.1) and accountable human from a node's stamps.
+
+    The stamped user instructed the write. The stamped pipeline authored the
+    record when a model extracted it (``authored``), and imported it — stored
+    it as it came — otherwise.
+    """
     header: dict = {}
-    contributors = []
+    provenance = []
     label = properties.get("source_user")
     if label:
         actor = actors.get(str(label))
-        contributors.append(
+        provenance.append(
             COGXContributor(
-                role="initiator", actor=str(label), kind=actor.kind if actor else "unknown"
+                id=str(label),
+                kind=actor.kind if actor else "unknown",
+                contribution="instructed",
             )
         )
         if actor is not None:
             header["accountable"] = actor.accountable
     pipeline = properties.get("source_pipeline") or properties.get("source_task")
     if pipeline:
-        contributors.append(
-            COGXContributor(role="system", actor=f"cognee:{pipeline}", kind="agent")
+        provenance.append(
+            COGXContributor(
+                id=f"cognee:{pipeline}",
+                kind="agent",
+                contribution="authored" if authored else "imported",
+                ai_usage="full" if authored else "none",
+            )
         )
-    if contributors:
-        header["contributors"] = contributors
+    if provenance:
+        header["provenance"] = provenance
     return header
 
 
 def _element_header(
-    properties: dict, element_id: str, actors: dict[str, "Actor"], imported: dict
+    properties: dict,
+    element_id: str,
+    actors: dict[str, "Actor"],
+    imported: dict,
+    authored: bool = False,
 ) -> dict:
-    """OMP header for one node or edge.
+    """OMP metadata for one node or edge.
 
-    ``imported`` is the header the memory arrived with (its own ``omp_header``,
-    or for a chunk its document's) and wins; cognee's own properties and
-    pipeline stamps fill the rest, and the origin defaults to cognee itself.
+    ``imported`` is the metadata the memory arrived with (its own
+    ``omp_header``, or for a chunk its document's) and wins; cognee's own
+    properties and pipeline stamps fill the rest, and the origin defaults to
+    cognee itself. ``authored`` says whether a model wrote the record.
     """
     header = dict(imported)
-    derived = {**header_from_graph_properties(properties), **_contributors(properties, actors)}
+    derived = {
+        **header_from_graph_properties(properties),
+        **_contributors(properties, actors, authored),
+    }
     for key, value in derived.items():
         header.setdefault(key, value)
     header.setdefault("origin", COGXOrigin(system="cognee", id=element_id))
@@ -333,16 +369,17 @@ def _entity_record(
     node_id: str, properties: dict, topology: _Topology, facts: ExportFacts
 ) -> COGXEntity:
     imported = parse_omp_header(properties.get("omp_header"))
-    header = _element_header(properties, node_id, facts.actors, imported)
+    extracted = properties.get("source_pipeline") == COGNIFY_PIPELINE_NAME
+    header = _element_header(properties, node_id, facts.actors, imported, authored=extracted)
     header.setdefault("subject", [properties["name"]])
     header.setdefault(
         "evidence",
         [
-            COGXEvidence(role="derived", ref=chunk_id)
+            COGXEvidence(relation="derived", ref=chunk_id)
             for chunk_id in topology.chunks_of_entity.get(node_id, [])
         ],
     )
-    if properties.get("source_pipeline") == COGNIFY_PIPELINE_NAME:
+    if extracted:
         header.setdefault("ai_involvement", "full")  # extracted by a model
     return COGXEntity(
         external_system="cognee",
@@ -374,7 +411,7 @@ def _chunk_record(
     )
 
 
-_EVIDENCE_ROLES = {"extracted": "inferred", "structural": "observed"}
+_EVIDENCE_RELATIONS = {"extracted": "inferred", "structural": "observed"}
 
 
 def _fact_record(
@@ -387,17 +424,21 @@ def _fact_record(
 ) -> COGXFact:
     external_id = f"{source}:{relationship}:{target}"
     imported = parse_omp_header(properties.get("omp_header"))
-    header = _element_header(properties, external_id, facts.actors, imported)
     support = facts.edge_support.get(external_id, [])
+    involvement = _ai_involvement(support)
+    header = _element_header(
+        properties, external_id, facts.actors, imported, authored=involvement == "full"
+    )
     header.setdefault(
         "evidence",
         [
-            COGXEvidence(role=_EVIDENCE_ROLES[s.kind], ref=s.chunk_id, confidence=s.confidence)
+            COGXEvidence(
+                relation=_EVIDENCE_RELATIONS[s.kind], ref=s.chunk_id, confidence=s.confidence
+            )
             for s in support
-            if s.kind in _EVIDENCE_ROLES
+            if s.kind in _EVIDENCE_RELATIONS
         ],
     )
-    involvement = _ai_involvement(support)
     if involvement is not None:
         header.setdefault("ai_involvement", involvement)
     header.setdefault(
@@ -478,10 +519,15 @@ def _write_cogx(
     facts: ExportFacts,
     embedding_model: str | None = None,
     migration_revision: str | None = None,
+    origin: str | None = None,
 ) -> None:
-    """Map graph nodes/edges onto typed COGX records; keep the rest raw."""
+    """Map graph nodes/edges onto typed COGX records; keep the rest raw.
+
+    ``origin`` is the store-level identifier the manifest declares (OMP 5.3):
+    with a record's ``external_id`` it is the memory's global key.
+    """
     topology = _Topology.of(nodes, edges)
-    with COGXArchiveWriter(destination, source_system="cognee") as writer:
+    with COGXArchiveWriter(destination, source_system="cognee", origin=origin) as writer:
         writer.add_note(f"Exported from Cognee dataset {dataset_name!r}.")
         writer.embedding_model = embedding_model
         writer.migration_revision = migration_revision
@@ -509,6 +555,77 @@ def _write_cogx(
                     str(source), str(target), str(relationship), properties or {}, topology, facts
                 )
             )
+
+
+def _omp_memories(nodes, edges, facts: ExportFacts, exported_at: datetime):
+    """The dataset as OMP memories: every entity, chunk and fact is one.
+
+    A chunk links the entities it contains (``mentions``); a fact links its
+    ``subject`` and ``object`` entities. Cognee-internal nodes (entity types,
+    summaries, document records) are graph structure, not memories, and are
+    left out — the manifest says so.
+    """
+    topology = _Topology.of(nodes, edges)
+    for node_id, properties in nodes:
+        properties = properties or {}
+        node_id = str(node_id)
+        node_type = properties.get("type")
+        if node_type == "Entity" and properties.get("name"):
+            record = _entity_record(node_id, properties, topology, facts)
+        elif node_type == "DocumentChunk" and properties.get("text"):
+            record = _chunk_record(node_id, properties, topology, facts)
+            record.links.extend(
+                COGXLink(target=entity_id, rel="mentions")
+                for entity_id in topology.entities_in_chunk.get(node_id, [])
+            )
+        else:
+            continue
+        yield memory_from_record(record, exported_at=exported_at)
+    for source, target, relationship, properties in edges:
+        source, target = str(source), str(target)
+        record = _fact_record(source, target, str(relationship), properties or {}, topology, facts)
+        record.links.extend(
+            [COGXLink(target=source, rel="subject"), COGXLink(target=target, rel="object")]
+        )
+        yield memory_from_record(record, exported_at=exported_at)
+
+
+def _write_omp(
+    nodes,
+    edges,
+    destination: Path,
+    dataset_name: str,
+    facts: ExportFacts,
+    *,
+    origin: str,
+    layout: str,
+    embedding_model: str | None = None,
+    migration_revision: str | None = None,
+) -> dict[str, Any]:
+    """Write the dataset as an OMP export (draft v0.6): ``memories.jsonl`` or a
+    folder of markdown memories, plus the 5.3 manifest."""
+    exported_at = datetime.now(timezone.utc)
+    manifest = OMPManifest.model_validate(
+        {
+            "origin": origin,
+            "exported_at": exported_at,
+            "cognee": {
+                "cogx_version": COGX_VERSION,
+                "dataset": dataset_name,
+                "embedding_model": embedding_model,
+                "migration_revision": migration_revision,
+                "coverage": COGX_EXPORT_COVERAGE,
+                "not_exported": "cognee-internal graph nodes (entity types, summaries, "
+                "document records) are structure, not memories",
+            },
+        }
+    )
+    return write_omp_export(
+        _omp_memories(nodes, edges, facts, exported_at),
+        destination,
+        manifest=manifest,
+        layout=layout,
+    )
 
 
 async def export_dataset(
@@ -577,11 +694,15 @@ async def export_dataset(
         return snapshot
 
     if destination is None:
-        suffix = _FORMAT_SUFFIX.get(format, "")
-        destination = f"{dataset_obj.name}_export{suffix}" if suffix else f"{dataset_obj.name}_cogx"
+        suffix = _FORMAT_SUFFIX.get(format)
+        destination = (
+            f"{dataset_obj.name}_export{suffix}"
+            if suffix
+            else f"{dataset_obj.name}{_DIRECTORY_SUFFIX[format]}"
+        )
     destination = Path(destination)
 
-    if format == "cogx":
+    if format in ("cogx", "omp", "omp-markdown"):
         embedding_model = None
         try:
             from cognee.infrastructure.databases.vector.embeddings.config import (
@@ -593,17 +714,35 @@ async def export_dataset(
             logger.debug(
                 "Could not determine embedding model for manifest: %s", error, exc_info=True
             )
-        _write_cogx(
-            nodes,
-            edges,
-            destination,
-            dataset_obj.name,
-            await _load_export_facts(dataset_obj.id, nodes, edges),
-            embedding_model=embedding_model,
-            migration_revision=await _stored_migration_revision(dataset_obj.id),
-        )
-        if include_permissions:
-            write_social_layer(destination, await _gather_social_layer(dataset_obj))
+        export_facts = await _load_export_facts(dataset_obj.id, nodes, edges)
+        migration_revision = await _stored_migration_revision(dataset_obj.id)
+        # The store-level origin (OMP 5.3): a cognee dataset is one store.
+        origin = f"cognee:{dataset_obj.id}"
+        if format == "cogx":
+            _write_cogx(
+                nodes,
+                edges,
+                destination,
+                dataset_obj.name,
+                export_facts,
+                embedding_model=embedding_model,
+                migration_revision=migration_revision,
+                origin=origin,
+            )
+            if include_permissions:
+                write_social_layer(destination, await _gather_social_layer(dataset_obj))
+        else:
+            _write_omp(
+                nodes,
+                edges,
+                destination,
+                dataset_obj.name,
+                export_facts,
+                origin=origin,
+                layout="markdown" if format == "omp-markdown" else "jsonl",
+                embedding_model=embedding_model,
+                migration_revision=migration_revision,
+            )
     elif format == "json":
         write_json(nodes, edges, destination)
     elif format == "graphml":

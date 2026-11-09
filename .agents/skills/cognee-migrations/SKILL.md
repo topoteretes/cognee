@@ -87,23 +87,74 @@ kind (`documents`, `episodes`, `entities`, `facts`, `memories`,
 `memory_blocks`), plus `nodes.jsonl` with the raw graph nodes. The Mem0,
 Zep, Letta and LangMem importers also translate into COGX records first.
 
-Since COGX 0.2 every record also carries an optional OMP header, the fields
-proposed to the Open Memory Protocol exchange group: `origin` (first system
-and id, kept across copies), `content_hash` (sha256 of the body, for dedupe;
-distinct from an integrity checksum), `subject`, `semantic_kind` (fact,
-decision, commitment, procedure, preference, observation, other),
-`valid_from`/`valid_to` with `invalidated_by`, `evidence[]` (role, ref,
-confidence), `confidence` (outcome, verified_at, verified_by, score),
-`version`, `content_type` (the body's format), `tags`, a record `checksum`
-stamped by the writer, and provenance as `contributors[]` (role, actor,
-kind, at) with the `accountable` human and `ai_involvement`. The
-cognee exporter fills what it can read from the graph and declares the rest
-in the manifest's `coverage` map. The loader keeps the header as one
-`omp_header` JSON in a data item's external metadata, on Entity nodes and on
-fact edges, so a re-export preserves it; a chunk re-exports with its
-document's header. A record with no `origin` originates at its own
-`external_system`/`external_id`, so a Mem0 memory stays Mem0's.
-0.1 archives read unchanged.
+Since COGX 0.3 every record carries the metadata of an **Open Memory
+Protocol memory object** (editors' draft v0.6, 2026-11-09), under the
+draft's own field names: `media_type` (the body's MIME type), `path`,
+`title`, `stub`, `tags`, `scope_tags` (the draft's `scope`),
+`valid_from`/`valid_until`, `version` (`{value, comparator}`; a bare int is
+read as comparator `integer`), `provenance[]` (`id`, `kind` human/agent/
+system, `contribution` such as authored/instructed/approved/imported/
+verified, `ai_usage`, `name`, `at`), `evidence[]` (`ref`, `relation`
+observed/stated/inferred/derived, `dangling`), `links[]` (`target`, `rel`,
+`version`), `weight`, a `checksum` over the record's canonical JSON, and
+`extensions` for fields the record carried that cognee does not define
+(the draft says unknown fields MUST be preserved). Cognee's own extensions
+stay beside them: `origin` (first system and id, kept across copies),
+`content_hash` (sha256 of the body, for dedupe), `subject`,
+`semantic_kind`, `invalidated_by`, `accountable`, `ai_involvement` and
+`confidence` (outcome, verified_by, score, system). The manifest declares
+`protocol_version` (0.6), the store `origin` (`cognee:<dataset id>`; with a
+record's `external_id` the memory's global key), the `profiles` the export
+meets (`minimal`; `audit` when every record names a human contributor and a
+version), `selection`, `intent` and the `media_types` present, plus the
+`coverage` map saying what the exporter could state. The loader keeps the
+metadata as one `omp_header` JSON in a data item's external metadata, on
+Entity nodes and on fact edges, so a re-export preserves it; a chunk
+re-exports with its document's header. A record with no `origin` originates
+at its own `external_system`/`external_id`, so a Mem0 memory stays Mem0's.
+0.1 and 0.2 archives (and `omp_header` values stored by 0.2 imports) read
+unchanged: `content_type`, `valid_to`, `contributors[]` with `role`/`actor`
+and `evidence[].role` are mapped to the 0.3 names on read.
+
+Every import returns a **receipt** (draft 3.5.4) on
+`result.receipt` / the import summary's `receipt`: per status counts
+(accepted, transformed, omitted, rejected), an entry with a reason for every
+record that was not simply accepted (a fact whose endpoint is missing is
+`omitted` with its dangling refs kept, never dropped silently; a same-named
+entity merge is `transformed` with the local id), the origin-to-local
+`identifier_map`, and checksum `integrity` (verified / unverified / failed
+identifiers; a mismatch is reported, not rejected).
+
+#### OMP exports (any conformant system)
+
+`cognee/modules/migration/omp.py` is the memory object itself:
+`OMPMemory` (the Appendix A interchange form, unknown fields preserved),
+`.conformance()` (minimal / audit profiles with the reasons), `.runtime_view()`
+(the projection an agent sees: no checksum, scope or evidence),
+`.to_markdown()` / `OMPMemory.from_markdown()` (front matter plus body;
+a file with no front matter is the smallest conforming memory), and
+`memory_from_record` / `record_from_memory` between a memory and a COGX
+record (lossless for cognee's own records through the `cognee` extension).
+
+```python
+from cognee.migration import OMPSource
+
+await cognee.export("my_dataset", format="omp", destination="my_omp")        # manifest.json + memories.jsonl
+await cognee.export("my_dataset", format="omp-markdown", destination="md")   # folder of .md + MEMORY.md index
+result = await cognee.remember(OMPSource("their_export"), dataset_name="my_dataset")
+result.receipt.counts, result.receipt.dangling
+```
+
+- `OMPSource` reads an export directory (`memories.jsonl` and/or `.md`
+  files), a single `.jsonl`/`.json`/`.md` file, or parsed objects. Memories
+  cognee exported come back as the record kinds they were; any other memory
+  becomes a `COGXMemory`, cognified in `re-derive` mode (the default) or
+  stored as is in `preserve` mode. Links and evidence the export does not
+  resolve are marked `dangling`; checksums are verified onto the receipt.
+- An OMP export carries entities, chunks and facts as memories (a chunk
+  links the entities it `mentions`, a fact its `subject` and `object`);
+  cognee-internal graph nodes are not memories and stay in COGX archives
+  only. Use COGX for backup/restore, OMP for exchange with other systems.
 
 Use it to back up and restore a dataset, or to copy one to another cognee
 instance:

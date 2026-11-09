@@ -17,6 +17,12 @@ Restoring / Cognee-to-Cognee migration::
 
     await cognee.export("main_dataset", format="cogx", destination="backup_cogx")
     await cognee.remember(COGXArchiveSource("backup_cogx"))
+
+Open Memory Protocol (draft v0.6) exchange with any conformant system::
+
+    await cognee.export("main_dataset", format="omp", destination="main_omp")
+    await cognee.remember(OMPSource("their_export"))        # jsonl, json or markdown
+    result.receipt                                            # what happened per memory
 """
 
 from cognee.modules.migration import (
@@ -29,6 +35,7 @@ from cognee.modules.migration import (
     COGXEvidence,
     COGXEpisode,
     COGXFact,
+    COGXLink,
     COGXManifest,
     COGXMemory,
     COGXMemoryBlock,
@@ -37,28 +44,41 @@ from cognee.modules.migration import (
     COGXRecord,
     COGXScope,
     COGXTurn,
+    COGXVersion,
     EXPORT_FORMATS,
     ExportResult,
     GraphEdge,
     GraphSnapshot,
     GraphitiSource,
     IMPORT_MODES,
+    ImportReceipt,
+    LangMemSource,
     LettaSource,
     Mem0Source,
     MemorySource,
+    OMP_PROTOCOL_VERSION,
+    OMPConformance,
+    OMPManifest,
+    OMPMemory,
+    OMPSource,
     ZepSource,
     build_snapshot,
     datapoint_registry,
     export_dataset,
+    iter_omp_memories,
+    memory_from_record,
     read_archive,
     read_manifest,
+    record_from_memory,
     rehydrate_node,
+    write_omp_export,
 )
 
 __all__ = [
     "COGX_VERSION",
     "EXPORT_FORMATS",
     "IMPORT_MODES",
+    "OMP_PROTOCOL_VERSION",
     "COGXArchiveSource",
     "COGXConfidence",
     "COGXContributor",
@@ -67,6 +87,7 @@ __all__ = [
     "COGXEpisode",
     "COGXEvidence",
     "COGXFact",
+    "COGXLink",
     "COGXManifest",
     "COGXMemory",
     "COGXMemoryBlock",
@@ -75,18 +96,29 @@ __all__ = [
     "COGXRecord",
     "COGXScope",
     "COGXTurn",
+    "COGXVersion",
     "ExportResult",
     "GraphEdge",
     "GraphSnapshot",
     "GraphitiSource",
+    "ImportReceipt",
+    "LangMemSource",
     "LettaSource",
     "Mem0Source",
     "MemorySource",
+    "OMPConformance",
+    "OMPManifest",
+    "OMPMemory",
+    "OMPSource",
     "ZepSource",
     "build_snapshot",
     "datapoint_registry",
     "export_dataset",
+    "iter_omp_memories",
+    "memory_from_record",
     "read_archive",
     "read_manifest",
+    "record_from_memory",
     "rehydrate_node",
+    "write_omp_export",
 ]

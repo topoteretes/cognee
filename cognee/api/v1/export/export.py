@@ -9,7 +9,7 @@ from cognee.modules.migration.export import ExportResult, export_dataset
 from cognee.modules.migration.snapshot import GraphSnapshot
 from cognee.modules.observability import COGNEE_DATASET_NAME, new_span
 
-_FileFormat = Literal["cogx", "json", "graphml", "cypher"]
+_FileFormat = Literal["cogx", "omp", "omp-markdown", "json", "graphml", "cypher"]
 
 
 @overload
@@ -66,10 +66,17 @@ async def export(
               ``GraphSnapshot.model_validate_json()``.
             - ``"cogx"`` — re-importable archive directory
               (``cognee.remember(COGXArchiveSource(path))`` restores it)
+            - ``"omp"`` — Open Memory Protocol export directory (draft
+              v0.6): ``manifest.json`` plus ``memories.jsonl``, readable by
+              any conformant system and by ``cognee.remember(OMPSource(path))``
+            - ``"omp-markdown"`` — the same memories as a folder of markdown
+              files with front matter, with a root ``MEMORY.md`` index
             - ``"json"`` / ``"graphml"`` / ``"cypher"`` — file exports
         destination: Output path. Optional for ``pydantic`` (saves JSON when
-            given); a directory for ``cogx``; a file otherwise. File formats
-            default to ``<dataset>_export.<ext>`` in the working directory.
+            given); a directory for ``cogx`` and the ``omp`` formats; a file
+            otherwise. File formats default to ``<dataset>_export.<ext>`` in
+            the working directory, directories to ``<dataset>_cogx`` /
+            ``<dataset>_omp``.
         user: User context; defaults to the default user.
         link_relations: ``pydantic`` only — re-attach edges as object
             references on declared relation fields (e.g. ``entity.is_a``),

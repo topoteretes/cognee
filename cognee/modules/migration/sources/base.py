@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 from cognee.modules.migration.cogx import COGXRecord
+from cognee.modules.migration.receipt import ImportReceipt
 
 IMPORT_MODES = ("re-derive", "preserve", "hybrid")
 
@@ -75,6 +76,11 @@ class MemorySource(ABC):
     # records are written entirely by current-code pipelines, so the target's
     # own stamp is already correct.
     migration_revision: str | None = None
+
+    # The receipt of the import this source feeds (OMP draft 3.5.4), attached
+    # by import_memory_source before the records are read. Sources note on it
+    # what they verify (checksums) or transform; None outside an import.
+    receipt: "ImportReceipt | None" = None
 
     def __init__(self, mode: str = "re-derive"):
         if mode not in IMPORT_MODES:

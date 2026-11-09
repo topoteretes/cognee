@@ -29,6 +29,7 @@ from cognee.modules.migration.cogx import (
     COGXRecord,
     omp_header_of,
 )
+from cognee.modules.migration.receipt import ImportReceipt
 from cognee.modules.migration.snapshot import rehydrate_node
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
@@ -51,6 +52,8 @@ class TranslationResult:
     skipped_facts: int = 0
     # False in preserve mode: data items are stored raw, without cognify.
     cognify_data_items: bool = True
+    # Per-record outcomes and identifier mappings (OMP draft 3.5.4).
+    receipt: ImportReceipt = field(default_factory=ImportReceipt)
 
 
 def record_data_id(record: COGXRecord) -> UUID:
@@ -173,6 +176,7 @@ def _register_entity(
     by_external_id: dict[str, Any],
     first_external_id: dict[UUID, str],
     preserve_source_ids: bool = False,
+    receipt: ImportReceipt | None = None,
 ) -> Any:
     """Register an entity record.
 
@@ -217,6 +221,15 @@ def _register_entity(
             record.external_id,
         )
         by_external_id[record.external_id] = existing
+        if receipt is not None:
+            receipt.record(
+                "transformed",
+                record.external_id,
+                kind="entity",
+                reason="merged into the same-named entity "
+                f"{first_external_id.get(node_id)!r} (descriptions combined)",
+                local_id=existing.id,
+            )
         return existing
     header = omp_header_of(record)
     entity = Entity(
@@ -229,6 +242,8 @@ def _register_entity(
     by_node_id[node_id] = entity
     first_external_id[node_id] = record.external_id
     by_external_id[record.external_id] = entity
+    if receipt is not None:
+        receipt.record("accepted", record.external_id, kind="entity", local_id=node_id)
     return entity
 
 
@@ -237,6 +252,7 @@ def _build_graph_batches(
     facts: list[COGXFact],
     raw_nodes: list[COGXRawNode],
     preserve_source_ids: bool = False,
+    receipt: ImportReceipt | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """Map entity/fact/raw-node records onto bounded graph batches.
 
@@ -268,6 +284,10 @@ def _build_graph_batches(
         external_id = properties.get("id")
         if external_id:
             by_external_id[str(external_id)] = node
+        if receipt is not None:
+            receipt.record(
+                "accepted", str(external_id or node.id), kind="raw_node", local_id=node.id
+            )
 
     for record in entities:
         _register_entity(
@@ -277,6 +297,7 @@ def _build_graph_batches(
             by_external_id=by_external_id,
             first_external_id=first_external_id,
             preserve_source_ids=preserve_source_ids,
+            receipt=receipt,
         )
 
     batches: list[dict[str, Any]] = []
@@ -329,11 +350,28 @@ def _build_graph_batches(
                 fact.predicate,
                 ", ".join(unresolved),
             )
+            if receipt is not None:
+                # OMP 3.5.5: a dangling reference is kept and marked, not
+                # dropped silently — the receipt holds the fact and its refs.
+                receipt.record(
+                    "omitted",
+                    fact.external_id,
+                    kind="fact",
+                    reason="dangling reference: no node in this import or archive",
+                    refs=unresolved,
+                )
             continue
 
         edge_key = (subject.id, target.id, fact.predicate)
         if edge_key in seen_edge_keys:
             deduped_edges += 1
+            if receipt is not None:
+                receipt.record(
+                    "omitted",
+                    fact.external_id,
+                    kind="fact",
+                    reason="duplicate of an edge already imported under the same key",
+                )
             continue
         seen_edge_keys.add(edge_key)
 
@@ -360,6 +398,8 @@ def _build_graph_batches(
         batches[index]["edges"].append(
             (subject.id, target.id, fact.predicate, _fact_edge_properties(fact))
         )
+        if receipt is not None:
+            receipt.record("accepted", fact.external_id, kind="fact")
 
     if deduped_edges:
         logger.info("Deduplicated %d facts that resolved to already-seen edge keys.", deduped_edges)
@@ -370,10 +410,17 @@ def _build_graph_batches(
 class _RecordTranslator:
     """Incremental record translator shared by the sync and async entry points."""
 
-    def __init__(self, mode: str, preserve_source_ids: bool = False):
+    def __init__(
+        self,
+        mode: str,
+        preserve_source_ids: bool = False,
+        receipt: ImportReceipt | None = None,
+    ):
         self.mode = mode
         self.preserve_source_ids = preserve_source_ids
-        self.result = TranslationResult(cognify_data_items=mode != "preserve")
+        self.result = TranslationResult(
+            cognify_data_items=mode != "preserve", receipt=receipt or ImportReceipt()
+        )
         self.entities: list[COGXEntity] = []
         self.facts: list[COGXFact] = []
         self.raw_nodes: list[COGXRawNode] = []
@@ -385,6 +432,9 @@ class _RecordTranslator:
         data_item = data_item_from_record(record)
         if data_item is not None:
             result.data_items.append(data_item)
+            result.receipt.record(
+                "accepted", record.external_id, kind=record.kind, local_id=data_item.data_id
+            )
         elif record.kind == "entity":
             self.entities.append(record)
         elif record.kind == "fact":
@@ -399,6 +449,7 @@ class _RecordTranslator:
             # Render the source's derived knowledge as digest documents so it
             # is not lost, and let cognify re-extract it. Raw nodes carry no
             # standalone text and are intentionally dropped in this mode.
+            receipt = result.receipt
             described = [e for e in entities if e.description]
             if described:
                 lines = [f"{e.name}: {e.description}" for e in described]
@@ -407,9 +458,24 @@ class _RecordTranslator:
                     external_id="entities-digest",
                     name="entities-digest",
                 )
-                result.data_items.append(
-                    _data_item_for(digest, "\n".join(lines), "Imported entity descriptions")
-                )
+                item = _data_item_for(digest, "\n".join(lines), "Imported entity descriptions")
+                result.data_items.append(item)
+                for entity in described:
+                    receipt.record(
+                        "transformed",
+                        entity.external_id,
+                        kind="entity",
+                        reason="rendered into the entity digest for re-extraction",
+                        local_id=item.data_id,
+                    )
+            for entity in entities:
+                if not entity.description:
+                    receipt.record(
+                        "omitted",
+                        entity.external_id,
+                        kind="entity",
+                        reason="no description to render in re-derive mode",
+                    )
             for start in range(0, len(facts), FACTS_PER_DIGEST):
                 chunk = facts[start : start + FACTS_PER_DIGEST]
                 digest = COGXFact(
@@ -419,16 +485,34 @@ class _RecordTranslator:
                     predicate="-",
                     object_ref="-",
                 )
-                result.data_items.append(
-                    _data_item_for(
-                        digest,
-                        "\n".join(_render_fact_line(fact) for fact in chunk),
-                        "Imported facts",
+                item = _data_item_for(
+                    digest,
+                    "\n".join(_render_fact_line(fact) for fact in chunk),
+                    "Imported facts",
+                )
+                result.data_items.append(item)
+                for fact in chunk:
+                    receipt.record(
+                        "transformed",
+                        fact.external_id,
+                        kind="fact",
+                        reason="rendered into a facts digest for re-extraction",
+                        local_id=item.data_id,
                     )
+            for raw_node in self.raw_nodes:
+                receipt.record(
+                    "omitted",
+                    str((raw_node.properties or {}).get("id", "")),
+                    kind="raw_node",
+                    reason="raw graph node carries no text to re-extract",
                 )
         else:
             batches, skipped_facts = _build_graph_batches(
-                entities, facts, self.raw_nodes, preserve_source_ids=self.preserve_source_ids
+                entities,
+                facts,
+                self.raw_nodes,
+                preserve_source_ids=self.preserve_source_ids,
+                receipt=result.receipt,
             )
             result.graph_batches.extend(batches)
             result.skipped_facts = skipped_facts
@@ -436,20 +520,26 @@ class _RecordTranslator:
 
 
 def translate_records(
-    records: Iterable[COGXRecord], mode: str, preserve_source_ids: bool = False
+    records: Iterable[COGXRecord],
+    mode: str,
+    preserve_source_ids: bool = False,
+    receipt: ImportReceipt | None = None,
 ) -> TranslationResult:
     """Translate COGX records according to the import fidelity mode."""
-    translator = _RecordTranslator(mode, preserve_source_ids=preserve_source_ids)
+    translator = _RecordTranslator(mode, preserve_source_ids=preserve_source_ids, receipt=receipt)
     for record in records:
         translator.add(record)
     return translator.finish()
 
 
 async def translate_record_stream(
-    records: AsyncIterable[COGXRecord], mode: str, preserve_source_ids: bool = False
+    records: AsyncIterable[COGXRecord],
+    mode: str,
+    preserve_source_ids: bool = False,
+    receipt: ImportReceipt | None = None,
 ) -> TranslationResult:
     """Translate an async record stream without first materializing it as a list."""
-    translator = _RecordTranslator(mode, preserve_source_ids=preserve_source_ids)
+    translator = _RecordTranslator(mode, preserve_source_ids=preserve_source_ids, receipt=receipt)
     async for record in records:
         translator.add(record)
     return translator.finish()
@@ -501,7 +591,11 @@ EDGE_BATCH_TARGET = 2 * BATCH_NODE_TARGET
 
 
 async def stream_graph_from_source(
-    source, stats: dict[str, int], ctx=None, graph_only: bool = False
+    source,
+    stats: dict[str, int],
+    ctx=None,
+    graph_only: bool = False,
+    receipt: ImportReceipt | None = None,
 ) -> dict[str, int]:
     """Two-pass streaming graph import for replayable preserve-mode sources.
 
@@ -552,12 +646,23 @@ async def stream_graph_from_source(
         if record.kind == "raw_node":
             properties = record.properties or {}
             node = rehydrate_node(properties)
+            external_id = properties.get("id")
             if node.id in known_node_ids:
+                if receipt is not None:
+                    receipt.record(
+                        "omitted",
+                        str(external_id or node.id),
+                        kind="raw_node",
+                        reason="duplicate of a node already imported under the same id",
+                    )
                 continue
             known_node_ids.add(node.id)
-            external_id = properties.get("id")
             if external_id:
                 external_to_node_id[str(external_id)] = node.id
+            if receipt is not None:
+                receipt.record(
+                    "accepted", str(external_id or node.id), kind="raw_node", local_id=node.id
+                )
             batch.append(node)
             if len(batch) >= BATCH_NODE_TARGET:
                 await flush(batch)
@@ -570,6 +675,7 @@ async def stream_graph_from_source(
                 by_external_id=by_external_id,
                 first_external_id=first_external_id,
                 preserve_source_ids=preserve_source_ids,
+                receipt=receipt,
             )
     await flush(batch)
 
@@ -627,10 +733,26 @@ async def stream_graph_from_source(
                 record.predicate,
                 ", ".join(unresolved),
             )
+            if receipt is not None:
+                # OMP 3.5.5: kept and marked on the receipt, never dropped silently.
+                receipt.record(
+                    "omitted",
+                    record.external_id,
+                    kind="fact",
+                    reason="dangling reference: no node in this import or archive",
+                    refs=unresolved,
+                )
             continue
         edge_key = (subject_id, object_id, record.predicate)
         if edge_key in seen_edge_keys:
             stats["deduped_edges"] += 1
+            if receipt is not None:
+                receipt.record(
+                    "omitted",
+                    record.external_id,
+                    kind="fact",
+                    reason="duplicate of an edge already imported under the same key",
+                )
             continue
         seen_edge_keys.add(edge_key)
         for stub in (subject_stub, object_stub):
@@ -638,6 +760,8 @@ async def stream_graph_from_source(
                 stub_batch.append(stub)
                 stubbed.add(stub.id)
         edge_batch.append((subject_id, object_id, record.predicate, _fact_edge_properties(record)))
+        if receipt is not None:
+            receipt.record("accepted", record.external_id, kind="fact")
         if len(edge_batch) >= EDGE_BATCH_TARGET or len(stub_batch) >= BATCH_NODE_TARGET:
             await flush(stub_batch, edge_batch)
             stub_batch, edge_batch = [], []
