@@ -147,6 +147,7 @@ async def build_entities(
         _partition_neighborhood(entity_ids, nodes, edges),
         node_name,
         node_name_filter_operator,
+        pinned_ids,
     )
     entities = [
         entity
@@ -236,11 +237,14 @@ def _keep_scoped_connections(
     connections_by_entity_id: dict[str, list[tuple[dict, dict, dict]]],
     node_name: list[str] | None,
     node_name_filter_operator: str,
+    pinned_ids: frozenset[str] | set[str],
 ) -> dict[str, list[tuple[dict, dict, dict]]]:
     """Drop 1-hop neighbours that are not in the requested node set.
 
-    ``is_a`` type edges stay: EntityType nodes usually have no ``belongs_to_set``.
-    Unscoped searches are unchanged.
+    A vector hit's ``is_a`` type edges stay: the hit passed the filter itself, and
+    EntityType nodes usually have no ``belongs_to_set``. A pinned entity did not pass
+    it, so every one of its neighbours must be in the node set. Unscoped searches are
+    unchanged.
     """
     if not node_name:
         return connections_by_entity_id
@@ -248,7 +252,9 @@ def _keep_scoped_connections(
         entity_id: [
             triple
             for triple in triples
-            if _connection_in_scope(entity_id, triple, node_name, node_name_filter_operator)
+            if _connection_in_scope(
+                entity_id, triple, node_name, node_name_filter_operator, entity_id in pinned_ids
+            )
         ]
         for entity_id, triples in connections_by_entity_id.items()
     }
@@ -259,9 +265,10 @@ def _connection_in_scope(
     triple: tuple[dict, dict, dict],
     node_name: list[str],
     node_name_filter_operator: str,
+    pinned: bool,
 ) -> bool:
     source, edge, target = triple
-    if _is_type_relationship(display_value(edge.get("relationship_name"))):
+    if not pinned and _is_type_relationship(display_value(edge.get("relationship_name"))):
         return True
     neighbor = target if display_value(source.get("id")) == entity_id else source
     return payload_matches_node_filter(neighbor, node_name, node_name_filter_operator)

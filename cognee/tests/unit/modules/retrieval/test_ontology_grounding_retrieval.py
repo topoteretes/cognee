@@ -283,6 +283,43 @@ async def test_a_pinned_concept_the_graph_does_not_hold_is_not_shown():
     assert [entity["id"] for entity in entities] == vector_ids
 
 
+@pytest.mark.asyncio
+async def test_a_pinned_concept_shows_only_neighbours_in_the_node_set():
+    customer_id = str(EntityType.id_for("Customer"))
+    initech_id = str(Entity.id_for("Initech"))
+    acme_id, globex_id = str(uuid4()), str(uuid4())
+    nodes = [
+        (customer_id, {"name": "customer"}),
+        (initech_id, {"name": "Initech", "belongs_to_set": ["project_b"]}),
+        (acme_id, {"name": "Acme", "belongs_to_set": ["project_a"]}),
+        (globex_id, {"name": "Globex", "belongs_to_set": ["project_b"]}),
+    ]
+    edges = [
+        (acme_id, customer_id, "is_a", {}),
+        (globex_id, customer_id, "is_a", {}),
+        (initech_id, customer_id, "is_a", {}),
+        (initech_id, globex_id, "supplies", {}),
+    ]
+    grounding = QueryGrounding(
+        concepts=(
+            GroundedConcept("customers", "Customer", "classes", customer_id),
+            GroundedConcept("initech", "Initech", "individuals", initech_id),
+        )
+    )
+
+    entities, _ = await build_entities(
+        _graph_engine(nodes, edges),
+        pin_grounded_entities([], grounding),
+        10,
+        node_name=["project_a"],
+        pinned_ids={customer_id, initech_id},
+    )
+
+    # Initech's neighbours are all outside project_a, its is_a edge included.
+    assert [entity["name"] for entity in entities] == ["Customer"]
+    assert [edge["source"] for edge in entities[0]["edges"]] == ["Acme"]
+
+
 async def _retrieve_hybrid(query: str):
     """Run ``HybridRetriever._retrieve_one`` with every store mocked out.
 
