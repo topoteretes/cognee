@@ -28,6 +28,7 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("slack_history")
 HISTORY_VIEW = "cognee_history_import"
+_VIEWS_OPEN_URL = "https://slack.com/api/views.open"
 HISTORY_SHORTCUT = "import_history"
 THREAD_SHORTCUT = "remember_thread"
 
@@ -142,14 +143,19 @@ async def _open_view(credential, trigger_id, view):
         async with (
             client_session("slack", timeout=aiohttp.ClientTimeout(total=2)) as session,
             session.post(
-                "https://slack.com/api/views.open",
+                _VIEWS_OPEN_URL,
                 headers={"Authorization": f"Bearer {token}"},
                 json={"trigger_id": trigger_id, "view": view},
                 allow_redirects=False,
             ) as response,
         ):
+            if response.status != 200:
+                raise SlackHistoryError(
+                    f"Could not open the import dialog (HTTP {response.status}). "
+                    "Try the command again."
+                )
             payload = await response.json()
-            if response.status != 200 or not payload.get("ok"):
+            if not payload.get("ok"):
                 raise SlackHistoryError("Could not open the import dialog. Try the command again.")
     except (aiohttp.ClientError, asyncio.TimeoutError):
         raise SlackHistoryError(

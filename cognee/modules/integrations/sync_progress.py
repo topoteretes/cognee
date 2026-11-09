@@ -21,7 +21,7 @@ from sqlalchemy import func, select, update
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.integrations.credentials import CredentialInactiveError
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
-from cognee.modules.integrations.outbound import require_outbound_http
+from cognee.modules.integrations.outbound import OutboundHttpDisabledError, require_outbound_http
 from cognee.modules.pipelines.models.PipelineRun import PipelineRun
 
 # The structlog exception wrapper can attach the current exception even with
@@ -42,6 +42,7 @@ SyncReason = Literal[
     "cancelled",
     "connection_changed",
     "incomplete",
+    "outbound_http_disabled",
 ]
 SyncUnit = Literal["items", "files", "bytes", "documents", "channels", "repositories", "scopes"]
 TERMINAL_STATES = frozenset({"succeeded", "partial", "failed", "cancelled", "blocked"})
@@ -341,13 +342,19 @@ async def track_sync(
     their updates after completion cannot reopen a finished run.
 
     Every sync starts here, so this is where ``ALLOW_HTTP_REQUESTS=false`` stops
-    it: the run is refused before anything is published or fetched.
+    it: the run is refused before anything is fetched, and recorded as a failed
+    run (``outbound_http_disabled``), so a webhook- or scheduler-started sync
+    that nobody awaits still leaves a visible trace.
     """
-    require_outbound_http(provider)
     reporter = SyncProgressReporter(provider, credential, dataset_id, sink)
     token = _current.set(reporter)
     _active[reporter.progress.run_id] = reporter
     try:
+        try:
+            require_outbound_http(provider)
+        except OutboundHttpDisabledError:
+            await reporter.finish("failed", reason="outbound_http_disabled")
+            raise
         try:
             await reporter._publish()
             yield reporter

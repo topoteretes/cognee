@@ -214,7 +214,10 @@ async def test_repository_discovery_refuses_a_next_page_off_the_api_host(monkeyp
     response.links = {"next": {"url": "https://api.github.com.evil.example/page2"}}
     response.__aenter__ = AsyncMock(return_value=response)
     session = MagicMock()
-    session.get.return_value = response
+    # The first page answers; a second request means the link was followed. The
+    # fake fails it outright, since answering the same page again would make a
+    # regression hang the test instead of failing it.
+    session.get.side_effect = [response, AssertionError("the off-origin page was requested")]
     session.__aenter__ = AsyncMock(return_value=session)
     monkeypatch.setattr(sync_module.aiohttp, "ClientSession", lambda **kwargs: session)
     monkeypatch.setattr(sync_module, "report_sync_progress", AsyncMock())

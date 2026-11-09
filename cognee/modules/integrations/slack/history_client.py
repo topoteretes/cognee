@@ -20,6 +20,9 @@ class SlackAPIError(SlackHistoryError):
         super().__init__(f"Slack {method}: {code}. Check app scopes and channel membership.")
 
 
+_API_URL = "https://slack.com/api"
+
+
 class SlackHistoryClient:
     def __init__(self, token: str, *, max_requests: int = 1000, max_messages: int = 50000):
         if not token:
@@ -46,14 +49,16 @@ class SlackHistoryClient:
                 )
             try:
                 async with self.session.get(
-                    f"https://slack.com/api/{method}",
+                    f"{_API_URL}/{method}",
                     headers={"Authorization": f"Bearer {self._token}"},
                     params=params,
                     allow_redirects=False,
                 ) as response:
                     status = response.status
                     retry_after = response.headers.get("Retry-After", "1")
-                    payload = await response.json() if status < 500 and status != 429 else {}
+                    payload = (
+                        await response.json() if 200 <= status < 300 or 400 <= status < 429 else {}
+                    )
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
                 if attempt == 3:
                     raise SlackHistoryError(
@@ -61,6 +66,12 @@ class SlackHistoryClient:
                     ) from None
                 await asyncio.sleep(2**attempt)
                 continue
+            if 300 <= status < 400:
+                # Not followed (the bearer rides along), and not a transient failure
+                # worth retrying: Slack's API never redirects.
+                raise SlackHistoryError(
+                    f"Slack {method} answered HTTP {status}; redirects are refused."
+                )
             if status == 429 or payload.get("error") == "ratelimited" or status >= 500:
                 reason = (
                     "rate_limited"

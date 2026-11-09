@@ -27,6 +27,8 @@ from cognee.modules.integrations.linear import client as linear_client
 from cognee.modules.integrations.notion import client as notion_client
 from cognee.modules.integrations.slack import adapter as slack_adapter
 from cognee.modules.integrations.slack import channels as slack_channels
+from cognee.modules.integrations.slack import handle_history as slack_handle_history
+from cognee.modules.integrations.slack import history_client as slack_history_client
 from cognee.modules.integrations.slack import home as slack_home
 from cognee.modules.integrations.slack import oauth as slack_oauth
 
@@ -100,6 +102,25 @@ def _slack_home(mp, base):
 def _slack_channels(mp, base):
     mp.setattr(slack_channels, "_CHANNELS_URL", f"{base}/api/conversations.list")
     return slack_channels.list_channels("tok"), RuntimeError
+
+
+def _slack_history(mp, base):
+    mp.setattr(slack_history_client, "_API_URL", f"{base}/api")
+
+    async def call():
+        async with slack_history_client.SlackHistoryClient("tok") as client:
+            await client.call("conversations.history", channel="C1")
+
+    return call(), slack_history_client.SlackHistoryError
+
+
+def _slack_views_open(mp, base):
+    mp.setattr(slack_handle_history, "_VIEWS_OPEN_URL", f"{base}/api/views.open")
+    mp.setattr(slack_handle_history, "decrypt_token_payload", lambda c: {"access_token": "tok"})
+    return (
+        slack_handle_history._open_view(SimpleNamespace(), "trigger", {"type": "modal"}),
+        slack_handle_history.SlackHistoryError,
+    )
 
 
 def _google_token(mp, base):
@@ -183,6 +204,8 @@ _CASES = {
     "slack revoke": _slack_revoke,
     "slack views.publish": _slack_home,
     "slack conversations.list": _slack_channels,
+    "slack history client": _slack_history,
+    "slack views.open": _slack_views_open,
     "google token": _google_token,
     "google revoke": _google_revoke,
     "google userinfo": _google_userinfo,

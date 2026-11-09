@@ -9,9 +9,13 @@ disable the connectors too. The check sits where the connections are made:
   ``cognee/modules/integrations`` is opened, so each provider call (OAuth
   exchange and refresh, revoke, webhook-driven posts, resource listings,
   syncs) is refused before a socket is opened, whatever path led to it.
-* ``track_sync`` checks it once per sync, which also covers the dlt sources
-  under ``cognee/tasks/ingestion/connectors`` (``requests``/``httpx``), since
-  every sync runs inside it.
+* ``track_sync`` checks it once per integration sync (``ingestion.run_sync``,
+  the GitHub repository sync, the Slack history import), so a sync a webhook
+  or the resume worker starts is refused before anything is fetched, and the
+  refusal is recorded as a failed run. This covers the dlt sources under
+  ``cognee/tasks/ingestion/connectors`` only when an integration drives them:
+  ``add(source)`` over one of them from the SDK never enters ``track_sync``
+  and is not gated here.
 * The router checks it on ``authorize``, ``sync`` and the resource picker so
   the caller gets a 503 instead of a background failure or an OAuth round
   trip that cannot complete.
