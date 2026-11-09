@@ -261,6 +261,7 @@ class HybridRetriever(BaseRetriever):
             edge_rank_by_id(edge_hits),
             self.node_name,
             self.node_name_filter_operator,
+            pinned_ids={concept.node_id for concept in grounding.concepts} if grounding else set(),
         )
         from cognee.modules.retrieval.utils.resolved_context import (
             apply_entity_resolutions,

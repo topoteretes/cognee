@@ -12,7 +12,7 @@ from cognee.modules.ontology.query_grounding import GroundedConcept, QueryGround
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.hybrid.context import format_hybrid_context
-from cognee.modules.retrieval.hybrid.entities import pin_grounded_entities
+from cognee.modules.retrieval.hybrid.entities import build_entities, pin_grounded_entities
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
 
@@ -253,6 +253,36 @@ def test_format_hybrid_context_places_grounding_after_global_context_only_with_c
     assert format_hybrid_context("", {"ontology_grounding": grounding_block}) == ""
 
 
+def _graph_engine(nodes: list, edges: list) -> MagicMock:
+    graph_engine = MagicMock()
+    graph_engine.get_neighborhood = AsyncMock(return_value=(nodes, edges))
+    return graph_engine
+
+
+PINNED_IDS = {EXPOSURE_ID, ACME_ID}
+
+
+@pytest.mark.asyncio
+async def test_a_pinned_concept_the_graph_does_not_hold_is_not_shown():
+    hits = pin_grounded_entities([], _grounding())
+    entities, _ = await build_entities(_graph_engine([], []), hits, 10, pinned_ids=PINNED_IDS)
+
+    assert entities == []
+    block = _grounding().to_context_block()
+    assert format_hybrid_context("", {"entities": entities, "ontology_grounding": block}) == ""
+
+    # Dropped before the entities_top_k cut, so it takes no vector hit's slot.
+    vector_ids = [str(uuid4()) for _ in range(5)]
+    vector_hits = [
+        ScoredResult(id=UUID(node_id), score=0.3, payload={"name": f"entity {index}"})
+        for index, node_id in enumerate(vector_ids)
+    ]
+    hits = pin_grounded_entities(vector_hits, _grounding())
+    entities, _ = await build_entities(_graph_engine([], []), hits, 10, pinned_ids=PINNED_IDS)
+
+    assert [entity["id"] for entity in entities] == vector_ids
+
+
 async def _retrieve_hybrid(query: str):
     """Run ``HybridRetriever._retrieve_one`` with every store mocked out.
 
@@ -342,8 +372,6 @@ async def test_grounding_switched_off_pins_nothing_and_renders_no_block(monkeypa
 
 @pytest.mark.asyncio
 async def test_authoritative_realizes_edges_survive_the_edge_cap_and_say_so():
-    from cognee.modules.retrieval.hybrid.entities import build_entities
-
     customer_id = str(EntityType.id_for("Customer"))
     tables = {f"legacy-{index}": f"legacy_{index}.customer" for index in range(4)}
     tables["crm"] = "crm.customers"

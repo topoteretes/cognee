@@ -75,9 +75,10 @@ def pin_grounded_entities(entity_hits: list[Any], grounding: QueryGrounding) -> 
     """Put the ontology nodes a query resolved to at the head of the entity hits.
 
     Each grounded concept becomes an exact-score hit (0.0) carrying the payload the
-    entity formatter reads (``name``, ``description``, ``type``); a node the vector
-    search already returned is moved up rather than duplicated. The list grows by at
-    most the number of grounded concepts, so the entity budget is not squeezed.
+    entity formatter reads (``name``, ``type``); a node the vector search already
+    returned is moved up rather than duplicated. Pinned entities come first and count
+    against ``entities_top_k``; ``build_entities`` drops one that has no connection in
+    the graph.
     """
     if not grounding:
         return entity_hits
@@ -99,7 +100,6 @@ def pin_grounded_entities(entity_hits: list[Any], grounding: QueryGrounding) -> 
                 payload={
                     "id": concept.node_id,
                     "name": concept.canonical_name,
-                    "description": concept.describe(),
                     "type": concept_type,
                 },
             )
@@ -116,7 +116,14 @@ async def build_entities(
     edge_ranks: dict[str, int] | None = None,
     node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
+    pinned_ids: frozenset[str] | set[str] = frozenset(),
 ) -> tuple[list[dict], set[str]]:
+    """Entities for the hits, with their one-hop edges as bullets.
+
+    A pinned entity (an ontology node the query names, ``pin_grounded_entities``) is
+    dropped when it has no connection left: the dataset's graph does not hold it, and
+    showing it would invent an entity and make an empty context look non-empty.
+    """
     if not entity_hits:
         return [], set()
 
@@ -134,13 +141,18 @@ async def build_entities(
             error,
             exc_info=True,
         )
-        return entities, set()
+        return [entity for entity in entities if entity["id"] not in pinned_ids], set()
 
     connections_by_entity_id = _keep_scoped_connections(
         _partition_neighborhood(entity_ids, nodes, edges),
         node_name,
         node_name_filter_operator,
     )
+    entities = [
+        entity
+        for entity in entities
+        if entity["id"] not in pinned_ids or connections_by_entity_id.get(entity["id"])
+    ]
     for entity in entities:
         connections = connections_by_entity_id.get(entity["id"], [])
         _hydrate_entity(entity, connections, scoped=scoped)
