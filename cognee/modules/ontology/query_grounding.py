@@ -219,3 +219,16 @@ def get_query_grounding_resolver() -> BaseOntologyResolver | None:
     if not env_config.ontology_query_grounding or not env_config.ontology_file_path:
         return None
     return _load_resolver(_file_mtimes(env_config.ontology_file_path), **env_config.to_dict())
+
+
+def with_grounding_block(query: str | None, context: str) -> str:
+    """``context`` with the ``## Ontology grounding`` block for ``query`` in front.
+
+    Only in front of real context: on its own the block names concepts without any
+    facts about them, and an empty context must stay empty so "nothing found" remains
+    detectable.
+    """
+    if not context:
+        return context
+    block = grounding_block(ground_query(query, get_query_grounding_resolver()))
+    return f"{block}\n\n{context}" if block else context

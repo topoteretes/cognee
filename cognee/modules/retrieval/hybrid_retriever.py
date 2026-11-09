@@ -10,7 +10,7 @@ from cognee.modules.ontology.query_grounding import (
     GroundedConcept,
     get_query_grounding_resolver,
     ground_query,
-    grounding_block,
+    with_grounding_block,
 )
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
@@ -213,7 +213,6 @@ class HybridRetriever(BaseRetriever):
             chunk_summaries=chunk_objects["chunk_summaries"],
             entities=entities,
             fact_candidates=fact_candidates,
-            ontology_grounding=grounding_block(concepts),
         )
 
     async def _retrieve_entities_and_facts(
@@ -295,9 +294,10 @@ class HybridRetriever(BaseRetriever):
                     for q, objects in zip(query_batch, retrieved_objects)
                 ]
             )
-            return format_hybrid_context_batch(global_contexts, retrieved_objects)
+            contexts = format_hybrid_context_batch(global_contexts, retrieved_objects)
+            return [with_grounding_block(q, context) for q, context in zip(query_batch, contexts)]
         global_context = await self._build_global_context_section(query, retrieved_objects)
-        return format_hybrid_context(global_context, retrieved_objects)
+        return with_grounding_block(query, format_hybrid_context(global_context, retrieved_objects))
 
     async def _build_global_context_section(
         self, query: str | None, retrieved_objects: Any = None

@@ -13,8 +13,8 @@ from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subcla
 from cognee.modules.ontology.query_grounding import (
     get_query_grounding_resolver,
     ground_query,
-    grounding_block,
     seed_node_ids_by_collection,
+    with_grounding_block,
 )
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
@@ -121,18 +121,6 @@ class GraphCompletionRetriever(BaseRetriever):
         self.include_global_context_index = include_global_context_index
         self.global_context_index_top_k = global_context_index_top_k
         self.include_references = include_references
-
-    def _with_grounding_block(self, query: str | None, graph_context: str) -> str:
-        """Prepend the ``## Ontology grounding`` block for ``query`` to ``graph_context``.
-
-        Only to real graph context: on its own the block names concepts without any
-        facts about them, and an empty context must stay empty so "nothing found"
-        remains detectable.
-        """
-        if not graph_context:
-            return graph_context
-        block = grounding_block(ground_query(query, get_query_grounding_resolver()))
-        return f"{block}\n\n{graph_context}" if block else graph_context
 
     def _use_session_cache(self) -> bool:
         """Check if session caching is enabled for the current user."""
@@ -373,7 +361,7 @@ class GraphCompletionRetriever(BaseRetriever):
             )
 
         graph_context = await self.resolve_edges_to_text(triplets) if triplets else ""
-        graph_context = self._with_grounding_block(query, graph_context)
+        graph_context = with_grounding_block(query, graph_context)
 
         if not self.include_global_context_index:
             if not triplets:

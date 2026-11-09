@@ -8,7 +8,7 @@ from rdflib import OWL, RDF, RDFS, Graph, Namespace
 
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.modules.engine.models import Entity, EntityType
-from cognee.modules.ontology.query_grounding import GroundedConcept, grounding_block
+from cognee.modules.ontology.query_grounding import GroundedConcept, with_grounding_block
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.hybrid.context import format_hybrid_context
@@ -151,10 +151,12 @@ async def test_pinned_ids_flow_into_projection_and_outrank_vector_hits():
 def ontology(monkeypatch):
     """Both retrievers ground against the test ontology, as with ONTOLOGY_FILE_PATH set."""
     resolver = _resolver()
-    for module in ("graph_completion_retriever", "hybrid_retriever"):
-        monkeypatch.setattr(
-            f"cognee.modules.retrieval.{module}.get_query_grounding_resolver", lambda: resolver
-        )
+    for module in (
+        "cognee.modules.ontology.query_grounding",
+        "cognee.modules.retrieval.graph_completion_retriever",
+        "cognee.modules.retrieval.hybrid_retriever",
+    ):
+        monkeypatch.setattr(f"{module}.get_query_grounding_resolver", lambda: resolver)
 
 
 @pytest.mark.asyncio
@@ -261,25 +263,33 @@ def test_pin_grounded_entities_leads_with_concepts_and_dedupes():
     assert pin_grounded_entities([other], []) == [other]
 
 
-def test_format_hybrid_context_places_grounding_after_global_context_only_with_content():
-    block = grounding_block(_grounding())
+@pytest.mark.asyncio
+async def test_hybrid_context_leads_with_the_grounding_block_only_with_content(ontology):
+    retriever = HybridRetriever()
+    passages = {"chunks": [{"text": "Acme owes 3M."}]}
 
-    with_passages = format_hybrid_context(
-        "",
-        {"chunks": [{"text": "Acme owes 3M."}], "ontology_grounding": block},
-    )
-    assert with_passages.startswith("## Ontology grounding")
-    assert "## Relevant passages" in with_passages
+    with patch.object(
+        HybridRetriever,
+        "_build_global_context_section",
+        new_callable=AsyncMock,
+        return_value="## Global context\nroot",
+    ):
+        context = await retriever.get_context_from_objects(
+            query="credit exposure of Acme", retrieved_objects=passages
+        )
+        batch = await retriever.get_context_from_objects(
+            query_batch=["credit exposure", "hello"], retrieved_objects=[passages, passages]
+        )
 
-    with_global = format_hybrid_context(
-        "## Global context\nroot",
-        {"chunks": [{"text": "Acme owes 3M."}], "ontology_grounding": block},
-    )
-    sections = with_global.split("\n\n")
-    assert sections[0].startswith("## Global context")
-    assert sections[1].startswith("## Ontology grounding")
+    sections = context.split("\n\n")
+    assert sections[0].startswith("## Ontology grounding\n")
+    assert sections[1].startswith("## Global context")
+    assert "Acme owes 3M." in context
+    assert batch[0].startswith("## Ontology grounding\n")
+    assert batch[1].startswith("## Global context")
 
-    assert format_hybrid_context("", {"ontology_grounding": block}) == ""
+    # Nothing retrieved -> no context at all, grounding or not.
+    assert with_grounding_block("credit exposure of Acme", "") == ""
 
 
 def _graph_engine(nodes: list, edges: list) -> MagicMock:
@@ -297,8 +307,7 @@ async def test_a_pinned_concept_the_graph_does_not_hold_is_not_shown():
     entities, _ = await build_entities(_graph_engine([], []), hits, 10, pinned_ids=PINNED_IDS)
 
     assert entities == []
-    block = grounding_block(_grounding())
-    assert format_hybrid_context("", {"entities": entities, "ontology_grounding": block}) == ""
+    assert format_hybrid_context("", {"entities": entities}) == ""
 
     # Dropped before the entities_top_k cut, so it takes no vector hit's slot.
     vector_ids = [str(uuid4()) for _ in range(5)]
@@ -411,19 +420,14 @@ async def _retrieve_hybrid(query: str):
 
 
 @pytest.mark.asyncio
-async def test_hybrid_retrieve_one_carries_grounding_and_pins_entity_lane(ontology):
-    result, mock_build_entities = await _retrieve_hybrid("What is our credit exposure to Acme?")
+async def test_hybrid_pins_the_grounded_concepts_in_the_entity_lane(ontology):
+    _, mock_build_entities = await _retrieve_hybrid("What is our credit exposure to Acme?")
 
     pinned_hits = mock_build_entities.call_args.args[1]
     assert [str(hit.id) for hit in pinned_hits] == [EXPOSURE_ID, ACME_ID]
-    assert result["ontology_grounding"].startswith("## Ontology grounding")
 
-
-@pytest.mark.asyncio
-async def test_hybrid_result_has_no_grounding_key_when_nothing_matches(ontology):
-    result, _ = await _retrieve_hybrid("hello there")
-
-    assert "ontology_grounding" not in result
+    _, mock_build_entities = await _retrieve_hybrid("hello there")
+    assert mock_build_entities.call_args.args[1] == []
 
 
 # --- ONTOLOGY_QUERY_GROUNDING=false -----------------------------------------------------
@@ -453,9 +457,9 @@ async def test_grounding_switched_off_pins_nothing_and_renders_no_block(monkeypa
         )
     assert context == "x"
 
-    result, mock_build_entities = await _retrieve_hybrid("credit exposure of Acme")
+    _, mock_build_entities = await _retrieve_hybrid("credit exposure of Acme")
     assert mock_build_entities.call_args.args[1] == []
-    assert "ontology_grounding" not in result
+    assert with_grounding_block("credit exposure of Acme", "x") == "x"
 
 
 # --- authoritative sources in the entity lane ---------------------------------------
