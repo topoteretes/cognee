@@ -762,3 +762,45 @@ async def test_hybrid_deferral_to_graph_completion_is_logged_as_a_warning(caplog
 
     assert effective is SearchType.GRAPH_COMPLETION
     assert "HYBRID_COMPLETION is not available for this search" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_feeling_lucky_with_a_node_name_filter_bounds_the_selector():
+    from cognee.modules.data.processing.document_types import TextDocument
+
+    retriever = _DeterministicRetriever()
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "select_search_type",
+            new_callable=AsyncMock,
+            return_value=SearchType.CHUNKS,
+        ) as selector,
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ) as factory,
+        patch.object(
+            get_retriever_output_module,
+            "run_session_aware_completion",
+            new_callable=AsyncMock,
+            return_value=([], "", []),
+        ),
+    ):
+        result = await get_retriever_output(
+            SearchType.FEELING_LUCKY, "q", node_type=TextDocument, node_name=["doc_a"]
+        )
+
+    assert selector.await_args is not None and factory.await_args is not None
+    allowed = selector.await_args.kwargs["allowed_search_types"]
+    assert SearchType.CHUNKS in allowed and SearchType.SUMMARIES not in allowed
+    assert result.search_type is SearchType.CHUNKS
+    assert factory.await_args.kwargs["node_name"] == ["doc_a"]

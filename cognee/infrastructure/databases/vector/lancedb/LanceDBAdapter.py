@@ -17,11 +17,18 @@ from typing import (  # noqa: UP035 - typing.List is a distinct origin key, not 
 from uuid import UUID
 
 import lancedb
+import pyarrow as pa
 from lancedb.pydantic import LanceModel, Vector
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.exceptions import (
+    CollectionNotFoundError,
+    StoredVectorWidthMismatchError,
+)
+from cognee.infrastructure.databases.vector.local_scoring import (
+    score_rows_against_queries,
+)
 from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
@@ -45,6 +52,14 @@ from cognee_db_workers.lancedb_compaction import (
     lance_core_mismatch,
     open_as_lance,
     prune_superseded_versions,
+)
+from cognee_db_workers.lancedb_schema_evolution import (
+    MIGRATING_COLUMN,
+    OLD_PAYLOAD_COLUMN,
+    SchemaEvolutionError,
+    arrow_default,
+    evolve_payload_schema,
+    relax_nullability,
 )
 
 from ..embeddings.EmbeddingGateway import EmbeddingGateway
@@ -692,11 +707,7 @@ class LanceDBAdapter(VectorDBInterface):
             payload_schema = IndexSchema
 
         vector_size = self.embedding_engine.get_vector_size()
-        payload_model = (
-            self.get_data_point_schema(payload_schema)
-            if issubclass(payload_schema, DataPoint)
-            else payload_schema
-        )
+        payload_model = self._payload_model_for(payload_schema)
         LanceDataPoint = self._make_lance_datapoint_cls(payload_model, vector_size)
 
         # Every check runs before the table exists, so a rejected call creates nothing.
@@ -748,8 +759,8 @@ class LanceDBAdapter(VectorDBInterface):
                 )
         except (ValueError, OSError, RuntimeError) as e:
             # The same two schema-drift errors create_data_points recovers from: a
-            # table created with an older payload shape is rebuilt to the current
-            # one, its rows kept, and the points are written into the new table.
+            # table created with an older payload shape is evolved to the current
+            # one in place, and the points are written afterwards.
             if not self._is_schema_drift_error(e):
                 raise
             logger.warning(
@@ -861,7 +872,10 @@ class LanceDBAdapter(VectorDBInterface):
         wrote (that pass raises ``PylanceIncompatibleError``, later ones skip).
         A failure on one collection does not stop the pass: the rest are
         compacted, the failed one stays first in line for the next pass, and
-        one error naming every failed collection is raised at the end.
+        one error naming every failed collection is raised at the end. A table
+        in the middle of a payload schema migration is left alone (reported
+        ``skipped``): a rewrite would renumber the fragments the migration
+        repairs by id (see ``cognee_db_workers.lancedb_schema_evolution``).
         """
         options = self._compaction_options()
         reason = self._compaction_skip_reason()
@@ -968,12 +982,33 @@ class LanceDBAdapter(VectorDBInterface):
             max_versions=max_versions,
         )
 
+    def _payload_model_for(self, payload_schema: type) -> type:
+        """The model a collection stores for ``payload_schema``: a DataPoint's storable
+        shape (``get_data_point_schema``), a plain BaseModel as declared."""
+        if issubclass(payload_schema, DataPoint):
+            return self.get_data_point_schema(payload_schema)
+        return payload_schema
+
+    def _require_lance_core(self) -> None:
+        """Raise when pylance is not on the Lance core lancedb bundles.
+
+        The in-place migration commits through pylance; a mismatched pair could
+        write a version lancedb cannot read, so it is an error here, not a skip.
+        """
+        mismatch = lance_core_mismatch()
+        if mismatch:
+            raise PylanceIncompatibleError(
+                f"LanceDB schema migration needs pylance on lancedb's Lance core: {mismatch}. "
+                "Install the pylance release line matching lancedb's bundled Lance core "
+                "(see pyproject)."
+            )
+
     @staticmethod
     def _is_schema_drift_error(error: Exception) -> bool:
         """Whether a write failed because the table's payload shape is an older one.
 
-        Two LanceDB failures are recoverable by rebuilding the table through
-        Pydantic validation, which fills the defaults of the current schema:
+        Two LanceDB failures are recoverable by evolving the stored payload
+        struct to the current schema, which fills the defaults of its new fields:
         "not found in target schema" (the payload has a field the table does
         not know) and "contained null values" (old rows lack a field the
         current schema requires; raised by the Rust file writer).
@@ -987,18 +1022,16 @@ class LanceDBAdapter(VectorDBInterface):
         payload_schema: type,
         new_lance_data_points: list,
     ):
-        """Rebuild a LanceDB table to the current schema, keeping its rows, and write the points.
+        """Bring a LanceDB table to the current payload schema and write the points.
 
-        Everything from the row copy to the table replacement runs under
-        ``VECTOR_DB_LOCK``, which serializes every write to the table: a row
-        written between an unlocked copy and the drop would be lost with the
-        old table, and both writers would report success. The routing
-        collection is one table for every dataset, so two datasets' first
-        writes after an upgrade reach here together. Each caller's own write
-        failed outside the lock, and another migration may have rebuilt the
-        table in the meantime, so the points are written once more first and
-        the table is rebuilt only when they still do not fit; the table is
-        opened afresh for the same reason.
+        The whole run holds ``VECTOR_DB_LOCK``, which serializes every write to
+        the table in this process. The routing collection is one table for
+        every dataset, so two datasets' first writes after an upgrade reach
+        here together. Each caller's own write failed outside the lock, and
+        another migration may have evolved the table in the meantime, so the
+        points are written once more first and the payload is evolved only
+        when they still do not fit; the table is opened afresh for the same
+        reason.
         """
         async with self.VECTOR_DB_LOCK:
             connection = await self.get_connection()
@@ -1015,119 +1048,98 @@ class LanceDBAdapter(VectorDBInterface):
                 except (ValueError, OSError, RuntimeError) as e:
                     if not self._is_schema_drift_error(e):
                         raise
-            await self._replace_collection_schema(
-                connection, collection_name, collection, payload_schema, new_lance_data_points
+            return await self._evolve_collection_schema(
+                collection_name, collection, payload_schema, new_lance_data_points
             )
 
-    async def _replace_collection_schema(
+    async def _evolve_collection_schema(
         self,
-        connection,
         collection_name: str,
         old_collection,
         payload_schema: type,
         new_lance_data_points: list,
     ):
-        """The rebuild itself; call it under ``VECTOR_DB_LOCK`` (see ``_migrate_collection_schema``)."""
-        rows = (await old_collection.to_arrow()).to_pylist()
+        """Bring the table's ``payload`` struct to ``payload_schema``'s shape, in place.
 
+        Call it under ``VECTOR_DB_LOCK`` (see ``_migrate_collection_schema``).
+
+        The vectors are never read: ``lancedb_schema_evolution`` evolves the payload
+        column alone through pylance (on the worker's handle in subprocess mode), each
+        step a committed Lance version with ``payload`` present at every one, so an
+        interrupted run leaves the table readable and nothing is dropped. The model's
+        required fields travel apart from the target struct, whose nullability is the
+        storage's (relaxed in subprocess mode). ``new_lance_data_points``, the batch
+        whose write found the drift, are merged in afterwards. A table whose vectors
+        are not the configured width is refused: that is a re-embedding, not a schema
+        migration.
+        """
         vector_size = self.embedding_engine.get_vector_size()
-        schema_model = self.get_data_point_schema(payload_schema)
-        valid_payload_fields = set(schema_model.model_fields.keys())
-        defaults = self._get_payload_defaults(payload_schema)
-
-        # Reuse the cached LanceDataPoint class rather than mint a new
-        # ``MigrationLanceDataPoint`` class per migration call.
-        MigrationLanceDataPoint = self._make_lance_datapoint_cls(schema_model, vector_size)
-
-        new_ids = {dp.id for dp in new_lance_data_points}
-        typed_old_rows = []
-        skipped = 0
-        failed_rows = []
-        for row in rows:
-            if row.get("id") in new_ids:
-                continue
-
-            raw_payload = row.get("payload")
-            if raw_payload is None or not isinstance(raw_payload, dict):
-                raw_payload = dict(defaults)
-
-            # Strip to only fields in the new schema and fill defaults
-            raw_payload = {k: v for k, v in raw_payload.items() if k in valid_payload_fields}
-            for key, val in defaults.items():
-                raw_payload.setdefault(key, val)
-
-            # Convert to typed LanceModel instances to ensure exact Arrow
-            # type compatibility. Using collection.add(dicts) causes LanceDB
-            # to infer Arrow types from Python values, which can differ from
-            # the schema's declared types and cause Rust panics on subsequent
-            # vector searches.
-            try:
-                validated_payload = schema_model.model_validate(raw_payload).model_dump()
-                typed_old_rows.append(
-                    MigrationLanceDataPoint(
-                        id=row["id"],
-                        vector=row["vector"],
-                        payload=validated_payload,
-                    )
-                )
-            except Exception as e:
-                row_id = str(row.get("id", "?"))
-                logger.warning(
-                    "Skipping row %s during migration (validation failed): %s",
-                    row_id,
-                    e,
-                    exc_info=True,
-                )
-                skipped += 1
-                failed_rows.append((row_id, str(e)))
-
-        if skipped:
-            example_failures = "; ".join(
-                [f"{row_id}: {error}" for row_id, error in failed_rows[:5]]
+        target, required = self._target_payload_struct(payload_schema)
+        if target is None:
+            raise TypeError(
+                f"The payload model of '{collection_name}' has no Arrow representation, so "
+                "the table cannot be migrated."
             )
-            logger.error(
-                "Migration of '%s' aborted: %d rows cannot be migrated to the new schema. "
-                "No data was modified. Add explicit defaults for newly required fields or make "
-                "them optional. Example validation failures: %s",
-                collection_name,
-                skipped,
-                example_failures or "<no details>",
-            )
-            raise RuntimeError(
-                f"LanceDB migration aborted for '{collection_name}': {skipped} existing rows "
-                "cannot be backfilled to the new payload schema. "
-                "Add an explicit default value for newly required fields "
-                "(or make them optional) and re-run migration."
-            )
+        stored_schema = await old_collection.schema()
+        stored_width = getattr(stored_schema.field("vector").type, "list_size", None)
+        if stored_width != vector_size:
+            raise StoredVectorWidthMismatchError(collection_name, stored_width, vector_size)
+        # Plain values only: the defaults cross to the worker pickled, and an
+        # Enum member or model instance would make it import cognee.
+        defaults = {
+            name: arrow_default(value)
+            for name, value in self._get_payload_defaults(payload_schema).items()
+        }
+        self._require_lance_core()
 
-        await connection.drop_table(collection_name)
-        await connection.create_table(
-            name=collection_name,
-            schema=self._schema_for_create_table(MigrationLanceDataPoint),
-        )
-        collection = await connection.open_table(collection_name)
-
-        if typed_old_rows:
-            await collection.add(self._records_for_write(typed_old_rows))
+        if self._subprocess_mode:
+            stats = await old_collection.evolve_payload_schema(
+                target, defaults=defaults, required=required
+            )
+        else:
+            # Plan against the version current under the lock, do the I/O off
+            # the event loop, then move the handle to the committed version,
+            # as compaction does.
+            await old_collection.checkout_latest()
+            dataset = await open_as_lance(old_collection)
+            stats = await asyncio.to_thread(
+                evolve_payload_schema, dataset, target, defaults, required=required
+            )
+            await old_collection.checkout_latest()
 
         if new_lance_data_points:
             await (
-                collection.merge_insert("id")
+                old_collection.merge_insert("id")
                 .when_matched_update_all()
                 .when_not_matched_insert_all()
                 .execute(self._records_for_write(new_lance_data_points))
             )
 
         logger.info(
-            "Migrated collection '%s' schema (%d existing rows preserved)",
+            "Migrated collection '%s' payload schema in place (%d rows; fields added %s, "
+            "removed %s, cast %s; %d rows written meanwhile repaired)",
             collection_name,
-            len(typed_old_rows),
+            stats["rows"],
+            stats["added"],
+            stats["removed"],
+            stats["cast"],
+            stats["repaired"],
         )
+        return stats
 
     @classmethod
     def _resolve_collection_payload_schema(cls, collection_name: str):
-        # Vector index collections store IndexSchema payloads regardless of the
-        # source DataPoint type encoded in the collection name.
+        """The payload model a collection was written with.
+
+        Index collections (``<Type>_<field>``, written by ``index_data_points``) hold
+        ``IndexSchema`` rows whatever DataPoint type their name carries. The one
+        collection of a dataset store written with another model is named here.
+        """
+        from cognee.modules.truth_subspace.constants import TRUTH_CENTROID_COLLECTION
+        from cognee.modules.truth_subspace.models import TruthCentroidPayload
+
+        if collection_name == TRUTH_CENTROID_COLLECTION:
+            return TruthCentroidPayload
         return IndexSchema
 
     @staticmethod
@@ -1135,8 +1147,12 @@ class LanceDBAdapter(VectorDBInterface):
         """
         Convert Arrow type objects into a recursive comparable structure.
         This allows deep comparison of field names, nullability, and nested types.
+
+        Only a struct is walked by its fields: every ``pa.DataType`` has a
+        ``num_fields`` (0 for a scalar), and walking scalars that way made
+        ``int64`` and ``double`` compare equal, so a type change was never seen.
         """
-        if hasattr(arrow_type, "num_fields"):
+        if pa.types.is_struct(arrow_type):
             return {
                 "kind": type(arrow_type).__name__,
                 "fields": [
@@ -1168,35 +1184,44 @@ class LanceDBAdapter(VectorDBInterface):
 
         return {"kind": type(arrow_type).__name__, "repr": str(arrow_type)}
 
-    def _get_target_payload_arrow_type(self, payload_schema: type):
-        """
-        Build a probe LanceModel and extract the expected Arrow type of the payload field.
-        """
+    def _model_payload_arrow_type(self, payload_schema: type):
+        """The ``payload`` struct ``LanceModel`` derives for ``payload_schema``, with the
+        model's own nullability (required fields non-null), or ``None`` when the model
+        has no Arrow form (complex unions)."""
         vector_size = self.embedding_engine.get_vector_size()
-        schema_model = self.get_data_point_schema(payload_schema)
-        data_point_types = get_type_hints(schema_model)
-
-        class SchemaProbeDataPoint(LanceModel):
-            id: data_point_types["id"]
-            vector: Vector(vector_size)
-            payload: schema_model
-
-        to_arrow_schema = getattr(SchemaProbeDataPoint, "to_arrow_schema", None)
-        if not callable(to_arrow_schema):
-            return None
-
+        payload_model = self._payload_model_for(payload_schema)
         try:
-            target_schema = to_arrow_schema()
+            schema = self._make_lance_datapoint_cls(payload_model, vector_size).to_arrow_schema()
         except TypeError:
-            # Models with complex Union types (e.g. List[Union[Entity, Timestamp,
-            # tuple[Edge, Entity]]]) can't be converted to Arrow. Fall back to
-            # field-name comparison in _is_payload_schema_compatible.
             return None
-        payload_field_index = target_schema.get_field_index("payload")
+        payload_field_index = schema.get_field_index("payload")
         if payload_field_index < 0:
             return None
+        return schema.field(payload_field_index).type
 
-        return target_schema.field(payload_field_index).type
+    def _target_payload_struct(self, payload_schema: type):
+        """The Arrow struct this adapter writes for ``payload_schema`` and the names of
+        the fields the model requires a value for; ``(None, frozenset())`` when the
+        model has no Arrow form. One schema build for both.
+
+        In subprocess mode the worker creates every table with relaxed nullability
+        (``relax_nullability``), so the target is relaxed the same way; otherwise a
+        stored table would never compare equal to its own model. Which fields must
+        hold a value is the model's rule (non-null in the struct ``LanceModel``
+        derives), kept apart from the struct the table is stored with.
+        """
+        payload_type = self._model_payload_arrow_type(payload_schema)
+        if payload_type is None:
+            return None, frozenset()
+        required = frozenset(field.name for field in payload_type if not field.nullable)
+        if self._subprocess_mode:
+            relaxed = relax_nullability(pa.schema([pa.field("payload", payload_type)]))
+            payload_type = relaxed.field(0).type
+        return payload_type, required
+
+    def _get_target_payload_arrow_type(self, payload_schema: type):
+        """The Arrow struct this adapter writes for ``payload_schema``, or ``None``."""
+        return self._target_payload_struct(payload_schema)[0]
 
     def _is_payload_schema_compatible(self, existing_payload_type, payload_schema: type) -> bool:
         """
@@ -1205,13 +1230,13 @@ class LanceDBAdapter(VectorDBInterface):
         """
         target_payload_type = self._get_target_payload_arrow_type(payload_schema)
         if target_payload_type is None:
-            if not hasattr(existing_payload_type, "num_fields"):
+            if not pa.types.is_struct(existing_payload_type):
                 return False
 
             existing_payload_fields = {
                 existing_payload_type.field(i).name for i in range(existing_payload_type.num_fields)
             }
-            target_schema_model = self.get_data_point_schema(payload_schema)
+            target_schema_model = self._payload_model_for(payload_schema)
             target_payload_fields = set(target_schema_model.model_fields.keys())
             return existing_payload_fields == target_payload_fields
 
@@ -1223,6 +1248,12 @@ class LanceDBAdapter(VectorDBInterface):
         """
         Proactively migrates all LanceDB collections that map to known DataPoint schemas.
         This is intended for startup/readiness checks so searches don't hit legacy schemas.
+
+        Reads each table's schema only; a table whose payload struct already matches
+        its model costs one metadata read, and one that does not is evolved in place
+        (``_migrate_collection_schema``) without its rows ever leaving the engine. A
+        table whose data cannot be migrated does not stop the others: every table is
+        visited, then one error names each that failed.
         """
         connection = await self.get_connection()
         collection_names = await connection.table_names()
@@ -1230,6 +1261,7 @@ class LanceDBAdapter(VectorDBInterface):
         migrated_collections = []
         checked_collections = []
         skipped_collections = []
+        failures: dict[str, Exception] = {}
 
         for collection_name in collection_names:
             payload_schema = self._resolve_collection_payload_schema(collection_name)
@@ -1239,24 +1271,30 @@ class LanceDBAdapter(VectorDBInterface):
 
             checked_collections.append(collection_name)
             collection = await self.get_collection(collection_name)
-            table = await collection.to_arrow()
-            payload_field_index = table.schema.get_field_index("payload")
+            schema = await collection.schema()
+            payload_field_index = schema.get_field_index("payload")
 
             if payload_field_index < 0:
                 skipped_collections.append(collection_name)
                 continue
 
-            payload_field_type = table.schema.field(payload_field_index).type
-            if not hasattr(payload_field_type, "num_fields"):
+            payload_field_type = schema.field(payload_field_index).type
+            if not pa.types.is_struct(payload_field_type):
                 skipped_collections.append(collection_name)
                 continue
 
-            if self._is_payload_schema_compatible(payload_field_type, payload_schema):
+            # A column an interrupted migration left behind is finished first,
+            # even when the payload already matches (the swap had committed).
+            unfinished = {OLD_PAYLOAD_COLUMN, MIGRATING_COLUMN} & set(schema.names)
+            if not unfinished and self._is_payload_schema_compatible(
+                payload_field_type, payload_schema
+            ):
                 continue
 
             logger.info(
-                "Proactive LanceDB migration for '%s' due to payload schema mismatch",
+                "Proactive LanceDB migration for '%s' (%s)",
                 collection_name,
+                "finishing an interrupted migration" if unfinished else "payload schema mismatch",
             )
             try:
                 await self._migrate_collection_schema(
@@ -1276,6 +1314,21 @@ class LanceDBAdapter(VectorDBInterface):
                     e,
                 )
                 skipped_collections.append(collection_name)
+            except (SchemaEvolutionError, StoredVectorWidthMismatchError) as e:
+                # One table's data, not the store's: migrate the rest, then
+                # raise naming every table that failed. A pylance mismatch
+                # would fail every table the same way and propagates at once.
+                logger.error("LanceDB migration of '%s' failed: %s", collection_name, e)
+                failures[collection_name] = e
+
+        if len(failures) == 1:
+            raise next(iter(failures.values()))
+        if failures:
+            first = next(iter(failures.values()))
+            raise RuntimeError(
+                "LanceDB schema migration failed for "
+                + ", ".join(f"'{name}': {error}" for name, error in failures.items())
+            ) from first
 
         return {
             "checked_collections": checked_collections,
@@ -1285,7 +1338,7 @@ class LanceDBAdapter(VectorDBInterface):
 
     def _get_payload_defaults(self, payload_schema: type) -> dict:
         """Extract default values from payload model, including inferred defaults for required fields."""
-        schema_model = self.get_data_point_schema(payload_schema)
+        schema_model = self._payload_model_for(payload_schema)
         defaults = {}
         for name, field_info in schema_model.model_fields.items():
             is_required = hasattr(field_info, "is_required") and field_info.is_required()
@@ -1295,8 +1348,16 @@ class LanceDBAdapter(VectorDBInterface):
                 continue
 
             inferred_default = self._infer_default_for_annotation(field_info.annotation)
-            if inferred_default is not _NO_DEFAULT:
-                defaults[name] = inferred_default
+            if inferred_default is _NO_DEFAULT:
+                continue
+            # An inferred value the field would not accept (an empty tuple for
+            # ``tuple[int, int]``) is no default: the migration then aborts for
+            # the field instead of storing a value the model cannot read back.
+            try:
+                TypeAdapter(field_info.annotation).validate_python(inferred_default)
+            except ValidationError:
+                continue
+            defaults[name] = inferred_default
         return defaults
 
     @staticmethod
@@ -1453,6 +1514,33 @@ class LanceDBAdapter(VectorDBInterface):
                 for row in rows
             )
         return scores
+
+    async def score_by_ids_batch(
+        self, collection_name: str, data_point_ids: list[str], query_vectors: list[list[float]]
+    ) -> list[list[ScoredResult]]:
+        """Score the same ids against every query vector with one filtered scan per id batch.
+
+        ``score_by_ids`` pays the ``id IN (...)`` filter once per query vector, and on a
+        fragmented table that filter is the whole cost. Fetching the rows' vectors once and
+        taking the cosine distances locally makes a batch cost about one query.
+        """
+        ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
+        if not ids or not query_vectors:
+            return [[] for _ in query_vectors]
+        collection = await self.get_collection(collection_name)
+        rows = []
+        for start in range(0, len(ids), self.SCORE_ID_BATCH_SIZE):
+            batch = ids[start : start + self.SCORE_ID_BATCH_SIZE]
+            literals = ", ".join("'" + point_id.replace("'", "''") + "'" for point_id in batch)
+            fetched = await (
+                collection.query()
+                .where(f"id IN ({literals})")
+                .select(["id", "vector"])
+                .limit(len(batch))
+                .to_list()
+            )
+            rows.extend((row["id"], row["vector"]) for row in fetched)
+        return score_rows_against_queries(rows, query_vectors)
 
     async def search(
         self,
@@ -1717,7 +1805,7 @@ class LanceDBAdapter(VectorDBInterface):
                 continue
 
             payload_type = arrow_schema.field(payload_idx).type
-            if not hasattr(payload_type, "num_fields"):
+            if not pa.types.is_struct(payload_type):
                 continue
 
             payload_fields = {payload_type.field(i).name for i in range(payload_type.num_fields)}

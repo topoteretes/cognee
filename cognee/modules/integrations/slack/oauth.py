@@ -29,6 +29,7 @@ from cognee.modules.integrations.oauth_flow import (
 from cognee.modules.integrations.oauth_flow import (
     validate_state as _validate_state,
 )
+from cognee.modules.integrations.outbound import client_session
 from cognee.modules.integrations.slack.slack_settings import require
 
 _AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
@@ -36,10 +37,14 @@ _ACCESS_URL = "https://slack.com/api/oauth.v2.access"
 
 # History is fetched only for explicitly selected channels. Metadata scopes
 # also let imports verify both bot and connecting-user membership. Existing
-# installations must re-authorize to grant these additional scopes.
-_BOT_SCOPES = (
-    "commands,chat:write,im:write,channels:read,channels:history,groups:read,groups:history"
-)
+# installations must re-authorize when this list changes.
+#
+# Read-only on purpose: every message the app sends goes through a
+# ``response_url`` (no scope) or ``views.*`` (a bot token, no scope), so no
+# write scope is requested. ``chat:write`` and ``im:write`` used to be here
+# with nothing calling a method that needs them; they only widened what a
+# leaked bot token could do (SDK-832).
+_BOT_SCOPES = "commands,channels:read,channels:history,groups:read,groups:history"
 
 # oauth.v2.access is a synchronous call inside the callback request — cap it so
 # a hanging Slack never ties up a worker.
@@ -82,7 +87,7 @@ async def exchange_code(code: str) -> dict[str, Any]:
     alone cannot be trusted.
     """
     async with (
-        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        client_session("slack", timeout=_TIMEOUT) as session,
         session.post(
             _ACCESS_URL,
             data={
@@ -91,8 +96,13 @@ async def exchange_code(code: str) -> dict[str, Any]:
                 "code": code,
                 "redirect_uri": require("redirect_uri"),
             },
+            # The body carries the client secret: never let a redirect replay
+            # it to the host a Location header names.
+            allow_redirects=False,
         ) as response,
     ):
+        if response.status != 200:
+            raise RuntimeError(f"Slack oauth.v2.access failed: HTTP {response.status}")
         payload = await response.json()
 
     if not payload.get("ok"):
