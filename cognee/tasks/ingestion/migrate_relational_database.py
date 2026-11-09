@@ -62,11 +62,7 @@ async def migrate_relational_database(
         node_mapping, edge_mapping = await complete_database_ingestion(schema, migrate_column_data)
 
     if ontology_resolver is None:
-        try:
-            ontology_resolver = get_configured_ontology_resolver(ontology_config)
-        except Exception as error:  # an ontology misconfiguration must not block migration
-            logger.warning("Skipping ontology alignment of schema tables: %s", error, exc_info=True)
-            ontology_resolver = None
+        ontology_resolver = get_configured_ontology_resolver(ontology_config)
     alignment = align_tables_with_ontology(
         [
             SchemaTableSpec(node.id, node.name)

@@ -206,11 +206,7 @@ async def emit_dlt_schema_graph(
     # realizes the ontology class its name resolves to (see schema_alignment).
     if table_node_ids:
         wrapped_config = {"ontology_config": ontology_config} if ontology_config else None
-        try:
-            ontology_resolver = get_configured_ontology_resolver(wrapped_config)
-        except Exception as error:  # an ontology misconfiguration must not block ingestion
-            logger.warning("Skipping ontology alignment of DLT tables: %s", error, exc_info=True)
-            ontology_resolver = None
+        ontology_resolver = get_configured_ontology_resolver(wrapped_config)
         # ``table_node_ids`` is keyed by ``(scope, name)``; ``tables`` by its own key.
         alignment = align_tables_with_ontology(
             [

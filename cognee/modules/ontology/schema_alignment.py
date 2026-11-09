@@ -174,16 +174,10 @@ def _entity_type_for(node: AttachedOntologyNode) -> EntityType:
 
 
 def _resolve(
-    candidates: list[str], category: str, resolver: BaseOntologyResolver, what: str
+    candidates: list[str], category: str, resolver: BaseOntologyResolver
 ) -> Subgraph | None:
     for candidate in candidates:
-        try:
-            nodes, edges, root = resolver.get_subgraph(node_name=candidate, node_type=category)
-        except Exception as error:  # a broken lookup must not fail ingestion
-            logger.debug(
-                "Ontology lookup failed for %s %r: %s", what, candidate, error, exc_info=True
-            )
-            return None
+        nodes, edges, root = resolver.get_subgraph(node_name=candidate, node_type=category)
         if root is not None and multiword_match_is_sound(candidate, root.name):
             return nodes, edges, root
     return None
@@ -245,9 +239,7 @@ def align_tables_with_ontology(
 
     for table in specs:
         authority = authority_for(table.name, authoritative_sources)
-        table_subgraph = _resolve(
-            table_lookup_names(table.name), ONTOLOGY_CLASS_CATEGORY, resolver, f"table {table.name}"
-        )
+        table_subgraph = _resolve(table_lookup_names(table.name), ONTOLOGY_CLASS_CATEGORY, resolver)
         if table_subgraph is not None:
             root = table_subgraph[2]
             _add_class_subgraph(alignment, table_subgraph)

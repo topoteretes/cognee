@@ -1,10 +1,15 @@
 """Schema tables -> ontology classes: the first business-to-technical mapping."""
 
+import importlib
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import pytest
 from rdflib import OWL, RDF, RDFS, Graph, Namespace
 
 from cognee.modules.engine.models import EntityType
+from cognee.modules.ontology.exceptions import GetSubgraphError, OntologyInitializationError
+from cognee.modules.ontology.ontology_env_config import OntologyEnvConfig
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.ontology.schema_alignment import (
     REALIZES_RELATIONSHIP,
@@ -130,3 +135,30 @@ def test_env_authoritative_sources_parse_json_and_csv():
     }
     assert parse_authoritative_sources("{not json") == {}
     assert parse_authoritative_sources("") == {}
+
+
+# --- errors ---------------------------------------------------------------------------
+
+
+def test_a_failing_ontology_lookup_fails_the_alignment():
+    class BrokenResolver(RDFLibOntologyResolver):
+        def get_subgraph(self, node_name, node_type="individuals", directed=True):
+            raise GetSubgraphError()
+
+    with pytest.raises(GetSubgraphError):
+        align_tables_with_ontology([(uuid4(), "customers")], BrokenResolver(ontology_file=None))
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_ontology_file_fails_the_migration(monkeypatch, tmp_path):
+    from cognee.modules.ontology import get_default_ontology_resolver as resolver_module
+
+    migration = importlib.import_module("cognee.tasks.ingestion.migrate_relational_database")
+    malformed = tmp_path / "ontology.owl"
+    malformed.write_text("this is <not rdf")
+    config = OntologyEnvConfig(ontology_file_path=str(malformed))
+    monkeypatch.setattr(resolver_module, "get_ontology_env_config", lambda: config)
+    monkeypatch.setattr(migration, "schema_only_ingestion", AsyncMock(return_value=({}, [])))
+
+    with pytest.raises(OntologyInitializationError):
+        await migration.migrate_relational_database(MagicMock(), {}, schema_only=True)
