@@ -15,6 +15,7 @@ from .linear import build_linear_service, linear_source
 from .notion import notion_source
 from .obsidian import obsidian_source
 from .onenote import list_onenote_notebooks, onenote_source
+from .pocket import pocket_source
 
 __all__ = [
     "apollo_source",
@@ -33,4 +34,5 @@ __all__ = [
     "notion_source",
     "obsidian_source",
     "onenote_source",
+    "pocket_source",
 ]

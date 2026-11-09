@@ -1,5 +1,4 @@
 .data
-.env
 .local.env
 .prod.env
 cognee/.data/
@@ -142,8 +141,6 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
-.env.local
 .venv
 env/
 venv/
@@ -184,7 +181,6 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 
-.vscode/
 cognee/data/
 cognee/cache/
 
@@ -240,3 +236,4 @@ cognee/tests/e2e/keyless/.crash_run/
 
 # Local benchmark / eval run artifacts (BEAM and LoCoMo default output dirs)
 temp/
+config.bat
