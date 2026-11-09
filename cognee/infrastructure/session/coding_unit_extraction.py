@@ -550,16 +550,27 @@ def turn_header(number: int, turn: Turn) -> str:
     return f"-- turn {number}: {_clip(turn.request, MAX_TURN_LABEL_CHARS) or '(no request)'} --"
 
 
+def final_message_block(number: int, turn: Turn) -> str:
+    """One turn's request and final answer, as FINAL MESSAGE shows them."""
+    request = _clip(turn.request, MAX_REQUEST_CHARS) or "(none recorded)"
+    answer = _clip(turn.final_answer, MAX_FINAL_ANSWER_CHARS) or "(none recorded)"
+    return f"Turn {number}:\nUser request: {request}\nAgent's final answer: {answer}"
+
+
 def render_final_message(unit: UnitOfWork, numbers: tuple[int, ...] | None = None) -> str:
     """FINAL MESSAGE: the request and final answer of the given turns (all by default)."""
-    blocks = []
-    for number, turn in enumerate(unit.turns, start=1):
-        if numbers is not None and number not in numbers:
-            continue
-        request = _clip(turn.request, MAX_REQUEST_CHARS) or "(none recorded)"
-        answer = _clip(turn.final_answer, MAX_FINAL_ANSWER_CHARS) or "(none recorded)"
-        blocks.append(f"Turn {number}:\nUser request: {request}\nAgent's final answer: {answer}")
+    blocks = [
+        final_message_block(number, turn)
+        for number, turn in enumerate(unit.turns, start=1)
+        if numbers is None or number in numbers
+    ]
     return "FINAL MESSAGE:\n" + "\n\n".join(blocks)
+
+
+def turn_chars(number: int, turn: Turn) -> int:
+    """What an input grows by when it shows ``turn``: its TRACES header line and its
+    FINAL MESSAGE block, with their separators."""
+    return len(turn_header(number, turn)) + 1 + len(final_message_block(number, turn)) + 2
 
 
 def render_tail_sections(
@@ -575,16 +586,28 @@ def render_tail_sections(
     return "\n\n".join(sections)
 
 
-def chunk_trace_lines(lines: list[str], budget: int) -> list[list[str]]:
-    """Pack lines in order under ``budget`` chars per chunk; an oversized line goes alone."""
+def pack_trace_lines(
+    lines: list[str], turns: list[int], turn_costs: dict[int, int], budget: int
+) -> list[list[str]]:
+    """Pack lines in order into chunks that fit ``budget`` chars together with the
+    header and FINAL MESSAGE block of every turn they show (``turns[i]`` is the turn of
+    ``lines[i]``, ``turn_costs`` what each turn adds); an oversized line goes alone.
+
+    A turn is paid for once per chunk that shows it, so a window of many turns is cut
+    by its trace text and the turns it covers, never by every turn of the window.
+    """
     chunks: list[list[str]] = [[]]
     used = 0
-    for line in lines:
-        cost = len(line) + 1
+    shown: set[int] = set()
+    for line, turn in zip(lines, turns):
+        cost = len(line) + 1 + (0 if turn in shown else turn_costs[turn])
         if chunks[-1] and used + cost > budget:
             chunks.append([])
             used = 0
+            shown = set()
+            cost = len(line) + 1 + turn_costs[turn]
         chunks[-1].append(line)
+        shown.add(turn)
         used += cost
     return chunks if chunks[0] else []
 
@@ -606,17 +629,17 @@ def plan_extraction_parts(
     unit: UnitOfWork, groups: list[ErrorGroup], *, max_chars: int = MAX_INPUT_CHARS
 ) -> list[ExtractionChunk]:
     """The unit's phase parts, each cut into chunks that fit ``max_chars`` with the
-    other sections; a short unit is one part and one chunk."""
-    tail = render_tail_sections(unit, groups)  # every turn: the largest the tail gets
-    turn_headers = sum(len(turn_header(n, t)) + 1 for n, t in enumerate(unit.turns, start=1))
+    other sections; a short unit is one part and one chunk. A turn's header and FINAL
+    MESSAGE block count only in the chunks that show the turn."""
+    fixed_tail = render_tail_sections(unit, groups, ())  # the tail with no turn in it
     budget = (
         max_chars
         - _EXISTING_LESSONS_RESERVE
         - _MEMORY_LESSONS_RESERVE
-        - len(tail)
+        - len(fixed_tail)
         - _TRACES_HEADER_RESERVE
-        - turn_headers
     )
+    turn_costs = {n: turn_chars(n, turn) for n, turn in enumerate(unit.turns, start=1)}
     all_traces = unit.traces
     numbers = unit.turn_numbers()
     parts: list[PhaseBlock] = split_into_parts(all_traces)
@@ -625,7 +648,8 @@ def plan_extraction_parts(
         traces = all_traces[part.start : part.end]
         lines = [render_trace_line(entry, unit.repo_root) for entry in traces]
         offset = 0
-        for chunk_lines in chunk_trace_lines(lines, max(budget, 1)):
+        turns = [numbers[entry.trace_id] for entry in traces]
+        for chunk_lines in pack_trace_lines(lines, turns, turn_costs, budget):
             chunk_traces = traces[offset : offset + len(chunk_lines)]
             chunks.append(
                 ExtractionChunk(

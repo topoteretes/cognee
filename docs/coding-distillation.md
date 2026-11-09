@@ -61,7 +61,9 @@ every part has at least 5 traces and there are at most 4 parts (up to 120 traces
 `ceil(n / 30)`). A unit under 5 traces is one part.
 
 **The LLM sees the whole record.** One input per part (a part over 120,000 chars is cut
-into trace chunks, every chunk repeating every section), in this order:
+into trace chunks, every chunk repeating every section; a turn's header and FINAL MESSAGE
+block count only in the chunks that show the turn, so the cut follows the trace text, not
+the number of turns), in this order:
 
 1. `EXISTING LESSONS`: the session's 40 newest candidates.
 2. `LESSONS ALREADY IN MEMORY`: up to 8 stored lessons, 1,500 chars in all, from a vector
@@ -151,17 +153,20 @@ finds its project's pitfalls. Once the new lessons are in the graph, the key's l
 that scope are reduced to the one with the newest `session_date`: normally the new lesson,
 which deletes the older rows; when a later session already stored the key, the lesson of
 the late-distilled older session is the one deleted. Without a date on both sides the
-lesson stored last wins. The replacement also runs when only the step after cognify failed
+lesson stored last wins. Within one run, two accepted lessons with the same key store the
+later one only (the candidates are curated in turn order). The replacement also runs when only the step after cognify failed
 (`AfterRunHookError`), which is raised afterwards. Deleting needs delete permission on the
 dataset, so coding mode requires it next to write permission before anything runs. A
 re-distilled identical lesson has the same row id and is kept.
 
 ## Writer rules enforced in code
 
-`already_known` never applies to a state-key update: when the writer still rejects one
-as known, the curator's working statement is stored as the state lesson, since a state
-lesson replaces the earlier one with its key by definition. The evidence rules above
-settle the lesson type after the writer.
+`already_known` never applies to a keyed lesson: a state lesson replaces the earlier one
+with its key by definition, and a pitfall seen again is the recurrence its `(seen in N
+sessions)` count exists for. When the writer still rejects one as known, the curator's
+working statement is stored under the key, as the state lesson or as the pitfall its
+repeated-error candidate names. The evidence rules above settle the lesson type after the
+writer.
 
 ## Not in this mode
 

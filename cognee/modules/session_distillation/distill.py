@@ -663,25 +663,42 @@ def is_failed_trace_candidate(entry: SessionContextEntry) -> bool:
     return entry.section == "failure_lessons" and bool(entry.source_trace_ids)
 
 
+def member_pitfall_key(members: list[SessionContextEntry]) -> str:
+    """The pitfall key of the first repeated-error candidate among ``members``, else ``""``."""
+    for member in members:
+        key = candidate_state_key(member.content)
+        if key.startswith(PITFALL_STATE_KEY_PREFIX):
+            return key
+    return ""
+
+
 def keep_state_key_update(
-    proposed: ProposedLesson, written: CodingWrittenLesson
+    proposed: ProposedLesson, written: CodingWrittenLesson, members: list[SessionContextEntry]
 ) -> CodingWrittenLesson:
-    """``already_known`` never applies to a state-key update (coding mode).
+    """``already_known`` never applies to a keyed lesson (coding mode).
 
     A state lesson replaces the earlier lesson with its key, so a changed state is new
-    by definition. When the writer still rejects one as known, the curator's working
-    statement is written as the state lesson instead of dropping the update.
+    by definition; a pitfall seen again is the recurrence its ``seen in N sessions``
+    count is there for. When the writer still rejects one as known, the curator's
+    working statement is written under the key instead of dropping the update.
     """
+    if written.accept or written.reason != "already_known":
+        return written
     state_key = str(getattr(proposed, "state_key", "") or "").strip()
-    if written.accept or written.reason != "already_known" or not state_key:
+    lesson_type = "state"
+    if not state_key:
+        state_key, lesson_type = member_pitfall_key(members), "pitfall"
+    if not state_key:
         return written
     logger.info(
-        "Coding distillation: keeping state-key update '%s' the writer called known", state_key
+        "Coding distillation: keeping %s-key update '%s' the writer called known",
+        lesson_type,
+        state_key,
     )
     return CodingWrittenLesson(
         accept=True,
         statement=strip_state_key(proposed.working_statement),
-        lesson_type="state",
+        lesson_type=lesson_type,
         state_key=state_key,
     )
 
@@ -698,15 +715,11 @@ def apply_evidence_rules(
     """
     if not lesson.accept:
         return lesson
-    pitfall_keys = [
-        key
-        for key in (candidate_state_key(member.content) for member in members)
-        if key.startswith(PITFALL_STATE_KEY_PREFIX)
-    ]
+    pitfall_key = member_pitfall_key(members)
     lesson_type = lesson.lesson_type
     state_key = lesson.state_key.strip()
-    if pitfall_keys:
-        lesson_type, state_key = "pitfall", pitfall_keys[0]
+    if pitfall_key:
+        lesson_type, state_key = "pitfall", pitfall_key
     elif lesson_type == "pitfall" and not any(is_failed_trace_candidate(m) for m in members):
         lesson_type, state_key = "change", ""
     if lesson_type not in ("state", "pitfall"):
@@ -756,7 +769,7 @@ async def evaluate_proposed_lesson(
     )
     written = await write_or_reject(lesson, members, prior_lessons, glossary, coding=coding)
     if coding and isinstance(written, CodingWrittenLesson):
-        written = apply_evidence_rules(keep_state_key_update(lesson, written), members)
+        written = apply_evidence_rules(keep_state_key_update(lesson, written, members), members)
         return written.with_turn_context(lesson_turn_context(members, qa_rows or []))
     return written
 
@@ -861,6 +874,25 @@ def lesson_metadata(
     return metadata
 
 
+def newest_per_state_key(lessons: list[CodingWrittenLesson]) -> list[CodingWrittenLesson]:
+    """One lesson per state key, the one accepted last (the candidates are curated in
+    turn order), in the order given; unkeyed lessons are kept as they are. A key names
+    one lesson, so two turns that each update ``test-baseline`` store the later state."""
+    last = {lesson.state_key: index for index, lesson in enumerate(lessons) if lesson.state_key}
+    kept = [
+        lesson
+        for index, lesson in enumerate(lessons)
+        if not lesson.state_key or last[lesson.state_key] == index
+    ]
+    if len(kept) < len(lessons):
+        logger.info(
+            "Coding distillation: %d earlier lesson(s) superseded within the run by a later "
+            "lesson with the same state key",
+            len(lessons) - len(kept),
+        )
+    return kept
+
+
 async def build_coding_lesson_documents(
     scope: SessionDistillationScope,
     accepted: list[CodingWrittenLesson],
@@ -935,7 +967,9 @@ async def publish_distilled_lessons(
 
     if not all(isinstance(lesson, CodingWrittenLesson) for lesson in accepted):
         raise TypeError("coding distillation publishes CodingWrittenLesson items only")
-    coding_lessons = [lesson for lesson in accepted if isinstance(lesson, CodingWrittenLesson)]
+    coding_lessons = newest_per_state_key(
+        [lesson for lesson in accepted if isinstance(lesson, CodingWrittenLesson)]
+    )
     lessons = await build_coding_lesson_documents(scope, coding_lessons, node_set)
     items = [
         DataItem(

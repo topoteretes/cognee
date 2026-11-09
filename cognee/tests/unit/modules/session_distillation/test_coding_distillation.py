@@ -27,6 +27,7 @@ from cognee.modules.session_distillation.distill import (
     distillation_prompt_file,
     keep_state_key_update,
     lesson_metadata,
+    newest_per_state_key,
     publish_distilled_lessons,
     recase_glossary,
     write_or_reject,
@@ -299,15 +300,32 @@ class TestEvidenceRules:
             state_key="test-baseline",
         )
         known = CodingWrittenLesson(accept=False, reason="already_known")
-        kept = keep_state_key_update(proposed, known)
+        kept = keep_state_key_update(proposed, known, [])
         assert kept.accept and kept.lesson_type == "state"
         assert kept.state_key == "test-baseline"
         assert kept.statement == "pytest -q: 41 passed."
 
         plain = CodingProposedLesson(working_statement="Routes live in api/.")
-        assert keep_state_key_update(plain, known) is known
+        assert keep_state_key_update(plain, known, [_entry("plain candidate")]) is known
         unsupported = CodingWrittenLesson(accept=False, reason="unsupported")
-        assert keep_state_key_update(proposed, unsupported) is unsupported
+        assert keep_state_key_update(proposed, unsupported, []) is unsupported
+
+    def test_already_known_never_rejects_a_repeated_pitfall(self):
+        # Session B hits the pitfall session A stored: the writer sees A's lesson and calls
+        # it known. The pitfall must still be stored, or "seen in N sessions" never grows.
+        member = _entry(
+            "[state-key: pitfall:Edit:no-changes-to-make:py] Edit failed → Bash python",
+            section="failure_lessons",
+            source_trace_ids=["t1"],
+        )
+        proposed = CodingProposedLesson(
+            working_statement="Edit on an unchanged string fails; rewrite with a script."
+        )
+        known = CodingWrittenLesson(accept=False, reason="already_known")
+        kept = apply_evidence_rules(keep_state_key_update(proposed, known, [member]), [member])
+        assert kept.accept and kept.lesson_type == "pitfall"
+        assert kept.state_key == "pitfall:Edit:no-changes-to-make:py"
+        assert kept.statement == "Edit on an unchanged string fails; rewrite with a script."
 
     def test_candidate_state_key_parsing(self):
         assert (
@@ -381,6 +399,21 @@ def test_lessons_in_scope_keep_generated_lessons_of_the_same_project_only():
         same
     ]
     assert lessons_in_scope(rows, ["session_learnings"]) == []
+
+
+def test_one_run_stores_one_lesson_per_state_key():
+    first = _written("state", "test-baseline", "pytest -q: 41 passed.")
+    change = _written("change", statement="Routes moved to api/.")
+    second = _written("state", "test-baseline", "pytest -q: 42 passed.")
+    pitfall = _written("pitfall", "pitfall:Bash:cat-illegal-option:cat", "cat has no -z.")
+
+    kept = newest_per_state_key([first, change, second, pitfall])
+    assert [lesson.statement for lesson in kept] == [
+        "Routes moved to api/.",
+        "pytest -q: 42 passed.",
+        "cat has no -z.",
+    ]
+    assert newest_per_state_key([change, pitfall]) == [change, pitfall]
 
 
 def test_rows_to_delete_lets_the_newest_session_date_win():

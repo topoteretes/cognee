@@ -7,7 +7,6 @@ from cognee.modules.agent_memory.sanitization import (
     sanitize_value,
     truncate_text,
 )
-from cognee.shared.event_time import normalize_event_time
 
 
 def _validate_list_of_str(value: object, key: str) -> list[str]:

@@ -359,6 +359,27 @@ class TestExtractionInput:
         rendered_lines = sum(text.count("\n- Bash") for text in inputs)
         assert rendered_lines == 300
 
+    def test_a_turn_costs_only_the_chunks_that_show_it(self):
+        # 40 turns with long answers: FINAL MESSAGE for all of them is far over the input
+        # limit, but each chunk carries only the turns of its traces, so the window is cut
+        # by its text into a few inputs, not one per trace.
+        turns = [
+            _turn(
+                [_trace("Read", params={"file_path": f"{REPO}/f{index}.py"})],
+                request=f"task {index}",
+                answer="a" * 6_000,
+                qa_id=f"qa-{index}",
+            )
+            for index in range(40)
+        ]
+        inputs = build_extraction_inputs(UnitOfWork(turns=turns, repo_root=REPO), [], [])
+        assert 1 < len(inputs) <= 5
+        for text in inputs:
+            assert len(text) <= MAX_INPUT_CHARS
+            shown = text.count("\n-- turn ")
+            assert shown > 1 and text.count("\nUser request: task ") == shown
+        assert sum(text.count("\n- Read") for text in inputs) == 40
+
     @pytest.mark.asyncio
     async def test_existing_lessons_show_the_40_most_recent(self):
         start = datetime(2026, 1, 1, tzinfo=timezone.utc)
