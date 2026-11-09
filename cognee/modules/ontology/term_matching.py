@@ -1,9 +1,8 @@
 """Deterministic name-level checks shared by every place that matches text to ontology keys.
 
 The resolver's fuzzy matcher (80% difflib cutoff) is tuned for single names —
-``customers`` vs ``customer``. Cognify's entity canonicalisation and schema alignment
-feed it multi-word strings as well, and a ratio over the whole
-string will happily accept ``enterprise_customer_acme`` for ``EnterpriseCustomer``,
+``customers`` vs ``customer``. Cognify's entity canonicalisation feeds it multi-word
+strings as well, and a ratio over the whole string will happily accept ``enterprise_customer_acme`` for ``EnterpriseCustomer``,
 swallowing the token that named the individual. The helpers here are the guard rails
 those callers share:
 

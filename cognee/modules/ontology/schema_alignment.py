@@ -1,9 +1,9 @@
 """Link technical schema nodes to the business concepts they realize.
 
 Relational ingestion (``migrate_relational_database``, the DLT schema graph) writes one
-node per source table. When an ontology is configured, this module resolves each table
-name against the ontology's classes — the same fuzzy lookup cognify uses for extracted
-entity types — and emits
+node per source table. When an ontology is configured, this module looks each table name
+up among the ontology's classes by exact key, the way recall grounds a question (schema
+prefix stripped, last word also tried singular), and emits
 
 * an ``EntityType`` node for the matched class (and its ``is_a`` parents), under the
   same deterministic id cognify would give it, so the two ingestion paths meet on one
@@ -28,7 +28,7 @@ from cognee.modules.engine.models import EntityType
 from cognee.modules.engine.utils import generate_edge_name, generate_node_name
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY, AttachedOntologyNode
-from cognee.modules.ontology.term_matching import multiword_match_is_sound, singular
+from cognee.modules.ontology.term_matching import compact_key_index, lookup_words, tokens_of
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ontology_schema_alignment")
@@ -98,20 +98,6 @@ def authority_for(
     return SourceAuthority()
 
 
-# ---------------------------------------------------------------------- name forms
-
-
-def table_lookup_names(table_name: str) -> list[str]:
-    """Names to try for a table, most specific first.
-
-    ``public.customer_accounts`` yields ``customer_accounts`` then its singular
-    ``customer_account``; the fuzzy matcher (80% cutoff) covers most plural forms
-    on its own but not ``-ies``/``-es`` (``companies`` vs ``company`` is 75%).
-    """
-    bare = table_name.rsplit(".", 1)[-1].strip().lower()
-    return [name for name in dict.fromkeys((bare, singular(bare))) if name]
-
-
 # ------------------------------------------------------------------------- lookups
 
 
@@ -138,16 +124,6 @@ def _entity_type_for(node: AttachedOntologyNode) -> EntityType:
         ontology_valid=True,
         ontology_uri=str(node.uri) if node.uri is not None else None,
     )
-
-
-def _resolve(
-    candidates: list[str], category: str, resolver: BaseOntologyResolver
-) -> Subgraph | None:
-    for candidate in candidates:
-        nodes, edges, root = resolver.get_subgraph(node_name=candidate, node_type=category)
-        if root is not None and multiword_match_is_sound(candidate, root.name):
-            return nodes, edges, root
-    return None
 
 
 def _add_class_subgraph(alignment: SchemaOntologyAlignment, subgraph: Subgraph) -> None:
@@ -202,10 +178,14 @@ def align_tables_with_ontology(
     if resolver is None or not tables:
         return alignment
 
+    class_index = compact_key_index(resolver, ONTOLOGY_CLASS_CATEGORY)
     for table in tables:
         authority = authority_for(table.name, authoritative_sources)
-        table_subgraph = _resolve(table_lookup_names(table.name), ONTOLOGY_CLASS_CATEGORY, resolver)
-        if table_subgraph is not None:
+        class_key = lookup_words(tokens_of(table.name.rsplit(".", 1)[-1]), class_index)
+        if class_key is not None:
+            table_subgraph = resolver.get_subgraph(
+                node_name=class_key, node_type=ONTOLOGY_CLASS_CATEGORY
+            )
             root = table_subgraph[2]
             _add_class_subgraph(alignment, table_subgraph)
             alignment.add_edge(

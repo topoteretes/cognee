@@ -15,7 +15,6 @@ from cognee.modules.ontology.schema_alignment import (
     REALIZES_RELATIONSHIP,
     SchemaTableSpec,
     align_tables_with_ontology,
-    table_lookup_names,
 )
 
 NS = Namespace("http://example.org/crm#")
@@ -35,11 +34,23 @@ def _crm_resolver() -> RDFLibOntologyResolver:
     return resolver
 
 
-def test_table_lookup_names_strips_schema_and_singularizes():
-    assert table_lookup_names("public.companies") == ["companies", "company"]
-    assert table_lookup_names("customers") == ["customers", "customer"]
-    assert table_lookup_names("addresses") == ["addresses", "address"]
-    assert table_lookup_names("status") == ["status"]  # -ss/-us words are left alone
+def test_a_table_realizes_the_class_its_name_is_the_exact_key_of():
+    resolver = _crm_resolver()
+    for class_name in ("Product", "Order", "Address", "CustomerAccount"):
+        resolver.graph.add((NS[class_name], RDF.type, OWL.Class))
+    resolver.build_lookup()
+    names = ["public.companies", "addresses", "customer_accounts", "production", "borders"]
+
+    alignment = align_tables_with_ontology(
+        [SchemaTableSpec(uuid4(), name) for name in names], resolver
+    )
+
+    # A near miss is no match: "production" is not a Product, "borders" not an Order.
+    assert alignment.realized_concept_by_table == {
+        "public.companies": "Company",
+        "addresses": "Address",
+        "customer_accounts": "CustomerAccount",
+    }
 
 
 def test_align_tables_emits_realizes_edges_and_the_ontology_subgraph():
@@ -162,14 +173,15 @@ def test_a_per_call_empty_map_overrides_the_environment(monkeypatch):
 
 
 def test_a_failing_ontology_lookup_fails_the_alignment():
-    class BrokenResolver(RDFLibOntologyResolver):
-        def get_subgraph(self, node_name, node_type="individuals", directed=True):
-            raise GetSubgraphError()
+    resolver = _crm_resolver()
+
+    def broken_get_subgraph(*_args, **_kwargs):
+        raise GetSubgraphError()
+
+    resolver.get_subgraph = broken_get_subgraph
 
     with pytest.raises(GetSubgraphError):
-        align_tables_with_ontology(
-            [SchemaTableSpec(uuid4(), "customers")], BrokenResolver(ontology_file=None)
-        )
+        align_tables_with_ontology([SchemaTableSpec(uuid4(), "customers")], resolver)
 
 
 @pytest.mark.asyncio
