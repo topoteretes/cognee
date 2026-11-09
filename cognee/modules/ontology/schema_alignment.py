@@ -403,9 +403,9 @@ def _align_columns(
             node_id,
             SchemaColumn(
                 id=node_id,
-                name=column.name,
+                name=f"{table.name}:{column.name}",
                 table_name=table.name,
-                data_type=column.data_type,
+                column_name=column.name,
                 description=(
                     f"Column '{column.name}' of table '{table.name}'"
                     f"{f' ({column.data_type})' if column.data_type else ''}, "

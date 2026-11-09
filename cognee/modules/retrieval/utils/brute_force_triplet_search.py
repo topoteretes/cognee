@@ -7,6 +7,7 @@ from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.chunking.models.DltRow import DltRow
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
@@ -330,13 +331,57 @@ async def brute_force_triplet_search(
 
             vector_search = NodeEdgeVectorSearch(vector_engine=vector_engine)
 
+            ids_by_collection = None
+            vector_node_name = node_name
+            # A typed scope is fixed by the graph, so its triplets stay eligible (with
+            # missing-distance penalties) even when no vector matches.
+            typed_scope = bool(
+                node_type is not None
+                and not issubclass(node_type, NodeSet)
+                and node_name
+                and memory_fragment is None
+                and neighborhood_depth is None
+            )
+            if typed_scope:
+                if await vector_search.supports_id_scoring():
+                    # This scope is fixed by the graph, not by vector seeds. Resolve it
+                    # first so unrelated vectors never enter scoring.
+                    memory_fragment = await get_memory_fragment(
+                        properties_to_project=properties_to_project,
+                        node_type=node_type,
+                        node_name=node_name,
+                        node_name_filter_operator=node_name_filter_operator,
+                        triplet_distance_penalty=triplet_distance_penalty,
+                        feedback_influence=feedback_influence,
+                        graph_engine=graph_engine,
+                    )
+                    if not memory_fragment.nodes:
+                        return [[] for _ in range(query_list_length)] if query_list_length else []
+                    node_ids = [str(node_id) for node_id in memory_fragment.nodes]
+                    edge_ids = list(memory_fragment.edges_by_distance_key)
+                    ids_by_collection = {
+                        collection: edge_ids
+                        if collection == vector_search.edge_collection
+                        else node_ids
+                        for collection in collections
+                    }
+                else:
+                    # Fallback for engines without ``score_by_ids``: the vector
+                    # ``node_name`` filter selects NodeSet membership, which a typed
+                    # scope never has, so forwarding it matches nothing and every
+                    # scoped node takes the distance penalty. Scan the collections
+                    # unfiltered (``wide_search_limit`` is already None here); the
+                    # distances are mapped onto the projected scope only.
+                    vector_node_name = None
+
             await vector_search.embed_and_retrieve_distances(
                 query=None if query_list_length else query,
                 query_batch=query_batch if query_list_length else None,
                 collections=collections,
                 wide_search_limit=wide_search_limit,
-                node_name=node_name,
+                node_name=vector_node_name,
                 node_name_filter_operator=node_name_filter_operator,
+                ids_by_collection=ids_by_collection,
             )
 
             if query_batch is not None:
@@ -348,7 +393,7 @@ async def brute_force_triplet_search(
                     sum(len(ids) for ids in pinned_node_ids.values()),
                 )
 
-            if not vector_search.has_results():
+            if not vector_search.has_results() and not typed_scope:
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
                 otel_span.set_attribute(COGNEE_RESULT_SUMMARY, "No vector results found")
                 return [[] for _ in range(query_list_length)] if query_list_length else []

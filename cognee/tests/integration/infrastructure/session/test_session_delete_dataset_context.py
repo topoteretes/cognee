@@ -136,8 +136,8 @@ async def test_without_the_dataset_context_the_vectors_survive(isolated_dataset,
     user, dataset = isolated_dataset
     await _answer_turn(user.id, dataset.id, "s2")
 
-    async def no_datasets(user_id, session_id):
-        return []
+    async def no_datasets(sessions):
+        return {}
 
     monkeypatch.setattr(delete_module, "_session_vector_datasets", no_datasets)
     # Cache content went, so it reports True; the vectors in the dataset store did not.
@@ -201,7 +201,7 @@ async def test_a_session_id_naming_another_users_dataset_does_not_reach_it(isola
     stranger = await create_user("stranger@example.com", "password")
     foreign = await create_authorized_dataset("foreign", stranger)
 
-    targets = await delete_module._session_vector_datasets(user.id, f"x_{foreign.id}")
+    targets = await delete_module._session_vector_datasets([(user.id, f"x_{foreign.id}")])
 
     assert foreign.id not in targets
     assert dataset.id in targets

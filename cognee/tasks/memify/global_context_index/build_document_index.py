@@ -160,7 +160,8 @@ def build_context_summaries(content: DatasetContent) -> list[GlobalContextSummar
     A dataset always gets its root, even when no document has an entity to name.
     The root is a vocabulary, not a ranking, so it is still worth having.
     """
-    if not content.document_by_chunk:
+    root = build_root_summary(content)
+    if root is None:
         return []
     entities_by_document = _rank_document_entities(content)
 
@@ -178,15 +179,25 @@ def build_context_summaries(content: DatasetContent) -> list[GlobalContextSummar
             key=lambda document_id: (content.document_name(document_id), document_id),
         )
     ]
-    return buckets + [
-        GlobalContextSummary(
-            id=create_root_summary_id(content.dataset_id),
-            text=_render_root_text(content),
-            dataset_id=content.dataset_id,
-            level=1,
-            is_root=True,
-        )
-    ]
+    return buckets + [root]
+
+
+def build_root_summary(content: DatasetContent) -> GlobalContextSummary | None:
+    """The dataset's root alone, without ranking a single bucket.
+
+    The root reads the dataset's vocabulary straight off ``content``; the
+    buckets' tf-idf ranking is not part of it. ``None`` for a dataset with no
+    chunk: nothing is left to name, and the index of such a dataset is empty.
+    """
+    if not content.document_by_chunk:
+        return None
+    return GlobalContextSummary(
+        id=create_root_summary_id(content.dataset_id),
+        text=_render_root_text(content),
+        dataset_id=content.dataset_id,
+        level=1,
+        is_root=True,
+    )
 
 
 def _rank_document_entities(content: DatasetContent) -> dict[str, _RankedEntities]:

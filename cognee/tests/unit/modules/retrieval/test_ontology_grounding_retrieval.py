@@ -127,6 +127,7 @@ async def test_pinned_ids_flow_into_projection_and_outrank_vector_hits():
         return []
 
     vector_engine.search = AsyncMock(side_effect=search)
+    vector_engine.existing_collections = AsyncMock(side_effect=lambda names: list(names))
 
     with (
         patch(
