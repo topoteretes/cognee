@@ -28,14 +28,7 @@ from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.get_default_ontology_resolver import get_ontology_resolver_from_env
 from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY, ONTOLOGY_INDIVIDUAL_CATEGORY
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
-from cognee.modules.ontology.term_matching import (
-    MIN_TOKEN_LENGTH,
-    STOPWORDS,
-    TOKEN_PATTERN,
-    compact,
-    compact_key_index,
-    singular,
-)
+from cognee.modules.ontology.term_matching import compact_key_index, lookup_words, tokens_of
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ontology_query_grounding")
@@ -152,17 +145,11 @@ def _concept_from_subgraph(
 
 
 def _match_run(run: list[str], indexes: list[tuple[str, dict[str, str]]]) -> tuple[str, str] | None:
-    """``(category, resolver key)`` of the first index holding the run, or None.
-
-    The run is compared in compact form as written and with its last word singular,
-    so "credit exposures" finds ``creditexposure``.
-    """
-    forms = (compact("".join(run)), compact("".join(run[:-1]) + singular(run[-1])))
+    """``(category, resolver key)`` of the first index that holds ``run``, or None."""
     for category, index in indexes:
-        for form in forms:
-            key = index.get(form)
-            if key is not None:
-                return category, key
+        key = lookup_words(run, index)
+        if key is not None:
+            return category, key
     return None
 
 
@@ -186,7 +173,7 @@ def ground_query(
     ]
     # A run of more words than the longest key has characters cannot match.
     longest_key = max((len(key) for _, index in indexes for key in index), default=0)
-    tokens = TOKEN_PATTERN.findall(query.lower())
+    tokens = tokens_of(query)
 
     concepts: list[GroundedConcept] = []
     matched_nodes: set[tuple[str, str]] = set()
@@ -197,8 +184,6 @@ def ground_query(
             positions = range(start, start + size)
             run = tokens[start : start + size]
             if used_positions.intersection(positions):
-                continue
-            if size == 1 and (run[0] in STOPWORDS or len(run[0]) < MIN_TOKEN_LENGTH):
                 continue
             match = _match_run(run, indexes)
             if match is None:

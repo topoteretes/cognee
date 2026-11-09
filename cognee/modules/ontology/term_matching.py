@@ -9,6 +9,9 @@ those callers share:
 
 * :func:`multiword_match_is_sound` — every content token of a multi-word term must
   appear in the matched name, so a fuzzy hit cannot drag in an unrelated word.
+* :func:`lookup_words` — the exact lookup: a list of words, as written or with the last
+  word singular, against a :func:`compact_key_index`. Recall grounding and the rule
+  below use it.
 * :func:`find_class_named_in` — the "contains the class name" rule: an extracted entity
   whose *name* ends its head noun phrase with an ontology class (``credit exposure to
   Acme`` → ``CreditExposure``) is grounded in that class even when its LLM-assigned
@@ -25,13 +28,13 @@ from collections.abc import Mapping
 
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 
-MIN_TOKEN_LENGTH = 3
+_MIN_TOKEN_LENGTH = 3
 
 # Short function-word list, without a stopword dependency. They are not content words
 # of a fuzzy match (``multiword_match_is_sound``), and one alone never matches a key
 # ("will", "may" are not the classes ``Will`` / ``May``). Inside or at the end of a
 # longer run they stay: an exact key decides ("line of credit", "new york").
-STOPWORDS = frozenset(
+_STOPWORDS = frozenset(
     """
     a an the and or but if then else of for to in on at by with from as into onto about
     over under between within without across after before during through this that these
@@ -52,7 +55,7 @@ _PHRASE_BREAKERS = frozenset(
     """.split()  # noqa: SIM905
 )
 
-TOKEN_PATTERN = re.compile(r"[a-z0-9]+(?:['\-][a-z0-9]+)*")
+_TOKEN_PATTERN = re.compile(r"[a-z0-9]+(?:['\-][a-z0-9]+)*")
 
 
 def compact(name: str) -> str:
@@ -63,12 +66,12 @@ def compact(name: str) -> str:
 def tokens_of(name: str) -> list[str]:
     """Lowercased word tokens of a name in any casing (``camelCase`` is split too)."""
     spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
-    return TOKEN_PATTERN.findall(spaced.lower())
+    return _TOKEN_PATTERN.findall(spaced.lower())
 
 
 def singular(token: str) -> str:
     """A cheap singular form good enough for suffix comparison (never for display)."""
-    if len(token) <= MIN_TOKEN_LENGTH:
+    if len(token) <= _MIN_TOKEN_LENGTH:
         return token
     if token.endswith("ies"):
         return token[:-3] + "y"
@@ -85,7 +88,7 @@ def multiword_match_is_sound(term: str, matched_name: str) -> bool:
     Every content word of a multi-word term must appear in the matched name (plural
     stripped); single words keep the resolver's own judgement.
     """
-    tokens = [token for token in tokens_of(term) if token not in STOPWORDS]
+    tokens = [token for token in tokens_of(term) if token not in _STOPWORDS]
     if len(tokens) <= 1:
         return True
     compact_name = compact(matched_name)
@@ -123,9 +126,24 @@ def compact_key_index(resolver: BaseOntologyResolver, category: str) -> dict[str
     index: dict[str, str] = {}
     for key in keys:
         compact_key = compact(key)
-        if len(compact_key) >= MIN_TOKEN_LENGTH:
+        if len(compact_key) >= _MIN_TOKEN_LENGTH:
             index.setdefault(compact_key, key)
     return index
+
+
+def lookup_words(words: list[str], index: Mapping[str, str]) -> str | None:
+    """The key of ``index`` (a :func:`compact_key_index`) that ``words`` name, or None.
+
+    The words are compared in compact form as written and with the last word singular,
+    so "credit exposures" finds ``creditexposure``. A lone stopword never matches.
+    """
+    if not words or (len(words) == 1 and words[0] in _STOPWORDS):
+        return None
+    for form in ("".join(words), "".join(words[:-1]) + singular(words[-1])):
+        key = index.get(compact(form))
+        if key is not None:
+            return key
+    return None
 
 
 def find_class_named_in(name: str, class_index: Mapping[str, str]) -> str | None:
@@ -141,18 +159,8 @@ def find_class_named_in(name: str, class_index: Mapping[str, str]) -> str | None
     ``class_index`` is the classes' :func:`compact_key_index`.
     """
     head = head_phrase_tokens(name)
-    best_key: str | None = None
-    best_length = 0
     for start in range(len(head)):
-        suffix = head[start:]
-        if len(suffix) == 1 and suffix[0] in STOPWORDS:
-            continue
-        for candidate in (
-            "".join(suffix),
-            "".join(suffix[:-1]) + singular(suffix[-1]),
-        ):
-            candidate = compact(candidate)
-            key = class_index.get(candidate)
-            if key is not None and len(candidate) > best_length:
-                best_key, best_length = key, len(candidate)
-    return best_key
+        key = lookup_words(head[start:], class_index)
+        if key is not None:
+            return key
+    return None

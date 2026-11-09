@@ -6,6 +6,7 @@ from cognee.modules.ontology.term_matching import (
     compact_key_index,
     find_class_named_in,
     head_phrase_tokens,
+    lookup_words,
     multiword_match_is_sound,
     singular,
 )
@@ -44,6 +45,14 @@ def test_find_class_named_in_skips_only_a_lone_stopword():
     classes = compact_key_index(resolver, "classes")
     assert find_class_named_in("acme new customer", classes) == "newcustomer"
     assert find_class_named_in("the last will", classes) is None
+
+
+def test_lookup_words_tries_the_singular_and_skips_a_lone_stopword():
+    resolver = SimpleNamespace(lookup={"classes": dict.fromkeys(["credit_exposure", "will"])})
+    index = compact_key_index(resolver, "classes")
+    assert lookup_words(["credit", "exposures"], index) == "credit_exposure"
+    assert lookup_words(["will"], index) is None
+    assert lookup_words([], index) is None
 
 
 def test_singular_forms():
