@@ -1,9 +1,8 @@
 import asyncio
 from functools import wraps
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.calculate_backoff import calculate_backoff
-
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("deadlock_retry")
 
@@ -26,7 +25,7 @@ def deadlock_retry(max_retries=10):
     def decorator(func):
         @wraps(func)
         async def wrapper(self, *args, **kwargs):
-            from neo4j.exceptions import Neo4jError, DatabaseUnavailable
+            from neo4j.exceptions import DatabaseUnavailable, Neo4jError
 
             attempt = 0
 
@@ -52,6 +51,11 @@ def deadlock_retry(max_retries=10):
                         raise  # Re-raise the original error
 
                     error_str = str(error)
+                    if "MemoryPoolOutOfMemoryError" in error_str:
+                        # Deterministic: retrying the identical query re-allocates
+                        # the same transaction memory and fails the same way, so
+                        # each retry only amplifies the memory pressure.
+                        raise
                     if "DeadlockDetected" in error_str or "Neo.TransientError" in error_str:
                         await wait()
                     else:

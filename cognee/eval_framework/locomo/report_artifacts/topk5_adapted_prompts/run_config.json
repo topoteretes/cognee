@@ -1,0 +1,77 @@
+{
+  "benchmark": "LoCoMo-10 (snap-research/locomo, data/locomo10.json)",
+  "dataset_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+  "conversations": 10,
+  "questions": 1986,
+  "runs": 1,
+  "publication": {
+    "source_commit": "012e8a039b5116bc30325a9c10192d9c9336e399",
+    "eligible_questions": 1762,
+    "scored_questions": 1761
+  },
+  "configuration": "A: default retrieval depth (5/5/5) with adapted ingestion prompts and a global context index",
+  "ingestion": {
+    "date": "2026-10-12",
+    "api": "remember() = add + cognify + improve, one call per conversation",
+    "documents": "overview + one document per window of 6 consecutive turns, each with a dated session header",
+    "window_turns": 6,
+    "chunk_size": 4096,
+    "llm": "openai/gpt-5-mini",
+    "embeddings": "openai/text-embedding-3-large",
+    "date_resolution": {
+      "model": "openai/gpt-5-mini",
+      "reasoning_effort": "low",
+      "prompt": "prompts/resolve_dates.txt",
+      "prompt_sha256": "ce7f3c7414c6a9a84cbc71a222968be5b0d16d625e0c13f4604eaae89ad97a16",
+      "windows": 1048,
+      "annotated": 414,
+      "annotations": 596,
+      "rejected": 5
+    },
+    "extraction_prompt": "prompts/graph_extraction_conversations.txt",
+    "extraction_prompt_sha256": "a3d92a44e9d88b19e02f552e664acb1889a96cbf7a9c6747784a1b0d15fbe10a",
+    "summary_prompt": "prompts/summarize_content_questions.txt",
+    "summary_prompt_sha256": "dee3de25c831bafb58096e5a8f84a72b3dbcf470d1f0a78050551a70d92ea7e5",
+    "global_context_index": true,
+    "note": "Run with these prompts and settings through experiment scripts, before they became the --resolve-dates, --extraction-prompt, --summary-prompt and --global-context-index options of the benchmark package."
+  },
+  "retrieval": {
+    "config": "configs/locomo_hybrid_5_5_5_gci.json",
+    "retriever": "hybrid_completion",
+    "chunks_top_k": 5,
+    "entities_top_k": 5,
+    "facts_top_k": 5,
+    "max_edges_per_entity": 10,
+    "include_global_context_index": true,
+    "global_context_index_top_k": 3
+  },
+  "answering": {
+    "date": "2026-10-12",
+    "model": "openai/gpt-5-mini",
+    "reasoning_effort": "model default",
+    "prompt": "qa_prompts/unified.txt",
+    "prompt_sha256": "5c340b1a10cabd22142dc311f932ba2a16042c44eac62be2305da20317844c60",
+    "same_prompt_for_every_question": true,
+    "category_label_used": false
+  },
+  "judge": {
+    "model": "openai/gpt-5.1",
+    "reasoning_effort": "medium",
+    "max_completion_tokens": 6000,
+    "system_prompt": "You are a strict but fair grader. Reply with JSON only.",
+    "prompt": "prompts/locomo_judge_prompt.txt",
+    "prompt_sha256": "3595726c99dbdd52ba61606c89d4fbf7cafa3a48dd4971a9f7b9e076e4435cb0"
+  },
+  "environment": {
+    "CACHING": "true",
+    "AUTO_FEEDBACK": "false",
+    "ENABLE_BACKEND_ACCESS_CONTROL": "false"
+  },
+  "stack": {
+    "cognee": "1.5.4",
+    "graph": "Ladybug 0.19.0",
+    "vector": "LanceDB 0.38.0",
+    "relational": "SQLite",
+    "litellm": "1.96.2"
+  }
+}

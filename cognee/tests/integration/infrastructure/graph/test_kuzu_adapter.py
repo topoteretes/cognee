@@ -7,15 +7,18 @@ main process.
 """
 
 import json
+import logging
 import os
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
 
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
 from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
+from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
+from cognee.shared.data_models import KnowledgeGraph
+
+logger = logging.getLogger(__name__)
 
 DEMO_KG_PATH = os.path.join(os.path.dirname(__file__), "test_kg.json")
 
@@ -33,7 +36,7 @@ async def _close_adapter(a) -> None:
     try:
         await a.close()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _close_adapter", exc_info=True)
 
 
 @pytest_asyncio.fixture
@@ -103,9 +106,8 @@ async def test_add_and_get_node(adapter):
     kg = _load_demo_kg()
     node = kg.nodes[0]  # Alice
 
-    # Use add_nodes (batch) with a single node — add_node uses a
-    # different Cypher path that has a known Kuzu compatibility issue.
-    await adapter.add_nodes([node])
+    # add_node delegates to add_nodes, so the single-node path is the batch path.
+    await adapter.add_node(node)
 
     result = await adapter.get_node(node.id)
     assert result is not None
@@ -290,7 +292,7 @@ async def test_get_filtered_graph_data(adapter):
     await adapter.add_edges(edge_rows)
 
     # Filter by type = "Person"
-    nodes, edges = await adapter.get_filtered_graph_data([{"type": ["Person"]}])
+    nodes, _edges = await adapter.get_filtered_graph_data([{"type": ["Person"]}])
     assert len(nodes) == len(kg.nodes)  # All nodes are Person type
 
 
@@ -512,6 +514,19 @@ async def test_get_graph_metrics(adapter):
     metrics = await adapter.get_graph_metrics()
     assert metrics["num_nodes"] == len(kg.nodes)
     assert metrics["num_edges"] == len(kg.edges)
+
+
+@pytest.mark.asyncio
+async def test_get_graph_counts(adapter):
+    assert await adapter.get_graph_counts() == (0, 0)
+
+    kg = _load_demo_kg()
+    await adapter.add_nodes(kg.nodes)
+
+    edge_rows = [(e.source_node_id, e.target_node_id, e.relationship_name, {}) for e in kg.edges]
+    await adapter.add_edges(edge_rows)
+
+    assert await adapter.get_graph_counts() == (len(kg.nodes), len(kg.edges))
 
 
 # ---------------------------------------------------------------------------
@@ -849,6 +864,10 @@ async def test_query_racing_with_close_does_not_leak_executor_error(kuzu_adapter
         except RuntimeError as exc:
             errors_seen.append(exc)
         except Exception as exc:  # pragma: no cover - any other type is a regression
+            logger.debug(
+                "Ignoring exception in test_query_racing_with_close_does_not_leak_executor_error.fire_query",
+                exc_info=True,
+            )
             errors_seen.append(exc)
 
     async def fire_close():

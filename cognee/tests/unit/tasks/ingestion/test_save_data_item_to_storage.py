@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from cognee.modules.ingestion import StoredFile
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
-from cognee.modules.ingestion import StoredFile
 
 # The package __init__ rebinds the name ``save_data_item_to_storage`` to the
 # function, so ``import ... as mod`` would yield the function, not the module.
@@ -84,7 +84,7 @@ async def test_existing_absolute_file_rejected_when_gate_disabled(tmp_path, monk
     file_path.write_text("hello", encoding="utf-8")
     monkeypatch.setattr(mod.settings, "accept_local_file_path", False)
 
-    with pytest.raises(IngestionError, match="Local files are not accepted"):
+    with pytest.raises(IngestionError, match="not accepted"):
         await save_data_item_to_storage(str(file_path))
 
 

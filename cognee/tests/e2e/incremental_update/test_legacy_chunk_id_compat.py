@@ -27,6 +27,7 @@ from pathlib import Path
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 import pytest
+
 from cognee.tests.e2e.incremental_update.backend_env import (
     incremental_test_backend_env,
     reset_backend_state,
@@ -43,7 +44,7 @@ def legacy_env():
 
     root = Path(tempfile.mkdtemp(prefix="cognee_legacy_id_test_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
     os.environ.update(
         **incremental_test_backend_env(),
@@ -158,11 +159,18 @@ async def _scenario():
     # --- phase 1: ingest under the LEGACY id scheme ------------------------ #
     real_minter = chunker_module.content_chunk_id
     minted_per_document: dict = {}
+    minted_per_chunk: dict = {}
 
     def legacy_minter(document_id, content_hash, occurrence):
-        index = minted_per_document.get(document_id, 0)
-        minted_per_document[document_id] = index + 1
-        return uuid5(NAMESPACE_OID, f"{document_id}-{index}")
+        # cognify() chunks a document in its indexing run and again in its
+        # cognify run (SDK-397); the released scheme gave a chunk the same id
+        # every time, so the n-th distinct chunk of a document keeps index n.
+        key = (document_id, content_hash, occurrence)
+        if key not in minted_per_chunk:
+            index = minted_per_document.get(document_id, 0)
+            minted_per_document[document_id] = index + 1
+            minted_per_chunk[key] = uuid5(NAMESPACE_OID, f"{document_id}-{index}")
+        return minted_per_chunk[key]
 
     chunker_module.content_chunk_id = legacy_minter
     try:

@@ -35,6 +35,7 @@ def _note_local_execution() -> None:
 
         creds = load_credentials()
     except Exception:
+        logger.debug("Giving up after error in _note_local_execution", exc_info=True)
         return
     if creds and creds.service_url and creds.api_key:
         logger.warning(
@@ -43,6 +44,14 @@ def _note_local_execution() -> None:
             "operations to that instance, or ignore this if local execution is intended.",
             creds.service_url,
         )
+
+
+def peek_remote_client() -> Optional["CloudClient"]:
+    """The active client, without the local-execution warning or a file read.
+
+    For callers such as telemetry that only inspect the connection state.
+    """
+    return _remote_client
 
 
 def set_remote_client(client: Optional["CloudClient"]) -> None:

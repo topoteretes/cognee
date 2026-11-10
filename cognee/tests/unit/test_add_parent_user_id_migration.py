@@ -3,7 +3,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-
 _MIGRATION_PATH = (
     Path(__file__).resolve().parents[2]
     / "alembic"

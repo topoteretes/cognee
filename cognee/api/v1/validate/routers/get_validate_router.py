@@ -1,10 +1,10 @@
-from typing import List
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from typing_extensions import Annotated
 
 from cognee.api.v1.validate.validate import ValidationReport, ValidationStatus, validate
+from cognee.exceptions import CogneeApiError
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
@@ -19,7 +19,7 @@ def get_validate_router() -> APIRouter:
     @validate_router.get("", response_model=ValidationReport)
     async def run_validate(
         dataset: Annotated[
-            List[str],
+            list[str],
             Query(
                 description=("Dataset name(s) to validate. Omit to validate the default dataset."),
             ),
@@ -42,8 +42,10 @@ def get_validate_router() -> APIRouter:
             report = await validate(dataset=dataset, user=user)
             status_code = 503 if report.status == ValidationStatus.UNHEALTHY else 200
             return JSONResponse(status_code=status_code, content=report.model_dump(mode="json"))
-        except Exception as error:
-            logger.error("validate() failed: %s", error, exc_info=True)
+        except CogneeApiError:
+            raise
+        except Exception:
+            logger.exception("validate() failed")
             return JSONResponse(
                 status_code=500,
                 content={"status": "error", "reason": "validation failed; see server logs."},

@@ -1,4 +1,3 @@
-from typing import Optional
 from contextlib import contextmanager
 
 from .trace_context import (
@@ -13,6 +12,7 @@ from .tracing import (
     CogneeTrace,
     redact_secrets,
     get_tracer,
+    bind_trace_owner,
     COGNEE_DB_SYSTEM,
     COGNEE_DB_QUERY,
     COGNEE_DB_ROW_COUNT,
@@ -34,6 +34,7 @@ from .tracing import (
     COGNEE_DATA_SIZE_BYTES,
     COGNEE_DATA_ITEM_COUNT,
     COGNEE_OPERATION_MODE,
+    COGNEE_RECALL_ROUTE_RULE,
     COGNEE_RECALL_SCOPE,
     COGNEE_RECALL_SOURCE,
     COGNEE_FORGET_TARGET,
@@ -99,7 +100,7 @@ class _NullSpan:
         return lambda *args, **kwargs: None
 
 
-def get_tracer_if_enabled() -> Optional[object]:
+def get_tracer_if_enabled() -> object | None:
     """Return the OTEL tracer if tracing is enabled, None otherwise."""
     if is_tracing_enabled():
         return get_tracer()

@@ -6,9 +6,8 @@ from uuid import UUID
 
 import pytest
 
-from cognee.pipelines.types import Drop
 from cognee.modules.pipelines.tasks.task import BoundTask
-
+from cognee.pipelines.types import Drop
 
 # -- Drop sentinel tests --
 
@@ -46,7 +45,7 @@ class TestFieldAnnotations:
         assert "name" in meta.get("identity_fields", [])
 
     def test_dedup_generates_deterministic_id(self):
-        from cognee.infrastructure.engine import DataPoint, Embeddable, Dedup
+        from cognee.infrastructure.engine import DataPoint, Dedup, Embeddable
 
         class Person(DataPoint):
             name: Annotated[str, Embeddable(), Dedup()]
@@ -90,7 +89,7 @@ class TestFieldAnnotations:
 
 class TestTaskDecorator:
     def test_task_no_args(self):
-        from cognee.modules.pipelines.tasks.task import task, Task
+        from cognee.modules.pipelines.tasks.task import Task, task
 
         @task
         async def classify(data):
@@ -137,7 +136,7 @@ class TestTaskDecorator:
         assert process.task.task_config["batch_size"] == 20  # original unchanged
 
     def test_task_in_pipeline_list(self):
-        from cognee.modules.pipelines.tasks.task import task, Task
+        from cognee.modules.pipelines.tasks.task import Task, task
 
         @task
         async def classify(data):

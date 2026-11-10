@@ -5,19 +5,23 @@ Generate human-friendly release notes by analyzing git diff with LLM.
 This script compares changes between two branches (typically main and dev)
 and uses an LLM to generate readable, user-focused release notes.
 
-Uses litellm + instructor directly to avoid cognee's dotenv.load_dotenv(override=True)
-which can overwrite CI environment variables with .env file placeholders.
+Calls cognee's NativeLiteLLMAdapter directly, with LLM_API_KEY / LLM_MODEL read
+from the environment before cognee is imported: importing cognee loads a local
+.env with override=True, which would replace them with .env placeholders.
 """
 
 import argparse
 import asyncio
+import logging
 import os
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def run_git_command(command: list[str]) -> str:
@@ -54,6 +58,7 @@ def get_latest_release_tag(exclude: str | None = None) -> str | None:
                 return tag
         return None
     except Exception:
+        logger.debug("Falling back to None after error in get_latest_release_tag", exc_info=True)
         return None
 
 
@@ -133,7 +138,7 @@ def _parse_dependencies(pyproject_text: str) -> dict[str, str]:
                 deps[name] = spec
         return deps
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _parse_dependencies", exc_info=True)
 
     # Fallback: extract the [project].dependencies = [ ... ] array textually.
     match = re.search(r"^dependencies\s*=\s*\[(.*?)\]", pyproject_text, re.DOTALL | re.MULTILINE)
@@ -155,6 +160,7 @@ def get_dependency_changes(base_ref: str, target_ref: str) -> dict[str, list[str
     except SystemExit:
         return changes
     except Exception:
+        logger.debug("Falling back after error in get_dependency_changes", exc_info=True)
         return changes
 
     base_deps = _parse_dependencies(base_text)
@@ -177,9 +183,11 @@ def get_compatibility_info(target_ref: str) -> dict[str, str]:
     try:
         text = run_git_command(["git", "show", f"{target_ref}:pyproject.toml"])
     except Exception:
+        logger.debug("Ignoring exception in get_compatibility_info", exc_info=True)
         try:
             text = (Path(__file__).parent.parent / "pyproject.toml").read_text()
         except Exception:
+            logger.debug("Falling back after error in get_compatibility_info", exc_info=True)
             return info
 
     py_match = re.search(r'^requires-python\s*=\s*["\']([^"\']+)["\']', text, re.MULTILINE)
@@ -203,18 +211,16 @@ async def generate_release_notes_with_llm(
 ) -> Any:
     """Use LLM to generate human-friendly release notes.
 
-    Uses litellm + instructor directly instead of cognee's LLM client
-    to avoid cognee's dotenv.load_dotenv(override=True) overwriting
-    CI environment variables.
+    Uses cognee's NativeLiteLLMAdapter with the credentials read before
+    cognee is imported, since that import loads a local .env over the
+    environment.
     """
     try:
-        import instructor
-        import litellm
         from pydantic import BaseModel, Field
     except ImportError as e:
         print(f"Error: Required dependencies not available: {e}", file=sys.stderr)
         print(
-            "Please ensure litellm, instructor, and pydantic are installed.",
+            "Please ensure pydantic is installed.",
             file=sys.stderr,
         )
         return None
@@ -314,19 +320,21 @@ Create engaging release notes that help users understand what's new and improved
 """
 
     try:
-        client = instructor.from_litellm(litellm.acompletion)
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text_input},
-            ],
-            response_model=ReleaseNotes,
-            api_key=api_key,
-            max_retries=2,
+        # Imported here, after LLM_API_KEY / LLM_MODEL are read: importing cognee
+        # loads a local .env over the environment.
+        from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+            NativeLiteLLMAdapter,
+        )
+
+        adapter = NativeLiteLLMAdapter(api_key=api_key, model=model, max_completion_tokens=16384)
+        response = await adapter.acreate_structured_output(
+            text_input=text_input, system_prompt=system_prompt, response_model=ReleaseNotes
         )
         return response
     except Exception as e:
+        logger.debug(
+            "Falling back to None after error in generate_release_notes_with_llm", exc_info=True
+        )
         print(f"Warning: LLM generation failed: {e}", file=sys.stderr)
         return None
 
@@ -405,7 +413,7 @@ def format_release_notes(
     compat_info: dict[str, str] | None = None,
 ) -> str:
     """Format structured release notes into markdown."""
-    date_str = datetime.now().strftime("%Y-%m-%d")
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     md = f"# {get_release_title(notes, version)}\n\n"
     md += f"**Release Date:** {date_str}\n"
@@ -522,6 +530,7 @@ async def main():
             else:
                 version = "unknown"
         except Exception as e:
+            logger.debug("Ignoring exception in main", exc_info=True)
             print(f"Warning: Could not extract version: {e}", file=sys.stderr)
             version = "unknown"
 

@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import networkx as nx
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Fixtures — real get_graph_data() shape
 # ---------------------------------------------------------------------------

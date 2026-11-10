@@ -28,13 +28,13 @@ def _source_doc():
 
 def _manifest(row_id):
     return {
-        "tables": {
-            "people": {"schema_info": {"columns": {}}, "foreign_keys": [], "dlt_db_name": "db"}
-        },
+        "tables": {"people": {"schema_info": {"columns": {}}, "foreign_keys": []}},
         "rows": [
             {
                 "node_id": str(row_id),
                 "table_name": "people",
+                "primary_key_column": "id",
+                "primary_key_value": "1",
                 "fk_references": [],
                 "column_values": {},
             }
@@ -53,6 +53,11 @@ def emit_mock(monkeypatch):
     return mock
 
 
+def _table_names(tables: dict) -> set[str]:
+    """Emitted tables are keyed per source document; their names are in the values."""
+    return {meta["name"] for meta in tables.values()}
+
+
 @pytest.mark.asyncio
 async def test_two_contexts_do_not_share_dedup_state(monkeypatch, emit_mock):
     """Two data items (two sources/datasets) must both emit their schema."""
@@ -69,13 +74,21 @@ async def test_two_contexts_do_not_share_dedup_state(monkeypatch, emit_mock):
     # Both calls emitted the schema tables — B was not suppressed by A's state.
     first_tables = emit_mock.await_args_list[0].args[0]
     second_tables = emit_mock.await_args_list[1].args[0]
-    assert "people" in first_tables
-    assert "people" in second_tables
+    assert "people" in _table_names(first_tables)
+    assert "people" in _table_names(second_tables)
 
     # And the dedup sets are distinct objects per context.
     assert ctx_a.extras["dlt_emitted_schema_docs"] is not ctx_b.extras["dlt_emitted_schema_docs"]
     assert (
         ctx_a.extras["dlt_emitted_value_node_ids"] is not ctx_b.extras["dlt_emitted_value_node_ids"]
+    )
+    assert (
+        ctx_a.extras["dlt_emitted_column_node_ids"]
+        is not ctx_b.extras["dlt_emitted_column_node_ids"]
+    )
+    assert (
+        ctx_a.extras["dlt_emitted_has_value_edges"]
+        is not ctx_b.extras["dlt_emitted_has_value_edges"]
     )
 
 
@@ -94,7 +107,7 @@ async def test_same_context_dedups_schema_across_batches(monkeypatch, emit_mock)
     await extract_dlt_source_edges(_batch(doc, row_a), ctx=ctx)
     await extract_dlt_source_edges(_batch(doc, row_b), ctx=ctx)
 
-    assert "people" in emit_mock.await_args_list[0].args[0]
+    assert "people" in _table_names(emit_mock.await_args_list[0].args[0])
     assert emit_mock.await_args_list[1].args[0] == {}  # schema deduped
     # Row records still emitted for the second batch.
     second_rows = emit_mock.await_args_list[1].args[1]
@@ -115,8 +128,8 @@ async def test_ctx_none_direct_call_uses_fresh_state(monkeypatch, emit_mock):
     await extract_dlt_source_edges(_batch(doc, row_id), ctx=None)
 
     # No cross-call state: both calls emit the schema.
-    assert "people" in emit_mock.await_args_list[0].args[0]
-    assert "people" in emit_mock.await_args_list[1].args[0]
+    assert "people" in _table_names(emit_mock.await_args_list[0].args[0])
+    assert "people" in _table_names(emit_mock.await_args_list[1].args[0])
 
 
 @pytest.mark.asyncio
@@ -126,13 +139,14 @@ async def test_dlt_rows_index_into_their_own_collection(monkeypatch):
     DltRow_text for row-aware retrieval. The pipeline rebuilds
     data-point classes (copy_model keeps only the class NAME and fields),
     so the collection name must survive that rebuild too."""
-    from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
     from cognee.modules.chunking.models.DltRow import DltRow
+    from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
     from cognee.modules.data.processing.document_types import DltSourceDocument
     from cognee.modules.storage.utils import copy_model
     from cognee.tasks.storage.index_data_points import index_data_points as run_indexing
 
     chunk = DltRow(
+        name="people:1",
         id=uuid4(),
         text="row text",
         chunk_size=2,

@@ -5,10 +5,10 @@ async-generator shape used by ``run_pipeline_per_dataset``.
 """
 
 import asyncio
-from uuid import uuid4
-import pytest
 from unittest.mock import patch
+from uuid import uuid4
 
+import pytest
 
 DATASET_QUEUE_MODULE = "cognee.infrastructure.databases.dataset_queue"
 GET_DATASET_QUEUE_SETTINGS = f"{DATASET_QUEUE_MODULE}.queue.get_dataset_queue_settings"

@@ -10,7 +10,6 @@ Uses inline reimplementation to avoid the cognee.__init__ import chain
 """
 
 from uuid import uuid4
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -22,14 +21,14 @@ class DataPoint(BaseModel):
 
     id: object = Field(default_factory=uuid4)
     version: int = 1
-    topological_rank: Optional[int] = 0
-    source_pipeline: Optional[str] = None
-    source_task: Optional[str] = None
+    topological_rank: int | None = 0
+    source_pipeline: str | None = None
+    source_task: str | None = None
 
 
 class ChunkDP(DataPoint):
     text: str = ""
-    contains: Optional[List] = None
+    contains: list | None = None
 
 
 def _stamp_provenance(
@@ -75,7 +74,7 @@ def _stamp_provenance(
             _stamp_provenance(item, pipeline_name, task_name, visited, task_index)
 
 
-def _simulate_pipeline_run(task_names: List[str], outputs_per_task):
+def _simulate_pipeline_run(task_names: list[str], outputs_per_task):
     """Simulate handle_task's rank-assignment loop.
 
     Returns the produced DataPoints in order so each task's rank can be asserted.
@@ -83,7 +82,7 @@ def _simulate_pipeline_run(task_names: List[str], outputs_per_task):
     ``outputs_per_task`` is a list of DataPoints (or lists of DataPoints) — one
     entry per task. Each entry is what that task "produces".
     """
-    sequence: List[str] = []
+    sequence: list[str] = []
     visited: set = set()
     produced = []
 
@@ -130,7 +129,7 @@ def test_same_task_repeated_keeps_same_rank():
     dp_b = DataPoint(id=uuid4())
     dp_c = DataPoint(id=uuid4())
 
-    sequence: List[str] = []
+    sequence: list[str] = []
     visited: set = set()
 
     # Streaming pattern: chunk task fires once, extract task fires twice

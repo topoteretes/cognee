@@ -1,5 +1,6 @@
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
@@ -515,24 +516,24 @@ async def test_combined_mode_internal_batch_does_not_fail_with_session_cache():
 
 @pytest.mark.asyncio
 async def test_get_retrieved_objects_and_context_handle_empty_graph():
+    """An empty graph is a loud state error (NoDataError -> 404 over the API),
+    not a quiet miss (SDK-270 / gh #3728)."""
+    from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+
     retriever = GraphCompletionDecompositionRetriever()
 
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=True)
 
-    with patch(
-        "cognee.modules.retrieval.graph_completion_decomposition_retriever.get_unified_engine",
-        new_callable=AsyncMock,
-        return_value=_make_unified_mock(mock_graph_engine),
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_decomposition_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+            return_value=_make_unified_mock(mock_graph_engine),
+        ),
+        pytest.raises(NoDataError, match="knowledge graph is empty"),
     ):
-        objects = await retriever.get_retrieved_objects(query="Original query")
-        context = await retriever.get_context_from_objects(
-            query="Original query",
-            retrieved_objects=objects,
-        )
-
-    assert objects == []
-    assert context == ""
+        await retriever.get_retrieved_objects(query="Original query")
 
 
 @pytest.mark.asyncio
@@ -561,14 +562,16 @@ async def test_ensure_state_raises_for_missing_query():
 async def test_ensure_state_raises_when_retrieval_does_not_initialize_state():
     retriever = GraphCompletionDecompositionRetriever()
 
-    with patch.object(
-        retriever,
-        "get_retrieved_objects",
-        new_callable=AsyncMock,
-        return_value=[],
+    with (
+        patch.object(
+            retriever,
+            "get_retrieved_objects",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        pytest.raises(QueryValidationError, match="Failed to initialize decomposition state"),
     ):
-        with pytest.raises(QueryValidationError, match="Failed to initialize decomposition state"):
-            await retriever._ensure_state("Original query")
+        await retriever._ensure_state("Original query")
 
 
 @pytest.mark.asyncio

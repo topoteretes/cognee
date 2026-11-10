@@ -1,5 +1,3 @@
-from typing import Optional
-
 from starlette.requests import HTTPConnection
 from starlette.websockets import WebSocket
 
@@ -9,8 +7,8 @@ WEBSOCKET_QUERY_PARAM_NAME = "token"
 
 
 async def resolve_websocket_query_param_fallback(
-    request: HTTPConnection, primary_token: Optional[str]
-) -> Optional[str]:
+    request: HTTPConnection, primary_token: str | None
+) -> str | None:
     """Fall back to a ``?token=`` query parameter when a header-based scheme found nothing.
 
     Browsers cannot set custom headers when opening a WebSocket, so a header

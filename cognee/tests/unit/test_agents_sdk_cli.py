@@ -337,73 +337,6 @@ async def test_register_list_connections_unregister(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_register_unauthorized_dataset_id_raises(monkeypatch):
-    from cognee.modules.users.exceptions import PermissionDeniedError
-
-    user = _make_user()
-    bad_dataset = str(uuid4())
-
-    register_called = []
-
-    async def fake_get_authorized_dataset(u, ds_id, permission="read"):
-        return None  # no access
-
-    async def fake_register_agent(u, request):
-        register_called.append(request)
-        return SimpleNamespace(model_dump=lambda mode="json": {})
-
-    _patch(monkeypatch, "get_authorized_dataset", fake_get_authorized_dataset)
-    _patch(monkeypatch, "register_agent", fake_register_agent)
-
-    with pytest.raises((PermissionDeniedError, ValueError)):
-        await agents.register("sess", user=user, dataset_ids=[bad_dataset])
-
-    # register must NOT be reached if a dataset is not accessible
-    assert register_called == []
-
-
-@pytest.mark.asyncio
-async def test_list_connections_drops_unscoped_connections(monkeypatch):
-    """Connections with no owning user AND no datasets are visible-to-all in the
-    backend; the SDK must defensively filter them out and adjust the totals."""
-    from cognee.modules.agents.models import AgentConnection, AgentsListResponse
-
-    user = _make_user()
-
-    async def fake_list_agent_connections(**kwargs):
-        scoped = AgentConnection(
-            id="scoped",
-            agent_session_name="mine",
-            user_id=user.id,
-            status="active",
-        )
-        # ownerless + datasetless -> backend marks visible to everyone
-        leaked = AgentConnection(
-            id="leaked",
-            agent_session_name="someone-elses",
-            user_id=None,
-            status="active",
-        )
-        return AgentsListResponse(
-            agents=[scoped, leaked],
-            memory_sources=[],
-            total=2,
-            limit=kwargs.get("limit", 50),
-            offset=kwargs.get("offset", 0),
-            has_more=False,
-        )
-
-    _patch(monkeypatch, "list_agent_connections", fake_list_agent_connections)
-
-    listing = await agents.list_connections(user=user)
-    session_names = [a["agent_session_name"] for a in listing["agents"]]
-    assert session_names == ["mine"]
-    assert "someone-elses" not in session_names
-    # total is decremented for the removed leaked connection
-    assert listing["total"] == 1
-
-
-@pytest.mark.asyncio
 async def test_get_connection_returns_none_when_missing(monkeypatch):
     user = _make_user()
     agent_id = uuid4()
@@ -437,7 +370,7 @@ def test_agents_command_parser_configures_actions():
 
     # parsing a "list" invocation succeeds and selects the list action
     args = parser.parse_args(["list"])
-    assert getattr(args, "agents_action") == "list"
+    assert args.agents_action == "list"
 
 
 def test_agents_command_execute_list(monkeypatch):

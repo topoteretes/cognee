@@ -35,13 +35,13 @@ from cognee.eval_framework.beam.session_io import (
     session_id_for,
     write_json,
 )
+from cognee.modules.session_distillation.distill import DistillationCallsFailedError
 
 # Keep Cognee's normal logging quiet; this script prints its own progress.
 os.environ["LOG_LEVEL"] = "ERROR"
 os.environ["COGNEE_LOG_FILE"] = "false"
 os.environ["COGNEE_CLI_MODE"] = "true"
 os.environ.setdefault("CACHING", "true")
-os.environ.setdefault("CACHE_BACKEND", "fs")
 os.environ.setdefault("AUTO_FEEDBACK", "true")
 
 
@@ -67,17 +67,16 @@ def import_cognee_modules():
             apply_session_turn_analysis,
         )
 
-    with open(os.devnull, "w") as devnull:
-        with redirect_stdout(devnull), redirect_stderr(devnull):
-            import cognee
-            from cognee.infrastructure.session.feedback_detection import (
-                analyze_turn_for_session_context,
-            )
-            from cognee.infrastructure.session.get_session_manager import get_session_manager
-            from cognee.infrastructure.session.session_turn import apply_session_turn_analysis
-            from cognee.memify_pipelines.global_context_index import global_context_index_pipeline
-            from cognee.modules.chunking.JsonListChunker import JsonListChunker
-            from cognee.modules.users.methods.get_default_user import get_default_user
+    with open(os.devnull, "w") as devnull, redirect_stdout(devnull), redirect_stderr(devnull):
+        import cognee
+        from cognee.infrastructure.session.feedback_detection import (
+            analyze_turn_for_session_context,
+        )
+        from cognee.infrastructure.session.get_session_manager import get_session_manager
+        from cognee.infrastructure.session.session_turn import apply_session_turn_analysis
+        from cognee.memify_pipelines.global_context_index import global_context_index_pipeline
+        from cognee.modules.chunking.JsonListChunker import JsonListChunker
+        from cognee.modules.users.methods.get_default_user import get_default_user
 
     return (
         cognee,
@@ -109,11 +108,11 @@ def utc_now() -> str:
 
 
 def timestamp() -> str:
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
 
 def print_step(message: str) -> None:
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
+    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {message}", flush=True)
 
 
 def configure_quiet_logging() -> None:
@@ -185,6 +184,7 @@ async def build_global_context_index(args: argparse.Namespace, dataset_name: str
         user=user,
         dataset=dataset_name,
         run_in_background=False,
+        method=args.global_context_method,
         bucketing_strategy=args.global_context_bucketing_strategy,
         max_bucket_size=args.global_context_max_bucket_size,
         rebuild=args.global_context_rebuild,
@@ -329,11 +329,18 @@ async def distill_session(
 ) -> dict[str, Any]:
     started = time.monotonic()
     print_step(f"Session memory {session_id}: distilling into dataset {dataset_name}")
-    result = await cognee.session.distill_session(
-        session_id,
-        dataset=dataset_name,
-        user=user,
-    )
+    try:
+        result = await cognee.session.distill_session(
+            session_id,
+            dataset=dataset_name,
+            user=user,
+        )
+    except DistillationCallsFailedError as exc:
+        # Surviving lessons were already published and the watermark stayed
+        # put, so a later distill retries the window; one flaky LLM batch
+        # should not kill a long eval run.
+        print_step(f"Session memory {session_id}: distillation partially failed: {exc}")
+        return {"status": "errored", "error": str(exc)}
     seconds = time.monotonic() - started
     payload = distillation_report_payload(result, seconds)
     print_step(
@@ -466,6 +473,7 @@ def build_report(
             "candidate_concurrency": args.candidate_concurrency,
             "skip_global_context_index": args.skip_global_context_index,
             "parallel_post_processing": args.parallel_post_processing,
+            "global_context_method": args.global_context_method,
             "global_context_bucketing_strategy": args.global_context_bucketing_strategy,
             "global_context_max_bucket_size": args.global_context_max_bucket_size,
             "global_context_rebuild": args.global_context_rebuild,
@@ -588,6 +596,7 @@ def build_parser() -> argparse.ArgumentParser:
             "index may not include the distillate produced by that same session."
         ),
     )
+    parser.add_argument("--global-context-method", default="llm")
     parser.add_argument("--global-context-bucketing-strategy", default="graph")
     parser.add_argument("--global-context-max-bucket-size", type=int, default=4)
     parser.add_argument("--global-context-rebuild", action="store_true")

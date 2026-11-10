@@ -1,7 +1,7 @@
 """Unit tests for session QA vector recall and active-context helpers."""
 
 import importlib
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -47,7 +47,7 @@ def _entry(section, content, **kwargs):
         section=section,
         content=content,
         normalized_content=normalize_content(content),
-        created_at=kwargs.pop("created_at", datetime.utcnow().isoformat()),
+        created_at=kwargs.pop("created_at", datetime.now(timezone.utc).isoformat()),
         **kwargs,
     )
 
@@ -312,9 +312,13 @@ class TestSessionQaVectorHelpers:
             _get_vector_engine,
         )
 
-        await delete_session_qa_vectors(user_id="u1", session_id="s1")
+        await delete_session_qa_vectors([("u1", "s1"), ("u2", "s2")])
 
-        assert vector_engine.remove_tags_call == [session_scope_tag("u1", "s1")]
+        # One call for every session, so the store is scanned once.
+        assert vector_engine.remove_tags_call == [
+            session_scope_tag("u1", "s1"),
+            session_scope_tag("u2", "s2"),
+        ]
 
 
 class TestRankerRelevance:
@@ -332,7 +336,7 @@ class TestRankerRelevance:
         # Pin one timestamp for both entries: score() has a recency term, so
         # per-entry utcnow() stamps make the scores differ by an ulp whenever
         # the two _entry() calls land a few milliseconds apart.
-        created_at = datetime.utcnow().isoformat()
+        created_at = datetime.now(timezone.utc).isoformat()
         aligned = _entry("rules", "same words", embedding=[1.0, 0.0], created_at=created_at)
         misaligned = _entry("rules", "same words", embedding=[0.0, 1.0], created_at=created_at)
 

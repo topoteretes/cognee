@@ -1,17 +1,25 @@
-# ruff: noqa: E402
+"""Show ACL enforcement: cross-user recall and remember are denied until read access is granted.
+
+user_1 (AI dataset from a bundled PDF) and user_2 (QUANTUM text) each own a dataset. user_1's
+recall and remember against QUANTUM hit PermissionDeniedError; after user_2 calls
+authorized_give_permission_on_datasets with "read", user_1's recall succeeds and is printed.
+
+Requires: LLM_API_KEY and ENABLE_BACKEND_ACCESS_CONTROL=True.
+Run: uv run python examples/demos/permissions/data_access_control_example.py
+"""
+
+import asyncio
 import os
 import pathlib
-import asyncio
 from uuid import UUID
 
 import cognee
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.shared.logging_utils import get_logger
+from cognee.modules.engine.operations.setup import setup
 from cognee.modules.search.types import SearchType
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import create_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.modules.engine.operations.setup import setup
-from cognee.shared.logging_utils import setup_logging, CRITICAL
+from cognee.shared.logging_utils import CRITICAL, get_logger, setup_logging
 
 logger = get_logger()
 

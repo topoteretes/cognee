@@ -1,3 +1,14 @@
+"""Tune HYBRID_COMPLETION recall between passage-, entity-, fact-focused and balanced context.
+
+The same question is recalled with only_context=True under four retriever_specific_config mixes
+(chunks_top_k, entities_top_k, max_edges_per_entity, facts_top_k) so the printed prompts (the full
+LLM input, retrieval context included) show what each source contributes, then answered once with
+the balanced mix.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/hybrid_retrieval_recall.py
+"""
+
 import asyncio
 
 import cognee

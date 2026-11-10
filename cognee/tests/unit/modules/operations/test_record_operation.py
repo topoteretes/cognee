@@ -12,6 +12,7 @@ Runs against a real temporary SQLite database — no LLM, no network.
 
 import asyncio
 import importlib
+import sys
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -159,6 +160,55 @@ async def test_persistence_failure_never_breaks_the_operation(ops_engine, monkey
 
 
 @pytest.mark.asyncio
+async def test_missing_store_logs_debug_not_warning(ops_engine, monkeypatch, caplog):
+    """An unreachable relational store must not splash a warning traceback.
+
+    Prune deletes the very database the ledger writes to, and nothing exists
+    before setup() — both are normal in the quickstart examples, so the
+    skipped write logs at debug only."""
+    from sqlalchemy.exc import OperationalError
+
+    def _store_gone():
+        raise OperationalError("stmt", None, Exception("unable to open database file"))
+
+    monkeypatch.setattr(record_operation_mod, "get_relational_engine", _store_gone)
+
+    with caplog.at_level("DEBUG"):
+        async with record_operation("prune_data"):
+            pass
+
+    warnings = [
+        r for r in caplog.records if r.levelname == "WARNING" and "persist" in r.getMessage()
+    ]
+    assert warnings == []
+    debugs = [
+        r
+        for r in caplog.records
+        if r.levelname == "DEBUG" and "relational store unavailable" in r.getMessage()
+    ]
+    assert len(debugs) == 1
+
+
+@pytest.mark.asyncio
+async def test_unexpected_persist_failure_still_warns(ops_engine, monkeypatch, caplog):
+    """Only the store-unavailable class is quiet; other failures stay loud."""
+
+    def _broken_engine():
+        raise RuntimeError("relational database is gone")
+
+    monkeypatch.setattr(record_operation_mod, "get_relational_engine", _broken_engine)
+
+    with caplog.at_level("DEBUG"):
+        async with record_operation("prune_data"):
+            pass
+
+    warnings = [
+        r for r in caplog.records if r.levelname == "WARNING" and "persist" in r.getMessage()
+    ]
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
 async def test_persistence_failure_does_not_mask_operation_error(ops_engine, monkeypatch):
     """When both the operation and the write fail, the operation's error wins."""
 
@@ -229,3 +279,133 @@ async def test_operation_rows_are_invisible_to_pipeline_status_readers(ops_engin
     statuses = await get_pipeline_status_mod.get_pipeline_status([dataset_id], "cognify_pipeline")
 
     assert statuses == {str(dataset_id): PipelineRunStatus.DATASET_PROCESSING_COMPLETED}
+
+
+@pytest.mark.asyncio
+async def test_background_improve_cancelled_before_start_persists_one_failed_scrubbed_row(
+    ops_engine, monkeypatch
+):
+    from cognee.infrastructure.background_tasks import wait_for_background_tasks
+    from cognee.tests.unit.api.v1.improve.conftest import FakeStage, ImproveHarness
+
+    harness = ImproveHarness(monkeypatch)
+    harness.use_stages([FakeStage("a")])
+    monkeypatch.setattr(
+        harness.improve_mod, "record_operation", record_operation_mod.record_operation
+    )
+    monkeypatch.setattr(
+        harness.improve_mod, "finish_operation", record_operation_mod.finish_operation
+    )
+    secret = "sk-dummycredential123456789"
+
+    result = await harness.improve(run_in_background=True)
+    result._task.cancel(secret)
+    with pytest.raises(asyncio.CancelledError):
+        await result._task
+    assert await wait_for_background_tasks(timeout=2)
+
+    assert result.finished and result.status == "errored"
+    assert secret not in result.model_dump_json()
+    rows = await _fetch_rows(ops_engine)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.operation_name == "improve"
+    assert row.outcome == "failed"
+    assert row.error_class == "CancelledError"
+    assert secret not in (row.error_message or "")
+    if sys.version_info >= (3, 11):
+        # Python 3.10 does not hand a done callback the cancel message, so the
+        # row has no message to scrub there.
+        assert "[secret]" in row.error_message
+    assert row.dataset_id == harness.dataset.id
+    assert row.user_id == harness.user.id
+    assert row.ended_at is not None
+
+
+@pytest.mark.asyncio
+async def test_deferred_close_writes_nothing_until_finish_operation(ops_engine):
+    """A deferred operation's row lands when the background work ends, not at launch."""
+    async with record_operation("improve", user=_fake_user()) as operation:
+        operation.defer_close()
+
+    assert await _fetch_rows(ops_engine) == []  # the scope exit wrote nothing
+
+    await record_operation_mod.finish_operation(operation)
+
+    rows = await _fetch_rows(ops_engine)
+    assert len(rows) == 1
+    assert rows[0].operation_name == "improve"
+    assert rows[0].outcome == "succeeded"
+    assert rows[0].started_at <= rows[0].ended_at
+
+
+@pytest.mark.asyncio
+async def test_finish_operation_records_the_error(ops_engine):
+    async with record_operation("improve", user=_fake_user()) as operation:
+        operation.defer_close()
+
+    await record_operation_mod.finish_operation(operation, error=RuntimeError("boom"))
+
+    rows = await _fetch_rows(ops_engine)
+    assert len(rows) == 1
+    assert rows[0].outcome == "failed"
+    assert rows[0].error_class == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_deferred_work_still_records_a_failed_row(ops_engine):
+    """The improve ``_run_detached`` pattern: a cancelled background run must
+    not vanish — with the close deferred, not even a launch row exists, so the
+    write has to happen from the cancelled task's own cleanup."""
+    started = asyncio.Event()
+
+    async def detached(operation):
+        error: BaseException | None = None
+        try:
+            started.set()
+            await asyncio.Event().wait()  # blocks until cancelled
+        except BaseException as caught:
+            error = caught
+            raise
+        finally:
+            await record_operation_mod.finish_operation(operation, error=error)
+
+    async with record_operation("improve", user=_fake_user()) as operation:
+        operation.defer_close()
+    task = asyncio.create_task(detached(operation))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    rows = await _fetch_rows(ops_engine)
+    assert len(rows) == 1
+    assert rows[0].outcome == "failed"
+    assert rows[0].error_class == "CancelledError"
+
+
+@pytest.mark.asyncio
+async def test_outcome_override_marks_a_clean_exit_failed(ops_engine):
+    """set_outcome lets an operation record failure its body did not raise."""
+    from cognee.modules.pipelines.models import OperationOutcome
+
+    async with record_operation("improve", user=_fake_user()) as operation:
+        operation.set_outcome(OperationOutcome.FAILED)
+
+    rows = await _fetch_rows(ops_engine)
+    assert len(rows) == 1
+    assert rows[0].outcome == "failed"
+
+
+@pytest.mark.asyncio
+async def test_raised_exception_wins_over_the_override(ops_engine):
+    from cognee.modules.pipelines.models import OperationOutcome
+
+    with pytest.raises(ValueError, match="boom"):
+        async with record_operation("improve", user=_fake_user()) as operation:
+            operation.set_outcome(OperationOutcome.SUCCEEDED)
+            raise ValueError("boom")
+
+    rows = await _fetch_rows(ops_engine)
+    assert rows[0].outcome == "failed"
+    assert rows[0].error_class == "ValueError"

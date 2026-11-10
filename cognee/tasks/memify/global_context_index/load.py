@@ -7,13 +7,8 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
 
 from .constants import SUMMARIZED_IN, SUMMARY_GRAPH_NODE_TYPES
+from .ids import dataset_id_from_context
 from .models import GlobalContextIndexUpdateData, SummaryNode
-
-
-def dataset_id_from_context(ctx: PipelineContext | None) -> str:
-    dataset = ctx.dataset if ctx else None
-    dataset_id = getattr(dataset, "id", dataset)
-    return str(dataset_id) if dataset_id is not None else ""
 
 
 def global_context_summary_level(attributes: dict[str, Any]) -> int | None:

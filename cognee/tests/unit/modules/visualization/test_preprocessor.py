@@ -14,6 +14,8 @@ from raw graph adapter output. These tests pin the contract:
     already reads.
 """
 
+import json
+
 import pytest
 
 from cognee.modules.visualization.preprocessor import (
@@ -134,6 +136,46 @@ def test_stage_falls_through_to_other_for_unknown_types():
     edges_data = []
     result = preprocess((nodes_data, edges_data))
     assert result.nodes[0]["stage"] == "other"
+
+
+_IDENTITY = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+
+@pytest.mark.parametrize("metadata", [_IDENTITY, json.dumps(_IDENTITY)])
+def test_custom_graph_model_node_with_identity_is_an_entity(metadata):
+    # A custom graph_model node keeps its class name as its type; metadata arrives
+    # as a dict from Ladybug and as a JSON string from Neo4j.
+    nodes_data = [("dana", {"type": "Person", "name": "Dana Kim", "metadata": metadata})]
+    result = preprocess((nodes_data, []))
+    assert result.nodes[0]["stage"] == "entity"
+    assert result.nodes[0]["entity_type"] == "Person"
+
+
+def test_custom_graph_model_node_without_identity_stays_other():
+    # A container root such as CompanyGraph declares no identity.
+    nodes_data = [("root", {"type": "CompanyGraph", "metadata": {"index_fields": []}})]
+    result = preprocess((nodes_data, []))
+    assert result.nodes[0]["stage"] == "other"
+
+
+@pytest.mark.parametrize(
+    "node_type", ["EdgeType", "NodeSet", "Skill", "SkillRun", "SkillImprovementProposal"]
+)
+def test_builtin_types_with_identity_keep_their_stage(node_type):
+    nodes_data = [("n", {"type": node_type, "name": "n", "metadata": _IDENTITY})]
+    result = preprocess((nodes_data, []))
+    assert result.nodes[0]["stage"] == "other"
+
+
+def test_mapped_types_keep_their_mapped_stage_even_with_identity():
+    nodes_data = [
+        ("e", {"type": "Entity", "name": "Alice", "metadata": _IDENTITY}),
+        ("t", {"type": "EntityType", "name": "Person", "metadata": _IDENTITY}),
+        ("s", {"type": "NodeSet", "name": "hr_database", "metadata": {"index_fields": []}}),
+    ]
+    result = preprocess((nodes_data, []))
+    stages = {n["id"]: n["stage"] for n in result.nodes}
+    assert stages == {"e": "entity", "t": "type", "s": "other"}
 
 
 def test_visual_rank_uses_stamped_topological_rank():
@@ -337,7 +379,7 @@ def test_schema_graph_falls_back_to_type_graph_when_no_schema_nodes():
     assert "type:Person" in type_node_ids
 
 
-def test_schema_graph_uses_schema_nodes_when_present():
+def test_schema_graph_draws_one_card_per_table_in_the_type_graph_shape():
     nodes_data = [
         (
             "users",
@@ -360,8 +402,9 @@ def test_schema_graph_uses_schema_nodes_when_present():
     ]
     edges_data = [("posts", "users", "has_relationship", {"relationship_name": "foreign_key"})]
     result = preprocess((nodes_data, edges_data))
-    schema_node_types = {n.get("type") for n in result.schema_graph["nodes"]}
-    assert "SchemaTable" in schema_node_types
+    cards = {n["name"]: n for n in result.schema_graph["nodes"] if n["type"] == "GraphNodeType"}
+    assert set(cards) == {"users", "posts"}
+    assert [f["name"] for f in cards["users"]["fields"]] == ["id"]
 
 
 def test_schema_type_nodes_resolve_semantic_types_via_is_a():
@@ -573,10 +616,56 @@ def test_operation_layer_maps_operations_to_present_types():
     feedback_targets = {
         (link["target"], link["effect"])
         for link in schema["operation_links"]
-        if link["source"] == "op:apply_feedback_weights"
+        if link["source"] == "op:feedback_weights"
     }
     assert ("type:Person", "modifies") in feedback_targets
 
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_a_foreign_key_becomes_a_relationship_edge_between_the_table_cards():
+    """The Schema view reads GraphNodeType cards and GraphRelationshipType
+    edges; raw SchemaTable and SchemaRelationship nodes were dropped there, so
+    a SQL dataset's schema tab drew nothing."""
+    tables = [
+        (name, {"type": "SchemaTable", "name": name, "columns": "[]"}) for name in ("pins", "parts")
+    ]
+    foreign_key = (
+        "fk",
+        {
+            "type": "SchemaRelationship",
+            "name": "pins_part_id",
+            "source_table": "pins",
+            "target_table": "parts",
+            "relationship_type": "foreign_key",
+        },
+    )
+
+    schema_graph = preprocess(([*tables, foreign_key], [])).schema_graph
+
+    edges = [n for n in schema_graph["nodes"] if n["type"] == "GraphRelationshipType"]
+    assert [(e["source_type"], e["target_type"], e["relationship_label"]) for e in edges] == [
+        ("pins", "parts", "foreign_key")
+    ]
+
+
+def test_a_relationship_to_a_table_that_is_not_there_is_not_drawn():
+    nodes = [
+        ("pins", {"type": "SchemaTable", "name": "pins", "columns": "[]"}),
+        (
+            "fk",
+            {
+                "type": "SchemaRelationship",
+                "name": "pins_part_id",
+                "source_table": "pins",
+                "target_table": "parts",
+                "relationship_type": "foreign_key",
+            },
+        ),
+    ]
+
+    schema_graph = preprocess((nodes, [])).schema_graph
+
+    assert [n["type"] for n in schema_graph["nodes"]] == ["GraphNodeType"]

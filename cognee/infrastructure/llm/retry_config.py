@@ -1,7 +1,7 @@
 """Shared tenacity retry policy for LLM structured-output calls.
 
-Used by every structured-output framework — the litellm/instructor adapters and
-the BAML integration alike. Each ``acreate_structured_output`` retries until BOTH
+Used by every structured-output framework — the litellm_native adapter, the
+legacy per-provider adapters and the BAML integration alike. Each ``acreate_structured_output`` retries until BOTH
 floors are satisfied: at least ``LLM_MIN_RETRY_ATTEMPTS`` attempts AND at least
 ``LLM_MIN_RETRY_SECONDS`` of elapsed wall-clock time.
 
@@ -18,7 +18,6 @@ retryable.
 
 import asyncio
 
-import litellm
 from tenacity import retry_if_exception, stop_after_attempt, stop_after_delay
 
 from cognee.infrastructure.llm.exceptions import (
@@ -53,8 +52,8 @@ _TERMINAL_QUOTA_PATTERNS = (
 def is_quota_or_billing_error(error: BaseException) -> bool:
     """True when the error, or its ``__cause__`` chain, reports quota/billing exhaustion.
 
-    Walks ``__cause__`` (adapters/instructor wrap the provider error with
-    ``raise ... from``) but not ``__context__``, so an unrelated error merely
+    Walks ``__cause__`` (the adapters and their frameworks wrap the provider
+    error with ``raise ... from``) but not ``__context__``, so an unrelated error merely
     raised while handling a quota error is not misclassified.
     """
     seen: set[int] = set()
@@ -69,6 +68,10 @@ def is_quota_or_billing_error(error: BaseException) -> bool:
 
 
 def should_retry_llm_exception(error: BaseException) -> bool:
+    # Imported here, not at module scope: this module is on the ``import cognee``
+    # path and litellm (with the OpenAI SDK behind it) is half of that import.
+    import litellm
+
     non_retryable: tuple[type[BaseException], ...] = (
         asyncio.CancelledError,
         LLMQuotaExceededError,

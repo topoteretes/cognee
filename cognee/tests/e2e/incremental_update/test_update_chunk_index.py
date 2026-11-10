@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
 from cognee.tests.e2e.incremental_update.backend_env import (
     incremental_test_backend_env,
     reset_backend_state,
@@ -29,7 +30,7 @@ MARKER = re.compile(r"ENT[A-Z0-9]+")
 def chunk_move_env():
     root = Path(tempfile.mkdtemp(prefix="cognee_chunk_move_test_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
     os.environ.update(
         **incremental_test_backend_env(),

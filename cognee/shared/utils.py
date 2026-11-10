@@ -4,16 +4,18 @@ import asyncio
 import http.server
 import os
 import pathlib
+import re
 import socketserver
 import ssl
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import lru_cache
 from threading import Thread
 from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
-import aiohttp
-
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.telemetry_sender import TelemetrySender
 
 logger = get_logger()
 
@@ -25,11 +27,6 @@ TELEMETRY_REQUEST_TIMEOUT: int = int(os.getenv("TELEMETRY_REQUEST_TIMEOUT", "5")
 _TELEMETRY_API_KEY_TRACKING_SALT_ENV = "TELEMETRY_API_KEY_TRACKING_SALT"
 _DEFAULT_TELEMETRY_API_KEY_TRACKING_SALT = b"cognee.telemetry.api-key-tracking.v1"
 _TELEMETRY_API_KEY_TRACKING_ITERATIONS = 100_000
-
-# Strong refs for fire-and-forget telemetry tasks. asyncio only holds a weak
-# reference to a task, so without anchoring here the gc can collect an
-# in-flight telemetry request mid-run. Tasks remove themselves on done.
-_TELEMETRY_TASKS: set = set()
 
 
 def as_uuid(value) -> UUID | None:
@@ -86,7 +83,7 @@ def get_anonymous_id() -> str:
         else:
             anonymous_id = _ANON_ID_FILE.read_text(encoding="utf-8").strip()
     except Exception as e:
-        logger.warning("Could not create or read anonymous id file: %s", e)
+        logger.warning("Could not create or read anonymous id file: %s", e, exc_info=True)
         return "unknown-anonymous-id"
     return anonymous_id
 
@@ -118,21 +115,260 @@ def get_persistent_id() -> str:
         _PERSISTENT_ID_FILE.write_text(persistent_id, encoding="utf-8")
         return persistent_id
     except Exception as e:
-        logger.warning("Could not create or read persistent id file: %s", e)
+        logger.warning("Could not create or read persistent id file: %s", e, exc_info=True)
         return get_anonymous_id()
+
+
+# Property keys hashed (uuid5 fingerprint) in every telemetry event's
+# additional_properties before they leave the process. session_id/session_ids
+# and dataset names are user-chosen and may carry meaning; only a fingerprint
+# may leave — the one place enforcing what remember/improve previously hashed
+# by hand. A key holding a list is hashed element by element, so per-dataset
+# activity can still be grouped without the name. Elements that are UUIDs are
+# ids, not content, and pass through (the datasets status events put dataset
+# ids under the same key); fingerprinted elements carry the "fp:" prefix so a
+# row can tell an id from a fingerprint, since both are UUID-shaped.
+TELEMETRY_SANITIZED_PROPERTIES = ["url", "session_id", "session_ids", "datasets"]
+TELEMETRY_FINGERPRINT_PREFIX = "fp:"
+# Single dataset identifiers (remember/forget send ``dataset_name``, push/export
+# ``dataset``): a dataset *id* passes through, a dataset *name* leaves as
+# ``fp:`` + fingerprint — the rule the ``datasets`` list already follows.
+TELEMETRY_DATASET_NAME_PROPERTIES = ["dataset_name", "dataset"]
+
+
+# Deployments may override the operation context's origin for telemetry.
+TELEMETRY_ORIGIN_ENV = "TELEMETRY_ORIGIN"
+# A model setting that is a filesystem path (a local GGUF, a mounted checkpoint)
+# carries the account name in it. It leaves the process as this closed value.
+TELEMETRY_LOCAL_PATH_LABEL = "local_path"
+_PATH_LIKE_MODEL = re.compile(
+    r"^(/|~[/\\]|\.{1,2}[/\\]|[A-Za-z]:[/\\]|\\\\)|[/\\](Users|home|root)[/\\]"
+)
+
+
+def telemetry_origin() -> str:
+    """Use the same origin as run records, unless the deployment overrides it."""
+    from cognee.modules.operations.origin import get_operation_origin
+
+    return os.getenv(TELEMETRY_ORIGIN_ENV) or get_operation_origin()
+
+
+def telemetry_model_label(model: Any) -> Any:
+    """The model setting as telemetry may carry it: a path becomes ``local_path``.
+
+    Provider model names (``openai/gpt-5-mini``, ``ollama/phi4:latest``) pass
+    through. A filesystem path (``/Users/<name>/models/x.gguf``, ``C:\\models\\x``)
+    names the account and the machine layout, so only the closed label leaves.
+    """
+    if isinstance(model, str) and _PATH_LIKE_MODEL.search(model):
+        return TELEMETRY_LOCAL_PATH_LABEL
+    return model
+
+
+# How far an error event follows ``raise X from Y``: enough for the cognee
+# wrapper, the structured-output layer and the provider error underneath it.
+TELEMETRY_EXCEPTION_CHAIN_DEPTH = 4
+
+
+def _telemetry_root_error(error: BaseException) -> BaseException:
+    """The error an event is about.
+
+    A ``PipelineRunFailedError`` wraps the item error that actually broke as
+    ``first_error``; report that root cause, as the run record does.
+    """
+    first_error = getattr(error, "first_error", None)
+    return first_error if isinstance(first_error, BaseException) else error
+
+
+def _telemetry_exception_chain(error: BaseException) -> list[BaseException]:
+    """``error`` and what it was raised from, outermost first.
+
+    Follows ``__cause__`` (``raise X from Y``) and, unless the context was
+    suppressed (``raise X from None``), ``__context__`` (an error raised while
+    handling another). Bounded to ``TELEMETRY_EXCEPTION_CHAIN_DEPTH`` entries
+    and cycle-safe, so a malformed chain can never stall an emitter.
+    """
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while (
+        current is not None
+        and id(current) not in seen
+        and len(chain) < TELEMETRY_EXCEPTION_CHAIN_DEPTH
+    ):
+        chain.append(current)
+        seen.add(id(current))
+        if current.__cause__ is not None:
+            current = current.__cause__
+        elif not current.__suppress_context__:
+            current = current.__context__
+        else:
+            current = None
+    return chain
+
+
+def telemetry_integer(value) -> int | None:
+    """Read an optional diagnostic integer without invoking arbitrary conversions."""
+    if type(value) not in (int, float, str):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if isinstance(value, float) and number != value:
+        return None
+    return number
+
+
+@contextmanager
+def telemetry_guard():
+    """Isolate synchronous diagnostic construction/emission from application work.
+
+    Keep only telemetry inside this boundary. Cancellation and other control-flow
+    BaseExceptions still propagate; diagnostic defects are logged for debugging.
+    """
+    try:
+        yield
+    except Exception:
+        logger.debug("Telemetry skipped after a diagnostic failure", exc_info=True)
+
+
+def _telemetry_status_code(chain: list[BaseException]) -> int | None:
+    """The HTTP status closest to the failure, or None.
+
+    The innermost error in the chain that carries an integer ``status_code``
+    in 100–599: a provider's 429/401/503 before the cognee error's mapped
+    status, since the provider's is the one that says why.
+    """
+    for error in reversed(chain):
+        with telemetry_guard():
+            status_code = telemetry_integer(getattr(error, "status_code", None))
+            if status_code is not None and 100 <= status_code <= 599:
+                return status_code
+    return None
+
+
+def telemetry_exception_properties(error: BaseException) -> dict:
+    """What an error event says about its error: class names and a status, never a message.
+
+    ``exception_type`` is the root error's class name. cognee's LLM and
+    embedding layers wrap provider errors — ``raise LLMQuotaExceededError(...)
+    from error`` — so that class alone says a quota was exceeded, not whether
+    the provider answered 429, 401 or timed out. ``exception_chain`` lists the
+    classes of the ``__cause__``/``__context__`` chain outermost first (at most
+    ``TELEMETRY_EXCEPTION_CHAIN_DEPTH``); ``exception_cause`` is its innermost
+    class, present only when it differs from ``exception_type``; ``status_code``
+    is the innermost integer HTTP status any error in the chain carries (litellm's
+    provider errors and every ``CogneeApiError`` do). Both keys exist only when
+    there is a chain or a status: a bare ``ValueError`` reports its type alone.
+    """
+    chain = _telemetry_exception_chain(_telemetry_root_error(error))
+    names = [type(link).__name__ for link in chain]
+    properties: dict = {"exception_type": names[0]}
+    if len(names) > 1:
+        properties["exception_chain"] = names
+        if names[-1] != names[0]:
+            properties["exception_cause"] = names[-1]
+    status_code = _telemetry_status_code(chain)
+    if status_code is not None:
+        properties["status_code"] = status_code
+    return properties
+
+
+def telemetry_on_error(event_name: str):
+    """Emit ``event_name`` with the error's class when the wrapped coroutine fails.
+
+    The terminal event the Started/Completed pair of an operation lacks: without
+    it a failed ``search`` or ``recall`` is a Started with no end, indistinguishable
+    in the warehouse from a run that is still going. Carries the error's class,
+    cause chain and status (``telemetry_exception_properties``), never the
+    message. ``BaseException`` so a cancelled call ends too, as
+    ``run_tasks_with_telemetry`` does; the error is always re-raised, telemetry
+    never changes the outcome. The ``user`` argument of the call, when there is
+    one, is the event's identity.
+    """
+    import functools
+    import inspect
+
+    def decorate(func):
+        signature = inspect.signature(func)
+
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            try:
+                return await func(*args, **kwargs)
+            except BaseException as error:
+                try:
+                    user = signature.bind_partial(*args, **kwargs).arguments.get("user")
+                except TypeError:
+                    user = None
+                with telemetry_guard():
+                    send_telemetry(
+                        event_name,
+                        user if user is not None else "sdk",
+                        additional_properties=telemetry_exception_properties(error)
+                        | {"cognee_version": _cognee_version()},
+                    )
+                raise
+
+        return wrapper
+
+    return decorate
+
+
+def _cognee_version() -> str:
+    from cognee import __version__
+
+    return __version__
+
+
+def _fingerprint(value: str) -> str:
+    return str(uuid5(NAMESPACE_OID, value))
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        UUID(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _mask_dataset_name(value: Any, *, preserve_empty: bool = True) -> Any:
+    """A dataset id passes through; a dataset name leaves as ``fp:`` + fingerprint.
+
+    Ids are not content. Names are user-chosen and descriptive, so only a marked
+    fingerprint leaves the process. Empty strings stay empty (``forget`` sends
+    ``""`` for "no dataset"). Legacy list fields pass ``preserve_empty=False``
+    to keep fingerprinting empty strings; non-strings are untouched.
+    """
+    if isinstance(value, str) and (value or not preserve_empty) and not _is_uuid(value):
+        return TELEMETRY_FINGERPRINT_PREFIX + _fingerprint(value)
+    return value
 
 
 def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
     """
     Recursively replaces any property whose key matches one of `property_names`
     (e.g., ['url', 'path']) in a nested dict or list with a uuid5 hash
-    of its string value. Returns a new sanitized copy.
+    of its string value, or of each string element when the value is a list.
+    Keys in ``TELEMETRY_DATASET_NAME_PROPERTIES`` get the dataset rule
+    (``_mask_dataset_name``) whether the value is a string or a list.
+    Returns a new sanitized copy.
     """
     if isinstance(obj, dict):
         new_obj = {}
         for k, v in obj.items():
-            if k in property_names and isinstance(v, str):
-                new_obj[k] = str(uuid5(NAMESPACE_OID, v))
+            if k in TELEMETRY_DATASET_NAME_PROPERTIES:
+                new_obj[k] = (
+                    [_mask_dataset_name(item) for item in v]
+                    if isinstance(v, list)
+                    else _mask_dataset_name(v)
+                )
+            elif k in property_names and isinstance(v, str):
+                new_obj[k] = _fingerprint(v)
+            elif k in property_names and isinstance(v, list):
+                new_obj[k] = [_mask_dataset_name(item, preserve_empty=False) for item in v]
             else:
                 new_obj[k] = _sanitize_nested_properties(v, property_names)
         return new_obj
@@ -142,120 +378,19 @@ def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
         return obj
 
 
-# A single ClientSession is reused across telemetry calls to avoid the
-# per-call DNS + TCP + TLS handshake to `proxy_url`. The session is bound to
-# the asyncio loop it was created on; if the loop changes (tests, reload), the
-# helper rebuilds it transparently.
-_telemetry_session: aiohttp.ClientSession | None = None
-_telemetry_session_loop: asyncio.AbstractEventLoop | None = None
-_telemetry_session_lock: asyncio.Lock | None = None
-_telemetry_session_lock_loop: asyncio.AbstractEventLoop | None = None
+# One sender per process: events are queued and posted to `proxy_url` in
+# batches from a background thread (see telemetry_sender.py).
+_telemetry_sender = TelemetrySender(proxy_url, TELEMETRY_REQUEST_TIMEOUT)
 
 
-async def _get_telemetry_session() -> aiohttp.ClientSession:
-    """Return a process-wide aiohttp.ClientSession for telemetry, creating it lazily.
+async def flush_telemetry() -> None:
+    """Send queued telemetry and stop the sender thread, waiting at most one request timeout.
 
-    The session is bound to the asyncio loop it was created on. If the running
-    loop changes (e.g. across tests or `asyncio.run` boundaries) or the session
-    has been closed, a fresh session is built. Concurrent callers are
-    serialized by an `asyncio.Lock` that is itself re-created when the loop
-    changes, because `asyncio.Lock` captures its loop on construction. Intended
-    for use only from inside a running event loop.
+    Called from the FastAPI lifespan shutdown; scripts are covered by the
+    sender's own ``atexit`` hook. Telemetry sent afterwards starts a new thread.
     """
-    global _telemetry_session, _telemetry_session_loop
-    global _telemetry_session_lock, _telemetry_session_lock_loop
-
-    loop = asyncio.get_running_loop()
-
-    # `asyncio.Lock` captures the running loop on creation, so a lock from a
-    # previous loop is unusable. Recreate it when the loop changes.
-    if _telemetry_session_lock is None or _telemetry_session_lock_loop is not loop:
-        _telemetry_session_lock = asyncio.Lock()
-        _telemetry_session_lock_loop = loop
-
-    async with _telemetry_session_lock:
-        if (
-            _telemetry_session is None
-            or _telemetry_session.closed
-            or _telemetry_session_loop is not loop
-        ):
-            # Close the stale session instead of dropping it: aiohttp accepts
-            # close() from a different loop, and an unowned session emits
-            # "Unclosed client session" at garbage collection.
-            if _telemetry_session is not None and not _telemetry_session.closed:
-                try:
-                    await _telemetry_session.close()
-                except Exception:
-                    pass
-            timeout = aiohttp.ClientTimeout(total=TELEMETRY_REQUEST_TIMEOUT)
-            _telemetry_session = aiohttp.ClientSession(timeout=timeout)
-            _telemetry_session_loop = loop
-            _register_telemetry_session_atexit()
-        return _telemetry_session
-
-
-async def close_telemetry_session() -> None:
-    """Flush in-flight telemetry tasks and close the shared aiohttp session.
-
-    Safe to call repeatedly and from any loop; ``_get_telemetry_session``
-    rebuilds transparently if telemetry fires again afterwards. Called from the
-    FastAPI lifespan shutdown and, as a last resort, from an ``atexit`` hook so
-    SDK scripts don't print "Unclosed client session" at interpreter exit.
-    """
-    global _telemetry_session, _telemetry_session_loop
-
-    if _TELEMETRY_TASKS:
-        try:
-            await asyncio.gather(*list(_TELEMETRY_TASKS), return_exceptions=True)
-        except Exception:
-            pass
-    session = _telemetry_session
-    _telemetry_session = None
-    _telemetry_session_loop = None
-    if session is not None and not session.closed:
-        try:
-            await session.close()
-        except Exception:
-            pass
-
-
-_telemetry_atexit_registered = False
-
-
-def _register_telemetry_session_atexit() -> None:
-    global _telemetry_atexit_registered
-    if _telemetry_atexit_registered:
-        return
-    _telemetry_atexit_registered = True
-
-    import atexit
-
-    def _close_at_exit() -> None:
-        # The loop that owned the session is gone by now; run the closer on a
-        # fresh one. In-flight tasks died with their loop, so gather() over
-        # them is a no-op here — this exists purely to release the session.
-        if _telemetry_session is None or _telemetry_session.closed:
-            return
-        try:
-            asyncio.run(close_telemetry_session())
-        except Exception:
-            pass
-
-    atexit.register(_close_at_exit)
-
-
-async def _send_telemetry_request(payload: dict) -> None:
-    """Send telemetry payload via async HTTP. Best-effort, never raises."""
-    try:
-        session = await _get_telemetry_session()
-        async with session.post(proxy_url, json=payload) as response:
-            if response.status != 200:
-                logger.debug("Telemetry proxy returned status %s", response.status)
-    except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as e:
-        # RuntimeError covers the case where the loop was closed between task
-        # creation and session use (fire-and-forget telemetry tasks can outlive
-        # the loop that scheduled them).
-        logger.debug("Telemetry request failed: %s", e)
+    # close() blocks; keep the event loop free while it waits.
+    await asyncio.to_thread(_telemetry_sender.close)
 
 
 def _get_api_key_tracking_id() -> str:
@@ -268,8 +403,6 @@ def _get_api_key_tracking_id() -> str:
     TELEMETRY_API_KEY_TRACKING_SALT can be set by deployments that want their own
     namespace. A default public namespace keeps tracking stable for local installs.
     """
-    import hashlib
-
     key = os.getenv("LLM_API_KEY", "")
     if not key:
         return ""
@@ -280,6 +413,14 @@ def _get_api_key_tracking_id() -> str:
         if configured_salt
         else _DEFAULT_TELEMETRY_API_KEY_TRACKING_SALT
     )
+    return _derive_api_key_tracking_id(key, salt)
+
+
+@lru_cache(maxsize=1)
+def _derive_api_key_tracking_id(key: str, salt: bytes) -> str:
+    """PBKDF2 is slow; cache the latest key/salt pair. A rotated key or salt recomputes."""
+    import hashlib
+
     derived = hashlib.pbkdf2_hmac(
         "sha256",
         key.encode("utf-8"),
@@ -293,6 +434,53 @@ def _get_api_key_tracking_id() -> str:
 def _get_api_key_fingerprint() -> str:
     """Backward-compatible alias for the API-key telemetry tracking ID."""
     return _get_api_key_tracking_id()
+
+
+# Only Cognee Cloud hosts are sent as-is; a self-hosted server's hostname can be
+# an internal name or IP, so it is reduced to a category.
+_CLOUD_HOST_SUFFIX = ".cognee.ai"
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _connected_host_label(service_url: str) -> str:
+    from urllib.parse import urlparse
+
+    host = urlparse(service_url).hostname or ""
+    if host.endswith(_CLOUD_HOST_SUFFIX):
+        return host
+    if host in _LOCAL_HOSTS:
+        return "localhost"
+    return "self_hosted"
+
+
+def _get_connected_tenant() -> dict[str, str]:
+    """Return the tenant of this process's active ``serve()`` connection, if any.
+
+    ``serve(url=..., api_key=...)`` keeps the ``tenant_id`` the instance's
+    ``/api/v1/users/me`` reports on the connected client. On a Cognee Cloud
+    instance that is the control-plane ``tenants.id``, so analytics can join an
+    install's ``persistent_id`` to its cloud tenant (CLO-804); self-hosted
+    servers report their own local tenant, told apart by ``connected_host``.
+
+    Read from memory, never from disk: events are tagged only while the
+    process is connected, not after ``disconnect()`` or in a process that never
+    called ``serve()``. Never sends the API key, and a self-hosted hostname is
+    reduced to ``self_hosted`` / ``localhost``.
+    """
+    try:
+        from cognee.api.v1.serve.state import peek_remote_client
+
+        client = peek_remote_client()
+        if client is None or not client.tenant_id:
+            return {}
+        # Parsed inside the guard: a malformed URL can raise.
+        return {
+            "connected_tenant_id": str(client.tenant_id),
+            "connected_host": _connected_host_label(client.service_url),
+        }
+    except Exception:
+        logger.debug("Ignoring exception in _get_connected_tenant", exc_info=True)
+        return {}
 
 
 def _resolve_identity(user) -> tuple[str, str | None]:
@@ -314,13 +502,23 @@ def _resolve_identity(user) -> tuple[str, str | None]:
     try:
         resolved_id = str(getattr(user, "id", user))
     except Exception:
+        logger.debug("Ignoring exception in _resolve_identity", exc_info=True)
         resolved_id = "unknown-user"
     try:
         tenant_id = getattr(user, "tenant_id", None)
         resolved_tenant = str(tenant_id) if tenant_id else None
     except Exception:
+        logger.debug("Ignoring exception in _resolve_identity", exc_info=True)
         resolved_tenant = None
     return resolved_id, resolved_tenant
+
+
+def _telemetry_identity(user, tenant_id) -> tuple[str, str]:
+    """``(user_id, tenant_id)`` as every event records them: an explicit tenant wins."""
+    user_id, resolved_tenant_id = _resolve_identity(user)
+    if tenant_id is not None:
+        resolved_tenant_id = str(tenant_id)
+    return user_id, resolved_tenant_id or "Single User Tenant"
 
 
 def send_telemetry(
@@ -329,6 +527,7 @@ def send_telemetry(
     additional_properties: dict | None = None,
     *,
     user_id=None,
+    tenant_id: UUID | str | None = None,
 ):
     """Send a product telemetry event.
 
@@ -341,6 +540,9 @@ def send_telemetry(
         additional_properties: Extra event properties.
         user_id: Deprecated alias for ``user``, kept so out-of-tree callers that
             pass it by keyword keep working. Ignored when ``user`` is given.
+        tenant_id: Explicit tenant for callers holding a stored identity rather
+            than a ``User`` model, such as abandoned-run recovery. When supplied,
+            overrides the tenant resolved from ``user``.
 
     Identity layers sent with every event:
 
@@ -356,6 +558,17 @@ def send_telemetry(
     - **api_key_tracking_id**: Stable pseudonymous ID derived from the full
       LLM API key when configured. Use this to group activity by key without
       sending the key or visible key fragments.
+    - **connected_tenant_id** / **connected_host**: Only when the install has
+      connected to an instance via ``serve()``: the tenant id it reported and
+      the instance host (a ``*.cognee.ai`` host for Cognee Cloud, otherwise
+      ``self_hosted`` or ``localhost``). Absent otherwise.
+    - **is_agent** / **agent_owner_id** / **agent_plugin**: Whether ``user``
+      is an agent (a child user with its own API key, such as a provisioned
+      plugin); ``user_id`` is then the agent itself. ``agent_owner_id`` is
+      the human user who owns it and ``agent_plugin`` a known plugin key or
+      ``"custom"``; both ``None`` otherwise. Read off the ``User`` model only:
+      a bare id cannot be told apart from a human's without a database
+      lookup, so pass the model when you hold it.
     """
     if additional_properties is None:
         additional_properties = {}
@@ -365,50 +578,118 @@ def send_telemetry(
     env = os.getenv("ENV")
     if env in ["test", "dev"]:
         return
-    additional_properties = _sanitize_nested_properties(
-        obj=additional_properties, property_names=["url"]
-    )
-    resolved_user_id, tenant_id = _resolve_identity(user if user is not None else user_id)
-    anonymous_id = str(get_anonymous_id())
-    persistent_id = str(get_persistent_id())
-    api_key_tracking_id = _get_api_key_tracking_id()
     # Where this telemetry event originates. Defaults to "sdk"; deployments such
     # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
     # segmented by origin.
-    telemetry_origin = os.getenv("TELEMETRY_ORIGIN", "sdk")
+    origin = telemetry_origin()
+    if origin == "cloud":
+        # The cloud profile: only what the contract allows (cognee/shared/telemetry_schema.py).
+        user = user if user is not None else user_id
+        _send_cloud_telemetry(event_name, user, tenant_id, additional_properties)
+        return
+    additional_properties = _sanitize_nested_properties(
+        obj=additional_properties, property_names=TELEMETRY_SANITIZED_PROPERTIES
+    )
+    resolved_user_id, resolved_tenant_id = _telemetry_identity(
+        user if user is not None else user_id, tenant_id
+    )
+    anonymous_id = str(get_anonymous_id())
+    persistent_id = str(get_persistent_id())
+    api_key_tracking_id = _get_api_key_tracking_id()
+    connected_tenant = _get_connected_tenant()
+    from cognee.modules.integrations.agent_identity import agent_telemetry_properties
+
+    agent_properties = agent_telemetry_properties(user if user is not None else user_id)
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,
         "event_name": event_name,
+        # When the event happened; batching delays delivery, so the proxy's
+        # receive time is no longer accurate.
+        "event_time": current_time.isoformat(),
         "user_properties": {
             "user_id": resolved_user_id,
-            "tenant_id": tenant_id or "Single User Tenant",
+            "tenant_id": resolved_tenant_id,
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
+            **connected_tenant,
+            "is_agent": agent_properties["is_agent"],
         },
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
             "user_id": resolved_user_id,
-            "tenant_id": tenant_id or "Single User Tenant",
+            "tenant_id": resolved_tenant_id,
             "anonymous_id": anonymous_id,
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
-            "telemetry_origin": telemetry_origin,
+            **connected_tenant,
+            **agent_properties,
             **additional_properties,
+            # Last, so an event property cannot override the deployment's origin.
+            "telemetry_origin": origin,
         },
     }
 
     try:
-        loop = asyncio.get_running_loop()
-        task = loop.create_task(_send_telemetry_request(payload))
-        _TELEMETRY_TASKS.add(task)
-        task.add_done_callback(_TELEMETRY_TASKS.discard)
-    except RuntimeError:
-        # No running event loop (shutdown, sync context, etc.) — telemetry is
+        _telemetry_sender.enqueue(payload)
+    except Exception:
+        # Starting the sender thread fails at interpreter shutdown — telemetry is
         # best-effort; dropping the event is better than crashing the caller.
-        pass
+        logger.debug("Ignoring exception in send_telemetry", exc_info=True)
+
+
+def _send_cloud_telemetry(event_name: str, user, tenant_id, additional_properties: dict) -> None:
+    """Queue the event as the cloud contract allows it; any failure drops it, never raises."""
+    try:
+        payload = _cloud_payload(event_name, user, tenant_id, additional_properties)
+        if payload is not None:
+            _telemetry_sender.enqueue(payload)
+    except Exception:
+        logger.debug("Dropping cloud telemetry event %s", event_name, exc_info=True)
+
+
+def _cloud_payload(event_name: str, user, tenant_id, additional_properties: dict) -> dict | None:
+    """The event's contract-checked properties under trusted fields no property can override."""
+    from cognee.shared.telemetry_schema import apply_cloud_contract, check_trusted_fields
+
+    trusted = check_trusted_fields(event_name, _cloud_trusted_fields(user, tenant_id))
+    if trusted is None:
+        return None
+    # Some events still send their own tenant_id; setting it is the builder's job.
+    event_properties = {k: v for k, v in additional_properties.items() if k not in trusted}
+    properties = apply_cloud_contract(event_name, event_properties)
+    if properties is None:
+        return None
+    return _cloud_envelope(event_name, properties, trusted)
+
+
+def _cloud_trusted_fields(user, tenant_id) -> dict:
+    """Identity and environment of a cloud event, built only here."""
+    from cognee.modules.integrations.agent_identity import agent_telemetry_properties
+    from cognee.shared.telemetry_schema import CLOUD_SCHEMA_VERSION
+
+    user_id, resolved_tenant_id = _telemetry_identity(user, tenant_id)
+    return {
+        "user_id": user_id,
+        "tenant_id": resolved_tenant_id,
+        **agent_telemetry_properties(user),
+        "schema_version": CLOUD_SCHEMA_VERSION,
+        "telemetry_origin": "cloud",
+    }
+
+
+def _cloud_envelope(event_name: str, properties: dict, trusted: dict) -> dict:
+    """The proxy's event shape; trusted fields go last, so no property replaces them."""
+    return {
+        # The proxy requires the key; a cloud event is identified by user_id and tenant_id.
+        "anonymous_id": "",
+        "event_name": event_name,
+        "event_time": datetime.now(timezone.utc).isoformat(),
+        "user_properties": {"user_id": trusted["user_id"], "tenant_id": trusted["tenant_id"]},
+        "properties": {**properties, **trusted},
+    }
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):

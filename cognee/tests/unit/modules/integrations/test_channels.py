@@ -18,6 +18,9 @@ class _FakeResponse:
     def __init__(self, payload, retry_after=None):
         self._payload = payload
         self.headers = {"Retry-After": retry_after} if retry_after else {}
+        # Slack answers a rate limit with 429 and everything else (``ok: false``
+        # included) with 200.
+        self.status = 429 if retry_after else 200
 
     async def __aenter__(self):
         return self
@@ -102,9 +105,11 @@ async def test_follows_pagination_cursor_across_multiple_pages():
 @pytest.mark.asyncio
 async def test_rejected_call_raises_with_slack_error_code():
     session = _session_with_pages([{"ok": False, "error": "missing_scope"}])
-    with patch("aiohttp.ClientSession", return_value=_FakeSessionContext(session)):
-        with pytest.raises(RuntimeError, match="missing_scope"):
-            await list_channels("xoxb-token")
+    with (
+        patch("aiohttp.ClientSession", return_value=_FakeSessionContext(session)),
+        pytest.raises(RuntimeError, match="missing_scope"),
+    ):
+        await list_channels("xoxb-token")
 
 
 @pytest.mark.asyncio
@@ -154,9 +159,9 @@ async def test_ratelimited_gives_up_after_max_retries():
     with (
         patch("aiohttp.ClientSession", return_value=_FakeSessionContext(session)),
         patch("cognee.modules.integrations.slack.channels.asyncio.sleep", new=_no_sleep),
+        pytest.raises(RuntimeError, match="ratelimited"),
     ):
-        with pytest.raises(RuntimeError, match="ratelimited"):
-            await list_channels("xoxb-token")
+        await list_channels("xoxb-token")
 
     assert session.get.call_count == 4  # 1 initial attempt + 3 retries
 

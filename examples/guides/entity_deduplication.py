@@ -1,7 +1,16 @@
-import asyncio
-import cognee
+"""Merge duplicate entities with consolidate_entities_pipeline, first as a dry run and then for real.
 
+"New York City" and "NYC" are remembered in separate calls so two entities exist. The dry run only
+logs the merge plan; the second run applies it. Graphs before and after are written to .artifacts/.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/entity_deduplication.py
+"""
+
+import asyncio
 from os import path
+
+import cognee
 from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.memify_pipelines.consolidate_entities import consolidate_entities_pipeline
 

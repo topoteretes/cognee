@@ -39,6 +39,7 @@ def test_performance_analysis():
         text=True,
         capture_output=True,
         timeout=600,
+        check=False,
     )
 
     assert result.returncode == 0, (

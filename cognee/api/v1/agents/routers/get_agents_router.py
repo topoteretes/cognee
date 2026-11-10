@@ -1,22 +1,23 @@
-from typing import Literal, Optional
+from typing import Literal
 from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.encoders import jsonable_encoder
+from fastapi_users.exceptions import UserAlreadyExists
 
 from cognee.api.DTO import OutDTO
 from cognee.modules.agents.agent_mode import register_agent, unregister_agent
-from cognee.modules.agents.models import RegisterAgentRequest, UnregisterAgentRequest
 from cognee.modules.agents.create_agent import create_agent
+from cognee.modules.agents.delete_agent import delete_agent
 from cognee.modules.agents.get_agent import get_agent
 from cognee.modules.agents.list_agents import list_agents
-from cognee.modules.agents.delete_agent import delete_agent
+from cognee.modules.agents.models import RegisterAgentRequest, UnregisterAgentRequest
 from cognee.modules.agents.operations import (
     get_agent_connection_detail,
     list_agent_connections,
 )
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.models.User import User
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.encoders import jsonable_encoder
-from fastapi_users.exceptions import UserAlreadyExists
 
 RangeLiteral = Literal["24h", "7d", "30d", "all"]
 
@@ -27,7 +28,7 @@ MANAGEMENT_TAG = "agent management"
 class AgentDTO(OutDTO):
     agent_id: UUID
     agent_email: str
-    api_key_label: Optional[str] = None
+    api_key_label: str | None = None
 
 
 class AgentWithApiKeyDTO(OutDTO):
@@ -57,7 +58,12 @@ def get_agents_router() -> APIRouter:
     async def list_agents_endpoint(
         user: User = Depends(get_authenticated_user),
     ) -> list[AgentDTO]:
-        """List agents endpoint — GET /api/v1/agents/list."""
+        """List the agents owned by the authenticated user.
+
+        Each entry carries agentId, agentEmail (in the form <name>@cognee.agent) and
+        apiKeyLabel, which is null when the agent has no API key. Returns an empty list when
+        the user owns no agents.
+        """
         agents = await list_agents(user.id)
         return [
             AgentDTO(
@@ -73,7 +79,13 @@ def get_agents_router() -> APIRouter:
         name: str,
         user: User = Depends(get_authenticated_user),
     ) -> AgentWithApiKeyDTO:
-        """Create agent endpoint — POST /api/v1/agents/create.
+        """Create an agent sub-user and issue its API key.
+
+        Returns agentId, agentEmail and agentApiKey. With HASH_API_KEY=true the raw key is
+        shown only in this response; with the default (false) GET /api/v1/auth/api-keys
+        also returns it to the agent. A name that already exists for this caller (compared
+        lowercased, with spaces turned into hyphens) returns 409, and a caller that is itself
+        an agent returns 403, since agents cannot create agents.
 
         ## Query Parameters
         - **name** (str): Unique name for the new agent user; a conflict is returned if an
@@ -99,13 +111,13 @@ def get_agents_router() -> APIRouter:
 
     @router.get("/connections", tags=[CONNECTIONS_TAG])
     async def list_agents_connections(
-        agent_id: Optional[UUID] = Query(
+        agent_id: UUID | None = Query(
             None,
             description="Filter connections by agent user ID. "
             "Only returns connections belonging to this specific agent.",
         ),
         range: RangeLiteral = Query("30d"),
-        status_filter: Optional[Literal["active", "inactive", "unknown"]] = Query(
+        status_filter: Literal["active", "inactive", "unknown"] | None = Query(
             None,
             alias="status",
         ),
@@ -115,7 +127,12 @@ def get_agents_router() -> APIRouter:
         offset: int = Query(0, ge=0),
         user: User = Depends(get_authenticated_user),
     ):
-        """List agents connections — GET /api/v1/agents/connections.
+        """List agent connections for the caller and their agents.
+
+        Returns agents (the requested page), memory_sources, total, limit, offset and
+        has_more. Only connections belonging to the caller or their child agents are
+        visible, so another user's connections never appear even when a dataset is shared.
+        memory_sources is empty when include_sources is false.
 
         ## Query Parameters
         - **active_only** (bool): When true, restricts results to connections currently
@@ -145,17 +162,25 @@ def get_agents_router() -> APIRouter:
 
     @router.get("/connections/me", tags=[CONNECTIONS_TAG])
     async def get_my_connection_detail(
-        agent_session_name: Optional[str] = Query(
+        agent_session_name: str | None = Query(
             None,
-            description="Filter by connection name. "
+            description="Filter by connection name. A named lookup also returns inactive "
+            "(unregistered) connections; check agent.status. "
             "Uses the authenticated user's ID as the agent ID.",
         ),
         user: User = Depends(get_authenticated_user),
     ):
-        """Get my connection detail — GET /api/v1/agents/connections/me.
+        """Get detail for one of the authenticated user's own connections.
+
+        Returns agent, memory_sources, recent_sessions (at most the connection's one
+        session), recent_traces and recent_qas, the last two capped at the 20 most recent
+        entries. When several connections match, the most recently active one is returned.
+        Session content is empty when the connection has no session id or the session cache
+        cannot be read. No matching connection returns 404.
 
         ## Query Parameters
-        - **agent_session_name** (Optional[str]): Filter by connection name. Uses the authenticated
+        - **agent_session_name** (Optional[str]): Filter by connection name. A named lookup also
+          returns inactive (unregistered) connections; check agent.status. Uses the authenticated
           user's ID as the agent ID.
         """
         response = await get_agent_connection_detail(
@@ -170,20 +195,30 @@ def get_agents_router() -> APIRouter:
     @router.get("/connections/{agent_id}", tags=[CONNECTIONS_TAG])
     async def get_connection_detail(
         agent_id: UUID,
-        agent_session_name: Optional[str] = Query(
+        agent_session_name: str | None = Query(
             None,
-            description="Filter by connection name within the agent's connections.",
+            description="Filter by connection name within the agent's connections. "
+            "A named lookup also returns inactive (unregistered) connections; "
+            "check agent.status.",
         ),
         user: User = Depends(get_authenticated_user),
     ):
-        """Get connection detail — GET /api/v1/agents/connections/{agent_id}.
+        """Get detail for one connection of a given agent.
+
+        Returns agent, memory_sources, recent_sessions (at most the connection's one
+        session), recent_traces and recent_qas, the last two capped at the 20 most recent
+        entries. Without agent_session_name only active connections are considered and the
+        most recently active one is returned; a named lookup also finds deactivated ones. An
+        agent_id that is neither the caller nor one of their agents, or no matching
+        connection, returns 404.
 
         ## Path Parameters
         - **agent_id** (UUID): The agent's user ID (from GET /api/v1/agents/list).
 
         ## Query Parameters
         - **agent_session_name** (Optional[str]): Filter by connection name within the agent's
-          connections.
+          connections. A named lookup also returns inactive (unregistered) connections; check
+          agent.status.
         """
         response = await get_agent_connection_detail(
             user=user,
@@ -199,7 +234,15 @@ def get_agents_router() -> APIRouter:
         request: RegisterAgentRequest,
         user: User = Depends(get_authenticated_user),
     ):
-        """Register agent endpoint — POST /api/v1/agents/register.
+        """Register an agent connection for the authenticated user.
+
+        Responds 201 with the registered connection. The connection is identified by
+        agent_session_name plus the authenticated user's id, so re-registering the same name
+        replaces the stored connection with the new request's fields (metadata merged into
+        the old); while that connection is still active in this process the active count
+        does not increase. A listed dataset id or name the caller cannot read returns 403.
+        With COGNEE_AGENT_MODE=true the first registration starts a watchdog that shuts the
+        server down once no connection is active.
 
         ## Request Parameters
         - **agent_session_name** (str): A unique name for this agent connection. Combined with the
@@ -228,11 +271,20 @@ def get_agents_router() -> APIRouter:
         request: UnregisterAgentRequest,
         user: User = Depends(get_authenticated_user),
     ) -> AgentModeDTO:
-        """Unregister agent endpoint — POST /api/v1/agents/unregister.
+        """Deactivate an agent connection by name.
+
+        The connection is identified by agent_session_name plus the authenticated user's id.
+        Returns activeAgents, the number of the caller's own connections still active in this
+        process; other users' connections are never counted. Unregistering a name that is not
+        active leaves that count unchanged. With COGNEE_AGENT_MODE=true the server shuts
+        itself down within 60 seconds once no connection of any user is active.
 
         ## Request Parameters
         - **agent_session_name** (str): The name used when registering the connection. Combined with
           the authenticated user's ID to identify which connection to deactivate.
+
+        ## Response
+        - **activeAgents** (int): The caller's own connections still active in this process.
         """
         count = await unregister_agent(user, request)
         return AgentModeDTO(active_agents=count)
@@ -246,7 +298,11 @@ def get_agents_router() -> APIRouter:
         agent_id: UUID,
         user: User = Depends(get_authenticated_user),
     ) -> AgentDTO:
-        """Get agent endpoint — GET /api/v1/agents/{agent_id}.
+        """Get one agent owned by the caller.
+
+        Returns agentId, agentEmail (in the form <name>@cognee.agent) and apiKeyLabel, which
+        is null when the agent has no API key. An unknown agent id returns 404; an agent
+        belonging to another user returns 403.
 
         ## Path Parameters
         - **agent_id** (UUID): The agent's user ID (from GET /api/v1/agents/list).
@@ -267,7 +323,11 @@ def get_agents_router() -> APIRouter:
     async def delete_agent_endpoint(
         agent_id: UUID, user: User = Depends(get_authenticated_user)
     ) -> None:
-        """Delete agent endpoint — DELETE /api/v1/agents/{agent_id}.
+        """Delete an agent and its connections.
+
+        Removes the agent's connection records and then the agent user itself, and responds
+        with a JSON null body. An unknown agent id returns 404; an agent belonging to
+        another user returns 403.
 
         ## Path Parameters
         - **agent_id** (UUID): The agent's user ID (from GET /api/v1/agents/list).

@@ -13,11 +13,10 @@ from cognee.infrastructure.databases.graph.ladybug.adapter import (
     LadybugAdapter,
 )
 
-
 KuzuAdapter = LadybugAdapter
 
 __all__ = [
-    "KuzuAdapter",
     "DEFAULT_KUZU_BUFFER_POOL_SIZE",
     "DEFAULT_KUZU_MAX_DB_SIZE",
+    "KuzuAdapter",
 ]

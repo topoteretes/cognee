@@ -1,8 +1,13 @@
 import string
-from typing import List
 from collections import Counter
 
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.graph.utils.fact_conflicts import (
+    fact_status,
+    is_rejected_fact,
+    status_label,
+    user_selected_facts,
+)
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
 from cognee.shared.logging_utils import get_logger
 
@@ -10,7 +15,7 @@ logger = get_logger()
 
 
 def _get_top_n_frequent_words(
-    text: str, stop_words: set = None, top_n: int = 3, separator: str = ", "
+    text: str, stop_words: set | None = None, top_n: int = 3, separator: str = ", "
 ) -> str:
     """Concatenates the top N frequent words in text."""
     if stop_words is None:
@@ -30,7 +35,7 @@ def _create_title_from_text(text: str, first_n_words: int = 7, top_n_words: int 
     return f"{' '.join(first_words)}... [{top_words}]"
 
 
-def _extract_nodes_from_edges(retrieved_edges: List[Edge]) -> dict:
+def _extract_nodes_from_edges(retrieved_edges: list[Edge]) -> dict:
     """Creates a dictionary of nodes with their names and content."""
 
     logger.debug(
@@ -58,11 +63,27 @@ def _extract_nodes_from_edges(retrieved_edges: List[Edge]) -> dict:
     return nodes
 
 
-async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
+def _superseded_last(edge: Edge) -> bool:
+    """A superseded fact still belongs in the context, but after the one that replaced it.
+
+    sorted() is stable, so every other edge keeps the retriever's ranking.
+    """
+    return fact_status(edge.attributes) == "superseded"
+
+
+async def resolve_edges_to_text(retrieved_edges: list[Edge]) -> str:
     """Converts retrieved graph edges into a human-readable string format."""
     if not retrieved_edges:
         return ""
 
+    # A rejected claim is dropped and its decision's accepted fact restated below, unless
+    # the selected edge is in the context, where its label states the user's choice.
+    rejected = [edge for edge in retrieved_edges if is_rejected_fact(edge.attributes)]
+    retrieved_edges = [edge for edge in retrieved_edges if not is_rejected_fact(edge.attributes)]
+    stated = {text for edge in retrieved_edges for text in user_selected_facts(edge.attributes)}
+    accepted = sorted(
+        {text for edge in rejected for text in user_selected_facts(edge.attributes)} - stated
+    )
     nodes = _extract_nodes_from_edges(retrieved_edges)
 
     node_section = "\n".join(
@@ -77,7 +98,7 @@ async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
         extra={"edge_count": len(retrieved_edges)},
     )
 
-    for edge in retrieved_edges:
+    for edge in sorted(retrieved_edges, key=_superseded_last):
         source_name = nodes[edge.node1.id]["name"]
         target_name = nodes[edge.node2.id]["name"]
         edge_label = (
@@ -92,6 +113,10 @@ async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
         if description and description != edge_label:
             line += f"  ({description})"
 
+        status = status_label(edge.attributes)
+        if status:
+            line += f" {status}"
+
         connections.append(line)
 
     connection_section = "\n".join(connections)
@@ -104,4 +129,9 @@ async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
         },
     )
 
-    return f"Nodes:\n{node_section}\n\nConnections:\n{connection_section}"
+    rendered = (
+        f"Nodes:\n{node_section}\n\nConnections:\n{connection_section}" if retrieved_edges else ""
+    )
+    if accepted:
+        rendered += "\n\n## Accepted facts (user resolved)\n" + "\n".join(accepted)
+    return rendered.strip()

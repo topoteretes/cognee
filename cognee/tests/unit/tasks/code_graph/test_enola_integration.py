@@ -1,8 +1,7 @@
 """Integration test that runs the real enola binary; skipped when not installed.
 
 "Installed" is judged the way cognee itself resolves the binary — ENOLA_PATH,
-PATH, or the auto-installed copy under ~/.cognee/bin — so the test is not
-silently skipped on machines where cognee has already installed enola.
+the environment's scripts directory (the ``enola-cli`` wheel), or PATH.
 """
 
 import pytest
@@ -13,7 +12,6 @@ from cognee.tasks.code_graph.enola import (
     parse_enola_snapshot,
     run_enola_generate,
 )
-from cognee.tasks.code_graph.install_enola import installed_binary_path
 
 
 def _enola_available() -> bool:
@@ -21,7 +19,7 @@ def _enola_available() -> bool:
         find_enola_binary()
         return True
     except EnolaNotInstalledError:
-        return installed_binary_path().is_file()
+        return False
 
 
 pytestmark = pytest.mark.skipif(not _enola_available(), reason="enola binary is not installed")

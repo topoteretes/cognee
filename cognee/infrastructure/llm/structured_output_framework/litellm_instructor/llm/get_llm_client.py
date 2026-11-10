@@ -1,23 +1,30 @@
 """Get the LLM client."""
 
+import importlib.util
+from collections.abc import Hashable
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Hashable, TypeGuard
+from typing import Any, TypeGuard
 
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.exceptions import (
+    InstructorNotInstalledError,
     LLMAPIKeyNotSetError,
     UnsupportedLLMProviderError,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.ollama.adapter import (
-    OllamaAPIAdapter,
-)
 
 _LLM_CLIENT_CACHE_MAXSIZE = 32
+
+
+def instructor_installed() -> bool:
+    """Whether the ``instructor`` extra is installed (checked without importing it)."""
+    return importlib.util.find_spec("instructor") is not None
+
+
 _FROZEN_DICT = "__cognee_dict__"
 _FROZEN_LIST = "__cognee_list__"
 _FROZEN_TUPLE = "__cognee_tuple__"
@@ -55,6 +62,7 @@ class _LLMClientCacheKey:
     streaming: bool
     max_completion_tokens: int
     transcription_model: str
+    image_transcribe_model: str
     fallback_api_key_cache_key: _SecretCacheKey
     fallback_endpoint: str
     fallback_model: str
@@ -172,6 +180,7 @@ def _build_llm_client_cache_key(llm_config, max_completion_tokens: int) -> _LLMC
         streaming=llm_config.llm_streaming,
         max_completion_tokens=max_completion_tokens,
         transcription_model=llm_config.transcription_model,
+        image_transcribe_model=llm_config.image_transcribe_model,
         fallback_api_key_cache_key=_secret_cache_key(llm_config.fallback_api_key),
         fallback_endpoint=llm_config.fallback_endpoint,
         fallback_model=llm_config.fallback_model,
@@ -223,6 +232,7 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             api_version=cache_key.api_version,
             model=cache_key.model,
             transcription_model=cache_key.transcription_model,
+            image_transcribe_model=cache_key.image_transcribe_model or None,
             max_completion_tokens=max_completion_tokens,
             instructor_mode=cache_key.instructor_mode,
             streaming=cache_key.streaming,
@@ -244,6 +254,7 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             api_version=cache_key.api_version,
             model=cache_key.model,
             transcription_model=cache_key.transcription_model,
+            image_transcribe_model=cache_key.image_transcribe_model or None,
             max_completion_tokens=max_completion_tokens,
             instructor_mode=cache_key.instructor_mode,
             streaming=cache_key.streaming,
@@ -254,6 +265,10 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
         )
 
     elif provider == LLMProvider.OLLAMA:
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.ollama.adapter import (
+            OllamaAPIAdapter,
+        )
+
         return OllamaAPIAdapter(
             endpoint=cache_key.endpoint,
             api_key=llm_api_key,
@@ -263,6 +278,8 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             instructor_mode=cache_key.instructor_mode,
             llm_args=llm_args,
             ollama_num_ctx=cache_key.ollama_num_ctx,
+            transcription_model=cache_key.transcription_model,
+            image_transcribe_model=cache_key.image_transcribe_model or None,
         )
 
     elif provider == LLMProvider.ANTHROPIC:
@@ -275,6 +292,8 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             cache_key.model,
             max_completion_tokens,
             instructor_mode=cache_key.instructor_mode,
+            transcription_model=cache_key.transcription_model,
+            image_transcribe_model=cache_key.image_transcribe_model or None,
             llm_args=llm_args,
         )
 
@@ -290,6 +309,8 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             name="Custom",
             endpoint=cache_key.endpoint,
             instructor_mode=cache_key.instructor_mode,
+            transcription_model=cache_key.transcription_model,
+            image_transcribe_model=cache_key.image_transcribe_model or None,
             fallback_api_key=llm_config.fallback_api_key,
             fallback_endpoint=cache_key.fallback_endpoint,
             fallback_model=cache_key.fallback_model,
@@ -308,6 +329,8 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             endpoint=cache_key.endpoint,
             api_version=cache_key.api_version,
             instructor_mode=cache_key.instructor_mode,
+            transcription_model=cache_key.transcription_model,
+            image_transcribe_model=cache_key.image_transcribe_model or None,
             llm_args=llm_args,
         )
 
@@ -322,6 +345,8 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             max_completion_tokens=max_completion_tokens,
             endpoint=cache_key.endpoint,
             instructor_mode=cache_key.instructor_mode,
+            transcription_model=cache_key.transcription_model,
+            image_transcribe_model=cache_key.image_transcribe_model or None,
             llm_args=llm_args,
         )
 
@@ -393,6 +418,11 @@ def get_llm_client(raise_api_key_error: bool = True) -> LLMInterface:
     llm_config = get_llm_context_config()
 
     provider = LLMProvider(llm_config.llm_provider)
+    # Every adapter except MCP sampling's imports ``instructor`` (an optional
+    # extra); checked here, before the adapter is imported, so a missing package
+    # names its fix instead of failing with a bare ModuleNotFoundError.
+    if provider is not LLMProvider.MCP_SAMPLING and not instructor_installed():
+        raise InstructorNotInstalledError()
     _raise_for_missing_api_key(
         provider,
         llm_config.llm_api_key,

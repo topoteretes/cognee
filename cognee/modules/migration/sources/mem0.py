@@ -13,8 +13,9 @@ Each memory becomes a :class:`COGXMemory` with scope taken from
 """
 
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Union
+from typing import Any
 
 from cognee.modules.migration.cogx import COGXMemory, COGXRecord, COGXScope, parse_timestamp
 from cognee.modules.migration.sources.base import MemorySource, read_export_file
@@ -25,11 +26,11 @@ _CONTENT_KEYS = ("memory", "text", "data", "content")
 class Mem0Source(MemorySource):
     source_system = "mem0"
 
-    def __init__(self, data: Union[str, Path, List[Any], Dict[str, Any]], mode: str = "re-derive"):
+    def __init__(self, data: str | Path | list[Any] | dict[str, Any], mode: str = "re-derive"):
         super().__init__(mode=mode)
         self._data = data
 
-    def _load_raw(self) -> List[Dict[str, Any]]:
+    def _load_raw(self) -> list[dict[str, Any]]:
         data = self._data
         if isinstance(data, (str, Path)):
             data = json.loads(read_export_file(data))

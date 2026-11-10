@@ -1,24 +1,25 @@
 import os
-import pytest
 import pathlib
-from uuid import NAMESPACE_OID, uuid5
+from contextlib import AsyncExitStack
 from unittest.mock import AsyncMock, patch
+from uuid import NAMESPACE_OID, uuid5
+
+import pytest
 
 import cognee
 from cognee.api.v1.datasets import datasets
-from contextlib import AsyncExitStack
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.infrastructure.locks import dataset_lock
-from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.llm import LLMGateway
-from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
 from cognee.modules.engine.models import Entity
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.methods import get_default_user
-from cognee.shared.data_models import KnowledgeGraph, Node, Edge, SummarizedContent
+from cognee.shared.data_models import Edge, KnowledgeGraph, Node, SummarizedContent
 from cognee.shared.logging_utils import get_logger
 from cognee.tests.utils.assert_edges_vector_index_not_present import (
     assert_edges_vector_index_not_present,
@@ -160,7 +161,7 @@ async def main(mock_create_structured_output: AsyncMock):
     maries_data_id = add_marie_result.data_ingestion_info[0]["data_id"]
 
     cognify_result: dict = await cognee.cognify()
-    dataset_id = list(cognify_result.keys())[0]
+    dataset_id = next(iter(cognify_result.keys()))
 
     johns_document = TextDocument(
         id=johns_data_id,

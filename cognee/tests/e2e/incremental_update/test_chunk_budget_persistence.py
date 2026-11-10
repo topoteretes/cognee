@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
 from cognee.tests.e2e.incremental_update.backend_env import (
     incremental_test_backend_env,
     reset_backend_state,
@@ -32,7 +33,7 @@ def budget_env():
 
     root = Path(tempfile.mkdtemp(prefix="cognee_budget_test_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
     os.environ.update(
         **incremental_test_backend_env(),

@@ -1,41 +1,9 @@
 from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from cognee.infrastructure.databases.graph.neo4j_driver.adapter import Neo4jAdapter
-
-
-async def get_edge_density(adapter: Neo4jAdapter):
-    """
-    Calculate the edge density of a graph in a Neo4j database.
-
-    This function executes a Cypher query to determine the ratio of edges to the maximum
-    possible edges in a graph, based on the number of nodes. If there are fewer than two
-    nodes, it returns an edge density of zero.
-
-    Parameters:
-    -----------
-
-        - adapter (Neo4jAdapter): An instance of Neo4jAdapter used to interface with the
-          Neo4j database.
-
-    Returns:
-    --------
-
-        Returns the calculated edge density as a float, or 0 if no results are found.
-    """
-    query = """
-    MATCH (n)
-    WITH count(n) AS num_nodes
-    MATCH ()-[r]->()
-    WITH num_nodes, count(r) AS num_edges
-    RETURN CASE
-        WHEN num_nodes < 2 THEN 0
-        ELSE num_edges * 1.0 / (num_nodes * (num_nodes - 1))
-    END AS edge_density;
-    """
-    result = await adapter.query(query)
-    return result[0]["edge_density"] if result else 0
 
 
 async def get_num_connected_components(adapter: Neo4jAdapter, graph_name: str):

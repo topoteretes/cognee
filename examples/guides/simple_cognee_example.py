@@ -1,3 +1,12 @@
+"""Run the canonical remember -> recall flow: store a text and answer a GRAPH_COMPLETION question.
+
+Start here. A short paragraph about NLP is remembered and "Tell me about NLP" is answered from the
+resulting knowledge graph; each result entry is printed.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/simple_cognee_example.py
+"""
+
 import asyncio
 
 import cognee

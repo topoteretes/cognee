@@ -134,10 +134,20 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.modules.migrations.migration import MigrationContext
 from cognee.modules.migrations.versions._vector_rekey import (
     RekeyedPoint as _RekeyedPoint,
+)
+from cognee.modules.migrations.versions._vector_rekey import (
     index_data_points_batched as _index_data_points_batched,
+)
+from cognee.modules.migrations.versions._vector_rekey import (
     lancedb_where as _lancedb_where,
+)
+from cognee.modules.migrations.versions._vector_rekey import (
     rekey_lancedb as _rekey_lancedb,
+)
+from cognee.modules.migrations.versions._vector_rekey import (
     rekey_native as _rekey_native,
+)
+from cognee.modules.migrations.versions._vector_rekey import (
     rekey_pgvector as _rekey_pgvector,
 )
 
@@ -784,6 +794,7 @@ async def _edges_needing_reassert(graph_engine, at_risk: list) -> list:
             "%d at-risk edge(s)",
             error,
             len(at_risk),
+            exc_info=True,
         )
         return at_risk
 

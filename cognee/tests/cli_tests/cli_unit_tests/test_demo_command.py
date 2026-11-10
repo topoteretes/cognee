@@ -99,9 +99,9 @@ class TestDemoCommand:
         with (
             patch.object(cognee, "remember", AsyncMock(side_effect=RuntimeError("boom"))),
             patch("asyncio.run", _mock_run),
+            pytest.raises(CliCommandException, match="boom"),
         ):
-            with pytest.raises(CliCommandException, match="boom"):
-                DemoCommand().execute(_parse_args(DemoCommand(), []))
+            DemoCommand().execute(_parse_args(DemoCommand(), []))
 
 
 class TestResultLines:

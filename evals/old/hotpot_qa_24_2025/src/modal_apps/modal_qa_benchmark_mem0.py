@@ -5,8 +5,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 import modal
-
 from qa.qa_benchmark_mem0 import Mem0Config, QABenchmarkMem0
+
 from modal_apps.modal_image import image
 
 APP_NAME = "qa-benchmark-mem0"
@@ -64,15 +64,15 @@ def run_mem0_benchmark(config_params: dict, dir_suffix: str):
 @app.local_entrypoint()
 async def main(
     runs: int = 45,
-    corpus_limit: int = None,
-    qa_limit: int = None,
+    corpus_limit: int | None = None,
+    qa_limit: int | None = None,
     print_results: bool = True,
 ):
     """Trigger Mem0 QA benchmark runs on Modal."""
     print(f"🚀 Launching {runs} Mem0 QA benchmark run(s) on Modal...")
 
     # Generate unique timestamp for this benchmark session
-    base_timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    base_timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     config_params_list = []
 
     for run_num in range(runs):

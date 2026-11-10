@@ -1,19 +1,20 @@
+import heapq
 import time
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.graph.models.EdgeType import EdgeType
-from typing import List, Dict, Union, Optional, Type, Iterable, Tuple, Callable, Any
+from collections.abc import Callable, Iterable
+from typing import Any
 
+from cognee.base_config import get_base_config
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.engine import is_internal_node
+from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.graph.exceptions import (
     EntityNotFoundError,
     InvalidDimensionsError,
 )
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
-from cognee.infrastructure.engine import is_internal_node
-from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
-from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.user_preferences.weights import personal_factor
-from cognee.base_config import get_base_config
-import heapq
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("CogneeGraph")
 
@@ -26,9 +27,9 @@ class CogneeGraph(CogneeAbstractGraph):
     and project a graph from a database using adapters.
     """
 
-    nodes: Dict[str, Node]
-    edges: List[Edge]
-    edges_by_distance_key: Dict[str, List[Edge]]
+    nodes: dict[str, Node]
+    edges: list[Edge]
+    edges_by_distance_key: dict[str, list[Edge]]
     directed: bool
     triplet_distance_penalty: float
     feedback_influence: float
@@ -72,24 +73,24 @@ class CogneeGraph(CogneeAbstractGraph):
     def get_node(self, node_id: str) -> Node:
         return self.nodes.get(node_id, None)
 
-    def get_edges_from_node(self, node_id: str) -> List[Edge]:
+    def get_edges_from_node(self, node_id: str) -> list[Edge]:
         node = self.get_node(node_id)
         if node:
             return node.skeleton_edges
         else:
             raise EntityNotFoundError(message=f"Node with id {node_id} does not exist.")
 
-    def get_edges(self) -> List[Edge]:
+    def get_edges(self) -> list[Edge]:
         return self.edges
 
-    def reset_distances(self, collection: Iterable[Union[Node, Edge]], query_count: int) -> None:
+    def reset_distances(self, collection: Iterable[Node | Edge], query_count: int) -> None:
         """Reset vector distances for a collection of nodes or edges."""
         for item in collection:
             item.reset_vector_distances(query_count, self.triplet_distance_penalty)
 
     def _normalize_query_distance_lists(
-        self, distances: List, query_list_length: Optional[int] = None, name: str = "distances"
-    ) -> List:
+        self, distances: list, query_list_length: int | None = None, name: str = "distances"
+    ) -> list:
         """Normalize shape: flat list -> single-query; nested list -> multi-query."""
         if not distances:
             return []
@@ -113,10 +114,11 @@ class CogneeGraph(CogneeAbstractGraph):
             node_name=node_name,
             node_name_filter_operator=node_name_filter_operator,
         )
-        if not nodes_data or not edges_data:
+        if not nodes_data:
             raise EntityNotFoundError(
                 message="Nodeset does not exist, or empty nodeset projected from the database."
             )
+        edges_data = edges_data or []
         return nodes_data, edges_data
 
     async def _get_full_or_id_filtered_graph(
@@ -128,9 +130,16 @@ class CogneeGraph(CogneeAbstractGraph):
         if relevant_ids_to_filter is None:
             logger.info("Retrieving full graph.")
             nodes_data, edges_data = await adapter.get_graph_data()
-            if not nodes_data or not edges_data:
+            # Nodes decide emptiness, edges do not: a graph can legitimately
+            # have nodes and no relationships (a fresh dataset, or extraction
+            # that produced entities but no links between them). Treating that
+            # as "empty" is what forced the Ladybug adapter to fabricate
+            # (id, id, "SELF") self-loops just to keep this guard quiet -- and
+            # those fakes then flowed into retrieval as real triplets. Same
+            # rule get_neighborhood already applies below.
+            if not nodes_data:
                 raise EntityNotFoundError(message="Empty graph projected from the database.")
-            return nodes_data, edges_data
+            return nodes_data, edges_data or []
 
         get_graph_data_fn = getattr(adapter, "get_id_filtered_graph_data", adapter.get_graph_data)
         if getattr(adapter.__class__, "get_id_filtered_graph_data", None):
@@ -139,16 +148,16 @@ class CogneeGraph(CogneeAbstractGraph):
         else:
             logger.info("Retrieving full graph from database.")
             nodes_data, edges_data = await get_graph_data_fn()
-        if hasattr(adapter, "get_id_filtered_graph_data") and (not nodes_data or not edges_data):
+        if hasattr(adapter, "get_id_filtered_graph_data") and not nodes_data:
             logger.warning(
                 "Id filtered graph returned empty, falling back to full graph retrieval."
             )
             logger.info("Retrieving full graph")
             nodes_data, edges_data = await adapter.get_graph_data()
 
-        if not nodes_data or not edges_data:
+        if not nodes_data:
             raise EntityNotFoundError("Empty graph projected from the database.")
-        return nodes_data, edges_data
+        return nodes_data, edges_data or []
 
     async def _get_filtered_graph(
         self,
@@ -160,16 +169,16 @@ class CogneeGraph(CogneeAbstractGraph):
         nodes_data, edges_data = await adapter.get_filtered_graph_data(
             attribute_filters=memory_fragment_filter
         )
-        if not nodes_data or not edges_data:
+        if not nodes_data:
             raise EntityNotFoundError(message="Empty filtered graph projected from the database.")
-        return nodes_data, edges_data
+        return nodes_data, edges_data or []
 
     def _process_nodes_and_edges(
         self,
         nodes_data,
         edges_data,
-        node_properties_to_project: List[str],
-        edge_properties_to_project: List[str],
+        node_properties_to_project: list[str],
+        edge_properties_to_project: list[str],
         directed: bool,
         node_dimension: int,
         edge_dimension: int,
@@ -231,20 +240,22 @@ class CogneeGraph(CogneeAbstractGraph):
 
     async def project_graph_from_db(
         self,
-        adapter: Union[GraphDBInterface],
-        node_properties_to_project: List[str],
-        edge_properties_to_project: List[str],
+        adapter: GraphDBInterface,
+        node_properties_to_project: list[str],
+        edge_properties_to_project: list[str],
         directed=True,
         node_dimension=1,
         edge_dimension=1,
-        memory_fragment_filter=[],
-        node_type: Optional[Type] = None,
-        node_name: Optional[List[str]] = None,
+        memory_fragment_filter=None,
+        node_type: type | None = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-        relevant_ids_to_filter: Optional[List[str]] = None,
+        relevant_ids_to_filter: list[str] | None = None,
         triplet_distance_penalty: float = 6.5,
         feedback_influence: float = get_base_config().default_feedback_influence,
     ) -> None:
+        if memory_fragment_filter is None:
+            memory_fragment_filter = []
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidDimensionsError()
         try:
@@ -277,17 +288,17 @@ class CogneeGraph(CogneeAbstractGraph):
         except EntityNotFoundError:
             raise
         except Exception:
-            logger.error("Error during graph projection", exc_info=True)
+            logger.exception("Error during graph projection")
             raise
 
     async def project_neighborhood_from_db(
         self,
-        adapter: Union[GraphDBInterface],
-        node_properties_to_project: List[str],
-        edge_properties_to_project: List[str],
-        seed_node_ids: List[str],
+        adapter: GraphDBInterface,
+        node_properties_to_project: list[str],
+        edge_properties_to_project: list[str],
+        seed_node_ids: list[str],
         depth: int = 1,
-        edge_types: Optional[List[str]] = None,
+        edge_types: list[str] | None = None,
         directed: bool = True,
         node_dimension: int = 1,
         edge_dimension: int = 1,
@@ -332,13 +343,13 @@ class CogneeGraph(CogneeAbstractGraph):
             )
 
         except Exception:
-            logger.error("Error during neighborhood projection", exc_info=True)
+            logger.exception("Error during neighborhood projection")
             raise
 
     async def map_vector_distances_to_graph_nodes(
         self,
         node_distances,
-        query_list_length: Optional[int] = None,
+        query_list_length: int | None = None,
     ) -> None:
         """Map vector distances to nodes, supporting single- and multi-query input shapes."""
 
@@ -373,7 +384,7 @@ class CogneeGraph(CogneeAbstractGraph):
     async def map_vector_distances_to_graph_edges(
         self,
         edge_distances,
-        query_list_length: Optional[int] = None,
+        query_list_length: int | None = None,
     ) -> None:
         """Map vector distances to graph edges, supporting single- and multi-query input shapes."""
         query_count = query_list_length or 1
@@ -381,7 +392,7 @@ class CogneeGraph(CogneeAbstractGraph):
         self.reset_distances(self.edges, query_count)
 
         if not edge_distances:
-            return None
+            return
 
         per_query_scored_results = self._normalize_query_distance_lists(
             edge_distances, query_list_length, "edge_distances"
@@ -400,7 +411,7 @@ class CogneeGraph(CogneeAbstractGraph):
                         default_penalty=self.triplet_distance_penalty,
                     )
 
-    def apply_personal_weights(self, weights: Dict[str, float]) -> None:
+    def apply_personal_weights(self, weights: dict[str, float]) -> None:
         """Set ``personal_weight`` on nodes matched by id; unknown ids are ignored.
 
         Called after projection and distance mapping. The weight lands in its
@@ -418,8 +429,8 @@ class CogneeGraph(CogneeAbstractGraph):
         self,
         k: int,
         query_index: int = 0,
-        feedback_influence: Optional[float] = None,
-    ) -> List[Edge]:
+        feedback_influence: float | None = None,
+    ) -> list[Edge]:
         """Calculate top k triplet importances for a specific query index."""
         active_feedback_influence = (
             self.feedback_influence if feedback_influence is None else feedback_influence
@@ -507,9 +518,9 @@ class CogneeGraph(CogneeAbstractGraph):
     async def calculate_top_triplet_importances(
         self,
         k: int,
-        query_list_length: Optional[int] = None,
-        feedback_influence: Optional[float] = None,
-    ) -> Union[List[Edge], List[List[Edge]]]:
+        query_list_length: int | None = None,
+        feedback_influence: float | None = None,
+    ) -> list[Edge] | list[list[Edge]]:
         """Calculate top k triplet importances, supporting both single and multi-query modes."""
         query_count = query_list_length or 1
         results = [

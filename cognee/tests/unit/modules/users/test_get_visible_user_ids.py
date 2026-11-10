@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 
-import cognee.modules.users.methods.get_visible_user_ids  # noqa: F401 - registers the submodule
+import cognee.modules.users.methods.get_visible_user_ids  # registers the submodule
 
 # `cognee.modules.users.methods.__init__` does
 # `from .get_visible_user_ids import get_visible_user_ids`, which overwrites the

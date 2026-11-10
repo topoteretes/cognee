@@ -1,14 +1,17 @@
+import logging
 import pathlib
+
 import pytest
 import pytest_asyncio
 
 import cognee
-from cognee.low_level import setup
-from cognee import memify
-from cognee.modules.pipelines.tasks.task import Task
-from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
-from cognee.tasks.chunks.create_chunk_associations import create_chunk_associations
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.low_level import setup
+from cognee.modules.memify import run_memify_tasks
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.tasks.chunks.create_chunk_associations import create_chunk_associations
+
+logger = logging.getLogger(__name__)
 
 
 @pytest_asyncio.fixture
@@ -30,7 +33,16 @@ async def clean_test_environment():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_test_environment", exc_info=True)
+
+
+async def extract_chunk_texts(_data):
+    """Forward the text of every DocumentChunk in the dataset's graph."""
+    graph_engine = await get_graph_engine()
+    nodes, _edges = await graph_engine.get_graph_data()
+    for _node_id, properties in nodes:
+        if properties.get("type") == "DocumentChunk":
+            yield properties["text"]
 
 
 def _get_association_edges(edges):
@@ -53,7 +65,7 @@ async def test_chunk_associations_creates_edges_between_similar_chunks(clean_tes
 
     await cognee.cognify()
 
-    extraction_tasks = [Task(extract_subgraph_chunks)]
+    extraction_tasks = [Task(extract_chunk_texts)]
     enrichment_tasks = [
         Task(
             create_chunk_associations,
@@ -64,13 +76,13 @@ async def test_chunk_associations_creates_edges_between_similar_chunks(clean_tes
         )
     ]
 
-    await memify(
+    await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 
@@ -95,7 +107,7 @@ async def test_chunk_associations_respects_similarity_threshold(clean_test_envir
 
     await cognee.cognify()
 
-    extraction_tasks = [Task(extract_subgraph_chunks)]
+    extraction_tasks = [Task(extract_chunk_texts)]
     enrichment_tasks = [
         Task(
             create_chunk_associations,
@@ -105,13 +117,13 @@ async def test_chunk_associations_respects_similarity_threshold(clean_test_envir
         )
     ]
 
-    await memify(
+    await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 
@@ -131,7 +143,7 @@ async def test_chunk_associations_includes_metadata(clean_test_environment):
 
     await cognee.cognify()
 
-    extraction_tasks = [Task(extract_subgraph_chunks)]
+    extraction_tasks = [Task(extract_chunk_texts)]
     enrichment_tasks = [
         Task(
             create_chunk_associations,
@@ -140,13 +152,13 @@ async def test_chunk_associations_includes_metadata(clean_test_environment):
         )
     ]
 
-    await memify(
+    await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 
@@ -160,7 +172,8 @@ async def test_chunk_associations_includes_metadata(clean_test_environment):
 
 
 @pytest.mark.asyncio
-async def test_chunk_associations_with_cypher_query(clean_test_environment):
+async def test_chunk_associations_with_cypher_query(clean_test_environment, monkeypatch):
+    monkeypatch.setenv("ALLOW_CYPHER_QUERY", "true")
     text_1 = "Climate change is affecting global weather patterns and ecosystems."
     text_2 = "Rising temperatures contribute to extreme weather events worldwide."
     text_3 = "Renewable energy sources help reduce carbon emissions."
@@ -171,7 +184,7 @@ async def test_chunk_associations_with_cypher_query(clean_test_environment):
 
     await cognee.cognify()
 
-    extraction_tasks = [Task(extract_subgraph_chunks)]
+    extraction_tasks = [Task(extract_chunk_texts)]
     enrichment_tasks = [
         Task(
             create_chunk_associations,
@@ -180,7 +193,7 @@ async def test_chunk_associations_with_cypher_query(clean_test_environment):
         )
     ]
 
-    await memify(
+    await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
     )
@@ -205,7 +218,7 @@ async def test_chunk_associations_handles_single_chunk(clean_test_environment):
     await cognee.add(single_text)
     await cognee.cognify()
 
-    extraction_tasks = [Task(extract_subgraph_chunks)]
+    extraction_tasks = [Task(extract_chunk_texts)]
     enrichment_tasks = [
         Task(
             create_chunk_associations,
@@ -214,13 +227,13 @@ async def test_chunk_associations_handles_single_chunk(clean_test_environment):
         )
     ]
 
-    await memify(
+    await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 
@@ -236,7 +249,7 @@ async def test_chunk_associations_configurable_parameters(clean_test_environment
     await cognee.add(text_2)
     await cognee.cognify()
 
-    extraction_tasks = [Task(extract_subgraph_chunks)]
+    extraction_tasks = [Task(extract_chunk_texts)]
     enrichment_tasks = [
         Task(
             create_chunk_associations,
@@ -247,13 +260,13 @@ async def test_chunk_associations_configurable_parameters(clean_test_environment
         )
     ]
 
-    await memify(
+    await run_memify_tasks(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 

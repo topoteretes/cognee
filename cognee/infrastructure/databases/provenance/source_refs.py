@@ -1,4 +1,4 @@
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 from uuid import UUID
 
 from .constants import CHUNK_SOURCE_REF_PREFIX, SOURCE_REF_PREFIX, SOURCE_RUN_REF_PREFIX
@@ -27,7 +27,7 @@ class ParsedSourceRef(NamedTuple):
     version: int
     dataset_id: UUID
     data_id: UUID
-    chunk_id: Optional[UUID]
+    chunk_id: UUID | None
 
 
 def parse_source_ref_key(source_ref_key: str) -> ParsedSourceRef:

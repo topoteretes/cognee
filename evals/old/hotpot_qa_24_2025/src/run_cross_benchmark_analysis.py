@@ -4,12 +4,16 @@ Cross-benchmark analysis orchestration script.
 Downloads qa-benchmarks volume and processes each benchmark folder.
 """
 
+import logging
 import os
 import subprocess
 import sys
 from pathlib import Path
+
 import pandas as pd
 from analysis.analyze_single_benchmark import analyze_single_benchmark_folder
+
+logger = logging.getLogger(__name__)
 
 
 def download_modal_volume(volume_name: str, download_path: str) -> None:
@@ -24,7 +28,7 @@ def download_modal_volume(volume_name: str, download_path: str) -> None:
 
     try:
         cmd = ["modal", "volume", "get", volume_name, "/"]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
         if result.returncode == 0:
             print("✅ Successfully downloaded modal volume")
@@ -109,6 +113,7 @@ def process_single_benchmark(benchmark_folder: str, volume_path: str) -> bool:
         print(f"✅ Successfully processed: {benchmark_folder}")
         return True
     except Exception as e:
+        logger.debug("Falling back to False after error in process_single_benchmark", exc_info=True)
         print(f"❌ Error processing {benchmark_folder}: {e}")
         return False
 
@@ -174,6 +179,7 @@ def create_cross_benchmark_summary(volume_path: str, results: dict) -> None:
                 print(f"  ✅ Added {benchmark_folder}: {len(df)} questions")
 
             except Exception as e:
+                logger.debug("Ignoring exception in create_cross_benchmark_summary", exc_info=True)
                 print(f"  ❌ Error reading {benchmark_folder}: {e}")
         else:
             print(f"  ⚠️  No aggregate file found for {benchmark_folder}")

@@ -10,10 +10,9 @@ about it.
 import asyncio
 from uuid import NAMESPACE_OID, uuid4, uuid5
 
-from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
-
 import pytest
 
+from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.chunking.chunk_policy import (
     ChunkPlan,
     ChunkPlanRequest,
@@ -116,6 +115,24 @@ def test_single_mid_document_edit_touches_one_region():
     assert _reassemble(plan, stored) == new
     # The untouched first and last chunks are neither deleted nor rebuilt.
     assert len(plan.deleted_ids) == 1
+
+
+def test_fresh_region_chunks_carry_the_document_external_metadata():
+    """Content-only incremental updates stamp the document's stored metadata on new chunks.
+
+    The assembler re-mints fresh chunks field by field; the model derives the
+    metadata from ``is_part_of`` so that re-minting cannot drop it.
+    """
+    texts = ["First para.\n\n", "Second para.\n\n", "Third para.\n"]
+    old = "".join(texts)
+    new = "First para.\n\nSecond para EDITED.\n\nThird para.\n"
+    request = _request(old, _stored(texts), new)
+    request.document.external_metadata = '{"created_at": "2024-01-15"}'
+
+    plan = asyncio.run(diff_region_policy(request))
+
+    assert plan.fresh
+    assert all(chunk.external_metadata == '{"created_at": "2024-01-15"}' for chunk in plan.fresh)
 
 
 def test_three_disjoint_edits_are_three_regions():

@@ -14,6 +14,7 @@ from cognee.modules.integrations.slack.home import publish_home_view
 
 class _FakeResponse:
     def __init__(self, payload):
+        self.status = 200  # Slack answers ``ok: false`` with 200 too
         self._payload = payload
 
     async def __aenter__(self):
@@ -59,6 +60,8 @@ async def test_publishes_view_for_the_given_user_with_bearer_auth():
 @pytest.mark.asyncio
 async def test_rejected_call_raises_with_slack_error_code():
     session = _session_with({"ok": False, "error": "not_enabled"})
-    with patch("aiohttp.ClientSession", return_value=_FakeSessionContext(session)):
-        with pytest.raises(RuntimeError, match="not_enabled"):
-            await publish_home_view("xoxb-secret", "U1")
+    with (
+        patch("aiohttp.ClientSession", return_value=_FakeSessionContext(session)),
+        pytest.raises(RuntimeError, match="not_enabled"),
+    ):
+        await publish_home_view("xoxb-secret", "U1")

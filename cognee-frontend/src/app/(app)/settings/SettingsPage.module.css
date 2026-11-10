@@ -1,0 +1,29 @@
+.page {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 32px;
+  color: #edecea;
+}
+
+.header { margin-bottom: 28px; }
+.header h1 { margin: 0 0 8px; font-size: 28px; font-weight: 400; }
+.header p, .subtitle { margin: 0; color: rgba(237, 236, 234, 0.6); font-size: 14px; line-height: 1.6; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.card { min-width: 0; padding: 28px; background: #171717; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; }
+.card h2 { margin: 0 0 6px; font-size: 20px; font-weight: 400; color: #edecea; }
+.section { margin-top: 24px; }
+.section + .section { padding-top: 24px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.label { margin: 0 0 6px; font-size: 14px; font-weight: 500; }
+.badge { display: inline-block; margin-bottom: 12px; padding: 5px 10px; border-radius: 6px; color: #bc9bff; background: rgba(188, 155, 255, 0.1); font-size: 12px; }
+.logout { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; margin-top: 16px; padding: 8px 16px; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 8px; color: #edecea; background: rgba(255, 255, 255, 0.04); font-size: 14px; text-decoration: none; }
+.logout:hover { background: rgba(255, 255, 255, 0.09); }
+.logout:focus-visible { outline: 2px solid #bc9bff; outline-offset: 3px; }
+
+@media (max-width: 1100px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .page { padding: 20px 16px; }
+  .card { padding: 20px; }
+}

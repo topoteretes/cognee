@@ -11,25 +11,57 @@ from cognee.api.v1.remember.remember import remember
 
 remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
+code_repo_module = importlib.import_module("cognee.tasks.code_graph.code_repo")
+cluster_module = importlib.import_module("cognee.tasks.code_graph.cluster")
+data_methods_module = importlib.import_module("cognee.modules.data.methods")
 pipeline_module = importlib.import_module("cognee.modules.run_custom_pipeline")
 migrations_module = importlib.import_module("cognee.modules.migrations.startup")
+cognify_config_module = importlib.import_module("cognee.modules.cognify.config")
 
 
 @pytest.fixture
 def code_remember_env(monkeypatch, tmp_path):
-    """Stub out migrations, repo resolution, and the pipeline run."""
+    """Stub out migrations, dataset and repo resolution, the Data row, and the pipeline run."""
     monkeypatch.setenv("TELEMETRY_DISABLED", "1")
     monkeypatch.setattr(migrations_module, "run_migrations_and_block", AsyncMock())
+
+    dataset = SimpleNamespace(id=uuid4(), name="my_code")
+    user = SimpleNamespace(id=uuid4())
+    datasets_mock = AsyncMock(return_value=(user, [dataset]))
+    monkeypatch.setattr(remember_module, "resolve_authorized_user_datasets", datasets_mock)
 
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
     resolve_mock = AsyncMock(return_value=repo_dir)
     monkeypatch.setattr(resolve_module, "resolve_repo_source", resolve_mock)
 
+    data_row = SimpleNamespace(id=uuid4())
+    add_repo_mock = AsyncMock(return_value=data_row)
+    monkeypatch.setattr(code_repo_module, "add_code_repository", add_repo_mock)
+
+    mark_processed_mock = AsyncMock()
+    monkeypatch.setattr(data_methods_module, "mark_data_processed", mark_processed_mock)
+
     pipeline_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(pipeline_module, "run_custom_pipeline", pipeline_mock)
 
-    return {"repo_dir": repo_dir, "resolve": resolve_mock, "pipeline": pipeline_mock}
+    # The dataset holds no other repositories, and is not snapshotted as a cluster.
+    monkeypatch.setattr(cluster_module, "dataset_code_repo_rows", AsyncMock(return_value=[]))
+    cluster_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(cluster_module, "snapshot_dataset_code_repos", cluster_mock)
+
+    return {
+        "cluster": cluster_mock,
+        "repo_dir": repo_dir,
+        "resolve": resolve_mock,
+        "pipeline": pipeline_mock,
+        "dataset": dataset,
+        "user": user,
+        "datasets": datasets_mock,
+        "data_row": data_row,
+        "add_repo": add_repo_mock,
+        "mark_processed": mark_processed_mock,
+    }
 
 
 @pytest.mark.asyncio
@@ -45,9 +77,9 @@ async def test_single_repo_runs_code_graph_pipeline(code_remember_env):
     )
     code_remember_env["pipeline"].assert_awaited_once()
     call = code_remember_env["pipeline"].await_args
-    assert call.kwargs["dataset"] == "my_code"
+    assert call.kwargs["dataset"] == code_remember_env["dataset"].id
     assert call.kwargs["pipeline_name"] == "code_graph_pipeline"
-    assert call.kwargs["data"] == str(code_remember_env["repo_dir"])
+    assert call.kwargs["data"] == [code_remember_env["data_row"]]
     assert len(call.kwargs["tasks"]) == 3
 
     assert result.status == "completed"
@@ -63,8 +95,58 @@ async def test_repo_list_runs_pipeline_per_repo(code_remember_env):
     result = await remember(repos, content_type="code")
 
     assert code_remember_env["resolve"].await_count == 3
+    assert code_remember_env["add_repo"].await_count == 3
     assert code_remember_env["pipeline"].await_count == 3
     assert [item["source"] for item in result.items] == repos
+    # One dataset for the whole batch, resolved before the first repo runs.
+    code_remember_env["datasets"].assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_each_repo_is_stored_as_a_data_row_in_the_dataset(code_remember_env):
+    """SDK-783: a repository gets a Data row, so the caller has a data_id to forget."""
+    result = await remember(
+        "https://github.com/org/repo", dataset_name="my_code", content_type="code"
+    )
+
+    code_remember_env["add_repo"].assert_awaited_once_with(
+        code_remember_env["repo_dir"],
+        user=code_remember_env["user"],
+        dataset=code_remember_env["dataset"],
+        source_url="https://github.com/org/repo",
+        skip_connection_test=True,
+    )
+    assert result.items[0]["id"] == str(code_remember_env["data_row"].id)
+    assert result.dataset_id == str(code_remember_env["dataset"].id)
+
+
+@pytest.mark.asyncio
+async def test_local_repo_row_records_no_source_url(code_remember_env):
+    await remember(str(code_remember_env["repo_dir"]), content_type="code")
+
+    assert code_remember_env["add_repo"].await_args.kwargs["source_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_completed_repo_is_stamped_as_cognified(code_remember_env):
+    """A later cognify() of the dataset must not rerun enola for a repo already built."""
+    await remember("/some/repo", content_type="code")
+
+    code_remember_env["mark_processed"].assert_awaited_once_with(
+        code_remember_env["data_row"].id,
+        code_remember_env["dataset"].id,
+        pipeline_names=("cognify_pipeline", "code_graph_pipeline"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_errored_repo_is_not_stamped_as_cognified(code_remember_env):
+    pipeline_result, _, _ = _pipeline_result("PipelineRunErrored")
+    code_remember_env["pipeline"].return_value = pipeline_result
+
+    await remember("/some/repo", content_type="code")
+
+    code_remember_env["mark_processed"].assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -96,7 +178,10 @@ async def test_non_string_data_is_rejected(code_remember_env):
 
 
 @pytest.mark.asyncio
-async def test_index_vectors_without_code_content_type_is_rejected(code_remember_env):
+async def test_index_vectors_without_code_content_type_is_rejected(code_remember_env, monkeypatch):
+    # A text remember() runs the keyless extractor gate before argument
+    # validation; disable the preflight so this test checks the argument only.
+    monkeypatch.setenv("COGNEE_SKIP_CONNECTION_TEST", "true")
     with pytest.raises(ValueError, match="index_vectors"):
         await remember("some text", index_vectors=True)
 
@@ -114,19 +199,6 @@ def _pipeline_result(status, dataset_name="my_code"):
         dataset_uuid,
         run_id,
     )
-
-
-@pytest.fixture
-def resolved_dataset(monkeypatch):
-    """Stub upfront dataset resolution used by the background code branch."""
-    dataset = SimpleNamespace(id=uuid4(), name="my_code")
-    user = SimpleNamespace(id=uuid4())
-    monkeypatch.setattr(
-        remember_module,
-        "resolve_authorized_user_datasets",
-        AsyncMock(return_value=(user, [dataset])),
-    )
-    return dataset
 
 
 @pytest.mark.asyncio
@@ -156,9 +228,8 @@ async def test_blocking_errored_run_marks_result_errored(code_remember_env):
 
 
 @pytest.mark.asyncio
-async def test_run_in_background_returns_running_then_completes(
-    code_remember_env, resolved_dataset
-):
+async def test_run_in_background_returns_running_then_completes(code_remember_env):
+    resolved_dataset = code_remember_env["dataset"]
     result = await remember(
         "https://github.com/org/repo",
         dataset_name="my_code",
@@ -174,11 +245,12 @@ async def test_run_in_background_returns_running_then_completes(
 
     assert result.status == "completed"
     assert result.items_processed == 1
+    assert result.items[0]["id"] == str(code_remember_env["data_row"].id)
     assert code_remember_env["pipeline"].await_args.kwargs["dataset"] == resolved_dataset.id
 
 
 @pytest.mark.asyncio
-async def test_background_failure_continues_batch(code_remember_env, resolved_dataset):
+async def test_background_failure_continues_batch(code_remember_env):
     repo_dir = code_remember_env["repo_dir"]
     code_remember_env["resolve"].side_effect = [RuntimeError("clone failed"), repo_dir]
 
@@ -203,8 +275,309 @@ async def test_background_failure_continues_batch(code_remember_env, resolved_da
 
 
 @pytest.mark.asyncio
+async def test_failure_after_the_row_is_stored_keeps_its_id(code_remember_env):
+    """A repo whose pipeline raises after its Data row was written still reports
+    that row's id, so the caller can forget it."""
+    code_remember_env["pipeline"].side_effect = RuntimeError("enola crashed")
+
+    result = await remember("/some/repo", content_type="code", run_in_background=True)
+    await result
+
+    assert result.items[0]["status"] == "errored"
+    assert result.items[0]["id"] == str(code_remember_env["data_row"].id)
+    code_remember_env["mark_processed"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_result_error_names_every_failed_repo(code_remember_env):
+    """A pipeline-errored repo and a raising repo in one batch both reach
+    result.error, each with its own cause."""
+    repo_dir = code_remember_env["repo_dir"]
+    code_remember_env["resolve"].side_effect = [repo_dir, RuntimeError("clone failed")]
+    dataset_uuid = uuid4()
+    code_remember_env["pipeline"].return_value = {
+        dataset_uuid: SimpleNamespace(
+            status="PipelineRunErrored",
+            pipeline_run_id=uuid4(),
+            dataset_name="my_code",
+            error_message="enola crashed",
+        )
+    }
+
+    result = await remember(
+        ["https://github.com/org/a", "https://github.com/org/b"],
+        content_type="code",
+        raise_on_error=False,
+    )
+
+    assert result.status == "errored"
+    assert result.items[0]["error"] == "enola crashed"
+    assert result.error == (
+        "https://github.com/org/a: enola crashed; https://github.com/org/b: clone failed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_row_write_run_and_stamp_hold_the_dataset_lock(code_remember_env, monkeypatch):
+    """The row's stamps are read-modify-written as a whole, so storing the row,
+    building its graph, and stamping it must all happen under the dataset lock."""
+    from contextlib import asynccontextmanager
+
+    lock_module = importlib.import_module("cognee.infrastructure.locks.dataset_lock")
+    events = []
+
+    @asynccontextmanager
+    async def _recording_lock(dataset_id):
+        events.append(("lock", dataset_id))
+        yield
+        events.append(("unlock", dataset_id))
+
+    monkeypatch.setattr(lock_module, "dataset_lock", _recording_lock)
+    for name in ("add_repo", "pipeline", "mark_processed"):
+        code_remember_env[name].side_effect = lambda *_args, _name=name, **_kwargs: events.append(
+            (_name, None)
+        )
+    code_remember_env["add_repo"].side_effect = lambda *_a, **_k: (
+        events.append(("add_repo", None)) or code_remember_env["data_row"]
+    )
+    code_remember_env["resolve"].side_effect = lambda *_a, **_k: (
+        events.append(("resolve", None)) or code_remember_env["repo_dir"]
+    )
+    code_remember_env["cluster"].side_effect = lambda *_a, **_k: (
+        events.append(("snapshot", None)) or None
+    )
+
+    await remember("/some/repo", content_type="code")
+
+    dataset_id = code_remember_env["dataset"].id
+    # The clone (resolve) is the slow part and reads no dataset state: it
+    # happens before the lock, so nothing else on the dataset waits for it.
+    # The enola run (snapshot) writes the dataset's snapshot directory, which
+    # a concurrent cognify() rewrites, so it holds the lock with the rest.
+    assert events == [
+        ("resolve", None),
+        ("lock", dataset_id),
+        ("snapshot", None),
+        ("add_repo", None),
+        ("pipeline", None),
+        ("mark_processed", None),
+        ("unlock", dataset_id),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_blocking_raises_a_failed_repo_by_default(code_remember_env):
+    code_remember_env["resolve"].side_effect = RuntimeError("clone failed")
+
+    with pytest.raises(RuntimeError, match="clone failed"):
+        await remember("https://github.com/org/bad", content_type="code")
+
+
+@pytest.mark.asyncio
+async def test_blocking_with_raise_on_error_false_reports_failed_repos(code_remember_env):
+    """The HTTP router passes raise_on_error=False and answers an errored result
+    with 409; a failed repo must become an errored item, not an exception, and
+    must not abort the rest of the batch."""
+    repo_dir = code_remember_env["repo_dir"]
+    code_remember_env["resolve"].side_effect = [RuntimeError("clone failed"), repo_dir]
+
+    result = await remember(
+        ["https://github.com/org/bad", "https://github.com/org/good"],
+        content_type="code",
+        raise_on_error=False,
+    )
+
+    assert result.status == "errored"
+    assert "clone failed" in result.error
+    assert result.items[0]["status"] == "errored"
+    assert result.items[1]["id"] == str(code_remember_env["data_row"].id)
+    assert result.items_processed == 1
+
+
+@pytest.mark.asyncio
 async def test_blocking_ignores_background_machinery(code_remember_env):
     result = await remember("/some/repo", content_type="code")
 
     assert result._task is None
     assert result.done
+
+
+@pytest.mark.asyncio
+async def test_code_route_never_resolves_the_graph_extractor(code_remember_env, monkeypatch):
+    """A keyless install without gliner2 must still build code graphs.
+
+    The code route runs enola only, so the extractor gate that a keyless
+    text remember() hits (KeylessExtractorNotInstalledError) must not run.
+    """
+
+    def _gate_would_fail(*_args, **_kwargs):
+        raise cognify_config_module.KeylessExtractorNotInstalledError()
+
+    monkeypatch.setattr(cognify_config_module, "resolve_extractor", _gate_would_fail)
+
+    result = await remember(
+        str(code_remember_env["repo_dir"]), dataset_name="my_code", content_type="code"
+    )
+
+    assert result.status == "completed"
+    code_remember_env["pipeline"].assert_awaited_once()
+
+
+def _cluster_of(env, other_row, other_path):
+    """The dataset already holds another repository: both form one cluster."""
+    return cluster_module.DatasetCodeSnapshot(
+        snapshot_dir=other_path / ".enola",
+        members=[
+            cluster_module.ClusterMember(data=other_row, repo_path=other_path, label="other"),
+            cluster_module.ClusterMember(
+                data=env["data_row"], repo_path=env["repo_dir"], label="repo"
+            ),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_repositories_already_in_the_dataset_are_rebuilt_with_the_new_one(
+    code_remember_env, tmp_path
+):
+    other_row = SimpleNamespace(id=uuid4())
+    code_remember_env["cluster"].return_value = _cluster_of(
+        code_remember_env, other_row, tmp_path / "other"
+    )
+
+    result = await remember("/local/repo", dataset_name="my_code", content_type="code")
+
+    calls = code_remember_env["pipeline"].await_args_list
+    assert [call.kwargs["data"] for call in calls] == [[other_row], [code_remember_env["data_row"]]]
+    scopes = [call.kwargs["tasks"][0].default_params["kwargs"]["repo_scope"] for call in calls]
+    assert scopes == ["other", "repo"]
+    # Only the repository the caller named is an item of the result.
+    assert result.status == "completed"
+    assert [item["id"] for item in result.items] == [str(code_remember_env["data_row"].id)]
+    assert code_remember_env["mark_processed"].await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_failed_rebuild_of_another_repository_is_reported(code_remember_env, tmp_path):
+    other_row = SimpleNamespace(id=uuid4())
+    code_remember_env["cluster"].return_value = _cluster_of(
+        code_remember_env, other_row, tmp_path / "other"
+    )
+    code_remember_env["pipeline"].side_effect = [RuntimeError("graph write failed"), None]
+
+    result = await remember(
+        "/local/repo", dataset_name="my_code", content_type="code", raise_on_error=False
+    )
+
+    assert result.status == "errored"
+    assert result.error == "other: graph write failed"
+    assert result.items_processed == 1
+    assert result.items[0].get("status") != "errored"
+
+
+@pytest.mark.asyncio
+async def test_failed_rebuild_of_another_repository_is_not_raised(code_remember_env, tmp_path):
+    """The rows this call stored are built and stamped; another repository's
+    failed rebuild is reported on the result, not raised at the caller."""
+    other_row = SimpleNamespace(id=uuid4())
+    code_remember_env["cluster"].return_value = _cluster_of(
+        code_remember_env, other_row, tmp_path / "other"
+    )
+    code_remember_env["pipeline"].side_effect = [RuntimeError("graph write failed"), None]
+
+    result = await remember("/local/repo", dataset_name="my_code", content_type="code")
+
+    assert result.status == "errored"
+    assert result.error == "other: graph write failed"
+    assert result.items[0]["id"] == str(code_remember_env["data_row"].id)
+    assert result.items[0].get("status") != "errored"
+    code_remember_env["mark_processed"].assert_awaited_once()
+    assert (
+        code_remember_env["mark_processed"].await_args.args[0] == code_remember_env["data_row"].id
+    )
+
+
+@pytest.mark.asyncio
+async def test_failed_cluster_snapshot_fails_every_repository_of_the_call(code_remember_env):
+    code_remember_env["cluster"].side_effect = RuntimeError("enola timed out")
+
+    result = await remember(["/local/a", "/local/b"], content_type="code", raise_on_error=False)
+
+    code_remember_env["pipeline"].assert_not_awaited()
+    assert result.status == "errored"
+    assert [item["error"] for item in result.items] == ["enola timed out", "enola timed out"]
+    # The rows were stored before the snapshot was taken, so they keep their ids.
+    assert all(item["id"] == str(code_remember_env["data_row"].id) for item in result.items)
+
+
+@pytest.mark.asyncio
+async def test_code_sync_keeps_one_phase_so_repository_progress_survives(
+    code_remember_env, monkeypatch
+):
+    from cognee.modules.integrations.sync_progress import (
+        SyncProgressReporter,
+        get_current_sync_progress,
+        track_sync,
+    )
+
+    observations = []
+
+    async def capture(reporter, snapshot=None):
+        observations.append(reporter.snapshot() if snapshot is None else snapshot)
+
+    async def clone(*args, **kwargs):
+        snapshot = get_current_sync_progress().snapshot()
+        assert snapshot.phase == "processing"
+        assert snapshot.total == 2  # Repositories, not an invented clone byte or file total.
+        return code_remember_env["repo_dir"]
+
+    async def index(**kwargs):
+        assert get_current_sync_progress().snapshot().phase == "processing"
+        if code_remember_env["pipeline"].await_count == 1:
+            raise RuntimeError("repo failed")
+
+    monkeypatch.setattr(SyncProgressReporter, "_publish", capture)
+    code_remember_env["resolve"].side_effect = clone
+    code_remember_env["pipeline"].side_effect = index
+    credential = SimpleNamespace(
+        provider="github", id=uuid4(), user_id=uuid4(), workspace_id=None, provider_account_id="42"
+    )
+    async with track_sync("github", credential) as reporter:
+        result = await remember(
+            ["https://github.com/org/a", "https://github.com/org/b"],
+            content_type="code",
+            raise_on_error=False,
+        )
+        assert result.status == "errored"
+        snapshot = reporter.snapshot()
+        assert snapshot.completed == snapshot.total == 2
+        assert snapshot.unit == "repositories"
+        assert snapshot.counts == {"processed": 1, "failed": 1}
+        await reporter.finish("partial", reason="processing_error")
+    assert observations[-1].state == "partial"
+
+
+@pytest.mark.asyncio
+async def test_stored_repository_no_run_built_is_errored_not_processed(code_remember_env, tmp_path):
+    """A row whose directory is gone by the load gets no run, so no graph."""
+    code_remember_env["resolve"].return_value = tmp_path / "gone"
+
+    result = await remember(
+        "/local/repo", dataset_name="my_code", content_type="code", raise_on_error=False
+    )
+
+    code_remember_env["pipeline"].assert_not_awaited()
+    code_remember_env["mark_processed"].assert_not_awaited()
+    assert result.status == "errored"
+    assert result.items_processed == 0
+    assert result.items[0]["error"] == "code graph not built for 'gone'"
+
+
+@pytest.mark.asyncio
+async def test_stored_repository_no_run_built_raises_when_not_isolating(
+    code_remember_env, tmp_path
+):
+    code_remember_env["resolve"].return_value = tmp_path / "gone"
+
+    with pytest.raises(RuntimeError, match="code graph not built for 'gone'"):
+        await remember("/local/repo", dataset_name="my_code", content_type="code")

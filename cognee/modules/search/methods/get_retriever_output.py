@@ -1,5 +1,6 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.retrieval.context_preview import ContextPreview, build_context_preview
+from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.retrieval.only_context_prompt import build_only_context_prompt
 from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
 from cognee.modules.retrieval.utils.evidence import (
     append_source_evidence_text,
@@ -12,9 +13,10 @@ from cognee.modules.search.methods.hybrid_deferral import (
     hybrid_deferral_reason,
     reject_hybrid_graph_only_knobs,
 )
+from cognee.modules.search.methods.node_name_scope import lucky_search_types
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations.select_search_type import select_search_type
-from cognee.modules.search.types import ContextFormat, SearchType
+from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -28,7 +30,12 @@ async def _effective_search_type(
         if graph_is_empty:
             resolved = SearchType.HYBRID_COMPLETION
         else:
-            resolved = await select_search_type(query_text)
+            resolved = await select_search_type(
+                query_text,
+                allowed_search_types=lucky_search_types(
+                    kwargs.get("node_type", NodeSet), kwargs.get("node_name")
+                ),
+            )
     else:
         resolved = query_type
 
@@ -36,7 +43,10 @@ async def _effective_search_type(
         reject_hybrid_graph_only_knobs(kwargs)
         reason = await hybrid_deferral_reason(kwargs, graph_is_empty=graph_is_empty)
         if reason:
-            logger.info("Deferring HYBRID_COMPLETION to GRAPH_COMPLETION: %s", reason)
+            logger.warning(
+                "HYBRID_COMPLETION is not available for this search; answering with "
+                "GRAPH_COMPLETION instead."
+            )
             # Payload.search_type records this. search() strips it; only_context
             # and verbose callers that parse shape must pin query_type.
             return SearchType.GRAPH_COMPLETION
@@ -60,19 +70,16 @@ def _context_evidence(retriever_instance, retrieved_objects, kwargs: dict) -> li
         return []
     dataset = kwargs.get("dataset")
     try:
-        return evidence_method(retrieved_objects, dataset_id=getattr(dataset, "id", None))
+        # None from a retriever means "no evidence", like []; callers iterate the result.
+        return evidence_method(retrieved_objects, dataset_id=getattr(dataset, "id", None)) or []
     except Exception as error:
-        logger.warning("Unable to build structured context evidence: %s", error)
+        logger.warning("Unable to build structured context evidence: %s", error, exc_info=True)
         return []
 
 
 async def get_retriever_output(
     query_type: SearchType, query_text: str, **kwargs
 ) -> SearchResultPayload:
-    # Validate the output knob before any retrieval runs, through the same parse the
-    # API layer uses, so every entry point raises the same error for the same input.
-    context_format = ContextFormat.parse(kwargs.get("context_format"))
-
     graph_engine = await get_graph_engine()
     graph_is_empty = await graph_engine.is_empty()
     if graph_is_empty:
@@ -95,13 +102,15 @@ async def get_retriever_output(
         search_type_for_spans=effective_query_type,
     )
 
-    preview = ContextPreview()
-    if only_context and context_format is ContextFormat.PROMPT:
-        # The caller's session_id is passed explicitly: non-generative retrievers do not
-        # keep one, and the preview must describe the session that was asked about.
-        # shared_history is the fan-out's single conversation-history read, when the
-        # caller made one.
-        preview = await build_context_preview(
+    prompts = None
+    if only_context:
+        # The (user_prompt, system_prompt) pair the completion would have received, or
+        # None when the retriever sends no single templated prompt (bare context is
+        # returned then). The caller's session_id is passed explicitly: non-generative
+        # retrievers do not keep one, and the system prompt must describe the session
+        # that was asked about. shared_history is the fan-out's single
+        # conversation-history read.
+        prompts = await build_only_context_prompt(
             retriever_instance,
             query=query_text,
             context=context,
@@ -120,7 +129,7 @@ async def get_retriever_output(
                 evidence.extend(await graph_source_evidence(evidence, getattr(dataset, "id", None)))
                 completion = append_source_evidence_text(completion, evidence)
             except Exception as error:
-                logger.warning("Unable to resolve graph source evidence: %s", error)
+                logger.warning("Unable to resolve graph source evidence: %s", error, exc_info=True)
 
     return SearchResultPayload(
         result_object=retrieved_objects,
@@ -129,10 +138,7 @@ async def get_retriever_output(
         evidence=evidence,
         search_type=effective_query_type,
         only_context=only_context,
-        question=query_text,
-        context_format=context_format,
-        session_context=preview.session_context or None,
-        user_prompt=preview.user_prompt,
-        system_prompt=preview.system_prompt,
+        user_prompt=prompts[0] if prompts else None,
+        system_prompt=prompts[1] if prompts else None,
         **_dataset_fields(kwargs),
     )

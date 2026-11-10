@@ -4,6 +4,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+
 from .harness import (
     DEFAULT_DISPATCH,
     HandleRegistry,
@@ -11,24 +14,30 @@ from .harness import (
     Request,
     run_worker_loop,
 )
+from .lancedb_compaction import compact_fragments, open_as_lance, prune_superseded_versions
 from .lancedb_protocol import (
     OP_CONNECT,
     OP_CREATE_TABLE,
     OP_DROP_TABLE,
     OP_OPEN_TABLE,
     OP_TABLE_ADD,
+    OP_TABLE_COMPACT_FRAGMENTS,
     OP_TABLE_COUNT_ROWS,
     OP_TABLE_DELETE,
-    OP_TABLE_OPTIMIZE,
+    OP_TABLE_EVOLVE_PAYLOAD,
     OP_TABLE_MERGE_INSERT_EXECUTE,
     OP_TABLE_NAMES,
+    OP_TABLE_OPTIMIZE,
+    OP_TABLE_PRUNE_VERSIONS,
     OP_TABLE_QUERY_EXECUTE,
     OP_TABLE_RELEASE,
     OP_TABLE_SCHEMA,
     OP_TABLE_TO_ARROW,
     OP_TABLE_VECTOR_SEARCH_EXECUTE,
 )
+from .lancedb_schema_evolution import PAYLOAD_COLUMN, evolve_payload_schema, relax_nullability
 
+logger = logging.getLogger(__name__)
 
 # The connection is stored at a fixed handle id (0) since there is exactly one
 # per worker.
@@ -47,7 +56,6 @@ async def _op_connect(registry: HandleRegistry, req: Request) -> None:
 
     connection = await lancedb.connect_async(url, api_key=api_key)
     registry.register_at(_CONNECTION_HANDLE, connection)  # fixed singleton slot
-    return None
 
 
 async def _op_table_names(registry: HandleRegistry, req: Request):
@@ -55,44 +63,8 @@ async def _op_table_names(registry: HandleRegistry, req: Request):
     return await conn.table_names()
 
 
-def _relax_nullability(schema):
-    """Return a pa.Schema with every top-level field (and nested struct fields)
-    marked as nullable. LanceModel's ``to_arrow_schema()`` marks required
-    pydantic fields as non-nullable; once pydantic validation happens only in
-    the main process, the worker sees plain dicts and some records may end up
-    with null values (e.g. optional-ish fields that pydantic would have
-    defaulted). Relaxing nullability avoids brittle schema mismatches at the
-    Arrow layer.
-    """
-    import pyarrow as pa
-
-    def _relax_type(arrow_type):
-        if pa.types.is_struct(arrow_type):
-            return pa.struct(
-                [pa.field(f.name, _relax_type(f.type), nullable=True) for f in arrow_type]
-            )
-        if pa.types.is_list(arrow_type):
-            return pa.list_(
-                pa.field(
-                    arrow_type.value_field.name, _relax_type(arrow_type.value_type), nullable=True
-                )
-            )
-        if pa.types.is_fixed_size_list(arrow_type):
-            return pa.list_(
-                pa.field(
-                    arrow_type.value_field.name,
-                    _relax_type(arrow_type.value_type),
-                    nullable=True,
-                ),
-                arrow_type.list_size,
-            )
-        return arrow_type
-
-    return pa.schema([pa.field(f.name, _relax_type(f.type), nullable=True) for f in schema])
-
-
 async def _op_create_table(registry: HandleRegistry, req: Request):
-    import pyarrow as pa  # noqa: F401  # ensure pyarrow is resolved in-worker
+    import pyarrow as pa  # ensure pyarrow is resolved in-worker
 
     conn = _get_connection(registry)
     name = req.args[0]
@@ -103,9 +75,8 @@ async def _op_create_table(registry: HandleRegistry, req: Request):
     # and rejects anything that isn't a valid Arrow schema, eliminating
     # the unconditional ``pickle.loads`` RCE surface on this RPC.
     schema = pa.ipc.read_schema(pa.py_buffer(schema_bytes))
-    schema = _relax_nullability(schema)
+    schema = relax_nullability(schema)
     await conn.create_table(name=name, schema=schema, exist_ok=exist_ok)
-    return None
 
 
 async def _op_open_table(registry: HandleRegistry, req: Request) -> HandleResult:
@@ -119,14 +90,12 @@ async def _op_drop_table(registry: HandleRegistry, req: Request):
     conn = _get_connection(registry)
     name = req.args[0]
     await conn.drop_table(name)
-    return None
 
 
 def _op_release_handle(registry: HandleRegistry, req: Request):
     """Drop a handle from the registry. Idempotent."""
     if req.handle_id is not None:
         registry.pop(req.handle_id)
-    return None
 
 
 async def _op_table_count_rows(registry: HandleRegistry, req: Request):
@@ -158,20 +127,55 @@ async def _op_table_add(registry: HandleRegistry, req: Request):
     table = registry.get(req.handle_id)
     records = req.args[0]
     await table.add(records)
-    return None
 
 
 async def _op_table_delete(registry: HandleRegistry, req: Request):
     table = registry.get(req.handle_id)
     where_expr = req.args[0]
     await table.delete(where_expr)
-    return None
 
 
 async def _op_table_optimize(registry: HandleRegistry, req: Request):
+    # LanceDB's own full ``optimize`` (the id re-key migration compacts this
+    # way after a bulk delete). Its stats object is not returned: nothing
+    # reads it and it is not a plain builtin.
     table = registry.get(req.handle_id)
-    await table.optimize()
-    return None
+    await table.optimize(**(req.kwargs or {}))
+
+
+async def _op_table_compact_fragments(registry: HandleRegistry, req: Request):
+    # Plan against the latest version (the caller holds its write lock), so a
+    # write committed after this handle was opened cannot make the rewrite
+    # conflict. Hand the table to pylance, do the I/O off the event loop so
+    # other requests keep flowing, then move this handle to the committed version.
+    table = registry.get(req.handle_id)
+    await table.checkout_latest()
+    dataset = await open_as_lance(table)
+    stats = await asyncio.to_thread(compact_fragments, dataset, **req.kwargs)
+    await table.checkout_latest()
+    return stats
+
+
+async def _op_table_prune_versions(registry: HandleRegistry, req: Request):
+    table = registry.get(req.handle_id)
+    await table.checkout_latest()
+    dataset = await open_as_lance(table)
+    return await asyncio.to_thread(prune_superseded_versions, dataset, **req.kwargs)
+
+
+async def _op_table_evolve_payload(registry: HandleRegistry, req: Request):
+    import pyarrow as pa
+
+    # Same shape as compaction: plan against the latest version under the
+    # caller's write lock, hand the table to pylance off the event loop, then
+    # move this handle to the version the evolution committed.
+    table = registry.get(req.handle_id)
+    target = pa.ipc.read_schema(pa.py_buffer(req.args[0])).field(PAYLOAD_COLUMN).type
+    await table.checkout_latest()
+    dataset = await open_as_lance(table)
+    stats = await asyncio.to_thread(evolve_payload_schema, dataset, target, **req.kwargs)
+    await table.checkout_latest()
+    return stats
 
 
 def _apply_chain(builder, chain_steps):
@@ -227,6 +231,7 @@ async def _op_merge_insert_execute(registry: HandleRegistry, req: Request):
             "num_deleted_rows": getattr(result, "num_deleted_rows", None),
         }
     except Exception:
+        logger.debug("Falling back to None after error in _op_merge_insert_execute", exc_info=True)
         return None
 
 
@@ -244,6 +249,9 @@ DISPATCH = {
     OP_TABLE_ADD: _op_table_add,
     OP_TABLE_DELETE: _op_table_delete,
     OP_TABLE_OPTIMIZE: _op_table_optimize,
+    OP_TABLE_COMPACT_FRAGMENTS: _op_table_compact_fragments,
+    OP_TABLE_PRUNE_VERSIONS: _op_table_prune_versions,
+    OP_TABLE_EVOLVE_PAYLOAD: _op_table_evolve_payload,
     OP_TABLE_QUERY_EXECUTE: _op_query_execute,
     OP_TABLE_VECTOR_SEARCH_EXECUTE: _op_vector_search_execute,
     OP_TABLE_MERGE_INSERT_EXECUTE: _op_merge_insert_execute,

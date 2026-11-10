@@ -11,6 +11,10 @@ permissions:
 on:
   workflow_call:
     inputs:
+      has-secrets:
+        required: false
+        type: boolean
+        default: true
       databases:
         required: false
         type: string
@@ -26,6 +30,7 @@ on:
         required: false
 
 env:
+  CI_HAS_SECRETS: ${{ inputs.has-secrets }}
   COGNEE_SKIP_CONNECTION_TEST: 'true'
 
 jobs:
@@ -33,7 +38,7 @@ jobs:
     name: PostgreSQL Tests
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'postgres') }}
+    if: ${{ inputs.has-secrets && (inputs.databases == 'all' || contains(inputs.databases, 'postgres')) }}
     services:
       postgres:
         image: ghcr.io/topoteretes/pgvector:pg17
@@ -53,7 +58,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Check out
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -91,7 +96,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: cognee
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_PASSWORD: cognee
           POSTGRES_DB: cognee_db
         options: >-
           --health-cmd pg_isready
@@ -102,13 +107,14 @@ jobs:
           - 5432:5432
     steps:
       - name: Check out
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: ${{ inputs.python-version }}
           extra-dependencies: "postgres"
 
@@ -126,17 +132,21 @@ jobs:
           VECTOR_DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
           VECTOR_DB_PORT: 5432
           VECTOR_DB_USERNAME: cognee
-          VECTOR_DB_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          VECTOR_DB_PASSWORD: cognee
           VECTOR_DATASET_DATABASE_HANDLER: pgvector
-        run: uv run python ./cognee/tests/test_permissions.py
+        shell: bash
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run python ./cognee/tests/test_permissions.py
 
   run-lancedb-tests:
     name: LanceDB Tests
+    if: ${{ inputs.has-secrets }}
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -164,10 +174,10 @@ jobs:
     name: Turso Tests
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'turso') }}
+    if: ${{ inputs.has-secrets && (inputs.databases == 'all' || contains(inputs.databases, 'turso')) }}
     steps:
       - name: Check out
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -177,11 +187,43 @@ jobs:
           python-version: ${{ inputs.python-version }}
           extra-dependencies: "turso"
 
-      # Adapter behavior against a real embedded libSQL DB (no LLM needed).
-      - name: Run Turso adapter unit tests
+      # Adapter behavior against the real Turso rewrite engine (pyturso), no LLM
+      # needed: shared dialect/config, relational (incl. the Alembic chain),
+      # graph-as-tables, vector, the per-dataset handlers, and concurrent writes
+      # from independent connections in both journal modes (wal and mvcc).
+      - name: Run Turso adapter tests (relational, graph, vector, concurrency)
         env:
           ENV: 'dev'
-        run: uv run pytest cognee/tests/unit/infrastructure/databases/vector/test_turso_adapter.py -v
+        run: >-
+          uv run pytest -v
+          cognee/tests/unit/infrastructure/databases/turso_backend
+          cognee/tests/unit/infrastructure/databases/relational/test_turso_adapter.py
+          cognee/tests/unit/infrastructure/databases/relational/test_create_relational_engine.py
+          cognee/tests/unit/infrastructure/databases/graph/test_turso_graph_dataset_database_handler.py
+          cognee/tests/unit/infrastructure/databases/vector/test_turso_adapter.py
+          cognee/tests/unit/infrastructure/databases/cache/test_sql_cache_turso.py
+          cognee/tests/unit/infrastructure/databases/cache/test_sql_adapter_crud.py
+          cognee/tests/e2e/turso/test_turso_adapter.py
+          cognee/tests/e2e/turso/test_concurrent_writes.py
+
+      # The same adapter tests with TURSO_JOURNAL_MODE=mvcc: graph and vector writes
+      # run as BEGIN CONCURRENT, the relational DB and cache must stay on wal. The
+      # search suites below run in wal only, so mvcc is not covered end to end.
+      - name: Run Turso adapter tests in mvcc mode
+        env:
+          ENV: 'dev'
+          TURSO_JOURNAL_MODE: mvcc
+        run: >-
+          uv run pytest -v
+          cognee/tests/unit/infrastructure/databases/turso_backend
+          cognee/tests/unit/infrastructure/databases/relational/test_turso_adapter.py
+          cognee/tests/unit/infrastructure/databases/relational/test_create_relational_engine.py
+          cognee/tests/unit/infrastructure/databases/graph/test_turso_graph_dataset_database_handler.py
+          cognee/tests/unit/infrastructure/databases/vector/test_turso_adapter.py
+          cognee/tests/unit/infrastructure/databases/cache/test_sql_cache_turso.py
+          cognee/tests/unit/infrastructure/databases/cache/test_sql_adapter_crud.py
+          cognee/tests/e2e/turso/test_turso_adapter.py
+          cognee/tests/e2e/turso/test_concurrent_writes.py
 
       # Full search-type e2e suite, run against Turso via VECTOR_DB_PROVIDER.
       - name: Run Turso search tests
@@ -199,6 +241,26 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run pytest cognee/tests/test_search_db.py -v --log-level=INFO
 
+      # The same suite with every layer on Turso: relational + graph-as-tables +
+      # vector + session cache all run on the rewrite engine (the local integration SDK-664 ships).
+      - name: Run Turso all-layers search tests
+        env:
+          ENV: 'dev'
+          DATABASE_MAX_LRU_CACHE_SIZE: 1
+          DB_PROVIDER: turso
+          GRAPH_DATABASE_PROVIDER: turso
+          VECTOR_DB_PROVIDER: turso
+          CACHE_BACKEND: turso
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: uv run pytest cognee/tests/test_search_db.py -v --log-level=INFO
+
   run-turso-multi-user-tests:
     name: Turso Multi-User Tests
     runs-on: ubuntu-22.04
@@ -206,17 +268,18 @@ jobs:
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'turso') }}
     steps:
       - name: Check out
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
+          keyless-models: "true"
           python-version: ${{ inputs.python-version }}
           extra-dependencies: "turso"
 
-      # Per-dataset libSQL files isolate users; proves the dataset handler +
+      # Per-dataset Turso database files isolate users; proves the dataset handler +
       # permission system work with Turso under backend access control.
       - name: Run Turso permissions tests
         env:
@@ -232,4 +295,7 @@ jobs:
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run pytest cognee/tests/test_permissions.py -v --log-level=INFO
+        shell: bash
+        run: |
+          source .github/scripts/keyless_ci_env.sh
+          uv run pytest cognee/tests/test_permissions.py -v --log-level=INFO

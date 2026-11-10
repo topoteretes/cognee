@@ -16,7 +16,7 @@ Slack retry, never a better outcome for a payload this app doesn't act on.
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import parse_qs
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
@@ -25,6 +25,12 @@ from cognee.modules.integrations.slack.handle_cognee_ask import (
     ASK_SHARE_ACTION_ID,
     handle_cognee_ask_discard,
     handle_cognee_ask_share,
+)
+from cognee.modules.integrations.slack.handle_history import (
+    HISTORY_SHORTCUT,
+    HISTORY_VIEW,
+    THREAD_SHORTCUT,
+    handle_history_interactive,
 )
 from cognee.modules.integrations.slack.handle_slack_link import NOT_LINKED_MESSAGE
 from cognee.modules.integrations.slack.persistence import (
@@ -56,6 +62,15 @@ async def handle_slack_interactive(raw_body: bytes) -> dict[str, Any]:
 
     payload = json.loads(raw_payload)
     payload_type = payload.get("type")
+
+    if (
+        payload_type in {"shortcut", "message_action"}
+        and payload.get("callback_id") in {HISTORY_SHORTCUT, THREAD_SHORTCUT}
+    ) or (
+        payload_type in {"view_submission", "block_suggestion"}
+        and (payload.get("view") or {}).get("callback_id") == HISTORY_VIEW
+    ):
+        return await handle_history_interactive(payload)
 
     if payload_type == "message_action" and payload.get("callback_id") == REMEMBER_THIS_CALLBACK_ID:
         await _handle_remember_this(payload)
@@ -118,8 +133,8 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
         )
         return
 
-    channel_name: Optional[str] = (payload.get("channel") or {}).get("name")
-    author_id: Optional[str] = message.get("user")
+    channel_name: str | None = (payload.get("channel") or {}).get("name")
+    author_id: str | None = message.get("user")
 
     try:
         await remember_message(
@@ -134,7 +149,7 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
             ),
         )
         return
-    except Exception:  # noqa: BLE001 - any remember failure must degrade to a chat message, not a crash
+    except Exception:  # any remember failure must degrade to a chat message, not a crash
         logger.exception("Failed to remember a Slack message for team %s", team_id)
         await post_to_response_url(
             response_url, _ephemeral("Could not save that message. Please try again.")

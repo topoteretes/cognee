@@ -15,6 +15,9 @@ from cognee.eval_framework.beam.preprocessing.conversation_preprocessing import 
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 PROMPT_VERSION = "conversation-message-tagged-compression-percent-v1"
 COMPRESSION_RETRY_VERSION = "beam-preprocess-compression-retry-v1"
@@ -528,6 +531,9 @@ async def compress_until_within_limit(
                     llm_semaphore=llm_semaphore,
                 )
             except Exception as exc:
+                logger.debug(
+                    "Skipping item after error in compress_until_within_limit", exc_info=True
+                )
                 attempts.append(
                     {
                         "role_compression_percents": role_percents,

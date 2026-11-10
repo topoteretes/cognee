@@ -1,8 +1,7 @@
 """Approval-gated write-back: correction proposals for authorized databases.
 
-When cognee determines stored data is inaccurate — a ``contradicts`` edge
-from contradiction detection, or an explicit instruction — this module drafts
-an UPDATE with the LLM, validates it (single UPDATE, mandatory WHERE, table
+Given an explicit correction instruction, this module drafts an UPDATE with
+the LLM, validates it (single UPDATE, mandatory WHERE, table
 allowlist), dry-runs it inside a rolled-back transaction to capture the
 affected-row count, and stores everything as a ``ToolWriteProposal``.
 
@@ -14,7 +13,7 @@ review → apply.
 """
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select, text
@@ -92,8 +91,8 @@ async def _dry_run_update(engine, sql: str) -> int:
 
 
 async def _draft_update(
-    connection: dict[str, Any], instruction: str, evidence: Optional[dict[str, Any]]
-) -> Optional[tuple[str, str, int]]:
+    connection: dict[str, Any], instruction: str, evidence: dict[str, Any] | None
+) -> tuple[str, str, int] | None:
     """Draft, guard, and dry-run one UPDATE.
 
     Returns ``(sql, target_table, estimated_rows)``, or ``None`` when the
@@ -123,7 +122,7 @@ async def _draft_update(
     dialect = write_engine.dialect.name
 
     previous_attempts = ""
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     for attempt in range(1, config.text_to_sql_max_attempts + 1):
         system_prompt = render_prompt(
             _WRITE_PROMPT_PATH,
@@ -158,7 +157,7 @@ async def _draft_update(
             estimated_rows = await _dry_run_update(write_engine, sql)
         except Exception as error:
             previous_attempts += f"Query: {sql} -> Executed with error: {error}\n"
-            logger.warning("Write dry-run failed on attempt %d: %s", attempt, error)
+            logger.warning("Write dry-run failed on attempt %d: %s", attempt, error, exc_info=True)
             last_error = error
             continue
 
@@ -174,7 +173,7 @@ async def propose_sql_write(
     user_id: UUID,
     connection_name: str,
     instruction: str,
-    evidence: Optional[dict[str, Any]] = None,
+    evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Draft a correction UPDATE and store it as a reviewable proposal.
 
@@ -221,70 +220,6 @@ async def propose_sql_write(
     return _proposal_to_public(row)
 
 
-async def propose_corrections_from_contradictions(
-    user_id: UUID,
-    connection_name: str,
-    limit: int = 10,
-) -> list[dict[str, Any]]:
-    """Draft correction proposals from the graph's ``contradicts`` edges.
-
-    Reads the contradictions recorded by ``detect_contradictions`` (each
-    carries both fact texts, the reason, and a confidence), asks the LLM
-    whether each is correctable in the given database, and stores a proposal
-    for those that are. Contradictions the model marks NOT_APPLICABLE are
-    skipped — with approval gating, a wrong mapping costs a rejected
-    proposal, never a wrong write.
-    """
-    connection = await get_tool_connection(user_id, connection_name)
-    _check_write_gates(connection)
-
-    from cognee.infrastructure.databases.graph import get_graph_engine
-
-    graph_engine = await get_graph_engine()
-    _, edges = await graph_engine.get_graph_data()
-
-    contradictions = []
-    for _source_id, _target_id, relationship_name, properties in edges:
-        if relationship_name != "contradicts":
-            continue
-        properties = properties or {}
-        contradictions.append(
-            {
-                "type": "contradiction",
-                "first_fact": properties.get("first_fact"),
-                "second_fact": properties.get("second_fact"),
-                "reason": properties.get("reason"),
-                "confidence": properties.get("confidence"),
-            }
-        )
-        if len(contradictions) >= limit:
-            break
-
-    proposals: list[dict[str, Any]] = []
-    for evidence in contradictions:
-        instruction = (
-            f"Cognee detected a contradiction: '{evidence['first_fact']}' contradicts "
-            f"'{evidence['second_fact']}' ({evidence['reason']}). If this database "
-            "holds the inaccurate value, draft the correction."
-        )
-        try:
-            drafted = await propose_sql_write(
-                user_id, connection_name, instruction, evidence=evidence
-            )
-        except ToolError as error:
-            logger.info("Skipped contradiction (not correctable here): %s", error)
-            continue
-        proposals.append(drafted)
-
-    logger.info(
-        "Drafted %d correction proposal(s) from %d contradiction(s) for '%s'",
-        len(proposals),
-        len(contradictions),
-        connection_name,
-    )
-    return proposals
-
-
 async def _get_owned_proposal(session, user_id: UUID, proposal_id) -> ToolWriteProposal:
     if not isinstance(proposal_id, UUID):
         proposal_id = UUID(str(proposal_id))
@@ -300,7 +235,7 @@ async def _get_owned_proposal(session, user_id: UUID, proposal_id) -> ToolWriteP
     return row
 
 
-async def list_write_proposals(user_id: UUID, status: Optional[str] = None) -> list[dict[str, Any]]:
+async def list_write_proposals(user_id: UUID, status: str | None = None) -> list[dict[str, Any]]:
     await _ensure_table()
     from cognee.infrastructure.databases.relational import get_relational_engine
 
@@ -342,7 +277,7 @@ async def apply_write_proposal(user_id: UUID, proposal_id: UUID) -> dict[str, An
             config.text_to_sql_statement_timeout_ms,
         )
 
-        error_message: Optional[str] = None
+        error_message: str | None = None
         affected = 0
         try:
             async with write_engine.connect() as db_connection:
@@ -365,6 +300,7 @@ async def apply_write_proposal(user_id: UUID, proposal_id: UUID) -> dict[str, An
                 else:
                     await db_connection.commit()
         except Exception as error:
+            logger.debug("Ignoring exception in apply_write_proposal", exc_info=True)
             error_message = f"Rolled back: execution failed: {error}"
 
         row.applied_rows = affected if error_message is None else None

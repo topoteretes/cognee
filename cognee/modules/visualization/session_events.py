@@ -15,7 +15,7 @@ Two event kinds are emitted per the renderer's contract:
   ``apply_feedback_weights`` (reinforcement overlay).
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -26,14 +26,14 @@ logger = get_logger("visualization.session_events")
 MAX_SESSIONS_SCANNED = 10
 
 
-def map_session_entries_to_events(session_id: str, entries: List[Any]) -> List[Dict[str, Any]]:
+def map_session_entries_to_events(session_id: str, entries: list[Any]) -> list[dict[str, Any]]:
     """Map SessionQAEntry records to Memory-tab timeline events (pure).
 
     Emits a ``search`` event per entry and, when the entry carries a feedback
     score, an ``improve`` event immediately after it (the renderer's sort is
     stable, so equal timestamps preserve this order).
     """
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     for entry in entries:
         used = getattr(entry, "used_graph_element_ids", None) or {}
         node_ids = list(used.get("node_ids") or [])
@@ -70,8 +70,8 @@ def map_session_entries_to_events(session_id: str, entries: List[Any]) -> List[D
 
 
 async def _list_recent_session_ids(
-    user_uuid, limit: int, dataset_id: Optional[UUID] = None
-) -> List[str]:
+    user_uuid, limit: int, dataset_id: UUID | None = None
+) -> list[str]:
     """Most recently active session ids for a user, from the lifecycle table.
 
     ``user_uuid`` must be the raw UUID (the column is UUID-typed; a string
@@ -133,10 +133,10 @@ async def _list_recent_session_ids(
 
 async def collect_session_events(
     user=None,
-    session_ids: Optional[List[str]] = None,
+    session_ids: list[str] | None = None,
     max_sessions: int = MAX_SESSIONS_SCANNED,
-    dataset_id: Optional[UUID] = None,
-) -> List[Dict[str, Any]]:
+    dataset_id: UUID | None = None,
+) -> list[dict[str, Any]]:
     """Best-effort collection of search/improve events from the session cache.
 
     ``dataset_id`` scopes the auto-discovered recent sessions to one dataset,
@@ -176,11 +176,13 @@ async def collect_session_events(
                 session_ids = await _list_recent_session_ids(
                     user.id, max_sessions, dataset_id=dataset_id
                 )
-            except Exception as error:  # noqa: BLE001 — lifecycle table may not exist
-                logger.debug("Session listing unavailable (%s); no events collected.", error)
+            except Exception as error:  # — lifecycle table may not exist
+                logger.debug(
+                    "Session listing unavailable (%s); no events collected.", error, exc_info=True
+                )
                 return []
 
-        events: List[Dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
         for session_id in session_ids[:max_sessions]:
             entries = await session_manager.get_session(user_id=user_id, session_id=session_id)
             if isinstance(entries, list) and entries:
@@ -190,6 +192,8 @@ async def collect_session_events(
         if events:
             logger.info("Collected %d session operation events for the Memory tab.", len(events))
         return events
-    except Exception as error:  # noqa: BLE001 — visualization must never fail on this
-        logger.warning("Session event collection failed; rendering without them: %s", error)
+    except Exception as error:  # — visualization must never fail on this
+        logger.warning(
+            "Session event collection failed; rendering without them: %s", error, exc_info=True
+        )
         return []

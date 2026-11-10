@@ -390,6 +390,7 @@ async def test_retrieve_memory_context_passes_explicit_scope(monkeypatch):
     assert search_mock.await_args.kwargs["system_prompt"] is None
     assert search_mock.await_args.kwargs["top_k"] == 7
     assert search_mock.await_args.kwargs["only_context"] is False
+    assert search_mock.await_args.kwargs["verbose"] is False
 
 
 @pytest.mark.asyncio
@@ -410,7 +411,21 @@ async def test_retrieve_memory_context_passes_custom_memory_system_prompt(monkey
 
 @pytest.mark.asyncio
 async def test_retrieve_memory_context_can_request_context_only_search(monkeypatch):
-    search_mock = AsyncMock(return_value=["Relevant memory"])
+    """memory_only_context reads the bare context from the verbose payload: an only_context
+    search result is the user prompt, cognee's own question framing included, and that
+    must never be pasted into the agent's prompt as memory."""
+    search_mock = AsyncMock(
+        return_value=[
+            {
+                "text_result": None,
+                "context_result": "Relevant memory",
+                "objects_result": [],
+                "user_prompt_result": "The question is: `Find memory` ... Relevant memory",
+                "system_prompt_result": "TASK:You are cognee",
+                "evidence": [],
+            }
+        ]
+    )
     monkeypatch.setattr("cognee.api.v1.search.search", search_mock)
 
     context = _make_context(
@@ -422,6 +437,7 @@ async def test_retrieve_memory_context_can_request_context_only_search(monkeypat
 
     assert await retrieve_memory_context(context) == "Relevant Cognee Memory:\nRelevant memory"
     assert search_mock.await_args.kwargs["only_context"] is True
+    assert search_mock.await_args.kwargs["verbose"] is True
     assert search_mock.await_args.kwargs["system_prompt"] == "Return only product codenames."
 
 
@@ -1211,3 +1227,125 @@ async def test_session_memory_decorator_flow_injects_into_llmgateway(monkeypatch
         "Original Input:\n"
         "original question"
     )
+
+
+def test_agent_memory_session_trace_summary_defaults_off():
+    """Plan C7: the per-tool-call LLM summary is opt-in.
+
+    It costs one LLM call per wrapped invocation and the batch agent-context extraction
+    in improve() reads the stored return value directly, so the default is False.
+    """
+    import inspect as _inspect
+
+    parameter = _inspect.signature(cognee.agent_memory).parameters["session_trace_summary"]
+    assert parameter.default is False
+
+
+def test_agent_memory_decorator_default_disables_trace_summary_on_the_config(monkeypatch):
+    import cognee.modules.agent_memory.decorator as decorator_module
+
+    captured = {}
+    real_validate = decorator_module.validate_agent_memory_config
+
+    def _capture(**kwargs):
+        captured["config"] = real_validate(**kwargs)
+        return captured["config"]
+
+    monkeypatch.setattr(decorator_module, "validate_agent_memory_config", _capture)
+
+    @decorator_module.agent_memory(with_memory=False)
+    async def _agent(question: str):
+        return question
+
+    assert captured["config"].session_trace_summary is False
+    # The change is documented where users read it.
+    docstring = decorator_module.agent_memory.__doc__ or ""
+    assert "session_trace_summary" in docstring
+    assert "AUTO_FEEDBACK" in docstring
+
+
+class TestValidateSessionBackedOptions:
+    """One helper carries the session-cache checks the decorator used to spell out twice."""
+
+    @staticmethod
+    def _call(monkeypatch, *, caching=True, **kwargs):
+        from cognee.modules.agent_memory.runtime import _validate_session_backed_options
+
+        monkeypatch.setattr(
+            "cognee.infrastructure.databases.cache.config.get_cache_config",
+            lambda: SimpleNamespace(caching=caching),
+        )
+        defaults = {
+            "with_session_memory": False,
+            "save_session_traces": False,
+            "persist_session_trace_after": None,
+        }
+        defaults.update(kwargs)
+        return _validate_session_backed_options(**defaults)
+
+    def test_accepts_defaults_without_caching(self, monkeypatch):
+        assert self._call(monkeypatch, caching=False) is None
+
+    @pytest.mark.parametrize("bad", [0, -1, "2", 1.5])
+    def test_rejects_non_positive_persist_after(self, monkeypatch, bad):
+        with pytest.raises(CogneeValidationError, match="positive integer"):
+            self._call(monkeypatch, save_session_traces=True, persist_session_trace_after=bad)
+
+    def test_persist_after_requires_save_session_traces(self, monkeypatch):
+        with pytest.raises(CogneeValidationError, match="requires save_session_traces=True"):
+            self._call(monkeypatch, persist_session_trace_after=2)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"with_session_memory": True},
+            {"save_session_traces": True},
+            {"save_session_traces": True, "persist_session_trace_after": 2},
+        ],
+    )
+    def test_session_backed_options_need_caching(self, monkeypatch, kwargs):
+        with pytest.raises(CogneeValidationError, match="Caching must be enabled"):
+            self._call(monkeypatch, caching=False, **kwargs)
+        assert self._call(monkeypatch, caching=True, **kwargs) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("access_control", [True, False])
+async def test_context_only_memory_never_carries_the_prompt_from_a_real_verbose_payload(
+    monkeypatch, access_control
+):
+    """End to end through the real verbose result shaping, in both access-control modes:
+    the memory block is the bare context, never the full LLM input."""
+    import importlib
+    from uuid import uuid4
+
+    from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
+    from cognee.modules.search.types import SearchType
+
+    search_methods = importlib.import_module("cognee.modules.search.methods.search")
+    monkeypatch.setattr(search_methods, "backend_access_control_enabled", lambda: access_control)
+    payload = SearchResultPayload(
+        context="Relevant memory",
+        only_context=True,
+        prompt="=== SYSTEM PROMPT ===\nTASK:You are cognee\n\n=== USER PROMPT ===\nRelevant memory",
+        search_type=SearchType.GRAPH_SUMMARY_COMPLETION,
+        dataset_name="demo",
+        dataset_id=uuid4(),
+        dataset_tenant_id=None,
+    )
+    search_mock = AsyncMock(
+        return_value=search_methods._backwards_compatible_search_results([payload], verbose=True)
+    )
+    monkeypatch.setattr("cognee.api.v1.search.search", search_mock)
+
+    context = _make_context(
+        method_params={"question": "ignored"},
+        memory_query_fixed="Find memory",
+        memory_only_context=True,
+    )
+
+    result = await retrieve_memory_context(context)
+
+    assert result == "Relevant Cognee Memory:\nRelevant memory"
+    assert "SYSTEM PROMPT" not in result and "TASK:" not in result
+    assert search_mock.await_args.kwargs["verbose"] is True

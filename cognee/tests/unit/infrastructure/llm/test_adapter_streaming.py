@@ -26,8 +26,8 @@ from cognee.infrastructure.llm.streaming.stream_completion import stream_text_co
 from cognee.infrastructure.llm.streaming.token_sink import (
     TokenSink,
     active_token_sink,
-    requested_token_sink,
     answer_scope,
+    requested_token_sink,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
@@ -267,9 +267,11 @@ async def test_the_stream_is_closed_even_when_iteration_fails():
     async def _acompletion(*_args, **_kwargs):
         return _Exploding()
 
-    with patch(f"{STREAM_MODULE}.litellm.acompletion", new=_acompletion):
-        with pytest.raises(RuntimeError, match="connection reset"):
-            await _stream(sink, [])
+    with (
+        patch(f"{STREAM_MODULE}.litellm.acompletion", new=_acompletion),
+        pytest.raises(RuntimeError, match="connection reset"),
+    ):
+        await _stream(sink, [])
 
     assert closed.get("yes") is True
 

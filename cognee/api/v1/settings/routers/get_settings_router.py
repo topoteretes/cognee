@@ -1,10 +1,12 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+
 from cognee.api.DTO import InDTO, OutDTO
-from typing import Union, Optional, Literal
+from cognee.modules.settings.get_settings import LLMConfig, VectorDBConfig
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
-from cognee.modules.settings.get_settings import LLMConfig, VectorDBConfig
 
 
 class LLMConfigOutputDTO(OutDTO, LLMConfig):
@@ -21,29 +23,20 @@ class SettingsDTO(OutDTO):
 
 
 class LLMConfigInputDTO(InDTO):
-    provider: Union[
-        Literal["openai"],
-        Literal["ollama"],
-        Literal["anthropic"],
-        Literal["gemini"],
-        Literal["mistral"],
-    ]
+    provider: Literal["openai", "ollama", "anthropic", "gemini", "mistral"]
     model: str
     api_key: str
 
 
 class VectorDBConfigInputDTO(InDTO):
-    provider: Union[
-        Literal["lancedb"],
-        Literal["pgvector"],
-    ]
+    provider: Literal["lancedb", "pgvector"]
     url: str
     api_key: str
 
 
 class SettingsPayloadDTO(InDTO):
-    llm: Optional[LLMConfigInputDTO] = None
-    vector_db: Optional[VectorDBConfigInputDTO] = None
+    llm: LLMConfigInputDTO | None = None
+    vector_db: VectorDBConfigInputDTO | None = None
 
 
 def get_settings_router() -> APIRouter:
@@ -64,8 +57,17 @@ def get_settings_router() -> APIRouter:
         - **vector_db**: Vector database configuration (provider, URL, API key)
 
         ## Error Codes
+        - **403 Forbidden**: Caller is not a superuser. The settings are server-wide
+          (provider endpoints, key prefixes), not the caller's own, so they are read
+          by whoever may write them.
         - **500 Internal Server Error**: Error retrieving settings
         """
+        if not user.is_superuser:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Superuser privileges required to read settings"},
+            )
+
         from cognee.modules.settings import get_settings as get_cognee_settings
 
         return get_cognee_settings()

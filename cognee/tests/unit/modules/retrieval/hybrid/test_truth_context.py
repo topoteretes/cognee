@@ -6,13 +6,13 @@ from cognee.context_global_variables import current_dataset_id
 from cognee.modules.retrieval.hybrid.truth import TruthContext, build_truth_context
 from cognee.modules.truth_subspace.models import TruthCentroidPayload
 
-
 QUERY_VECTOR = [1.0, 0.0, 0.0]
 
 
 def _engine():
     engine = MagicMock()
     engine.vector = MagicMock()
+    engine.vector.has_collection = AsyncMock(return_value=False)
     engine.graph = MagicMock()
     engine.graph.get_node_truth_state = AsyncMock(return_value={"chunk-1": {"truth_epoch": 3}})
     return engine

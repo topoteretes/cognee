@@ -1,28 +1,28 @@
-from typing import Optional
 from uuid import UUID as uuid_UUID
+
 from fastapi_users import schemas
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
-from sqlalchemy import ForeignKey, Column, UUID
-from sqlalchemy.orm import relationship, Mapped
+from sqlalchemy import Column, ForeignKey, Uuid
+from sqlalchemy.orm import Mapped, relationship
 
 from .Principal import Principal
-from .UserTenant import UserTenant
-from .UserRole import UserRole
 from .Role import Role
 from .Tenant import Tenant
+from .UserRole import UserRole
+from .UserTenant import UserTenant
 
 
 class User(SQLAlchemyBaseUserTableUUID, Principal):
     __tablename__ = "users"
 
-    id = Column(UUID, ForeignKey("principals.id", ondelete="CASCADE"), primary_key=True)
+    id = Column(Uuid, ForeignKey("principals.id", ondelete="CASCADE"), primary_key=True)
 
     # Foreign key to current Tenant (Many-to-One relationship)
-    tenant_id = Column(UUID, ForeignKey("tenants.id"))
+    tenant_id = Column(Uuid, ForeignKey("tenants.id"))
 
     # Parent user — when an agent/service user creates datasets, the parent
     # inherits full permissions automatically. Null for regular human users.
-    parent_user_id = Column(UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    parent_user_id = Column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Many-to-Many Relationship with Roles
     roles: Mapped[list["Role"]] = relationship(
@@ -41,6 +41,16 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
     # ACL Relationship (One-to-Many)
     acls = relationship("ACL", back_populates="principal", cascade="all, delete")
 
+    # Capabilities granted to the user personally (One-to-Many). Deleted with
+    # the user through the ORM, as acls are, because the CASCADE on
+    # principal_capabilities.principal_id is not enforced on SQLite. Named by
+    # foreign key because granted_by also points at users.
+    capabilities = relationship(
+        "PrincipalCapability",
+        foreign_keys="PrincipalCapability.principal_id",
+        cascade="all, delete",
+    )
+
     __mapper_args__ = {
         "polymorphic_identity": "user",
     }
@@ -48,13 +58,22 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
 
 # Keep these schemas in sync with User model
 class UserRead(schemas.BaseUser[uuid_UUID]):
-    tenant_id: Optional[uuid_UUID] = None
-    parent_user_id: Optional[uuid_UUID] = None
+    tenant_id: uuid_UUID | None = None
+    parent_user_id: uuid_UUID | None = None
 
 
 class UserCreate(schemas.BaseUserCreate):
+    """What the public sign-up route accepts. It has no ``parent_user_id``: a
+    parent can see its child's agents and sessions and is granted every dataset
+    the child creates, so a parent is set only by ``create_agent``."""
+
     is_verified: bool = True
-    parent_user_id: Optional[uuid_UUID] = None
+
+
+class InternalUserCreate(UserCreate):
+    """``UserCreate`` plus the parent, for ``create_user`` only."""
+
+    parent_user_id: uuid_UUID | None = None
 
 
 class UserUpdate(schemas.BaseUserUpdate):

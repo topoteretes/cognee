@@ -95,7 +95,9 @@ def server_model_schema(
         "print(json.dumps({t.name: sorted(c.name for c in t.columns)"
         " for t in Base.metadata.sorted_tables}))\n"
     )
-    result = subprocess.run([sys.executable, "-c", code], cwd=cwd, capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=cwd, capture_output=True, text=True, check=False
+    )
     if result.returncode != 0:
         raise RuntimeError(
             f"importing {entrypoint!r} to measure the model surface failed:\n"

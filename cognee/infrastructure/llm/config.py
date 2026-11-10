@@ -1,6 +1,6 @@
 import json
 from functools import lru_cache
-from typing import Any, ClassVar
+from typing import Any
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -86,6 +86,7 @@ class LLMConfig(BaseSettings):
     - llm_answer_streaming
     - llm_max_completion_tokens
     - transcription_model
+    - image_transcribe_model
     - graph_prompt_path
     - llm_rate_limit_enabled
     - llm_rate_limit_requests
@@ -106,7 +107,7 @@ class LLMConfig(BaseSettings):
     structured_output_framework: str = "litellm_native"
     llm_instructor_mode: str = ""
     llm_provider: str = "openai"
-    llm_model: str = "openai/gpt-5-mini"
+    llm_model: str = "openai/gpt-5.6-luna"
     llm_endpoint: str = ""
     llm_api_key: str | None = None
     llm_api_version: str | None = None
@@ -149,16 +150,19 @@ class LLMConfig(BaseSettings):
     llm_max_completion_tokens: int = 16384
 
     baml_llm_provider: str = "openai"
-    baml_llm_model: str = "gpt-5-mini"
+    baml_llm_model: str = "gpt-5.6-luna"
     baml_llm_endpoint: str = ""
     baml_llm_api_key: str | None = None
     baml_llm_temperature: float = 0.0
     baml_llm_api_version: str = ""
 
     transcription_model: str = "whisper-1"
+    # Vision model for image transcription. Empty means "use llm_model", which is
+    # the right default: the chat model is often already multimodal, and unlike
+    # audio there is no separate-model-by-necessity the way whisper-1 is for
+    # speech. Set it when the base model has no vision capability.
+    image_transcribe_model: str = ""
     graph_prompt_path: str = "generate_graph_prompt.txt"
-    temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
-    event_entity_prompt_path: str = "generate_event_entity_prompt.txt"
     image_transcription_prompt_path: str = "transcribe_image_prompt.txt"
     image_transcription_max_completion_tokens: int = 1024
     image_transcription_reasoning_effort: str = "low"
@@ -188,7 +192,7 @@ class LLMConfig(BaseSettings):
 
     baml_registry: Any | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(extra="allow")
 
     @model_validator(mode="before")
     @classmethod
@@ -222,9 +226,13 @@ class LLMConfig(BaseSettings):
         """
         for field_name in self.__class__.model_fields:
             value = getattr(self, field_name, None)
-            if isinstance(value, str) and len(value) >= 2:
-                if value[0] == value[-1] and value[0] in ("'", '"'):
-                    setattr(self, field_name, value[1:-1])
+            if (
+                isinstance(value, str)
+                and len(value) >= 2
+                and value[0] == value[-1]
+                and value[0] in ("'", '"')
+            ):
+                setattr(self, field_name, value[1:-1])
 
         return self
 
@@ -303,7 +311,7 @@ class LLMConfig(BaseSettings):
         """
         return _apply_local_rate_limit_default(self)
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, context, /) -> None:
         """Initialize the BAML registry after the model is created."""
         # Check if BAML is selected as structured output framework but not available
         if self.structured_output_framework.lower() == "baml" and ClientRegistry is None:
@@ -358,7 +366,7 @@ class LLMConfig(BaseSettings):
         #
         # llm_endpoint/llm_api_key default to blank ("" / None), so "has a
         # non-blank value" alone tells us whether they were configured.
-        # llm_model defaults to a real model id ("openai/gpt-5-mini"), so the
+        # llm_model defaults to a real model id ("openai/gpt-5.6-luna"), so the
         # same non-blank check can't tell "configured, happens to match the
         # default" from "left unset" - that also needs `model_fields_set`
         # (populated by pydantic-settings whether the value came from a kwarg
@@ -409,6 +417,7 @@ class LLMConfig(BaseSettings):
             "answer_streaming": self.llm_answer_streaming,
             "max_completion_tokens": self.llm_max_completion_tokens,
             "transcription_model": self.transcription_model,
+            "image_transcribe_model": self.image_transcribe_model,
             "graph_prompt_path": self.graph_prompt_path,
             "rate_limit_enabled": self.llm_rate_limit_enabled,
             "rate_limit_requests": self.llm_rate_limit_requests,
@@ -473,6 +482,12 @@ def get_llm_config() -> LLMConfig:
           LLM.
     """
     return LLMConfig()
+
+
+def resolve_structured_output_framework(config: LLMConfig) -> str:
+    """The gateway's dispatch decision, also used by diagnostic settings."""
+    framework = config.structured_output_framework.lower()
+    return framework if framework in ("baml", "litellm_native") else "instructor"
 
 
 def get_llm_context_config() -> LLMConfig:

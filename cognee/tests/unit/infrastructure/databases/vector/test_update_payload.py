@@ -7,7 +7,6 @@ and — the whole point — the embedding engine is never called.
 import socket
 import tempfile
 from pathlib import Path
-from typing import Optional
 from uuid import uuid4
 
 import pytest
@@ -50,7 +49,7 @@ def _port_open(host: str, port: int) -> bool:
         return sock.connect_ex((host, port)) == 0
 
 
-async def _exercise_update_payload(engine, embedder: Optional[CountingMockEmbedder] = None):
+async def _exercise_update_payload(engine, embedder: CountingMockEmbedder | None = None):
     """Shared contract check for any adapter instance."""
     collection = f"payload_upd_{uuid4().hex[:8]}"
     points = [
@@ -149,7 +148,7 @@ async def test_pgvector_update_payload():
 
 @pytest.mark.asyncio
 async def test_turso_update_payload():
-    pytest.importorskip("libsql", reason="libsql driver not installed")
+    pytest.importorskip("turso", reason="pyturso driver not installed")
     from cognee.infrastructure.databases.vector.turso.TursoVectorAdapter import (
         TursoVectorAdapter,
     )

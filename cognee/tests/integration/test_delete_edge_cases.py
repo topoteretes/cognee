@@ -14,8 +14,9 @@ Test Coverage:
 
 import os
 import pathlib
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, update
 
 import cognee
@@ -26,6 +27,7 @@ from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.cleanup.cleanup_unused_data import cleanup_unused_data
+from cognee.tests.utils.ci_search_type import ci_llm_available
 
 logger = get_logger()
 
@@ -72,7 +74,7 @@ async def test_last_accessed_updates_on_search():
     await cognee.add([doc_text], dataset_name=dataset_name, user=user)
     cognify_result = await cognee.cognify([dataset_name], user=user)
 
-    dataset_id = list(cognify_result.keys())[0]
+    dataset_id = next(iter(cognify_result.keys()))
 
     # Get the data_id
     db_engine = get_relational_engine()
@@ -95,11 +97,14 @@ async def test_last_accessed_updates_on_search():
 
     # Perform search to trigger last_accessed update
     logger.info("Performing search to trigger last_accessed update...")
+    # Access is recorded at retrieval, before any answer is generated, so without
+    # an LLM key (fork PRs) the same retrieval runs with only_context=True.
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="Apple technology",
         datasets=[dataset_name],
         user=user,
+        only_context=not ci_llm_available(),
     )
 
     logger.info(f"Search returned {len(search_results)} results")
@@ -187,7 +192,7 @@ async def test_cleanup_unused_data_dry_run():
         data_ids.append(add_result.data_ingestion_info[0]["data_id"])
 
     cognify_result = await cognee.cognify([dataset_name], user=user)
-    list(cognify_result.keys())[0]
+    next(iter(cognify_result.keys()))
 
     # Age the first 3 documents to be "old"
     db_engine = get_relational_engine()
@@ -293,7 +298,7 @@ async def test_cleanup_actual_deletion():
         data_ids.append(add_result.data_ingestion_info[0]["data_id"])
 
     cognify_result = await cognee.cognify([dataset_name], user=user)
-    list(cognify_result.keys())[0]
+    next(iter(cognify_result.keys()))
 
     # Age the first 3 documents to be "old"
     db_engine = get_relational_engine()

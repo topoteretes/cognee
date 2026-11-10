@@ -12,7 +12,8 @@ are identical across runs — no scikit-learn, which lives only in the evals ext
 
 import math
 from collections import Counter
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 
@@ -74,13 +75,13 @@ def kmeans(x: np.ndarray, k: int, seed: int = CLUSTER_SEED, max_iter: int = 50) 
     return labels
 
 
-def _nearest_neighbors(ids: List[str], x: np.ndarray, top: int) -> Dict[str, List[str]]:
+def _nearest_neighbors(ids: list[str], x: np.ndarray, top: int) -> dict[str, list[str]]:
     """Top-``top`` cosine neighbors per node (self excluded, stable tie order)."""
     norms = np.linalg.norm(x, axis=1, keepdims=True)
     unit = x / (norms + _EPS)
     sim = unit @ unit.T
     np.fill_diagonal(sim, -np.inf)
-    out: Dict[str, List[str]] = {}
+    out: dict[str, list[str]] = {}
     for i, nid in enumerate(ids):
         # Drop self before truncating: with <= ``top`` other nodes the self index
         # would otherwise fall inside the slice (fill_diagonal only sorts it last).
@@ -89,7 +90,7 @@ def _nearest_neighbors(ids: List[str], x: np.ndarray, top: int) -> Dict[str, Lis
     return out
 
 
-def _usable_name(nd: Dict[str, Any]) -> Optional[str]:
+def _usable_name(nd: dict[str, Any]) -> str | None:
     """A node's name if it reads as a clean label — not a UUID/hash or a text blob."""
     if nd.get("is_unnamed"):
         # Preprocessor-flagged placeholder ("Unnamed Entity (ab12cd34)"): never a label.
@@ -103,7 +104,7 @@ def _usable_name(nd: Dict[str, Any]) -> Optional[str]:
     return name
 
 
-def default_label(member_nodes: List[Dict[str, Any]]) -> str:
+def default_label(member_nodes: list[dict[str, Any]]) -> str:
     """Default cluster ``label_fn``: top-3 real ``Entity`` nodes (by degree, importance).
 
     Entities win over DocumentChunk/TextSummary/EntityType so labels read as
@@ -125,13 +126,13 @@ def default_label(member_nodes: List[Dict[str, Any]]) -> str:
 
 
 def compute_clusters(
-    nodes: List[Dict[str, Any]],
-    embeddings: Dict[str, List[float]],
+    nodes: list[dict[str, Any]],
+    embeddings: dict[str, list[float]],
     *,
-    k: Optional[int] = None,
+    k: int | None = None,
     seed: int = CLUSTER_SEED,
-    label_fn: Optional[Callable[[List[Dict[str, Any]]], str]] = None,
-) -> Dict[str, Any]:
+    label_fn: Callable[[list[dict[str, Any]]], str] | None = None,
+) -> dict[str, Any]:
     """Cluster embedded nodes and precompute neighbors.
 
     Returns ``{"clusters": [...], "node_cluster": {id: cluster_id},
@@ -156,8 +157,8 @@ def compute_clusters(
     labels = kmeans(x, k_effective, seed)
     neighbors = _nearest_neighbors(ids, x, TOP_NEIGHBORS)
 
-    clusters: List[Dict[str, Any]] = []
-    node_cluster: Dict[str, int] = {}
+    clusters: list[dict[str, Any]] = []
+    node_cluster: dict[str, int] = {}
     for c in range(k_effective):
         members = [ids[i] for i in range(len(ids)) if labels[i] == c]
         if not members:

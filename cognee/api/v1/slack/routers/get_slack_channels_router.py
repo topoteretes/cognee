@@ -8,10 +8,12 @@ integration — it does not belong on the generic integrations router either.
 """
 
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from cognee.api.DTO import InDTO, OutDTO
+from cognee.api.v1.slack.routers.get_slack_history_router import get_slack_history_router
 from cognee.modules.integrations.credentials import (
     decrypt_token_payload,
     get_active_credential_for_user,
@@ -62,9 +64,12 @@ def _connected_credential_or_404(credential) -> IntegrationCredential:
 
 def get_slack_channels_router():
     router = APIRouter()
+    router.include_router(get_slack_history_router())
 
     @router.get("/channels")
-    async def get_channels(user: User = Depends(get_authenticated_user)) -> ChannelListDTO:
+    async def get_channels(
+        user: Annotated[User, Depends(get_authenticated_user)],
+    ) -> ChannelListDTO:
         """List the connected workspace's public channels, flagging the current allowlist."""
         credential = _connected_credential_or_404(
             await get_active_credential_for_user(user.id, PROVIDER)
@@ -100,7 +105,7 @@ def get_slack_channels_router():
 
     @router.put("/channels")
     async def set_allowed_channels(
-        payload: SetAllowedChannelsPayload, user: User = Depends(get_authenticated_user)
+        payload: SetAllowedChannelsPayload, user: Annotated[User, Depends(get_authenticated_user)]
     ) -> SetAllowedChannelsResultDTO:
         """Restrict slash commands to exactly these channel ids.
 
@@ -126,7 +131,7 @@ def get_slack_channels_router():
 
     @router.post("/link")
     async def link(
-        payload: ConfirmLinkPayload, user: User = Depends(get_authenticated_user)
+        payload: ConfirmLinkPayload, user: Annotated[User, Depends(get_authenticated_user)]
     ) -> ConfirmLinkResultDTO:
         """Confirm a ``/cognee-link`` magic-link code for the authenticated caller.
 

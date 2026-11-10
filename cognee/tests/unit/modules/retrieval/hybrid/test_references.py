@@ -2,7 +2,6 @@ from unittest.mock import MagicMock
 
 from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions
 
-
 ANSWER = "Revenue grew 12 percent."
 
 

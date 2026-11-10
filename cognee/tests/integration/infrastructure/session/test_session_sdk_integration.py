@@ -14,7 +14,7 @@ from cognee.infrastructure.session.session_manager import SessionManager
 
 def _session_module():
     """Real session.py module (package __init__ replaces session with a SimpleNamespace)."""
-    import cognee.api.v1.session  # noqa: F401
+    import cognee.api.v1.session
 
     return sys.modules["cognee.api.v1.session.session"]
 
@@ -46,6 +46,16 @@ class _InMemoryRedisList:
     async def lset(self, key: str, idx: int, val: str):
         self.data[key][idx] = val
 
+    async def lrem(self, key: str, count: int, val: str):
+        """Only count=0, every occurrence, is used; an emptied list disappears as in Redis."""
+        lst = self.data.get(key, [])
+        kept = [item for item in lst if item != val]
+        if kept:
+            self.data[key] = kept
+        else:
+            self.data.pop(key, None)
+        return len(lst) - len(kept)
+
     async def delete(self, key: str):
         return 1 if self.data.pop(key, None) is not None else 0
 
@@ -56,33 +66,14 @@ class _InMemoryRedisList:
         self.data.clear()
 
 
-@pytest.fixture(params=["fs", "redis", "sqlite"])
+@pytest.fixture(params=["redis", "sqlite"])
 def sdk_uses_session_manager(request):
     """
-    SessionManager backed by FsCache, in-memory Redis, or SQL (aiosqlite); SDK is
+    SessionManager backed by in-memory Redis or SQL (aiosqlite); SDK is
     patched to use it. Tests run once per backend.
     """
     backend = request.param
-    if backend == "fs":
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch(
-                "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-                return_value={"data_root_directory": tmpdir},
-            ):
-                from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                    FSCacheAdapter,
-                )
-
-                adapter = FSCacheAdapter()
-                session_manager = SessionManager(cache_engine=adapter)
-                with patch.object(
-                    _session_module(),
-                    "get_session_manager",
-                    return_value=session_manager,
-                ):
-                    yield session_manager
-                adapter.cache.close()
-    elif backend == "redis":
+    if backend == "redis":
         store = _InMemoryRedisList()
         patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
         with (
@@ -183,12 +174,14 @@ async def test_sdk_get_session_without_main_dataset_raises(sdk_uses_session_mana
     from cognee.exceptions import CogneeValidationError
 
     user = _user(str(uuid4()))
-    with patch(
-        "cognee.modules.data.methods.get_datasets_by_name",
-        AsyncMock(return_value=[]),
+    with (
+        patch(
+            "cognee.modules.data.methods.get_datasets_by_name",
+            AsyncMock(return_value=[]),
+        ),
+        pytest.raises(CogneeValidationError, match="no main_dataset"),
     ):
-        with pytest.raises(CogneeValidationError, match="no main_dataset"):
-            await cognee.session.get_session(user=user)
+        await cognee.session.get_session(user=user)
 
 
 @pytest.mark.asyncio

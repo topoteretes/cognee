@@ -1,10 +1,12 @@
-import os
-from dotenv import load_dotenv
 import asyncio
+import os
+
+from dotenv import load_dotenv
+
 from cognee.infrastructure.databases.graph.neptune_driver import NeptuneGraphDB
 from cognee.modules.chunking.models import DocumentChunk
-from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.data.processing.document_types import TextDocument
+from cognee.modules.engine.models import Entity, EntityType
 
 # Set up Amazon credentials in .env file and get the values from environment variables
 load_dotenv()
@@ -300,8 +302,6 @@ async def misc_methods():
     await na_adapter.project_entire_graph()
     await na_adapter.drop_graph()
     await na_adapter.graph_exists()
-
-    pass
 
 
 if __name__ == "__main__":

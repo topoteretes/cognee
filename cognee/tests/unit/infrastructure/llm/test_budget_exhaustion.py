@@ -29,8 +29,8 @@ which is what these tests pin. Two failure directions matter equally:
 import litellm
 import pytest
 from instructor.core.exceptions import FailedAttempt, InstructorRetryException
-from tenacity import RetryError
 from tenacity import Future as TenacityFuture
+from tenacity import RetryError
 
 from cognee.infrastructure.llm.exceptions import (
     LLMPaymentRequiredError,
@@ -38,13 +38,16 @@ from cognee.infrastructure.llm.exceptions import (
     _redact_budget_identifiers,
     budget_exhaustion_detail,
     is_budget_exhausted_error,
+    is_budget_exhausted_record,
     raise_if_budget_exhausted,
+    raise_if_budget_exhausted_record,
 )
 from cognee.infrastructure.llm.retry_config import (
     is_quota_or_billing_error,
     raise_if_quota_error,
     should_retry_llm_exception,
 )
+from cognee.modules.operations import scrub_error_message
 
 # The exact wordings litellm raises ``BudgetExceededError`` with. Sourced from
 # litellm/exceptions.py, litellm/proxy/auth/auth_checks.py and
@@ -74,8 +77,10 @@ LITELLM_BUDGET_MESSAGES = [
     # for ``_wrapped_budget_error`` and other tests key off its exact wording.
     # The key alias and key hint sit mid-sentence, which is the span the bounded
     # wildcard in ``_BUDGET_SENTENCE_RE`` has to cross.
-    "Budget has been exceeded! Key=my-key-alias (sk-...-VGw) "
-    "Current cost: 20.00066499999998, Max budget: 0.01",
+    (
+        "Budget has been exceeded! Key=my-key-alias (sk-...-VGw) "
+        "Current cost: 20.00066499999998, Max budget: 0.01"
+    ),
 ]
 
 # Prose that a cognified document could plausibly contain. None of it may be
@@ -283,7 +288,8 @@ class TestCauseChainWalk:
         try:
             try:
                 raise _rate_limit_error(LITELLM_BUDGET_MESSAGES[0])
-            except Exception:
+            except litellm.RateLimitError:
+                # Deliberately unchained: the test needs __context__ without __cause__.
                 raise ValueError("secondary failure during cleanup")
         except ValueError as e:
             unrelated = e
@@ -418,3 +424,88 @@ class TestDetailExtraction:
         # The detail is the provider sentence with identifiers masked -- nothing
         # invented, nothing pulled in from the surrounding wrapper noise.
         assert detail.lower() in _redact_budget_identifiers(message).lower()
+
+
+class TestRecordedFailure:
+    """A failure that survives only as a class name and a scrubbed message.
+
+    A pipeline that ends ``PipelineRunErrored`` without raising hands back
+    ``error_class`` / ``error_message`` and nothing else: no ``__cause__`` chain,
+    no status code, no response. ``is_budget_exhausted_record`` has to reach the
+    same verdict ``is_budget_exhausted_error`` reaches on the live exception, or
+    a budget failure that passed through such a run stops being one.
+    """
+
+    def test_payment_required_class_name_is_enough(self):
+        """The converted error's default message carries no provider sentence,
+        so the class name is the only signal left."""
+        recorded_message = scrub_error_message(LLMPaymentRequiredError())
+        assert "exceeded" not in recorded_message
+        assert is_budget_exhausted_record("LLMPaymentRequiredError", recorded_message) is True
+        assert is_budget_exhausted_record("LLMPaymentRequiredError", None) is True
+
+    @pytest.mark.parametrize("message", LITELLM_BUDGET_MESSAGES)
+    def test_provider_sentence_is_recognised_after_the_scrub(self, message):
+        """A run that recorded the provider's own error: the class is not ours,
+        and the message went through ``scrub_error_message`` (long digit runs
+        and key-shaped tokens redacted) before it was stored."""
+        recorded_message = scrub_error_message(_rate_limit_error(message))
+        assert is_budget_exhausted_record("RateLimitError", recorded_message) is True
+        assert is_budget_exhausted_record(None, recorded_message) is True
+
+    @pytest.mark.parametrize("prose", INNOCENT_PROSE)
+    def test_document_prose_in_a_recorded_message_is_not_budget_exhaustion(self, prose):
+        assert is_budget_exhausted_record("ValueError", prose) is False
+
+    def test_unrelated_and_empty_records_are_not_budget_exhaustion(self):
+        assert is_budget_exhausted_record("AuthenticationError", "invalid api key") is False
+        assert (
+            is_budget_exhausted_record("RateLimitError", "Rate limit reached for gpt-4o") is False
+        )
+        assert is_budget_exhausted_record(None, None) is False
+        assert is_budget_exhausted_record("", "") is False
+
+    def test_class_name_is_matched_whole_not_as_a_fragment(self):
+        """The message is matched by sentence only. An error that merely names
+        the class — a wrapper's text, or a document about cognee's own errors
+        quoted in a failed completion — is not a budget failure."""
+        assert is_budget_exhausted_record("NotLLMPaymentRequiredError", None) is False
+        assert (
+            is_budget_exhausted_record(
+                "ValueError", "validation failed, completion='raise LLMPaymentRequiredError()'"
+            )
+            is False
+        )
+
+    def test_raise_carries_the_provider_sentence_into_the_402(self):
+        recorded_message = scrub_error_message(_rate_limit_error(LITELLM_BUDGET_MESSAGES[0]))
+
+        with pytest.raises(LLMPaymentRequiredError) as caught:
+            raise_if_budget_exhausted_record("RateLimitError", recorded_message)
+
+        assert caught.value.status_code == 402
+        assert caught.value.message.startswith("LLM budget exhausted: Budget has been exceeded!")
+        assert caught.value.message.endswith("Max budget: 20.0")
+        # The result classifies like the live error it stands in for.
+        assert is_budget_exhausted_error(caught.value) is True
+
+    def test_raise_redacts_identifiers_like_the_exception_path(self):
+        with pytest.raises(LLMPaymentRequiredError) as caught:
+            raise_if_budget_exhausted_record(
+                "RateLimitError",
+                "Budget has been exceeded! Team=acme-corp Current cost: 70.0, Max budget: 70.0",
+            )
+
+        assert "acme-corp" not in caught.value.message
+        assert "70.0" in caught.value.message
+
+    def test_raise_without_a_sentence_falls_back_to_the_default_message(self):
+        with pytest.raises(LLMPaymentRequiredError) as caught:
+            raise_if_budget_exhausted_record("LLMPaymentRequiredError", None)
+
+        assert caught.value.status_code == 402
+        assert caught.value.message == LLMPaymentRequiredError().message
+
+    def test_raise_is_a_no_op_for_any_other_recorded_failure(self):
+        assert raise_if_budget_exhausted_record("AuthenticationError", "invalid api key") is None
+        assert raise_if_budget_exhausted_record(None, None) is None

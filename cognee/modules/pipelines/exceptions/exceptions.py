@@ -1,5 +1,8 @@
-from cognee.exceptions import CogneeSystemError
+from uuid import UUID
+
 from fastapi import status
+
+from cognee.exceptions import CogneeSystemError
 
 
 class PipelineRunFailedError(CogneeSystemError):
@@ -31,10 +34,10 @@ class CognifyFailedError(CogneeSystemError):
 
     def __init__(
         self,
-        dataset_name: str = None,
-        error_class: str = None,
-        error_message: str = None,
-        hint: str = None,
+        dataset_name: str | None = None,
+        error_class: str | None = None,
+        error_message: str | None = None,
+        hint: str | None = None,
     ):
         self.dataset_name = dataset_name
         self.error_class = error_class
@@ -51,3 +54,62 @@ class CognifyFailedError(CogneeSystemError):
         )
         message = f"Cognify failed{dataset_desc}: {cause_desc} | {hint}"
         super().__init__(message, "CognifyFailedError", status.HTTP_422_UNPROCESSABLE_CONTENT)
+
+
+class AbandonedPipelineRunError(CogneeSystemError):
+    """The process running a pipeline stopped before writing a terminal status.
+
+    Written by startup recovery as the error of the ERRORED row it closes such a
+    run with, after rolling the run's graph work back. ``error_class`` on that
+    row is how readers tell an abandoned run from one that failed on its own.
+    """
+
+    def __init__(
+        self,
+        message: str = (
+            "Pipeline run was abandoned: its process stopped before the run finished. "
+            "Startup recovery rolled the run back; re-run the pipeline."
+        ),
+        name: str = "AbandonedPipelineRunError",
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class AfterRunHookError(CogneeSystemError):
+    """The step after a completed pipeline run failed (cognify: the document
+    structure pass or the vector store compaction).
+
+    The runs are recorded as completed and their data is stored; the step runs
+    again on the dataset's next run. ``failures`` holds ``(dataset_id,
+    dataset_name, error)`` for every dataset whose step failed, ``error`` being
+    the exception or the reason a returned run already carries
+    (``after_run_error``), and ``__cause__`` is the first of those exceptions; ``reasons`` maps each of those
+    dataset ids to its error's class and scrubbed message. ``run_info`` is what
+    the blocking executor would have returned (``{dataset_id: PipelineRunInfo}``,
+    each failed dataset's completed run carrying its reason as
+    ``after_run_error``), so a caller that treats the stored data as success can
+    still read its runs.
+    """
+
+    run_info: dict | None = None
+
+    def __init__(self, failures: list[tuple[UUID, str, BaseException | str]]):
+        from cognee.modules.operations import scrub_error_message
+
+        self.failures = failures
+        self.reasons = {
+            dataset_id: error
+            if isinstance(error, str)
+            else f"{type(error).__name__}: {scrub_error_message(error)}"
+            for dataset_id, _dataset_name, error in failures
+        }
+        described = "; ".join(
+            f"'{dataset_name}' ({self.reasons[dataset_id]})"
+            for dataset_id, dataset_name, _error in failures
+        )
+        super().__init__(
+            "The pipeline run completed and its data is stored, but the step after it "
+            f"failed for dataset {described}",
+            "AfterRunHookError",
+        )

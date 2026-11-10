@@ -1,15 +1,15 @@
 """Tests for ClosingLRUCache and the @closing_lru_cache decorator."""
 
 import gc
+import sys
+
+import pytest
 
 from cognee.infrastructure.databases.utils.closing_lru_cache import (
     ClosingLRUCache,
     _start_close,
     closing_lru_cache,
 )
-
-import sys
-import pytest
 
 # These tests construct subprocess workers explicitly, so the
 # *_SUBPROCESS_ENABLED=false the Windows CI jobs set cannot keep them from
@@ -1014,6 +1014,39 @@ def test_name_bound_pin_predicate_resolves_parameter():
     assert create.cache_info().currsize == 2
 
 
+@pytest.mark.parametrize(
+    ("queue_enabled", "access_control", "pinned"),
+    [(True, True, True), (False, True, False), (True, False, False)],
+)
+def test_default_store_is_pinned_under_access_control(queue_enabled, access_control, pinned):
+    """An empty database name is the deployment's default store: no dataset slot
+    ever covers it, yet prune and dataset routing use it outside any slot, so
+    the queue pins it under access control and the idle reaper leaves it alone."""
+    from unittest.mock import MagicMock, patch
+
+    from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
+
+    predicate = dataset_queue_pin_predicate("db_name")
+    predicate.bind_signature({"provider": 0, "db_name": 1})
+
+    fake_queue = MagicMock()
+    fake_queue.enabled = queue_enabled
+    fake_queue.active_dataset_ids.return_value = set()
+    with (
+        patch(
+            "cognee.infrastructure.databases.dataset_queue.dataset_queue",
+            return_value=fake_queue,
+        ),
+        patch(
+            "cognee.context_global_variables.backend_access_control_enabled",
+            return_value=access_control,
+        ),
+    ):
+        assert predicate(("lancedb", "")) is pinned
+        # A dataset store is still pinned by its slot alone.
+        assert predicate(("lancedb", "dataset-1.lance.db")) is False
+
+
 def test_name_bound_pin_predicate_rejects_unknown_parameter():
     """A typo'd parameter name fails at decoration time, not silently at runtime."""
     import pytest
@@ -1192,6 +1225,7 @@ def test_wait_for_pending_close_is_bounded(monkeypatch):
     creation proceeds with a warning instead of hanging."""
     import asyncio
     import concurrent.futures
+
     from cognee.infrastructure.databases.utils import closing_lru_cache as cache_module
 
     monkeypatch.setattr(cache_module, "PENDING_CLOSE_WAIT_SECONDS", 0.2)

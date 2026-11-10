@@ -41,7 +41,7 @@ MARKER = re.compile(r"ENT[A-Z0-9]+")
 def update_env():
     root = Path(tempfile.mkdtemp(prefix="cognee_update_id_test_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
     def clear_config_caches():
         import importlib
@@ -70,17 +70,17 @@ def update_env():
                 pass
 
     mp = pytest.MonkeyPatch()
-    for key, value in dict(
-        DB_PROVIDER="sqlite",
-        VECTOR_DB_PROVIDER="lancedb",
-        GRAPH_DATABASE_PROVIDER="kuzu",
-        CACHE_BACKEND="sqlite",
-        MOCK_EMBEDDING="true",
-        TELEMETRY_DISABLED="1",
-        DATA_ROOT_DIRECTORY=str(root / "data"),
-        SYSTEM_ROOT_DIRECTORY=str(root / "system"),
-        ENABLE_BACKEND_ACCESS_CONTROL="false",
-    ).items():
+    for key, value in {
+        "DB_PROVIDER": "sqlite",
+        "VECTOR_DB_PROVIDER": "lancedb",
+        "GRAPH_DATABASE_PROVIDER": "kuzu",
+        "CACHE_BACKEND": "sqlite",
+        "MOCK_EMBEDDING": "true",
+        "TELEMETRY_DISABLED": "1",
+        "DATA_ROOT_DIRECTORY": str(root / "data"),
+        "SYSTEM_ROOT_DIRECTORY": str(root / "system"),
+        "ENABLE_BACKEND_ACCESS_CONTROL": "false",
+    }.items():
         mp.setenv(key, value)
     clear_config_caches()
 
@@ -180,7 +180,7 @@ async def _assert_stack_under_id(graph, vector_engine, document_id, expected_tex
     chunks = await _doc_chunks(graph, document_id)
     assert chunks, "chunks attached to the document node"
     chunk_texts = []
-    for chunk_id, chunk_properties in chunks.items():
+    for chunk_properties in chunks.values():
         assert str(chunk_properties.get("document_id")) == str(document_id)
         chunk_texts.append(str(chunk_properties.get("text", "")))
     assert any(expected_text_marker in text for text in chunk_texts), (
@@ -197,6 +197,8 @@ def test_update_keeps_data_id_end_to_end(update_env):
 
 
 async def _scenario():
+    from sqlalchemy import update as sql_update
+
     import cognee
     from cognee.api.v1.datasets.datasets import datasets as datasets_api
     from cognee.infrastructure.databases.graph import get_graph_engine
@@ -207,7 +209,6 @@ async def _scenario():
     from cognee.modules.data.models import Data
     from cognee.modules.ingestion.exceptions import IngestionError
     from cognee.modules.users.methods import get_default_user
-    from sqlalchemy import update as sql_update
 
     text_v1 = _text("a", "b", "orig")
     text_v2 = _text("a", "b", "new")

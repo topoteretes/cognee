@@ -15,10 +15,10 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.provenance import EdgeIdentity, make_source_ref_key
 from cognee.infrastructure.databases.unified.capabilities import EngineCapability
 from cognee.infrastructure.databases.unified.unified_store_engine import UnifiedStoreEngine
+from cognee.infrastructure.engine import DataPoint
 
 try:
     from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter

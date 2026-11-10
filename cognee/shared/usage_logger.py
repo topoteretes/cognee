@@ -10,6 +10,7 @@ from uuid import UUID
 from cognee import __version__ as cognee_version
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
+from cognee.shared.dict_keys import unique_string_keys
 from cognee.shared.exceptions import UsageLoggerError
 from cognee.shared.logging_utils import get_logger
 
@@ -25,20 +26,21 @@ def _sanitize_value(value: Any) -> Any:
             return f"<cannot be serialized: {type(value).__name__}>"
         return str_repr
     except Exception:
+        logger.debug("Falling back after error in _sanitize_value", exc_info=True)
         return f"<cannot be serialized: {type(value).__name__}>"
 
 
 @_sanitize_value.register(type(None))
 def _(value: None) -> None:
     """Handle None values - returns None as-is."""
-    return None
+    return
 
 
 @_sanitize_value.register(str)
 @_sanitize_value.register(int)
 @_sanitize_value.register(float)
 @_sanitize_value.register(bool)
-def _(value: str | int | float | bool) -> str | int | float | bool:
+def _(value: str | float | bool) -> str | int | float | bool:
     """Handle primitive types - returns value as-is since they're JSON-serializable."""
     return value
 
@@ -64,12 +66,17 @@ def _(value: list | tuple) -> list:
 
 @_sanitize_value.register(dict)
 def _(value: dict) -> dict:
-    """Recursively sanitize dictionary keys and values."""
-    sanitized = {}
-    for k, v in value.items():
-        key_str = k if isinstance(k, str) else _sanitize_dict_key(k)
-        sanitized[key_str] = _sanitize_value(v)
-    return sanitized
+    """Recursively sanitize dictionary keys and values.
+
+    Keys that convert to the same string keep both values: the key that already
+    was a string keeps its name, the other gets a ``_2``, ``_3``, ... suffix.
+    """
+    items = list(value.items())
+    keys = unique_string_keys(
+        [k if isinstance(k, str) else _sanitize_dict_key(k) for k, _ in items],
+        [isinstance(k, str) for k, _ in items],
+    )
+    return {key: _sanitize_value(v) for key, (_, v) in zip(keys, items, strict=True)}
 
 
 def _sanitize_dict_key(key: Any) -> str:
@@ -87,6 +94,7 @@ def _get_param_names(func: Callable) -> list[str]:
     try:
         return list(inspect.signature(func).parameters.keys())
     except Exception:
+        logger.debug("Falling back to [] after error in _get_param_names", exc_info=True)
         return []
 
 
@@ -100,6 +108,7 @@ def _get_param_defaults(func: Callable) -> dict[str, Any]:
                 defaults[param_name] = param.default
         return defaults
     except Exception:
+        logger.debug("Falling back to {} after error in _get_param_defaults", exc_info=True)
         return {}
 
 
@@ -126,6 +135,7 @@ def _extract_user_id(args: tuple, kwargs: dict, param_names: list[str]) -> str |
                     return str(user.id)
         return None
     except Exception:
+        logger.debug("Falling back to None after error in _extract_user_id", exc_info=True)
         return None
 
 
@@ -230,8 +240,8 @@ async def _log_usage_async(
             ttl=config.usage_logging_ttl,
         )
         logger.info(f"Successfully logged usage for {function_name} (user_id={user_id})")
-    except Exception as e:
-        logger.error(f"Failed to log usage for {function_name}: {str(e)}", exc_info=True)
+    except Exception:
+        logger.exception(f"Failed to log usage for {function_name}")
 
 
 def _is_streaming_response(result: Any) -> bool:
@@ -261,7 +271,7 @@ def _wrap_streaming_result(result: Any, emit, function_name: str):
         try:
             async for chunk in inner:
                 yield chunk
-        except BaseException as streaming_error:  # noqa: BLE001 - logged, then re-raised
+        except BaseException as streaming_error:  # logged, then re-raised
             success = False
             error = str(streaming_error) or type(streaming_error).__name__
             raise
@@ -274,7 +284,7 @@ def _wrap_streaming_result(result: Any, emit, function_name: str):
             if aclose is not None:
                 try:
                     await aclose()
-                except BaseException:  # noqa: BLE001 - cleanup must not mask the outcome
+                except BaseException:  # cleanup must not mask the outcome
                     logger.debug("Failed to close streaming body", exc_info=True)
             # Shielded because the common ending is a client disconnect, which
             # cancels this scope: an unshielded await would be cancelled at its
@@ -283,10 +293,9 @@ def _wrap_streaming_result(result: Any, emit, function_name: str):
             # for the same reason — CancelledError is not an Exception.
             try:
                 await asyncio.shield(asyncio.ensure_future(emit(None, success, error)))
-            except BaseException as log_error:  # noqa: BLE001
-                logger.error(
-                    f"Failed to log usage for {function_name}: {str(log_error)}",
-                    exc_info=True,
+            except BaseException:
+                logger.exception(
+                    f"Failed to log usage for {function_name}",
                 )
 
     result.body_iterator = _logged()
@@ -407,10 +416,9 @@ def log_usage(function_name: str | None = None, log_type: str = "function"):
                 if not deferred_to_stream:
                     try:
                         await _emit(result, success, error)
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to log usage for {resolved_function_name}: {str(e)}",
-                            exc_info=True,
+                    except Exception:
+                        logger.exception(
+                            f"Failed to log usage for {resolved_function_name}",
                         )
 
         return async_wrapper

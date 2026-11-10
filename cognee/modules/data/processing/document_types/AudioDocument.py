@@ -1,5 +1,5 @@
-from cognee.modules.chunking.Chunker import Chunker
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.modules.chunking.Chunker import Chunker
 
 from .Document import Document
 

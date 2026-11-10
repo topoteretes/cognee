@@ -1,6 +1,7 @@
+from uuid import UUID
+
 import sqlalchemy.exc
 from sqlalchemy import select
-from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.exceptions import RoleNotFoundError

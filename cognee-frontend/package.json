@@ -2,13 +2,14 @@
   "name": "cognee-frontend",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --turbopack",
     "build": "NEXT_TELEMETRY_DISABLED=1 next build",
     "start": "NEXT_TELEMETRY_DISABLED=1 next start",
-    "test": "jest",
-    "lint": "eslint .",
-    "check:tracking-plan": "node scripts/check-tracking-plan.js"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@mantine/core": "^8.3.13",
@@ -28,13 +29,12 @@
     "embla-carousel-react": "^8.6.0",
     "jose": "^6.0.11",
     "mantine-form-valibot-resolver": "^3.0.1",
-    "next": "^16.0.8",
+    "next": "16.3.8",
     "react": "^19.1.2",
     "react-dom": "^19.1.2",
     "react-error-boundary": "^6.0.0",
     "react-force-graph-2d": "^1.29.0",
     "react-markdown": "^10.1.0",
-    "server-only": "^0.0.1",
     "uuid": "^11.1.0",
     "valibot": "^1.2.0"
   },

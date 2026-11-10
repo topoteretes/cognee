@@ -1,37 +1,35 @@
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
-from fastapi import Depends, status
 from pydantic import Field
-from typing import List, Optional, Union, Literal
 
-from cognee.api.DTO import InDTO
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
+from cognee import __version__ as cognee_version
+from cognee.api.DTO import ErrorResponse, InDTO
 from cognee.exceptions import CogneeApiError
-from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
-from cognee import __version__ as cognee_version
-from cognee.api.DTO import ErrorResponse
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger()
 
 
 class MemifyPayloadDTO(InDTO):
-    extraction_tasks: Optional[List[str]] = Field(
+    extraction_tasks: list[str] | None = Field(
         default=None,
         examples=[[]],
     )
-    enrichment_tasks: Optional[List[str]] = Field(default=None, examples=[[]])
-    data: Optional[str] = Field(default=None)
-    dataset_name: Optional[str] = Field(default=None)
+    enrichment_tasks: list[str] | None = Field(default=None, examples=[[]])
+    data: str | None = Field(default=None)
+    dataset_name: str | None = Field(default=None)
     # Note: Literal is needed for Swagger use
-    dataset_id: Union[UUID, Literal[""], None] = Field(default=None, examples=[""])
-    node_name: Optional[List[str]] = Field(default=None, examples=[[]])
-    run_in_background: Optional[bool] = Field(default=False)
+    dataset_id: UUID | Literal[""] | None = Field(default=None, examples=[""])
+    node_name: list[str] | None = Field(default=None, examples=[[]])
+    run_in_background: bool | None = Field(default=False)
 
 
 def get_memify_router() -> APIRouter:
@@ -40,6 +38,7 @@ def get_memify_router() -> APIRouter:
     @router.post(
         "",
         response_model=dict,
+        deprecated=True,
         responses={
             400: {"model": ErrorResponse},
             403: {"model": ErrorResponse},
@@ -50,22 +49,27 @@ def get_memify_router() -> APIRouter:
     @log_usage(function_name="POST /v1/memify", log_type="api_endpoint")
     async def memify(payload: MemifyPayloadDTO, user: User = Depends(get_authenticated_user)):
         """
-        Enrichment pipeline in Cognee, can work with already built graphs. If no data is provided existing knowledge graph will be used as data,
-        custom data can also be provided instead which can be processed with provided extraction and enrichment tasks.
+        **Deprecated** and removed in the next release. Use `POST /api/v1/improve` to
+        enrich a dataset. Triplet embeddings were removed, so a call without tasks runs
+        nothing and returns `{}`.
 
-        Provided tasks and data will be arranged to run the Cognee pipeline and execute graph enrichment/creation.
+        Runs the named enrichment tasks over an existing graph. If no data is provided the
+        existing knowledge graph is used as data.
 
         ## Request Parameters
         - **extractionTasks** Optional[List[str]]: Names of built-in Cognee Tasks to execute for graph/data extraction.
-              Supported names: extract_subgraph, extract_subgraph_chunks, get_triplet_datapoints,
-              extract_user_sessions, extract_agent_trace_feedbacks, detect_entity_duplicates.
+              Supported names: extract_subgraph, extract_subgraph_chunks,
+              extract_user_sessions, extract_agent_trace_feedbacks, detect_entity_duplicates,
+              extract_code_docs (reads the dataset's code graph itself; no graph is projected for it).
               Unknown names are rejected with 422. Tasks requiring parameters are SDK-only.
         - **enrichmentTasks** Optional[List[str]]: Names of built-in Cognee Tasks to handle enrichment of provided graph/data from extraction tasks.
               Supported names: cognify_session, cognify_agent_trace_feedback, apply_feedback_weights,
-              apply_frequency_weights, merge_entity_duplicates, index_data_points.
+              merge_entity_duplicates, index_data_points, cognify_code_doc_chunks, add_data_points,
+              add_code_doc_edges.
         - **data** Optional[List[str]]: The data to ingest. Can be any text data when custom extraction and enrichment tasks are used.
               Data provided here will be forwarded to the first extraction task in the pipeline as input.
-              If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded
+              If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded,
+              except to an extraction task that reads the graph itself (extract_code_docs), which is seeded with a placeholder.
         - **dataset_name** (Optional[str]): Name of the datasets to memify
         - **dataset_id** (Optional[UUID]): List of UUIDs of an already existing dataset
         - **node_name** (Optional[List[str]]):  Filter graph to specific named entities (for targeted search). Used when no data is provided.
@@ -90,6 +94,10 @@ def get_memify_router() -> APIRouter:
         - datasetId value can only be the UUID of an already existing dataset
         """
 
+        logger.warning(
+            "POST /v1/memify is deprecated and will be removed in the next release; "
+            "use POST /v1/improve"
+        )
         send_telemetry(
             "Memify API Endpoint Invoked",
             user,
@@ -105,7 +113,7 @@ def get_memify_router() -> APIRouter:
             )
 
         try:
-            from cognee.modules.memify import memify as cognee_memify
+            from cognee.api.v1.memify import memify as cognee_memify
 
             memify_run = await cognee_memify(
                 extraction_tasks=payload.extraction_tasks,

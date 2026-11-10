@@ -1,18 +1,31 @@
-import unittest
-import subprocess
-import time
+import json
 import os
 import signal
-import requests
-from pathlib import Path
+import subprocess
 import sys
+import time
+import unittest
 import uuid
-import json
+from pathlib import Path
+
+import requests
+
+from cognee.tests.utils.ci_search_type import ci_llm_available, completion_or_chunks
+
+DEFAULT_USER_EMAIL = "default_user@example.com"
+# The default user has no password until a server started with
+# DEFAULT_USER_PASSWORD sets it once. This test logs in over HTTP, so it pins
+# the value for the server subprocess below.
+DEFAULT_USER_PASSWORD = "default_password"
 
 
 class TestCogneeServerStart(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # Inherited by the server subprocess started below, which creates the
+        # default user lazily on first use.
+        os.environ["DEFAULT_USER_PASSWORD"] = DEFAULT_USER_PASSWORD
+
         # Start the Cognee server - just check if the server can start without errors
         cls.server_process = subprocess.Popen(
             [
@@ -25,7 +38,7 @@ class TestCogneeServerStart(unittest.TestCase):
                 "--port",
                 "8000",
             ],
-            preexec_fn=os.setsid,
+            start_new_session=True,
         )
         # Give the server some time to start
         time.sleep(120)
@@ -63,8 +76,8 @@ class TestCogneeServerStart(unittest.TestCase):
         # Login request
         url = "http://127.0.0.1:8000/api/v1/auth/login"
         form_data = {
-            "username": "default_user@example.com",
-            "password": "default_password",
+            "username": DEFAULT_USER_EMAIL,
+            "password": DEFAULT_USER_PASSWORD,
         }
         login_response = requests.post(url, data=form_data, timeout=15)
         login_response.raise_for_status()  # raises on HTTP 4xx/5xx
@@ -76,7 +89,10 @@ class TestCogneeServerStart(unittest.TestCase):
 
         # Add request
         url = "http://127.0.0.1:8000/api/v1/add"
-        file_path = Path(os.path.join(Path(__file__).parent, "test_data/example.png"))
+        # Image ingestion needs an LLM to describe the image; without a key (fork
+        # PRs) the same flow runs on a text document.
+        test_file = "example.png" if ci_llm_available() else "Natural_language_processing.txt"
+        file_path = Path(os.path.join(Path(__file__).parent, "test_data", test_file))
         headers = {"Authorization": auth_var}
 
         dataset_name = f"test_{uuid.uuid4().hex[:8]}"
@@ -85,7 +101,7 @@ class TestCogneeServerStart(unittest.TestCase):
         file = {
             "data": (
                 file_path.name,
-                open(file_path, "rb"),
+                open(file_path, "rb"),  # noqa: SIM115 - requests closes the upload handle
             )
         }
 
@@ -187,7 +203,7 @@ class TestCogneeServerStart(unittest.TestCase):
             "Content-Type": "application/json",
         }
 
-        payload = {"searchType": "GRAPH_COMPLETION", "query": "What's in the document?"}
+        payload = {"searchType": completion_or_chunks().value, "query": "What's in the document?"}
 
         search_response = requests.post(url, headers=headers, json=payload, timeout=50)
         if search_response.status_code not in [200, 201]:

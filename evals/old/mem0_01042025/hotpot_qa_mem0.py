@@ -1,8 +1,9 @@
-from dotenv import load_dotenv
 import json
 from dataclasses import dataclass
-from openai import OpenAI
+
+from dotenv import load_dotenv
 from mem0 import Memory
+from openai import OpenAI
 from tqdm import tqdm
 
 load_dotenv()
@@ -12,7 +13,7 @@ def load_corpus_to_memory(
     memory: Memory,
     corpus_file: str = "hotpot_50_corpus.json",
     user_id: str = "hotpot_qa_user",
-    limit: int = None,
+    limit: int | None = None,
 ):
     """Loads corpus data into memory."""
     print(f"Loading corpus from {corpus_file}...")
@@ -45,8 +46,8 @@ def answer_questions(
     user_id: str = "hotpot_qa_user",
     qa_pairs_file: str = "hotpot_50_qa_pairs.json",
     print_results: bool = True,
-    output_file: str = None,
-    limit: int = None,
+    output_file: str | None = None,
+    limit: int | None = None,
 ):
     """Answer questions using memory retrieval."""
     print(f"Loading QA pairs from {qa_pairs_file}...")

@@ -1,15 +1,77 @@
-from typing import Any, Dict, List, Optional, Protocol
+import asyncio
 from abc import abstractmethod
-from cognee.infrastructure.engine import DataPoint
-from .models.PayloadSchema import PayloadSchema
+from typing import Any, Protocol
 from uuid import UUID
+
+from cognee.infrastructure.engine import DataPoint
 from cognee.modules.users.models import User
+
+from .models.PayloadSchema import PayloadSchema
+from .models.ScoredResult import ScoredResult
+
+
+def validate_raw_vector_points(points: list[dict], vector_size: int) -> dict[str, dict]:
+    """Check ``upsert_raw_vectors`` points before anything is written; collapse them by id.
+
+    Every point needs an ``id``, a ``vector`` list of ``vector_size`` floats and a dict
+    ``payload``; the first bad point raises ``ValueError``, so an adapter that calls this
+    before creating the collection leaves nothing behind on a rejected call. The same id
+    twice is written once: the last point wins and the two ``belongs_to_set`` lists are
+    unioned, as ``create_data_points`` does with duplicate ids in one batch.
+    """
+    rows: dict[str, dict] = {}
+    for point in points:
+        point_id = point.get("id")
+        vector = point.get("vector")
+        payload = point.get("payload")
+        if point_id is None:
+            raise ValueError("Raw vector point is missing id")
+        if not isinstance(vector, list):
+            raise ValueError("Raw vector point vector must be a list")
+        if len(vector) != vector_size:
+            raise ValueError(
+                f"Raw vector size {len(vector)} does not match expected size {vector_size}"
+            )
+        if not isinstance(payload, dict):
+            raise ValueError("Raw vector point payload must be a dict")
+        previous = rows.get(str(point_id))
+        if previous is not None:
+            tags = list(
+                dict.fromkeys(
+                    list(previous["payload"].get("belongs_to_set") or [])
+                    + list(payload.get("belongs_to_set") or [])
+                )
+            )
+            if tags:
+                payload = {**payload, "belongs_to_set": tags}
+        rows[str(point_id)] = {"id": point_id, "vector": vector, "payload": payload}
+    return rows
 
 
 class VectorDBInterface(Protocol):
     """
-    Defines an interface for interacting with a vector database, including operations for
-    managing collections and data points.
+    Interface every vector backend implements (LanceDB, PGVector, Neptune Analytics, Turso).
+
+    Get an instance with ``get_vector_engine_async()``; never construct adapters directly.
+
+    Contract shared by all adapters:
+
+    * **One collection per embedded field.** ``add_data_points`` writes each ``DataPoint``
+      type's ``index_fields`` to a collection named ``<TypeName>_<field>``
+      (``DocumentChunk_text``, ``Entity_name``, ``TextSummary_text``, ...). Rows are keyed
+      by the data point's id.
+    * **Writes are idempotent upserts.** ``create_data_points`` replaces an existing row
+      with the same id (LanceDB additionally merges the ``belongs_to_set`` tags of the
+      old and new row). Embedding is done by the adapter through the configured
+      embedding engine.
+    * **Search returns ``list[ScoredResult]``** (``id``, ``score``, ``payload``), ordered by
+      ``score`` ascending. ``score`` is the backend's raw distance -- cosine distance for
+      the built-in adapters -- so **lower is better**; it is not a similarity.
+    * Ids are passed and returned as ``UUID``/``str`` of the ``DataPoint.id``; missing ids
+      in ``retrieve``/``score_by_ids`` are omitted from the result, not an error.
+
+    Multi-tenant isolation requires a ``DatasetDatabaseHandlerInterface`` registration
+    for the backend (see ``dataset_database_handler/``).
     """
 
     @abstractmethod
@@ -33,7 +95,7 @@ class VectorDBInterface(Protocol):
     async def create_collection(
         self,
         collection_name: str,
-        payload_schema: Optional[Any] = None,
+        payload_schema: Any | None = None,
     ):
         """
         Create a new collection with an optional payload schema.
@@ -47,12 +109,30 @@ class VectorDBInterface(Protocol):
         """
         raise NotImplementedError
 
+    async def delete_collection(self, collection_name: str) -> None:
+        """Drop a collection and every row in it; a collection that does not exist is not an error.
+
+        Unlike ``prune`` this leaves the rest of the store alone. The in-tree adapters
+        implement it; an adapter that does not raises ``NotImplementedError``.
+
+        Parameters:
+        -----------
+
+            - collection_name (str): The name of the collection to drop.
+        """
+        raise NotImplementedError
+
     """ Data points """
 
     @abstractmethod
-    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """
-        Insert new data points into the specified collection.
+        Upsert data points into the specified collection.
+
+        Keyed on ``DataPoint.id``: an existing row is replaced (LanceDB merges its
+        ``belongs_to_set`` with the new row's), a new id is inserted. The adapter embeds
+        each point's ``get_embeddable_data()`` with the configured embedding engine and
+        creates the collection if it does not exist. Returns ``None``.
 
         Parameters:
         -----------
@@ -67,19 +147,37 @@ class VectorDBInterface(Protocol):
         self,
         collection_name: str,
         points: list[dict],
-        payload_schema: Optional[Any] = None,
+        payload_schema: Any | None = None,
     ) -> None:
         """
         Upsert already-computed vectors into the specified collection.
 
-        This is for small system-owned vector state where re-embedding from text would be
-        incorrect. Adapters that do not support raw vector writes should raise
-        NotImplementedError.
+        Each point is ``{"id", "vector", "payload"}``. The embedding engine is never
+        called, and a point whose id exists replaces the stored payload and vector (unlike
+        ``create_data_points``, which keeps the stored vector on conflict), except
+        ``belongs_to_set``: as on every write, the stored row's tags are unioned with the
+        incoming ones, so a copy into a dataset that already holds the row (ids are
+        content-derived) never drops the tags that dataset gave it. With
+        ``retrieve(..., include_vector=True)`` this moves a row between stores without
+        re-embedding its text: pass the payload that call returned, minus ``"vector"``.
+        The points are checked (``validate_raw_vector_points``) before the collection is
+        created or anything is written: a missing id, a vector that is not a list of the
+        destination engine's width, or a payload that is not a dict raises ``ValueError``
+        and leaves the store untouched; the same id twice in one call is written once,
+        last point wins, with the two ``belongs_to_set`` lists unioned.
+        The payload is stored in the shape an ingested row of ``payload_schema`` has
+        (for a DataPoint that includes its ``id``). With no ``payload_schema`` the rows
+        are the adapter's index rows (``IndexSchema``, the shape of every
+        ``<Type>_<field>`` collection ``index_data_points`` writes), so a row read from
+        one of those lands in another as it was. Adapters that do not support raw vector
+        writes should raise NotImplementedError.
         """
         raise NotImplementedError("upsert_raw_vectors is not implemented for this adapter")
 
     @abstractmethod
-    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
+    async def retrieve(
+        self, collection_name: str, data_point_ids: list[str], *, include_vector: bool = False
+    ):
         """
         Retrieve data points from a collection using their IDs.
 
@@ -89,8 +187,49 @@ class VectorDBInterface(Protocol):
             - collection_name (str): The name of the collection from which to retrieve data
               points.
             - data_point_ids (Union[List[str], list[str]]): A list of IDs of the data points to retrieve.
+            - include_vector (bool): When True, each result carries its stored embedding as
+              ``payload["vector"]`` (a list of floats), so it can be written elsewhere with
+              ``upsert_raw_vectors``. The default result is the payload alone.
         """
         raise NotImplementedError
+
+    async def score_by_ids(
+        self, collection_name: str, data_point_ids: list[str], query_vector: list[float]
+    ):
+        """Return raw cosine distances for existing requested IDs, with no top-k cutoff.
+
+        Empty IDs return []; missing IDs are omitted and result order is unspecified.
+        Implementations must filter by ID before scoring and bound query batches,
+        rather than searching the whole collection. This optional capability raises
+        NotImplementedError on adapters that do not support neighborhood re-scoring.
+        """
+        raise NotImplementedError("score_by_ids is not implemented for this adapter")
+
+    async def score_by_ids_batch(
+        self, collection_name: str, data_point_ids: list[str], query_vectors: list[list[float]]
+    ) -> list[list[ScoredResult]]:
+        """``score_by_ids`` for several query vectors over the same ids: one result list per
+        vector, in the vectors' order, each with ``score_by_ids``'s contract.
+
+        The default scores the vectors concurrently with ``score_by_ids``. Adapters whose
+        cost is reaching the rows rather than the distances override it to visit the rows
+        once: LanceDB fetches the scoped vectors with one filtered scan and scores every
+        query locally, PGVector and Turso run one statement with a distance column per
+        query. Neptune Analytics keeps the default: its distances are computed server-side
+        by a one-embedding procedure, and no live deployment was available to measure.
+        """
+        return list(
+            await asyncio.gather(
+                *(
+                    self.score_by_ids(
+                        collection_name=collection_name,
+                        data_point_ids=data_point_ids,
+                        query_vector=query_vector,
+                    )
+                    for query_vector in query_vectors
+                )
+            )
+        )
 
     """ Search """
 
@@ -98,17 +237,22 @@ class VectorDBInterface(Protocol):
     async def search(
         self,
         collection_name: str,
-        query_text: Optional[str],
-        query_vector: Optional[List[float]],
-        limit: Optional[int],
+        query_text: str | None,
+        query_vector: list[float] | None,
+        limit: int | None,
         with_vector: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         """
         Perform a search in the specified collection using either a text query or a vector
         query.
+
+        Exactly one of ``query_text`` / ``query_vector`` is required; text is embedded
+        first. Returns ``list[ScoredResult]`` ordered by ``score`` ascending, where
+        ``score`` is the raw backend distance (cosine for built-in adapters; lower is
+        better). ``limit=None`` returns every row; ``limit<=0`` returns ``[]``.
 
         Parameters:
         -----------
@@ -133,11 +277,11 @@ class VectorDBInterface(Protocol):
     async def batch_search(
         self,
         collection_name: str,
-        query_texts: List[str],
-        limit: Optional[int],
+        query_texts: list[str],
+        limit: int | None,
         with_vectors: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
     ):
         """
         Perform a batch search using multiple text queries against a collection.
@@ -162,7 +306,7 @@ class VectorDBInterface(Protocol):
     supports_payload_update: bool = False
 
     async def update_payload(
-        self, collection_name: str, payload_updates: Dict[str, Dict[str, Any]]
+        self, collection_name: str, payload_updates: dict[str, dict[str, Any]]
     ) -> None:
         """
         Update payload fields on existing rows WITHOUT re-embedding.
@@ -190,7 +334,7 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError("This vector adapter does not support payload-only updates.")
 
     @abstractmethod
-    async def delete_data_points(self, collection_name: str, data_point_ids: List[UUID]):
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
         """
         Delete specified data points from a collection.
 
@@ -208,8 +352,8 @@ class VectorDBInterface(Protocol):
 
     async def remove_belongs_to_set_tags(
         self,
-        tags: List[str],
-        node_ids: Optional[List[str]] = None,
+        tags: list[str],
+        node_ids: list[str] | None = None,
     ) -> None:
         """
         Remove the given tag names from every `belongs_to_set` array in the
@@ -226,7 +370,7 @@ class VectorDBInterface(Protocol):
         Default no-op; adapters that need to clean up stale NodeSet tags
         on dataset deletion override this.
         """
-        return None
+        return
 
     @abstractmethod
     async def prune(self):
@@ -236,7 +380,7 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    async def embed_data(self, data: List[str]) -> List[List[float]]:
+    async def embed_data(self, data: list[str]) -> list[list[float]]:
         """
         Embed textual data into vector representations.
 
@@ -253,36 +397,56 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError
 
     # Optional methods that may be implemented by adapters
+    async def existing_collections(self, collection_names: list[str]) -> list[str]:
+        """
+        Return the names in ``collection_names`` that exist, in their given order.
+
+        A caller searching many collections uses it to skip the missing ones. The
+        default asks ``has_collection`` for every name at once; an adapter that can
+        list its collections in one call overrides it, so the answer costs one
+        round trip instead of one per name.
+        """
+        checks = await asyncio.gather(*(self.has_collection(name) for name in collection_names))
+        return [name for name, exists in zip(collection_names, checks) if exists]
+
+    async def compact(self, collection_name: str | None = None):
+        """
+        Reclaim storage the adapter's own writes left behind (merge small
+        fragments, prune superseded versions). Called once at the end of every
+        cognify run; must be cheap when there is nothing to do, bounded in
+        work, and must never raise. Default implementation is a no-op.
+        """
+        return
+
     async def run_migrations(self):
         """
         Run adapter-specific vector storage migrations.
         Default implementation is a no-op.
         """
-        return None
+        return
 
     async def get_connection(self):
         """
         Get a connection to the vector database.
         This method is optional and may return None for adapters that don't use connections.
         """
-        return None
+        return
 
     async def get_collection(self, collection_name: str):
         """
         Get a collection object from the vector database.
         This method is optional and may return None for adapters that don't expose collection objects.
         """
-        return None
+        return
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """
         Create a vector index for improved search performance.
         This method is optional and may be a no-op for adapters that don't support indexing.
         """
-        pass
 
     async def index_data_points(
-        self, index_name: str, index_property_name: str, data_points: List[DataPoint]
+        self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
         """
         Index data points for improved search performance.
@@ -294,7 +458,6 @@ class VectorDBInterface(Protocol):
             - index_property_name (str): Property name to index on
             - data_points (List[DataPoint]): Data points to index
         """
-        pass
 
     def get_data_point_schema(self, model_type: Any) -> Any:
         """
@@ -312,7 +475,7 @@ class VectorDBInterface(Protocol):
         return model_type
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         """
         Return a dictionary with connection info for a vector database for the given dataset.
         Function can auto handle deploying of the actual database if needed, but is not necessary.
@@ -330,7 +493,6 @@ class VectorDBInterface(Protocol):
         Returns:
             dict: Connection info for the created vector database instance.
         """
-        pass
 
     async def delete_dataset(self, dataset_id: UUID, user: User) -> None:
         """
@@ -342,4 +504,3 @@ class VectorDBInterface(Protocol):
             dataset_id: UUID of the dataset
             user: User object
         """
-        pass

@@ -17,5 +17,7 @@ class FakeGraphVectorStore(GraphVectorStoreInterface):
     async def delete_by_dataset_id(self, dataset_id: str) -> None:
         self.deleted_dataset_ids.append(dataset_id)
 
-    async def rollback_by_pipeline_run_id(self, pipeline_run_id: str) -> None:
+    async def rollback_by_pipeline_run_id(
+        self, pipeline_run_id: str, *, keep_data_ids=None
+    ) -> None:
         self.rolled_back_pipeline_run_ids.append(pipeline_run_id)

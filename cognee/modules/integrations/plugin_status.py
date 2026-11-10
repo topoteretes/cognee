@@ -27,13 +27,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import case, func, or_, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.agents.registry import AGENT_CONFIG_NAME, list_persisted_agent_connections
+from cognee.modules.integrations.agent_identity import plugin_key_from_agent_email
 from cognee.modules.integrations.plugins import KNOWN_PLUGINS
 from cognee.modules.session_lifecycle.models import SessionRecord
 from cognee.modules.session_lifecycle.visibility import child_agent_emails
@@ -64,14 +64,14 @@ class PluginStatusRow:
 
     key: str
     connected: bool = False
-    agent_id: Optional[UUID] = None
-    provisioned_at: Optional[datetime] = None
-    last_active_at: Optional[datetime] = None
+    agent_id: UUID | None = None
+    provisioned_at: datetime | None = None
+    last_active_at: datetime | None = None
     session_count: int = 0
-    source: Optional[str] = None
+    source: str | None = None
 
 
-def as_utc(value: Optional[datetime]) -> Optional[datetime]:
+def as_utc(value: datetime | None) -> datetime | None:
     """Normalize to aware-UTC; SQLite hands back tz-naive datetimes.
 
     Public: the integrations router runs credential timestamps through this
@@ -84,12 +84,12 @@ def as_utc(value: Optional[datetime]) -> Optional[datetime]:
     return value.astimezone(timezone.utc)
 
 
-def _max_datetime(*values: Optional[datetime]) -> Optional[datetime]:
+def _max_datetime(*values: datetime | None) -> datetime | None:
     present = [as_utc(value) for value in values if value is not None]
     return max(present) if present else None
 
 
-def coerce_provisioned_at(value) -> Optional[datetime]:
+def coerce_provisioned_at(value) -> datetime | None:
     """Coerce the stored ``provisioned_at`` into an aware datetime.
 
     The value lives in the agent's principal-configuration blob, which the
@@ -106,21 +106,6 @@ def coerce_provisioned_at(value) -> Optional[datetime]:
         except ValueError:
             return None
     return None
-
-
-def _plugin_key_from_agent_email(email: Optional[str], parent_id: UUID) -> Optional[str]:
-    """Plugin key encoded in a child agent's server-assigned email, if any.
-
-    ``create_agent`` mints ``<plugin_key>+<parent_id>@cognee.agent``
-    deterministically, so the email is the one identity signal a child
-    agent cannot rewrite — unlike its principal-configuration blob.
-    Returns ``None`` for agents that aren't a known plugin identity.
-    """
-    suffix = f"+{parent_id}@cognee.agent"
-    if not (email or "").endswith(suffix):
-        return None
-    plugin_key = email[: -len(suffix)]
-    return plugin_key if plugin_key in KNOWN_PLUGINS else None
 
 
 def _escape_like_prefix(prefix: str) -> str:
@@ -151,9 +136,9 @@ async def identity_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
     latest session activity, so pure-recall plugins that never open
     sessions still report "last seen".
     """
-    plugin_agents: dict[UUID, tuple[str, Optional[datetime]]] = {}
+    plugin_agents: dict[UUID, tuple[str, datetime | None]] = {}
     for agent_id, email in (await child_agent_emails(user_id)).items():
-        plugin_key = _plugin_key_from_agent_email(email, user_id)
+        plugin_key = plugin_key_from_agent_email(email, user_id)
         if plugin_key is None:
             continue
         for config in await get_principal_all_configuration(agent_id):
@@ -219,7 +204,7 @@ async def identity_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
 
 
 async def legacy_plugin_statuses(
-    visible_user_ids: list[UUID], exclude_keys: Optional[set[str]] = None
+    visible_user_ids: list[UUID], exclude_keys: set[str] | None = None
 ) -> dict[str, PluginStatusRow]:
     """Prefix-inferred statuses for pre-migration shared-key installs.
 
@@ -297,7 +282,7 @@ async def registry_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
     """
     statuses: dict[str, PluginStatusRow] = {}
 
-    def _add(plugin_key: Optional[str], connection) -> None:
+    def _add(plugin_key: str | None, connection) -> None:
         if plugin_key not in KNOWN_PLUGINS:
             return
         row = statuses.setdefault(
@@ -313,7 +298,7 @@ async def registry_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
         )
 
     for agent_id, email in (await child_agent_emails(user_id)).items():
-        email_key = _plugin_key_from_agent_email(email, user_id)
+        email_key = plugin_key_from_agent_email(email, user_id)
         if email_key is None:
             continue
         for connection in await list_persisted_agent_connections([agent_id], active_only=True):

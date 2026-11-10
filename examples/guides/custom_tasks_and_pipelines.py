@@ -1,6 +1,16 @@
+"""Author custom Tasks and compose them into a pipeline with cognee.run_custom_pipeline.
+
+An LLM-backed task extracts Person DataPoints with ``knows`` edges, add_data_points stores them,
+cognify() runs over the dataset, and the graph is written to
+.artifacts/custom_tasks_and_pipelines.html.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/custom_tasks_and_pipelines.py
+"""
+
 import asyncio
 import os
-from typing import Any, Dict, List
+from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 from pydantic import BaseModel
@@ -18,21 +28,21 @@ class PersonLLM(BaseModel):
     """Lightweight Pydantic model for LLM extraction only."""
 
     name: str
-    knows: List[str] = []  # Just names for now, we'll resolve to Person instances later
+    knows: list[str] = []  # Just names for now, we'll resolve to Person instances later
 
 
 class PeopleLLM(BaseModel):
     """Lightweight Pydantic model for LLM extraction only."""
 
-    persons: List[PersonLLM]
+    persons: list[PersonLLM]
 
 
 class Person(DataPoint):
     name: str
     # Optional relationships (we'll let the LLM populate this)
-    knows: List["Person"] = []
+    knows: list["Person"] = []
     # Make names searchable in the vector store
-    metadata: Dict[str, Any] = {"index_fields": ["name"]}
+    metadata: dict[str, Any] = {"index_fields": ["name"]}
 
 
 class LightweightData(DataPoint):
@@ -46,14 +56,14 @@ def build_lightweight_data_object(text_data):
     return LightweightData(id=uuid5(NAMESPACE_OID, text_data), text=text_data)
 
 
-async def extract_people(data: LightweightData) -> List[Person]:
+async def extract_people(data: LightweightData) -> list[Person]:
     system_prompt = (
         "Extract people mentioned in the text. "
         "Return as `persons: Person[]` with each Person having `name` and optional `knows` relations. "
         "Infer ‘knows’ only when there is a clear interpersonal interaction in the text."
     )
     # Create a mapping of name -> Person DataPoint
-    person_map: Dict[str, Person] = {}
+    person_map: dict[str, Person] = {}
     for data_item in data:
         people_llm = await LLMGateway.acreate_structured_output(
             data_item.text, system_prompt, PeopleLLM

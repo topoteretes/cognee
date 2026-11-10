@@ -1,7 +1,8 @@
-"""Session-independent, operation-scoped LLM token accumulation.
+"""Session-independent, operation-scoped LLM and embedding token accumulation.
 
-A ContextVar-scoped accumulator fed from ``record_llm_call`` (the single
-choke point for counted LLM calls) regardless of whether a session-usage
+A ContextVar-scoped accumulator fed from ``record_llm_call`` and
+``record_embedding_call`` (the choke points for counted LLM and embedding
+calls) regardless of whether a session-usage
 scope is active. Accumulators chain to their parent scope, so a top-level
 operation (e.g. ``remember``) sees the total including its nested
 operations' tokens — do NOT sum token columns across nesting levels.
@@ -10,10 +11,11 @@ This module must stay import-light (no cognee imports) so it can be
 imported from ``usage_tracking`` without pulling in the package-init chain.
 """
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Iterator, Optional
+from typing import Optional
 from uuid import UUID
 
 
@@ -23,6 +25,7 @@ class OperationUsage:
 
     tokens_in: int = 0
     tokens_out: int = 0
+    embedding_tokens: int = 0
     parent: Optional["OperationUsage"] = None
 
     def add(self, tokens_in: int, tokens_out: int) -> None:
@@ -32,13 +35,20 @@ class OperationUsage:
         if self.parent is not None:
             self.parent.add(tokens_in, tokens_out)
 
+    def add_embedding(self, tokens: int) -> None:
+        """Add an embedding call's input tokens, kept apart from the LLM counters,
+        then propagate up the parent chain."""
+        self.embedding_tokens += tokens
+        if self.parent is not None:
+            self.parent.add_embedding(tokens)
 
-_active_operation_usage: ContextVar[Optional[OperationUsage]] = ContextVar(
+
+_active_operation_usage: ContextVar[OperationUsage | None] = ContextVar(
     "cognee_operation_usage", default=None
 )
 
 
-def get_active_operation_usage() -> Optional[OperationUsage]:
+def get_active_operation_usage() -> OperationUsage | None:
     """Return the innermost active operation accumulator, if any."""
     return _active_operation_usage.get()
 
@@ -83,12 +93,12 @@ class ParentRun:
     parent: Optional["ParentRun"] = None
 
 
-_current_parent_run: ContextVar[Optional[ParentRun]] = ContextVar(
+_current_parent_run: ContextVar[ParentRun | None] = ContextVar(
     "cognee_current_parent_run", default=None
 )
 
 
-def get_parent_run_id(excluding: Optional[UUID] = None) -> Optional[UUID]:
+def get_parent_run_id(excluding: UUID | None = None) -> UUID | None:
     """The innermost enclosing run id — the value for ``parent_operation_id``.
 
     ``excluding`` skips the caller's own scope: a pipeline's terminal-row

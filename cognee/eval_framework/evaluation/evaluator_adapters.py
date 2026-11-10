@@ -1,6 +1,5 @@
 from enum import Enum
 from importlib import import_module
-from typing import Optional, Type
 
 
 class EvaluatorAdapter(Enum):
@@ -26,6 +25,12 @@ class EvaluatorAdapter(Enum):
         "BeamEvalAdapter",
         None,
     )
+    LOCOMO = (
+        "LocomoEval",
+        "cognee.eval_framework.locomo.eval_adapter",
+        "LocomoEvalAdapter",
+        None,
+    )
     DIRECT_LLM = (
         "DirectLLM",
         "cognee.eval_framework.evaluation.direct_llm_eval_adapter",
@@ -33,7 +38,7 @@ class EvaluatorAdapter(Enum):
         None,
     )
 
-    def __new__(cls, adapter_name: str, module_path: str, class_name: str, extra: Optional[str]):
+    def __new__(cls, adapter_name: str, module_path: str, class_name: str, extra: str | None):
         obj = object.__new__(cls)
         obj._value_ = adapter_name
         obj._module_path = module_path
@@ -41,7 +46,7 @@ class EvaluatorAdapter(Enum):
         obj._extra = extra
         return obj
 
-    def load_adapter_class(self) -> Type:
+    def load_adapter_class(self) -> type:
         """Import and return the adapter class, raising an actionable error if the
         optional dependency backing this engine is not installed."""
         try:
@@ -56,7 +61,7 @@ class EvaluatorAdapter(Enum):
         return getattr(module, self._class_name)
 
     @property
-    def adapter_class(self) -> Type:
+    def adapter_class(self) -> type:
         """Backwards-compatible accessor that resolves the adapter class lazily."""
         return self.load_adapter_class()
 

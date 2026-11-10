@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerBackendUrl } from "@/modules/config/serverRuntimeConfig";
+
+const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8000";
 
 // Proxies the cognee /v1/schema/provenance HTML view (memory-provenance graph:
 // Tenant -> User -> Agent -> Brain -> File -> memory) so it can be embedded in
 // an iframe. Mirrors the /api/visualize proxy, including default-user login.
 export async function GET(request: NextRequest) {
-  const localApiUrl = getServerBackendUrl();
   const headers: Record<string, string> = {};
   const cookie = request.headers.get("cookie");
   if (cookie) headers["cookie"] = cookie;

@@ -1,4 +1,3 @@
-from typing import List, Union
 from cognee.shared.logging_utils import setup_logging
 
 logger = setup_logging()
@@ -22,7 +21,7 @@ def is_embeddable(s: str) -> bool:
     return False
 
 
-def sanitize_embedding_text_inputs(text: Union[str, List[str]]) -> List[str]:
+def sanitize_embedding_text_inputs(text: str | list[str]) -> list[str]:
     """
     Transform invalid/empty inputs into a safe dummy to prevent API 422 embedding errors while
     keeping list length consistent.
@@ -35,8 +34,8 @@ def sanitize_embedding_text_inputs(text: Union[str, List[str]]) -> List[str]:
 
 
 def handle_embedding_response(
-    original_texts: Union[List[str], str], embeddings: List[List[float]], dimensions: int
-) -> List[List[float]]:
+    original_texts: list[str] | str, embeddings: list[list[float]], dimensions: int
+) -> list[list[float]]:
     """
     Compare the original input strings against the results.
     If the original string was 'junk' that was not embeddable, overwrite its vector with zeros.
@@ -49,3 +48,42 @@ def handle_embedding_response(
         embeddings[i] if is_embeddable(original_texts[i]) else zero_vector
         for i in range(len(original_texts))
     ]
+
+
+def count_input_tokens(response, texts: list[str], tokenizer) -> int:
+    """Input tokens an embedding request consumed: the provider's own count when the
+    response carries one, else the engine tokenizer's count of the texts sent.
+
+    Best-effort: a counting failure is logged and counts 0, because raising here
+    would fail (and retry, re-billing) an embedding request that succeeded.
+    """
+    try:
+        reported = _reported_input_tokens(response)
+        if reported is not None:
+            return reported
+        return sum(tokenizer.count_tokens(text) for text in texts)
+    except Exception:
+        logger.exception("Could not count embedding input tokens; counting 0")
+        return 0
+
+
+def _reported_input_tokens(response) -> int | None:
+    """The provider's input-token count, or None when the response carries none:
+    Ollama's prompt_eval_count, else prompt_tokens (else total_tokens) off usage.
+
+    Accepts litellm's EmbeddingResponse and the openai SDK's CreateEmbeddingResponse
+    (usage is an object) as well as plain dicts.
+    """
+    # Ollama's native /api/embed reports the count at the top level, not under usage.
+    if isinstance(response, dict) and type(response.get("prompt_eval_count")) is int:
+        return response["prompt_eval_count"]
+    usage = (
+        response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
+    )
+    if usage is None:
+        return None
+    for field in ("prompt_tokens", "total_tokens"):
+        value = usage.get(field) if isinstance(usage, dict) else getattr(usage, field, None)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None

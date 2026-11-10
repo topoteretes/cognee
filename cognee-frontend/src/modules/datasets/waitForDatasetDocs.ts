@@ -1,12 +1,22 @@
 import { captureException } from "@/utils/monitoring";
 import { CogneeInstance } from "../instances/types";
-import getDatasetData from "./getDatasetData";
+import getAllDatasetData from "./getAllDatasetData";
+import getDatasetDataCount from "./getDatasetDataCount";
 
 export class WaitForDocsTimeoutError extends Error {
   constructor(datasetId: string, minCount: number) {
     super(`Timed out waiting for ${minCount} document(s) in dataset ${datasetId}`);
     this.name = "WaitForDocsTimeoutError";
   }
+}
+
+// Polls the count, not the rows: /data is paged, so its length caps at the page
+// size and a minCount above it would never be reached. A null count is the
+// capped page-through fallback ("at least this many"), which meets any minCount
+// a caller can sensibly wait for.
+async function hasAtLeast(datasetId: string, instance: CogneeInstance, minCount: number): Promise<boolean> {
+  const count = await getDatasetDataCount(datasetId, instance);
+  return count === null || count >= minCount;
 }
 
 export default async function waitForDatasetDocs<T = unknown>(
@@ -26,13 +36,12 @@ export default async function waitForDatasetDocs<T = unknown>(
   } = {},
 ): Promise<T[]> {
   const deadline = Date.now() + timeoutMs;
-  let latest: T[] = [];
 
   for (;;) {
     try {
-      const data = await getDatasetData(datasetId, instance);
-      latest = Array.isArray(data) ? data : [];
-      if (latest.length >= minCount) return latest;
+      if (await hasAtLeast(datasetId, instance, minCount)) {
+        return (await getAllDatasetData(datasetId, instance)) as T[];
+      }
     } catch {
       // transient fetch failure — keep polling until the deadline
     }
@@ -65,10 +74,8 @@ async function pollInBackground<T>(
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
     if (Date.now() >= deadline) return;
     try {
-      const data = await getDatasetData(datasetId, instance);
-      const docs = Array.isArray(data) ? (data as T[]) : [];
-      if (docs.length >= minCount) {
-        onDone(docs);
+      if (await hasAtLeast(datasetId, instance, minCount)) {
+        onDone((await getAllDatasetData(datasetId, instance)) as T[]);
         return;
       }
     } catch {

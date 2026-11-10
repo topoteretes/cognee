@@ -4,7 +4,6 @@ import { CogneeInstance } from "../instances/types";
 export default async function createDataset(
   dataset: { name: string },
   instance: CogneeInstance,
-  tenantId?: string | null,
   signal?: AbortSignal,
 ) {
   const response = await instance.fetch(`/v1/datasets/`, {
@@ -15,33 +14,35 @@ export default async function createDataset(
   });
   const created = await response.json();
 
-  // Grant tenant-level read+write so all tenant members can see this dataset.
-  // Skip in local (self-hosted) mode, where tenantId is the "local" sentinel
-  // rather than a real UUID — there's no multi-tenant sharing to set up there.
-  const isRealTenantId = !!tenantId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenantId);
-  if (isRealTenantId && created.id) {
-    const body = JSON.stringify([created.id]);
-    try {
-      await Promise.all([
-        instance.fetch(`/v1/permissions/datasets/${tenantId}?permission_name=read`, {
-          method: "POST",
-          body,
-          headers: { "Content-Type": "application/json" },
-          signal,
-        }),
-        instance.fetch(`/v1/permissions/datasets/${tenantId}?permission_name=write`, {
-          method: "POST",
-          body,
-          headers: { "Content-Type": "application/json" },
-          signal,
-        }),
-      ]);
-    } catch {
-      // Non-fatal — dataset was created, just not shared yet
-    }
-  }
-
   notifySurveyTrigger("datasource_added");
 
   return created;
+}
+
+/**
+ * Give every member of the workspace read and write on a dataset, so the whole
+ * team sees it. Apart from createDataset on purpose: the dataset exists, and is
+ * usable by its creator, as soon as it is created, while each of these grants is
+ * a pod call that takes seconds. Best effort: a failure leaves the dataset
+ * created and just not shared yet.
+ */
+export async function shareDatasetWithWorkspace(
+  datasetId: string,
+  tenantId: string,
+  instance: CogneeInstance,
+  signal?: AbortSignal,
+): Promise<void> {
+  const body = JSON.stringify([datasetId]);
+  const grant = (permission: "read" | "write") =>
+    instance.fetch(`/v1/permissions/datasets/${tenantId}?permission_name=${permission}`, {
+      method: "POST",
+      body,
+      headers: { "Content-Type": "application/json" },
+      signal,
+    });
+  try {
+    await Promise.all([grant("read"), grant("write")]);
+  } catch (err) {
+    console.error("Failed to share the new dataset with the workspace:", err);
+  }
 }

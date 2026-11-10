@@ -14,11 +14,11 @@ without spinning up FastAPI.
 """
 
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import datetime, timezone
-from typing import Iterable, Optional
 from uuid import UUID as UUIDType
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.agents.models import AgentConnection
@@ -28,6 +28,7 @@ from cognee.modules.agents.registry import (
     list_persisted_agent_connections,
     list_registered_agent_connections,
 )
+from cognee.modules.data.models import Dataset
 from cognee.modules.session_lifecycle.metrics import list_session_rows
 from cognee.modules.session_lifecycle.models import SessionRecord
 from cognee.modules.users.exceptions import PermissionDeniedError
@@ -69,8 +70,8 @@ async def build_sessions_with_agent_info_page(
     user: User,
     permitted_dataset_ids: list[UUIDType],
     visible_user_ids: list[UUIDType],
-    since: Optional[datetime],
-    status_filter: Optional[str],
+    since: datetime | None,
+    status_filter: str | None,
     limit: int,
     offset: int,
     order_by: str,
@@ -142,33 +143,41 @@ async def build_sessions_with_agent_info_page(
 
 async def _resolve_scope_emails(
     user: User, *, visible_user_ids: Iterable[UUIDType]
-) -> dict[UUIDType, str]:
-    """Return {user_id: email} for the callers this request may report on.
+) -> tuple[dict[UUIDType, str], list[UUIDType]]:
+    """Return ``({user_id: email}, tenant_member_ids)`` for this request.
 
-    Always includes ``visible_user_ids`` — the caller plus their child
-    agents, the same base scope every other ``/sessions`` endpoint uses
-    (see ``get_visible_user_ids``). A tenant owner/admin (same
-    check ``GET /tenants/{id}/users`` uses) additionally gets every
-    tenant member unioned in on top of that base scope; a regular
-    member — or a caller with no tenant at all (single-user/local mode)
-    — just keeps the base scope rather than being denied outright.
+    The emails always cover ``visible_user_ids`` — the caller plus their
+    child agents, the same base scope every other ``/sessions`` endpoint
+    uses (see ``get_visible_user_ids``). A tenant owner/admin (same check
+    ``GET /tenants/{id}/users`` uses) additionally gets every member of
+    their current tenant, returned separately as ``tenant_member_ids`` so
+    the caller can restrict those members' sessions to the tenant's own
+    datasets: a user may belong to several tenants, and sessions they ran
+    elsewhere are not this admin's to see. A regular member — or a caller
+    with no tenant at all (single-user/local mode) — gets an empty member
+    list and keeps the base scope rather than being denied outright.
 
     Child-agent ids without a resolvable email map to "unknown" here;
     the caller's own email and any tenant member emails (from
     ``get_users_in_tenant``) are always known.
     """
-    email_by_id: dict[UUIDType, str] = {uid: "unknown" for uid in visible_user_ids}
+    base_ids = list(visible_user_ids)
+    email_by_id: dict[UUIDType, str] = {uid: "unknown" for uid in base_ids}
     email_by_id[user.id] = user.email
 
+    tenant_member_ids: list[UUIDType] = []
     if user.tenant_id is not None:
         try:
             users_data = await get_users_in_tenant(user.tenant_id, user)
-            for u in users_data:
-                email_by_id[UUIDType(u["id"])] = u["email"]
         except PermissionDeniedError:
-            pass
+            users_data = []
+        for u in users_data:
+            member_id = UUIDType(u["id"])
+            email_by_id[member_id] = u["email"]
+            if member_id not in base_ids:
+                tenant_member_ids.append(member_id)
 
-    return email_by_id
+    return email_by_id, tenant_member_ids
 
 
 async def compute_cost_by_user_agent(
@@ -176,30 +185,44 @@ async def compute_cost_by_user_agent(
     user: User,
     visible_user_ids: list[UUIDType],
     permitted_dataset_ids: list[UUIDType],
-    since: Optional[datetime],
+    since: datetime | None,
 ) -> list[dict]:
     """Token/cost totals grouped by (user, agent type) for a spend chart.
 
     Visibility mirrors every other ``/sessions`` endpoint — the caller,
     their child agents (``visible_user_ids``), and sessions whose
-    dataset is shared with them (``permitted_dataset_ids``) — unioned
-    with every tenant member's sessions when the caller is a tenant
-    owner/admin (see ``_resolve_scope_emails``). Returns rows sorted by
-    ``cost_usd`` descending — ready to feed a "who spends the most, with
-    which agent" chart without further client-side sorting.
+    dataset is shared with them (``permitted_dataset_ids``) — unioned,
+    when the caller is a tenant owner/admin, with the tenant members'
+    sessions on the tenant's own datasets (see ``_resolve_scope_emails``).
+    A member's session with no dataset, or on a dataset of another tenant,
+    stays out: ``session_records`` carries no tenant, so the dataset is
+    the only thing that places a session in a tenant. Returns rows sorted
+    by ``cost_usd`` descending — ready to feed a "who spends the most,
+    with which agent" chart without further client-side sorting.
     """
-    email_by_user_id = await _resolve_scope_emails(user, visible_user_ids=visible_user_ids)
-    scoped_user_ids = list(email_by_user_id.keys())
+    email_by_user_id, tenant_member_ids = await _resolve_scope_emails(
+        user, visible_user_ids=visible_user_ids
+    )
+    base_user_ids = list(visible_user_ids)
+    scoped_user_ids = [*base_user_ids, *tenant_member_ids]
     if not scoped_user_ids and not permitted_dataset_ids:
         return []
 
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
         visibility_terms = []
-        if scoped_user_ids:
-            visibility_terms.append(SessionRecord.user_id.in_(scoped_user_ids))
+        if base_user_ids:
+            visibility_terms.append(SessionRecord.user_id.in_(base_user_ids))
         if permitted_dataset_ids:
             visibility_terms.append(SessionRecord.dataset_id.in_(permitted_dataset_ids))
+        if tenant_member_ids:
+            tenant_dataset_ids = select(Dataset.id).where(Dataset.tenant_id == user.tenant_id)
+            visibility_terms.append(
+                and_(
+                    SessionRecord.user_id.in_(tenant_member_ids),
+                    SessionRecord.dataset_id.in_(tenant_dataset_ids),
+                )
+            )
         stmt = select(
             SessionRecord.user_id,
             SessionRecord.session_id,
@@ -251,9 +274,9 @@ async def compute_cost_by_user_agent(
 
 async def get_sessions_with_agent_info(
     *,
-    user: Optional[User] = None,
-    since: Optional[datetime],
-    status_filter: Optional[str],
+    user: User | None = None,
+    since: datetime | None,
+    status_filter: str | None,
     limit: int,
     offset: int,
     order_by: str,
@@ -289,9 +312,7 @@ async def get_sessions_with_agent_info(
     )
 
 
-async def get_cost_by_user_agent(
-    *, user: Optional[User] = None, since: Optional[datetime]
-) -> list[dict]:
+async def get_cost_by_user_agent(*, user: User | None = None, since: datetime | None) -> list[dict]:
     """SDK-usable entry point backing ``GET /sessions/cost-by-user-agent``.
 
     Resolves visibility the same way ``get_sessions_with_agent_info``

@@ -26,7 +26,7 @@ export default function SessionMemoryCard({ principalName, events, distilledSets
   return (
     <div
       className="absolute bottom-[84px] left-1/2 z-10 max-w-[560px] -translate-x-1/2 rounded-xl border px-4 py-3 backdrop-blur-sm"
-      style={{ background: "rgba(26,36,56,.96)", borderColor: "rgba(245,168,60,.5)" }}
+      style={{ background: "rgba(26,36,56,.96)", borderColor: "rgba(233,238,246,.35)" }}
     >
       <button
         type="button"
@@ -36,7 +36,7 @@ export default function SessionMemoryCard({ principalName, events, distilledSets
       >
         ✕
       </button>
-      <div className="pr-4 text-[13px] font-semibold text-[#F5A83C]">{principalName} — session memory</div>
+      <div className="pr-4 text-[13px] font-semibold text-[#E9EEF6]">{principalName} — session memory</div>
       <div className="mt-1 text-[11px] text-[#7E8CA6]">
         {qas.length ? `${qas.length} exchange${qas.length === 1 ? "" : "s"}` : "no session activity yet"}
       </div>

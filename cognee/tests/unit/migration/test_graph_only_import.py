@@ -5,11 +5,10 @@
 an embedding provider, or an API key (the `cognee-cli demo` contract).
 """
 
+import importlib
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
-import importlib
 
 from cognee.modules.migration.cogx import COGXEntity, COGXFact, COGXRawNode
 from cognee.modules.migration.loader import store_imported_graph, stream_graph_from_source

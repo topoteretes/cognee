@@ -1,7 +1,8 @@
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.modules.search.search_type_policy import CYPHER_SEARCH_TYPES, cypher_queries_allowed
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 logger = get_logger("SearchTypeSelector")
 
@@ -9,6 +10,7 @@ logger = get_logger("SearchTypeSelector")
 async def select_search_type(
     query: str,
     system_prompt_path: str = "search_type_selector_prompt.txt",
+    allowed_search_types: frozenset[SearchType] | None = None,
 ) -> SearchType:
     """
     Analyzes the query and Selects the best search type.
@@ -16,15 +18,25 @@ async def select_search_type(
     Args:
         query: The query to analyze.
         system_prompt_path: The path to the system prompt.
+        allowed_search_types: The types this request can be served by, or None for
+            any. A request with a node_name filter passes the types that honour it,
+            so the LLM's choice can never drop the filter.
 
     Returns:
-        The best search type given by the LLM.
+        An enabled search type that can serve the request.
     """
     default_search_type = SearchType.RAG_COMPLETION
+    if allowed_search_types is not None and default_search_type not in allowed_search_types:
+        # Graph completion honours every node_name scope.
+        default_search_type = SearchType.GRAPH_COMPLETION
     # Search types that cannot answer a free-form natural-language query on
     # their own: CODE runs one exact graph operation driven by a structured
     # code_query, which FEELING_LUCKY has no way to construct.
     excluded_search_types = {SearchType.CODE}
+    if not cypher_queries_allowed():
+        excluded_search_types.update(CYPHER_SEARCH_TYPES)
+    if allowed_search_types is not None:
+        excluded_search_types |= set(SearchType) - allowed_search_types
     system_prompt = read_query_prompt(system_prompt_path)
 
     try:
@@ -38,8 +50,8 @@ async def select_search_type(
             selected_search_type = SearchType(response.upper())
             if selected_search_type in excluded_search_types:
                 logger.info(
-                    f"LLM selected {selected_search_type.value}, which requires structured "
-                    f"arguments; falling back to {default_search_type.value}."
+                    f"LLM selected {selected_search_type.value}, which cannot serve this "
+                    f"request; falling back to {default_search_type.value}."
                 )
                 return default_search_type
             logger.info(f"Selected lucky search type: {response.upper()}")
@@ -48,6 +60,6 @@ async def select_search_type(
         # If the response is not a valid search type, return the default search type
         logger.info(f"LLM gives an invalid search type: {response.upper()}")
         return default_search_type
-    except Exception as e:
-        logger.error(f"Failed to select search type intelligently from LLM: {str(e)}")
+    except Exception:
+        logger.exception("Failed to select search type intelligently from LLM")
         return default_search_type

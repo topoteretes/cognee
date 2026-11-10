@@ -22,11 +22,11 @@ def _isolate_llm_env(monkeypatch):
 
 
 def _build(**kwargs):
-    defaults = dict(
-        llm_api_key="test-key",
-        llm_endpoint="http://localhost:11434/v1",
-        _env_file=None,
-    )
+    defaults = {
+        "llm_api_key": "test-key",
+        "llm_endpoint": "http://localhost:11434/v1",
+        "_env_file": None,
+    }
     defaults.update(kwargs)
     return LLMConfig(**defaults)
 
@@ -47,7 +47,7 @@ def test_local_providers_default_to_small_budget(provider, model):
 @pytest.mark.parametrize(
     ("provider", "model"),
     [
-        ("openai", "openai/gpt-5-mini"),
+        ("openai", "openai/gpt-5.6-luna"),
         ("custom", "hosted_vllm/meta-llama/Llama-3-70B"),  # vLLM batches like a cloud endpoint
         ("custom", "vllm/some-model"),
     ],
@@ -69,7 +69,7 @@ def test_explicit_setting_wins_over_local_default():
         ("llama_cpp", "some-model", True),
         ("custom", "lm_studio/qwen2.5-7b", True),
         ("custom", "hosted_vllm/meta-llama/Llama-3-70B", False),
-        ("openai", "openai/gpt-5-mini", False),
+        ("openai", "openai/gpt-5.6-luna", False),
         (None, None, False),
     ],
 )

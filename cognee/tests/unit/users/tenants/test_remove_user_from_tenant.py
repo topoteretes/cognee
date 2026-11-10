@@ -28,7 +28,7 @@ async def test_remove_user_from_tenant_permission_denied(monkeypatch):
     tenant_id = uuid4()
     user_id = uuid4()
 
-    async def fake_has_permission(*, requester_id, tenant_id):  # noqa: ARG001
+    async def fake_has_permission(*, requester_id, tenant_id):
         raise PermissionDeniedError(
             message="User is not authorized to manage users for this tenant"
         )
@@ -50,7 +50,7 @@ async def test_remove_user_from_tenant_cannot_remove_owner(monkeypatch):
     tenant_id = uuid4()
     user_id = owner_id  # same as owner
 
-    async def fake_has_permission(*, requester_id, tenant_id):  # noqa: ARG001
+    async def fake_has_permission(*, requester_id, tenant_id):
         return True
 
     async def fake_get_tenant(_):
@@ -77,13 +77,13 @@ async def test_remove_user_from_tenant_user_not_found(monkeypatch):
     tenant_id = uuid4()
     user_id = uuid4()
 
-    async def fake_has_permission(*, requester_id, tenant_id):  # noqa: ARG001
+    async def fake_has_permission(*, requester_id, tenant_id):
         return True
 
     async def fake_get_tenant(_):
         return FakeTenant(owner_id=owner_id)
 
-    async def fake_get_user(_):  # noqa: ARG001
+    async def fake_get_user(_):
         raise EntityNotFoundError(message=f"Could not find user: {user_id}")
 
     monkeypatch.setattr(

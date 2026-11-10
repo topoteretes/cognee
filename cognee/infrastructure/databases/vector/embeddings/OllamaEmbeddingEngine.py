@@ -1,35 +1,46 @@
 import asyncio
-import math
-from cognee.shared.logging_utils import get_logger
-import aiohttp
-from typing import List, Optional
-import os
-import litellm
 import logging
+import math
+import os
+
+import aiohttp
 import aiohttp.http_exceptions
+import litellm
 import numpy as np
 from tenacity import (
+    before_sleep_log,
     retry,
     stop_after_delay,
     wait_exponential_jitter,
-    before_sleep_log,
 )
 
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions import EmbeddingException
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
+    EmbeddingEngine,
+    EmbeddingResult,
+)
+from cognee.infrastructure.databases.vector.embeddings.input_limit import (
+    init_input_limit,
+    sane_limit,
+)
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
+from cognee.infrastructure.databases.vector.embeddings.utils import (
+    count_input_tokens,
+    handle_embedding_response,
+    sanitize_embedding_text_inputs,
+)
 from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
+from cognee.modules.observability.get_observe import get_observe
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.shared.utils import create_secure_ssl_context
-from cognee.infrastructure.databases.vector.embeddings.utils import (
-    sanitize_embedding_text_inputs,
-    handle_embedding_response,
-)
 
 logger = get_logger("OllamaEmbeddingEngine")
+
+observe = get_observe()
 
 
 class OllamaEmbeddingEngine(EmbeddingEngine):
@@ -58,33 +69,37 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
     mock: bool
     huggingface_tokenizer_name: str
 
-    MAX_RETRIES = 5
-
     def __init__(
         self,
-        model: Optional[str] = "avr/sfr-embedding-mistral:latest",
-        dimensions: Optional[int] = 1024,
-        max_completion_tokens: int = 512,
-        endpoint: Optional[str] = "http://localhost:11434/api/embed",
+        model: str | None = "avr/sfr-embedding-mistral:latest",
+        dimensions: int | None = 1024,
+        max_completion_tokens: int | None = None,
+        endpoint: str | None = "http://localhost:11434/api/embed",
         huggingface_tokenizer: str = "Salesforce/SFR-Embedding-Mistral",
         batch_size: int = 100,
     ):
         self.model = model
         self.dimensions = dimensions
-        self.max_completion_tokens = max_completion_tokens
         self.endpoint = endpoint
         self.huggingface_tokenizer_name = huggingface_tokenizer
         self.batch_size = batch_size
         self.tokenizer = self.get_tokenizer()
+        # Ollama embeds up to the model's context length and, by default, cuts
+        # the rest without an error. The limit comes from /api/show (see
+        # input_limit()), and every embed request below sends truncate=false so
+        # an over-length input is rejected (and then embedded in parts) instead
+        # of silently shortened.
+        init_input_limit(self, max_completion_tokens)
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    @observe(as_type="embeddings")
+    async def embed_text(self, text: list[str]) -> EmbeddingResult:
         """
-        Generate embedding vectors for a list of text prompts.
+        Embed a list of text prompts; returns their vectors and the input-token count.
 
         If mocking is enabled, returns a list of zero vectors instead of actual embeddings.
 
@@ -96,20 +111,28 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         Returns:
         --------
 
-            - List[List[float]]: A list of embedding vectors corresponding to the text prompts.
+            - EmbeddingResult: A vector per text prompt and the input tokens consumed.
         """
         original_texts = text if isinstance(text, list) else [text]
         sanitized_text = sanitize_embedding_text_inputs(original_texts)
 
         if self.mock:
             embeddings = [[0.0] * self.dimensions for _ in sanitized_text]
-            return handle_embedding_response(original_texts, embeddings, self.dimensions)
+            # No provider call, so nothing consumed.
+            return EmbeddingResult(
+                vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
+                tokens=0,
+            )
 
         try:
-            embeddings = await asyncio.gather(
+            results = await asyncio.gather(
                 *[self._get_embedding(prompt) for prompt in sanitized_text]
             )
-            return handle_embedding_response(original_texts, embeddings, self.dimensions)
+            embeddings = [result[0] for result in results]
+            return EmbeddingResult(
+                vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
+                tokens=sum(result.tokens for result in results),
+            )
         except Exception as error:
             # A spend cap is terminal and is neither a context-window nor a
             # connectivity problem, so it must not fall through to the branches
@@ -129,12 +152,17 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             if any(pattern in error_str for pattern in context_error_patterns):
                 if len(original_texts) > 1:
                     mid = math.ceil(len(original_texts) / 2)
-                    left_vecs, right_vecs = await asyncio.gather(
+                    left_result, right_result = await asyncio.gather(
                         self.embed_text(original_texts[:mid]),
                         self.embed_text(original_texts[mid:]),
                     )
-                    embeddings = left_vecs + right_vecs
-                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
+                    embeddings = left_result + right_result
+                    return EmbeddingResult(
+                        vectors=handle_embedding_response(
+                            original_texts, embeddings, self.dimensions
+                        ),
+                        tokens=left_result.tokens + right_result.tokens,
+                    )
 
                 if len(original_texts) == 1:
                     s = original_texts[0]
@@ -144,17 +172,26 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                             "Text is too short to split further but exceeds context window."
                         ) from error
                     left_part, right_part = s[: third * 2], s[third:]
-                    (left_vec,), (right_vec,) = await asyncio.gather(
+                    left_result, right_result = await asyncio.gather(
                         self.embed_text([left_part]),
                         self.embed_text([right_part]),
                     )
+                    (left_vec,), (right_vec,) = left_result, right_result
                     pooled = (np.array(left_vec) + np.array(right_vec)) / 2
                     embeddings = [pooled.tolist()]
-                    return handle_embedding_response(original_texts, embeddings, self.dimensions)
+                    return EmbeddingResult(
+                        vectors=handle_embedding_response(
+                            original_texts, embeddings, self.dimensions
+                        ),
+                        tokens=left_result.tokens + right_result.tokens,
+                    )
 
-                return handle_embedding_response(original_texts, embeddings, self.dimensions)
+                return EmbeddingResult(
+                    vectors=handle_embedding_response(original_texts, embeddings, self.dimensions),
+                    tokens=0,
+                )
 
-            logger.error(f"Embedding error in OllamaEmbeddingEngine: {str(error)}")
+            logger.error(f"Embedding error in OllamaEmbeddingEngine: {error!s}")
             raise EmbeddingException(
                 f"Failed to index data points using model {self.model}"
             ) from error
@@ -182,9 +219,10 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def _get_embedding(self, prompt: str) -> List[float]:
+    async def _get_embedding(self, prompt: str) -> EmbeddingResult:
         """
-        Internal method to call the Ollama embeddings endpoint for a single prompt.
+        Internal method to call the Ollama embeddings endpoint for a single prompt;
+        returns its one vector and the input-token count.
         """
 
         payload = {
@@ -192,6 +230,13 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             "input": prompt,
             "dimensions": self.dimensions,
         }
+        if "/api/" in self.endpoint:
+            # Ollama's native API: reject over-length input ("the input length
+            # exceeds the context length") instead of embedding only the head.
+            # The rejection is classified below and embed_text splits the text.
+            # Not sent to an OpenAI-shaped endpoint (a LiteLLM proxy, /v1/...),
+            # which rejects unknown fields.
+            payload["truncate"] = False
 
         headers = {}
         api_key = os.getenv("LLM_API_KEY")
@@ -200,34 +245,44 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
 
         ssl_context = create_secure_ssl_context()
         connector = aiohttp.TCPConnector(ssl=ssl_context)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with embedding_rate_limiter_context_manager():
-                async with session.post(
-                    self.endpoint, json=payload, headers=headers, timeout=60.0
-                ) as response:
-                    data = await response.json()
+        async with (
+            aiohttp.ClientSession(connector=connector) as session,
+            embedding_rate_limiter_context_manager(),
+            session.post(self.endpoint, json=payload, headers=headers, timeout=60.0) as response,
+        ):
+            data = await response.json()
 
-                    if "error" in data:
-                        # The body shape varies by server: Ollama sends a string,
-                        # an OpenAI-compatible proxy sends an object, and either
-                        # can send null. Coerce before the membership tests below,
-                        # which would otherwise test dict keys (always False) or
-                        # raise TypeError on None, turning a terminal over-length
-                        # error into a retryable one that burns the full ladder.
-                        error_msg = str(data["error"])
-                        logger.error(f"Ollama embedding error: {error_msg}")
-                        if "context length" in error_msg or "input length" in error_msg:
-                            raise ValueError(f"Text too long for embedding model: {error_msg}")
-                        raise RuntimeError(f"Ollama embedding API error: {error_msg}")
+            if "error" in data:
+                # The body shape varies by server: Ollama sends a string,
+                # an OpenAI-compatible proxy sends an object, and either
+                # can send null. Coerce before the membership tests below,
+                # which would otherwise test dict keys (always False) or
+                # raise TypeError on None, turning a terminal over-length
+                # error into a retryable one that burns the full ladder.
+                error_msg = str(data["error"])
+                if "context length" in error_msg or "input length" in error_msg:
+                    # Expected with truncate=false: embed_text embeds the text in
+                    # parts, so this is recovery, not a failure.
+                    logger.debug(
+                        "Ollama rejected an over-length input for %s (%s); embedding it in parts.",
+                        self.model,
+                        error_msg,
+                    )
+                    raise ValueError(f"Text too long for embedding model: {error_msg}")
+                logger.error(f"Ollama embedding error: {error_msg}")
+                raise RuntimeError(f"Ollama embedding API error: {error_msg}")
 
-                    if "embeddings" in data:
-                        return data["embeddings"][0]
-                    elif "embedding" in data:
-                        return data["embedding"]
-                    elif "data" in data and len(data["data"]) > 0:
-                        return data["data"][0]["embedding"]
-                    else:
-                        raise ValueError(f"Unexpected response format from Ollama: {data}")
+            if "embeddings" in data:
+                vector = data["embeddings"][0]
+            elif "embedding" in data:
+                vector = data["embedding"]
+            elif "data" in data and len(data["data"]) > 0:
+                vector = data["data"][0]["embedding"]
+            else:
+                raise ValueError(f"Unexpected response format from Ollama: {data}")
+            return EmbeddingResult(
+                vectors=[vector], tokens=count_input_tokens(data, [prompt], self.tokenizer)
+            )
 
     def get_vector_size(self) -> int:
         """
@@ -249,6 +304,43 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         """
         return self.batch_size
 
+    input_limit_source = "Ollama /api/show context_length"
+
+    async def input_limit(self) -> int | None:
+        """The model's context length from Ollama's ``/api/show``, or None.
+
+        Ollama embeds up to the model's ``context_length``. Asked asynchronously so
+        a slow server holds up only this request, not the whole event loop; httpx's
+        default timeout bounds the wait. Anything that stops the lookup, from a
+        server that is down to an endpoint that is not Ollama-shaped, gives None:
+        the cap then stands, and ``truncate: false`` on every embed request still
+        turns an over-length input into an error instead of a silent cut.
+        """
+        if not self.endpoint or not self.model or "/api/" not in self.endpoint:
+            return None
+        import httpx
+
+        show_url = f"{self.endpoint.split('/api/', 1)[0]}/api/show"
+        api_key = os.getenv("LLM_API_KEY")
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(show_url, json={"model": self.model}, headers=headers)
+            response.raise_for_status()
+            model_info = response.json().get("model_info") or {}
+        except Exception:
+            logger.debug(
+                "Could not read the context length of %r from %s",
+                self.model,
+                show_url,
+                exc_info=True,
+            )
+            return None
+        for key, value in model_info.items():
+            if key.endswith(".context_length"):
+                return sane_limit(value)
+        return None
+
     def get_tokenizer(self):
         """
         Load and return the tokenizer for the embedding engine.
@@ -266,7 +358,6 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         tokenizer = resolve_embedding_tokenizer(
             provider="ollama",
             model=self.model,
-            max_completion_tokens=self.max_completion_tokens,
             huggingface_tokenizer=self.huggingface_tokenizer_name,
         )
         logger.debug("Tokenizer loaded for OllamaEmbeddingEngine")

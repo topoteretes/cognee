@@ -1,7 +1,8 @@
 """Dataset-scoped reads from the append-only edge evidence sidecar."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import and_, exists, func, or_, select
@@ -14,6 +15,7 @@ from cognee.shared.logging_utils import get_logger
 from .models import ProvenanceEdgeEvidence
 
 logger = get_logger("provenance.lookup")
+_EDGE_SOURCE_BATCH_SIZE = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +25,60 @@ class EdgeEvidenceRecord:
     chunk_id: UUID
     chunk_index: int | None
     document_name: str | None
+    external_metadata: dict | None = None
+    observed_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EdgeSupportRecord:
+    edge_id: UUID
+    chunk_id: UUID
+    evidence_kind: str
+    confidence: float | None
+
+
+def _only_active(statement, dataset_id: UUID, edge_ids: list[UUID]):
+    """Restrict an evidence query to the dataset's rows for ``edge_ids`` that
+    count: written without a run, or by a run with a completed record."""
+    return statement.outerjoin(
+        PipelineRun,
+        and_(
+            PipelineRun.pipeline_run_id == ProvenanceEdgeEvidence.pipeline_run_id,
+            PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+        ),
+    ).where(
+        ProvenanceEdgeEvidence.dataset_id == dataset_id,
+        ProvenanceEdgeEvidence.edge_id.in_(edge_ids),
+        or_(ProvenanceEdgeEvidence.pipeline_run_id.is_(None), PipelineRun.id.is_not(None)),
+    )
+
+
+def _active_support(dataset_id: UUID, edge_ids: list[UUID]):
+    # A row counts once its run completes and is observed then, the clock
+    # get_touched_entity_ids selects by; a row without a run is observed when written.
+    return (
+        _only_active(
+            select(
+                ProvenanceEdgeEvidence.edge_id,
+                ProvenanceEdgeEvidence.data_id,
+                ProvenanceEdgeEvidence.chunk_id,
+                ProvenanceEdgeEvidence.chunk_index,
+                func.min(ProvenanceEdgeEvidence.created_at).label("first_seen_at"),
+                func.max(
+                    func.coalesce(PipelineRun.created_at, ProvenanceEdgeEvidence.created_at)
+                ).label("observed_at"),
+            ),
+            dataset_id,
+            edge_ids,
+        )
+        .group_by(
+            ProvenanceEdgeEvidence.edge_id,
+            ProvenanceEdgeEvidence.data_id,
+            ProvenanceEdgeEvidence.chunk_id,
+            ProvenanceEdgeEvidence.chunk_index,
+        )
+        .subquery()
+    )
 
 
 async def get_edge_evidence_records(
@@ -42,36 +98,7 @@ async def get_edge_evidence_records(
     if not unique_edge_ids or per_edge_limit <= 0 or total_limit <= 0:
         return []
 
-    completed_run_exists = exists(
-        select(PipelineRun.id).where(
-            PipelineRun.pipeline_run_id == ProvenanceEdgeEvidence.pipeline_run_id,
-            PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
-        )
-    )
-    distinct_support = (
-        select(
-            ProvenanceEdgeEvidence.edge_id,
-            ProvenanceEdgeEvidence.data_id,
-            ProvenanceEdgeEvidence.chunk_id,
-            ProvenanceEdgeEvidence.chunk_index,
-            func.min(ProvenanceEdgeEvidence.created_at).label("first_seen_at"),
-        )
-        .where(
-            ProvenanceEdgeEvidence.dataset_id == dataset_id,
-            ProvenanceEdgeEvidence.edge_id.in_(unique_edge_ids),
-            or_(
-                ProvenanceEdgeEvidence.pipeline_run_id.is_(None),
-                completed_run_exists,
-            ),
-        )
-        .group_by(
-            ProvenanceEdgeEvidence.edge_id,
-            ProvenanceEdgeEvidence.data_id,
-            ProvenanceEdgeEvidence.chunk_id,
-            ProvenanceEdgeEvidence.chunk_index,
-        )
-        .subquery()
-    )
+    distinct_support = _active_support(dataset_id, unique_edge_ids)
     ranked_support = select(
         distinct_support,
         func.row_number()
@@ -108,7 +135,7 @@ async def get_edge_evidence_records(
     except Exception as error:
         # References are optional and existing databases may briefly serve
         # traffic before their migration completes. Never fail the answer.
-        logger.debug("Unable to resolve graph edge evidence: %s", error)
+        logger.debug("Unable to resolve graph edge evidence: %s", error, exc_info=True)
         return []
 
     counts: dict[UUID, int] = {}
@@ -132,3 +159,110 @@ async def get_edge_evidence_records(
         if len(records) >= total_limit:
             break
     return records
+
+
+async def get_edge_sources(dataset_id: UUID, edge_ids: Iterable[UUID]) -> list[EdgeEvidenceRecord]:
+    """Read every active support with its document date and latest observation.
+
+    Review requires complete evidence, so unlike optional answer citations this
+    read has no result limit and propagates storage errors. Batch edge IDs to
+    stay below relational drivers' bind-parameter limits.
+    """
+    # Sorting before batching preserves the query's global edge/chunk ordering.
+    edge_ids = sorted(set(edge_ids))
+    if not edge_ids:
+        return []
+    records: dict[tuple[UUID, UUID, UUID], EdgeEvidenceRecord] = {}
+    async with get_relational_engine().get_async_session() as session:
+        for start in range(0, len(edge_ids), _EDGE_SOURCE_BATCH_SIZE):
+            support = _active_support(dataset_id, edge_ids[start : start + _EDGE_SOURCE_BATCH_SIZE])
+            statement = (
+                select(
+                    support.c.edge_id,
+                    support.c.data_id,
+                    support.c.chunk_id,
+                    support.c.chunk_index,
+                    Data.name,
+                    Data.external_metadata,
+                    support.c.observed_at,
+                )
+                .join(Data, and_(Data.id == support.c.data_id, Data.dataset_id == dataset_id))
+                .order_by(support.c.edge_id, support.c.chunk_id)
+            )
+            for row in (await session.execute(statement)).all():
+                record = EdgeEvidenceRecord(*row)
+                key = (record.edge_id, record.data_id, record.chunk_id)
+                previous = records.get(key)
+                if previous is None or record.observed_at > previous.observed_at:
+                    records[key] = record
+    return list(records.values())
+
+
+async def get_edge_support(dataset_id: UUID, edge_ids: Iterable[UUID]) -> list[EdgeSupportRecord]:
+    """Every active support of the edges: its chunk, how the edge came from it
+    (``extracted`` or ``structural``) and the highest confidence recorded.
+
+    Complete like :func:`get_edge_sources` (an export states all of it), so no
+    result limit and storage errors propagate.
+    """
+    edge_ids = sorted(set(edge_ids))
+    records: list[EdgeSupportRecord] = []
+    async with get_relational_engine().get_async_session() as session:
+        for start in range(0, len(edge_ids), _EDGE_SOURCE_BATCH_SIZE):
+            batch = edge_ids[start : start + _EDGE_SOURCE_BATCH_SIZE]
+            statement = (
+                _only_active(
+                    select(
+                        ProvenanceEdgeEvidence.edge_id,
+                        ProvenanceEdgeEvidence.chunk_id,
+                        ProvenanceEdgeEvidence.evidence_kind,
+                        func.max(ProvenanceEdgeEvidence.confidence),
+                    ),
+                    dataset_id,
+                    batch,
+                )
+                .group_by(
+                    ProvenanceEdgeEvidence.edge_id,
+                    ProvenanceEdgeEvidence.chunk_id,
+                    ProvenanceEdgeEvidence.evidence_kind,
+                )
+                .order_by(ProvenanceEdgeEvidence.edge_id, ProvenanceEdgeEvidence.chunk_id)
+            )
+            rows = (await session.execute(statement)).all()
+            records.extend(EdgeSupportRecord(*row) for row in rows)
+    return records
+
+
+async def get_touched_entity_ids(dataset_id: UUID, since: datetime) -> set[str]:
+    """Return candidate Entity endpoints observed by a completed write since the stamp."""
+    evidence = ProvenanceEdgeEvidence
+    completed_since = exists(
+        select(PipelineRun.id).where(
+            PipelineRun.pipeline_run_id == evidence.pipeline_run_id,
+            PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+            PipelineRun.created_at > since,
+        )
+    )
+    statement = select(
+        evidence.source_node_id,
+        evidence.destination_node_id,
+        evidence.evidence_kind,
+    ).where(
+        evidence.dataset_id == dataset_id,
+        or_(
+            evidence.evidence_kind == "extracted",
+            and_(evidence.evidence_kind == "structural", evidence.relationship_name == "contains"),
+        ),
+        or_(
+            completed_since,
+            and_(evidence.pipeline_run_id.is_(None), evidence.created_at > since),
+        ),
+    )
+    async with get_relational_engine().get_async_session() as session:
+        rows = (await session.execute(statement)).all()
+    touched = set()
+    for source, target, kind in rows:
+        touched.add(str(target))
+        if kind == "extracted":
+            touched.add(str(source))
+    return touched

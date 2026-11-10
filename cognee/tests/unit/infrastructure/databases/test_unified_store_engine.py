@@ -5,7 +5,6 @@ import pytest
 from cognee.infrastructure.databases.unified.capabilities import EngineCapability
 from cognee.infrastructure.databases.unified.unified_store_engine import UnifiedStoreEngine
 
-
 # ---------------------------------------------------------------------------
 # EngineCapability flag tests
 # ---------------------------------------------------------------------------
@@ -48,13 +47,9 @@ class TestEngineCapability:
 class _FakeGraph:
     """Minimal stand-in for GraphDBInterface."""
 
-    pass
-
 
 class _FakeVector:
     """Minimal stand-in for VectorDBInterface."""
-
-    pass
 
 
 class TestUnifiedStoreEngineSeparateBackends:
@@ -93,8 +88,6 @@ class TestUnifiedStoreEngineSeparateBackends:
 
 class _FakeHybridAdapter:
     """Simulates a backend that implements both graph and vector interfaces."""
-
-    pass
 
 
 class TestUnifiedStoreEngineHybridBackend:

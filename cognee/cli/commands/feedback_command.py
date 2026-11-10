@@ -1,10 +1,10 @@
 import argparse
 import asyncio
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException
+from cognee.cli.reference import SupportsCliCommand
 
 
 class FeedbackCommand(SupportsCliCommand):
@@ -105,7 +105,7 @@ Subcommands:
         try:
             return asyncio.run(coro)
         except Exception as e:
-            raise CliCommandException(f"{error_prefix}: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"{error_prefix}: {e!s}", error_code=1) from e
 
 
 def _not_found_message(prefix: str, qa_id: str, session_id: str) -> str:

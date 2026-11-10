@@ -1,11 +1,12 @@
 import io
 
 import pytest
-from rdflib import Graph, Namespace, RDF, OWL, RDFS
-from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from rdflib import OWL, RDF, RDFS, Graph, Namespace
+
 from cognee.modules.ontology.exceptions import OntologyInitializationError
-from cognee.modules.ontology.models import AttachedOntologyNode
 from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver
+from cognee.modules.ontology.models import AttachedOntologyNode
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
 
 def test_ontology_adapter_initialization_success():
@@ -297,9 +298,9 @@ def test_base_ontology_resolver_custom_matching_strategy():
 
 def test_ontology_config_structure():
     """Test TypedDict structure for ontology configuration."""
+    from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
     from cognee.modules.ontology.ontology_config import Config
     from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
-    from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 
     matching_strategy = FuzzyMatchingStrategy()
     resolver = RDFLibOntologyResolver(matching_strategy=matching_strategy)
@@ -311,8 +312,8 @@ def test_ontology_config_structure():
 
 def test_get_ontology_resolver_default():
     """Test get_default_ontology_resolver returns a properly configured RDFLibOntologyResolver with FuzzyMatchingStrategy."""
-    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
     from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
+    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
     resolver = get_default_ontology_resolver()
 
@@ -322,8 +323,8 @@ def test_get_ontology_resolver_default():
 
 def test_get_default_ontology_resolver():
     """Test get_default_ontology_resolver returns a properly configured RDFLibOntologyResolver with FuzzyMatchingStrategy."""
-    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
     from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
+    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
     resolver = get_default_ontology_resolver()
 
@@ -363,8 +364,8 @@ def test_rdflib_ontology_resolver_default_matching_strategy():
 def test_get_ontology_resolver_from_env_success():
     """Test get_ontology_resolver_from_env returns correct resolver with valid parameters."""
     from cognee.modules.ontology.get_default_ontology_resolver import get_ontology_resolver_from_env
-    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
     from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
+    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
     resolver = get_ontology_resolver_from_env(
         ontology_resolver="rdflib", matching_strategy="fuzzy", ontology_file_path="/test/path.owl"
@@ -484,8 +485,8 @@ def test_get_ontology_resolver_from_env_case_sensitivity():
 def test_get_ontology_resolver_from_env_with_actual_file():
     """Test get_ontology_resolver_from_env works with actual file path."""
     from cognee.modules.ontology.get_default_ontology_resolver import get_ontology_resolver_from_env
-    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
     from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
+    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
     resolver = get_ontology_resolver_from_env(
         ontology_resolver="rdflib",
@@ -654,7 +655,7 @@ def test_multifile_ontology_with_overlapping_entities():
         assert "mercedes" in resolver.lookup["individuals"]
         assert "bmw" in resolver.lookup["individuals"]
 
-        nodes, relationships, start_node = resolver.get_subgraph("Mercedes", "individuals")
+        nodes, _relationships, _start_node = resolver.get_subgraph("Mercedes", "individuals")
 
         uri_labels = {resolver._uri_to_key(n.uri) for n in nodes}
         assert "mercedes" in uri_labels

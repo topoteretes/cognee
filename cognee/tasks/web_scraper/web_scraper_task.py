@@ -5,27 +5,26 @@ and ScrapingJob data points, and store them in a Ladybug graph database. It supp
 scheduled scraping tasks and ensures that node updates preserve existing graph edges.
 """
 
-import os
 import hashlib
-from datetime import datetime
-from typing import Union, List
+import os
+from datetime import datetime, timezone
 from urllib.parse import urlparse
-from uuid import uuid5, NAMESPACE_OID, NAMESPACE_URL
+from uuid import NAMESPACE_OID, NAMESPACE_URL, uuid5
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
+from cognee.modules.engine.operations.setup import setup
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
-from cognee.modules.engine.operations.setup import setup
 
-from .models import WebPage, WebSite, ScrapingJob
 from .config import DefaultCrawlerConfig, KeenableConfig, TavilyConfig
+from .models import ScrapingJob, WebPage, WebSite
 from .utils import fetch_page_content
 
 try:
-    from apscheduler.triggers.cron import CronTrigger
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
 except ImportError:
     raise ImportError("Please install apscheduler by pip install APScheduler>=3.10")
 
@@ -43,10 +42,10 @@ def get_scheduler():
 
 
 async def cron_web_scraper_task(
-    url: Union[str, List[str]],
+    url: str | list[str],
     *,
-    schedule: str = None,
-    extraction_rules: dict = None,
+    schedule: str | None = None,
+    extraction_rules: dict | None = None,
     tavily_api_key: str = os.getenv("TAVILY_API_KEY"),
     soup_crawler_config: DefaultCrawlerConfig = None,
     tavily_config: TavilyConfig = None,
@@ -78,7 +77,7 @@ async def cron_web_scraper_task(
         ValueError: If the schedule is an invalid cron expression.
         ImportError: If APScheduler is not installed.
     """
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     job_name = job_name or f"scrape_{now.strftime('%Y%m%d_%H%M%S')}"
     if schedule:
         try:
@@ -110,7 +109,7 @@ async def cron_web_scraper_task(
         return
 
     # If no schedule, run immediately
-    logger.info(f"[{datetime.now()}] Running web scraper task immediately...")
+    logger.info(f"[{datetime.now(timezone.utc)}] Running web scraper task immediately...")
     return await web_scraper_task(
         url=url,
         schedule=schedule,
@@ -125,15 +124,15 @@ async def cron_web_scraper_task(
 
 
 async def web_scraper_task(
-    url: Union[str, List[str]],
+    url: str | list[str],
     *,
-    schedule: str = None,
-    extraction_rules: dict = None,
+    schedule: str | None = None,
+    extraction_rules: dict | None = None,
     tavily_api_key: str = os.getenv("TAVILY_API_KEY"),
     soup_crawler_config: DefaultCrawlerConfig = None,
     tavily_config: TavilyConfig = None,
     keenable_config: KeenableConfig = None,
-    job_name: str = None,
+    job_name: str | None = None,
     ctx=None,
 ):
     """Scrape URLs and store data points in a Graph database.
@@ -171,7 +170,7 @@ async def web_scraper_task(
     soup_crawler_config, tavily_config, keenable_config, preferred_tool = check_arguments(
         tavily_api_key, extraction_rules, tavily_config, soup_crawler_config, keenable_config
     )
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     job_name = job_name or f"scrape_{now.strftime('%Y%m%d_%H%M%S')}"
     provenance_kwargs = await graph_provenance_write_kwargs(
         graph_db,

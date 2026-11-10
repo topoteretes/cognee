@@ -1,6 +1,6 @@
 import math
 
-import cognee.modules.truth_subspace.align as align
+from cognee.modules.truth_subspace import align
 
 
 def test_cosine_identical_vectors():

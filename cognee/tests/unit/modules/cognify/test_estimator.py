@@ -48,7 +48,7 @@ class _FakeChunker:
 
 @pytest.fixture
 def offline_estimator(monkeypatch):
-    monkeypatch.setattr(estimator, "_llm_tokenizer", lambda: _FakeTokenizer())
+    monkeypatch.setattr(estimator, "get_llm_tokenizer", lambda: _FakeTokenizer())
     monkeypatch.setattr(
         estimator,
         "get_llm_config",
@@ -59,13 +59,27 @@ def offline_estimator(monkeypatch):
     monkeypatch.setattr(
         estimator,
         "get_cognify_config",
-        lambda: SimpleNamespace(summarization_model=_TinySummary),
+        lambda: SimpleNamespace(summarization_model=_TinySummary, summary_method="llm"),
     )
 
 
 # --------------------------------------------------------------------------- #
 # Stage math
 # --------------------------------------------------------------------------- #
+def test_summaries_from_extraction_report_zero_chunk_summarization(offline_estimator):
+    estimate = estimator.estimate_chunks(
+        [SimpleNamespace(text="alpha beta gamma")],
+        operation="cognify",
+        graph_model=_TinyGraph,
+        summary_method="from_extraction",
+    )
+
+    summary = next(stage for stage in estimate.stages if stage.name == "chunk_summarization")
+    assert summary.calls == 0
+    assert summary.input_tokens == 0
+    assert summary.output_tokens == 0
+
+
 def test_estimate_chunks_reports_stage_tokens_and_cost(offline_estimator, monkeypatch):
     monkeypatch.setattr(
         estimator,
@@ -335,10 +349,11 @@ async def test_local_paths_are_rejected_when_gate_disabled(tmp_path, monkeypatch
     # A non-existent absolute path is raw text even with the gate off: a real run
     # saves it as text because it is not an existing local file (see #3887).
     assert await estimator._input_to_texts("/no/such/file.txt") == ["/no/such/file.txt"]
-    # A real run treats a relative path to an existing file as raw text when
-    # the gate is off.
+    # A real run refuses a relative path to an existing file too when the gate
+    # is off (save_data_item_to_storage's relative-path branch).
     monkeypatch.chdir(tmp_path)
-    assert await estimator._input_to_texts("notes.txt") == ["notes.txt"]
+    with pytest.raises(ValueError, match="not accepted"):
+        await estimator._input_to_texts("notes.txt")
 
 
 @pytest.mark.asyncio

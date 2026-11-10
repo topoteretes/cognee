@@ -1,40 +1,40 @@
-from uuid import uuid4, UUID
-from typing import Optional, Iterator, Tuple
-from .chunk_by_word import chunk_by_word
+from collections.abc import Iterator
+from uuid import UUID, uuid4
+
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from cognee.shared.logging_utils import get_logger
+
+from .chunk_by_word import chunk_by_word
 
 logger = get_logger(__name__)
 
 
-def get_word_size(word: str) -> int:
+def get_word_size(word: str, tokenizer) -> int:
     """
     Calculate the size of a given word in terms of tokens.
 
-    If an embedding engine's tokenizer is available, count the tokens for the provided word.
-    If the tokenizer is not available, assume the word counts as one token.
+    Counts the word's tokens with the embedding engine's tokenizer, or counts it as
+    one token when the engine has no tokenizer.
 
     Parameters:
     -----------
 
         - word (str): The word for which the token size is to be calculated.
+        - tokenizer: The embedding engine's tokenizer, or None.
 
     Returns:
     --------
 
-        - int: The number of tokens representing the word, typically an integer, depending
-          on the tokenizer's output.
+        - int: The number of tokens representing the word.
     """
-    embedding_engine = get_embedding_engine()
-    if embedding_engine.tokenizer:
-        return embedding_engine.tokenizer.count_tokens(word)
-    else:
-        return 1
+    if tokenizer:
+        return tokenizer.count_tokens(word)
+    return 1
 
 
 def chunk_by_sentence(
-    data: str, maximum_size: Optional[int] = None
-) -> Iterator[Tuple[UUID, str, int, Optional[str]]]:
+    data: str, maximum_size: int | None = None
+) -> Iterator[tuple[UUID, str, int, str | None]]:
     """
     Splits text into sentences while preserving word and paragraph boundaries.
 
@@ -53,6 +53,10 @@ def chunk_by_sentence(
         - maximum_size (Optional[int]): An optional limit on the maximum size of sentences
           generated. (default None)
     """
+    # The embedding engine is fixed for the whole call: it comes from the current
+    # dataset's context, which cannot change mid-document. Resolving it per word
+    # rebuilt the embedding config every time (a fastembed registry scan each word).
+    tokenizer = get_embedding_engine().tokenizer
     sentence = ""
     paragraph_id = uuid4()
     sentence_size = 0
@@ -64,7 +68,7 @@ def chunk_by_sentence(
     # and words with the same characteristics connect it to a preceding
     # word with word_type 'paragraph_end' or 'sentence_end'
     for word, word_type in chunk_by_word(data):
-        word_size = get_word_size(word)
+        word_size = get_word_size(word, tokenizer)
 
         if word_type in ["paragraph_end", "sentence_end"]:
             word_type_state = word_type

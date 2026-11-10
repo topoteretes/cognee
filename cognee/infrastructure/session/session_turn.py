@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
@@ -27,6 +26,7 @@ from cognee.infrastructure.session.session_embeddings import (
     search_session_qa_ids,
 )
 from cognee.modules.retrieval.utils.completion import (
+    SessionPrompt,
     generate_session_completion_with_optional_summary,
 )
 from cognee.modules.user_preferences import load_active_preference_lines
@@ -47,23 +47,6 @@ class SessionTurnPreparation:
     previous_qa_id: str | None = None
 
 
-def compose_session_prompt(
-    active_context_block: str,
-    conversation_history: str,
-) -> str:
-    """Assemble the session prompt from the guidance block and history.
-
-    Empty layers are skipped. The guidance block is the single owner of every
-    guidance line — durable preference lines are merged into its ``Preferences``
-    section by the session-context builder, never layered as a second block —
-    and it sits ahead of the conversation history.
-    """
-    prompt = conversation_history
-    if active_context_block:
-        prompt = active_context_block + "\n\n" + prompt
-    return prompt
-
-
 async def load_preference_lines_safe() -> list[str]:
     """Durable preference lines for the guidance channel. Fail-open -> [].
 
@@ -73,12 +56,38 @@ async def load_preference_lines_safe() -> list[str]:
     try:
         return await load_active_preference_lines()
     except Exception as error:
-        logger.debug("Session turn: preference lookup failed open: %s", error)
+        logger.debug("Session turn: preference lookup failed open: %s", error, exc_info=True)
         return []
 
 
 def _empty_turn_preparation(query: str) -> SessionTurnPreparation:
     return SessionTurnPreparation(should_answer=True, effective_query=query)
+
+
+DEFAULT_NO_ANSWER_ACK = "Got it."
+
+
+def should_answer_turn(analysis: SessionTurnAnalysis, *, has_previous_qa: bool) -> bool:
+    """Whether sequential and concurrent session paths should generate an answer.
+
+    Answers when the analysis names a query to answer, when the analysis found nothing
+    worth acting on (so there is nothing to acknowledge instead), or when there is no
+    previous QA entry for the message to be feedback about.
+    """
+    query_to_answer = (analysis.query_to_answer or "").strip()
+    response_to_user = (analysis.response_to_user or "").strip()
+    has_analysis_signal = bool(
+        query_to_answer
+        or response_to_user
+        or analysis.candidate_context_updates
+        or analysis.served_context_ratings
+    )
+    return bool(query_to_answer or not has_analysis_signal or not has_previous_qa)
+
+
+def acknowledgement_for_turn(response_to_user: str | None) -> str:
+    """Acknowledgement stored and returned when a turn does not generate an answer."""
+    return (response_to_user or "").strip() or DEFAULT_NO_ANSWER_ACK
 
 
 def coerce_qa_entry(entry: Any) -> dict:
@@ -128,7 +137,7 @@ async def select_session_history(
                 include_context=False,
             )
     except Exception as error:
-        logger.warning("Session history: hybrid selection failed open: %s", error)
+        logger.warning("Session history: hybrid selection failed open: %s", error, exc_info=True)
 
     history = await session_manager.get_session(
         user_id=user_id,
@@ -158,7 +167,7 @@ async def generate_session_answer(
 
     Returns ``(answer, context_to_store, served_context_ids)``.
     """
-    conversation_history, served_ids = await build_session_prompt(
+    session, served_ids = await build_session_prompt(
         session_manager,
         user_id=user_id,
         session_id=session_id,
@@ -172,7 +181,7 @@ async def generate_session_answer(
     ) = await generate_session_completion_with_optional_summary(
         query=answer_query,
         context=context,
-        conversation_history=conversation_history,
+        session=session,
         user_prompt_path=user_prompt_path,
         system_prompt_path=system_prompt_path,
         system_prompt=system_prompt,
@@ -190,8 +199,8 @@ async def build_session_prompt(
     query: str,
     history: str | None = None,
     stamp_served: bool = True,
-) -> tuple[str, list[str]]:
-    """Assemble the session layer of a completion prompt: guidance block, then history.
+) -> tuple[SessionPrompt, list[str]]:
+    """Assemble the session layer of a completion prompt: history and guidance block.
 
     The single owner of this assembly. The sequential answer path calls it as-is; an
     ``only_context`` preview calls it with ``stamp_served=False`` so it reads the same
@@ -200,7 +209,9 @@ async def build_session_prompt(
 
     ``history`` lets a caller that has already loaded the conversation (once across a
     dataset fan-out) skip the second read; ``None`` loads it here. Returns
-    ``(prompt, served_ids)``.
+    ``(SessionPrompt, served_ids)``. The guidance block is the single owner of every
+    guidance line: durable preference lines are merged into its ``Preferences`` section
+    by the session-context builder, never layered as a second block.
     """
     conversation_history = (
         history
@@ -230,7 +241,7 @@ async def build_session_prompt(
         # through the same owner, budgets, and block shape.
         active_context_block = render_preference_block(preference_lines)
 
-    return compose_session_prompt(active_context_block, conversation_history), served_ids
+    return SessionPrompt(history=conversation_history, guidance=active_context_block), served_ids
 
 
 async def build_active_context_block_safe(
@@ -253,7 +264,7 @@ async def build_active_context_block_safe(
             stamp_served=stamp_served,
         )
     except Exception as e:
-        logger.warning("Active session-context block failed: %s", e)
+        logger.warning("Active session-context block failed: %s", e, exc_info=True)
         return "", []
 
 
@@ -282,7 +293,7 @@ async def load_served_context_payload(
                 by_id[str(entry_id)] = row.get("content", "")
         return [{"id": cid, "content": by_id[cid]} for cid in served_ids if cid in by_id]
     except Exception as e:
-        logger.warning("Session turn: load served context failed: %s", e)
+        logger.warning("Session turn: load served context failed: %s", e, exc_info=True)
         return []
 
 
@@ -332,9 +343,12 @@ async def apply_served_context_ratings(
                 )
                 counts[entry_id] = next_counts
             except Exception:
+                logger.debug(
+                    "Skipping item after error in apply_served_context_ratings", exc_info=True
+                )
                 continue
     except Exception as e:
-        logger.warning("Session turn: served-context rating update failed: %s", e)
+        logger.warning("Session turn: served-context rating update failed: %s", e, exc_info=True)
 
 
 async def apply_session_turn_analysis(
@@ -348,14 +362,11 @@ async def apply_session_turn_analysis(
     served_ids: list[str],
 ) -> list[str]:
     """Persist turn evidence, apply candidate updates, and bump helpful/harmful counters."""
-    # A rating is only evidence when there is a previous turn it can refer to,
-    # and only worth persisting when preference personalization can ever
-    # consume it — with the flag off, a rating-only turn must save nothing.
-    previous_answer_rating = (
-        analysis.previous_answer_rating
-        if previous_qa_id and get_base_config().personalization_enabled
-        else None
-    )
+    # A rating is only evidence when there is a previous turn it can refer to.
+    # It is persisted whenever the analysis produced one: the row is the
+    # signal, and which consumers read it (personalization, feedback weights)
+    # is decided where they run, not here.
+    previous_answer_rating = analysis.previous_answer_rating if previous_qa_id else None
     if (
         not analysis.candidate_context_updates
         and not analysis.served_context_ratings
@@ -399,7 +410,7 @@ async def apply_session_turn_analysis(
         )
         return touched_ids
     except Exception as e:
-        logger.warning("Session turn: feedback application failed: %s", e)
+        logger.warning("Session turn: feedback application failed: %s", e, exc_info=True)
         return []
 
 
@@ -461,7 +472,7 @@ async def prepare_session_turn(
             served_context=served_context,
         )
     except Exception as error:
-        logger.warning("Session turn preparation failed open: %s", error)
+        logger.warning("Session turn preparation failed open: %s", error, exc_info=True)
         return _empty_turn_preparation(query)
 
     try:
@@ -475,27 +486,20 @@ async def prepare_session_turn(
             served_ids=[str(entry_id) for entry_id in previous_served_ids],
         )
     except Exception as error:
-        logger.warning("Session turn analysis application failed open: %s", error)
+        logger.warning("Session turn analysis application failed open: %s", error, exc_info=True)
         accepted_context_ids = []
 
-    query_to_answer = (analysis.query_to_answer or "").strip()
-    response_to_user = (analysis.response_to_user or "").strip() or None
-    has_analysis_signal = bool(
-        query_to_answer
-        or response_to_user
-        or analysis.candidate_context_updates
-        or analysis.served_context_ratings
+    should_answer = should_answer_turn(analysis, has_previous_qa=bool(previous_qa_id))
+    response_to_user = (
+        acknowledgement_for_turn(analysis.response_to_user)
+        if not should_answer
+        else ((analysis.response_to_user or "").strip() or None)
     )
-    has_previous_answer = bool(previous_qa_id)
-    should_answer = bool(query_to_answer or not has_analysis_signal or not has_previous_answer)
-    effective_query = query_to_answer or query
-    if not should_answer and not response_to_user:
-        response_to_user = "Got it."
 
     return SessionTurnPreparation(
         should_answer=should_answer,
         response_to_user=response_to_user,
-        effective_query=effective_query,
+        effective_query=(analysis.query_to_answer or "").strip() or query,
         analysis=analysis,
         accepted_context_ids=accepted_context_ids,
         previous_qa_id=previous_qa_id,

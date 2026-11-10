@@ -8,19 +8,20 @@ automatically when the Neptune optional dependencies (langchain_aws, botocore) a
 not installed.
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
+
+import pytest
 
 langchain_aws = pytest.importorskip(
     "langchain_aws", reason="Neptune Analytics tests require langchain_aws"
 )
 botocore = pytest.importorskip("botocore", reason="Neptune Analytics tests require botocore")
 
-from cognee.infrastructure.engine import DataPoint  # noqa: E402
 from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (  # noqa: E402
     NeptuneAnalyticsAdapter,
 )
+from cognee.infrastructure.engine import DataPoint  # noqa: E402
 
 
 class SimpleNode(DataPoint):
@@ -209,6 +210,48 @@ class _FakeSearchAdapter:
         self._TOPK_UPPER_BOUND = 100
         self._na_exception_handler = MagicMock(side_effect=_re_raise_exception)
         self._validate_embedding_engine = MagicMock()
+
+
+@pytest.mark.asyncio
+async def test_score_by_ids_filters_and_scores_every_requested_id_across_batches():
+    adapter = object.__new__(NeptuneAnalyticsAdapter)
+    adapter._client = MagicMock()
+    first, second, missing = [str(uuid4()) for _ in range(3)]
+
+    def query(statement, params):
+        assert "WHERE id(n) IN $node_ids" in statement
+        assert "n.VECTOR_COLLECTION = $collection_name" in statement
+        assert "vectors.distance.byEmbedding" in statement
+        assert "metric: 'CosineDistance'" in statement
+        assert "topK" not in statement and "LIMIT" not in statement
+        assert params["collection_name"] == "Quoted'Collection"
+        assert params["embedding"] == [1.0, 0.0]
+        assert "Quoted'Collection" not in statement
+        return [
+            {"node_id": point_id, "distance": 1.5}
+            for point_id in params["node_ids"]
+            if point_id != missing
+        ]
+
+    adapter._client.query.side_effect = query
+    with patch.object(adapter, "_SCORE_ID_BATCH_SIZE", 1):
+        results = await adapter.score_by_ids(
+            "Quoted'Collection", [first, second, first, missing], [1.0, 0.0]
+        )
+    assert [str(row.id) for row in results] == [first, second]
+    assert all(row.score == 1.5 and row.payload is None for row in results)
+    assert adapter._client.query.call_count == 3
+    assert await adapter.score_by_ids("missing", [], [1.0, 0.0]) == []
+    assert adapter._client.query.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_score_by_ids_propagates_neptune_failure():
+    adapter = object.__new__(NeptuneAnalyticsAdapter)
+    adapter._client = MagicMock()
+    adapter._client.query.side_effect = RuntimeError("unavailable")
+    with pytest.raises(RuntimeError, match="unavailable"):
+        await adapter.score_by_ids("Entity_name", [str(uuid4())], [1.0, 0.0])
 
 
 @pytest.mark.asyncio

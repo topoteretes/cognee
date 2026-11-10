@@ -1,3 +1,12 @@
+"""Override the entity-extraction prompt by passing custom_prompt to remember.
+
+The prompt restricts extraction to people and cities linked by "lives_in"; a GRAPH_COMPLETION
+recall then answers "Where does Alice live?" from the narrowed graph.
+
+Requires: LLM_API_KEY.
+Run: uv run python examples/guides/custom_prompts.py
+"""
+
 import asyncio
 
 import cognee

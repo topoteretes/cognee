@@ -139,3 +139,83 @@ async def test_cloud_client_list_data_surfaces_remote_errors(monkeypatch):
 
     with pytest.raises(RuntimeError, match=r"Remote list_data failed \(404\)"):
         await client.list_data(uuid4())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_second_page", [False, True])
+async def test_cloud_client_list_data_follows_pages(monkeypatch, fail_second_page):
+    client = CloudClient("http://remote.invalid", "key")
+    offsets = []
+    first_page = [{"id": str(i)} for i in range(1000)]
+
+    @asynccontextmanager
+    async def fake_get(url, params):
+        offsets.append(params["offset"])
+        assert params["limit"] == 1000
+        if params["offset"] == 0:
+            yield _FakeResponse(payload=first_page)
+        elif fail_second_page:
+            yield _FakeResponse(status=503, text="unavailable")
+        else:
+            yield _FakeResponse(payload=[{"id": "1000"}])
+
+    async def get_session():
+        return type("Session", (), {"get": staticmethod(fake_get)})()
+
+    monkeypatch.setattr(client, "_get_session", get_session)
+    if fail_second_page:
+        with pytest.raises(RuntimeError, match="503"):
+            await client.list_data(uuid4())
+    else:
+        assert await client.list_data(uuid4()) == first_page + [{"id": "1000"}]
+    assert offsets == [0, 1000]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", [1000, 1001])
+async def test_cloud_client_stops_when_server_ignores_paging(monkeypatch, size):
+    client, _ = _client_with_fake_get(
+        monkeypatch, _FakeResponse(payload=[{"id": str(i)} for i in range(size)])
+    )
+    with pytest.raises(RuntimeError, match="pagination"):
+        await client.list_data(uuid4())
+
+
+@pytest.mark.asyncio
+async def test_local_list_data_uses_the_same_order_as_the_http_route(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    dataset_id = uuid4()
+    methods = importlib.import_module("cognee.modules.data.methods")
+    listing = AsyncMock(return_value=[])
+    monkeypatch.setattr(methods, "get_dataset_data", listing)
+    monkeypatch.setattr(state_mod, "_remote_client", None)
+    monkeypatch.setattr(
+        datasets_mod,
+        "get_authorized_dataset",
+        AsyncMock(return_value=SimpleNamespace(id=dataset_id)),
+    )
+    await datasets_mod.datasets.list_data(dataset_id, user=SimpleNamespace(id=uuid4()))
+    listing.assert_awaited_once_with(dataset_id, order_by="created_at")
+
+
+@pytest.mark.asyncio
+async def test_cloud_client_deduplicates_overlaps_without_rewinding_offset(monkeypatch):
+    client = CloudClient("http://remote.invalid", "key")
+    offsets = []
+
+    @asynccontextmanager
+    async def fake_get(url, params):
+        offset = params["offset"]
+        offsets.append(offset)
+        start = offset - 1 if offset else 0
+        yield _FakeResponse(payload=[{"id": str(i)} for i in range(start, min(start + 1000, 2000))])
+
+    async def get_session():
+        return type("Session", (), {"get": staticmethod(fake_get)})()
+
+    monkeypatch.setattr(client, "_get_session", get_session)
+    rows = await client.list_data(uuid4())
+    assert [row["id"] for row in rows] == [str(i) for i in range(2000)]
+    assert offsets == [0, 1000, 2000]
