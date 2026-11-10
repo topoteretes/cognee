@@ -15,6 +15,12 @@ class GithubSettings(IntegrationSettings):
     ``client_id``/``client_secret``/``redirect_uri``/``frontend_base_url``
     come from :class:`IntegrationSettings`; the fields below are what a
     GitHub *App* (as opposed to a plain OAuth app) needs beyond that shape.
+
+    The app itself needs, beyond repository *Contents* and *Metadata*
+    (read), the organization permission *Members: Read-only*: the install
+    callback confirms the connecting user is an admin of the installed
+    organization through ``GET /user/memberships/orgs/{org}``, which that
+    permission gates (see ``app_auth.user_administers_installation``).
     """
 
     model_config = SettingsConfigDict(env_prefix="GITHUB_", extra="ignore")

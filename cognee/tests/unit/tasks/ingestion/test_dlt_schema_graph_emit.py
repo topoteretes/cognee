@@ -54,7 +54,7 @@ def _row_records():
                     "column": "customer_id",
                 }
             ],
-            "column_values": {},
+            "column_values": {"status": "active"},
         }
     ]
 

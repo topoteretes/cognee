@@ -68,8 +68,6 @@ oauth_config:
       # Adding more here without changing that constant does nothing: the
       # authorize URL only requests what the constant lists.
       - commands
-      - chat:write
-      - im:write
       - channels:read
 
 settings:

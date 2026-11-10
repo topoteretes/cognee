@@ -176,6 +176,40 @@ async def test_source_foreign_keys_become_edges_between_rows(clean_env):
 
 
 @pytest.mark.asyncio
+async def test_column_anchor_exposes_all_values_to_graph_completion(clean_env):
+    from cognee.infrastructure.databases.graph import get_graph_engine
+    from cognee.tasks.schema.models import SchemaColumn
+
+    source_db = _write_source_db(clean_env / "source.sqlite")
+    await cognee.add(f"sqlite:///{source_db}", dataset_name="shop")
+    await cognee.cognify(datasets=["shop"], chunks_per_batch=1)
+
+    graph = await get_graph_engine()
+    nodes, edges = await graph.get_nodeset_subgraph(SchemaColumn, ["users:name"])
+    assert {(p["type"], p["name"]) for _, p in nodes} == {
+        ("SchemaColumn", "users:name"),
+        ("SchemaTable", "users"),
+        ("DltColumn", "users:name:Ann"),
+        ("DltColumn", "users:name:Bob"),
+    }
+    results = await cognee.search(
+        "List every value in users:name.",
+        query_type=cognee.SearchType.GRAPH_COMPLETION,
+        datasets=["shop"],
+        node_type=SchemaColumn,
+        node_name=["users:name"],
+        top_k=len(edges),
+        only_context=True,
+        verbose=True,
+    )
+    assert results
+    context = str(results[0]["context_result"])
+    assert "users:name:Ann" in context
+    assert "users:name:Bob" in context
+    assert "is_column_of" in context
+
+
+@pytest.mark.asyncio
 async def test_sql_source_keys_survive_an_earlier_csv_in_the_same_pipeline(clean_env):
     """Unscoped sources share one dlt pipeline, and dlt keeps the first schema it
     saw as the default. A SQL source ingested after a CSV lands in its own schema,

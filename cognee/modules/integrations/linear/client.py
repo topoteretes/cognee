@@ -19,6 +19,7 @@ from typing import Any
 import aiohttp
 
 from cognee.modules.integrations.ingestion import RateLimitedError
+from cognee.modules.integrations.outbound import client_session
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +85,12 @@ async def graphql(
         payload["variables"] = variables
 
     async with (
-        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        client_session("linear", timeout=_TIMEOUT) as session,
         session.post(
             GRAPHQL_URL,
             json=payload,
             headers={"Authorization": f"Bearer {access_token}"},
+            allow_redirects=False,
         ) as response,
     ):
         if response.status == 401:

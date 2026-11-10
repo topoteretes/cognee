@@ -11,6 +11,21 @@ from cognee.infrastructure.session.feedback_models import (
 from cognee.infrastructure.session.session_manager import SessionManager
 
 
+class _InMemoryPipeline:
+    """Queues commands and runs them in order on execute(), as a Redis pipeline does."""
+
+    def __init__(self, store):
+        self.store = store
+        self.commands: list[tuple[str, tuple]] = []
+
+    def delete(self, *keys: str):
+        self.commands.append(("delete", keys))
+        return self
+
+    async def execute(self):
+        return [await getattr(self.store, name)(*args) for name, args in self.commands]
+
+
 class _InMemoryRedisList:
     """Minimal in-memory Redis list emulation."""
 
@@ -46,9 +61,15 @@ class _InMemoryRedisList:
             self.ttls.pop(key, None)
         return len(lst) - len(kept)
 
-    async def delete(self, key: str):
-        self.ttls.pop(key, None)
-        return 1 if self.data.pop(key, None) is not None else 0
+    async def delete(self, *keys: str):
+        deleted = 0
+        for key in keys:
+            self.ttls.pop(key, None)
+            deleted += self.data.pop(key, None) is not None
+        return deleted
+
+    def pipeline(self, transaction: bool = True):
+        return _InMemoryPipeline(self)
 
     async def expire(self, key: str, ttl: int):
         self.ttls[key] = ttl
