@@ -125,9 +125,9 @@ def get_remember_router() -> APIRouter:
                 "Data given as strings instead of uploads, one entry each: raw text to "
                 "remember, a local file or directory path on the server's filesystem or an "
                 "s3:// object read with the server's AWS credentials (both require "
-                "ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
-                "ALLOW_HTTP_REQUESTS), a GitHub/GitLab repository URL, which is "
-                "shallow-cloned and indexed as a code graph, or a database connection "
+                "ACCEPT_LOCAL_FILE_PATH), a web URL to fetch, a GitHub/GitLab repository URL, "
+                "which is shallow-cloned and indexed as a code graph (both require "
+                "ALLOW_HTTP_REQUESTS=true on the server), or a database connection "
                 "string (postgresql://, mysql://, sqlite:///, ...), refused over the "
                 "API with 422 DatabaseIngestionDisabled unless the server sets "
                 "ALLOW_DATABASE_INGESTION=true. Combined with 'data': "
@@ -318,8 +318,8 @@ def get_remember_router() -> APIRouter:
         - **raw_data** (Optional[List[str]]): String inputs, one entry each: raw text, a
           local file or directory path on the server or an s3:// object read with the
           server's AWS credentials (both require ACCEPT_LOCAL_FILE_PATH), a web URL
-          fetched as a page (requires ALLOW_HTTP_REQUESTS), a GitHub/GitLab
-          repository URL, shallow-cloned and indexed as a code graph, or a database
+          fetched as a page, a GitHub/GitLab repository URL, shallow-cloned and indexed
+          as a code graph (both require ALLOW_HTTP_REQUESTS=true on the server), or a database
           connection string (postgresql://, mysql://, sqlite:///, ...). Database
           ingestion is disabled over the API by default: the request fails with
           422 DatabaseIngestionDisabled unless the server sets

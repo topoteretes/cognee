@@ -1,9 +1,13 @@
 """The one place the integrations consult ``ALLOW_HTTP_REQUESTS``.
 
-Every connector talks to its provider over HTTPS, so the flag that disables
-cognee's outbound HTTP (honoured by URL ingestion, the crawler and repository
-cloning through :mod:`cognee.tasks.web_scraper.ssrf_protection`) has to
-disable the connectors too. The check sits where the connections are made:
+Every connector talks to its provider over HTTPS, so a set
+``ALLOW_HTTP_REQUESTS`` that disables cognee's outbound HTTP disables the
+connectors too. Unset (or blank), connectors work on every surface: unlike URL
+ingestion and repository cloning (see
+:mod:`cognee.tasks.web_scraper.ssrf_protection`, where an unset value refuses
+API requests), a connector only reaches its provider's fixed hosts, so no
+caller chooses where the server connects. The check sits where the
+connections are made:
 
 * :func:`client_session` is how every aiohttp session in
   ``cognee/modules/integrations`` is opened, so each provider call (OAuth
@@ -21,33 +25,44 @@ disable the connectors too. The check sits where the connections are made:
   trip that cannot complete.
 """
 
+import os
 from typing import Any
 
 import aiohttp
 from fastapi import status
 
 from cognee.exceptions import CogneeConfigurationError
-from cognee.tasks.web_scraper.ssrf_protection import is_http_requests_allowed
+from cognee.tasks.web_scraper.ssrf_protection import opt_in_setting
 
 
 class OutboundHttpDisabledError(CogneeConfigurationError):
-    """``ALLOW_HTTP_REQUESTS=false`` while an integration needed the network."""
+    """A set ``ALLOW_HTTP_REQUESTS`` disables outbound HTTP while an integration needed it."""
 
     def __init__(self, provider: str):
+        configured = (os.getenv("ALLOW_HTTP_REQUESTS") or "").strip()
         super().__init__(
             message=(
-                f"The {provider} integration needs outbound HTTP, "
-                "which ALLOW_HTTP_REQUESTS=false disables."
+                f"The {provider} integration needs outbound HTTP, which "
+                f"ALLOW_HTTP_REQUESTS={configured} disables on this server. Set "
+                "ALLOW_HTTP_REQUESTS=true in the server's environment, or unset it, to "
+                "connect or sync integrations."
             ),
             name="OutboundHttpDisabledError",
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            remediation="Set ALLOW_HTTP_REQUESTS=true (the default) to connect or sync integrations.",
+            remediation=(
+                "Set ALLOW_HTTP_REQUESTS=true (only true, 1, yes or on enable it) in the "
+                "server's environment, or unset it, to connect or sync integrations."
+            ),
         )
 
 
 def require_outbound_http(provider: str) -> None:
-    """Raise :class:`OutboundHttpDisabledError` when outbound HTTP is switched off."""
-    if not is_http_requests_allowed():
+    """Raise :class:`OutboundHttpDisabledError` when a set ``ALLOW_HTTP_REQUESTS`` disables it.
+
+    Unset or blank allows it: the API-request default of URL ingestion does not apply
+    to connectors, which only call their provider's fixed hosts.
+    """
+    if opt_in_setting("ALLOW_HTTP_REQUESTS") is False:
         raise OutboundHttpDisabledError(provider)
 
 
