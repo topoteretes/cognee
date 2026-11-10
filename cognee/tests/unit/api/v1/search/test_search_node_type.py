@@ -153,6 +153,21 @@ class _Response:
         return []
 
 
+class _OpenApi(_Response):
+    """A current server's schema: both request bodies take nodeType."""
+
+    async def json(self):
+        properties = {"nodeType": {}}
+        return {
+            "components": {
+                "schemas": {
+                    "SearchPayloadDTO": {"properties": properties},
+                    "RecallPayloadDTO": {"properties": properties},
+                }
+            }
+        }
+
+
 class _Session:
     def __init__(self):
         self.payload = None
@@ -160,6 +175,9 @@ class _Session:
     def post(self, _url, *, json):
         self.payload = json
         return _Response()
+
+    def get(self, _url):
+        return _OpenApi()
 
 
 def _cloud_client():

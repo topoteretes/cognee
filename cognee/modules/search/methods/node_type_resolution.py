@@ -8,17 +8,16 @@ would. The graph adapters match nodes by ``node_type.__name__``, and the scope r
 compare the class against ``NodeSet``, so the resolved class must be the real one.
 """
 
-# Imported for their side effect: the resolver walks ``DataPoint.__subclasses__``,
-# so a class resolves only once its module is loaded. These are the model modules
-# the endpoints resolve regardless of what else the process imported first.
+# Imported for their side effect: the registry holds the loaded DataPoint
+# subclasses, so a class resolves only once its module is loaded. These are the
+# model modules the endpoints resolve regardless of what else the process imported
+# first.
 import cognee.modules.data.processing.document_types
 import cognee.modules.engine.models
 import cognee.tasks.schema.models
 from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
-from cognee.modules.migration.snapshot import _DynamicDataPoint
+from cognee.modules.migration.snapshot import datapoint_registry
 
 
 def resolve_node_type(name: str | None) -> type:
@@ -31,18 +30,9 @@ def resolve_node_type(name: str | None) -> type:
     if name is None:
         return NodeSet
 
-    # A snapshot import builds a stand-in DataPoint subclass for a node type that was
-    # not loaded at the time (``cognee.modules.migration.snapshot``), named after the
-    # stored type. It shadows the real class in the subclass walk, so it is skipped
-    # here like the snapshot's own registry skips it.
-    node_type = next(
-        (
-            subclass
-            for subclass in get_all_subclasses(DataPoint)
-            if subclass.__name__ == name and not issubclass(subclass, _DynamicDataPoint)
-        ),
-        None,
-    )
+    # The registry skips the stand-in classes a snapshot import builds for node types
+    # that were not loaded at the time, so one never shadows the real class here.
+    node_type = datapoint_registry().get(name)
     if node_type is None:
         raise CogneeValidationError(
             message=(

@@ -326,7 +326,7 @@ class CloudClient:
             payload["top_k"] = kwargs["top_k"]
         if kwargs.get("system_prompt"):
             payload["system_prompt"] = kwargs["system_prompt"]
-        node_type_name = _node_type_name(kwargs.get("node_type"))
+        node_type_name = await self._node_type_payload(kwargs.get("node_type"))
         if node_type_name is not None:
             payload["node_type"] = node_type_name
         if kwargs.get("node_name"):
@@ -573,6 +573,60 @@ class CloudClient:
             )
         return self._content_hash_lookup_supported
 
+    # Set when the server's search and recall request schemas have been probed
+    # for ``nodeType``; a class default so instances built without ``__init__``
+    # (tests) start unknown too.
+    _node_type_supported: bool | None = None
+
+    _NODE_TYPE_UNSUPPORTED = (
+        "Remote server does not take node_type on POST /api/v1/search and "
+        "POST /api/v1/recall: it predates the field and would read node_name as node-set "
+        "tags, returning results for the wrong scope without an error. Upgrade the server "
+        "to use a typed node_type over serve(); node_name alone (node-set tags) still works."
+    )
+
+    async def supports_node_type(self) -> bool | None:
+        """Whether the server's search and recall request bodies take ``nodeType``.
+
+        Request bodies ignore unknown fields, so a server older than the field
+        accepts the body and reads ``nodeName`` as node-set tags: no error, and
+        results for the wrong scope. Probed once per client from ``/openapi.json``,
+        like ``supports_content_hash_lookup``. ``None`` means unknown (no schema
+        served) and is not cached, so a later call can still find out.
+        """
+        if self._node_type_supported is not None:
+            return self._node_type_supported
+        try:
+            session = await self._get_session()
+            async with session.get(f"{self.service_url}/openapi.json") as resp:
+                if resp.status >= 400:
+                    return None
+                schema = await resp.json()
+            schemas = schema["components"]["schemas"]
+            self._node_type_supported = all(
+                "nodeType" in schemas.get(name, {}).get("properties", {})
+                for name in ("SearchPayloadDTO", "RecallPayloadDTO")
+            )
+        except (aiohttp.ClientError, ValueError, KeyError, TypeError, AttributeError):
+            logger.warning("could not read the server schema to check node_type support")
+            return None
+        if not self._node_type_supported:
+            logger.warning(
+                "the remote server predates node_type on search and recall; "
+                "typed scopes over serve() are refused until it is upgraded"
+            )
+        return self._node_type_supported
+
+    async def _node_type_payload(self, node_type: Any) -> str | None:
+        """The ``node_type`` to send: None for the node-set default, which every
+        server reads, else the class name, refused when the server cannot read it.
+        Dropping the type or the names instead would return results the caller did
+        not ask for, with nothing to tell them."""
+        node_type_name = _node_type_name(node_type)
+        if node_type_name is not None and await self.supports_node_type() is False:
+            raise RuntimeError(self._NODE_TYPE_UNSUPPORTED)
+        return node_type_name
+
     async def list_data(self, dataset_id: UUID, *, content_hash: str | None = None) -> list:
         """Traverse bounded pages, deduplicating overlaps during concurrent ingest.
 
@@ -718,7 +772,7 @@ class CloudClient:
             payload["topK"] = kwargs["top_k"]
         if kwargs.get("system_prompt"):
             payload["systemPrompt"] = kwargs["system_prompt"]
-        node_type_name = _node_type_name(kwargs.get("node_type"))
+        node_type_name = await self._node_type_payload(kwargs.get("node_type"))
         if node_type_name is not None:
             payload["nodeType"] = node_type_name
         if kwargs.get("node_name"):

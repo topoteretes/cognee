@@ -37,6 +37,7 @@ with no LLM a pinned completion type also runs with ``only_context=True``
 import re
 from dataclasses import dataclass, replace
 
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
 
@@ -66,22 +67,21 @@ class RoutingConstraints:
     def from_config(
         cls,
         llm_config=None,
-        node_type: type | None = None,
+        node_type: type | None = NodeSet,
         node_name: list[str] | None = None,
     ) -> "RoutingConstraints":
         """Constraints for this deployment and request.
 
-        ``node_type`` says what ``node_name`` names (``NodeSet``, the default when
-        omitted, means node-set tags; another graph node type means a typed graph
-        scope), so the scoped types are the ones that honour that scope.
+        ``node_type`` says what ``node_name`` names (``NodeSet``, the default, means
+        node-set tags; another graph node type means a typed graph scope), so the
+        scoped types are the ones that honour that scope. An explicit ``None`` with
+        names is refused here, before anything is routed, by the same rule
+        ``search()`` applies.
         """
-        from cognee.modules.engine.models.node_set import NodeSet
         from cognee.modules.preflight import llm_available
         from cognee.modules.search.methods.node_name_scope import lucky_search_types
         from cognee.modules.search.search_type_policy import cypher_queries_allowed
 
-        if node_type is None:
-            node_type = NodeSet
         return cls(
             llm_available=llm_available(llm_config),
             cypher_allowed=cypher_queries_allowed(),

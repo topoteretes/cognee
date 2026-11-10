@@ -124,6 +124,22 @@ async def test_recall_defaults_node_type_to_node_set(api_recall_mod, graph_lane)
 
 
 @pytest.mark.asyncio
+async def test_recall_refuses_names_with_an_explicit_none_type_before_routing(
+    api_recall_mod, graph_lane
+):
+    with pytest.raises(QueryValidationError):
+        await api_recall_mod.recall(
+            query_text="q",
+            dataset_ids=[uuid4()],
+            node_type=None,
+            node_name=["proj"],
+            user=_make_user(),
+        )
+
+    assert graph_lane == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("node_type", "expected_type"),
     [
@@ -215,12 +231,27 @@ async def test_cloud_client_recall_sends_the_node_type_name():
         async def json(self):
             return []
 
+    class _OpenApi(_Response):
+        async def json(self):
+            properties = {"nodeType": {}}
+            return {
+                "components": {
+                    "schemas": {
+                        "SearchPayloadDTO": {"properties": properties},
+                        "RecallPayloadDTO": {"properties": properties},
+                    }
+                }
+            }
+
     class _Session:
         payload = None
 
         def post(self, _url, *, json):
             self.payload = json
             return _Response()
+
+        def get(self, _url):
+            return _OpenApi()
 
     client = CloudClient("https://example.test", "key")
     session = _Session()
