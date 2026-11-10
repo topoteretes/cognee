@@ -6,7 +6,9 @@ Flow (curator calls parallel by batch; accept/write calls parallel by lesson):
            QA turns from the turn that produced the earliest such entry onward (older
            turns were already curated with the entries they produced).
 2. CURATE  pack them into batches; one curator LLM call per batch. Every new entry is
-           curated unless ``IMPROVE_DISTILL_MAX_BATCHES_PER_RUN`` caps the run.
+           curated unless ``IMPROVE_DISTILL_MAX_BATCHES_PER_RUN`` caps the run. In coding
+           mode, proposals from more than one batch go through one more curator call
+           that merges those about the same subject (``merge_proposed_lessons``).
 3. ACCEPT  per proposed lesson: search prior lessons/entities, then writer/rejecter LLM.
 4. PERSIST render accepted lessons as documents; add + cognify them in one pass.
 
@@ -484,6 +486,59 @@ async def curate_batch(batch_text: str, *, coding: bool = False) -> list[Propose
         return None
 
 
+async def merge_proposed_lessons(
+    proposed: list[ProposedLesson],
+    qa_rows: list[dict],
+    context_entries: list[SessionContextEntry],
+) -> list[ProposedLesson]:
+    """One more curator call over the proposals of several batches (coding mode).
+
+    Each batch is curated on its own, with the turns of its candidates pinned, so
+    batches of one turn all see the same final answer and propose the same headline
+    facts; nothing merged them, and one session stored several lessons per fact. The
+    proposals go back to the curator as candidates (``Candidate proposal-<n>``, a
+    state key kept as ``[state-key: ...]``) with the session's turns, and its
+    one-lesson-per-subject rule now applies across the session. A merged lesson's
+    members are the members of the proposals it names. Fail-open: a failed or empty
+    merge keeps the proposals as they were; an exhausted budget is raised.
+    """
+    if len(proposed) < 2:
+        return proposed
+    by_id = {f"proposal-{index}": lesson for index, lesson in enumerate(proposed, start=1)}
+    turns: dict[str, str] = {}
+    for entry in context_entries:
+        for row in entry_turns(entry, qa_rows):
+            turns.setdefault(str(row.get("qa_id") or ""), _turn_block(row))
+    blocks = [block for block in turns.values() if block]
+    for proposal_id, lesson in by_id.items():
+        state_key = str(getattr(lesson, "state_key", "") or "").strip()
+        prefix = f"[state-key: {state_key}] " if state_key else ""
+        statement = " ".join(strip_state_key(lesson.working_statement).split())
+        blocks.append(f"Candidate {proposal_id} [agent/proposed]: {prefix}{statement}")
+    merged = await curate_batch("\n\n".join(blocks), coding=True)
+    if not merged:
+        logger.info(
+            "Coding distillation: merging %d proposals %s; keeping them as they were",
+            len(proposed),
+            "failed" if merged is None else "returned nothing",
+        )
+        return proposed
+    result: list[ProposedLesson] = []
+    for lesson in merged:
+        members: list[str] = []
+        for proposal_id in lesson.member_entry_ids:
+            source = by_id.get(proposal_id)
+            if source is not None:
+                members.extend(source.member_entry_ids)
+        result.append(lesson.model_copy(update={"member_entry_ids": list(dict.fromkeys(members))}))
+    logger.info(
+        "Coding distillation: merged %d proposals from several curator batches into %d",
+        len(proposed),
+        len(result),
+    )
+    return result
+
+
 async def propose_lessons(
     qa_rows: list[dict],
     context_entries: list[SessionContextEntry],
@@ -523,6 +578,11 @@ async def propose_lessons(
         if batch_lessons is not None
         for lesson in batch_lessons
     ]
+    if coding and not budget_exhausted and sum(1 for lessons in per_batch if lessons) > 1:
+        try:
+            proposed = await merge_proposed_lessons(proposed, qa_rows, context_entries)
+        except LLMPaymentRequiredError:
+            budget_exhausted = True
     curated_entry_ids = {
         entry_id
         for batch, batch_lessons in zip(batches, per_batch)

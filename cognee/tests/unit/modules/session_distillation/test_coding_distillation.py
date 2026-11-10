@@ -28,6 +28,7 @@ from cognee.modules.session_distillation.distill import (
     keep_state_key_update,
     lesson_metadata,
     newest_per_state_key,
+    propose_lessons,
     publish_distilled_lessons,
     recase_glossary,
     write_or_reject,
@@ -771,3 +772,101 @@ async def test_coding_scope_requires_delete_permission(monkeypatch):
         await distill_module.resolve_distillation_scope(
             session_id="s-1", dataset=DATASET.name, user=USER, replaces_lessons=True
         )
+
+
+# -- Proposals from several curator batches are merged (coding mode) ----------------
+
+
+def _curator_fake(monkeypatch, per_call):
+    """``curate_batch`` stand-in: returns the next item of ``per_call`` and records inputs."""
+    calls = []
+    outputs = iter(per_call)
+
+    async def fake(batch_text, *, coding=False):
+        calls.append(batch_text)
+        return next(outputs)
+
+    monkeypatch.setattr(distill_module, "curate_batch", fake)
+    return calls
+
+
+def _proposal(statement, members=(), state_key=""):
+    return CodingProposedLesson(
+        working_statement=statement, member_entry_ids=list(members), state_key=state_key
+    )
+
+
+@pytest.mark.asyncio
+async def test_proposals_of_several_batches_are_merged_once(monkeypatch):
+    """Two batches of one turn both propose the headline fact; one lesson remains."""
+    qa_rows = [{"qa_id": "q1", "question": "Fix exits", "answer": "Command.execute exits 1."}]
+    entries = [_entry(f"candidate {i}", entry_id=f"c{i}", source_qa_ids=["q1"]) for i in range(8)]
+    calls = _curator_fake(
+        monkeypatch,
+        [
+            [_proposal("Command.execute exits 1 on XitError.", ["c0"])],
+            [_proposal("Command.execute in commands.py exits with status 1.", ["c6"])],
+            [_proposal("Command.execute exits 1 on XitError.", ["proposal-1", "proposal-2"])],
+        ],
+    )
+
+    run = await propose_lessons(qa_rows, entries, coding=True)
+
+    assert len(calls) == 3  # two batches, one merge
+    merge_input = calls[-1]
+    assert (
+        "Candidate proposal-1 [agent/proposed]: Command.execute exits 1 on XitError." in merge_input
+    )
+    assert "Candidate proposal-2" in merge_input and merge_input.startswith("User: Fix exits")
+    assert [lesson.member_entry_ids for lesson in run.proposed] == [["c0", "c6"]]
+    assert run.curated_entry_ids == {f"c{i}" for i in range(8)}
+
+
+@pytest.mark.asyncio
+async def test_a_state_key_reaches_the_merge_and_comes_back(monkeypatch):
+    qa_rows = [{"qa_id": "q1", "question": "Run tests", "answer": "41 passed."}]
+    entries = [_entry(f"candidate {i}", entry_id=f"c{i}", source_qa_ids=["q1"]) for i in range(7)]
+    calls = _curator_fake(
+        monkeypatch,
+        [
+            [_proposal("pytest -q: 41 passed.", ["c0"], "test-baseline")],
+            [_proposal("Tests pass.", ["c6"])],
+            [_proposal("pytest -q: 41 passed.", ["proposal-1", "proposal-2"], "test-baseline")],
+        ],
+    )
+
+    run = await propose_lessons(qa_rows, entries, coding=True)
+
+    assert "[state-key: test-baseline] pytest -q: 41 passed." in calls[-1]
+    assert run.proposed[0].state_key == "test-baseline"
+
+
+@pytest.mark.asyncio
+async def test_one_batch_is_not_merged_again(monkeypatch):
+    entries = [_entry(f"candidate {i}", entry_id=f"c{i}") for i in range(3)]
+    calls = _curator_fake(monkeypatch, [[_proposal("A.", ["c0"]), _proposal("B.", ["c1"])]])
+
+    run = await propose_lessons([{"question": "q", "answer": "a"}], entries, coding=True)
+
+    assert len(calls) == 1 and len(run.proposed) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_failed_merge_keeps_the_proposals(monkeypatch):
+    entries = [_entry(f"candidate {i}", entry_id=f"c{i}") for i in range(7)]
+    _curator_fake(monkeypatch, [[_proposal("A.", ["c0"])], [_proposal("B.", ["c6"])], None])
+
+    run = await propose_lessons([{"question": "q", "answer": "a"}], entries, coding=True)
+
+    assert [lesson.working_statement for lesson in run.proposed] == ["A.", "B."]
+    assert run.failed_batches == 0
+
+
+@pytest.mark.asyncio
+async def test_default_mode_never_merges(monkeypatch):
+    entries = [_entry(f"candidate {i}", entry_id=f"c{i}") for i in range(7)]
+    calls = _curator_fake(monkeypatch, [[_proposal("A.", ["c0"])], [_proposal("A.", ["c6"])]])
+
+    run = await propose_lessons([{"question": "q", "answer": "a", "time": "t"}], entries)
+
+    assert len(calls) == 2 and len(run.proposed) == 2
