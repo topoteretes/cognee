@@ -213,6 +213,7 @@ async def update(
     from cognee.modules.users.exceptions import PermissionDeniedError
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.ingestion.resolve_dlt_sources import check_dlt_replacement, is_dlt_input
+    from cognee.tasks.ingestion.screen_server_paths import screen_server_paths
 
     if isinstance(data, list):
         if len(data) != 1:
@@ -220,6 +221,11 @@ async def update(
                 f"update() replaces exactly one document; got a list of {len(data)} items."
             )
         data = data[0]
+
+    # Decide a caller string before anything is dropped: with the gate closed an
+    # explicit server path is refused here, not after the full rebuild has
+    # already dropped the document's memory, and both paths store the rest as text.
+    data = screen_server_paths(data)
 
     # Authorize before the id is resolved: a caller without write access must
     # not learn from 404-versus-further whether a (dataset, data) pair exists.

@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from typing import Any, BinaryIO
 from urllib.parse import urlparse
@@ -10,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 from cognee.modules.ingestion import StoredFile, save_data_to_file_detailed
 from cognee.modules.ingestion.exceptions import IngestionError
-from cognee.modules.operations.origin import ORIGIN_API, get_operation_origin
+from cognee.modules.operations.remote_caller import is_remote_caller
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
@@ -20,7 +19,7 @@ logger = get_logger()
 
 
 class SaveDataSettings(BaseSettings):
-    # None = not set: the gate decides from the call origin. True or False, from
+    # None = not set: the gate decides from where the caller is. True or False, from
     # the environment or assigned in process, is explicit and wins everywhere.
     accept_local_file_path: bool | None = None
 
@@ -31,7 +30,7 @@ settings = SaveDataSettings()
 
 
 def local_file_paths_configured() -> bool:
-    """Whether ``ACCEPT_LOCAL_FILE_PATH`` was set, rather than left to the call origin."""
+    """Whether ``ACCEPT_LOCAL_FILE_PATH`` was set, rather than left to where the caller is."""
     return settings.accept_local_file_path is not None
 
 
@@ -41,15 +40,17 @@ def local_file_paths_accepted() -> bool:
     That is a local file or directory, including one under cognee's own data
     root, and an ``s3://`` object, read with cognee's AWS credentials. One
     rule, read at the gates: an explicit ``ACCEPT_LOCAL_FILE_PATH`` is
-    honoured everywhere. Unset, the answer depends on who is calling: the SDK,
-    CLI and MCP server run on the caller's own machine, so the code default
-    (True) stands; an API request names a file on the server, so it is
-    refused. Uploads and text are never subject to this: they are stored
-    first and loaded from cognee's own copy.
+    honoured everywhere. Unset, the answer depends on where the caller is: the
+    SDK, CLI and MCP server over stdio run on the caller's own machine, so the
+    code default (True) stands; an API request, or an MCP tool call served
+    over sse / streamable http, names a file on the server, so it is refused
+    (the remote-caller signal, ``cognee/modules/operations/remote_caller.py``).
+    Uploads and text are never subject to this: they are stored first and
+    loaded from cognee's own copy.
     """
     if settings.accept_local_file_path is not None:
         return settings.accept_local_file_path
-    return get_operation_origin() != ORIGIN_API
+    return not is_remote_caller()
 
 
 def require_server_path_access() -> None:
@@ -68,9 +69,10 @@ def require_server_path_access() -> None:
         )
     else:
         message = (
-            "Server-side paths are not accepted for API requests by default because "
-            "ACCEPT_LOCAL_FILE_PATH is unset. Set ACCEPT_LOCAL_FILE_PATH=true in the "
-            "server's environment to allow them, or upload the file instead."
+            "Server-side paths are not accepted for network callers (API requests, MCP "
+            "over sse or streamable http) by default because ACCEPT_LOCAL_FILE_PATH is "
+            "unset. Set ACCEPT_LOCAL_FILE_PATH=true in the server's environment to allow "
+            "them, or upload the file instead."
         )
     raise IngestionError(message=message, status_code=status.HTTP_403_FORBIDDEN)
 
@@ -93,6 +95,17 @@ def _resolve_local_file_uri(
         return None
 
     return local_path.as_uri() if local_path.is_file() else None
+
+
+def _caller_file_uri(data_item: str) -> str | None:
+    """The existing file a caller's string names, or None when it is text.
+
+    With the gate closed the disk is never asked, so no reply can reveal
+    whether a path exists (``screen_server_paths`` has refused explicit paths).
+    """
+    if not local_file_paths_accepted():
+        return None
+    return _resolve_local_file_uri(data_item)
 
 
 async def save_data_item_to_storage_detailed(
@@ -147,31 +160,11 @@ async def save_data_item_to_storage_detailed(
                 return StoredFile(file_path=local_uri)
             raise IngestionError(message="Local file does not exist or is not a file.")
 
-        # data is an absolute file path that points at an existing file
-        elif (
-            data_item.startswith("/")
-            or (os.name == "nt" and len(data_item) > 1 and data_item[1] == ":")
-        ) and Path(os.path.normpath(data_item)).is_absolute():
-            # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path).
-            #
-            # is_absolute() guard: on Windows a POSIX-style "/path" (or a drive-relative
-            # "C:path") normalizes to a *drive-relative* WindowsPath, and Path.as_uri()
-            # raises ValueError for it. Such strings are not usable file paths on this
-            # platform and continue to the relative-path/text handling below.
-            #
-            # _resolve_local_file_uri returns a URI only for an existing allowed file,
-            # mirroring the relative-path branch below. A "/"-prefixed string that is
-            # not an existing allowed file (e.g. a plain text note such as "/remember
-            # to call Bob") falls through to text ingestion on every platform instead
-            # of becoming a broken file:// URI.
-            local_uri = _resolve_local_file_uri(data_item)
-            if local_uri:
-                require_server_path_access()
-                return StoredFile(file_path=local_uri)
-        # Data is a relative file path
-        local_uri = _resolve_local_file_uri(data_item)
+        # data is a local file path, absolute or relative. It is text when the gate
+        # is closed (nothing is looked up) or when it names no existing allowed
+        # file, e.g. a plain note such as "/remember to call Bob".
+        local_uri = _caller_file_uri(data_item)
         if local_uri:
-            require_server_path_access()
             return StoredFile(file_path=local_uri)
 
         # data is text, save it to data storage and return the file path

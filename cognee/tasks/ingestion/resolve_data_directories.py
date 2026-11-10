@@ -6,10 +6,17 @@ from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.exceptions import S3FileSystemNotFoundError
-from cognee.tasks.ingestion.save_data_item_to_storage import require_server_path_access
+from cognee.tasks.ingestion.save_data_item_to_storage import (
+    local_file_paths_accepted,
+    require_server_path_access,
+)
 
 
 def _resolve_existing_local_path(item: str) -> Path | None:
+    if not local_file_paths_accepted():
+        # Gate closed: the disk is never asked, so no reply reveals whether a
+        # path exists (screen_server_paths has refused explicit paths).
+        return None
     try:
         return resolve_local_path(item, must_exist=True)
     except FileNotFoundError:
@@ -123,13 +130,10 @@ async def resolve_data_directories(
                 )
                 continue
 
+            # Gated: with the gate closed nothing is looked up, so no directory is
+            # listed and no code project walked. A string that is not an existing
+            # path is text, not a path.
             local_path = _resolve_existing_local_path(item)
-
-            # The gate runs before a directory is listed or a code project is
-            # turned into a repository manifest, so a refused path is never
-            # walked. A string that is not an existing path is text, not a path.
-            if local_path is not None:
-                require_server_path_access()
 
             if local_path and local_path.is_dir():  # If it's a directory
                 if include_subdirectories:

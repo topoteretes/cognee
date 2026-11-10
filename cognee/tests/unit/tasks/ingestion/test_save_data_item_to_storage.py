@@ -1,13 +1,10 @@
 import importlib
-import ntpath
 import os
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from cognee.modules.ingestion import StoredFile
-from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
 
 # The package __init__ rebinds the name ``save_data_item_to_storage`` to the
@@ -48,26 +45,15 @@ async def test_nonexistent_absolute_path_is_ingested_as_text(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_windows_style_paths_do_not_crash_and_fall_back_to_text(monkeypatch):
-    """Windows-style path normalization, simulated on any OS.
-
-    ``ntpath.normpath`` turns a "/"-prefixed or drive-relative string into a
-    backslash path, which ``pathlib`` treats as *relative* on POSIX exactly as
-    ``WindowsPath`` does on Windows (``is_absolute()`` is False, ``as_uri()``
-    raises). Combined with the existence guard, such inputs — which do not name
-    an existing file — are ingested as text on every platform instead of raising
-    the Windows ``ValueError: relative path can't be expressed as a file URI``
-    that #3887 reported.
-
-    We replace the module's ``os`` *reference* (not the shared ``os`` singleton),
-    so ``os.name``/``os.path.normpath`` behave like Windows inside the function
-    while ``pathlib`` keeps using the real platform for ``Path``/``Path.cwd()``.
-    The genuine drive-anchored Windows path (``C:\\...``) that points at an
-    existing file is covered by the Windows-only test below and the OS-matrix CI.
+    """A "/"-prefixed or drive-relative string that names no existing file is
+    text, never a broken file:// URI (#3887's ``ValueError: relative path can't
+    be expressed as a file URI``). The lookup resolves the string to an absolute
+    path before it builds a URI, and only for an existing file. The genuine
+    drive-anchored Windows path (``C:\\...``) that points at an existing file is
+    covered by the Windows-only test below and the OS-matrix CI.
     """
-    fake_os = SimpleNamespace(name="nt", path=SimpleNamespace(normpath=ntpath.normpath))
     save_mock = AsyncMock(return_value=StoredFile(file_path="text-file-path"))
     monkeypatch.setattr(mod, "save_data_to_file_detailed", save_mock)
-    monkeypatch.setattr(mod, "os", fake_os)
 
     for item in ["/no/such/windows/path.txt", "C:name.txt"]:
         save_mock.reset_mock()
@@ -77,31 +63,23 @@ async def test_windows_style_paths_do_not_crash_and_fall_back_to_text(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_existing_absolute_file_rejected_when_gate_disabled(tmp_path, monkeypatch):
-    # An existing absolute local file is still rejected when
-    # ACCEPT_LOCAL_FILE_PATH is off — the fix must not weaken that gate.
-    file_path = tmp_path / "note.txt"
-    file_path.write_text("hello", encoding="utf-8")
-    monkeypatch.setattr(mod.settings, "accept_local_file_path", False)
-
-    with pytest.raises(IngestionError, match="not accepted"):
-        await save_data_item_to_storage(str(file_path))
-
-
-@pytest.mark.asyncio
-async def test_nonexistent_absolute_path_is_text_even_when_gate_disabled(monkeypatch):
-    # The ACCEPT_LOCAL_FILE_PATH gate rejects existing *local files*; a
-    # non-existent absolute-looking string is not a local file, so it is still
-    # ingested as text even with the gate off (the reject branch is only reached
-    # once is_file() is true). Mirrors the estimator's gate-off behavior.
+async def test_absolute_path_is_text_whether_or_not_it_exists_when_gate_disabled(
+    tmp_path, monkeypatch
+):
+    # With ACCEPT_LOCAL_FILE_PATH off the disk is never asked, so an existing
+    # file and a missing one get the same answer: text. That is what keeps a
+    # reply from revealing whether a path exists; explicit paths are refused
+    # earlier, by screen_server_paths at the entry.
+    existing = tmp_path / "note.txt"
+    existing.write_text("hello", encoding="utf-8")
     save_mock = AsyncMock(return_value=StoredFile(file_path="text-file-path"))
     monkeypatch.setattr(mod, "save_data_to_file_detailed", save_mock)
     monkeypatch.setattr(mod.settings, "accept_local_file_path", False)
 
-    result = await save_data_item_to_storage("/no/such/file.txt")
-
-    assert result == "text-file-path"
-    save_mock.assert_awaited_once_with("/no/such/file.txt")
+    for item in (str(existing), "/no/such/file.txt"):
+        save_mock.reset_mock()
+        assert await save_data_item_to_storage(item) == "text-file-path"
+        save_mock.assert_awaited_once_with(item)
 
 
 @pytest.mark.asyncio
