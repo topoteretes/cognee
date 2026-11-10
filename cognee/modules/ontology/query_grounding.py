@@ -23,6 +23,7 @@ import os
 import threading
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
+from itertools import accumulate
 
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.engine.utils import generate_edge_name
@@ -30,7 +31,13 @@ from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.get_default_ontology_resolver import get_ontology_resolver_from_env
 from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY, ONTOLOGY_INDIVIDUAL_CATEGORY
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
-from cognee.modules.ontology.term_matching import compact_key_index, lookup_words, tokens_of
+from cognee.modules.ontology.term_matching import (
+    compact,
+    compact_key_index,
+    lookup_words,
+    singular,
+    tokens_of,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ontology_query_grounding")
@@ -214,6 +221,10 @@ def ground_query(
 
     resolver_index = _resolver_index(resolver)
     tokens = tokens_of(query)
+    # Compact lengths: ``ends[i]`` of the first ``i`` tokens together, and of each token
+    # in its singular form, which ``lookup_words`` also tries for a run's last word.
+    ends = [0, *accumulate(len(compact(token)) for token in tokens)]
+    singular_lengths = [len(compact(singular(token))) for token in tokens]
 
     concepts: list[GroundedConcept] = []
     # A resolver key names exactly one ontology node, so matched keys are matched nodes.
@@ -223,8 +234,12 @@ def ground_query(
     # A run of more words than the longest key has characters cannot match.
     for size in range(min(len(tokens), resolver_index.longest_key), 0, -1):
         for start in range(len(tokens) - size + 1):
-            positions = range(start, start + size)
-            run = tokens[start : start + size]
+            end = start + size
+            # Nor can a run whose shortest form is longer than every key.
+            if ends[end - 1] - ends[start] + singular_lengths[end - 1] > resolver_index.longest_key:
+                continue
+            positions = range(start, end)
+            run = tokens[start:end]
             if used_positions.intersection(positions):
                 continue
             match = _match_run(run, resolver_index.indexes)

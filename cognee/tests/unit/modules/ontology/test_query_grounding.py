@@ -19,6 +19,7 @@ from cognee.modules.ontology.query_grounding import (
     seed_node_ids_by_collection,
 )
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.term_matching import compact, singular
 
 NS = Namespace("http://example.org/fin#")
 
@@ -155,6 +156,33 @@ def test_grounding_matches_exact_keys_without_a_fuzzy_scan(monkeypatch):
         "EnterpriseCustomer",
         "Customer",
     ]
+
+
+def test_runs_longer_than_every_key_are_not_looked_up(monkeypatch):
+    resolver = _finance_resolver()
+    looked_up = []
+    lookup_words = query_grounding.lookup_words
+
+    def recording_lookup_words(words, index):
+        looked_up.append(words)
+        return lookup_words(words, index)
+
+    monkeypatch.setattr(query_grounding, "lookup_words", recording_lookup_words)
+    # "enterprise customers" is one character longer than the longest key,
+    # ``enterprisecustomer``; only its singular form fits.
+    query = "which enterprise customers " + "have a large credit exposure and " * 20
+
+    grounding = ground_query(query, resolver)
+
+    assert [concept.canonical_name for concept in grounding] == [
+        "EnterpriseCustomer",
+        "CreditExposure",
+    ]
+    longest_key = query_grounding._resolver_index(resolver).longest_key
+    assert all(
+        len(compact("".join(words[:-1]) + singular(words[-1]))) <= longest_key
+        for words in looked_up
+    )
 
 
 def test_each_concept_is_walked_once_per_resolver(monkeypatch):
