@@ -65,6 +65,20 @@ class _FakeEngine:
         return self._sessions.pop(0)
 
 
+@pytest.fixture(autouse=True)
+def kept_evidence_calls(monkeypatch):
+    """Record the evidence re-homing the rollback asks for; the sidecar has its
+    own session, which the fake relational engine above does not serve."""
+    calls = []
+
+    async def _keep(dataset_id, pipeline_run_id, data_ids):
+        calls.append((dataset_id, pipeline_run_id, set(data_ids)))
+        return 0
+
+    monkeypatch.setattr(rollback_module, "keep_completed_items_evidence", _keep)
+    return calls
+
+
 @pytest.mark.asyncio
 async def test_cognify_rollback_deletes_graph_before_relational(monkeypatch):
     pipeline_run_id = uuid4()
@@ -350,7 +364,9 @@ async def test_rollback_preserves_markers_of_previously_extracted_data(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_ledger_rollback_removes_only_the_unstamped_items_of_the_run(monkeypatch):
+async def test_ledger_rollback_removes_only_the_unstamped_items_of_the_run(
+    monkeypatch, kept_evidence_calls
+):
     """Relational-ledger path: of the rows the run wrote, only those of the item
     it never stamped complete are deleted (graph, vector and ledger) and only
     that item's status is cleared; the stamped item keeps everything."""
@@ -425,10 +441,14 @@ async def test_ledger_rollback_removes_only_the_unstamped_items_of_the_run(monke
     )
     assert str(dataset_id) not in unfinished_record.pipeline_status["cognify_pipeline"]
     assert session_mutation.committed is True
+    # The stamped item's evidence stays readable with it.
+    assert kept_evidence_calls == [(dataset_id, pipeline_run_id, {done_id})]
 
 
 @pytest.mark.asyncio
-async def test_graph_provenance_rollback_keeps_completed_documents(monkeypatch):
+async def test_graph_provenance_rollback_keeps_completed_documents(
+    monkeypatch, kept_evidence_calls
+):
     """A document the run marked complete keeps its refs and its completed
     status; the unfinished one is rolled back and its status cleared."""
     from cognee.infrastructure.databases.provenance import make_source_ref_key
@@ -494,6 +514,7 @@ async def test_graph_provenance_rollback_keeps_completed_documents(monkeypatch):
     )
     assert str(dataset_id) not in unfinished_record.pipeline_status["cognify_pipeline"]
     assert reset_session.committed is True
+    assert kept_evidence_calls == [(dataset_id, pipeline_run_id, {done_id})]
 
 
 def _entry(run_info_cls, pipeline_run_id, dataset_id, data_id, **fields):

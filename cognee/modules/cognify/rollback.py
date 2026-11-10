@@ -17,6 +17,7 @@ from cognee.modules.graph.methods.delete_from_graph_and_vector import delete_fro
 from cognee.modules.graph.models import Edge, Node
 from cognee.modules.pipelines.models.DataItemStatus import is_item_stamped
 from cognee.modules.pipelines.utils import iter_ingestion_entries
+from cognee.modules.provenance.edge_evidence.cleanup import keep_completed_items_evidence
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME
 
@@ -128,8 +129,9 @@ async def _kept_data_ids(
     the run's per-item results are at hand (``run_tasks`` passes every result it
     has, the raising path included), reported ``PipelineRunCompleted`` by this
     run. A stamp alone may be an earlier run's: the non-incremental path
-    (``incremental_loading=False, data_cache=False``) never stamps, so an item stamped by an earlier run and failed half-way in this one
-    still carries that stamp, and its writes must go and its stamp be cleared.
+    (``incremental_loading=False, data_cache=False``) never stamps, so an item
+    stamped by an earlier run and failed half-way in this one still carries
+    that stamp, and its writes must go and its stamp be cleared.
     Startup recovery has no results, so there the stamp is the only evidence and
     decides alone. An item that completed in a non-incremental run is not
     stamped, so it is rolled back like the unfinished ones.
@@ -154,12 +156,15 @@ async def cognify_rollback_handler(
     The rollback is per item: the documents this run completed (stamped, and
     reported ``PipelineRunCompleted`` by its per-item results, see
     ``_kept_data_ids``) keep their artifacts and their completed status, only
-    the work of the items the run never finished is removed. An item is stamped complete only once all of its
-    tasks have run (``run_tasks_data_item``), so a kept document is never
-    half-written, and the next run re-extracts only what failed instead of the
-    whole run at full LLM cost. Startup recovery relies on the same rule: a
-    later run may already have trusted those completed documents and skipped
-    them, so deleting them would leave the dataset with holes nothing refills.
+    the work of the items the run never finished is removed. An item is
+    stamped complete only once all of its tasks have run
+    (``run_tasks_data_item``), so a kept document is never half-written, and
+    the next run re-extracts only what failed instead of the whole run at full
+    LLM cost. The kept documents' edge evidence is detached from the run
+    (``keep_completed_items_evidence``), since lookups hide the rows of a run
+    that did not complete. Startup recovery relies on the same rule: a later
+    run may already have trusted those completed documents and skipped them,
+    so deleting them would leave the dataset with holes nothing refills.
 
     ``pipeline_name`` is the pipeline whose per-item completion stamps the run
     set (``run_tasks`` passes it): the cognify pipeline by default, or the
@@ -180,6 +185,7 @@ async def cognify_rollback_handler(
         return
 
     user_id = getattr(user, "id", None)
+    run_uuid = UUID(str(pipeline_run_id))
     db_engine = get_relational_engine()
 
     # Graph-provenance graphs carry provenance in the graph (no relational ledger
@@ -212,6 +218,7 @@ async def cognify_rollback_handler(
                     session, target_data_ids - kept_data_ids, dataset_id, pipeline_name
                 )
                 await session.commit()
+            await keep_completed_items_evidence(dataset_id, run_uuid, kept_data_ids)
 
             logger.info(
                 "Graph-provenance %s rollback completed for run %s (dataset=%s, user=%s).",
@@ -344,6 +351,7 @@ async def cognify_rollback_handler(
         )
 
         await session.commit()
+    await keep_completed_items_evidence(dataset_id, run_uuid, kept_data_ids)
 
     logger.info(
         "%s rollback completed for run %s (dataset=%s, user=%s, rows=%d nodes/%d edges).",

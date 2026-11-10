@@ -231,6 +231,27 @@ async def _mock_structured_output(
     return "test"
 
 
+async def _evidence_rows(dataset_id) -> list:
+    from cognee.modules.provenance.edge_evidence import ProvenanceEdgeEvidence
+
+    async with get_relational_engine().get_async_session() as session:
+        statement = select(ProvenanceEdgeEvidence).where(
+            ProvenanceEdgeEvidence.dataset_id == dataset_id
+        )
+        return list((await session.execute(statement)).scalars().all())
+
+
+async def _readable_extracted_evidence_data_ids(dataset_id) -> set:
+    """Documents whose extracted-edge evidence the lookups count (citations,
+    conflict review). Structural rows are left out: the indexing run, which
+    completes, writes them for every document's chunks."""
+    from cognee.modules.provenance.edge_evidence.lookup import get_edge_sources
+
+    rows = await _evidence_rows(dataset_id)
+    edge_ids = {row.edge_id for row in rows if row.evidence_kind == "extracted"}
+    return {record.data_id for record in await get_edge_sources(dataset_id, edge_ids)}
+
+
 async def _graph_node_names() -> set:
     graph_engine = await get_graph_engine()
     nodes, _edges = await graph_engine.get_graph_data()
@@ -275,6 +296,7 @@ async def test_cognify_rollback_keeps_the_documents_the_failed_run_completed(
 
     monkeypatch.setattr(cognify_module, "get_default_tasks", _patched_get_default_tasks)
 
+    before_failed_run = datetime.now(timezone.utc)
     # raise_on_error=False: this test inspects the errored run info directly;
     # the default would raise CognifyFailedError here (COG-6276).
     cognify_result = await cognee.cognify(datasets=[dataset_name], user=user, raise_on_error=False)
@@ -293,6 +315,23 @@ async def test_cognify_rollback_keeps_the_documents_the_failed_run_completed(
         DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
     )
     assert not is_item_stamped(await _get_data_record(second_id), "cognify_pipeline", dataset.id)
+    # The kept document's evidence stays readable although its run errored, and
+    # conflict review sees it as new; the failed document's stays hidden.
+    from cognee.modules.provenance.edge_evidence.lookup import get_touched_entity_ids
+
+    rows = await _evidence_rows(dataset.id)
+    assert {row.data_id for row in rows} == {first_id, second_id}
+    assert await _readable_extracted_evidence_data_ids(dataset.id) == {first_id}
+    first_rows = [
+        row for row in rows if row.data_id == first_id and row.evidence_kind == "extracted"
+    ]
+    touched = await get_touched_entity_ids(dataset.id, before_failed_run)
+    assert {str(row.source_node_id) for row in first_rows} <= touched
+    assert all(
+        row.pipeline_run_id == failed_run_id
+        for row in rows
+        if row.data_id == second_id and row.evidence_kind == "extracted"
+    )
 
     # The next cognify skips the first document and processes only the second.
     monkeypatch.setattr(cognify_module, "get_default_tasks", original_get_default_tasks)
@@ -310,6 +349,7 @@ async def test_cognify_rollback_keeps_the_documents_the_failed_run_completed(
     assert {node.data_id for node in nodes} == {first_id}
     assert {"alice", "bob", "carol", "dave"} <= await _graph_node_names()
     assert is_item_stamped(await _get_data_record(second_id), "cognify_pipeline", dataset.id)
+    assert await _readable_extracted_evidence_data_ids(dataset.id) == {first_id, second_id}
 
 
 @pytest.mark.asyncio
