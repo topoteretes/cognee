@@ -18,7 +18,9 @@ grounding, and the retriever runs exactly as it did before.
 
 from __future__ import annotations
 
+import asyncio
 import os
+import threading
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 
@@ -251,20 +253,35 @@ def _file_mtimes(ontology_file_path: str) -> tuple[float | None, ...]:
     return tuple(os.path.getmtime(path) if os.path.exists(path) else None for path in paths)
 
 
-def get_query_grounding_resolver() -> BaseOntologyResolver | None:
+# Held while a worker thread checks and, if needed, parses the file, so concurrent first
+# searches parse it once. A thread lock, not an asyncio one: it works on any event loop.
+_load_lock = threading.Lock()
+
+
+def _current_resolver(ontology_file_path: str, settings: dict[str, str]) -> BaseOntologyResolver:
+    """The resolver for the files as they are now. Runs in a worker thread."""
+    with _load_lock:
+        return _load_resolver(_file_mtimes(ontology_file_path), **settings)
+
+
+async def get_query_grounding_resolver() -> BaseOntologyResolver | None:
     """The resolver recall should ground against, or None when grounding is off.
 
     Grounding is on when ``ONTOLOGY_FILE_PATH`` names an ontology and
     ``ONTOLOGY_QUERY_GROUNDING`` (default true) has not turned it off. The resolver
-    is reloaded when a configured file changes.
+    is reloaded when a configured file changes. The file check and any parse (with
+    ``ONTOLOGY_REASONING=owl_rl``, the closure too) run in a worker thread, so a large
+    ontology does not block the event loop.
     """
     env_config = get_ontology_env_config()
     if not env_config.ontology_query_grounding or not env_config.ontology_file_path:
         return None
-    return _load_resolver(_file_mtimes(env_config.ontology_file_path), **env_config.to_dict())
+    return await asyncio.to_thread(
+        _current_resolver, env_config.ontology_file_path, env_config.to_dict()
+    )
 
 
-def with_grounding_block(query: str | None, context: str) -> str:
+async def with_grounding_block(query: str | None, context: str) -> str:
     """``context`` with the ``## Ontology grounding`` block for ``query`` in front.
 
     Only in front of real context: on its own the block names concepts without any
@@ -273,5 +290,5 @@ def with_grounding_block(query: str | None, context: str) -> str:
     """
     if not context:
         return context
-    block = grounding_block(ground_query(query, get_query_grounding_resolver()))
+    block = grounding_block(ground_query(query, await get_query_grounding_resolver()))
     return f"{block}\n\n{context}" if block else context

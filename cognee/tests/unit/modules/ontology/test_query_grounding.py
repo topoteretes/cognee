@@ -1,6 +1,9 @@
 """Read-time ontology grounding: query terms -> ontology nodes -> seeds + context."""
 
+import asyncio
 import os
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -207,19 +210,21 @@ def _write_classes(path: Path, *class_names: str, mtime: int) -> None:
     os.utime(path, (mtime, mtime))
 
 
-def test_configured_resolver_is_built_with_every_setting(configured, monkeypatch):
+@pytest.mark.asyncio
+async def test_configured_resolver_is_built_with_every_setting(configured, monkeypatch):
     configured(ontology_reasoning="owl_rl")
     built = []
     monkeypatch.setattr(
         query_grounding, "get_ontology_resolver_from_env", lambda **kwargs: built.append(kwargs)
     )
 
-    query_grounding.get_query_grounding_resolver()
+    await query_grounding.get_query_grounding_resolver()
 
     assert built[0]["ontology_reasoning"] == "owl_rl"
 
 
-def test_a_load_error_is_raised_and_not_cached(configured, monkeypatch):
+@pytest.mark.asyncio
+async def test_a_load_error_is_raised_and_not_cached(configured, monkeypatch):
     configured()
     resolver = object()
     outcomes = [OntologyInitializationError("half-written file"), resolver]
@@ -233,18 +238,40 @@ def test_a_load_error_is_raised_and_not_cached(configured, monkeypatch):
     monkeypatch.setattr(query_grounding, "get_ontology_resolver_from_env", factory)
 
     with pytest.raises(OntologyInitializationError):
-        query_grounding.get_query_grounding_resolver()
-    assert query_grounding.get_query_grounding_resolver() is resolver
+        await query_grounding.get_query_grounding_resolver()
+    assert await query_grounding.get_query_grounding_resolver() is resolver
 
 
-def test_an_edited_ontology_file_is_loaded_again(configured):
+@pytest.mark.asyncio
+async def test_an_edited_ontology_file_is_loaded_again(configured):
     path = configured()
     _write_classes(path, "CreditExposure", mtime=1_000_000)
-    first = query_grounding.get_query_grounding_resolver()
+    first = await query_grounding.get_query_grounding_resolver()
     assert not ground_query("loan facility", first)
-    assert query_grounding.get_query_grounding_resolver() is first
+    assert await query_grounding.get_query_grounding_resolver() is first
 
     _write_classes(path, "CreditExposure", "LoanFacility", mtime=2_000_000)
-    grounding = ground_query("loan facility", query_grounding.get_query_grounding_resolver())
+    resolver = await query_grounding.get_query_grounding_resolver()
+    grounding = ground_query("loan facility", resolver)
 
     assert [concept.canonical_name for concept in grounding] == ["LoanFacility"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_searches_parse_once_off_the_event_loop(configured, monkeypatch):
+    configured()
+    parsed_on = []
+
+    def factory(**_kwargs):
+        parsed_on.append(threading.get_ident())
+        time.sleep(0.05)
+        return object()
+
+    monkeypatch.setattr(query_grounding, "get_ontology_resolver_from_env", factory)
+    resolvers = await asyncio.gather(
+        *(query_grounding.get_query_grounding_resolver() for _ in range(3))
+    )
+
+    assert len(parsed_on) == 1
+    assert parsed_on[0] != threading.get_ident()
+    assert resolvers[0] is resolvers[1] is resolvers[2]

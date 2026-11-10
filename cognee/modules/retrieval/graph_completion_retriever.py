@@ -272,7 +272,7 @@ class GraphCompletionRetriever(BaseRetriever):
         # CreditExposure class node even when the embedding neighbourhood misses it.
         # Batch mode has no query, so it grounds nothing (the search could not pin anyway).
         pinned_node_ids = seed_node_ids_by_collection(
-            ground_query(query, get_query_grounding_resolver())
+            ground_query(query, await get_query_grounding_resolver())
         )
         return await brute_force_triplet_search(
             query,
@@ -361,7 +361,7 @@ class GraphCompletionRetriever(BaseRetriever):
             )
 
         graph_context = await self.resolve_edges_to_text(triplets) if triplets else ""
-        graph_context = with_grounding_block(query, graph_context)
+        graph_context = await with_grounding_block(query, graph_context)
 
         if not self.include_global_context_index:
             if not triplets:

@@ -156,7 +156,9 @@ def ontology(monkeypatch):
         "cognee.modules.retrieval.graph_completion_retriever",
         "cognee.modules.retrieval.hybrid_retriever",
     ):
-        monkeypatch.setattr(f"{module}.get_query_grounding_resolver", lambda: resolver)
+        monkeypatch.setattr(
+            f"{module}.get_query_grounding_resolver", AsyncMock(return_value=resolver)
+        )
 
 
 @pytest.mark.asyncio
@@ -289,7 +291,7 @@ async def test_hybrid_context_leads_with_the_grounding_block_only_with_content(o
     assert batch[1].startswith("## Global context")
 
     # Nothing retrieved -> no context at all, grounding or not.
-    assert with_grounding_block("credit exposure of Acme", "") == ""
+    assert await with_grounding_block("credit exposure of Acme", "") == ""
 
 
 def _graph_engine(nodes: list, edges: list) -> MagicMock:
@@ -459,7 +461,7 @@ async def test_grounding_switched_off_pins_nothing_and_renders_no_block(monkeypa
 
     _, mock_build_entities = await _retrieve_hybrid("credit exposure of Acme")
     assert mock_build_entities.call_args.args[1] == []
-    assert with_grounding_block("credit exposure of Acme", "x") == "x"
+    assert await with_grounding_block("credit exposure of Acme", "x") == "x"
 
 
 # --- authoritative sources in the entity lane ---------------------------------------

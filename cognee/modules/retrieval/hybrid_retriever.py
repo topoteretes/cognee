@@ -175,7 +175,7 @@ class HybridRetriever(BaseRetriever):
         # and fails open: flag off, no node, or any error yields {}, keeping
         # ranking byte-identical to an un-personalized run.
         personal_weights = await load_preference_weights()
-        concepts = ground_query(query, get_query_grounding_resolver())
+        concepts = ground_query(query, await get_query_grounding_resolver())
 
         # One check decides for both lanes whether the DLT collections are read.
         include_dlt = await dlt_rows_indexed(self._unified_engine.vector)
@@ -295,9 +295,13 @@ class HybridRetriever(BaseRetriever):
                 ]
             )
             contexts = format_hybrid_context_batch(global_contexts, retrieved_objects)
-            return [with_grounding_block(q, context) for q, context in zip(query_batch, contexts)]
+            return [
+                await with_grounding_block(q, context) for q, context in zip(query_batch, contexts)
+            ]
         global_context = await self._build_global_context_section(query, retrieved_objects)
-        return with_grounding_block(query, format_hybrid_context(global_context, retrieved_objects))
+        return await with_grounding_block(
+            query, format_hybrid_context(global_context, retrieved_objects)
+        )
 
     async def _build_global_context_section(
         self, query: str | None, retrieved_objects: Any = None
