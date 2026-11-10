@@ -1,0 +1,144 @@
+name: release_hermes_plugin.yml
+# Publish the Hermes Agent memory plugin (cognee-integrations/integrations/hermes-agent) to
+# PyPI as cognee-integration-hermes-agent.
+#
+# The plugin versions independently of the cognee library, so, like cognee-mcp,
+# it has its own workflow and its own tag namespace (hermes-agent-v*). The tag
+# names are the same as when the plugin lived in topoteretes/cognee-integrations.
+#
+# Release flow:
+#   1. Bump the version in pyproject.toml, plugin.yaml and
+#      cognee_integration_hermes/_plugin_root/plugin.yaml (the tests check they
+#      match), re-lock, and add a CHANGELOG.md section. Merge that to main.
+#   2. Run this workflow from main. It tests, builds, attests, publishes and
+#      then tags the released commit hermes-agent-v<version>.
+#
+# Auth: PyPI Trusted Publishing only. A PyPI owner of
+# cognee-integration-hermes-agent has to add a publisher with
+#   Repository owner: topoteretes
+#   Repository name:  cognee
+#   Workflow name:    release_hermes_plugin.yml
+#   Environment:      (leave blank)
+# The publisher for topoteretes/cognee-integrations can be removed once the
+# first release from here is out.
+on:
+  workflow_dispatch:
+
+# Minimal default permissions (OSSF Scorecard: Token-Permissions). The one job
+# opts in to exactly what it needs.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-hermes-plugin
+  cancel-in-progress: false
+
+jobs:
+  release-hermes-plugin-pypi:
+    name: Release cognee-integration-hermes-agent to PyPI from ${{ github.ref_name }}
+    permissions:
+      contents: write       # push the hermes-agent-v* tag
+      id-token: write       # OIDC: Trusted Publishing and signing attestations
+      attestations: write   # Persist the SLSA build provenance attestation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TELEMETRY_DISABLED: "1"
+    defaults:
+      run:
+        working-directory: cognee-integrations/integrations/hermes-agent
+
+    steps:
+      - name: Refuse any ref but main
+        working-directory: .
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::release_hermes_plugin.yml publishes and tags permanently; run it from main (got ${GITHUB_REF})."
+            exit 1
+          fi
+
+      - name: Check out ${{ github.ref_name }} at ${{ github.sha }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # The commit the run was dispatched on, not the branch head now.
+          ref: ${{ github.sha }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+
+      - name: Install Python
+        run: uv python install
+
+      - name: Resolve version and tag
+        id: meta
+        run: |
+          VERSION="$(uv version --short)"
+          TAG="hermes-agent-v${VERSION}"
+          echo "Releasing cognee-integration-hermes-agent ${VERSION} as ${TAG}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to republish an existing version
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          # PyPI versions are immutable: a second upload of the same version is
+          # rejected. Fail here, with a message that says what to do, rather
+          # than at the upload step.
+          if curl -fsS "https://pypi.org/pypi/cognee-integration-hermes-agent/${VERSION}/json" >/dev/null 2>&1; then
+            echo "::error::cognee-integration-hermes-agent ${VERSION} is already on PyPI. Bump the version (pyproject.toml and both plugin.yaml files) and re-lock before releasing."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::Tag ${TAG} already exists on origin."
+            exit 1
+          fi
+          echo "${VERSION} is unpublished and ${TAG} is free."
+
+      - name: Run the test suite
+        run: |
+          uv sync --locked --dev
+          uv pip install -r local-mode-requirements.txt
+          uv run --no-sync pytest tests/ -q
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Verify distributions were built
+        run: |
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+          if [ "${#wheels[@]}" -ne 1 ] || [ "${#sdists[@]}" -ne 1 ] || \
+             [ ! -s "${wheels[0]}" ] || [ ! -s "${sdists[0]}" ]; then
+            echo "::error::Build must produce exactly one nonempty wheel and sdist."
+            ls -lh dist/ || true
+            exit 1
+          fi
+          ls -lh "${wheels[@]}" "${sdists[@]}"
+
+      # `with:` paths on actions are workspace-relative; the job-level
+      # working-directory only applies to `run:` steps.
+      - name: Attest build provenance for distributions
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: "cognee-integrations/integrations/hermes-agent/dist/*"
+
+      - name: Publish cognee-integration-hermes-agent ${{ steps.meta.outputs.version }} to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2 (twine 7.0.0: accepts Metadata-Version 2.5)
+        with:
+          packages-dir: cognee-integrations/integrations/hermes-agent/dist/
+
+      - name: Tag the released commit
+        # After the upload, not before: a tag that points at an unpublished
+        # version is a lie, whereas a published version with no tag is a
+        # one-line fix by hand.
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          git config user.name "Cognee Team"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${TAG}"
+          git push origin "${TAG}"
+          echo "Tagged ${TAG} at $(git rev-parse --short HEAD)"

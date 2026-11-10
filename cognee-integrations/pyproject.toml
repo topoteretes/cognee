@@ -1,0 +1,18 @@
+# Shared lint and test settings for the agent plugins under integrations/,
+# moved here from the root of topoteretes/cognee-integrations. Ruff and pytest
+# use the nearest pyproject.toml that configures them, so these settings apply
+# to every plugin below that does not set its own, instead of the cognee
+# repository root's.
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+"*.ipynb" = ["E501", "W293"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

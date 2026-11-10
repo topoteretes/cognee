@@ -1,0 +1,5 @@
+# The cognee release local and embedded mode run, for installing it by hand and
+# for CI. Local mode installs it itself (`hermes cognee install-runtime`). Not a
+# dependency of the plugin (see pyproject.toml); kept equal to LOCAL_COGNEE_REQUIREMENT in
+# cognee_integration_hermes/config.py by tests/test_local_mode_requirement.py.
+cognee==1.6.6

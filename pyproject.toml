@@ -322,6 +322,7 @@ exclude = [
   "/deployment",
   "/cognee-mcp",
   "/cognee-connectors",
+  "/cognee-integrations",
   "/cognee-frontend",
   "/examples",
   "/helm",
@@ -359,8 +360,9 @@ constraint-dependencies = [
     "scipy>=1.16.1 ; python_version >= '3.14'",
 ]
 [tool.pytest.ini_options]
-# `pytest` with no path collects only the library test tree; cognee-mcp and
-# cognee-connectors have their own pyproject and suite. See cognee/tests/README.md for layout and credentials.
+# `pytest` with no path collects only the library test tree; cognee-mcp,
+# cognee-connectors and each plugin under cognee-integrations have their own
+# pyproject and suite. See cognee/tests/README.md for layout and credentials.
 testpaths = ["cognee/tests"]
 markers = [
     "deployment: smoke tests against a deployed cognee instance (cognee/tests/deployment/)",

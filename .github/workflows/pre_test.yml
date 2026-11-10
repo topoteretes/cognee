@@ -34,6 +34,11 @@ jobs:
         if: ${{ !cancelled() }}
         run: uv sync --extra dev
 
+      # cognee-integrations/ is excluded for now: the agent plugins moved there
+      # from topoteretes/cognee-integrations, where these rules did not apply, and
+      # catch broad exceptions on purpose so a memory failure never crashes the
+      # host agent. Narrowing them is tracked in SDK-1489.
+      #
       # Exception-handling rules are enforced without escape hatch: `--ignore-noqa`
       # makes a `# noqa` comment on these rules count as a finding, so a silent
       # `except Exception` has to be fixed (log with traceback, re-raise, or narrow
@@ -42,7 +47,7 @@ jobs:
       # Exception raise.
       - name: Ruff exception-handling rules (strict, noqa ignored)
         if: ${{ !cancelled() }}
-        run: uv run ruff check . --select BLE001,S110,S112,G201,TRY201,TRY002 --ignore-noqa
+        run: uv run ruff check . --select BLE001,S110,S112,G201,TRY201,TRY002 --ignore-noqa --extend-exclude cognee-integrations
 
       - name: Ty type check
         if: ${{ !cancelled() }}

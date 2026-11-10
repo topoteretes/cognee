@@ -1,0 +1,811 @@
+[
+  {
+    "kind": "trim",
+    "name": "well_formed_160",
+    "note": "1.6.0 item: history + hybrid template + context + guidance; own passage dropped, entities pruned, facts kept",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "Previous conversation:\n\n[2026-10-01]\nQUESTION: earlier\nANSWER: `done`\n\nThe question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\nSession ID: open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2\n\nQuestion: earlier\n\nAnswer: run `uv sync` then:\n\n---\n\n- step\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n---\nCognee blog: memory for agents.\n\nParagraph two of the post.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`\n\n## Active session guidance\nWhen guidance conflicts, prefer the later item.\n- Run ruff.",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n---\nCognee blog: memory for agents.\n\nParagraph two of the post.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "## Active session guidance\nWhen guidance conflicts, prefer the later item.\n- Run ruff.",
+      "stats": {
+        "parsed": true,
+        "chars_in": 1356,
+        "history_chars": 69,
+        "passages_in": 3,
+        "passages_dropped": 1,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 511
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "graph_template",
+    "note": "graph-completion template, no guidance (text ends with the context backtick)",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nand here is the context provided with a set of relationships from a knowledge graph separated by \\n---\\n each represented as node1 -- relation -- node2 triplet: `## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 1050,
+        "history_chars": 0,
+        "passages_in": 1,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 447
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "plain_template",
+    "note": "plain template, no guidance",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnd here is the context: `## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 914,
+        "history_chars": 0,
+        "passages_in": 1,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 447
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "own_session_both_headers",
+    "note": "own transcript chunk and own session-learning note dropped; other session and headerless doc kept",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\nSession ID: open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2\n\nQuestion: earlier\n\nAnswer: run `uv sync` then:\n\n---\n\n- step\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n---\n# Session learning — 2026-09-18 (session open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2)\n\nThe dify-sdk plugin lives in integrations/dify-sdk.\n---\nCognee blog: memory for agents.\n\nParagraph two of the post.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": 0,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n---\nCognee blog: memory for agents.\n\nParagraph two of the post.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 1346,
+        "history_chars": 0,
+        "passages_in": 4,
+        "passages_dropped": 2,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 511
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "own_session_exact_match_only",
+    "note": "a session id that is a prefix of the current one is not the current session",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\nSession ID: open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c\n\nQuestion: prefix of the current id\n\nAnswer: kept.\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c\n\nQuestion: prefix of the current id\n\nAnswer: kept.\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 1120,
+        "history_chars": 0,
+        "passages_in": 2,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 561
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "no_session_id",
+    "note": "without a session id nothing is dropped",
+    "session_id": "",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\nSession ID: open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2\n\nQuestion: earlier\n\nAnswer: run `uv sync` then:\n\n---\n\n- step\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": 0,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2\n\nQuestion: earlier\n\nAnswer: run `uv sync` then:\n\n---\n\n- step\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 1133,
+        "history_chars": 0,
+        "passages_in": 2,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 574
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "passage_cap_paragraph_break",
+    "note": "a long passage is cut at a paragraph break and marked with how much was cut",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nParagraph 0: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 1: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 2: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 3: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 4: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 5: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 6: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 7: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 8: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 9: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 10: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 11: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 12: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 13: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 14: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 15: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 16: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 17: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 18: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 19: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 20: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 21: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 22: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 23: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 24: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 25: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 26: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 27: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 28: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 29: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 30: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 31: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 32: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 33: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 34: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 35: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 36: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 37: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 38: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 39: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": 1000,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nParagraph 0: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 1: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 2: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 3: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 4: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 5: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 6: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 7: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n…[+3390 chars]\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 5296,
+        "history_chars": 0,
+        "passages_in": 2,
+        "passages_dropped": 0,
+        "passages_capped": 1,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 1362
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "passage_cap_default",
+    "note": "default caps (2000 / 12000) when no option is given",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nParagraph 0: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 1: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 2: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 3: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 4: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 5: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 6: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 7: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 8: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 9: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 10: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 11: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 12: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 13: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 14: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 15: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 16: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 17: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 18: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 19: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 20: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 21: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 22: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 23: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 24: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 25: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 26: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 27: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 28: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 29: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 30: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 31: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 32: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 33: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 34: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 35: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 36: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 37: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 38: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 39: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nParagraph 0: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 1: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 2: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 3: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 4: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 5: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 6: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 7: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 8: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 9: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 10: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 11: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 12: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 13: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 14: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 15: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 16: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 17: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n…[+2332 chars]\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 5296,
+        "history_chars": 0,
+        "passages_in": 2,
+        "passages_dropped": 0,
+        "passages_capped": 1,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 2420
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "budget_drops_from_end",
+    "note": "the budget drops passages from the end; entities and facts are never trimmed",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_0\n\nAnswer 0: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_1\n\nAnswer 1: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_2\n\nAnswer 2: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_3\n\nAnswer 3: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_4\n\nAnswer 4: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_5\n\nAnswer 5: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": 0,
+    "context_chars": 1500,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_0\n\nAnswer 0: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_1\n\nAnswer 1: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 3724,
+        "history_chars": 0,
+        "passages_in": 6,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 4,
+        "chars_out": 1269
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "budget_exhausts_passages",
+    "note": "a budget smaller than entities+facts drops every passage and still keeps entities and facts",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_0\n\nAnswer 0: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_1\n\nAnswer 1: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": 0,
+    "context_chars": 50,
+    "expected": {
+      "context": "## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 1828,
+        "history_chars": 0,
+        "passages_in": 2,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 2,
+        "chars_out": 303
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "budget_disabled",
+    "note": "context_chars=0 disables the budget",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_0\n\nAnswer 0: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_1\n\nAnswer 1: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_2\n\nAnswer 2: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_3\n\nAnswer 3: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_4\n\nAnswer 4: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_5\n\nAnswer 5: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": 0,
+    "context_chars": 0,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_0\n\nAnswer 0: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_1\n\nAnswer 1: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_2\n\nAnswer 2: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_3\n\nAnswer 3: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_4\n\nAnswer 4: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190_5\n\nAnswer 5: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 3724,
+        "history_chars": 0,
+        "passages_in": 6,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 3165
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "entities_pruned_to_nothing",
+    "note": "an entities block with only type/set bullets disappears; facts stay",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### n\n- n is a concept.\n- n belongs to set s.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": 0,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 515,
+        "history_chars": 0,
+        "passages_in": 1,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 3,
+        "budget_trimmed": 0,
+        "chars_out": 237
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "empty_facts_dropped",
+    "note": "a facts section with only whitespace is left out",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n  \n`",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 933,
+        "history_chars": 0,
+        "passages_in": 1,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 352
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "guidance_title_quoted_in_passage",
+    "note": "a passage quoting the guidance title does not end the context when the text ends with a backtick",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nAnswer: the block is titled\n\n## Active session guidance\nand follows the context.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nAnswer: the block is titled\n\n## Active session guidance\nand follows the context.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 1022,
+        "history_chars": 0,
+        "passages_in": 1,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 463
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "guidance_without_history",
+    "note": "guidance block split off, no history",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`\n\n## Active session guidance\nWhen guidance conflicts, prefer the later item.\n- Run ruff.",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "## Active session guidance\nWhen guidance conflicts, prefer the later item.\n- Run ruff.",
+      "stats": {
+        "parsed": true,
+        "chars_in": 1094,
+        "history_chars": 0,
+        "passages_in": 1,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 447
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "unparsed_legacy",
+    "note": "pre-1.6.0 bare context: returned whole, parsed=false",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "bare context from a pre-1.6.0 server",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "bare context from a pre-1.6.0 server",
+      "guidance": "",
+      "stats": {
+        "parsed": false,
+        "chars_in": 36,
+        "history_chars": 0,
+        "chars_out": 36
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "unparsed_rewritten_question",
+    "note": "the question is not the prompt we sent",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `a rewritten question`\n\nContext:\n`c`",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "The question is: `a rewritten question`\n\nContext:\n`c`",
+      "guidance": "",
+      "stats": {
+        "parsed": false,
+        "chars_in": 53,
+        "history_chars": 0,
+        "chars_out": 53
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "unparsed_no_slot",
+    "note": "no context slot after the question",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nno context slot follows",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nno context slot follows",
+      "guidance": "",
+      "stats": {
+        "parsed": false,
+        "chars_in": 114,
+        "history_chars": 0,
+        "chars_out": 114
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "unparsed_no_end",
+    "note": "no closing backtick and no guidance block",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`unterminated context\n\n## Something else",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`unterminated context\n\n## Something else",
+      "guidance": "",
+      "stats": {
+        "parsed": false,
+        "chars_in": 248,
+        "history_chars": 0,
+        "chars_out": 248
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "unparsed_empty",
+    "note": "empty text",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "",
+      "guidance": "",
+      "stats": {
+        "parsed": false,
+        "chars_in": 0,
+        "history_chars": 0,
+        "chars_out": 0
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "unsectioned_context",
+    "note": "a context without section headings passes through (stripped)",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nand here is the context provided with a set of relationships from a knowledge graph separated by \\n---\\n each represented as node1 -- relation -- node2 triplet: `\nnode1 -- relation -- node2\n---\nnode3 -- relation -- node4\n`",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "node1 -- relation -- node2\n---\nnode3 -- relation -- node4",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 313,
+        "history_chars": 0,
+        "passages_in": 0,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 0,
+        "budget_trimmed": 0,
+        "chars_out": 57
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "global_preamble_kept",
+    "note": "the hybrid retriever's global-context preamble is kept before the passages",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`Global: the project is cognee.\n\n## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": 0,
+    "context_chars": null,
+    "expected": {
+      "context": "Global: the project is cognee.\n\n## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 1038,
+        "history_chars": 0,
+        "passages_in": 1,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 479
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "duplicate_heading_last_wins",
+    "note": "a repeated section heading keeps its last block",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Related facts\n- first\n\n## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- second`",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- second",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 964,
+        "history_chars": 0,
+        "passages_in": 1,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 379
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "crlf_text",
+    "note": "CRLF: a heading followed by \\r\\n is not a section; \\r is not a line start for Session ID; Python '.' matches \\r in entity bullets",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\r\nignored\n\n## Relevant passages\nintro\rSession ID: open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2\r\nkept\n---\nSession ID: open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2\r\ndropped\n\n## Relevant entities\n### foo\r\n- foo\r is a concept.\n- foo\r belongs to set s\n- bar is real\r\n## Related facts\n- f\r\n`",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\r\nignored\n\n## Relevant passages\nintro\rSession ID: open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2\r\nkept\n\n## Relevant entities\n### foo\r\n- bar is real\r\n\n## Related facts\n- f",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 524,
+        "history_chars": 0,
+        "passages_in": 2,
+        "passages_dropped": 1,
+        "passages_capped": 0,
+        "entity_lines_removed": 2,
+        "budget_trimmed": 0,
+        "chars_out": 193
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "astral_chars_counted_as_code_points",
+    "note": "caps and budgets count code points (Python len), not UTF-16 units",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": 400,
+    "context_chars": 1200,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀\n…[+2647 chars]\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 \n\nemoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀 emoji 😀\n…[+2647 chars]\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 7006,
+        "history_chars": 0,
+        "passages_in": 3,
+        "passages_dropped": 0,
+        "passages_capped": 2,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 1183
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "prompt_empty",
+    "note": "an empty prompt still anchors on the empty question marker",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "",
+    "input_text": "The question is: ``\nContext:\n`## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 827,
+        "history_chars": 0,
+        "passages_in": 1,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 447
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "unicode_whitespace_strip",
+    "note": "Python strip() whitespace (\\x1c, \\x85, \\u3000) is stripped; \\ufeff is not",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`　\u001c﻿preamble\n\n## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`\n\n## Active session guidance\nWhen guidance conflicts, prefer the later item.\n- Run ruff.",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "﻿preamble\n\n## Relevant passages\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "## Active session guidance\nWhen guidance conflicts, prefer the later item.\n- Run ruff.",
+      "stats": {
+        "parsed": true,
+        "chars_in": 1109,
+        "history_chars": 0,
+        "passages_in": 1,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 458
+      }
+    }
+  },
+  {
+    "kind": "trim",
+    "name": "session_learning_unicode_boundary",
+    "note": "'# Session learningé' is not a session-learning header (Python \\b is Unicode-aware)",
+    "session_id": "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+    "prompt": "why does `recall_via_http` pop the session_id? Context: federated reads",
+    "input_text": "The question is: `why does `recall_via_http` pop the session_id? Context: federated reads`\nAnswer using this sectioned context. Keep the answer brief and do not use information outside the context.\n\nContext:\n`## Relevant passages\n# Session learningé (session open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2)\n\nnot a note\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.`",
+    "passage_chars": null,
+    "context_chars": null,
+    "expected": {
+      "context": "## Relevant passages\n# Session learningé (session open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2)\n\nnot a note\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n\n## Relevant entities\n### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n\n## Related facts\n- cognee-integrations uses only_context on every prompt.\n- top_k stays at 5.",
+      "guidance": "",
+      "stats": {
+        "parsed": true,
+        "chars_in": 1102,
+        "history_chars": 0,
+        "passages_in": 2,
+        "passages_dropped": 0,
+        "passages_capped": 0,
+        "entity_lines_removed": 7,
+        "budget_trimmed": 0,
+        "chars_out": 543
+      }
+    }
+  },
+  {
+    "kind": "cap_passage",
+    "name": "cap_short_unchanged",
+    "note": "shorter than the limit: unchanged",
+    "input_text": "short",
+    "passage_chars": 1000,
+    "expected": {
+      "text": "short"
+    }
+  },
+  {
+    "kind": "cap_passage",
+    "name": "cap_disabled",
+    "note": "limit 0 disables the cap",
+    "input_text": "Session ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nParagraph 0: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 1: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 2: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 3: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 4: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 5: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 6: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 7: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 8: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 9: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 10: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 11: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 12: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 13: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 14: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 15: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 16: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 17: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 18: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 19: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 20: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 21: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 22: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 23: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 24: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 25: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 26: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 27: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 28: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 29: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 30: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 31: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 32: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 33: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 34: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 35: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 36: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 37: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 38: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 39: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "passage_chars": 0,
+    "expected": {
+      "text": "Session ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nParagraph 0: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 1: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 2: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 3: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 4: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 5: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 6: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 7: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 8: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 9: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 10: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 11: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 12: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 13: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 14: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 15: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 16: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 17: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 18: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 19: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 20: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 21: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 22: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 23: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 24: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 25: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 26: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 27: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 28: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 29: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 30: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 31: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 32: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 33: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 34: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 35: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 36: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 37: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 38: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 39: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  {
+    "kind": "cap_passage",
+    "name": "cap_paragraph",
+    "note": "cut at the last paragraph break before the limit",
+    "input_text": "Session ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nParagraph 0: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 1: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 2: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 3: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 4: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 5: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 6: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 7: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 8: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 9: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 10: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 11: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 12: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 13: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 14: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 15: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 16: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 17: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 18: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 19: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 20: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 21: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 22: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 23: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 24: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 25: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 26: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 27: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 28: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 29: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 30: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 31: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 32: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 33: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 34: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 35: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 36: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 37: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 38: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 39: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "passage_chars": 1000,
+    "expected": {
+      "text": "Session ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nParagraph 0: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 1: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 2: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 3: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 4: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 5: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 6: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nParagraph 7: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n…[+3390 chars]"
+    }
+  },
+  {
+    "kind": "cap_passage",
+    "name": "cap_line_fallback",
+    "note": "no paragraph break in the second half: cut at a line break",
+    "input_text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "passage_chars": 200,
+    "expected": {
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n…[+246 chars]"
+    }
+  },
+  {
+    "kind": "cap_passage",
+    "name": "cap_hard_cut",
+    "note": "no break at all past half the limit: hard cut at the limit",
+    "input_text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ",
+    "passage_chars": 101,
+    "expected": {
+      "text": "word word word word word word word word word word word word word word word word word word word word w\n…[+399 chars]"
+    }
+  },
+  {
+    "kind": "cap_passage",
+    "name": "cap_astral",
+    "note": "astral characters count once",
+    "input_text": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\n\n😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+    "passage_chars": 80,
+    "expected": {
+      "text": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\n…[+52 chars]"
+    }
+  },
+  {
+    "kind": "cap_passage",
+    "name": "cap_tiny_limit",
+    "note": "limit 1: no room for a separator",
+    "input_text": "\n\nabc",
+    "passage_chars": 1,
+    "expected": {
+      "text": "\n…[+5 chars]"
+    }
+  },
+  {
+    "kind": "prune_entities",
+    "name": "prune_mixed",
+    "note": "type and set bullets go, headings left bare go, content stays",
+    "input_text": "### recalled context injection\n- recalled context injection is a concept.\n- recalled context injection is a process.\n- recalled context injection belongs to set session_learnings:claude_18c06095-db5a-4356-9d7b-16127c2f3190.\n- recalled context injection belongs to set session_learnings.\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n### empty node\n- empty node is a node.\n- empty node belongs to set user_sessions_from_cache.\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.\n",
+    "expected": {
+      "text": "### recalled context injection\n- Document chunk mentions recalled context injection: injecting recalled context.\n\n\n### scheduled task\n- scheduled task is a dependency of the nightly sync.",
+      "removed": 7
+    }
+  },
+  {
+    "kind": "prune_entities",
+    "name": "prune_nothing_left",
+    "note": "only noise: empty text",
+    "input_text": "### n\n- n is a concept.\n- n belongs to set s.\n",
+    "expected": {
+      "text": "",
+      "removed": 3
+    }
+  },
+  {
+    "kind": "prune_entities",
+    "name": "prune_type_two_words",
+    "note": "'is a design pattern.' (two-word type) is pruned; 'is a very long thing.' (three) is kept",
+    "input_text": "### x\n- x is a design pattern.\n- x is a very long thing.\n- x is an API_key.\n- x is a node_set.",
+    "expected": {
+      "text": "### x\n- x is a very long thing.\n- x is an API_key.",
+      "removed": 2
+    }
+  },
+  {
+    "kind": "split_passages",
+    "name": "split_markdown_rule_glued",
+    "note": "a markdown rule (blank lines around ---) stays inside its passage",
+    "input_text": "Session ID: open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2\n\nQuestion: earlier\n\nAnswer: run `uv sync` then:\n\n---\n\n- step\n---\nSession ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.\n---\n# Session learning — 2026-09-18 (session open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2)\n\nThe dify-sdk plugin lives in integrations/dify-sdk.",
+    "expected": {
+      "passages": [
+        "Session ID: open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2\n\nQuestion: earlier\n\nAnswer: run `uv sync` then:\n\n---\n\n- step",
+        "Session ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\n\nQuestion: other\n\nAnswer: use `--graph`; see ```python\nx = 1\n```.",
+        "# Session learning — 2026-09-18 (session open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2)\n\nThe dify-sdk plugin lives in integrations/dify-sdk."
+      ],
+      "session_ids": [
+        "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2",
+        "claude_18c06095-db5a-4356-9d7b-16127c2f3190",
+        "open_claw_7f3c2a9e-1b4d-4e8a-9c21-5d6e7f8a9b0c__2"
+      ]
+    }
+  },
+  {
+    "kind": "split_passages",
+    "name": "split_header_after_blank",
+    "note": "a piece after a blank-line separator that opens with a document header is its own passage",
+    "input_text": "Cognee blog: memory for agents.\n\nParagraph two of the post.\n---\n\n  Session ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\nbody\n---\n\n\n",
+    "expected": {
+      "passages": [
+        "Cognee blog: memory for agents.\n\nParagraph two of the post.",
+        "\n  Session ID: claude_18c06095-db5a-4356-9d7b-16127c2f3190\nbody\n---"
+      ],
+      "session_ids": [
+        "",
+        "claude_18c06095-db5a-4356-9d7b-16127c2f3190"
+      ]
+    }
+  }
+]
