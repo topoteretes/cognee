@@ -1,6 +1,7 @@
 """Shared utilities for DLT ingestion."""
 
 import json
+import os
 
 # A dlt source sets this attribute to opt into the "document" ingestion path:
 # each row becomes a text document that flows through normal cognify (LLM entity
@@ -79,6 +80,47 @@ def document_source_tag(item) -> str | None:
     """Return the document-source tag a dlt source opted into, else ``None``."""
     tag = getattr(item, DOCUMENT_SOURCE_ATTR, None)
     return tag if isinstance(tag, str) and tag else None
+
+
+def document_write_disposition(source) -> str | None:
+    """The write disposition a document source runs under when the caller names none.
+
+    ``None``, each resource's own, when every selected resource declares
+    ``merge``; ``"replace"`` otherwise. dlt reports a resource that declares
+    nothing as ``append``, the same as one that declares it, so only a declared
+    ``merge`` can be told apart and kept; ``append`` needs the caller's argument.
+    """
+    selected = getattr(source, "selected_resources", None)
+    resources = list(selected.values()) if selected is not None else [source]
+    return None if resources and all(_declares_merge(r) for r in resources) else "replace"
+
+
+def _declares_merge(resource) -> bool:
+    disposition = getattr(resource, "write_disposition", None)
+    if isinstance(disposition, dict):  # merge with a strategy: {"disposition": "merge", ...}
+        disposition = disposition.get("disposition")
+    return disposition == "merge"
+
+
+def apply_dlt_runtime_defaults() -> None:
+    """Set cognee's defaults for dlt's own settings, as environment variables.
+
+    Runs when ``ingest_dlt_source`` is imported, before anything reads dlt's
+    configuration: dlt starts its telemetry on the first read (building a
+    ``sql_database`` source is one) and never re-reads the setting. A value already in the
+    environment is kept; one set only in dlt's ``config.toml`` is not seen
+    (reading it would start the telemetry) and is overridden. A process that
+    used dlt before importing cognee has already started dlt's telemetry, and
+    this does not stop it: import cognee first, or set the variable yourself.
+
+    - ``RUNTIME__DLTHUB_TELEMETRY=false`` when ``TELEMETRY_DISABLED`` is set, so
+      cognee's switch also stops the events dlt sends to its own endpoint.
+    - ``LOAD__DELETE_COMPLETED_JOBS=true``: completed load packages hold every
+      row's full text under dlt's pipelines directory, which no forget reaches.
+    """
+    if os.getenv("TELEMETRY_DISABLED"):
+        os.environ.setdefault("RUNTIME__DLTHUB_TELEMETRY", "false")
+    os.environ.setdefault("LOAD__DELETE_COMPLETED_JOBS", "true")
 
 
 def metadata_source(metadata) -> str | None:

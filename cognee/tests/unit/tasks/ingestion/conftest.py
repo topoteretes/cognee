@@ -37,8 +37,10 @@ def staging(tmp_path, monkeypatch):
         lambda **kw: pipeline_factory(pipelines_dir=str(tmp_path / "pipelines"), **kw),
     )
 
-    def source(name, rows, tag="notion"):
-        @dlt.resource(name=name, primary_key="id")
+    def source(name, rows, tag="notion", declares=None, key="id"):
+        hints = {"write_disposition": declares} if declares else {}
+
+        @dlt.resource(name=name, primary_key=key, **hints)
         def documents():
             yield from rows
 
@@ -47,13 +49,14 @@ def staging(tmp_path, monkeypatch):
         setattr(resource, PIPELINE_SCOPE_ATTR, name)
         return resource
 
-    async def run(name, rows, tag="notion"):
+    async def run(name, rows, tag="notion", write_disposition="merge", declares=None, key="id"):
         return await ingest.ingest_dlt_source(
-            source(name, rows, tag),
+            source(name, rows, tag, declares, key),
             "brain",
             primary_key="id",
-            write_disposition="merge",
+            write_disposition=write_disposition,
             max_rows_per_table=0,
         )
 
+    run.source = source
     return run

@@ -44,8 +44,9 @@ from .dlt_utils import (
     STRUCTURE_COLUMN,
     column_selected,
     document_source_tag,
+    document_write_disposition,
 )
-from .ingest_dlt_source import ingest_dlt_source
+from .ingest_dlt_source import ingest_dlt_source, require_valid_write_disposition
 
 logger = get_logger("resolve_dlt_sources")
 
@@ -155,7 +156,10 @@ async def resolve_dlt_sources(
         return data, None
 
     primary_key = kwargs.get("primary_key", None)
+    # "replace" when the caller named none. Document sources then follow what
+    # their resources declare instead (document_write_disposition).
     write_disposition = kwargs.get("write_disposition", "replace")
+    write_disposition_passed = "write_disposition" in kwargs
     query = kwargs.get("query", None)
     max_rows_per_table = kwargs.get("max_rows_per_table")
     column_value_columns = kwargs.get("column_value_columns")
@@ -208,15 +212,20 @@ async def resolve_dlt_sources(
     relational_items = [i for i in dlt_items if not document_source_tag(i)]
 
     # --- Document-tagged sources: one text document per row -----------------
-    # Document sources honour the caller's write_disposition so both sync models
-    # work: "replace" for snapshot sources (Slack, each run rewrites staging with
-    # exactly the rows currently visible) and "merge" (+ a hard_delete tombstone
-    # column) for incremental sources that emit their own deletions (Google
-    # Drive's Changes API, Notion's re-walk against the ids it saw last run).
+    # Both sync models work: "replace" for snapshot sources (each run rewrites
+    # staging with exactly the rows currently visible) and "merge" (+ a
+    # hard_delete tombstone column) for incremental sources that emit their own
+    # deletions (Google Drive's Changes API, Notion's re-walk against the ids it
+    # saw last run). The caller's write_disposition wins; without one a source
+    # whose resources declare "merge" keeps it, and any other is replaced: an
+    # incremental run stages only the changed rows, so replacing them would make
+    # orphan cleanup forget every document the run did not touch.
     # Either way the whole set is read back (max_rows_per_table=0) so orphan
     # cleanup can forget rows that dropped out of the current corpus.
-    # write_disposition/primary_key default to "replace"/"id" (see the kwargs
-    # resolution above).
+    # primary_key defaults to "id".
+    # Checked here, before any staging run: ingest_dlt_source takes None as
+    # "the resources' own", which a caller's value must never reach it as.
+    require_valid_write_disposition(write_disposition)
     document_data_items: list[DataItem] = []
     document_fresh_ids: set[UUID] = set()
     document_scopes: set[tuple[str, str]] = set()
@@ -226,7 +235,9 @@ async def resolve_dlt_sources(
             dlt_item,
             dataset_name,
             primary_key=primary_key or "id",
-            write_disposition=write_disposition,
+            write_disposition=write_disposition
+            if write_disposition_passed
+            else document_write_disposition(dlt_item),
             max_rows_per_table=0,
         )
         loaded_tables = getattr(rows, "loaded_tables", {row.table_name for row in rows})
