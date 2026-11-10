@@ -30,18 +30,16 @@ def request_deferral_reason(kwargs: dict) -> str | None:
 
     ``node_name`` with the default ``NodeSet`` stays on hybrid: 1-hop neighbours
     are filtered to that set in ``build_entities``. A custom ``node_type`` always
-    defers so graph completion can honour the type filter.
+    defers so graph completion can honour the type filter. ``node_name`` with
+    ``node_type=None`` is not a deferral reason: no type can apply it, so the
+    factory refuses it (``node_name_scope.reject_unsupported_node_name``).
 
     Explicit ``wide_search_top_k`` / ``triplet_distance_penalty`` are not
     deferral reasons; ``reject_hybrid_graph_only_knobs`` errors instead.
     """
-    node_name = kwargs.get("node_name")
     node_type = kwargs.get("node_type", NodeSet)
-    custom_node_type = node_type is not None and node_type is not NodeSet
-    untyped_named_scope = bool(node_name) and node_type is None
-    if custom_node_type or untyped_named_scope:
-        type_name = getattr(node_type, "__name__", repr(node_type))
-        return f"node_type={type_name} is not NodeSet"
+    if node_type is not None and node_type is not NodeSet:
+        return f"node_type={node_type.__name__} is not NodeSet"
 
     if kwargs.get("neighborhood_depth") is not None:
         return "neighborhood_depth is set"

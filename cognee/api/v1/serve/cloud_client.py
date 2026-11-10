@@ -8,6 +8,7 @@ from uuid import UUID
 
 import aiohttp
 
+from cognee.modules.conflicts.models import ConflictDetail
 from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
@@ -24,6 +25,21 @@ def _text_upload_filename(text: str) -> str:
     (FileContentHashingError 409s).
     """
     return create_text_data(text).get_metadata()["name"]
+
+
+def remote_graph_schema(graph_model: Any) -> dict | None:
+    """The ``graph_model`` a remote remember or cognify sends: the model as the JSON
+    schema the server rebuilds with ``graph_schema_to_graph_model``, typed ``Edge`` and
+    ``FromIdentity`` fields included, or None for the server's default ``KnowledgeGraph``.
+
+    A model the LLM extraction could not fill raises here, before anything is uploaded.
+    """
+    from cognee.shared.data_models import KnowledgeGraph
+    from cognee.shared.graph_model_utils import graph_model_to_graph_schema
+
+    if graph_model is None or graph_model is KnowledgeGraph:
+        return None
+    return graph_model_to_graph_schema(graph_model)
 
 
 def _failed_update_result(body: str) -> dict | None:
@@ -146,10 +162,14 @@ class CloudClient:
 
     async def remember(self, data: Any, dataset_name: str = "main_dataset", **kwargs) -> dict:
         """POST /api/v1/remember — ingest data and build knowledge graph."""
+        # Resolved first: a model the route cannot carry raises before any upload.
+        graph_schema = remote_graph_schema(kwargs.get("graph_model"))
         session = await self._get_session()
 
         form = aiohttp.FormData()
         form.add_field("datasetName", dataset_name)
+        if graph_schema is not None:
+            form.add_field("graph_model", json.dumps(graph_schema))
 
         if kwargs.get("dataset_id"):
             form.add_field("datasetId", str(kwargs["dataset_id"]))
@@ -635,9 +655,12 @@ class CloudClient:
 
     async def cognify(self, datasets: Any = None, **kwargs) -> dict:
         """POST /api/v1/cognify — build the knowledge graph."""
+        graph_schema = remote_graph_schema(kwargs.get("graph_model"))
         session = await self._get_session()
 
         payload: dict = {}
+        if graph_schema is not None:
+            payload["graph_model"] = graph_schema
         if datasets:
             payload["datasets"] = (
                 [str(d) for d in datasets] if isinstance(datasets, list) else [str(datasets)]
@@ -737,3 +760,49 @@ class CloudClient:
                 body = await resp.text()
                 raise RuntimeError(f"Remote forget failed ({resp.status}): {body}")
             return await resp.json()
+
+    async def list_conflicts(
+        self, dataset_id: UUID, *, status: str | None = None
+    ) -> list[ConflictDetail]:
+        """GET /api/v1/conflicts — a dataset's conflicts with their competing facts."""
+        session = await self._get_session()
+
+        params = {"dataset_id": str(dataset_id)}
+        if status:
+            params["status"] = status
+
+        async with session.get(
+            f"{self.service_url}/api/v1/conflicts",
+            params=params,
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote list_conflicts failed ({resp.status}): {body}")
+            payload = await resp.json()
+        if not isinstance(payload, list):
+            raise RuntimeError("Remote list_conflicts returned an invalid conflict list")
+        return [ConflictDetail.model_validate(item) for item in payload]
+
+    async def resolve_conflict(
+        self,
+        conflict_id: UUID,
+        *,
+        dataset_id: UUID,
+        selected_fact_id: UUID,
+        reason: str | None = None,
+    ) -> ConflictDetail:
+        """POST /api/v1/conflicts/{conflict_id}/resolve — accept one competing fact."""
+        session = await self._get_session()
+
+        payload: dict = {"datasetId": str(dataset_id), "selectedFactId": str(selected_fact_id)}
+        if reason is not None:
+            payload["reason"] = reason
+
+        async with session.post(
+            f"{self.service_url}/api/v1/conflicts/{conflict_id}/resolve",
+            json=payload,
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote resolve_conflict failed ({resp.status}): {body}")
+            return ConflictDetail.model_validate(await resp.json())

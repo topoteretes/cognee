@@ -664,7 +664,7 @@ async def recall(
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
             return results
 
-        async with record_operation("recall", user=user, session_id=session_id):
+        async with record_operation("recall", user=user, session_ids=[session_id]):
             merged: list[RecallResponse] = []
 
             async def _run_session() -> list[RecallResponse]:
@@ -744,7 +744,8 @@ async def recall(
                 # Cypher off means no Cypher types. Keyed on LLM availability, not on
                 # the extractor that built the graph. An explicit query_type is not
                 # rerouted; with no LLM a completion type runs with only_context=True.
-                constraints = RoutingConstraints.from_config(llm_config)
+                # A node_name filter also limits routing to the types that apply it.
+                constraints = RoutingConstraints.from_config(llm_config, node_name=node_name)
                 fallback_decision = default_route(constraints)
 
                 # routed_rule is set only when the router chose the type, so the

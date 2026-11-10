@@ -393,9 +393,10 @@ def get_sessions_router() -> APIRouter:
         caller, their child agents, and dataset-shared sessions. On top
         of that base scope, a tenant owner/admin (same check
         ``GET /tenants/{id}/users`` uses) additionally sees every
-        member's spend. A regular member — or anyone with no tenant,
-        i.e. single-user/local mode — just keeps the base scope rather
-        than being denied outright.
+        member's spend on the tenant's own datasets; a member's sessions
+        in another tenant, or with no dataset, do not appear. A regular
+        member — or anyone with no tenant, i.e. single-user/local mode —
+        just keeps the base scope rather than being denied outright.
 
         ## Query Parameters
         - **range** (Literal['24h', '7d', '30d', 'all']): Time window filtered on last_activity_at:
@@ -459,7 +460,15 @@ def get_sessions_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ):
-        """Get session detail — GET /api/v1/sessions/{session_id}.
+        """Get one session with its recent Q&As and trace steps.
+
+        Returns the session record plus label (first question cut to 120 characters, else the
+        first trace's origin function, else null), msg_count and tool_calls (counts over all
+        Q&As and trace steps), and qas and traces trimmed to the last 20 entries.
+        A session is visible when the caller or one of their child agents owns it, or when
+        its dataset is readable by the caller; otherwise 404. When the session cache is
+        unavailable, qas and traces are empty, label is null and both counts are 0; when only
+        the trace read fails, qas are still returned.
 
         ## Path Parameters
         - **session_id** (str): Client-supplied session identifier; the same value passed as

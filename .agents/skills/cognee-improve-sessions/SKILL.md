@@ -65,7 +65,7 @@ spends any LLM or embedding cost, and reports one `StageResult`.
 | 6 | `update_user_preferences` | Folds rated turns into per-user preferences | `session_ids`, `PERSONALIZATION_ENABLED=true` (default false) |
 | 7 | `build_truth_subspace` | Builds the truth subspace from distilled learnings | `session_ids`, `build_truth_subspace=True`, a Ladybug graph |
 | 8 | `review_conflicts` | Reviews dated source facts and stores conflicts | on by default (`review_conflicts=False` or `IMPROVE_REVIEW_CONFLICTS=false` turns it off), an LLM, edge evidence |
-| 9 | `global_context_index` | Bucket and root summaries for global questions | `build_global_context_index=True` |
+| 9 | `global_context_index` | Bucket and root summaries for global questions; also the rows dataset routing scores an unscoped search on | on by default (`build_global_context_index=False` or `IMPROVE_GLOBAL_CONTEXT_INDEX=false` turns it off) |
 
 Stages 1–7 need `session_ids`; 8–9 work on the graph alone. The order
 matters: 4 feeds 5, 5 feeds 7, and 7 runs before 8.
@@ -95,8 +95,8 @@ CLI, and `RememberResult.improve`.
 |---|---|
 | `no_session_ids` | Session stage, no `session_ids` passed |
 | `disabled_by_config` | Listed in `IMPROVE_STAGES_DISABLED` |
-| `opt_in_disabled` | Pass `build_truth_subspace=True` / `build_global_context_index=True` |
-| `turned_off` | Conflict review (on by default) was switched off by `review_conflicts=False` or `IMPROVE_REVIEW_CONFLICTS=false` |
+| `opt_in_disabled` | Pass `build_truth_subspace=True` |
+| `turned_off` | An on-by-default stage was switched off: conflict review by `review_conflicts=False` or `IMPROVE_REVIEW_CONFLICTS=false`, the global context index by `build_global_context_index=False` or `IMPROVE_GLOBAL_CONTEXT_INDEX=false` |
 | `personalization_disabled` | Set `PERSONALIZATION_ENABLED=true` |
 | `auto_feedback_disabled` | Stage 4 needs `CACHING=true` and `AUTO_FEEDBACK=true` |
 | `no_llm_configured` | Stages 4, 5, 8 draft text with an LLM; none configured |

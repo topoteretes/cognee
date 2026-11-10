@@ -1,4 +1,5 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.only_context_prompt import build_only_context_prompt
 from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
 from cognee.modules.retrieval.utils.evidence import (
@@ -16,6 +17,7 @@ from cognee.modules.search.methods.hybrid_deferral import (
     hybrid_deferral_reason,
     reject_hybrid_graph_only_knobs,
 )
+from cognee.modules.search.methods.node_name_scope import lucky_search_types
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations.select_search_type import select_search_type
 from cognee.modules.search.types import SearchType
@@ -32,7 +34,12 @@ async def _effective_search_type(
         if graph_is_empty:
             resolved = SearchType.HYBRID_COMPLETION
         else:
-            resolved = await select_search_type(query_text)
+            resolved = await select_search_type(
+                query_text,
+                allowed_search_types=lucky_search_types(
+                    kwargs.get("node_type", NodeSet), kwargs.get("node_name")
+                ),
+            )
         if (
             is_document_name_scope(kwargs.get("node_type"), kwargs.get("node_name"))
             and resolved not in FEELING_LUCKY_DOCUMENT_NAME_SEARCH_TYPES

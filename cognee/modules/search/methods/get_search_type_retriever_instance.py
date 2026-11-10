@@ -1,4 +1,3 @@
-import os
 from collections.abc import Callable
 
 from cognee.base_config import get_base_config
@@ -44,14 +43,17 @@ from cognee.modules.search.methods.document_name_scope import (
     DOCUMENT_NAME_FILTER_SEARCH_TYPES,
     is_document_name_scope,
 )
+from cognee.modules.search.methods.node_name_scope import (
+    lucky_search_types,
+    reject_unsupported_node_name,
+)
 from cognee.modules.search.operations import select_search_type
+from cognee.modules.search.search_type_policy import CYPHER_SEARCH_TYPES, cypher_queries_allowed
 from cognee.modules.search.types import SearchType
 from cognee.modules.search.types.SearchType import DEPRECATED_SEARCH_TYPES
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
-
-CYPHER_SEARCH_TYPES = (SearchType.CYPHER, SearchType.NATURAL_LANGUAGE)
 
 # Returned to the caller: says what to change, without detailing the risk.
 CYPHER_DISABLED_MESSAGE = "{search_type} search is disabled by default for security reasons."
@@ -67,11 +69,6 @@ CYPHER_DISABLED_LOG_MESSAGE = (
     "database, up to remote code execution on the server. Set ALLOW_CYPHER_QUERY=true only "
     "when every user of this deployment is trusted."
 )
-
-
-def cypher_queries_allowed() -> bool:
-    """Raw Cypher (CYPHER, NATURAL_LANGUAGE) is opt-in through ALLOW_CYPHER_QUERY=true."""
-    return os.getenv("ALLOW_CYPHER_QUERY", "false").strip().lower() in ("true", "1", "yes")
 
 
 def _hybrid_lane_top_k(config: dict, key: str, search_top_k: int | None) -> int | None:
@@ -155,6 +152,7 @@ async def get_search_type_retriever_instance(
             ChunksRetriever,
             {
                 "top_k": top_k,
+                "node_type": node_type,
                 "node_name": None if document_name_scope else node_name,
                 "node_name_filter_operator": node_name_filter_operator,
                 "document_name": document_name,
@@ -187,6 +185,7 @@ async def get_search_type_retriever_instance(
                 "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
                 "include_references": include_references,
+                "node_type": node_type,
                 "node_name": None if document_name_scope else node_name,
                 "node_name_filter_operator": node_name_filter_operator,
                 "document_name": document_name,
@@ -453,9 +452,12 @@ async def get_search_type_retriever_instance(
             include_references=include_references,
         )
 
-    # If the query type is FEELING_LUCKY, select the search type intelligently
+    # If the query type is FEELING_LUCKY, select the search type intelligently,
+    # among the types that honour the node_name filter when one is set.
     if query_type is SearchType.FEELING_LUCKY:
-        query_type = await select_search_type(query_text)
+        query_type = await select_search_type(
+            query_text, allowed_search_types=lucky_search_types(node_type, node_name)
+        )
         if document_name_scope and query_type not in DOCUMENT_NAME_FILTER_SEARCH_TYPES:
             logger.warning(
                 "FEELING_LUCKY chose %s, which cannot honor a TextDocument name filter; "
@@ -497,6 +499,10 @@ async def get_search_type_retriever_instance(
         # Check if retriever info is found for the given query type
         if not retriever_info:
             raise UnsupportedSearchTypeError(str(query_type))
+
+        # A filter the retriever would drop or mis-apply is an error, not a silent
+        # unscoped (or empty) result.
+        reject_unsupported_node_name(query_type, node_type, node_name)
 
         # If it exists unpack the retriever class and its initialization arguments
         retriever_cls, retriever_args = retriever_info
