@@ -67,12 +67,20 @@ class _FakeEngine:
 
 @pytest.fixture(autouse=True)
 def kept_evidence_calls(monkeypatch):
-    """Record the evidence re-homing the rollback asks for; the sidecar has its
-    own session, which the fake relational engine above does not serve."""
-    calls = []
+    """Record the evidence re-homing the rollback asks for; the fake session
+    above does not run the UPDATE itself."""
 
-    async def _keep(dataset_id, pipeline_run_id, data_ids):
+    class _Calls(list):
+        sessions: list
+
+    calls = _Calls()
+    calls.sessions = []
+
+    async def _keep(session, dataset_id, pipeline_run_id, data_ids):
+        # Inside the rollback's open transaction, so it commits with the stamp reset.
+        assert session.committed is False
         calls.append((dataset_id, pipeline_run_id, set(data_ids)))
+        calls.sessions.append(session)
         return 0
 
     monkeypatch.setattr(rollback_module, "keep_completed_items_evidence", _keep)
@@ -441,8 +449,9 @@ async def test_ledger_rollback_removes_only_the_unstamped_items_of_the_run(
     )
     assert str(dataset_id) not in unfinished_record.pipeline_status["cognify_pipeline"]
     assert session_mutation.committed is True
-    # The stamped item's evidence stays readable with it.
+    # The stamped item's evidence stays readable with it, in the same transaction.
     assert kept_evidence_calls == [(dataset_id, pipeline_run_id, {done_id})]
+    assert kept_evidence_calls.sessions == [session_mutation]
 
 
 @pytest.mark.asyncio
@@ -515,6 +524,7 @@ async def test_graph_provenance_rollback_keeps_completed_documents(
     assert str(dataset_id) not in unfinished_record.pipeline_status["cognify_pipeline"]
     assert reset_session.committed is True
     assert kept_evidence_calls == [(dataset_id, pipeline_run_id, {done_id})]
+    assert kept_evidence_calls.sessions == [reset_session]
 
 
 def _entry(run_info_cls, pipeline_run_id, dataset_id, data_id, **fields):

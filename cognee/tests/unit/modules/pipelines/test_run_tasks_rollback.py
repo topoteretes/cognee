@@ -313,7 +313,9 @@ async def test_run_tasks_tells_the_rollback_whether_the_writes_are_durable(
     async def _rollback_handler(**kwargs):
         rollback_calls.append(kwargs)
 
-    monkeypatch.setattr(run_tasks_module, "writes_durable_before_push", lambda: not s3_storage)
+    monkeypatch.setattr(
+        run_tasks_module, "writes_durable_before_push", lambda *_engines: not s3_storage
+    )
     monkeypatch.setattr(run_tasks_module, "get_relational_engine", lambda: _FakeEngine(dataset))
     monkeypatch.setattr(
         run_tasks_module,
@@ -404,3 +406,27 @@ async def test_run_tasks_marks_cancelled_run_as_errored_instead_of_stuck(monkeyp
     assert len(yielded) == 2
     assert isinstance(yielded[0], PipelineRunStarted)
     assert isinstance(yielded[1], PipelineRunErrored)
+
+
+@pytest.mark.parametrize(
+    "storage_backend, graph_attrs, relational_attrs, durable",
+    [
+        ("local", {"temp_graph_file": "x"}, {"temp_db_file": "y"}, True),
+        ("s3", {}, {}, True),  # Neo4j / Postgres: nothing to push
+        ("s3", {"temp_graph_file": "x"}, {}, False),  # Ladybug on S3
+        ("s3", {}, {"temp_db_file": "y"}, False),  # SQLite on S3
+    ],
+)
+def test_writes_are_durable_unless_an_embedded_database_waits_for_its_push(
+    monkeypatch, storage_backend, graph_attrs, relational_attrs, durable
+):
+    """Only an embedded database's local copy waits for the S3 push; server
+    databases on S3 storage are durable at once, so their runs keep completed items."""
+    monkeypatch.setenv("STORAGE_BACKEND", storage_backend)
+
+    assert (
+        run_tasks_module.writes_durable_before_push(
+            SimpleNamespace(**graph_attrs), SimpleNamespace(**relational_attrs)
+        )
+        is durable
+    )

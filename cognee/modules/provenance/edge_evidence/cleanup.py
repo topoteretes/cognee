@@ -3,7 +3,8 @@
 Ingestion only appends to ``provenance_edge_evidence``; this module is the one
 writer that removes or rewrites rows. A failed run's rollback keeps the
 documents the run completed (``cognee/modules/cognify/rollback.py``), and
-``keep_completed_items_evidence`` keeps their evidence readable with them.
+``keep_completed_items_evidence`` keeps their evidence readable with them, inside
+the rollback's own transaction.
 Rows become garbage in two situations:
 
 - the document is deleted (``forget()``, ``datasets.delete_data``,
@@ -13,14 +14,15 @@ Rows become garbage in two situations:
   its own pipeline run.
 
 Lookups already exclude rows whose ``Data`` row no longer exists (inner join),
-so the sweep is hygiene against unbounded growth, not correctness. It never
-raises: deletion must not fail because of a sidecar.
+so the sweep is hygiene against unbounded growth, not correctness. The sweep
+never raises: deletion must not fail because of a sidecar.
 """
 
 from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import delete, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.shared.logging_utils import get_logger
@@ -59,7 +61,7 @@ async def delete_edge_evidence(dataset_id: UUID, data_id: UUID | None = None) ->
 
 
 async def keep_completed_items_evidence(
-    dataset_id: UUID, pipeline_run_id: UUID, data_ids: set[UUID]
+    session: AsyncSession, dataset_id: UUID, pipeline_run_id: UUID, data_ids: set[UUID]
 ) -> int:
     """Keep the evidence of the documents a failed run completed readable.
 
@@ -70,30 +72,19 @@ async def keep_completed_items_evidence(
     detached from the run (``pipeline_run_id`` cleared, the form a row written
     outside a run has) and observed now, as a completed run's rows are observed
     at its completion, so conflict review sees them as new since its last
-    review. Never raises: the sidecar must not fail the rollback.
+    review. Runs in the caller's session and does not commit: the rollback
+    commits it with the stamp reset, so a failure fails the rollback instead of
+    hiding the kept documents' evidence for good.
     """
     if not data_ids:
         return 0
-    try:
-        engine = get_relational_engine()
-        async with engine.get_async_session() as session:
-            result = await session.execute(
-                update(ProvenanceEdgeEvidence)
-                .where(
-                    ProvenanceEdgeEvidence.dataset_id == dataset_id,
-                    ProvenanceEdgeEvidence.pipeline_run_id == pipeline_run_id,
-                    ProvenanceEdgeEvidence.data_id.in_(list(data_ids)),
-                )
-                .values(pipeline_run_id=None, created_at=datetime.now(timezone.utc))
-            )
-            await session.commit()
-            return result.rowcount or 0
-    except Exception as error:
-        logger.warning(
-            "Unable to keep edge evidence of the completed items of run %s (dataset %s): %s",
-            pipeline_run_id,
-            dataset_id,
-            error,
-            exc_info=True,
+    result = await session.execute(
+        update(ProvenanceEdgeEvidence)
+        .where(
+            ProvenanceEdgeEvidence.dataset_id == dataset_id,
+            ProvenanceEdgeEvidence.pipeline_run_id == pipeline_run_id,
+            ProvenanceEdgeEvidence.data_id.in_(list(data_ids)),
         )
-        return 0
+        .values(pipeline_run_id=None, created_at=datetime.now(timezone.utc))
+    )
+    return result.rowcount or 0

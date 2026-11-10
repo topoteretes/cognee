@@ -381,7 +381,7 @@ async def test_cognify_rollback_keeps_nothing_when_the_push_to_s3_fails(
     async def _push_fails(_self):
         raise OSError("S3 push failed")
 
-    monkeypatch.setattr(run_tasks_module, "writes_durable_before_push", lambda: False)
+    monkeypatch.setattr(run_tasks_module, "writes_durable_before_push", lambda *_: False)
     monkeypatch.setattr(LadybugAdapter, "push_to_s3", _push_fails, raising=False)
 
     with pytest.raises(CognifyFailedError, match="S3 push failed"):

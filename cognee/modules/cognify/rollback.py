@@ -174,8 +174,8 @@ async def cognify_rollback_handler(
     (``run_tasks_data_item``), so a kept document is never half-written, and
     the next run re-extracts only what failed instead of the whole run at full
     LLM cost. The kept documents' edge evidence is detached from the run
-    (``keep_completed_items_evidence``), since lookups hide the rows of a run
-    that did not complete. Startup recovery relies on the same rule: a later
+    (``keep_completed_items_evidence``, in the transaction that resets the
+    statuses), since lookups hide the rows of a run that did not complete. Startup recovery relies on the same rule: a later
     run may already have trusted those completed documents and skipped them,
     so deleting them would leave the dataset with holes nothing refills.
 
@@ -240,8 +240,8 @@ async def cognify_rollback_handler(
                 await _reset_pipeline_status(
                     session, target_data_ids - kept_data_ids, dataset_id, pipeline_name
                 )
+                await keep_completed_items_evidence(session, dataset_id, run_uuid, kept_data_ids)
                 await session.commit()
-            await keep_completed_items_evidence(dataset_id, run_uuid, kept_data_ids)
 
             logger.info(
                 "Graph-provenance %s rollback completed for run %s (dataset=%s, user=%s).",
@@ -372,9 +372,9 @@ async def cognify_rollback_handler(
         await _reset_pipeline_status(
             session, target_data_ids - kept_data_ids, dataset_id, pipeline_name
         )
+        await keep_completed_items_evidence(session, dataset_id, run_uuid, kept_data_ids)
 
         await session.commit()
-    await keep_completed_items_evidence(dataset_id, run_uuid, kept_data_ids)
 
     logger.info(
         "%s rollback completed for run %s (dataset=%s, user=%s, rows=%d nodes/%d edges).",

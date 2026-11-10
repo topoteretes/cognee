@@ -64,15 +64,21 @@ async def close_run_with_cause(run: AsyncGenerator, cause: Exception) -> None:
         _close_cause.reset(token)
 
 
-def writes_durable_before_push() -> bool:
+def writes_durable_before_push(graph_engine: Any, relational_engine: Any) -> bool:
     """Whether a run's writes are durable as soon as they are written.
 
-    With ``STORAGE_BACKEND=s3`` the embedded graph and relational databases are
-    local copies that reach S3 only through the ``push_to_s3`` after the item
-    loop (the adapters' own condition), so until that push a run's writes exist
-    in this process alone; on any other storage they are durable at once.
+    With ``STORAGE_BACKEND=s3`` an embedded graph or relational database
+    (Ladybug, SQLite) is a local temp copy that reaches S3 only through the
+    ``push_to_s3`` after the item loop, so until that push a run's writes exist
+    in this process alone. This is the condition the adapters' ``push_to_s3``
+    checks. Server databases (Neo4j, Postgres) and any other storage are
+    durable at once.
     """
-    return os.getenv("STORAGE_BACKEND", "").lower() != "s3"
+    if os.getenv("STORAGE_BACKEND", "").lower() != "s3":
+        return True
+    return not (
+        hasattr(graph_engine, "temp_graph_file") or hasattr(relational_engine, "temp_db_file")
+    )
 
 
 async def run_tasks(
@@ -150,8 +156,9 @@ async def run_tasks(
         items_failed = False
         # Whether this run's writes are durable: the rollback keeps the items the
         # run completed only then, since a kept item must still be there for the
-        # next process. Becomes true after the S3 push below where one is needed.
-        writes_durable = writes_durable_before_push()
+        # next process. Set once the dataset's engines are known; becomes true
+        # after the S3 push below where one is needed.
+        writes_durable = False
         async with AsyncExitStack() as stack:
             try:
                 yield PipelineRunStarted(
@@ -174,6 +181,9 @@ async def run_tasks(
                     )
                 )
                 database_ready = True
+                writes_durable = writes_durable_before_push(
+                    await get_graph_engine(), get_relational_engine()
+                )
                 if not isinstance(data, list):
                     data = [data]
 
