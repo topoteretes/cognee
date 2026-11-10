@@ -33,6 +33,7 @@ from cognee.modules.integrations.credentials import (
     get_credential_by_account,
     revoke_credential_by_account,
 )
+from cognee.modules.integrations.ingestion import sync_is_paused
 from cognee.modules.integrations.linear.agent_session import handle_agent_session
 from cognee.modules.integrations.linear.sync import (
     SEEDED_KEY,
@@ -100,8 +101,11 @@ async def _sync_teams_named_by(credential, payload: dict) -> None:
 
     Skipped until the connection has finished a full pass, so an upgraded
     install never starts a backfill from a webhook, and for teams the user did
-    not select. A delivery that arrives while a sync runs is queued.
+    not select, and while a pause holds the connection. A delivery that arrives while
+    a sync runs is queued.
     """
+    if await sync_is_paused(_PROVIDER, credential, f"{payload.get('type')} delivery"):
+        return
     metadata = credential.provider_metadata or {}
     if not metadata.get(SEEDED_KEY):
         logger.info(

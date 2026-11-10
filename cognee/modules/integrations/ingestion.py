@@ -10,7 +10,8 @@ of the providers' client libraries.
 import asyncio
 import json
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from importlib import import_module
@@ -450,6 +451,41 @@ def sync_is_running(provider: str, account_id: str) -> bool:
     return (provider, str(account_id)) in _running_syncs
 
 
+async def sync_is_paused(provider: str, credential: Any, source: str) -> bool:
+    """True, and logged, when a pause holds this connection: its sync policy or its owner's
+    default. Webhooks and the install hook call it before a sync, as the scheduler and
+    the manual route do, so a paused connection indexes nothing new (SDK-1434)."""
+    from cognee.modules.integrations.credentials import owner_principal_id
+    from cognee.modules.integrations.sync_policy import get_sync_pause_level
+
+    level = await get_sync_pause_level(
+        credential_id=credential.id, principal_id=owner_principal_id(credential)
+    )
+    if level is not None:
+        logger.info(
+            "%s %s for connection %s dropped: sync is paused at the %s level",
+            provider,
+            source,
+            credential.id,
+            level,
+        )
+    return level is not None
+
+
+@contextmanager
+def exclusive_sync(provider: str, account_id: str) -> Iterator[bool]:
+    """Mark the account as syncing for the block; yields False when one already runs."""
+    key = (provider, str(account_id))
+    if key in _running_syncs:
+        yield False
+        return
+    _running_syncs.add(key)
+    try:
+        yield True
+    finally:
+        _running_syncs.discard(key)
+
+
 async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
     """Serialize each account's DLT cursor and expose actual in-flight state."""
     from cognee.modules.integrations.credentials import (
@@ -459,50 +495,50 @@ async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
     from cognee.modules.integrations.outbound import OutboundHttpDisabledError
     from cognee.modules.integrations.sync_progress import track_sync
 
-    key = (provider, str(credential.provider_account_id))
-    if key in _running_syncs:
-        return
-    _running_syncs.add(key)
     counts = {"scanned": 0, "skipped": 0, "failed": 0}
     progress = None
     try:
-        async with track_sync(provider, credential) as progress:
-            await progress.report(phase="checking", counts=counts)
-            try:
-                credential = await require_active_credential(credential)
-                status, counts = await sync_source(credential, counts)
-            except Exception as exc:
-                counts["failed"] = max(1, counts["failed"])
-                # Store a safe category, never provider exception text (which may
-                # include message IDs, URLs, or user content).
-                message = str(exc).lower()
-                if isinstance(exc, RateLimitedError) or any(
-                    term in message for term in ("ratelimitexceeded", "quota exceeded", "http 429")
-                ):
-                    counts["failed_rate_limit"] = 1
-                reason = (
-                    "connection_changed"
-                    if isinstance(exc, CredentialInactiveError)
-                    else "rate_limited"
-                    if counts.get("failed_rate_limit")
-                    else "provider_error"
+        with exclusive_sync(provider, credential.provider_account_id) as acquired:
+            if not acquired:
+                return
+            async with track_sync(provider, credential) as progress:
+                await progress.report(phase="checking", counts=counts)
+                try:
+                    credential = await require_active_credential(credential)
+                    status, counts = await sync_source(credential, counts)
+                except Exception as exc:
+                    counts["failed"] = max(1, counts["failed"])
+                    # Store a safe category, never provider exception text (which may
+                    # include message IDs, URLs, or user content).
+                    message = str(exc).lower()
+                    if isinstance(exc, RateLimitedError) or any(
+                        term in message
+                        for term in ("ratelimitexceeded", "quota exceeded", "http 429")
+                    ):
+                        counts["failed_rate_limit"] = 1
+                    reason = (
+                        "connection_changed"
+                        if isinstance(exc, CredentialInactiveError)
+                        else "rate_limited"
+                        if counts.get("failed_rate_limit")
+                        else "provider_error"
+                    )
+                    await progress.finish("failed", counts=counts, reason=reason)
+                    await record_sync_result(credential, status="degraded", counts=counts)
+                    raise
+                await record_sync_result(credential, status=status, counts=counts)
+                partial = status == "degraded" or bool(counts.get("failed"))
+                await progress.finish(
+                    "partial" if partial else "succeeded",
+                    counts=counts,
+                    reason=(
+                        "rate_limited"
+                        if counts.get("failed_rate_limit")
+                        else "incomplete"
+                        if partial
+                        else None
+                    ),
                 )
-                await progress.finish("failed", counts=counts, reason=reason)
-                await record_sync_result(credential, status="degraded", counts=counts)
-                raise
-            await record_sync_result(credential, status=status, counts=counts)
-            partial = status == "degraded" or bool(counts.get("failed"))
-            await progress.finish(
-                "partial" if partial else "succeeded",
-                counts=counts,
-                reason=(
-                    "rate_limited"
-                    if counts.get("failed_rate_limit")
-                    else "incomplete"
-                    if partial
-                    else None
-                ),
-            )
     except OutboundHttpDisabledError:
         if progress is None:
             # Refused at the entry: track_sync recorded the failed run, and this
@@ -510,8 +546,6 @@ async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
             counts["failed"] = 1
             await record_sync_result(credential, status="degraded", counts=counts)
         raise
-    finally:
-        _running_syncs.discard(key)
 
 
 async def dataset_summary(credential: Any, dataset_name: str) -> tuple[str | None, int]:

@@ -54,6 +54,8 @@ SAMPLE_ARGUMENTS = {
     # SessionNodeSetConflictError: the node_set pinned on the session vs the one requested.
     "pinned": ("project-a",),
     "requested": ["project-b"],
+    # SyncPausedError names the row that holds the connection paused.
+    "level": "default",
     # DatasetNoDataError (search fan-out) wraps a retriever error for one dataset.
     "dataset": SimpleNamespace(
         name="sample_dataset", id="sample-dataset-id", tenant_id="sample-tenant-id"

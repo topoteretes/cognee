@@ -38,11 +38,11 @@ generic ``{provider}`` routes so ``plugins`` is never captured as a
 provider name.
 """
 
-import asyncio
 import hmac
 import logging
 import secrets
 from datetime import datetime, timezone
+from typing import Literal
 from urllib.parse import quote
 from uuid import UUID
 
@@ -54,7 +54,6 @@ from sqlalchemy.exc import IntegrityError
 
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.integrations.routers.get_sync_progress_router import get_sync_progress_router
-from cognee.infrastructure.background_tasks import register_background_task
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.list_agents import list_agents
 from cognee.modules.agents.registry import (
@@ -63,6 +62,7 @@ from cognee.modules.agents.registry import (
     deactivate_agent_connection,
     register_agent_connection,
 )
+from cognee.modules.integrations.background import spawn_background
 from cognee.modules.integrations.base import OAuthIntegration
 from cognee.modules.integrations.connect import complete_installation
 from cognee.modules.integrations.credentials import (
@@ -70,6 +70,7 @@ from cognee.modules.integrations.credentials import (
     get_active_credential_for_user,
     list_active_credentials_for_provider,
     list_active_credentials_for_user,
+    owner_principal_id,
     revoke_credential_by_account,
     update_provider_metadata,
 )
@@ -99,6 +100,22 @@ from cognee.modules.integrations.plugin_status import (
 )
 from cognee.modules.integrations.plugins import KNOWN_PLUGINS, get_plugin
 from cognee.modules.integrations.registry import get_integration, supported_integrations
+from cognee.modules.integrations.scheduled_sync import sync_scheduler_lifespan
+from cognee.modules.integrations.sync_policy import (
+    CUSTOM_HOURS,
+    INTERVAL_PRESETS,
+    SyncPolicy,
+    delete_sync_policy,
+    get_caller_effective_sync_policy,
+    get_sync_pause_level,
+    get_sync_policy,
+    pause_sync_policy,
+    policy_level,
+    require_sync_not_paused,
+    resume_sync_policy,
+    save_sync_policy,
+)
+from cognee.modules.integrations.sync_policy.models import IntegrationSyncPolicy
 from cognee.modules.observability import new_span
 from cognee.modules.session_lifecycle.visibility import visible_user_ids
 from cognee.modules.users.api_key.delete_api_key import delete_api_key
@@ -114,26 +131,6 @@ from cognee.modules.users.methods.store_principal_configuration import (
 from cognee.modules.users.models import User
 
 logger = logging.getLogger(__name__)
-
-# Detached post-install / webhook work (initial syncs, event handling) runs
-# off the request path; strong references keep the tasks alive until done —
-# same pattern as remember()'s _BACKGROUND_REMEMBER_TASKS.
-_BACKGROUND_INTEGRATION_TASKS: set = set()
-
-
-def _spawn_background(coro, *, description: str) -> None:
-    """Run ``coro`` detached, logging (never raising) on failure."""
-
-    async def _guarded():
-        try:
-            await coro
-        except Exception:  # detached work must log, not crash the loop
-            logger.exception("%s failed", description)
-
-    task = register_background_task(asyncio.create_task(_guarded()))
-    _BACKGROUND_INTEGRATION_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_INTEGRATION_TASKS.discard)
-
 
 # Plugin keys with a native AgentConnectionType; anything else registers as
 # a generic "sdk" connection in the agent-connection registry.
@@ -209,6 +206,49 @@ class IntegrationResourceSelectionResultDTO(OutDTO):
 
 class IntegrationSyncResultDTO(OutDTO):
     accepted: bool
+
+
+class SyncPolicyDTO(OutDTO):
+    """A saved sync policy, with the intervals a UI may offer, so it hard-codes none.
+
+    ``level`` is ``default`` for the owner's default and ``connection`` for one
+    connection's own policy. On a connection's routes ``held_by`` names the level that
+    holds it paused: a paused default holds it even when its own row is not. Times are UTC.
+    """
+
+    level: Literal["default", "connection"]
+    interval_minutes: int
+    weekdays: list[int]
+    timezone: str
+    paused: bool
+    paused_by: UUID | None
+    paused_at: datetime | None
+    next_due_at: datetime | None
+    held_by: Literal["default", "connection"] | None = None
+    interval_presets: list[int] = list(INTERVAL_PRESETS)
+    custom_hours: list[int] = list(CUSTOM_HOURS)
+
+
+def _sync_policy_dto(row: IntegrationSyncPolicy, held_by: str | None = None) -> SyncPolicyDTO:
+    return SyncPolicyDTO(
+        level=policy_level(row),
+        held_by=held_by,
+        interval_minutes=row.interval_minutes,
+        weekdays=row.weekdays,
+        timezone=row.timezone,
+        paused=row.paused,
+        paused_by=row.paused_by,
+        # SQLite returns the stored UTC values without their offset.
+        paused_at=as_utc(row.paused_at),
+        next_due_at=as_utc(row.next_due_at),
+    )
+
+
+async def _connection_policy_dto(row: IntegrationSyncPolicy, credential) -> SyncPolicyDTO:
+    held_by = await get_sync_pause_level(
+        credential_id=credential.id, principal_id=owner_principal_id(credential)
+    )
+    return _sync_policy_dto(row, held_by=held_by)
 
 
 class PluginProvisionDTO(OutDTO):
@@ -296,6 +336,16 @@ async def _credential_or_404(user: User, integration: OAuthIntegration, account_
         raise HTTPException(
             status_code=404, detail=f"{integration.provider} account is not connected"
         )
+    return credential
+
+
+async def _connected_credential_or_404(
+    user: User, integration: OAuthIntegration, account_id: str | None
+):
+    """``_credential_or_404`` for routes that act on a connection: none at all is a 404 too."""
+    credential = await _credential_or_404(user, integration, account_id)
+    if credential is None:
+        raise HTTPException(status_code=404, detail=f"{integration.provider} is not connected")
     return credential
 
 
@@ -493,6 +543,46 @@ def _frontend_redirect(integration: OAuthIntegration, outcome: str) -> RedirectR
 def get_integrations_router():
     integrations_router = APIRouter(lifespan=linear_resume_lifespan)
     integrations_router.include_router(get_sync_progress_router())
+    # A router holds one lifespan, and an included router's lifespan runs with its parent's.
+    integrations_router.include_router(APIRouter(lifespan=sync_scheduler_lifespan))
+
+    # ------------------------------------------------------------------ #
+    # Sync policies: the caller's own default (fixed /sync/policy path, before the
+    # {provider} routes). Scoped by construction: no route here takes an owner.
+    # ------------------------------------------------------------------ #
+
+    @integrations_router.get("/sync/policy")
+    async def get_default_sync_policy(
+        user: User = Depends(get_authenticated_user),
+    ) -> SyncPolicyDTO:
+        """The caller's default sync policy, which every connection without its own inherits."""
+        return _sync_policy_dto(await get_sync_policy(user, user.id))
+
+    @integrations_router.put("/sync/policy")
+    async def set_default_sync_policy(
+        policy: SyncPolicy, user: User = Depends(get_authenticated_user)
+    ) -> SyncPolicyDTO:
+        """Create or replace the caller's default sync policy. A pause is kept."""
+        return _sync_policy_dto(await save_sync_policy(user, user.id, policy))
+
+    @integrations_router.delete("/sync/policy", status_code=204)
+    async def remove_default_sync_policy(user: User = Depends(get_authenticated_user)) -> None:
+        """Remove the caller's default: connections without their own stop syncing on schedule."""
+        await delete_sync_policy(user, user.id)
+
+    @integrations_router.post("/sync/policy/pause")
+    async def pause_default_sync_policy(
+        user: User = Depends(get_authenticated_user),
+    ) -> SyncPolicyDTO:
+        """Pause every connection of the caller, those with their own policy too."""
+        return _sync_policy_dto(await pause_sync_policy(user, user.id))
+
+    @integrations_router.post("/sync/policy/resume")
+    async def resume_default_sync_policy(
+        user: User = Depends(get_authenticated_user),
+    ) -> SyncPolicyDTO:
+        """Resume the caller's default; its next slot is the first one after now."""
+        return _sync_policy_dto(await resume_sync_policy(user, user.id))
 
     # ------------------------------------------------------------------ #
     # Aggregate status (fixed /status path — before the {provider} routes)
@@ -901,7 +991,7 @@ def get_integrations_router():
             )
             # Post-install work (e.g. GitHub's initial repo sync) runs
             # detached — the browser gets its redirect now, not after.
-            _spawn_background(
+            spawn_background(
                 integration.on_installed(credential),
                 description=f"{provider} on_installed hook",
             )
@@ -937,7 +1027,7 @@ def get_integrations_router():
 
             raw_body = await verifier.verify(request)
             headers = {key.lower(): value for key, value in request.headers.items()}
-            _spawn_background(
+            spawn_background(
                 integration.handle_webhook(raw_body, headers),
                 description=f"{provider} webhook handling",
             )
@@ -1160,17 +1250,110 @@ def get_integrations_router():
         """
         integration = _integration_or_404(provider)
         _outbound_http_or_503(provider)
-        credential = await _credential_or_404(user, integration, account_id)
-        if credential is None:
-            raise HTTPException(status_code=404, detail=f"{provider} is not connected")
+        credential = await _connected_credential_or_404(user, integration, account_id)
+        await require_sync_not_paused(
+            credential_id=credential.id, principal_id=owner_principal_id(credential)
+        )
         from cognee.modules.integrations.ingestion import sync_is_running
 
         if sync_is_running(provider, credential.provider_account_id):
             # The running sync owns the cursor and a second request is dropped, so
             # saying "accepted" would be telling the user a sync started.
             return IntegrationSyncResultDTO(accepted=False)
-        _spawn_background(integration.sync_now(credential), description=f"{provider} manual sync")
+        spawn_background(integration.sync_now(credential), description=f"{provider} manual sync")
         return IntegrationSyncResultDTO(accepted=True)
+
+    # ------------------------------------------------------------------ #
+    # Sync policy of one connection. The connection is found among the
+    # caller's own, like every route above, and the owner is read off it, so
+    # a connection is never paired with a principal that does not own it.
+    # ------------------------------------------------------------------ #
+
+    @integrations_router.get("/{provider}/sync/policy")
+    async def get_connection_sync_policy(
+        provider: str, account_id: str | None = None, user: User = Depends(get_authenticated_user)
+    ) -> SyncPolicyDTO:
+        """The policy the connection syncs by: its own, else its owner's default.
+
+        ``level`` says which. No policy at either level is a 404.
+
+        ## Query Parameters
+        - **account_id** (str, optional): As for POST /{provider}/sync.
+        """
+        credential = await _connected_credential_or_404(
+            user, _integration_or_404(provider), account_id
+        )
+        row, held_by = await get_caller_effective_sync_policy(
+            user, owner_principal_id(credential), credential.id
+        )
+        return _sync_policy_dto(row, held_by=held_by)
+
+    @integrations_router.put("/{provider}/sync/policy")
+    async def set_connection_sync_policy(
+        provider: str,
+        policy: SyncPolicy,
+        account_id: str | None = None,
+        user: User = Depends(get_authenticated_user),
+    ) -> SyncPolicyDTO:
+        """Create or replace the connection's own policy, which overrides the default.
+
+        ## Query Parameters
+        - **account_id** (str, optional): As for POST /{provider}/sync.
+        """
+        credential = await _connected_credential_or_404(
+            user, _integration_or_404(provider), account_id
+        )
+        return await _connection_policy_dto(
+            await save_sync_policy(user, owner_principal_id(credential), policy, credential.id),
+            credential,
+        )
+
+    @integrations_router.delete("/{provider}/sync/policy", status_code=204)
+    async def remove_connection_sync_policy(
+        provider: str, account_id: str | None = None, user: User = Depends(get_authenticated_user)
+    ) -> None:
+        """Remove the connection's own policy; it inherits the owner's default again.
+
+        ## Query Parameters
+        - **account_id** (str, optional): As for POST /{provider}/sync.
+        """
+        credential = await _connected_credential_or_404(
+            user, _integration_or_404(provider), account_id
+        )
+        await delete_sync_policy(user, owner_principal_id(credential), credential.id)
+
+    @integrations_router.post("/{provider}/sync/policy/pause")
+    async def pause_connection_sync_policy(
+        provider: str, account_id: str | None = None, user: User = Depends(get_authenticated_user)
+    ) -> SyncPolicyDTO:
+        """Pause this connection only. It needs a policy of its own: a 404 otherwise.
+
+        ## Query Parameters
+        - **account_id** (str, optional): As for POST /{provider}/sync.
+        """
+        credential = await _connected_credential_or_404(
+            user, _integration_or_404(provider), account_id
+        )
+        return await _connection_policy_dto(
+            await pause_sync_policy(user, owner_principal_id(credential), credential.id), credential
+        )
+
+    @integrations_router.post("/{provider}/sync/policy/resume")
+    async def resume_connection_sync_policy(
+        provider: str, account_id: str | None = None, user: User = Depends(get_authenticated_user)
+    ) -> SyncPolicyDTO:
+        """Resume this connection; its next slot is the first one after now.
+
+        ## Query Parameters
+        - **account_id** (str, optional): As for POST /{provider}/sync.
+        """
+        credential = await _connected_credential_or_404(
+            user, _integration_or_404(provider), account_id
+        )
+        return await _connection_policy_dto(
+            await resume_sync_policy(user, owner_principal_id(credential), credential.id),
+            credential,
+        )
 
     @integrations_router.delete("/{provider}/connection")
     async def disconnect(
