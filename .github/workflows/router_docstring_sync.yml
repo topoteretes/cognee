@@ -311,7 +311,7 @@ jobs:
         id: critic
         if: ${{ steps.generated.outputs.changed == 'true' }}
         continue-on-error: true
-        uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790  # v1.0.235
+        uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe  # v1.0.269
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
