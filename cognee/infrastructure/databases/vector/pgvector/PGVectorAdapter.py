@@ -475,6 +475,21 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self._pgvector_version_cache = parse_pgvector_version(raw)
         return self._pgvector_version_cache
 
+    async def existing_collections(self, collection_names: list[str]) -> list[str]:
+        """Return the given collections that exist, read in one round trip.
+
+        A missing table is never cached by ``get_table``, so a search over many
+        collection names would otherwise reflect each missing one on its own
+        connection, every search. The list holds the tables visible on the
+        connection's ``search_path``, the same resolution ``get_table`` and the
+        unqualified search statements use.
+        """
+        async with self.engine.connect() as connection:
+            table_names = set(
+                await connection.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
+            )
+        return [name for name in collection_names if name in table_names]
+
     async def has_collection(self, collection_name: str) -> bool:
         """
         Check if a specified collection exists in the database.
@@ -960,6 +975,38 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     ScoredResult(id=parse_id(str(row.id)), score=float(row.distance), payload=None)
                     for row in rows.all()
                 )
+        return scores
+
+    async def score_by_ids_batch(
+        self, collection_name: str, data_point_ids: list[str], query_vectors: list[list[float]]
+    ) -> list[list[ScoredResult]]:
+        """One statement per id batch, with a distance column per query vector.
+
+        The rows are visited once and the distances are computed in Postgres, so no
+        vector leaves the database: fetching 3,000 vectors to score them locally costs
+        more than the per-query statements it would replace.
+        """
+        ids = list(dict.fromkeys(str(point_id) for point_id in data_point_ids))
+        if not ids or not query_vectors:
+            return [[] for _ in query_vectors]
+        table = await self.get_table(collection_name)
+        distances = [
+            table.c.vector.cosine_distance(query_vector).label(f"distance_{index}")
+            for index, query_vector in enumerate(query_vectors)
+        ]
+        scores: list[list[ScoredResult]] = [[] for _ in query_vectors]
+        async with self.get_async_session() as session:
+            for start in range(0, len(ids), QUERY_BATCH_SIZE):
+                batch = ids[start : start + QUERY_BATCH_SIZE]
+                rows = await session.execute(
+                    select(table.c.id, *distances).where(table.c.id.in_(batch))
+                )
+                for row in rows.all():
+                    row_id = parse_id(str(row.id))
+                    for index, query_scores in enumerate(scores):
+                        query_scores.append(
+                            ScoredResult(id=row_id, score=float(row[index + 1]), payload=None)
+                        )
         return scores
 
     async def search(

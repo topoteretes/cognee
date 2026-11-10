@@ -54,6 +54,8 @@ SAMPLE_ARGUMENTS = {
     # SessionNodeSetConflictError: the node_set pinned on the session vs the one requested.
     "pinned": ("project-a",),
     "requested": ["project-b"],
+    # SyncPausedError names the row that holds the connection paused.
+    "level": "default",
     # DatasetNoDataError (search fan-out) wraps a retriever error for one dataset.
     "dataset": SimpleNamespace(
         name="sample_dataset", id="sample-dataset-id", tenant_id="sample-tenant-id"
@@ -89,6 +91,8 @@ SAMPLE_ARGUMENTS = {
     "stored_dimensions": 384,
     "configured_model": "sample-provider/new-model",
     "configured_dimensions": 1536,
+    # StoredVectorWidthMismatchError: the LanceDB table whose vectors are not that width.
+    "collection_name": "DocumentChunk_text",
     # GlinerWorkerModelMismatchError: the model required vs the one the worker serves.
     "expected": "sample-org/required-model",
     "served": "sample-org/served-model",
