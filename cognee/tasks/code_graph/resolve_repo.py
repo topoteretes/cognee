@@ -216,20 +216,43 @@ def check_branch_name(branch) -> None:
         raise ValueError(f"Invalid branch name {branch!r}: {reason}.")
 
 
-def _credential_env(token: str) -> dict:
+def _credential_env(token: str, url: str) -> dict:
     """Auth for git over https, injected as environment-level git config.
 
     The environment channel (git >= 2.31) keeps the token out of argv (which
     any local process can read from the process listing), out of every
     URL-shaped string (so nothing derived from the URL can leak it into
     logs or error messages), and out of the on-disk remote config.
+
+    The header is scoped to the origin of the credential-free ``url``
+    (``http.<origin>/.extraHeader``): git and git-lfs send it only to that
+    host, never to another server a request ends up at.
     """
+    parts = urlsplit(url)
+    origin = f"{parts.scheme}://{parts.hostname}" + (f":{parts.port}" if parts.port else "")
     basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
     return {
         "GIT_CONFIG_COUNT": "1",
-        "GIT_CONFIG_KEY_0": "http.extraHeader",
+        "GIT_CONFIG_KEY_0": f"http.{origin}/.extraHeader",
         "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}",
     }
+
+
+# A repository's .lfsconfig can name any server as its LFS endpoint, and a
+# checkout (clone, pull, reset) on a machine with git-lfs installed would
+# contact it, from the server, carrying the clone's credentials. LFS downloads
+# are therefore off for every git command cognee runs: an LFS file is left as
+# its small pointer file. The skip variable covers git-lfs's own smudge; the
+# cleared filter settings cover a filter configured to ignore it.
+_LFS_OFF_ARGS = (
+    "-c",
+    "filter.lfs.smudge=",
+    "-c",
+    "filter.lfs.process=",
+    "-c",
+    "filter.lfs.required=false",
+)
+_LFS_OFF_ENV = {"GIT_LFS_SKIP_SMUDGE": "1"}
 
 
 async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
@@ -240,9 +263,10 @@ async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tu
         )
     process = await asyncio.create_subprocess_exec(
         git_binary,
+        *_LFS_OFF_ARGS,
         *args,
         cwd=str(cwd) if cwd else None,
-        env={**os.environ, **env} if env else None,
+        env={**os.environ, **_LFS_OFF_ENV, **(env or {})},
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -353,7 +377,8 @@ async def resolve_repo_source(
             await validate_outbound_url(url)
         except SSRFProtectionError as error:
             raise CodeRepositoryError(
-                message=f"Refusing to clone '{redact_repo_spec(url)}': {error.message}"
+                message=f"Refusing to clone '{redact_repo_spec(url)}': {error.message}",
+                status_code=error.status_code,
             ) from error
 
     # Slug, remote, logs, and errors all use the credential-free URL: tokens
@@ -370,7 +395,7 @@ async def resolve_repo_source(
             text = text.replace(url, clean_url)
         return re.sub(r"://[^/\s@]+@", "://", text)
 
-    auth_env = _credential_env(credentials) if credentials else None
+    auth_env = _credential_env(credentials, clean_url) if credentials else None
 
     base = Path(clones_dir) if clones_dir else default_clones_dir()
     target = clone_dir(clean_url, branch, base)
