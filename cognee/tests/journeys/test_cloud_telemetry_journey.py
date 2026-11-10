@@ -74,6 +74,10 @@ async def test_cloud_telemetry_removes_only_documented_fields(clean_env, default
     assert {event["event_name"] for event in events} == CLOUD_EVENTS
     for event in events:
         assert event["properties"]["telemetry_origin"] == "cloud"
+    # Counted is not enough: the removed fields must be absent from what was sent.
+    for name, field in REMOVED_FIELDS:
+        sent = [event["properties"] for event in events if event["event_name"] == name]
+        assert not any(_has_path(properties, field) for properties in sent), (name, field)
 
     # Nothing else was removed: a new property or event fails here until it is
     # given a model field or added to the lists above (and to the contract doc).
