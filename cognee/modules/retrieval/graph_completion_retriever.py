@@ -270,7 +270,13 @@ class GraphCompletionRetriever(BaseRetriever):
         # with the vector hits and rank ahead of them, so "exposure" reaches the
         # CreditExposure class node even when the embedding neighbourhood misses it.
         # Batch mode has no query, so it grounds nothing (the search could not pin anyway).
-        pinned_node_ids = seed_node_ids_by_collection(await ground(query))
+        # Neighbourhood mode pins nothing: its seeds are the first vector hits, and its
+        # projection does not apply node_name, which the vector hits already passed.
+        pinned_node_ids = (
+            seed_node_ids_by_collection(await ground(query))
+            if self.neighborhood_depth is None
+            else {}
+        )
         return await brute_force_triplet_search(
             query,
             query_batch,

@@ -198,6 +198,28 @@ async def test_graph_completion_passes_no_pins_when_grounding_misses(ontology):
 
 
 @pytest.mark.asyncio
+async def test_neighbourhood_mode_pins_no_seeds_but_keeps_the_block(ontology):
+    # Neighbourhood seeds are the first vector hits, and that projection skips node_name.
+    retriever = GraphCompletionRetriever(node_name=["project_a"], neighborhood_depth=1)
+
+    with patch(
+        "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
+        new_callable=AsyncMock,
+        return_value=[],
+    ) as mock_search:
+        await retriever.get_triplets("What is our credit exposure to Acme?")
+    assert mock_search.call_args.kwargs["pinned_node_ids"] is None
+
+    with patch.object(
+        GraphCompletionRetriever, "resolve_edges_to_text", new_callable=AsyncMock, return_value="x"
+    ):
+        context = await retriever.get_context_from_objects(
+            query="credit exposure of Acme", retrieved_objects=[MagicMock()]
+        )
+    assert context.startswith("## Ontology grounding\n")
+
+
+@pytest.mark.asyncio
 async def test_graph_completion_prepends_grounding_block_only_with_real_context(ontology):
     retriever = GraphCompletionRetriever()
     edge = MagicMock()
