@@ -55,7 +55,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 ### Retrieval
 | Script | Demonstrates |
 |---|---|
-| [`hybrid_decomposition.py`](guides/hybrid_decomposition.py) | Context-primed hybrid decomposition, configurable prompts and metadata, or subquestions without retrieval |
+| [`hybrid_decomposition.py`](guides/hybrid_decomposition.py) | Context-primed hybrid decomposition for multi-part questions, with a configurable planning prompt |
 | [`truth_subspace_reranking.py`](guides/truth_subspace_reranking.py) | Teaching retrieval a preference — truth-weighted reranking on/off |
 | [`temporal_recall.py`](guides/temporal_recall.py) | Time-bounded queries with `SearchType.TEMPORAL` |
 | [`references_example.py`](guides/references_example.py) | `include_references` — answers with evidence |

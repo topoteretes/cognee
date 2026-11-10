@@ -1,4 +1,4 @@
-Decompose the user's question into 1 to {max_subqueries} focused retrieval subqueries.
+Decompose the user's question into 1 to {{ max_subqueries }} focused retrieval subqueries.
 
 You receive the question and the context a first retrieval pass returned for it. Use that context to see which parts of the question the first pass already covers and which parts it misses.
 

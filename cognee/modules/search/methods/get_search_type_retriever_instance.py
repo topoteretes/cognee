@@ -34,7 +34,11 @@ from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
-from cognee.modules.retrieval.hybrid_decomposition_retriever import HybridDecompositionRetriever
+from cognee.modules.retrieval.hybrid_decomposition_retriever import (
+    DEFAULT_DECOMPOSITION_PROMPT_PATH,
+    DEFAULT_MAX_SUBQUERIES,
+    HybridDecompositionRetriever,
+)
 from cognee.modules.retrieval.hybrid_retriever import DEFAULT_HYBRID_LANE_TOP_K, HybridRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.retrieval.skills_retriever import SkillsRetriever
@@ -221,16 +225,15 @@ async def get_search_type_retriever_instance(
             HybridDecompositionRetriever,
             {
                 **hybrid_kwargs,
-                "max_subqueries": retriever_specific_config.get("max_subqueries", 7),
+                "max_subqueries": retriever_specific_config.get(
+                    "max_subqueries", DEFAULT_MAX_SUBQUERIES
+                ),
                 "decomposition_system_prompt": retriever_specific_config.get(
                     "decomposition_system_prompt"
                 ),
                 "decomposition_system_prompt_path": retriever_specific_config.get(
-                    "decomposition_system_prompt_path", "hybrid_decomposition_system_prompt.txt"
+                    "decomposition_system_prompt_path", DEFAULT_DECOMPOSITION_PROMPT_PATH
                 ),
-                "merged_chunks_limit": retriever_specific_config.get("merged_chunks_limit"),
-                "merged_entities_limit": retriever_specific_config.get("merged_entities_limit"),
-                "merged_facts_limit": retriever_specific_config.get("merged_facts_limit"),
             },
         ),
         SearchType.GRAPH_COMPLETION: (

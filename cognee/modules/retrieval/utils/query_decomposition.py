@@ -3,7 +3,11 @@ from enum import Enum
 
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("query_decomposition")
 
 
 class DecompositionMode(str, Enum):
@@ -44,18 +48,8 @@ def normalize_subqueries(
 ) -> list[str]:
     """Clean and bound decomposed subqueries to at most ``max_subqueries``."""
 
-    if (
-        isinstance(max_subqueries, bool)
-        or not isinstance(max_subqueries, int)
-        or max_subqueries < 1
-    ):
-        raise ValueError("max_subqueries must be a positive integer")
-
     normalized_queries: list[str] = []
-    candidates = subqueries if isinstance(subqueries, (list, tuple)) else []
-    for subquery in candidates:
-        if not isinstance(subquery, str):
-            continue
+    for subquery in subqueries or []:
         cleaned_query = subquery.strip()
         if not cleaned_query or cleaned_query in normalized_queries:
             continue
@@ -68,6 +62,48 @@ def normalize_subqueries(
 
     fallback_query = original_query.strip()
     return [fallback_query or original_query]
+
+
+async def decompose_query(
+    query: str,
+    *,
+    system_prompt: str | None,
+    context: str = "",
+    max_subqueries: int = 5,
+) -> list[str]:
+    """Plan focused subqueries for ``query``, optionally reading ``context`` first.
+
+    Planning never fails a search: without a prompt, or when the LLM call fails,
+    the plan is the original query alone.
+    """
+    if not system_prompt:
+        logger.warning("Decomposition prompt not found, falling back to original query.")
+        return [query]
+
+    text_input = query
+    if context:
+        text_input = (
+            f"Question:\n{query}\n\n"
+            "Context retrieved for the question so far:\n"
+            f"<context>\n{context}\n</context>"
+        )
+    try:
+        decomposition = await LLMGateway.acreate_structured_output(
+            text_input=text_input,
+            system_prompt=system_prompt,
+            response_model=QueryDecomposition,
+        )
+    except Exception as error:
+        logger.warning(
+            "Query decomposition failed, falling back to original query: %s",
+            error,
+            exc_info=True,
+        )
+        return [query]
+
+    return normalize_subqueries(
+        query, getattr(decomposition, "subqueries", None), max_subqueries=max_subqueries
+    )
 
 
 def merge_deduplicated_edges(edge_batches: list[list[Edge]]) -> list[Edge]:

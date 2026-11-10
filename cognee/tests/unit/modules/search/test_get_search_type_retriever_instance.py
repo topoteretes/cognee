@@ -260,9 +260,6 @@ async def test_hybrid_completion_decomposition_retriever_receives_config():
             "max_subqueries": 3,
             "decomposition_system_prompt": "INLINE",
             "decomposition_system_prompt_path": "custom_decomposition.txt",
-            "merged_chunks_limit": 12,
-            "merged_entities_limit": 8,
-            "merged_facts_limit": 4,
         },
     )
 
@@ -275,9 +272,6 @@ async def test_hybrid_completion_decomposition_retriever_receives_config():
     assert retriever_instance.max_subqueries == 3
     assert retriever_instance.decomposition_system_prompt == "INLINE"
     assert retriever_instance.decomposition_system_prompt_path == "custom_decomposition.txt"
-    assert retriever_instance.merged_chunks_limit == 12
-    assert retriever_instance.merged_entities_limit == 8
-    assert retriever_instance.merged_facts_limit == 4
 
 
 @pytest.mark.asyncio
@@ -298,7 +292,6 @@ async def test_hybrid_completion_decomposition_defaults_match_hybrid_plus_seven_
     assert (
         decomposition.decomposition_system_prompt_path == "hybrid_decomposition_system_prompt.txt"
     )
-    assert decomposition.merged_chunks_limit is None
 
 
 @pytest.mark.asyncio

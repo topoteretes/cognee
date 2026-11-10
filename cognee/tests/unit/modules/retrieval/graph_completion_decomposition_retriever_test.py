@@ -97,17 +97,6 @@ def test_normalize_subqueries_honours_max_subqueries():
     assert normalize_subqueries("original", nine, max_subqueries=1) == nine[:1]
 
 
-@pytest.mark.parametrize("limit", [0, -1, 1.5, True])
-def test_normalize_subqueries_rejects_invalid_limits(limit):
-    with pytest.raises(ValueError, match="positive integer"):
-        normalize_subqueries("original", ["leg"], max_subqueries=limit)
-
-
-def test_normalize_subqueries_ignores_malformed_values():
-    assert normalize_subqueries("original", [None, 42, "  valid  ", "valid"]) == ["valid"]
-    assert normalize_subqueries("original", "not a list") == ["original"]
-
-
 @pytest.mark.asyncio
 async def test_decompose_query_falls_back_to_original_query_on_failure():
     retriever = GraphCompletionDecompositionRetriever()
@@ -118,7 +107,7 @@ async def test_decompose_query_falls_back_to_original_query_on_failure():
             return_value="Decomposition prompt",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_decomposition_retriever.LLMGateway.acreate_structured_output",
+            "cognee.modules.retrieval.utils.query_decomposition.LLMGateway.acreate_structured_output",
             new_callable=AsyncMock,
             side_effect=RuntimeError("LLM unavailable"),
         ),
@@ -138,7 +127,7 @@ async def test_decompose_query_returns_normalized_subqueries_on_success():
             return_value="Decomposition prompt",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_decomposition_retriever.LLMGateway.acreate_structured_output",
+            "cognee.modules.retrieval.utils.query_decomposition.LLMGateway.acreate_structured_output",
             new_callable=AsyncMock,
             return_value=QueryDecomposition(
                 subqueries=["  First query  ", "", "First query", "Second query"]

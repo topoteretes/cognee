@@ -5,15 +5,12 @@ that survived so it never references a dropped chunk. Keys the retriever carries
 module does not own are taken from the primary result unchanged.
 """
 
-from collections.abc import Callable, Hashable
+from collections.abc import Hashable
 from typing import Any
 
+from cognee.modules.retrieval.hybrid.entities import _edge_dedupe_key
 from cognee.modules.retrieval.hybrid.results import empty_hybrid_result
-from cognee.modules.retrieval.utils.merge_results import (
-    conversational_reserve,
-    edge_identity,
-    merge_ranked,
-)
+from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
 from cognee.modules.retrieval.utils.results import result_id
 
 _DERIVED_KEYS = frozenset(empty_hybrid_result())
@@ -30,6 +27,12 @@ def merge_hybrid_results(
     """Merge each hybrid channel while preserving the result shape and its budgets."""
     primary = primary or {}
     secondary = secondary or {}
+    entities = merge_ranked(
+        primary.get("entities"),
+        secondary.get("entities"),
+        limit=entities_limit,
+        secondary_reserve=conversational_reserve(entities_limit),
+    )
     channels: dict[str, list] = {
         "chunks": merge_ranked(
             primary.get("chunks"),
@@ -37,15 +40,10 @@ def merge_hybrid_results(
             limit=chunks_limit,
             secondary_reserve=conversational_reserve(chunks_limit),
         ),
-        "entities": merge_ranked(
-            primary.get("entities"),
-            secondary.get("entities"),
-            limit=entities_limit,
-            secondary_reserve=conversational_reserve(entities_limit),
-        ),
+        "entities": entities,
         "facts": merge_ranked(
-            primary.get("facts"),
-            secondary.get("facts"),
+            drop_facts_shown_as_edges(primary.get("facts") or [], entities),
+            drop_facts_shown_as_edges(secondary.get("facts") or [], entities),
             limit=facts_limit,
             secondary_reserve=conversational_reserve(facts_limit),
         ),
@@ -67,48 +65,28 @@ def merge_hybrid_results(
     return merged
 
 
-def merge_hybrid_results_union(
-    results: list[dict | None],
-    *,
-    chunks_limit: int | None,
-    entities_limit: int | None,
-    facts_limit: int | None,
-    preserve_first: bool = False,
-) -> dict:
-    """Union peer hybrid results into one, content-keyed, round-robin by rank.
+def merge_hybrid_results_union(results: list[dict | None]) -> dict:
+    """Union peer hybrid results into one, round-robin by rank, deduplicated by id.
 
-    Legs are peers: every leg's first item comes before any leg's second, the
-    first leg winning ties, so a channel that hits its limit still represents
-    every leg. An item several legs returned appears once, at the position of
-    its best rank and as the object from the leg that ranked it there (the
-    earliest such leg on ties). Results without an identity are never merged
-    away. With ``preserve_first=True``, every distinct item from the first
-    result is retained using its original payload, even if a later leg ranks
-    the same identity higher. Limits cap additional coverage, with that baseline
-    as a minimum, even when a caller supplies a smaller ceiling.
+    Every result's first item comes before any result's second; at equal rank the
+    earlier result comes first. An item several results returned appears once, at
+    its best rank. An entity keeps the edges every result showed for it, and a fact
+    already shown as an entity edge is dropped, as within one hybrid retrieval.
+    Items without an id are never merged away.
     """
     results = [result for result in results or [] if result]
     if not results:
         return empty_hybrid_result()
 
     channels: dict[str, list] = {
-        "chunks": _union_ranked(
-            [result.get("chunks") for result in results],
-            chunks_limit,
-            preserve_first=preserve_first,
-        ),
-        "entities": _union_ranked(
-            [result.get("entities") for result in results],
-            entities_limit,
-            preserve_first=preserve_first,
-        ),
-        "facts": _union_ranked(
-            [result.get("facts") for result in results],
-            facts_limit,
-            identity=_fact_identity,
-            preserve_first=preserve_first,
-        ),
+        channel: _union_ranked([result.get(channel) or [] for result in results])
+        for channel in ("chunks", "entities", "facts")
     }
+    channels["entities"] = [
+        _with_all_edges(entity, results) if isinstance(entity, dict) else entity
+        for entity in channels["entities"]
+    ]
+    channels["facts"] = drop_facts_shown_as_edges(channels["facts"], channels["entities"])
 
     merged: dict[str, Any] = {
         key: value for key, value in results[0].items() if key not in _DERIVED_KEYS
@@ -125,56 +103,47 @@ def merge_hybrid_results_union(
     return merged
 
 
-def _fact_identity(item: Any) -> Hashable | None:
-    identifier = result_id(item)
-    if identifier is not None:
-        return identifier
-    key = edge_identity(item)
-    # A graph edge needs a real identity. Do not collapse arbitrary anonymous
-    # fact text into the all-empty graph tuple.
-    if key[0] == "edge" or all(key[1:4]):
-        return key
-    return None
+def drop_facts_shown_as_edges(facts: list, entities: list) -> list:
+    """Facts minus those an entity already shows as an edge (``select_facts``' rule)."""
+    bullet_ids = {
+        edge["edge_type_id"]
+        for entity in entities
+        if isinstance(entity, dict)
+        for edge in entity.get("edges", [])
+        if edge.get("edge_type_id")
+    }
+    return [fact for fact in facts if result_id(fact) not in bullet_ids]
 
 
-def _union_ranked(
-    lanes: list[list | None],
-    limit: int | None,
-    *,
-    identity: Callable[[Any], Hashable | None] = result_id,
-    preserve_first: bool = False,
-) -> list:
-    columns = [list(lane or []) for lane in lanes]
-    cap = None if limit is None else max(0, limit)
-    if cap == 0 and not preserve_first:
-        return []
-    baseline_items = {}
-    if preserve_first:
-        for rank, item in enumerate(columns[0] if columns else []):
-            key = identity(item)
-            if key is None:
-                key = ("unidentified", 0, rank)
-            baseline_items.setdefault(key, item)
-    baseline = set(baseline_items)
-    if cap is not None:
-        cap = max(cap, len(baseline))
+def _union_ranked(columns: list[list]) -> list:
     seen: set[Hashable] = set()
     merged: list = []
-    for rank in range(max((len(column) for column in columns), default=0)):
+    for rank in range(max(map(len, columns), default=0)):
         for lane, column in enumerate(columns):
             if rank >= len(column):
                 continue
             item = column[rank]
-            key: Hashable = identity(item) or ("unidentified", lane, rank)
-            if key in seen:
-                continue
-            seen.add(key)
-            if cap is not None and key not in baseline and len(merged) + len(baseline) >= cap:
-                continue
-            baseline.discard(key)
-            # A later leg may rank the same ID earlier, but must not replace
-            # the baseline object's source metadata, edges or provenance.
-            merged.append(baseline_items.get(key, item))
-            if cap is not None and len(merged) >= cap:
-                return merged
+            key: Hashable = result_id(item) or ("unidentified", lane, rank)
+            if key not in seen:
+                seen.add(key)
+                merged.append(item)
     return merged
+
+
+def _with_all_edges(entity: dict, results: list[dict]) -> dict:
+    """The entity with the edges every result showed for it, kept in first-seen order."""
+    entity_id = result_id(entity)
+    if not entity_id:
+        return entity
+    edges: list = []
+    seen: set[Hashable] = set()
+    for result in results:
+        for candidate in result.get("entities") or []:
+            if not isinstance(candidate, dict) or result_id(candidate) != entity_id:
+                continue
+            for edge in candidate.get("edges", []):
+                key = _edge_dedupe_key(edge) or edge.get("text")
+                if key not in seen:
+                    seen.add(key)
+                    edges.append(edge)
+    return {**entity, "edges": edges}

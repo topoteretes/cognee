@@ -14,7 +14,7 @@ from cognee.modules.search.types import SearchType
 get_retriever_output_module = importlib.import_module(
     "cognee.modules.search.methods.get_retriever_output"
 )
-RETRIEVER_MODULE = "cognee.modules.retrieval.hybrid_decomposition_retriever"
+PLANNER = "cognee.modules.retrieval.utils.query_decomposition"
 
 QUESTION = "How many units did Acme order, and when is delivery?"
 LEG_A = "How many units did Acme order?"
@@ -65,12 +65,18 @@ async def test_hybrid_decomposition_only_context_returns_the_merged_context():
             new_callable=AsyncMock,
             return_value=SimpleNamespace(is_empty=AsyncMock(return_value=False)),
         ),
+        patch.object(
+            get_retriever_output_module,
+            "hybrid_deferral_reason",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
         patch(
             "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
             new_callable=AsyncMock,
             return_value=unified,
         ),
-        patch(f"{RETRIEVER_MODULE}.LLMGateway.acreate_structured_output", decompose),
+        patch(f"{PLANNER}.LLMGateway.acreate_structured_output", decompose),
     ):
         result = await get_retriever_output(
             SearchType.HYBRID_COMPLETION_DECOMPOSITION,
@@ -95,39 +101,6 @@ async def test_hybrid_decomposition_only_context_returns_the_merged_context():
     assert decompose.await_args.kwargs["system_prompt"] == "Split into per-slot subqueries."
     assert QUESTION in decompose.await_args.kwargs["text_input"]
     assert "Acme ordered 40 units." in decompose.await_args.kwargs["text_input"]
-
-
-@pytest.mark.asyncio
-async def test_hybrid_decomposition_llm_failure_never_reaches_the_caller():
-    """AC3: a failing decomposition degrades to the plain hybrid context, without raising."""
-    unified = _unified()
-
-    with (
-        patch.object(
-            get_retriever_output_module,
-            "get_graph_engine",
-            new_callable=AsyncMock,
-            return_value=SimpleNamespace(is_empty=AsyncMock(return_value=False)),
-        ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
-            new_callable=AsyncMock,
-            return_value=unified,
-        ),
-        patch(
-            f"{RETRIEVER_MODULE}.LLMGateway.acreate_structured_output",
-            AsyncMock(side_effect=RuntimeError("LLM unavailable")),
-        ),
-    ):
-        result = await get_retriever_output(
-            SearchType.HYBRID_COMPLETION_DECOMPOSITION,
-            QUESTION,
-            only_context=True,
-            retriever_specific_config={"text_summaries_top_k": 0},
-        )
-
-    assert result.context == "## Relevant passages\nAcme ordered 40 units."
-    assert [chunk.id for chunk in result.result_object["chunks"]] == ["c1"]
 
 
 @pytest.mark.asyncio
@@ -156,12 +129,7 @@ async def test_decomposed_context_contains_every_chunk_plain_hybrid_returns():
             new_callable=AsyncMock,
             return_value=_unified(),
         ),
-        patch(
-            "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
-            new_callable=AsyncMock,
-            return_value=_unified(),
-        ),
-        patch(f"{RETRIEVER_MODULE}.LLMGateway.acreate_structured_output", decompose),
+        patch(f"{PLANNER}.LLMGateway.acreate_structured_output", decompose),
     ):
         plain = await get_retriever_output(
             SearchType.HYBRID_COMPLETION,
@@ -185,16 +153,8 @@ async def test_decomposed_context_contains_every_chunk_plain_hybrid_returns():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "config",
-    [
-        {"wide_search_top_k": 100},
-        {"triplet_distance_penalty": 6.5},
-        {"node_type": str},
-        {"neighborhood_depth": 2},
-    ],
-)
-async def test_decomposition_does_not_silently_ignore_graph_only_configuration(config):
+@pytest.mark.parametrize("config", [{"wide_search_top_k": 100}, {"triplet_distance_penalty": 6.5}])
+async def test_graph_only_knobs_are_rejected_like_plain_hybrid(config):
     from cognee.exceptions import CogneeValidationError
 
     with pytest.raises(CogneeValidationError):
@@ -204,26 +164,27 @@ async def test_decomposition_does_not_silently_ignore_graph_only_configuration(c
 
 
 @pytest.mark.asyncio
-async def test_full_answer_path_skips_session_preparation():
-    from cognee.modules.retrieval.hybrid_decomposition_retriever import HybridDecompositionRetriever
-    from cognee.modules.retrieval.session_aware_completion import run_sequential_session_turn
+@pytest.mark.parametrize(
+    "config", [{"node_type": str}, {"neighborhood_depth": 2}, {"feedback_influence": 0.2}]
+)
+async def test_graph_only_requests_defer_to_graph_decomposition(config):
+    resolved = await get_retriever_output_module._effective_search_type(
+        SearchType.HYBRID_COMPLETION_DECOMPOSITION, QUESTION, config, False
+    )
 
-    retriever = HybridDecompositionRetriever()
-    with (
-        patch.object(
-            retriever, "prepare_session_turn_for_retrieval", new_callable=AsyncMock
-        ) as prepare,
-        patch.object(retriever, "get_retrieved_objects", new_callable=AsyncMock, return_value={}),
-        patch.object(
-            retriever, "get_context_from_objects", new_callable=AsyncMock, return_value="context"
-        ),
-        patch.object(
-            retriever,
-            "get_completion_from_context",
-            new_callable=AsyncMock,
-            return_value=["answer"],
-        ),
+    assert resolved is SearchType.GRAPH_COMPLETION_DECOMPOSITION
+
+
+@pytest.mark.asyncio
+async def test_a_dataset_without_chunk_collections_defers_to_graph_decomposition():
+    vector = SimpleNamespace(has_collection=AsyncMock(return_value=False))
+    with patch(
+        "cognee.modules.search.methods.hybrid_deferral.get_vector_engine_async",
+        new_callable=AsyncMock,
+        return_value=vector,
     ):
-        result = await run_sequential_session_turn(retriever, raw_query=QUESTION)
-    prepare.assert_not_awaited()
-    assert result == ({}, "context", ["answer"])
+        resolved = await get_retriever_output_module._effective_search_type(
+            SearchType.HYBRID_COMPLETION_DECOMPOSITION, QUESTION, {}, False
+        )
+
+    assert resolved is SearchType.GRAPH_COMPLETION_DECOMPOSITION

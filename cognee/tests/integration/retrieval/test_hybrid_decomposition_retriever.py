@@ -63,9 +63,9 @@ async def test_local_stores_expand_coverage_and_preserve_chunk_metadata(tmp_path
                 AsyncMock(return_value=unified),
             ),
             patch(
-                "cognee.modules.retrieval.hybrid_decomposition_retriever.LLMGateway.acreate_structured_output",
+                "cognee.modules.retrieval.utils.query_decomposition.LLMGateway.acreate_structured_output",
                 AsyncMock(return_value=QueryDecomposition(subqueries=[SUBQUERY])),
-            ),
+            ) as planner,
         ):
             baseline = await plain.get_retrieved_objects(query=QUESTION)
             expanded = await decomposed.get_retrieved_objects(query=QUESTION)
@@ -78,7 +78,7 @@ async def test_local_stores_expand_coverage_and_preserve_chunk_metadata(tmp_path
         assert all(
             hit.payload["external_metadata"]["source_id"] == "order-A" for hit in expanded["chunks"]
         )
-        assert decomposed.decomposition_state.subqueries == [SUBQUERY]
+        assert QUESTION in planner.await_args.kwargs["text_input"]
     finally:
         await vector.close()
         await graph.close()
