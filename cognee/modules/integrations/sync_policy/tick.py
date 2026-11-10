@@ -94,10 +94,19 @@ async def run_due_syncs(
     report, so one connection does not stop the others.
     """
     started = 0
+    # Slots line up on a grid, so one owner's many rows are due together: list each
+    # owner's connections once per tick, not once per row. A failed read is not kept.
+    owned: dict[UUID, list[UUID]] = {}
+
+    async def owned_once(principal_id: UUID) -> list[UUID]:
+        if principal_id not in owned:
+            owned[principal_id] = await owned_credential_ids(principal_id)
+        return owned[principal_id]
+
     for row in await _due_rows(now):
         # Read before the claim: a read that fails here leaves the slot due for the
         # next tick instead of claimed with nothing started.
-        connections = await _connections_of(row, owned_credential_ids)
+        connections = await _connections_of(row, owned_once)
         try:
             claimed = await claim_due_slot(row, now)
         except ValidationError as error:
@@ -113,7 +122,10 @@ async def run_due_syncs(
         if (
             connections
             and row.credential_id is not None
-            and await get_sync_pause_level(row.credential_id, row.principal_id) is not None
+            and await get_sync_pause_level(
+                credential_id=row.credential_id, principal_id=row.principal_id
+            )
+            is not None
         ):
             continue
         for credential_id in connections:

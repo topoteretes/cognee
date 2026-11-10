@@ -216,7 +216,7 @@ def policy_level(row: IntegrationSyncPolicy) -> str:
 
 
 async def _connection_rows(
-    credential_id: UUID, principal_id: UUID
+    *, credential_id: UUID, principal_id: UUID
 ) -> tuple[IntegrationSyncPolicy | None, IntegrationSyncPolicy | None]:
     """The connection's own row and its owner's default row, each None when absent."""
     async with get_relational_engine().get_async_session() as session:
@@ -256,32 +256,40 @@ async def inheriting_credential_ids(principal_id: UUID, credential_ids: list[UUI
     return [credential_id for credential_id in credential_ids if credential_id not in own]
 
 
-async def get_caller_effective_sync_policy(
-    user: User, principal_id: UUID, credential_id: UUID
-) -> IntegrationSyncPolicy:
-    """The connection's own row, else its owner's default, for a caller who may act for
-    the owner. No policy at either level raises ``SyncPolicyNotFoundError``."""
-    await _require_actable(user, principal_id)
-    own, default = await _connection_rows(credential_id, principal_id)
-    row = own or default
-    if row is None:
-        raise SyncPolicyNotFoundError()
-    return row
-
-
-async def get_sync_pause_level(credential_id: UUID, principal_id: UUID) -> str | None:
-    """The level that holds this connection paused, ``default`` or ``connection``, or None.
+def _pause_level(
+    own: IntegrationSyncPolicy | None, default: IntegrationSyncPolicy | None
+) -> str | None:
+    """The level that holds a connection paused, from its own row and its owner's default.
 
     The owner's paused default comes first: it holds every connection, those with
     their own row too.
     """
-    own, default = await _connection_rows(credential_id, principal_id)
     pause = next((row for row in (default, own) if row is not None and row.paused), None)
     return policy_level(pause) if pause is not None else None
 
 
-async def require_sync_not_paused(credential_id: UUID, principal_id: UUID) -> None:
+async def get_caller_effective_sync_policy(
+    user: User, principal_id: UUID, credential_id: UUID
+) -> tuple[IntegrationSyncPolicy, str | None]:
+    """The connection's own row, else its owner's default, for a caller who may act for
+    the owner, and the level that holds the connection paused (``get_sync_pause_level``).
+    No policy at either level raises ``SyncPolicyNotFoundError``."""
+    await _require_actable(user, principal_id)
+    own, default = await _connection_rows(credential_id=credential_id, principal_id=principal_id)
+    row = own or default
+    if row is None:
+        raise SyncPolicyNotFoundError()
+    return row, _pause_level(own, default)
+
+
+async def get_sync_pause_level(*, credential_id: UUID, principal_id: UUID) -> str | None:
+    """The level that holds this connection paused, ``default`` or ``connection``, or None."""
+    own, default = await _connection_rows(credential_id=credential_id, principal_id=principal_id)
+    return _pause_level(own, default)
+
+
+async def require_sync_not_paused(*, credential_id: UUID, principal_id: UUID) -> None:
     """Refuse an explicit sync of a paused connection, naming the level that holds it."""
-    level = await get_sync_pause_level(credential_id, principal_id)
+    level = await get_sync_pause_level(credential_id=credential_id, principal_id=principal_id)
     if level is not None:
         raise SyncPausedError(level)

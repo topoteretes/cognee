@@ -71,8 +71,10 @@ PUT /api/v1/integrations/sync/policy
 Set `INTEGRATIONS_SYNC_SCHEDULER_ENABLED=true` and run that API as one process per
 database (one worker, one replica). It checks for due slots every 60 seconds and
 starts each through the provider's `sync_now`, the same call as a manual sync; the
-runs are recorded with origin `background`. On shutdown a tick in flight finishes
-within the API's background drain (`BACKGROUND_DRAIN_TIMEOUT_SECONDS`).
+runs are recorded with origin `background`. On shutdown the API waits for a tick in
+flight to finish, so it is not cut between a claim and its starts. A tick stuck on a
+database call holds shutdown until that call gives up; on Postgres set a command or
+statement timeout through `DATABASE_CONNECT_ARGS`.
 
 The claim of a slot is a conditional update, so even several processes start a
 slot once. Two runs of one connection, though, are kept apart only inside one

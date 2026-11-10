@@ -185,9 +185,12 @@ async def test_the_worker_outlives_a_failed_tick(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
-async def test_shutdown_lets_a_tick_in_flight_finish_through_the_apps_drain(monkeypatch, caplog):
-    """A tick cut off between its claim and its starts would lose the slot, and one that
-    hangs on the database must not hold shutdown past the app's bounded drain."""
+async def test_shutdown_waits_for_a_tick_in_flight_outside_the_background_registry(
+    monkeypatch, caplog
+):
+    """A tick cut off between its claim and its starts would lose the slot. The worker runs
+    until shutdown, so in the background registry it would keep
+    ``wait_for_background_tasks()`` from ever returning."""
     entered, release, finished = asyncio.Event(), asyncio.Event(), []
 
     async def run_due_syncs(now, owned, start):
@@ -200,15 +203,20 @@ async def test_shutdown_lets_a_tick_in_flight_finish_through_the_apps_drain(monk
     monkeypatch.setattr(scheduled_sync, "TICK_SECONDS", TICK)
     monkeypatch.setenv("INTEGRATIONS_SYNC_SCHEDULER_ENABLED", "true")
 
+    lifespan = scheduled_sync.sync_scheduler_lifespan(None)
     with caplog.at_level(logging.INFO):
-        async with scheduled_sync.sync_scheduler_lifespan(None):
-            await asyncio.wait_for(entered.wait(), timeout=5)
-        # The lifespan returned at once; the tick is still in flight, cut off by nothing.
+        await lifespan.__aenter__()
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        # The running worker is not background work a drain waits for.
+        assert await wait_for_background_tasks(timeout=TICK)
+
+        closing = asyncio.create_task(lifespan.__aexit__(None, None, None))
+        await asyncio.sleep(TICK * 5)
+        # Shutdown waits for the tick in flight.
+        assert not closing.done()
         assert finished == []
-        # The app's shutdown drain waits for it, within its own bound.
-        assert not await wait_for_background_tasks(timeout=TICK)
         release.set()
-        assert await wait_for_background_tasks(timeout=5)
+        await asyncio.wait_for(closing, timeout=5)
 
     assert finished == [True]
     assert "Scheduled sync worker stopped" in caplog.text

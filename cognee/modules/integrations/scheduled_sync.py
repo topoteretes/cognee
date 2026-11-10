@@ -13,7 +13,6 @@ from uuid import UUID
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from cognee.infrastructure.background_tasks import register_background_task
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.integrations.background import spawn_background
 from cognee.modules.integrations.credentials import (
@@ -96,11 +95,12 @@ async def sync_scheduler_lifespan(app):
         yield
         return
     stop = asyncio.Event()
-    # Registered, so the app's bounded shutdown drain waits for a tick in flight: it
-    # is not cut between a claim and its starts, and a database that hangs cannot
-    # hold shutdown past the drain's budget.
-    register_background_task(asyncio.create_task(_tick_until(stop)))
+    # Not in the background-task registry: the worker runs until shutdown, so a registered
+    # one would keep ``wait_for_background_tasks()`` from ever returning. Shutdown waits
+    # for it here instead, so a tick in flight is not cut between a claim and its starts.
+    worker = asyncio.create_task(_tick_until(stop))
     try:
         yield
     finally:
         stop.set()
+        await worker

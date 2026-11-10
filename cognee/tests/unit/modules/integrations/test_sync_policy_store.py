@@ -165,8 +165,8 @@ async def test_effective_policy_is_own_row_then_default_then_none(database):
     await store.save_sync_policy(owner, tenant_id, DAILY, now=NOW)
     await store.save_sync_policy(owner, tenant_id, HOURLY, own_credential, now=NOW)
 
-    own = await effective(owner, tenant_id, own_credential)
-    inherited = await effective(owner, tenant_id, inheriting_credential)
+    own, _ = await effective(owner, tenant_id, own_credential)
+    inherited, _ = await effective(owner, tenant_id, inheriting_credential)
     assert own.interval_minutes == 60
     assert inherited.interval_minutes == 1440
     assert inherited.credential_id is None
@@ -180,9 +180,8 @@ async def test_deleting_a_connection_row_returns_it_to_the_default(database):
 
     await store.delete_sync_policy(user, user.id, credential_id)
 
-    assert (
-        await store.get_caller_effective_sync_policy(user, user.id, credential_id)
-    ).credential_id is None
+    row, _ = await store.get_caller_effective_sync_policy(user, user.id, credential_id)
+    assert row.credential_id is None
     with pytest.raises(SyncPolicyNotFoundError):
         await store.delete_sync_policy(user, user.id, credential_id)
 
@@ -355,20 +354,20 @@ async def test_a_paused_default_holds_every_connection_and_a_paused_row_only_its
 
     async def levels():
         return [
-            await store.get_sync_pause_level(credential_id, owner.id)
+            await store.get_sync_pause_level(credential_id=credential_id, principal_id=owner.id)
             for credential_id in (inheriting, overriding, other)
         ]
 
     await store.pause_sync_policy(owner, owner.id, other, now=NOW)
     assert await levels() == [None, None, "connection"]
-    await store.require_sync_not_paused(inheriting, owner.id)
+    await store.require_sync_not_paused(credential_id=inheriting, principal_id=owner.id)
     with pytest.raises(SyncPausedError, match="connection level"):
-        await store.require_sync_not_paused(other, owner.id)
+        await store.require_sync_not_paused(credential_id=other, principal_id=owner.id)
 
     await store.pause_sync_policy(owner, owner.id, now=NOW)
     assert await levels() == ["default", "default", "default"]
     with pytest.raises(SyncPausedError, match="default level"):
-        await store.require_sync_not_paused(overriding, owner.id)
+        await store.require_sync_not_paused(credential_id=overriding, principal_id=owner.id)
 
 
 @pytest.mark.asyncio
@@ -398,12 +397,15 @@ async def test_the_caller_reads_the_effective_policy_with_its_level_only_as_owne
         await store.get_caller_effective_sync_policy(owner, owner.id, credential_id)
 
     await store.save_sync_policy(owner, owner.id, DAILY, now=NOW)
-    inherited = await store.get_caller_effective_sync_policy(owner, owner.id, credential_id)
+    inherited, inherited_held = await store.get_caller_effective_sync_policy(
+        owner, owner.id, credential_id
+    )
     await store.save_sync_policy(owner, owner.id, HOURLY, credential_id, now=NOW)
-    own = await store.get_caller_effective_sync_policy(owner, owner.id, credential_id)
+    own, own_held = await store.get_caller_effective_sync_policy(owner, owner.id, credential_id)
 
     assert store.policy_level(inherited) == "default"
     assert store.policy_level(own) == "connection"
+    assert inherited_held is None and own_held is None
     with pytest.raises(SyncPolicyNotFoundError):
         await store.get_caller_effective_sync_policy(stranger, owner.id, credential_id)
 

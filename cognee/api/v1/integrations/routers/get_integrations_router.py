@@ -245,7 +245,9 @@ def _sync_policy_dto(row: IntegrationSyncPolicy, held_by: str | None = None) -> 
 
 
 async def _connection_policy_dto(row: IntegrationSyncPolicy, credential) -> SyncPolicyDTO:
-    held_by = await get_sync_pause_level(credential.id, owner_principal_id(credential))
+    held_by = await get_sync_pause_level(
+        credential_id=credential.id, principal_id=owner_principal_id(credential)
+    )
     return _sync_policy_dto(row, held_by=held_by)
 
 
@@ -1249,7 +1251,9 @@ def get_integrations_router():
         integration = _integration_or_404(provider)
         _outbound_http_or_503(provider)
         credential = await _connected_credential_or_404(user, integration, account_id)
-        await require_sync_not_paused(credential.id, owner_principal_id(credential))
+        await require_sync_not_paused(
+            credential_id=credential.id, principal_id=owner_principal_id(credential)
+        )
         from cognee.modules.integrations.ingestion import sync_is_running
 
         if sync_is_running(provider, credential.provider_account_id):
@@ -1279,12 +1283,10 @@ def get_integrations_router():
         credential = await _connected_credential_or_404(
             user, _integration_or_404(provider), account_id
         )
-        return await _connection_policy_dto(
-            await get_caller_effective_sync_policy(
-                user, owner_principal_id(credential), credential.id
-            ),
-            credential,
+        row, held_by = await get_caller_effective_sync_policy(
+            user, owner_principal_id(credential), credential.id
         )
+        return _sync_policy_dto(row, held_by=held_by)
 
     @integrations_router.put("/{provider}/sync/policy")
     async def set_connection_sync_policy(
