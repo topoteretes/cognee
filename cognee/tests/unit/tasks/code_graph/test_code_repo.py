@@ -74,12 +74,16 @@ def test_lfs_pointers_of_documents_are_skipped(tmp_path):
     """git runs with LFS downloads off, so an LFS document arrives as its pointer;
     the pointer text must not be ingested as if it were the document."""
     repo = _make_repo(tmp_path)
+    # newline="\n": a real pointer has LF line endings on every platform, and
+    # write_text alone would write CRLF on Windows.
     (repo / "manual.pdf").write_text(
-        f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize 2048000\n"
+        f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize 2048000\n",
+        newline="\n",
     )
     (repo / "deck.pptx").write_text(
         "version https://git-lfs.github.com/spec/v1\n"
-        f"ext-0-foo sha256:{'b' * 64}\noid sha256:{'a' * 64}\nsize 12"
+        f"ext-0-foo sha256:{'b' * 64}\noid sha256:{'a' * 64}\nsize 12",
+        newline="\n",
     )
     # Prose that merely quotes the pointer header stays, short or long.
     (repo / "lfs-notes.md").write_text(
@@ -89,7 +93,8 @@ def test_lfs_pointers_of_documents_are_skipped(tmp_path):
         "version https://git-lfs.github.com/spec/v1 is the pointer header.\n"
     )
     (repo / "lfs-almost.md").write_text(
-        f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize 12\nmore prose\n"
+        f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize 12\nmore prose\n",
+        newline="\n",
     )
 
     _covered, documents, skipped = partition_repo_files(repo)
