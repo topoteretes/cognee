@@ -1,5 +1,8 @@
 import asyncio
+import difflib
+import inspect
 import warnings
+from functools import lru_cache
 from typing import Literal
 from uuid import UUID
 
@@ -84,6 +87,45 @@ def drop_deprecated_temporal_cognify(kwargs: dict) -> None:
     kwargs.pop("temporal_cognify")
     warnings.warn(TEMPORAL_COGNIFY_DEPRECATED, DeprecationWarning, stacklevel=3)
     logger.warning(TEMPORAL_COGNIFY_DEPRECATED)
+
+
+@lru_cache(maxsize=1)
+def _cognify_known_param_names() -> frozenset[str]:
+    """Explicit parameter names of cognify(), used to spot misspelled kwargs.
+
+    Computed lazily (and cached) because cognify() is defined below this helper.
+    """
+    return frozenset(inspect.signature(cognify).parameters) - {"kwargs"}
+
+
+def raise_on_close_misspelled_kwargs(kwargs: dict) -> None:
+    """Reject kwargs that look like typos of cognify()'s explicit parameters.
+
+    cognify() deliberately forwards unknown kwargs into the extractor LLM call
+    (``extract_graph_and_summarize(**kwargs)``), so we cannot reject every unknown
+    key — genuine extractor options (e.g. ``extraction_instructions``) must pass
+    through. But a one- or two-character typo of a real parameter (``extactor`` for
+    ``extractor``, ``sumary_method`` for ``summary_method``) would otherwise be
+    silently forwarded as an extractor option and ignored, running the wrong
+    pipeline with no signal to the caller.
+
+    We only flag keys that are close-match (difflib ratio >= 0.8) to a known
+    parameter name; anything else flows on as before.
+    """
+    if not kwargs:
+        return
+    known = _cognify_known_param_names()
+    typos = []
+    for key in kwargs:
+        if key in known:
+            continue
+        suggestions = difflib.get_close_matches(key, known, n=1, cutoff=0.8)
+        if suggestions:
+            typos.append((key, suggestions[0]))
+    if not typos:
+        return
+    rendered = ", ".join(f"{key!r} (did you mean {suggestion!r}?)" for key, suggestion in typos)
+    raise TypeError(f"cognify() got unexpected keyword arguments: {rendered}")
 
 
 def _wrap_cognify_exception(error: BaseException, datasets) -> "Exception":
@@ -376,6 +418,7 @@ async def cognify(
             "improve() reviews conflicts by default"
         )
     drop_deprecated_temporal_cognify(kwargs)
+    raise_on_close_misspelled_kwargs(kwargs)
 
     cognify_config = get_cognify_config()
     # The extractor decision is made once, here, before any branch. Branches
