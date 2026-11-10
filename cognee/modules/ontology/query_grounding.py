@@ -94,9 +94,19 @@ def _concept_from_subgraph(
     root,
     edges: list[tuple[str, str, str]],
 ) -> GroundedConcept:
-    """Build a GroundedConcept from what ``get_subgraph`` returned for one term."""
+    """Build a GroundedConcept from what ``get_subgraph`` returned for one term.
+
+    Only edges to classes and individuals count, the nodes cognify writes
+    (``_add_ontology_edges``): a blank node, such as an ``owl:Restriction``
+    superclass, or an undeclared URI is not a parent or a relation target.
+    """
     root_key = generate_edge_name(root.name)
     display_name_by_key = {generate_edge_name(node.name): node.name for node in nodes}
+    written_keys = {
+        generate_edge_name(node.name)
+        for node in nodes
+        if node.category in (ONTOLOGY_CLASS_CATEGORY, ONTOLOGY_INDIVIDUAL_CATEGORY)
+    }
 
     def display(label: str) -> str:
         return display_name_by_key.get(label, label)
@@ -104,6 +114,8 @@ def _concept_from_subgraph(
     is_a_by_source: dict[str, list[str]] = {}
     relations: list[tuple[str, str]] = []
     for source_label, relationship_name, target_label in edges:
+        if target_label not in written_keys:
+            continue
         if relationship_name == "is_a":
             if target_label not in _TRIVIAL_PARENTS:
                 is_a_by_source.setdefault(source_label, []).append(target_label)

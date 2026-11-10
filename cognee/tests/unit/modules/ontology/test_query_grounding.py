@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 import pytest
-from rdflib import OWL, RDF, RDFS, Graph, Namespace
+from rdflib import OWL, RDF, RDFS, BNode, Graph, Namespace
 
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.ontology import matching_strategies, query_grounding
@@ -78,6 +78,30 @@ def test_ground_query_reports_is_a_chain_and_relations_with_canonical_casing():
     assert block.startswith("## Ontology grounding")
     assert '"credit exposure" refers to CreditExposure (class); is a RiskMetric' in block
     assert "Acme (individual); is a EnterpriseCustomer > Customer" in block
+
+
+def test_a_restriction_superclass_is_not_a_parent():
+    graph = Graph()
+    for class_name in ("Party", "Customer", "Account"):
+        graph.add((NS[class_name], RDF.type, OWL.Class))
+    graph.add((NS.hasAccount, RDF.type, OWL.ObjectProperty))
+    # "Every customer has some account", stated before the named superclass.
+    restriction = BNode()
+    graph.add((restriction, RDF.type, OWL.Restriction))
+    graph.add((restriction, OWL.onProperty, NS.hasAccount))
+    graph.add((restriction, OWL.someValuesFrom, NS.Account))
+    graph.add((NS.Customer, RDFS.subClassOf, restriction))
+    graph.add((NS.Customer, RDFS.subClassOf, NS.Party))
+    resolver = RDFLibOntologyResolver(ontology_file=None)
+    resolver.graph = graph
+    resolver.build_lookup()
+
+    (concept,) = ground_query("which customer", resolver)
+
+    assert concept.parents == ("Party",)
+    assert grounding_block([concept]) == (
+        '## Ontology grounding\n- "customer" refers to Customer (class); is a Party'
+    )
 
 
 def test_a_longer_run_cannot_swallow_an_unrelated_word():
