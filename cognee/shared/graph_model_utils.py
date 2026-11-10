@@ -107,7 +107,7 @@ def resolve_graph_model(graph_model: type[BaseModel] | dict[str, Any] | None) ->
         ) from error
 
 
-def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
+def graph_schema_to_graph_model(pydantic_json_schema: dict) -> type[BaseModel]:
     _reject_external_refs(pydantic_json_schema)
     # If a custom graph model is provided, convert it from dict to a Pydantic model class
     config = GenerateConfig(

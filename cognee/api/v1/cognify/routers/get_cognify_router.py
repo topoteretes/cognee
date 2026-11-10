@@ -233,8 +233,9 @@ def get_cognify_router() -> APIRouter:
                 datasets,
                 user,
                 # The schema as sent; cognify() builds the class. This route has always
-                # read an empty object as "omitted", which cognify() spells None.
-                graph_model=payload.graph_model or None,
+                # read an empty object as "omitted": the argument is then left out, like
+                # on the remember route, and cognify() uses its own default.
+                **({"graph_model": payload.graph_model} if payload.graph_model else {}),
                 config=config_to_use,
                 run_in_background=payload.run_in_background,
                 custom_prompt=custom_prompt,

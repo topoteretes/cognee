@@ -166,6 +166,18 @@ def test_an_external_ref_is_refused_before_the_generator_runs():
     generate.assert_not_called()
 
 
+def test_building_is_repeatable_and_leaves_the_schema_alone():
+    """One schema dict builds the same model every time, and is not changed by it."""
+    schema = _schema()
+    snapshot = json.loads(json.dumps(schema))
+
+    first = resolve_graph_model(schema)
+    second = resolve_graph_model(schema)
+
+    assert graph_model_to_graph_schema(first) == graph_model_to_graph_schema(second)
+    assert schema == snapshot
+
+
 def test_a_generator_failure_becomes_a_typed_400():
     with (
         patch("cognee.shared.graph_model_utils.generate", side_effect=RuntimeError("boom")),
@@ -201,6 +213,17 @@ async def test_cognify_builds_the_tasks_from_a_schema_dict(local_cognify):
     await cognify_mod.cognify(graph_model=_schema(), extractor="llm")
 
     _assert_is_the_staff_graph(local_cognify.tasks.await_args.kwargs["graph_model"])
+
+
+@pytest.mark.asyncio
+async def test_cognify_leaves_the_callers_schema_unmodified(local_cognify):
+    schema = _schema()
+    snapshot = json.loads(json.dumps(schema))
+
+    await cognify_mod.cognify(graph_model=schema, extractor="llm")
+
+    local_cognify.tasks.assert_awaited_once()
+    assert schema == snapshot
 
 
 @pytest.mark.asyncio
@@ -401,18 +424,17 @@ def test_cognify_route_forwards_the_schema_dict(client, restore_api_packages):
 
 
 @pytest.mark.parametrize("graph_model", [None, {}])
-def test_cognify_route_reads_an_empty_model_as_the_default(
+def test_cognify_route_sends_no_model_when_none_was_given(
     client, restore_api_packages, graph_model
 ):
+    """Missing and ``{}`` both mean the default: cognify() is left to apply its own."""
     cognify_pkg.cognify = AsyncMock(return_value={})
     body = {"datasets": ["ds"]} | ({} if graph_model is None else {"graph_model": graph_model})
 
     resp = client.post("/cognify", json=body)
 
     assert resp.status_code == 200
-    forwarded = cognify_pkg.cognify.await_args.kwargs["graph_model"]
-    assert forwarded is None
-    assert resolve_graph_model(forwarded) is KnowledgeGraph
+    assert "graph_model" not in cognify_pkg.cognify.await_args.kwargs
 
 
 class _RememberResultStub:
