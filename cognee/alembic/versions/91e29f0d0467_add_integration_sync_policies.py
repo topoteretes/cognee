@@ -47,6 +47,8 @@ INDEXES = (
     ("uq_integration_sync_policies_default", ["principal_id"], True, "credential_id IS NULL"),
     ("ix_integration_sync_policies_due", ["next_due_at"], False, "NOT paused"),
     ("ix_integration_sync_policies_credential_id", ["credential_id"], False, None),
+    ("ix_integration_sync_policies_principal_id", ["principal_id"], False, None),
+    ("ix_integration_sync_policies_paused_by", ["paused_by"], False, None),
 )
 
 

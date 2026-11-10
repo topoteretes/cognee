@@ -46,6 +46,7 @@ REGISTRATION_SCRIPT = textwrap.dedent(
 
     # The import is the test.
     import cognee.modules.agents.delete_agents_of_user
+    import cognee.modules.agents.delete_sync_policies
 
     assert "integration_sync_policies" not in Base.metadata.tables
     print("ok")

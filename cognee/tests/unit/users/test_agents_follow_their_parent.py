@@ -312,7 +312,7 @@ async def test_an_agent_working_in_another_tenant_keeps_its_key_and_its_access_t
 def test_the_deletion_names_a_table_and_columns_the_policy_model_has():
     """The deletion refers to the policy table by name so that it never registers the model."""
     import cognee.modules.integrations.models as integration_models
-    from cognee.modules.agents.delete_agents_of_user import _SYNC_POLICIES
+    from cognee.modules.agents.delete_sync_policies import _SYNC_POLICIES
 
     model_table = integration_models.IntegrationSyncPolicy.__table__
 
@@ -357,6 +357,38 @@ async def test_deleting_a_user_deletes_the_sync_policies_of_them_and_their_agent
     assert await _count(IntegrationSyncPolicy, principal_id=seed["tenant_id"]) == 1
     assert await _count(IntegrationSyncPolicy, principal_id=seed["tenant_id"], paused=True) == 1
     assert await _count(IntegrationSyncPolicy, paused_by=seed["member_id"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_agents_of_a_user_deletes_their_policies_and_not_the_users():
+    """The user's own policies are the caller's to delete, not the agents' deletion's (SDK-1434)."""
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.agents.delete_agents_of_user import delete_agents_of_user
+    from cognee.modules.integrations.sync_policy.models import IntegrationSyncPolicy
+
+    seed = await _seed()
+    agent_id, _ = await _agent_with_access("agent", seed["member_id"], seed["dataset_id"])
+
+    async with get_relational_engine().get_async_session() as session:
+        session.add_all(
+            [
+                IntegrationSyncPolicy(
+                    principal_id=principal_id,
+                    interval_minutes=60,
+                    weekdays=[0],
+                    timezone="UTC",
+                )
+                for principal_id in (seed["member_id"], agent_id)
+            ]
+        )
+        await session.commit()
+
+    async with get_relational_engine().get_async_session() as session:
+        await delete_agents_of_user(session, seed["member_id"])
+        await session.commit()
+
+    assert await _count(IntegrationSyncPolicy, principal_id=seed["member_id"]) == 1
+    assert await _count(IntegrationSyncPolicy, principal_id=agent_id) == 0
 
 
 @pytest.mark.asyncio
