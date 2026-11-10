@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
@@ -136,6 +136,25 @@ class SearchPayloadDTO(InDTO):
             "feature_unavailable) and, when one argument is at fault, its 'param'."
         ),
     )
+    retriever_specific_config: dict[str, Any] | None = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Options for the retriever behind search_type, the same dict the SDK's "
+            "search(retriever_specific_config=...) takes, e.g. chunks_top_k, "
+            "entities_top_k, facts_top_k, include_external_metadata and "
+            "external_metadata_keys for HYBRID_COMPLETION. Keys the chosen search type "
+            "does not read are ignored. response_model is a Python type and cannot be "
+            "sent over HTTP."
+        ),
+    )
+
+    @field_validator("retriever_specific_config")
+    @classmethod
+    def _reject_response_model(cls, config: dict[str, Any] | None) -> dict[str, Any] | None:
+        if config and "response_model" in config:
+            raise ValueError("response_model cannot be set over HTTP; it is a Python type.")
+        return config
 
 
 def get_search_router() -> APIRouter:
@@ -269,6 +288,7 @@ def get_search_router() -> APIRouter:
         - **max_iter** (Optional[int]): Max agentic iterations, must be >= 1 (AGENTIC_COMPLETION only)
         - **include_references** (bool): Attach source references to completion-type results (default: true)
         - **code_query** (Optional[dict]): Structured operation arguments for CODE search
+        - **retriever_specific_config** (Optional[dict]): Options for the retriever behind search_type, as the SDK's `search(retriever_specific_config=...)` takes them; `response_model` is rejected with 422
 
         ## Response
         Returns a list of search results containing relevant nodes from the graph.
@@ -306,6 +326,7 @@ def get_search_router() -> APIRouter:
                 "max_iter": payload.max_iter,
                 "include_references": payload.include_references,
                 "code_query": len(str(payload.code_query)) if payload.code_query else 0,
+                "retriever_specific_config": len(payload.retriever_specific_config or {}),
                 "cognee_version": cognee_version,
             },
         )
@@ -332,6 +353,7 @@ def get_search_router() -> APIRouter:
                 max_iter=payload.max_iter,
                 include_references=payload.include_references,
                 code_query=payload.code_query,
+                retriever_specific_config=payload.retriever_specific_config,
             )
 
             return jsonable_encoder(results)

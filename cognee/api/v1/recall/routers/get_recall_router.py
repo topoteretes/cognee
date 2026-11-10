@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
@@ -168,6 +168,25 @@ class RecallPayloadDTO(InDTO):
             "server-side."
         ),
     )
+    retriever_specific_config: dict | None = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Options for the retriever behind search_type, the same dict the SDK's "
+            "recall(retriever_specific_config=...) takes, e.g. chunks_top_k, "
+            "entities_top_k, facts_top_k, include_external_metadata and "
+            "external_metadata_keys for HYBRID_COMPLETION. Keys the chosen search type "
+            "does not read are ignored. For structured output send response_schema, "
+            "not response_model."
+        ),
+    )
+
+    @field_validator("retriever_specific_config")
+    @classmethod
+    def _reject_response_model(cls, config: dict | None) -> dict | None:
+        if config and "response_model" in config:
+            raise ValueError("response_model cannot be set over HTTP; send response_schema.")
+        return config
 
 
 def get_recall_router() -> APIRouter:
@@ -263,6 +282,9 @@ def get_recall_router() -> APIRouter:
         - **response_schema** (Optional[dict]): JSON Schema for structured
           completion output; validated results land in each result's
           ``structured`` field. 422 on schemas outside the supported subset.
+        - **retriever_specific_config** (Optional[dict]): Options for the retriever
+          behind search_type, as the SDK's ``recall(retriever_specific_config=...)``
+          takes them; ``response_model`` is rejected with 422 (send response_schema).
         - **contextProfile** (str): Profile to render for the 'session_context' scope: 'qa'
           (conversational) or 'agent' (tool/workflow). Ignored by other scopes. Defaults to 'qa'.
         - **toolConnections** (Optional[List[str]]): Names of authorized external database
@@ -318,6 +340,7 @@ def get_recall_router() -> APIRouter:
                 tool_connections=payload.tool_connections,
                 tools_trigger=payload.tools_trigger,
                 code_query=payload.code_query,
+                retriever_specific_config=payload.retriever_specific_config,
             )
 
         streaming = wants_event_stream(request.headers.get("accept"), payload.stream)
