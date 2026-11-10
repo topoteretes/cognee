@@ -70,6 +70,36 @@ def test_partition_buckets(tmp_path):
     }
 
 
+def test_lfs_pointers_of_documents_are_skipped(tmp_path):
+    """git runs with LFS downloads off, so an LFS document arrives as its pointer;
+    the pointer text must not be ingested as if it were the document."""
+    repo = _make_repo(tmp_path)
+    (repo / "manual.pdf").write_text(
+        f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize 2048000\n"
+    )
+    (repo / "deck.pptx").write_text(
+        "version https://git-lfs.github.com/spec/v1\n"
+        f"ext-0-foo sha256:{'b' * 64}\noid sha256:{'a' * 64}\nsize 12"
+    )
+    # Prose that merely quotes the pointer header stays, short or long.
+    (repo / "lfs-notes.md").write_text(
+        "version https://git-lfs.github.com/spec/v1 is the pointer header.\n" + "x" * 2000
+    )
+    (repo / "lfs-short.md").write_text(
+        "version https://git-lfs.github.com/spec/v1 is the pointer header.\n"
+    )
+    (repo / "lfs-almost.md").write_text(
+        f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize 12\nmore prose\n"
+    )
+
+    _covered, documents, skipped = partition_repo_files(repo)
+
+    document_names = {path.relative_to(repo).as_posix() for path in documents}
+    skipped_names = {path.relative_to(repo).as_posix() for path in skipped}
+    assert {"manual.pdf", "deck.pptx"} <= skipped_names
+    assert {"lfs-notes.md", "lfs-short.md", "lfs-almost.md"} <= document_names
+
+
 def test_manifest_hash_tracks_code_content(tmp_path):
     repo = _make_repo(tmp_path)
     covered, _documents, _skipped = partition_repo_files(repo)
