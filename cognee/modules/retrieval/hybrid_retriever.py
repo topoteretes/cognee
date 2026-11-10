@@ -6,6 +6,7 @@ from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY
 from cognee.modules.ontology.query_grounding import (
     GroundedConcept,
     ground,
@@ -249,9 +250,9 @@ class HybridRetriever(BaseRetriever):
                 query_vector=query_vector,
             ),
         )
-        # Ontology concepts the query names lead the entity lane: their 1-hop
-        # neighbourhood (instances of a class, relations of an individual) is
-        # what "this customer" or "exposure" means in the business model.
+        # Ontology concepts the query names lead the entity lane: the tables that
+        # realize a class, and the relations of an individual, are what "customer"
+        # or "Acme" means in the business model.
         entity_hits = pin_grounded_entities(entity_hits, concepts)
         entities, reachable_ids = await build_entities(
             self._unified_engine.graph,
@@ -261,6 +262,11 @@ class HybridRetriever(BaseRetriever):
             self.node_name,
             self.node_name_filter_operator,
             pinned_ids={concept.node_id for concept in concepts},
+            pinned_class_ids={
+                concept.node_id
+                for concept in concepts
+                if concept.category == ONTOLOGY_CLASS_CATEGORY
+            },
         )
         from cognee.modules.retrieval.utils.resolved_context import (
             apply_entity_resolutions,

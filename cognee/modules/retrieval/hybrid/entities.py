@@ -15,6 +15,7 @@ from cognee.modules.graph.utils.fact_conflicts import (
 )
 from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY
 from cognee.modules.ontology.query_grounding import GroundedConcept
+from cognee.modules.ontology.schema_alignment import REALIZES_RELATIONSHIP
 from cognee.modules.retrieval.hybrid.chunks import search_collections
 from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
 from cognee.modules.retrieval.hybrid.results import payload_matches_node_filter
@@ -110,12 +111,17 @@ async def build_entities(
     node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
     pinned_ids: frozenset[str] | set[str] = frozenset(),
+    pinned_class_ids: frozenset[str] | set[str] = frozenset(),
 ) -> tuple[list[dict], set[str]]:
     """Entities for the hits, with their one-hop edges as bullets.
 
     A pinned entity (an ontology node the query names, ``pin_grounded_entities``) is
     dropped when it has no connection left: the dataset's graph does not hold it, and
     showing it would invent an entity and make an empty context look non-empty.
+
+    A pinned class (``pinned_class_ids``) is read with its ``realizes`` edges only, the
+    tables that realize it. Its other neighbours are every entity of its type, which a
+    search that names a common class would otherwise read in full on every call.
     """
     if not entity_hits:
         return [], set()
@@ -126,8 +132,17 @@ async def build_entities(
     if not entity_ids:
         return entities, set()
 
+    class_ids = [entity_id for entity_id in entity_ids if entity_id in pinned_class_ids]
+    other_ids = [entity_id for entity_id in entity_ids if entity_id not in pinned_class_ids]
     try:
-        nodes, edges = await graph_engine.get_neighborhood(entity_ids, depth=1)
+        nodes, edges = [], []
+        if other_ids:
+            nodes, edges = await graph_engine.get_neighborhood(other_ids, depth=1)
+        if class_ids:
+            class_nodes, class_edges = await graph_engine.get_neighborhood(
+                class_ids, depth=1, edge_types=[REALIZES_RELATIONSHIP]
+            )
+            nodes, edges = [*nodes, *class_nodes], [*edges, *class_edges]
     except Exception as error:
         logger.warning(
             "Graph neighborhood retrieval failed; returning entities without edges: %s",

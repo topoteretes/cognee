@@ -387,30 +387,50 @@ async def test_a_pinned_concept_shows_only_neighbours_in_the_node_set():
 
 
 @pytest.mark.asyncio
-async def test_a_class_keeps_its_realizes_edge_next_to_many_members():
+async def test_a_pinned_class_is_read_with_its_realizes_edges_only():
     customer_id = str(EntityType.id_for("Customer"))
-    member_ids = [str(uuid4()) for _ in range(12)]
-    nodes = [(customer_id, {"name": "customer"}), ("crm", {"name": "crm.customers"})]
-    nodes += [
-        (member_id, {"name": f"customer {index}"}) for index, member_id in enumerate(member_ids)
+    acme_id = str(uuid4())
+    neighbourhoods = {
+        # The tables that realize the class; its members are never asked for.
+        (customer_id,): (
+            [(customer_id, {"name": "customer"}), ("crm", {"name": "crm.customers"})],
+            [("crm", customer_id, "realizes", {"authoritative": True, "owner": "sales-ops"})],
+        ),
+        (acme_id,): (
+            [(acme_id, {"name": "acme"}), ("crm", {"name": "crm.customers"})],
+            [("crm", acme_id, "mentions", {}), (acme_id, customer_id, "is_a", {})],
+        ),
+    }
+    graph_engine = MagicMock()
+    graph_engine.get_neighborhood = AsyncMock(
+        side_effect=lambda node_ids, depth, edge_types=None: neighbourhoods[tuple(node_ids)]
+    )
+    hits = [
+        ScoredResult(id=UUID(customer_id), score=0.0, payload={"name": "customer"}),
+        ScoredResult(id=UUID(acme_id), score=0.3, payload={"name": "acme"}),
     ]
-    edges = [(member_id, customer_id, "is_a", {}) for member_id in member_ids]
-    edges.append(("crm", customer_id, "realizes", {}))
-    hit = ScoredResult(id=UUID(customer_id), score=0.0, payload={"name": "customer"})
 
-    entities, _ = await build_entities(_graph_engine(nodes, edges), [hit], 10)
+    entities, _ = await build_entities(
+        graph_engine,
+        hits,
+        10,
+        pinned_ids={customer_id},
+        pinned_class_ids={customer_id},
+    )
 
-    assert "crm.customers -- realizes -- customer" in [
-        edge["text"] for edge in entities[0]["edges"]
+    calls = {
+        tuple(call.args[0]): call.kwargs.get("edge_types")
+        for call in graph_engine.get_neighborhood.call_args_list
+    }
+    assert calls == {(acme_id,): None, (customer_id,): ["realizes"]}
+    customer, acme = entities
+    # A member reaches the class only as a vector hit, and sorts after the tables.
+    assert [edge["text"] for edge in customer["edges"]] == [
+        "crm.customers -- realizes -- customer (authoritative source, owner: sales-ops)",
+        "acme -- is_a -- customer",
     ]
-
     # An ordinary entity's own is_a edge still comes first.
-    acme_id = member_ids[0]
-    hit = ScoredResult(id=UUID(acme_id), score=0.3, payload={"name": "customer 0"})
-    acme_edges = [("crm", acme_id, "mentions", {}), (acme_id, customer_id, "is_a", {})]
-    entities, _ = await build_entities(_graph_engine(nodes, acme_edges), [hit], 10)
-
-    assert entities[0]["edges"][0]["text"] == "customer 0 -- is_a -- customer"
+    assert acme["edges"][0]["text"] == "acme -- is_a -- customer"
 
 
 async def _retrieve_hybrid(query: str):
@@ -455,6 +475,7 @@ async def test_hybrid_pins_the_grounded_concepts_in_the_entity_lane(ontology):
 
     pinned_hits = mock_build_entities.call_args.args[1]
     assert [str(hit.id) for hit in pinned_hits] == [EXPOSURE_ID, ACME_ID]
+    assert mock_build_entities.call_args.kwargs["pinned_class_ids"] == {EXPOSURE_ID}
 
     _, mock_build_entities = await _retrieve_hybrid("hello there")
     assert mock_build_entities.call_args.args[1] == []
