@@ -14,8 +14,10 @@ class OntologyConfig(TypedDict, total=False):
             entities with no ontology grounding). Falls back to the
             ONTOLOGY_MODE environment value when omitted.
         authoritative_sources: Which schema tables are the system of record for
-            the concept they realize: table name (bare or ``schema.table``) to
-            owner, or None for no owner. Stamped on the ``realizes`` edge;
+            the concept they realize: table name to owner, or None for no owner.
+            A table is named bare, as ``schema.table`` (a non-``public`` table of
+            ``migrate_relational_database``) or as ``database.table`` (a DLT
+            database source). Stamped on the ``realizes`` edge;
             retrieval prefers authoritative tables when several realize the
             same class. Falls back to ONTOLOGY_AUTHORITATIVE_SOURCES when
             omitted. Pass it next to ``ontology_resolver``: a per-call

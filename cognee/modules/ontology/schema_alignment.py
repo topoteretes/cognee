@@ -100,8 +100,8 @@ def align_tables_with_ontology(
 ) -> tuple[list[EntityType], list[tuple[UUID, UUID, str, dict[str, Any]]]]:
     """Link each table to the ontology class its name is the exact key of.
 
-    ``table_names`` maps a table node's id to the table's name (bare or
-    ``schema.table``). Returns the ``EntityType`` nodes of the classes reached and the
+    ``table_names`` maps a table node's id to the table's name, bare or qualified by
+    its schema or database (``crm.customers``). Returns the ``EntityType`` nodes of the classes reached and the
     edges: ``table -realizes-> class``, with ``authoritative`` / ``owner`` from
     ``authoritative_sources``, and the ontology's own edges among those classes. Each
     node and edge appears once, although many tables reach one ``is_a`` chain. With no

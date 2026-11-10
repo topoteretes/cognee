@@ -160,6 +160,10 @@ async def emit_dlt_schema_graph(
 
     # SchemaTable nodes for each source table
     table_node_ids = {}
+    # The names the ontology alignment matches authoritative sources against: qualified
+    # by the source's database when it names one ("crm.customers"), so two sources'
+    # tables of one name can be told apart.
+    aligned_table_names = {}
     for table_key, table_meta in tables.items():
         table_name = table_meta.get("name", table_key)
         scope = table_meta.get("scope", "")
@@ -186,6 +190,9 @@ async def emit_dlt_schema_graph(
         )
         schema_nodes.append(table_node)
         table_node_ids[(scope, table_name)] = table_node.id
+        aligned_table_names[table_node.id] = (
+            f"{source_label}.{table_name}" if source_label else table_name
+        )
         # The table belongs to the source document (the database) it was read from.
         if scope:
             schema_edges.append(
@@ -204,9 +211,7 @@ async def emit_dlt_schema_graph(
     # Business-to-technical mapping: with an ontology configured, each table node
     # realizes the ontology class its name is the key of (see schema_alignment).
     entity_types, alignment_edges = align_tables_with_ontology(
-        {node_id: name for (_scope, name), node_id in table_node_ids.items()},
-        ontology_resolver,
-        authoritative_sources,
+        aligned_table_names, ontology_resolver, authoritative_sources
     )
     schema_nodes.extend(entity_types)
     schema_edges.extend(alignment_edges)

@@ -37,8 +37,10 @@ def normalize_ontology_mode(mode: "str | None") -> str:
 def parse_authoritative_sources(raw: str) -> dict[str, "str | None"]:
     """Parse ``ONTOLOGY_AUTHORITATIVE_SOURCES``: comma-separated ``table[=owner]`` entries.
 
-    Returns table name (bare or ``schema.table``) to owner, None when no owner is
-    given; every listed table is authoritative. An entry with no table name raises.
+    Returns table name to owner, None when no owner is given; every listed table is
+    authoritative. A table is named bare, as ``schema.table`` (a non-``public`` table of
+    ``migrate_relational_database``) or as ``database.table`` (a DLT database source).
+    An entry with no table name raises.
     """
     sources: dict[str, str | None] = {}
     for entry in raw.split(","):

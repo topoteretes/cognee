@@ -191,10 +191,10 @@ async def test_tables_of_one_name_from_two_sources_are_separate_nodes(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_ontology_alignment_sees_each_scoped_table_under_its_bare_name(monkeypatch):
+async def test_ontology_alignment_sees_each_table_under_its_database_qualified_name(monkeypatch):
     """Tables are keyed ``"{source}:{name}"`` and their node ids by ``(scope, name)``;
-    the ontology alignment must be handed every table's own node id with the bare
-    table name the ontology is matched against (regression: KeyError on scoped tables)."""
+    the ontology alignment must be handed every table's own node id (regression:
+    KeyError on scoped tables), named by its database when the source names one."""
     graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
     _wire(monkeypatch, graph, {"source_ref_key": None, "pipeline_run_id": None})
     seen = []
@@ -208,39 +208,80 @@ async def test_ontology_alignment_sees_each_scoped_table_under_its_bare_name(mon
     orders = _tables()["orders"]
     tables = {
         f"{shop}:orders": {**orders, "name": "orders", "scope": shop},
-        f"{crm}:orders": {**orders, "name": "orders", "scope": crm},
+        f"{crm}:orders": {**orders, "name": "orders", "scope": crm, "source_label": "crm"},
     }
 
     await emit_dlt_schema_graph(tables, [], _ctx())
 
     assert seen == [
         (schema_graph_module._table_node_id("orders", shop), "orders"),
-        (schema_graph_module._table_node_id("orders", crm), "orders"),
+        (schema_graph_module._table_node_id("orders", crm), "crm.orders"),
     ]
 
 
-@pytest.mark.asyncio
-async def test_the_given_resolver_and_sources_align_the_tables(monkeypatch):
-    """The DLT path uses the ontology arguments it is handed and reads no environment."""
+def _order_resolver():
+    """An ontology whose only class is ``Order``."""
     from rdflib import OWL, RDF, Graph, Namespace
 
     from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
-    graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
-    _wire(monkeypatch, graph, {"source_ref_key": None, "pipeline_run_id": None})
     ontology = Graph()
     ontology.add((Namespace("http://example.org/shop#").Order, RDF.type, OWL.Class))
     resolver = RDFLibOntologyResolver(ontology_file=None)
     resolver.graph = ontology
     resolver.build_lookup()
+    return resolver
+
+
+@pytest.mark.asyncio
+async def test_the_given_resolver_and_sources_align_the_tables(monkeypatch):
+    """The DLT path uses the ontology arguments it is handed and reads no environment."""
+    graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
+    _wire(monkeypatch, graph, {"source_ref_key": None, "pipeline_run_id": None})
 
     await emit_dlt_schema_graph(
-        _tables(), [], _ctx(), ontology_resolver=resolver, authoritative_sources={"orders": "ops"}
+        _tables(),
+        [],
+        _ctx(),
+        ontology_resolver=_order_resolver(),
+        authoritative_sources={"orders": "ops"},
     )
 
     edges = graph.add_edges.await_args.args[0]
     realizes = [props for _, _, name, props in edges if name == "realizes"]
     assert [(props["authoritative"], props["owner"]) for props in realizes] == [(True, "ops")]
+
+
+@pytest.mark.asyncio
+async def test_a_database_qualified_source_marks_only_that_databases_table(monkeypatch):
+    """Two databases both hold ``orders``; ``crm.orders`` names one of them."""
+    graph = SimpleNamespace(add_nodes=AsyncMock(), add_edges=AsyncMock())
+    _wire(monkeypatch, graph, {"source_ref_key": None, "pipeline_run_id": None})
+    shop, crm = str(uuid4()), str(uuid4())
+    orders = _tables()["orders"]
+    tables = {
+        f"{shop}:orders": {**orders, "name": "orders", "scope": shop, "source_label": "shop.db"},
+        f"{crm}:orders": {**orders, "name": "orders", "scope": crm, "source_label": "crm"},
+    }
+
+    await emit_dlt_schema_graph(
+        tables,
+        [],
+        _ctx(),
+        ontology_resolver=_order_resolver(),
+        authoritative_sources={"crm.orders": "ops"},
+    )
+
+    edges = graph.add_edges.await_args.args[0]
+    authority = {
+        source: (props["authoritative"], props["owner"])
+        for source, _, name, props in edges
+        if name == "realizes"
+    }
+    assert authority == {
+        schema_graph_module._table_node_id("orders", shop): (False, None),
+        schema_graph_module._table_node_id("orders", crm): (True, "ops"),
+    }
 
 
 @pytest.mark.asyncio
