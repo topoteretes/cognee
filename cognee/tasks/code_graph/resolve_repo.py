@@ -280,8 +280,9 @@ async def resolve_repo_source(
     Local paths are validated and returned as-is. Remote URLs are cloned with
     ``--depth 1`` into ``clones_dir`` (default :func:`default_clones_dir`); an
     existing clone is reused after a best-effort ``git pull --ff-only``.
-    Remote resolution requires ``ALLOW_HTTP_REQUESTS=true`` (off by default on
-    every surface); the refusal names the setting and reports HTTP 403.
+    Remote resolution follows ``ALLOW_HTTP_REQUESTS``: API calls need an
+    explicit opt-in; other surfaces allow it unless a set value disables it. The
+    refusal names the setting and reports HTTP 403.
 
     ``branch`` clones that branch instead of the remote's default, into a directory of
     its own (see :func:`_clone_slug`); reusing it fetches and resets, which follows a

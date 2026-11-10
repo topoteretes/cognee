@@ -112,17 +112,21 @@ async def test_unresolvable_host_is_blocked(monkeypatch):
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        (None, False),  # unset -> off by default
-        ("", False),  # blank counts as unset
-        ("   ", False),
+        (None, True),  # unset -> SDK default enabled
+        ("", True),  # blank counts as unset
+        ("   ", True),
         ("true", True),
         ("True", True),
         ("1", True),
+        ("yes", True),
+        ("on", True),
         ("false", False),
         ("False", False),
         ("0", False),
         ("no", False),
         ("off", False),
+        ("flase", False),  # anything but a recognised true value disables
+        ("enabled ", False),
     ],
 )
 def test_is_http_requests_allowed_parsing(value, expected, monkeypatch):

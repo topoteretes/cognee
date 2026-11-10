@@ -11,8 +11,9 @@ This module centralises the outbound-URL policy so every fetch path shares the
 same guard:
 
 * ``ALLOW_HTTP_REQUESTS`` gates outbound URL fetching and remote repository
-  cloning on every surface (SDK, CLI, MCP and the API server alike). It is off
-  unless set to a true value; a blank value counts as unset.
+  cloning. Unset or blank, API requests are refused and SDK/CLI/MCP calls are
+  allowed. A set value applies on every surface: only ``true``, ``1``, ``yes``
+  or ``on`` enable fetching, any other value (a misspelling included) disables it.
 * Only the ``http`` and ``https`` schemes are permitted.
 * The hostname is resolved and *every* resolved address is checked. A request
   is rejected if any address is loopback, private, link-local, reserved,
@@ -35,7 +36,18 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 ALLOWED_SCHEMES = frozenset({"http", "https"})
-_FALSEY = frozenset({"false", "0", "no", "off"})
+_TRUTHY = frozenset({"true", "1", "yes", "on"})
+
+
+def opt_in_setting(name: str) -> bool | None:
+    """Read an opt-in security switch: ``None`` when unset or blank, else whether it is on.
+
+    Only a recognised true value (``true``, ``1``, ``yes``, ``on``, any case) turns
+    the switch on. Every other value, a misspelling included, turns it off, so a
+    typo fails closed instead of enabling the feature.
+    """
+    value = (os.getenv(name) or "").strip().lower()
+    return None if not value else value in _TRUTHY
 
 
 class SSRFProtectionError(CogneeValidationError):
@@ -50,31 +62,34 @@ class SSRFProtectionError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
-def _configured_http_requests_setting() -> str:
-    """The ``ALLOW_HTTP_REQUESTS`` value, stripped; ``""`` when unset or blank."""
-    return (os.getenv("ALLOW_HTTP_REQUESTS") or "").strip()
-
-
 def is_http_requests_allowed() -> bool:
-    """Whether ``ALLOW_HTTP_REQUESTS`` opts in to outbound URL fetching.
+    """Honor a set ``ALLOW_HTTP_REQUESTS``; otherwise refuse fetching for API requests.
 
-    One rule for every surface: fetching is off until the setting holds a true
-    value. Unset and blank are the same thing, so a ``.env`` line left empty or
-    a compose ``${ALLOW_HTTP_REQUESTS}`` with no host value never enables it.
+    Unset and blank are the same thing, so a ``.env`` line left empty or a compose
+    ``${ALLOW_HTTP_REQUESTS}`` with no host value keeps the default. The API
+    middleware stamps the request origin, which child tasks inherit; importing the
+    server alongside SDK calls does not change the SDK default.
     """
-    configured = _configured_http_requests_setting().lower()
-    return bool(configured) and configured not in _FALSEY
+    configured = opt_in_setting("ALLOW_HTTP_REQUESTS")
+    if configured is not None:
+        return configured
+
+    from cognee.modules.operations.origin import ORIGIN_API, get_operation_origin
+
+    return get_operation_origin() != ORIGIN_API
 
 
 def require_http_requests_allowed() -> None:
     """Refuse disabled fetching with the setting needed to enable it."""
     if is_http_requests_allowed():
         return
-    configured = _configured_http_requests_setting()
+    configured = (os.getenv("ALLOW_HTTP_REQUESTS") or "").strip()
     reason = (
-        "Outbound HTTP requests are disabled (ALLOW_HTTP_REQUESTS is unset)."
+        "Outbound HTTP requests are disabled by default for API requests "
+        "because ALLOW_HTTP_REQUESTS is unset."
         if not configured
-        else f"Outbound HTTP requests are disabled (ALLOW_HTTP_REQUESTS={configured})."
+        else f"Outbound HTTP requests are disabled (ALLOW_HTTP_REQUESTS={configured}; "
+        "only true, 1, yes or on enable them)."
     )
     raise SSRFProtectionError(
         f"{reason} Set ALLOW_HTTP_REQUESTS=true in the Cognee environment "

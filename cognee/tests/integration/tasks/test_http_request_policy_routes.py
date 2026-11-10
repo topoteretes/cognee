@@ -84,7 +84,7 @@ def policy_env():
 
 @pytest.fixture
 def client(policy_env):
-    from cognee.api.client import exception_handler
+    from cognee.api.client import _stamp_operation_origin, exception_handler
     from cognee.api.v1.add.routers.get_add_router import get_add_router
     from cognee.api.v1.remember.routers.get_remember_router import get_remember_router
     from cognee.exceptions import CogneeApiError
@@ -92,6 +92,9 @@ def client(policy_env):
     from cognee.modules.users.methods.get_default_user import get_default_user
 
     app = FastAPI()
+    # The production middleware that marks each request as an API call: the
+    # unset default refuses fetching only for API requests.
+    app.middleware("http")(_stamp_operation_origin)
     app.add_exception_handler(CogneeApiError, exception_handler)
     app.include_router(get_add_router(), prefix="/api/v1/add")
     app.include_router(get_remember_router(), prefix="/api/v1/remember")
@@ -122,7 +125,7 @@ def network_never_reached(monkeypatch):
 
 @pytest.mark.parametrize("endpoint", ["add", "remember"])
 @pytest.mark.parametrize("url", ["https://example.com/document", "https://github.com/org/repo"])
-@pytest.mark.parametrize("setting", [None, "", "false"])
+@pytest.mark.parametrize("setting", [None, "", "false", "flase"])
 def test_ingestion_reports_how_to_enable_http_before_any_network_work(
     client, monkeypatch, network_never_reached, endpoint, url, setting
 ):

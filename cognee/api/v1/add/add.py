@@ -93,7 +93,8 @@ async def add(
           project, or any URL ending in .git) is shallow-cloned and ingested as ONE
           code-repo item that cognify runs through the enola code graph pipeline
           (cross-file edges), plus the repo's documents; same as adding a local code
-          project directory. Requires ALLOW_HTTP_REQUESTS=true and git on PATH. Pass
+          project directory. Requires git on PATH, and ALLOW_HTTP_REQUESTS=true on
+          the server for API calls. Pass
           ``branch`` to clone a branch other than the remote's default.
         - **Database connection strings**: "postgresql://...", "mysql://...",
           "sqlite:///path/to/file.db" and the other schemes in

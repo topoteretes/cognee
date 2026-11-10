@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from cognee.modules.operations.origin import operation_origin_scope
+
 resolve_module = importlib.import_module("cognee.tasks.code_graph.resolve_repo")
 
 
@@ -54,8 +56,8 @@ async def test_remote_refused_when_http_disabled(monkeypatch, tmp_path):
     "url",
     ["https://github.com/org/repo", "git@github.com:org/repo.git", "ssh://git@github.com/org/repo"],
 )
-@pytest.mark.parametrize("setting", [None, "", "false"])
-async def test_default_refuses_remote_repos_before_git_including_cached_clones(
+@pytest.mark.parametrize("setting", [None, "", "false", "flase"])
+async def test_api_default_refuses_remote_repos_before_git_including_cached_clones(
     monkeypatch, tmp_path, url, setting
 ):
     if setting is None:
@@ -67,9 +69,12 @@ async def test_default_refuses_remote_repos_before_git_including_cached_clones(
     run_git = AsyncMock()
     monkeypatch.setattr(resolve_module, "_run_git", run_git)
 
-    with pytest.raises(
-        resolve_module.CodeRepositoryError, match="ALLOW_HTTP_REQUESTS=true"
-    ) as error:
+    with (
+        operation_origin_scope("api"),
+        pytest.raises(
+            resolve_module.CodeRepositoryError, match="ALLOW_HTTP_REQUESTS=true"
+        ) as error,
+    ):
         await resolve_module.resolve_repo_source(url, clones_dir=tmp_path)
 
     assert error.value.status_code == 403
@@ -79,14 +84,14 @@ async def test_default_refuses_remote_repos_before_git_including_cached_clones(
 
 
 @pytest.mark.asyncio
-async def test_explicit_opt_in_allows_repo_cloning(monkeypatch, tmp_path):
+async def test_explicit_opt_in_allows_api_repo_cloning(monkeypatch, tmp_path):
     monkeypatch.setenv("ALLOW_HTTP_REQUESTS", "true")
     run_git = AsyncMock(return_value=(0, ""))
     monkeypatch.setattr(resolve_module, "_run_git", run_git)
-
-    resolved = await resolve_module.resolve_repo_source(
-        "https://8.8.8.8/org/repo.git", clones_dir=tmp_path
-    )
+    with operation_origin_scope("api"):
+        resolved = await resolve_module.resolve_repo_source(
+            "https://8.8.8.8/org/repo.git", clones_dir=tmp_path
+        )
 
     assert resolved.parent == tmp_path
     assert run_git.await_count == 1

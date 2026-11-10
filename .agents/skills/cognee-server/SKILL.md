@@ -37,13 +37,12 @@ refuses to store a Secure cookie.
 
 ### URL ingestion
 
-Cognee does not fetch URLs or clone remote repositories unless
-`ALLOW_HTTP_REQUESTS=true` is set in its environment. The rule is the same on
-every surface: for API calls the server's environment counts, for embedded
-SDK, CLI and MCP calls the process's own. A blocked attempt fails with HTTP 403
-and names the setting; a blank value counts as unset. Text, uploads and local
-paths need no opt-in. This setting does not affect LLM or embedding provider
-calls.
+API requests cannot fetch URLs or clone remote repositories unless the server
+sets `ALLOW_HTTP_REQUESTS=true`. A blocked attempt raises an error naming that
+setting. With the variable unset or blank, SDK, CLI and MCP calls still allow
+fetching. Only `true`, `1`, `yes` or `on` enable it; any other value (`false`,
+or a misspelling) disables it on every surface. This setting does not disable
+LLM or embedding provider calls.
 
 ## Connecting clients to the running server
 

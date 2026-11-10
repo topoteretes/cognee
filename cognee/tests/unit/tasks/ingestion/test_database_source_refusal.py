@@ -233,7 +233,7 @@ def test_unset_switch_refuses_api_callers_only(servers, monkeypatch):
         _require_database_ingestion_allowed()
 
 
-@pytest.mark.parametrize("value", ["false", "0", "no", "off", " FALSE "])
+@pytest.mark.parametrize("value", ["false", "0", "no", "off", " FALSE ", "flase", "ture"])
 @pytest.mark.parametrize(
     "dsn",
     [f"postgresql://u:p@{FOREIGN}/shop", "sqlite:////tmp/shop.db", "mysql://u:p@db/shop"],
