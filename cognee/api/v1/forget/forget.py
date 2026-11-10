@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Any
 from uuid import UUID
 
@@ -18,6 +19,18 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME
 
 logger = get_logger("forget")
+
+
+class ForgetTarget(str, Enum):
+    """What forget() reports it removed, picked from its arguments (telemetry and tracing)."""
+
+    EVERYTHING = "everything"
+    DATA_ITEM_MEMORY_ONLY = "data_item_memory_only"
+    DATASET_MEMORY_ONLY = "dataset_memory_only"
+    DATA_ITEM = "data_item"
+    DATASET = "dataset"
+    SEARCH_HISTORY = "search_history"
+    UNKNOWN = "unknown"
 
 
 async def forget(
@@ -108,25 +121,25 @@ async def forget(
         raise ValueError("Provide either dataset or dataset_id, not both.")
 
     if everything:
-        target = "everything"
+        target = ForgetTarget.EVERYTHING
     elif memory_only and data_id:
-        target = "data_item_memory_only"
+        target = ForgetTarget.DATA_ITEM_MEMORY_ONLY
     elif memory_only and dataset_ref:
-        target = "dataset_memory_only"
+        target = ForgetTarget.DATASET_MEMORY_ONLY
     elif data_id:
-        target = "data_item"
+        target = ForgetTarget.DATA_ITEM
     elif dataset_ref:
-        target = "dataset"
+        target = ForgetTarget.DATASET
     elif clean_history:
-        target = "search_history"
+        target = ForgetTarget.SEARCH_HISTORY
     else:
-        target = "unknown"
+        target = ForgetTarget.UNKNOWN
 
     send_telemetry(
         "cognee.forget",
         user if user and hasattr(user, "id") else "sdk",
         additional_properties={
-            "target": target,
+            "target": target.value,
             "dataset_name": dataset or "",
             "dataset_id": str(dataset_id) if dataset_id else "",
             "data_id": str(data_id) if data_id else "",
@@ -141,7 +154,7 @@ async def forget(
     with new_span("memory.delete") as span:
         span.set_attribute(MEMORY_SYSTEM, "cognee")
         span.set_attribute(MEMORY_OPERATION, "delete")
-        span.set_attribute(COGNEE_FORGET_TARGET, target)
+        span.set_attribute(COGNEE_FORGET_TARGET, target.value)
         if dataset_ref:
             span.set_attribute(COGNEE_DATASET_NAME, str(dataset_ref))
 
