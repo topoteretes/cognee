@@ -1155,9 +1155,14 @@ async def remember(
     """
     from cognee import __version__ as cognee_version
     from cognee.api.v1.cognify.cognify import drop_deprecated_temporal_cognify
+    from cognee.shared.graph_model_utils import resolve_graph_model
     from cognee.shared.utils import send_telemetry
 
     drop_deprecated_temporal_cognify(kwargs)
+    # A graph_model schema is checked here, before add() stores anything: in background
+    # mode add() and cognify() run after this call returns. cognify() still receives the
+    # caller's graph_model as given and builds its own class from it.
+    graph_model_class = resolve_graph_model(kwargs.get("graph_model"))
 
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The
@@ -1399,13 +1404,12 @@ async def remember(
         from cognee.infrastructure.llm import resolve_chunk_size
         from cognee.modules.chunking.TextChunker import TextChunker
         from cognee.modules.cognify.estimator import estimate_remember_dry_run
-        from cognee.shared.data_models import KnowledgeGraph
 
         return await estimate_remember_dry_run(
             data,
             chunker=chunker or TextChunker,
             chunk_size=await resolve_chunk_size(chunk_size),
-            graph_model=kwargs.get("graph_model") or KnowledgeGraph,
+            graph_model=graph_model_class,
             custom_prompt=custom_prompt,
             summary_method=resolve_summary_method(
                 kwargs.get("summary_method"), get_cognify_config()

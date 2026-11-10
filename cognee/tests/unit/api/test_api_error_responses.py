@@ -8,7 +8,7 @@ Tests cover:
 
 import importlib
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -667,27 +667,40 @@ class TestRecallPermissionDenied:
 
 
 class TestCognifyExternalSchemaRef:
-    """A ``graph_model`` whose ``$ref`` points outside the document is a 400, never fetched."""
+    """A ``graph_model`` whose ``$ref`` points outside the document is a 400, never fetched.
+
+    The route forwards the schema and the real ``cognify()`` refuses it: the guard runs
+    before the code generator (which would fetch a URL or read a path) and before any
+    pipeline run is created for the dataset."""
 
     @pytest.mark.parametrize(
         "ref", ["http://169.254.169.254/latest/meta-data/", "/etc/passwd", "../.env"]
     )
     def test_external_ref_is_a_400_and_cognify_never_runs(self, client, ref):
-        cognify_pkg = importlib.import_module("cognee.api.v1.cognify")
-        cognify_pkg.cognify = AsyncMock()
-
-        resp = client.post(
-            "/cognify",
-            json={
-                "datasets": ["ds"],
-                "graph_model": {
-                    "title": "Graph",
-                    "type": "object",
-                    "properties": {"nodes": {"type": "array", "items": {"$ref": ref}}},
+        cognify_module = importlib.import_module("cognee.api.v1.cognify.cognify")
+        with (
+            patch("cognee.shared.graph_model_utils.generate") as generate,
+            patch(
+                "cognee.modules.migrations.startup.run_migrations_and_block",
+                new_callable=AsyncMock,
+            ) as migrations,
+            patch.object(cognify_module, "get_pipeline_executor") as executor,
+        ):
+            resp = client.post(
+                "/cognify",
+                json={
+                    "datasets": ["ds"],
+                    "graph_model": {
+                        "title": "Graph",
+                        "type": "object",
+                        "properties": {"nodes": {"type": "array", "items": {"$ref": ref}}},
+                    },
                 },
-            },
-        )
+            )
 
         assert resp.status_code == 400
         assert "ExternalSchemaReferenceError" in resp.json()["detail"]
-        cognify_pkg.cognify.assert_not_awaited()
+        # The generator is what resolves $ref (fetches URLs, reads paths): never reached.
+        generate.assert_not_called()
+        migrations.assert_not_awaited()
+        executor.assert_not_called()
