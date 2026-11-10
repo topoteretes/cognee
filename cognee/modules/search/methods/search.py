@@ -249,6 +249,32 @@ async def authorized_search(
         datasets=dataset_ids, permission_type="read", user=user
     )
 
+    # Dataset routing candidates: the readable datasets the deployment's
+    # configured embedding model can score, read from the registry rows (see
+    # dataset_routing.candidates). Only an unscoped search routes, so only it
+    # steps over a dataset recorded with another model; naming one still
+    # raises EmbeddingDimensionMismatchError at the dataset context, as
+    # before. The filter runs whenever an unscoped search covers several
+    # datasets, so the fallback and the widening of a routed search cover the
+    # configured model's candidates only, never a dataset of another model.
+    if dataset_ids is None and len(search_datasets) > 1 and backend_access_control_enabled():
+        from cognee.modules.search.dataset_routing import datasets_on_configured_model
+
+        candidate_ids = await datasets_on_configured_model(
+            [dataset.id for dataset in search_datasets]
+        )
+        if len(candidate_ids) < len(search_datasets):
+            by_id = {dataset.id: dataset for dataset in search_datasets}
+            logger.info(
+                "Dataset routing: skipping %s, recorded with another embedding model than "
+                "the configured one; pass datasets=[...] to search one of them anyway.",
+                ", ".join(
+                    f"'{by_id[dataset_id].name}'"
+                    for dataset_id in sorted(by_id.keys() - candidate_ids)
+                ),
+            )
+        search_datasets = [dataset for dataset in search_datasets if dataset.id in candidate_ids]
+
     async def _search(datasets: list[Dataset], widening: bool = False) -> list[SearchResultPayload]:
         # Searches all provided datasets and handles setting up of appropriate database context based on permissions
         return await search_in_datasets_context(
