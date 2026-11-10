@@ -84,3 +84,12 @@ def test_scope_is_passed_through_as_scopes():
         {"team": {"id": "T123"}, "access_token": "x", "scope": "commands,chat:write"}
     )
     assert installation.scopes == "commands,chat:write"
+
+
+def test_the_bot_scopes_are_read_only():
+    """SDK-832: the app posts through response_url and views.*, which need no write scope."""
+    from cognee.modules.integrations.slack import oauth
+
+    scopes = oauth._BOT_SCOPES.split(",")
+    assert not [scope for scope in scopes if scope.endswith(":write")]
+    assert "commands" in scopes and "channels:read" in scopes
