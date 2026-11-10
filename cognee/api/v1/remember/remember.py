@@ -99,7 +99,7 @@ class RememberKwargs(TypedDict, total=False):
     extractor: Literal["llm", "gliner_demo", "gliner"]
     summary_method: Literal["llm", "from_extraction"]
     node_set: list[str]
-    preferred_loaders: list
+    preferred_loaders: list | dict
     incremental_loading: bool
     data_cache: bool
     data_per_batch: int

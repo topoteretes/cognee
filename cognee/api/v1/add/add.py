@@ -47,7 +47,9 @@ async def add(
     vector_db_config: dict | None = None,
     graph_db_config: dict | None = None,
     dataset_id: UUID | None = None,
-    preferred_loaders: list[str | dict[str, dict[str, Any]]] | None = None,
+    preferred_loaders: (
+        list[str | dict[str, dict[str, Any]]] | dict[str, dict[str, Any] | None] | None
+    ) = None,
     dlt_config: dict | None = None,
     incremental_loading: bool = True,
     data_per_batch: int | None = 20,
@@ -142,7 +144,8 @@ async def add(
         graph_db_config: Optional configuration for graph database (for custom setups).
         dataset_id: Optional specific dataset UUID to use instead of dataset_name.
         preferred_loaders: Loader names to try first, each optionally with that loader's
-                           options: ``["csv_loader"]`` or ``[{"dlt_csv_loader": {...}}]``.
+                           options: ``["csv_loader"]``, ``[{"dlt_csv_loader": {...}}]``,
+                           or as a dictionary ``{"beautiful_soup_loader": {...}}``.
         dlt_config: Options that apply only to dlt sources (connection strings, dlt
                     resources, CSV files): ``primary_key``, ``write_disposition``,
                     ``query``, ``max_rows_per_table``, ``column_value_columns``,
@@ -279,12 +282,18 @@ async def add(
         check_branch_name(branch)
 
     if preferred_loaders is not None:
-        transformed = {}
-        for item in preferred_loaders:
-            if isinstance(item, dict):
-                transformed.update(item)
-            else:
-                transformed[item] = {}
+        if isinstance(preferred_loaders, dict):
+            transformed = {
+                loader_name: dict(options) if isinstance(options, dict) else {}
+                for loader_name, options in preferred_loaders.items()
+            }
+        else:
+            transformed = {}
+            for item in preferred_loaders:
+                if isinstance(item, dict):
+                    transformed.update(item)
+                else:
+                    transformed[item] = {}
         preferred_loaders = transformed
 
     # DLT options, from dlt_config and the bare keyword arguments. The CSV
