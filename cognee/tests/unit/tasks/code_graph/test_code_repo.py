@@ -74,8 +74,8 @@ def test_lfs_pointers_of_documents_are_skipped(tmp_path):
     """git runs with LFS downloads off, so an LFS document arrives as its pointer;
     the pointer text must not be ingested as if it were the document."""
     repo = _make_repo(tmp_path)
-    # newline="\n": a real pointer has LF line endings on every platform, and
-    # write_text alone would write CRLF on Windows.
+    # newline="\n": Git LFS writes a pointer with LF line endings on every
+    # platform, and write_text alone would write CRLF on Windows.
     (repo / "manual.pdf").write_text(
         f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize 2048000\n",
         newline="\n",
