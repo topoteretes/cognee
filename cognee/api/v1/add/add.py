@@ -95,6 +95,15 @@ async def add(
           (cross-file edges), plus the repo's documents; same as adding a local code
           project directory. Requires ALLOW_HTTP_REQUESTS=true and git on PATH. Pass
           ``branch`` to clone a branch other than the remote's default.
+        - **Database connection strings**: "postgresql://...", "mysql://...",
+          "sqlite:///path/to/file.db" and the other schemes in
+          ``create_dlt_source.DB_CONNECTION_PATTERNS`` are read through dlt, with
+          ``dlt_config["query"]`` as an optional single-table filter. The connection is
+          made from the machine running cognee: the SDK, CLI and MCP server ingest a
+          database by default, the API server refuses it (422
+          ``DatabaseIngestionDisabled``) unless ``ALLOW_DATABASE_INGESTION=true``, and
+          ``false`` refuses it everywhere. Cognee's own databases are refused whatever
+          the setting, and a sqlite:/// path must be an existing file.
         - **Lists**: Multiple files or text strings in a single call
 
     Supported File Formats:
