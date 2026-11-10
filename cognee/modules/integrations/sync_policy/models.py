@@ -62,8 +62,10 @@ class IntegrationSyncPolicy(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
 
+    # A plain index too: the partial ones above do not serve user deletion, nor the cascade
+    # from principals, which look rows up by principal alone.
     principal_id: Mapped[UUID] = mapped_column(
-        Uuid, ForeignKey("principals.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("principals.id", ondelete="CASCADE"), nullable=False, index=True
     )
     credential_id: Mapped[UUID | None] = mapped_column(
         Uuid, ForeignKey("integration_credentials.id", ondelete="CASCADE"), index=True
@@ -78,7 +80,7 @@ class IntegrationSyncPolicy(Base):
         Boolean, nullable=False, default=False, server_default=false()
     )
     paused_by: Mapped[UUID | None] = mapped_column(
-        Uuid, ForeignKey("users.id", ondelete="SET NULL")
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
     paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
