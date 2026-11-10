@@ -8,8 +8,7 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.ontology.query_grounding import (
     GroundedConcept,
-    get_query_grounding_resolver,
-    ground_query,
+    ground,
     with_grounding_block,
 )
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -175,7 +174,7 @@ class HybridRetriever(BaseRetriever):
         # and fails open: flag off, no node, or any error yields {}, keeping
         # ranking byte-identical to an un-personalized run.
         personal_weights = await load_preference_weights()
-        concepts = ground_query(query, await get_query_grounding_resolver())
+        concepts = await ground(query)
 
         # One check decides for both lanes whether the DLT collections are read.
         include_dlt = await dlt_rows_indexed(self._unified_engine.vector)

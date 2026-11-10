@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from itertools import accumulate
@@ -280,31 +280,31 @@ def _file_mtimes(ontology_file_path: str) -> tuple[float | None, ...]:
     return tuple(os.path.getmtime(path) if os.path.exists(path) else None for path in paths)
 
 
-# Held while a worker thread checks and, if needed, parses the file, so concurrent first
-# searches parse it once. A thread lock, not an asyncio one: it works on any event loop.
-_load_lock = threading.Lock()
+def _ground(query: str, ontology_file_path: str, settings: dict[str, str]) -> list[GroundedConcept]:
+    """``ground_query`` against the files as they are now. Runs on ``_grounding_thread``."""
+    return ground_query(query, _load_resolver(_file_mtimes(ontology_file_path), **settings))
 
 
-def _current_resolver(ontology_file_path: str, settings: dict[str, str]) -> BaseOntologyResolver:
-    """The resolver for the files as they are now. Runs in a worker thread."""
-    with _load_lock:
-        return _load_resolver(_file_mtimes(ontology_file_path), **settings)
+# Every grounding step that can be slow runs on this one thread: the file check, a parse
+# (with ``ONTOLOGY_REASONING=owl_rl``, the closure too), the scan and the subgraph walks.
+# Searches that wait for a parse queue here instead of holding threads of the shared pool,
+# and the resolver's caches are only ever used from this thread. A concurrent.futures
+# executor, unlike an asyncio lock, works on any event loop.
+_grounding_thread = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ontology-grounding")
 
 
-async def get_query_grounding_resolver() -> BaseOntologyResolver | None:
-    """The resolver recall should ground against, or None when grounding is off.
+async def ground(query: str | None) -> list[GroundedConcept]:
+    """The ontology concepts ``query`` names, or [] when grounding is off.
 
     Grounding is on when ``ONTOLOGY_FILE_PATH`` names an ontology and
     ``ONTOLOGY_QUERY_GROUNDING`` (default true) has not turned it off. The resolver
-    is reloaded when a configured file changes. The file check and any parse (with
-    ``ONTOLOGY_REASONING=owl_rl``, the closure too) run in a worker thread, so a large
-    ontology does not block the event loop.
+    is parsed again when a configured file changes.
     """
     env_config = get_ontology_env_config()
-    if not env_config.ontology_query_grounding or not env_config.ontology_file_path:
-        return None
-    return await asyncio.to_thread(
-        _current_resolver, env_config.ontology_file_path, env_config.to_dict()
+    if not query or not env_config.ontology_query_grounding or not env_config.ontology_file_path:
+        return []
+    return await asyncio.get_running_loop().run_in_executor(
+        _grounding_thread, _ground, query, env_config.ontology_file_path, env_config.to_dict()
     )
 
 
@@ -317,5 +317,5 @@ async def with_grounding_block(query: str | None, context: str) -> str:
     """
     if not context:
         return context
-    block = grounding_block(ground_query(query, await get_query_grounding_resolver()))
+    block = grounding_block(await ground(query))
     return f"{block}\n\n{context}" if block else context

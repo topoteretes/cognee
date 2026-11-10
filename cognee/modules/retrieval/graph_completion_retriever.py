@@ -11,8 +11,7 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.ontology.query_grounding import (
-    get_query_grounding_resolver,
-    ground_query,
+    ground,
     seed_node_ids_by_collection,
     with_grounding_block,
 )
@@ -271,9 +270,7 @@ class GraphCompletionRetriever(BaseRetriever):
         # with the vector hits and rank ahead of them, so "exposure" reaches the
         # CreditExposure class node even when the embedding neighbourhood misses it.
         # Batch mode has no query, so it grounds nothing (the search could not pin anyway).
-        pinned_node_ids = seed_node_ids_by_collection(
-            ground_query(query, await get_query_grounding_resolver())
-        )
+        pinned_node_ids = seed_node_ids_by_collection(await ground(query))
         return await brute_force_triplet_search(
             query,
             query_batch,

@@ -8,7 +8,11 @@ from rdflib import OWL, RDF, RDFS, Graph, Namespace
 
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 from cognee.modules.engine.models import Entity, EntityType
-from cognee.modules.ontology.query_grounding import GroundedConcept, with_grounding_block
+from cognee.modules.ontology.query_grounding import (
+    GroundedConcept,
+    ground_query,
+    with_grounding_block,
+)
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.hybrid.context import format_hybrid_context
@@ -151,14 +155,16 @@ async def test_pinned_ids_flow_into_projection_and_outrank_vector_hits():
 def ontology(monkeypatch):
     """Both retrievers ground against the test ontology, as with ONTOLOGY_FILE_PATH set."""
     resolver = _resolver()
+
+    async def ground(query):
+        return ground_query(query, resolver)
+
     for module in (
         "cognee.modules.ontology.query_grounding",
         "cognee.modules.retrieval.graph_completion_retriever",
         "cognee.modules.retrieval.hybrid_retriever",
     ):
-        monkeypatch.setattr(
-            f"{module}.get_query_grounding_resolver", AsyncMock(return_value=resolver)
-        )
+        monkeypatch.setattr(f"{module}.ground", ground)
 
 
 @pytest.mark.asyncio

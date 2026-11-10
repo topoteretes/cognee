@@ -270,7 +270,7 @@ async def test_configured_resolver_is_built_with_every_setting(configured, monke
         query_grounding, "get_ontology_resolver_from_env", lambda **kwargs: built.append(kwargs)
     )
 
-    await query_grounding.get_query_grounding_resolver()
+    await query_grounding.ground("credit exposure")
 
     assert built[0]["ontology_reasoning"] == "owl_rl"
 
@@ -278,8 +278,7 @@ async def test_configured_resolver_is_built_with_every_setting(configured, monke
 @pytest.mark.asyncio
 async def test_a_load_error_is_raised_and_not_cached(configured, monkeypatch):
     configured()
-    resolver = object()
-    outcomes = [OntologyInitializationError("half-written file"), resolver]
+    outcomes = [OntologyInitializationError("half-written file"), _finance_resolver()]
 
     def factory(**_kwargs):
         outcome = outcomes.pop(0)
@@ -290,21 +289,22 @@ async def test_a_load_error_is_raised_and_not_cached(configured, monkeypatch):
     monkeypatch.setattr(query_grounding, "get_ontology_resolver_from_env", factory)
 
     with pytest.raises(OntologyInitializationError):
-        await query_grounding.get_query_grounding_resolver()
-    assert await query_grounding.get_query_grounding_resolver() is resolver
+        await query_grounding.ground("credit exposure")
+    grounding = await query_grounding.ground("credit exposure")
+
+    assert [concept.canonical_name for concept in grounding] == ["CreditExposure"]
 
 
 @pytest.mark.asyncio
 async def test_an_edited_ontology_file_is_loaded_again(configured):
     path = configured()
     _write_classes(path, "CreditExposure", mtime=1_000_000)
-    first = await query_grounding.get_query_grounding_resolver()
-    assert not ground_query("loan facility", first)
-    assert await query_grounding.get_query_grounding_resolver() is first
+    assert not await query_grounding.ground("loan facility")
+    assert not await query_grounding.ground("loan facility")
+    assert query_grounding._load_resolver.cache_info().misses == 1
 
     _write_classes(path, "CreditExposure", "LoanFacility", mtime=2_000_000)
-    resolver = await query_grounding.get_query_grounding_resolver()
-    grounding = ground_query("loan facility", resolver)
+    grounding = await query_grounding.ground("loan facility")
 
     assert [concept.canonical_name for concept in grounding] == ["LoanFacility"]
 
@@ -317,13 +317,28 @@ async def test_concurrent_first_searches_parse_once_off_the_event_loop(configure
     def factory(**_kwargs):
         parsed_on.append(threading.get_ident())
         time.sleep(0.05)
-        return object()
+        return _finance_resolver()
 
     monkeypatch.setattr(query_grounding, "get_ontology_resolver_from_env", factory)
-    resolvers = await asyncio.gather(
-        *(query_grounding.get_query_grounding_resolver() for _ in range(3))
-    )
+    await asyncio.gather(*(query_grounding.ground("credit exposure") for _ in range(3)))
 
     assert len(parsed_on) == 1
     assert parsed_on[0] != threading.get_ident()
-    assert resolvers[0] is resolvers[1] is resolvers[2]
+
+
+@pytest.mark.asyncio
+async def test_a_new_term_is_walked_off_the_event_loop(configured, monkeypatch):
+    path = configured()
+    _write_classes(path, "CreditExposure", mtime=1_000_000)
+    walked_on = []
+    get_subgraph = RDFLibOntologyResolver.get_subgraph
+
+    def recording_get_subgraph(self, *args, **kwargs):
+        walked_on.append(threading.get_ident())
+        return get_subgraph(self, *args, **kwargs)
+
+    monkeypatch.setattr(RDFLibOntologyResolver, "get_subgraph", recording_get_subgraph)
+    grounding = await query_grounding.ground("credit exposure")
+
+    assert [concept.canonical_name for concept in grounding] == ["CreditExposure"]
+    assert walked_on and walked_on[0] != threading.get_ident()
