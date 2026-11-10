@@ -335,9 +335,9 @@ def _require_text_like(name: str) -> None:
 
 def _accept_local_file_path() -> bool:
     """The same ACCEPT_LOCAL_FILE_PATH gate real ingestion applies."""
-    from cognee.tasks.ingestion.save_data_item_to_storage import settings
+    from cognee.tasks.ingestion.save_data_item_to_storage import local_file_paths_accepted
 
-    return settings.accept_local_file_path
+    return local_file_paths_accepted()
 
 
 def _path_candidate(value: str) -> Path | None:
@@ -373,19 +373,10 @@ def _path_candidate(value: str) -> Path | None:
         return None
 
     if exists:
+        # Mirror the ACCEPT_LOCAL_FILE_PATH gate: save_data_item_to_storage
+        # refuses any existing path, absolute or relative, when it is closed.
         if not _accept_local_file_path():
-            # Mirror the ACCEPT_LOCAL_FILE_PATH gate: an existing *absolute* file
-            # path is rejected, while an existing *relative* path falls through to
-            # raw text (save_data_item_to_storage has no reject branch for it).
-            # Absolute-path detection matches save_data_item_to_storage exactly,
-            # including Windows drive-letter paths (C:\...), which "/"-prefix
-            # checking alone misses.
-            is_absolute_path = (
-                value.startswith("/") or (os.name == "nt" and len(value) > 1 and value[1] == ":")
-            ) and Path(os.path.normpath(value)).is_absolute()
-            if is_absolute_path:
-                raise ValueError(f"Local files are not accepted, got {value!r}.")
-            return None
+            raise ValueError(f"Local files are not accepted, got {value!r}.")
         return path
 
     # A non-existent path — absolute or relative — is raw text. A real run no

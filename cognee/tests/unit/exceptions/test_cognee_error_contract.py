@@ -91,6 +91,8 @@ SAMPLE_ARGUMENTS = {
     "stored_dimensions": 384,
     "configured_model": "sample-provider/new-model",
     "configured_dimensions": 1536,
+    # StoredVectorWidthMismatchError: the LanceDB table whose vectors are not that width.
+    "collection_name": "DocumentChunk_text",
     # GlinerWorkerModelMismatchError: the model required vs the one the worker serves.
     "expected": "sample-org/required-model",
     "served": "sample-org/served-model",

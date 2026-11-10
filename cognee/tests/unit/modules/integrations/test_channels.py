@@ -18,6 +18,9 @@ class _FakeResponse:
     def __init__(self, payload, retry_after=None):
         self._payload = payload
         self.headers = {"Retry-After": retry_after} if retry_after else {}
+        # Slack answers a rate limit with 429 and everything else (``ok: false``
+        # included) with 200.
+        self.status = 429 if retry_after else 200
 
     async def __aenter__(self):
         return self

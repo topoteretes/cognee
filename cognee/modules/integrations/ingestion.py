@@ -471,49 +471,60 @@ async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
         CredentialInactiveError,
         record_sync_result,
     )
+    from cognee.modules.integrations.outbound import OutboundHttpDisabledError
     from cognee.modules.integrations.sync_progress import track_sync
 
-    with exclusive_sync(provider, credential.provider_account_id) as acquired:
-        if not acquired:
-            return
-        counts = {"scanned": 0, "skipped": 0, "failed": 0}
-        async with track_sync(provider, credential) as progress:
-            await progress.report(phase="checking", counts=counts)
-            try:
-                credential = await require_active_credential(credential)
-                status, counts = await sync_source(credential, counts)
-            except Exception as exc:
-                counts["failed"] = max(1, counts["failed"])
-                # Store a safe category, never provider exception text (which may
-                # include message IDs, URLs, or user content).
-                message = str(exc).lower()
-                if isinstance(exc, RateLimitedError) or any(
-                    term in message for term in ("ratelimitexceeded", "quota exceeded", "http 429")
-                ):
-                    counts["failed_rate_limit"] = 1
-                reason = (
-                    "connection_changed"
-                    if isinstance(exc, CredentialInactiveError)
-                    else "rate_limited"
-                    if counts.get("failed_rate_limit")
-                    else "provider_error"
+    counts = {"scanned": 0, "skipped": 0, "failed": 0}
+    progress = None
+    try:
+        with exclusive_sync(provider, credential.provider_account_id) as acquired:
+            if not acquired:
+                return
+            async with track_sync(provider, credential) as progress:
+                await progress.report(phase="checking", counts=counts)
+                try:
+                    credential = await require_active_credential(credential)
+                    status, counts = await sync_source(credential, counts)
+                except Exception as exc:
+                    counts["failed"] = max(1, counts["failed"])
+                    # Store a safe category, never provider exception text (which may
+                    # include message IDs, URLs, or user content).
+                    message = str(exc).lower()
+                    if isinstance(exc, RateLimitedError) or any(
+                        term in message
+                        for term in ("ratelimitexceeded", "quota exceeded", "http 429")
+                    ):
+                        counts["failed_rate_limit"] = 1
+                    reason = (
+                        "connection_changed"
+                        if isinstance(exc, CredentialInactiveError)
+                        else "rate_limited"
+                        if counts.get("failed_rate_limit")
+                        else "provider_error"
+                    )
+                    await progress.finish("failed", counts=counts, reason=reason)
+                    await record_sync_result(credential, status="degraded", counts=counts)
+                    raise
+                await record_sync_result(credential, status=status, counts=counts)
+                partial = status == "degraded" or bool(counts.get("failed"))
+                await progress.finish(
+                    "partial" if partial else "succeeded",
+                    counts=counts,
+                    reason=(
+                        "rate_limited"
+                        if counts.get("failed_rate_limit")
+                        else "incomplete"
+                        if partial
+                        else None
+                    ),
                 )
-                await progress.finish("failed", counts=counts, reason=reason)
-                await record_sync_result(credential, status="degraded", counts=counts)
-                raise
-            await record_sync_result(credential, status=status, counts=counts)
-            partial = status == "degraded" or bool(counts.get("failed"))
-            await progress.finish(
-                "partial" if partial else "succeeded",
-                counts=counts,
-                reason=(
-                    "rate_limited"
-                    if counts.get("failed_rate_limit")
-                    else "incomplete"
-                    if partial
-                    else None
-                ),
-            )
+    except OutboundHttpDisabledError:
+        if progress is None:
+            # Refused at the entry: track_sync recorded the failed run, and this
+            # stamps the connection so it does not keep reading as healthy.
+            counts["failed"] = 1
+            await record_sync_result(credential, status="degraded", counts=counts)
+        raise
 
 
 async def dataset_summary(credential: Any, dataset_name: str) -> tuple[str | None, int]:
