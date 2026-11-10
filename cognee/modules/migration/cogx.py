@@ -370,58 +370,36 @@ HEADER_FIELDS = (
 )
 
 
-def header_to_properties(record: COGXRecordBase) -> dict[str, Any]:
-    """The OMP header as flat, JSON-safe node/edge properties.
+# Header fields that describe one exported record's bytes, not the memory:
+# every export computes them afresh, so an import never stores them.
+RECORD_FIELDS = ("content_type", "content_hash", "checksum")
 
-    Graph backends store scalars; nested values (origin, evidence, contributors)
-    are serialized as JSON strings and lists as JSON arrays so the header
-    survives a round trip through the graph and comes back on re-export.
+_HEADER_ADAPTERS: dict[str, TypeAdapter] = {
+    key: TypeAdapter(COGXRecordBase.model_fields[key].annotation)
+    for key in HEADER_FIELDS
+    if key not in RECORD_FIELDS
+}
+
+
+def omp_header_of(record: COGXRecordBase) -> dict[str, Any]:
+    """The record's OMP header as one JSON-safe dict, for storage on import.
+
+    Imports keep it as the ``omp_header`` of the element they create (a data
+    item's external metadata, an Entity node, a fact edge), so a re-export
+    states the header the memory arrived with. Empty fields are left out.
+
+    A record naming no earlier origin originates where it says it comes from
+    (``external_system``/``external_id``): a Mem0 memory stays Mem0's after
+    cognee exports it, since the export restamps both with cognee's own.
     """
-    properties: dict[str, Any] = {}
-    if record.origin is not None:
-        properties["origin"] = json.dumps(record.origin.model_dump(exclude_none=True))
-    if record.version is not None:
-        properties["version"] = record.version
-    if record.content_type:
-        properties["content_type"] = record.content_type
-    if record.content_hash:
-        properties["content_hash"] = record.content_hash
-    if record.tags:
-        properties["tags"] = json.dumps(record.tags)
-    if record.contributors:
-        properties["contributors"] = json.dumps(
-            [item.model_dump(mode="json", exclude_none=True) for item in record.contributors]
-        )
-    if record.accountable:
-        properties["accountable"] = record.accountable
-    if record.ai_involvement:
-        properties["ai_involvement"] = record.ai_involvement
-    if record.subject:
-        properties["subject"] = json.dumps(record.subject)
-    if record.semantic_kind:
-        properties["semantic_kind"] = record.semantic_kind
-    if record.valid_from:
-        properties["valid_from"] = record.valid_from.isoformat()
-    if record.valid_to:
-        properties["valid_to"] = record.valid_to.isoformat()
-    if record.invalidated_by:
-        properties["invalidated_by"] = record.invalidated_by
-    if record.evidence:
-        properties["evidence"] = json.dumps(
-            [item.model_dump(exclude_none=True) for item in record.evidence]
-        )
-    if record.confidence is not None:
-        # Kept scalar so the edge's ``confidence`` stays the numeric property
-        # retrieval already reads; the measured part rides beside it.
-        if record.confidence.score is not None:
-            properties["confidence"] = record.confidence.score
-        if record.confidence.outcome != "unverified":
-            properties["confidence_outcome"] = record.confidence.outcome
-        if record.confidence.verified_at:
-            properties["confidence_verified_at"] = record.confidence.verified_at.isoformat()
-        if record.confidence.verified_by:
-            properties["confidence_verified_by"] = record.confidence.verified_by
-    return properties
+    header = {
+        key: value
+        for key, value in record.model_dump(mode="json", exclude_none=True).items()
+        if key in HEADER_FIELDS and key not in RECORD_FIELDS and value not in ([], {})
+    }
+    if "origin" not in header and record.external_system != "unknown":
+        header["origin"] = {"system": record.external_system, "id": record.external_id}
+    return header
 
 
 def _loads(value: Any) -> Any:
@@ -433,44 +411,40 @@ def _loads(value: Any) -> Any:
     return value
 
 
-def header_from_properties(properties: dict[str, Any]) -> dict[str, Any]:
-    """Read the OMP header back from node/edge properties (inverse of
-    :func:`header_to_properties`). Unknown or malformed values are dropped,
-    never guessed: an absent header field means "not stated"."""
+def parse_omp_header(value: Any) -> dict[str, Any]:
+    """Read a stored ``omp_header`` (JSON string or dict) back into record fields.
+
+    Each field is validated against the record model on its own; a malformed
+    one is dropped, never guessed, so an absent field means "not stated".
+    """
+    stored = _loads(value)
+    if not isinstance(stored, dict):
+        return {}
     header: dict[str, Any] = {}
-    origin = _loads(properties.get("origin"))
-    if isinstance(origin, dict) and origin.get("system") and origin.get("id"):
-        header["origin"] = COGXOrigin(
-            system=str(origin["system"]), id=str(origin["id"]), version=origin.get("version")
-        )
+    for key, adapter in _HEADER_ADAPTERS.items():
+        if stored.get(key) in (None, [], {}):
+            continue
+        try:
+            header[key] = adapter.validate_python(stored[key])
+        except ValueError:
+            continue
+    return header
+
+
+def header_from_graph_properties(properties: dict[str, Any]) -> dict[str, Any]:
+    """OMP header fields cognee's own node/edge properties state: version, tags,
+    kind, validity, supersession and the numeric edge ``confidence``.
+
+    The header an import carried is stored separately (see
+    :func:`parse_omp_header`). Malformed values are dropped, never guessed.
+    """
+    header: dict[str, Any] = {}
     version = properties.get("version")
     if isinstance(version, int) and not isinstance(version, bool):
         header["version"] = version
-    if properties.get("content_type"):
-        header["content_type"] = str(properties["content_type"])
-    if properties.get("content_hash"):
-        header["content_hash"] = str(properties["content_hash"])
     tags = _loads(properties.get("tags"))
     if isinstance(tags, list):
         header["tags"] = [str(item) for item in tags]
-    contributors = _loads(properties.get("contributors"))
-    if isinstance(contributors, list):
-        items = []
-        for item in contributors:
-            if isinstance(item, dict) and item.get("role") and item.get("actor"):
-                try:
-                    items.append(COGXContributor.model_validate(item))
-                except ValueError:
-                    continue
-        if items:
-            header["contributors"] = items
-    if properties.get("accountable"):
-        header["accountable"] = str(properties["accountable"])
-    if properties.get("ai_involvement") in ("none", "draft", "mixed", "full"):
-        header["ai_involvement"] = properties["ai_involvement"]
-    subject = _loads(properties.get("subject"))
-    if isinstance(subject, list):
-        header["subject"] = [str(item) for item in subject]
     kind = properties.get("semantic_kind") or properties.get("lesson_kind")
     if kind in SEMANTIC_KINDS:
         header["semantic_kind"] = kind
@@ -481,40 +455,9 @@ def header_from_properties(properties: dict[str, Any]) -> dict[str, Any]:
     invalidated_by = properties.get("invalidated_by") or properties.get("superseded_by")
     if invalidated_by:
         header["invalidated_by"] = str(invalidated_by)
-    evidence = _loads(properties.get("evidence"))
-    if isinstance(evidence, list):
-        items = []
-        for item in evidence:
-            if isinstance(item, dict) and item.get("role") and item.get("ref"):
-                try:
-                    items.append(COGXEvidence.model_validate(item))
-                except ValueError:
-                    continue
-        if items:
-            header["evidence"] = items
-    confidence: dict[str, Any] = {}
-    raw_score = _loads(properties.get("confidence"))
-    if isinstance(raw_score, dict):
-        confidence.update(raw_score)
-    elif isinstance(raw_score, (int, float)) and not isinstance(raw_score, bool):
-        confidence["score"] = float(raw_score)
-    if properties.get("confidence_outcome") in (
-        "unverified",
-        "confirmed",
-        "corrected",
-        "contradicted",
-    ):
-        confidence["outcome"] = properties["confidence_outcome"]
-    verified_at = parse_timestamp(properties.get("confidence_verified_at"))
-    if verified_at is not None:
-        confidence["verified_at"] = verified_at
-    if properties.get("confidence_verified_by") in ("human", "agent", "automatic"):
-        confidence["verified_by"] = properties["confidence_verified_by"]
-    if confidence:
-        try:
-            header["confidence"] = COGXConfidence.model_validate(confidence)
-        except ValueError:
-            pass
+    score = properties.get("confidence")
+    if isinstance(score, (int, float)) and not isinstance(score, bool):
+        header["confidence"] = COGXConfidence(score=float(score))
     return header
 
 

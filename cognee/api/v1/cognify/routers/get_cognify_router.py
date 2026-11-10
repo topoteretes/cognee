@@ -214,18 +214,15 @@ def get_cognify_router() -> APIRouter:
 
             if payload.ontology_key:
                 ontology_service = OntologyService()
-                ontology_contents = ontology_service.get_ontology_contents(
-                    payload.ontology_key, user
-                )
-
-                from io import StringIO
+                # File objects keep the upload's filename and content type so the
+                # resolver can pick the right RDF parser (Turtle, JSON-LD, ...).
+                ontology_streams = ontology_service.get_ontology_files(payload.ontology_key, user)
 
                 from cognee.modules.ontology.ontology_config import Config
                 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
                     RDFLibOntologyResolver,
                 )
 
-                ontology_streams = [StringIO(content) for content in ontology_contents]
                 config_to_use: Config = {
                     "ontology_config": {
                         "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_streams)

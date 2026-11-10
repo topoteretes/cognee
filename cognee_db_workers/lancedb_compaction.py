@@ -50,6 +50,8 @@ from datetime import datetime
 from itertools import pairwise
 from typing import Any
 
+from .lancedb_schema_evolution import MIGRATING_COLUMN, OLD_PAYLOAD_COLUMN
+
 DEFAULT_TARGET_ROWS_PER_FRAGMENT = 20_000
 DEFAULT_RETENTION_SECONDS = 300
 DEFAULT_MAX_TASKS_PER_RUN = 4
@@ -132,8 +134,24 @@ def compact_fragments(
     commits only those, which Lance supports explicitly. Returns plain ints so
     the result crosses the subprocess boundary without pickling anything but
     builtins.
+
+    A table in the middle of a payload schema migration (one of its temporary
+    columns is present) is left alone, reported as ``skipped``: the migration
+    finds the rows written during its run by fragment id, and a rewrite would
+    give those fragments new ids. The check is made against the version the
+    rewrite is planned on, and Lance refuses a rewrite planned before a
+    migration's first commit, so the two never interleave.
     """
     from lance.optimize import Compaction, CompactionOptions
+
+    if {MIGRATING_COLUMN, OLD_PAYLOAD_COLUMN} & set(dataset.schema.names):
+        return {
+            "planned_tasks": 0,
+            "executed_tasks": 0,
+            "fragments_removed": 0,
+            "fragments_added": 0,
+            "skipped": "payload_migration",
+        }
 
     options = CompactionOptions(
         target_rows_per_fragment=int(target_rows_per_fragment),

@@ -196,24 +196,24 @@ class LLMGateway:
     def _transcription_client():
         """Client for the audio/image transcription entry points.
 
-        Follows the same framework dispatch as ``acreate_structured_output`` so
-        the default (``litellm_native``) path never builds the legacy client.
-        BAML has no transcription support of its own and keeps using the
-        legacy client, as it always has.
+        Transcription is a plain litellm call on every framework, so only the
+        ``instructor`` framework builds the legacy client; ``litellm_native``
+        and BAML (which has no transcription of its own) use the native client,
+        which never needs the optional ``instructor`` package.
         """
         llm_config = get_llm_config()
-        if llm_config.structured_output_framework.upper() == "LITELLM_NATIVE":
-            from cognee.infrastructure.llm.structured_output_framework.litellm_native.get_native_client import (
-                get_native_client,
+        if resolve_structured_output_framework(llm_config) == "instructor":
+            from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
+                get_llm_client,
             )
 
-            return get_native_client()
+            return get_llm_client()
 
-        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
-            get_llm_client,
+        from cognee.infrastructure.llm.structured_output_framework.litellm_native.get_native_client import (
+            get_native_client,
         )
 
-        return get_llm_client()
+        return get_native_client()
 
     @staticmethod
     def create_transcript(input, **kwargs) -> Coroutine[Any, Any, TranscriptionReturnType | None]:

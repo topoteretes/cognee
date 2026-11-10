@@ -12,6 +12,7 @@ import cognee.modules.provenance.edge_evidence.models
 import cognee.modules.provenance.models
 import cognee.modules.session_lifecycle.models
 from cognee.infrastructure.databases.relational import Base, get_relational_engine
+from cognee.modules.migrations.startup import _set_alembic_database_uri
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -106,11 +107,7 @@ logging.getLogger("alembic.env").info(
     "Using database: %s", db_engine.engine.url.render_as_string(hide_password=True)
 )
 
-config.set_section_option(
-    config.config_ini_section,
-    "SQLALCHEMY_DATABASE_URI",
-    db_uri,
-)
+_set_alembic_database_uri(config, db_uri)
 
 
 if context.is_offline_mode():

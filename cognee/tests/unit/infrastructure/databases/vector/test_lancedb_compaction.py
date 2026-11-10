@@ -150,6 +150,30 @@ async def test_compact_is_a_cheap_no_op_on_a_compact_table(tmp_path, compaction_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("temporary_column", ["__payload_migrating", "__payload_old"])
+async def test_compaction_leaves_a_table_mid_migration_alone(
+    tmp_path, compaction_settings, temporary_column
+):
+    """A payload migration finds the rows written during its run by fragment id, and a
+    rewrite would renumber them; while one of its temporary columns is present the
+    table is skipped, in the shared function both modes run."""
+    import lance
+
+    compaction_settings(retention_seconds=0)
+    adapter, db_path = _adapter(tmp_path)
+    collection = "MidMigration_label"
+    await _write_n_points(adapter, collection, 3)
+    dataset = lance.dataset(str(Path(db_path) / f"{collection}.lance"))
+    dataset.add_columns({temporary_column: "payload"})
+
+    stats = await adapter.compact()
+
+    assert stats[collection]["skipped"] == "payload_migration"
+    assert stats[collection]["executed_tasks"] == 0
+    assert await _fragment_count(adapter, collection) == 3
+
+
+@pytest.mark.asyncio
 async def test_compact_leaves_fragments_at_target_size_alone(tmp_path, compaction_settings):
     """The property that makes it cheap on any disk: cold fragments are not rewritten."""
     compaction_settings(retention_seconds=0, target_rows_per_fragment=3)
