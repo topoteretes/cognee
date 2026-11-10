@@ -712,6 +712,7 @@ def apply_evidence_rules(
     key) is a pitfall with that key, whatever the writer typed; a ``pitfall`` with no
     failed-trace candidate behind it is a ``change``. Only state and pitfall lessons
     keep a state key, and a key the writer echoed into the statement is stripped.
+    Every type the rules change is logged.
     """
     if not lesson.accept:
         return lesson
@@ -724,6 +725,13 @@ def apply_evidence_rules(
         lesson_type, state_key = "change", ""
     if lesson_type not in ("state", "pitfall"):
         state_key = ""
+    if lesson_type != lesson.lesson_type:
+        logger.info(
+            "Coding distillation: lesson typed '%s' by the writer stored as '%s'%s",
+            lesson.lesson_type,
+            lesson_type,
+            f" with key '{state_key}'" if state_key else " (no failed trace behind it)",
+        )
     return lesson.model_copy(
         update={
             "lesson_type": lesson_type,
