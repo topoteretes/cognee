@@ -56,7 +56,9 @@ async def _run_and_measure_peak_concurrency(data_points, batch_size, max_concurr
         {
             "get_embedding_context_config": lambda: SimpleNamespace(
                 embedding_max_concurrent_data_points=max_concurrent_data_points
-            )
+            ),
+            # One write per embedding request, so the batch count is the request count.
+            "get_vectordb_config": lambda: SimpleNamespace(vector_write_batch_size=batch_size),
         },
     ):
         await index_data_points(data_points, vector_engine=mock_vector_engine)
@@ -90,6 +92,93 @@ async def test_concurrency_floors_at_one_when_batch_size_exceeds_limit():
     )
 
     assert peak == 1
+
+
+@pytest.mark.asyncio
+async def test_write_batches_hold_vector_write_batch_size_rows():
+    """The write batch is VECTOR_WRITE_BATCH_SIZE rows, not the embedding request size:
+    300 points with 32-text requests and 128-row writes are three writes."""
+    data_points = [TestDataPoint(name=f"point{i}") for i in range(300)]
+    for data_point in data_points:
+        data_point.metadata["index_fields"] = ["name"]
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.get_batch_size = MagicMock(return_value=32)
+
+    with patch.dict(
+        index_data_points.__globals__,
+        {"get_vectordb_config": lambda: SimpleNamespace(vector_write_batch_size=128)},
+    ):
+        await index_data_points(data_points, vector_engine=mock_vector_engine)
+
+    batch_sizes = [
+        len(call.args[2]) for call in mock_vector_engine.index_data_points.await_args_list
+    ]
+    assert sorted(batch_sizes, reverse=True) == [128, 128, 44]
+
+
+@pytest.mark.asyncio
+async def test_a_point_with_one_index_field_is_handed_over_without_a_copy():
+    """Adapters embed the first index field, so nothing has to change on the point; only
+    a point indexed on several fields gets a copy per field, each naming its field."""
+
+    class TwoFieldPoint(DataPoint):
+        name: str
+        description: str
+        metadata: dict = {"index_fields": ["name", "description"]}
+
+    single = TestDataPoint(name="single")
+    single.metadata["index_fields"] = ["name"]
+    double = TwoFieldPoint(name="n", description="d")
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.get_batch_size = MagicMock(return_value=100)
+
+    await index_data_points([single, double], vector_engine=mock_vector_engine)
+
+    handed_over = {
+        (call.args[0], call.args[1]): call.args[2]
+        for call in mock_vector_engine.index_data_points.await_args_list
+    }
+    assert handed_over[("TestDataPoint", "name")][0] is single
+    (by_name,) = handed_over[("TwoFieldPoint", "name")]
+    (by_description,) = handed_over[("TwoFieldPoint", "description")]
+    assert by_name is not double and by_description is not double
+    assert by_name.metadata["index_fields"] == ["name"]
+    assert by_description.metadata["index_fields"] == ["description"]
+    assert double.metadata["index_fields"] == ["name", "description"]
+
+
+@pytest.mark.asyncio
+async def test_a_shared_semaphore_bounds_concurrent_calls_together():
+    """Two index calls handed one semaphore never exceed its bound between them."""
+    in_flight = 0
+    peak = 0
+
+    async def _index(*args, **kwargs):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0)
+        in_flight -= 1
+
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.get_batch_size = MagicMock(return_value=1)
+    mock_vector_engine.index_data_points = AsyncMock(side_effect=_index)
+    first = [TestDataPoint(name=f"a{i}") for i in range(6)]
+    second = [TestDataPoint(name=f"b{i}") for i in range(6)]
+    for data_point in first + second:
+        data_point.metadata["index_fields"] = ["name"]
+    shared = asyncio.Semaphore(2)
+
+    with patch.dict(
+        index_data_points.__globals__,
+        {"get_vectordb_config": lambda: SimpleNamespace(vector_write_batch_size=1)},
+    ):
+        await asyncio.gather(
+            index_data_points(first, vector_engine=mock_vector_engine, semaphore=shared),
+            index_data_points(second, vector_engine=mock_vector_engine, semaphore=shared),
+        )
+
+    assert peak == 2
 
 
 @pytest.mark.asyncio

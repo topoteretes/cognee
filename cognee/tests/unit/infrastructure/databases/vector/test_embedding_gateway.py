@@ -33,6 +33,21 @@ class _PlainListEngine(_Engine):
         return [[1.0, 0.0] for _ in text]
 
 
+class _SizedEngine(_Engine):
+    """An engine that sends two texts per request and records every request."""
+
+    def __init__(self, batch_size=2):
+        self.batch_size = batch_size
+        self.requests = []
+
+    def get_batch_size(self):
+        return self.batch_size
+
+    async def embed_text(self, text):
+        self.requests.append(list(text))
+        return EmbeddingResult([[float(len(value)), 0.0] for value in text], tokens=len(text))
+
+
 @pytest.mark.asyncio
 async def test_embed_text_returns_vectors_and_records_the_tokens():
     with patch(RECORD, new=AsyncMock()) as record:
@@ -54,6 +69,41 @@ async def test_a_recording_failure_does_not_fail_the_embedding():
         vectors = await EmbeddingGateway(_Engine()).embed_text(["a"])
 
     assert vectors == [[1.0, 0.0]]
+
+
+@pytest.mark.asyncio
+async def test_more_texts_than_one_request_carries_go_in_consecutive_requests():
+    """A write batch larger than the provider's request size is embedded request by
+    request, in order, with the token counts summed and recorded once."""
+    engine = _SizedEngine(batch_size=2)
+    with patch(RECORD, new=AsyncMock()) as record:
+        vectors = await EmbeddingGateway(engine).embed_text(["a", "bb", "ccc", "dddd", "e"])
+
+    assert engine.requests == [["a", "bb"], ["ccc", "dddd"], ["e"]]
+    assert vectors == [[1.0, 0.0], [2.0, 0.0], [3.0, 0.0], [4.0, 0.0], [1.0, 0.0]]
+    assert vectors.tokens == 5
+    record.assert_awaited_once_with(model="fake-embedding-model", tokens=5)
+
+
+@pytest.mark.asyncio
+async def test_a_request_sized_call_is_one_request():
+    engine = _SizedEngine(batch_size=3)
+    with patch(RECORD, new=AsyncMock()):
+        vectors = await EmbeddingGateway(engine).embed_text(["a", "b", "c"])
+
+    assert engine.requests == [["a", "b", "c"]]
+    assert vectors.tokens == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch_size", [None, 0, -4, True])
+async def test_an_engine_without_a_usable_request_size_gets_one_request(batch_size):
+    engine = _SizedEngine(batch_size=batch_size)
+    with patch(RECORD, new=AsyncMock()):
+        vectors = await EmbeddingGateway(engine).embed_text(["a", "b", "c"])
+
+    assert engine.requests == [["a", "b", "c"]]
+    assert len(vectors) == 3
 
 
 def test_other_attributes_pass_through_to_the_engine():
