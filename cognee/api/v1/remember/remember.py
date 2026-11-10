@@ -1543,6 +1543,53 @@ def _skill_materialize_root(dataset_id: UUID) -> Path:
     return _Path(tempfile.gettempdir()) / f"cognee-skills-{key}"
 
 
+async def _materialize_skill_uploads(uploads: list, root) -> None:
+    """Write the uploaded skill files into the staging ``root``, safely.
+
+    Each upload is materialized under a staging-relative name derived from the
+    client-sent filename. That name is untrusted: it is validated by
+    ``_safe_skill_upload_name`` and the resolved destination is verified to
+    stay beneath the resolved root before anything is written
+    (GHSA-cfx4-mx52-vv2h).
+    """
+    for upload in uploads:
+        rel_name = getattr(upload, "filename", None) or getattr(upload, "name", None) or "SKILL.md"
+        safe_rel = _safe_skill_upload_name(rel_name)
+        dest = root / safe_rel
+        # Belt and braces: the validated name is relative, but the resolved
+        # destination must stay beneath the resolved root.
+        if not dest.resolve().is_relative_to(root.resolve()):
+            raise ValueError(f"Invalid skill filename: {rel_name}")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        # UploadFile.read() is async; plain file-like .read() is sync.
+        read_result = upload.read()
+        payload = await read_result if hasattr(read_result, "__await__") else read_result
+        if isinstance(payload, str):
+            payload = payload.encode("utf-8")
+        dest.write_bytes(payload or b"")
+
+
+def _safe_skill_upload_name(rel_name: str) -> str:
+    """The staging-relative name for a client-sent skill filename.
+
+    Client-sent names are untrusted: a Windows drive-absolute name
+    (``C:\\evil\\x``) carries no ``..`` component yet stays drive-absolute when
+    joined, so the write would land outside the staging root
+    (GHSA-cfx4-mx52-vv2h). The name must be relative and drive-less under both
+    separator conventions and must not traverse; the caller still verifies the
+    destination against the resolved staging root before writing.
+    """
+    from pathlib import PurePosixPath, PureWindowsPath
+
+    for candidate in (PureWindowsPath(rel_name), PurePosixPath(rel_name)):
+        if candidate.is_absolute() or candidate.drive or ".." in candidate.parts:
+            raise ValueError(f"Invalid skill filename: {rel_name}")
+    safe_rel = PureWindowsPath(rel_name).as_posix()
+    if safe_rel in ("", "."):
+        raise ValueError(f"Invalid skill filename: {rel_name}")
+    return safe_rel
+
+
 def _materialize_inline_skill(skills_text, skill_name, materialize_root):
     """Write inline SKILL.md markdown into a deterministic ``<slug>/SKILL.md`` folder.
 
@@ -2052,26 +2099,7 @@ async def _remember_inner(
             materialize_root = root
 
             if normalized_uploads:
-                for upload in normalized_uploads:
-                    rel_name = (
-                        getattr(upload, "filename", None)
-                        or getattr(upload, "name", None)
-                        or "SKILL.md"
-                    )
-                    # Defensive: reject absolute paths / traversal in client-sent names.
-                    safe_rel = _Path(rel_name).as_posix().lstrip("/")
-                    if ".." in _Path(safe_rel).parts:
-                        raise ValueError(f"Invalid skill filename: {rel_name}")
-                    dest = root / safe_rel
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    # UploadFile.read() is async; plain file-like .read() is sync.
-                    read_result = upload.read()
-                    payload = (
-                        await read_result if hasattr(read_result, "__await__") else read_result
-                    )
-                    if isinstance(payload, str):
-                        payload = payload.encode("utf-8")
-                    dest.write_bytes(payload or b"")
+                await _materialize_skill_uploads(normalized_uploads, root)
                 skill_files = list(root.rglob("SKILL.md"))
                 if skill_files:
                     skill_source = root
