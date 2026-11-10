@@ -14,6 +14,10 @@ DOCUMENT_SOURCE_ATTR = "cognee_document_source"
 # alternating destination datasets. Unrelated DLT sources keep their contract.
 PIPELINE_SCOPE_ATTR = "cognee_pipeline_scope"
 
+# The database a connection-string source reads (a SQLite file's name, a server
+# database's name), so its table nodes can say which database they belong to.
+SOURCE_LABEL_ATTR = "cognee_source_label"
+
 
 def pipeline_name_for_source(source, dataset_name: str) -> str:
     from hashlib import sha256
@@ -28,7 +32,8 @@ def pipeline_name_for_source(source, dataset_name: str) -> str:
 # Community/cloud hosts can refuse unsafe older cores before ingestion starts.
 # Version 1 scopes cleanup by staging table and handles a confirmed empty table.
 # Version 2 reads the per-row node_set column (NODE_SET_COLUMN).
-DOCUMENT_SYNC_VERSION = 2
+# Version 3 reads the per-row structure column (STRUCTURE_COLUMN).
+DOCUMENT_SYNC_VERSION = 3
 
 # A document-mode row may carry its own node sets in this column, as a JSON
 # list of names (see resolve_dlt_sources._row_node_set). Every name is
@@ -37,6 +42,16 @@ DOCUMENT_SYNC_VERSION = 2
 # on the row as json instead of normalizing it into a child table.
 NODE_SET_COLUMN = "cognee_node_set"
 NODE_SET_COLUMN_HINT = {NODE_SET_COLUMN: {"data_type": "json", "nullable": True}}
+
+# A document-mode row may say where it sits in its source's tree in this column:
+# ``{"ancestors": [{"kind", "id", "name"?, "document"?}, ...]}``, nearest parent
+# first, empty for a row at the top. A ``"document": true`` entry is another row of
+# this source and table (its ``id`` column) and ends the list; any other entry is a
+# container with no row of its own (a database, a folder). Never hashed, so a move
+# keeps the row's data_id. Loaded as json for the same reason as the node set column.
+STRUCTURE_COLUMN = "cognee_structure"
+STRUCTURE_COLUMN_HINT = {STRUCTURE_COLUMN: {"data_type": "json", "nullable": True}}
+DOCUMENT_COLUMN_HINTS = {**NODE_SET_COLUMN_HINT, **STRUCTURE_COLUMN_HINT}
 
 
 def guarded_rows(rows, check_active=None):

@@ -6,11 +6,13 @@ shallow clone, and by ``add()`` to recognise a GitHub/GitLab repository URL
 (:func:`code_repo_clone_url`) and clone it the same way. Clones live under
 ``BaseConfig.repos_root_directory`` (``~/.cognee/repos`` by default) and are
 reused across calls; an existing clone is refreshed with a best-effort
-``git pull``.
+``git pull``. A ``branch`` can be chosen for a remote repository; each branch is
+cloned into a directory of its own.
 """
 
 import asyncio
 import base64
+import hashlib
 import os
 import re
 import shutil
@@ -160,11 +162,60 @@ def redact_repo_spec(spec: str | Path) -> str:
     return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
 
 
-def _clone_slug(url: str) -> str:
-    """A stable directory name for a remote URL, e.g. 'github.com-org-repo'."""
+def _clone_slug(url: str, branch: str | None = None) -> str:
+    """A stable directory name for a remote URL, e.g. 'github.com-org-repo'.
+
+    A chosen branch gets its own directory beside it, e.g. 'github.com-org-repo@dev-<hash>',
+    so no clone is ever replaced under another caller. The hash of the exact name keeps
+    apart branches the readable part merges: case-insensitive file systems, and the
+    characters replaced here.
+    """
     tail = url.split("://")[-1].replace(":", "/").rstrip("/")
     tail = tail.removesuffix(".git")
-    return re.sub(r"[^A-Za-z0-9._-]+", "-", tail).strip("-.")
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", tail).strip("-.")
+    if branch is None:
+        return slug
+    readable = re.sub(r"[^A-Za-z0-9._-]+", "-", branch)[:40]
+    return f"{slug}@{readable}-{hashlib.sha256(branch.encode()).hexdigest()[:8]}"
+
+
+def clone_dir(url: str, branch: str | None = None, clones_dir: Path | None = None) -> Path:
+    """Where :func:`resolve_repo_source` clones the credential-free ``url`` on ``branch``
+    (None: the remote's default branch, in the directory every clone had before)."""
+    return (Path(clones_dir) if clones_dir else default_clones_dir()) / _clone_slug(url, branch)
+
+
+# git's refname rules that cannot appear anywhere in a branch name: control
+# characters, space, ~ ^ : ? * [ and backslash.
+_BRANCH_FORBIDDEN_CHARS = re.compile(r"[\x00-\x20\x7f~^:?*\[\\]")
+
+
+def _invalid_branch_reason(branch) -> str | None:
+    """Why ``branch`` cannot be a branch name, or None: ``git check-ref-format --branch``
+    semantics (checked on git 2.50.1; a bare ``@`` is refused on purpose), so a name git
+    would read as an option never reaches it."""
+    if not isinstance(branch, str) or not branch:
+        return "it must be a non-empty string"
+    if branch.startswith("-"):
+        return "it must not start with '-'"
+    if branch in ("HEAD", "@"):
+        return f"'{branch}' is not a branch name"
+    if _BRANCH_FORBIDDEN_CHARS.search(branch):
+        return "it contains a space, control character or one of ~ ^ : ? * [ \\"
+    if ".." in branch or "@{" in branch or "//" in branch:
+        return "it contains '..', '@{' or '//'"
+    if branch.startswith("/") or branch.endswith(("/", ".")):
+        return "it must not start with '/' or end with '/' or '.'"
+    if any(part.startswith(".") or part.endswith(".lock") for part in branch.split("/")):
+        return "a path component must not start with '.' or end with '.lock'"
+    return None
+
+
+def check_branch_name(branch) -> None:
+    """Raise ``ValueError`` unless ``branch`` is a usable branch name."""
+    reason = _invalid_branch_reason(branch)
+    if reason is not None:
+        raise ValueError(f"Invalid branch name {branch!r}: {reason}.")
 
 
 def _credential_env(token: str) -> dict:
@@ -208,10 +259,23 @@ async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tu
     return process.returncode, stderr.decode(errors="replace")
 
 
+async def _remote_ref_missing(remote: str, branch: str, env: dict | None) -> bool:
+    """Whether the remote answers and has no branch called ``branch``.
+
+    ``ls-remote --exit-code`` ends with status 2 exactly when it reached the remote
+    and nothing matched, which git's error text, by locale and version, cannot tell.
+    """
+    returncode, _stderr = await _run_git(
+        ["ls-remote", "--exit-code", remote, f"refs/heads/{branch}"], env=env
+    )
+    return returncode == 2
+
+
 async def resolve_repo_source(
     spec: str | Path,
     clones_dir: Path | None = None,
     credentials: str | None = None,
+    branch: str | None = None,
 ) -> Path:
     """Return a local directory for the repo spec, shallow-cloning remote URLs.
 
@@ -219,6 +283,11 @@ async def resolve_repo_source(
     ``--depth 1`` into ``clones_dir`` (default :func:`default_clones_dir`); an
     existing clone is reused after a best-effort ``git pull --ff-only``.
     Remote resolution honors ``ALLOW_HTTP_REQUESTS=false``.
+
+    ``branch`` clones that branch instead of the remote's default, into a directory of
+    its own (see :func:`_clone_slug`); reusing it fetches and resets, which follows a
+    force push. A branch the remote does not have raises, and a local path rejects
+    ``branch``.
 
     ``credentials`` is the preferred way to authenticate against a private
     https remote (e.g. a GitHub App installation token): it reaches git only
@@ -228,6 +297,11 @@ async def resolve_repo_source(
     works but is the legacy path.
     """
     if not is_remote_repo(spec):
+        if branch is not None:
+            raise CodeRepositoryError(
+                message=f"branch is only supported for remote repositories, but '{spec}' is a "
+                "local path. Check the branch out in that directory instead."
+            )
         from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 
         # Repo specs can arrive from outside the SDK (CLI arguments, API
@@ -298,7 +372,7 @@ async def resolve_repo_source(
     auth_env = _credential_env(credentials) if credentials else None
 
     base = Path(clones_dir) if clones_dir else default_clones_dir()
-    target = base / _clone_slug(clean_url)
+    target = clone_dir(clean_url, branch, base)
     # The slug regex already forbids separators and dot-runs; keep an
     # explicit containment check so a clone can never land outside the
     # clones directory regardless of what the URL decomposed into.
@@ -306,21 +380,40 @@ async def resolve_repo_source(
     if not os.path.realpath(target).startswith(base_real.rstrip(os.sep) + os.sep):
         raise CodeRepositoryError(message=f"Could not derive a safe clone name for {clean_url}.")
 
+    def _branch_not_found() -> CodeRepositoryError:
+        return CodeRepositoryError(message=f"Branch '{branch}' was not found in '{clean_url}'.")
+
     if (target / ".git").is_dir():
         # Legacy URL-embedded credentials: fetch from the explicit URL
         # instead of the stored remote (which is deliberately
         # credential-free). Out-of-band credentials ride the environment.
-        pull_args = ["pull", "--ff-only"] + ([url] if has_credentials else [])
-        returncode, stderr = await _run_git(pull_args, cwd=target, env=auth_env)
+        if branch is None:
+            pull_args = ["pull", "--ff-only"] + ([url] if has_credentials else [])
+            returncode, stderr = await _run_git(pull_args, cwd=target, env=auth_env)
+        else:
+            # Fetch and reset, not pull: a rebased or force-pushed branch is not a
+            # fast-forward. The ref is spelled out because git resolves a bare name
+            # itself (a tag before a branch, '+x' as a force refspec).
+            remote = url if has_credentials else "origin"
+            fetch_args = ["fetch", "--depth", "1", remote, f"refs/heads/{branch}"]
+            returncode, stderr = await _run_git(fetch_args, cwd=target, env=auth_env)
+            if returncode != 0 and await _remote_ref_missing(url, branch, auth_env):
+                raise _branch_not_found()
+            if returncode == 0:
+                returncode, stderr = await _run_git(["reset", "--hard", "FETCH_HEAD"], cwd=target)
         if returncode != 0:
             # A stale clone is still indexable; the caller asked for the repo,
             # not for freshness guarantees.
             logger.warning(
-                "Reusing existing clone at %s (git pull failed: %s)", target, _scrub(stderr[-500:])
+                "Reusing existing clone at %s (refresh failed: %s)", target, _scrub(stderr[-500:])
             )
         return target
 
     target.parent.mkdir(parents=True, exist_ok=True)
+    # Checked first: 'clone --branch' falls back to a tag of that name and leaves HEAD
+    # detached, which no later fetch of the branch would follow.
+    if branch is not None and await _remote_ref_missing(url, branch, auth_env):
+        raise _branch_not_found()
     logger.info("Cloning %s into %s", clean_url, target)
     # core.symlinks=false: git otherwise materializes symlinks committed in the
     # remote, and nothing re-validates paths under the clone afterwards -- a repo
@@ -329,8 +422,10 @@ async def resolve_repo_source(
     # set, git writes each symlink as a regular file containing its target path.
     # Passed via -c on clone so it is persisted into the new repo's config and the
     # later 'git pull --ff-only' honours it too.
+    branch_args = ["--branch", branch] if branch is not None else []
     returncode, stderr = await _run_git(
-        ["clone", "-c", "core.symlinks=false", "--depth", "1", url, str(target)], env=auth_env
+        ["clone", "-c", "core.symlinks=false", "--depth", "1", *branch_args, url, str(target)],
+        env=auth_env,
     )
     if returncode != 0:
         raise CodeRepositoryError(

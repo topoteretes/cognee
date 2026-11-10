@@ -33,6 +33,7 @@ from cognee.infrastructure.databases.exceptions.exceptions import (
     SessionQAEntryValidationError,
     SharedLadybugLockRequiresRedisError,
 )
+from cognee.infrastructure.databases.postgres.deadlock import is_deadlock
 from cognee.infrastructure.databases.relational import get_relational_config
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
@@ -64,21 +65,10 @@ _PURGE_LOCK_ID = int.from_bytes(sha256(b"cognee_cache_ttl_sweep").digest()[:8], 
 # and 1.0 of the TTL after the session's last write.
 _TTL_REFRESH_FRACTION = 0.05
 
+# Ids per IN list in a batch delete, under every backend's bind-parameter cap.
+_IDS_PER_STATEMENT = 500
 
-def _is_deadlock_error(error: Exception) -> bool:
-    """Best-effort detection of a Postgres deadlock without importing asyncpg."""
-    if not isinstance(error, DBAPIError):
-        return False
-    orig = getattr(error, "orig", None)
-    seen = set()
-    while orig is not None and id(orig) not in seen:
-        seen.add(id(orig))
-        if type(orig).__name__ == "DeadlockDetectedError":
-            return True
-        if getattr(orig, "sqlstate", None) == "40P01":
-            return True
-        orig = getattr(orig, "__cause__", None)
-    return "deadlock detected" in str(error).lower()
+_SESSION_TABLES = (cache_qa_entries, cache_trace_entries, cache_session_context)
 
 
 class _SqlAdvisoryLockHandle:
@@ -559,6 +549,9 @@ class SqlCacheAdapter(CacheDBInterface):
                         session_id=session_id,
                         qa_id=qa_entry["qa_id"],
                         payload=qa_entry,
+                        # The same instant as the payload's ``time``, so a time filter
+                        # on the column agrees with one on the payload.
+                        created_at=datetime.fromisoformat(qa_entry["time"]),
                         expires_at=self._session_expiry(),
                     )
                 )
@@ -606,6 +599,36 @@ class SqlCacheAdapter(CacheDBInterface):
                     .order_by(cache_qa_entries.c.seq.asc())
                 )
                 rows = result.scalars().all()
+            return [SessionQAEntry.model_validate(payload) for payload in rows]
+        except Exception as error:
+            error_msg = f"Unexpected error while reading Q&A from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
+    async def get_qa_entries_since(
+        self, user_id: str, session_id: str, since: datetime, lead_in: int = 0
+    ) -> list[SessionQAEntry]:
+        """Filter on the ``created_at`` column, so only the wanted rows are read."""
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session:
+                scoped = select(cache_qa_entries.c.payload).where(
+                    self._session_filter(cache_qa_entries, user_id, session_id),
+                    self._not_expired(cache_qa_entries),
+                )
+                result = await session.execute(
+                    scoped.where(cache_qa_entries.c.created_at >= since).order_by(
+                        cache_qa_entries.c.seq.asc()
+                    )
+                )
+                rows = list(result.scalars().all())
+                if lead_in:
+                    result = await session.execute(
+                        scoped.where(cache_qa_entries.c.created_at < since)
+                        .order_by(cache_qa_entries.c.seq.desc())
+                        .limit(lead_in)
+                    )
+                    rows = list(reversed(result.scalars().all())) + rows
             return [SessionQAEntry.model_validate(payload) for payload in rows]
         except Exception as error:
             error_msg = f"Unexpected error while reading Q&A from SQL cache: {error}"
@@ -673,7 +696,7 @@ class SqlCacheAdapter(CacheDBInterface):
                     return True
             except DBAPIError as error:
                 attempt += 1
-                if _is_deadlock_error(error) and attempt < _DEADLOCK_ATTEMPTS:
+                if is_deadlock(error) and attempt < _DEADLOCK_ATTEMPTS:
                     await asyncio.sleep(0.05 * (2**attempt))
                     continue
                 raise
@@ -785,6 +808,63 @@ class SqlCacheAdapter(CacheDBInterface):
                 return deleted_rows > 0
         except Exception as error:
             error_msg = f"Unexpected error while deleting session from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
+    async def delete_sessions(self, sessions: list[tuple[str, str]]) -> list[bool]:
+        """Delete many sessions whole, one transaction per chunk of an owner's sessions.
+
+        Each chunk takes the same per-session write locks as ``delete_session``,
+        in table order and then session order, so it never cycles with another
+        writer. A session existed if any of its rows was still live.
+        """
+        await self._ensure_initialized()
+        owners: dict[str, list[str]] = {}
+        for user_id, session_id in dict.fromkeys(sessions):
+            owners.setdefault(user_id, []).append(session_id)
+        existed: set[tuple[str, str]] = set()
+        try:
+            for user_id, session_ids in owners.items():
+                session_ids.sort()
+                for start in range(0, len(session_ids), _IDS_PER_STATEMENT):
+                    chunk = session_ids[start : start + _IDS_PER_STATEMENT]
+                    async with self.sessionmaker() as session, session.begin():
+                        for table in _SESSION_TABLES:
+                            for session_id in chunk:
+                                await self._lock_session_writes(session, table, user_id, session_id)
+                        now = self._now()
+                        for table in _SESSION_TABLES:
+                            scope = (table.c.user_id == user_id) & table.c.session_id.in_(chunk)
+                            live = await session.execute(
+                                select(table.c.session_id)
+                                .where(
+                                    scope,
+                                    or_(table.c.expires_at.is_(None), table.c.expires_at > now),
+                                )
+                                .distinct()
+                            )
+                            existed.update((user_id, session_id) for session_id in live.scalars())
+                            await session.execute(delete(table).where(scope))
+        except Exception as error:
+            error_msg = f"Unexpected error while deleting sessions from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+        return [pair in existed for pair in sessions]
+
+    async def list_session_ids(self, user_id: str) -> list[str]:
+        """Every session id with QA, trace or session-context rows for the user."""
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session:
+                session_ids: set[str] = set()
+                for table in (cache_qa_entries, cache_trace_entries, cache_session_context):
+                    rows = await session.execute(
+                        select(table.c.session_id).where(table.c.user_id == user_id).distinct()
+                    )
+                    session_ids.update(rows.scalars())
+                return list(session_ids)
+        except Exception as error:
+            error_msg = f"Unexpected error while listing sessions from SQL cache: {error}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from error
 
@@ -1007,7 +1087,7 @@ class SqlCacheAdapter(CacheDBInterface):
                     return True
             except DBAPIError as error:
                 attempt += 1
-                if _is_deadlock_error(error) and attempt < _DEADLOCK_ATTEMPTS:
+                if is_deadlock(error) and attempt < _DEADLOCK_ATTEMPTS:
                     await asyncio.sleep(0.05 * (2**attempt))
                     continue
                 error_msg = f"Unexpected error while updating session context in SQL cache: {error}"
@@ -1205,6 +1285,21 @@ class SqlCacheAdapter(CacheDBInterface):
                 await session.execute(delete(cache_kv).where(cache_kv.c.key == key))
         except Exception as error:
             error_msg = f"Unexpected error while deleting key/value from SQL cache: {error}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
+    async def delete_values(self, keys: list[str]) -> None:
+        """Delete the values stored under the given keys, in one transaction."""
+        if not keys:
+            return
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session, session.begin():
+                for start in range(0, len(keys), _IDS_PER_STATEMENT):
+                    chunk = keys[start : start + _IDS_PER_STATEMENT]
+                    await session.execute(delete(cache_kv).where(cache_kv.c.key.in_(chunk)))
+        except Exception as error:
+            error_msg = f"Unexpected error while deleting key/values from SQL cache: {error}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from error
 

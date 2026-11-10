@@ -18,6 +18,7 @@ import pytest_asyncio
 
 import cognee
 from cognee.context_global_variables import graph_db_config, vector_db_config
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
@@ -34,7 +35,8 @@ CSV_CONTENT = "id,name,section\n1,anemometer,weather\n2,barometer,weather\n3,sei
 
 
 async def _mock_embed_text(self, texts):
-    return [[float(len(t) % 7) / 10.0 + 0.1] * self.dimensions for t in texts]
+    vectors = [[float(len(t) % 7) / 10.0 + 0.1] * self.dimensions for t in texts]
+    return EmbeddingResult(vectors=vectors, tokens=0)
 
 
 @pytest_asyncio.fixture
@@ -256,6 +258,9 @@ async def test_dlt_config_narrows_the_csv_time_edges(clean_env, tmp_path):
 
     graph = await get_graph_engine()
     nodes, edges = await graph.get_graph_data()
+    timestamp_ids = {str(i) for i, props in nodes if props.get("type") == "Timestamp"}
     timestamps = {props["timestamp_str"] for _, props in nodes if props.get("type") == "Timestamp"}
     assert timestamps == {"2024-03-01", "2024-03-15", "2024-06-20"}
-    assert not [rel for _, _, rel, _ in edges if rel == "shipped_at"]
+    # shipped_at no longer anchors in time; its cells are plain value nodes instead.
+    shipped_targets = {str(t) for _, t, rel, _ in edges if rel == "shipped_at"}
+    assert shipped_targets and not shipped_targets & timestamp_ids

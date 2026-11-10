@@ -1,1 +1,2 @@
 from .get_embedding_engine import get_embedding_engine
+from .EmbeddingGateway import EmbeddingGateway

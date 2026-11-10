@@ -1,5 +1,7 @@
-from typing import Any, BinaryIO
+from typing import Any
 from uuid import UUID
+
+from fastapi import UploadFile
 
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
@@ -38,7 +40,7 @@ logger = get_logger()
 
 
 async def add(
-    data: BinaryIO | list[BinaryIO] | str | list[str] | DataItem | list[DataItem] | Any,
+    data: str | list[str] | UploadFile | list[UploadFile] | DataItem | list[DataItem] | Any,
     dataset_name: str = DEFAULT_DATASET_NAME,
     user: User = None,
     node_set: list[str] | None = None,
@@ -55,14 +57,15 @@ async def add(
     embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = True,
     skip_connection_test: bool = False,
+    branch: str | None = None,
     **kwargs,
 ):
     """
     Add data to Cognee for knowledge graph processing.
 
     This is the first step in the Cognee workflow - it ingests raw data and prepares it
-    for processing. The function accepts various data formats including text, files, urls and
-    binary streams, then stores them in a specified dataset for further processing.
+    for processing. The function accepts text, file paths, URLs and file uploads, then
+    stores them in a specified dataset for further processing.
 
     Prerequisites:
         - **LLM_API_KEY**: Must be set in environment variables for content processing
@@ -81,13 +84,26 @@ async def add(
             * Absolute paths: "/path/to/document.pdf"
             * File URLs: "file:///path/to/document.pdf" or "file://relative/path.txt"
             * S3 paths: "s3://bucket-name/path/to/file.pdf"
-        - **Binary file objects**: File handles/streams (BinaryIO)
+        - **File uploads**: FastAPI ``UploadFile`` objects, which is what ``POST /api/v1/add``
+          hands in for its multipart ``data`` field; each is stored under its upload
+          filename. Plain open file objects (``open(path, "rb")``, ``BytesIO``) are not
+          accepted: pass the file's path instead.
         - **Web URLs**: "https://example.com/page" is fetched and ingested as a page
         - **Code repository URLs**: "https://github.com/<owner>/<repo>" (or a gitlab.com
           project, or any URL ending in .git) is shallow-cloned and ingested as ONE
           code-repo item that cognify runs through the enola code graph pipeline
           (cross-file edges), plus the repo's documents; same as adding a local code
-          project directory. Requires ALLOW_HTTP_REQUESTS and git on PATH.
+          project directory. Requires ALLOW_HTTP_REQUESTS and git on PATH. Pass
+          ``branch`` to clone a branch other than the remote's default.
+        - **Database connection strings**: "postgresql://...", "mysql://...",
+          "sqlite:///path/to/file.db" and the other schemes in
+          ``create_dlt_source.DB_CONNECTION_PATTERNS`` are read through dlt, with
+          ``dlt_config["query"]`` as an optional single-table filter. The connection is
+          made from the machine running cognee: the SDK, CLI and MCP server ingest a
+          database by default, the API server refuses it (422
+          ``DatabaseIngestionDisabled``) unless ``ALLOW_DATABASE_INGESTION=true``, and
+          ``false`` refuses it everywhere. Cognee's own databases are refused whatever
+          the setting, and a sqlite:/// path must be an existing file.
         - **Lists**: Multiple files or text strings in a single call
 
     Supported File Formats:
@@ -111,8 +127,8 @@ async def add(
             - Absolute file path: "/path/to/document.pdf"
             - File URL: "file:///absolute/path/to/document.pdf" or "file://relative/path.txt"
             - S3 path: "s3://my-bucket/documents/file.pdf"
-            - List of mixed types: ["text content", "/path/file.pdf", "file://doc.txt", file_handle]
-            - Binary file object: open("file.txt", "rb")
+            - List of mixed types: ["text content", "/path/file.pdf", "file://doc.txt"]
+            - File upload: a FastAPI UploadFile, as POST /api/v1/add receives it
             - url: A web link url (https or http); a GitHub/GitLab repository URL is
               cloned and indexed as a code graph instead of fetched as a page
         dataset_name: Name of the dataset to store data in. Defaults to "main_dataset".
@@ -140,12 +156,25 @@ async def add(
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
+        branch: Branch to clone for the GitHub/GitLab repository URL(s) in ``data``, instead of
+                the remote's default. Each branch is cloned into its own directory, so adds on
+                different branches never touch each other's clone. A dataset holds one branch of
+                a URL at a time: adding it on another branch re-indexes the code graph, but the
+                documents ingested from the previous branch stay. A missing branch raises
+                ``CodeRepositoryError``; not supported while connected to a remote instance.
 
     Returns:
         PipelineRunInfo: Information about the ingestion pipeline execution including:
             - Pipeline run ID for tracking
             - Dataset ID where data was stored
             - Processing status and any errors
+            - ``data_ids``: the id of every data item this call stored (or found
+              already present with identical content) — use these for later
+              ``update()`` / ``datasets.delete_data()`` calls instead of
+              re-deriving ids from content. They do not line up with the inputs:
+              a directory yields one id per file, and duplicates and items that
+              failed are left out. ``None`` with ``run_in_background=True``,
+              since the items are not stored yet when ``add()`` returns
             - Execution timestamps and metadata
 
     Next Steps:
@@ -230,11 +259,24 @@ async def add(
 
     client = get_remote_client()
     if client is not None:
+        if branch is not None:
+            # client.add() sends only the data and the dataset name, so the remote would
+            # clone the default branch instead.
+            raise ValueError(
+                "branch is not supported while connected to a remote Cognee instance. "
+                "Call cognee.disconnect() to clone the branch locally."
+            )
         result = await client.add(data, dataset_name)
         # Wrap in a simple namespace so callers expecting .model_dump() still work
         from types import SimpleNamespace
 
         return SimpleNamespace(**result)
+
+    if branch is not None:
+        from cognee.tasks.code_graph.resolve_repo import check_branch_name
+
+        # Before anything is written, and before the name can reach git.
+        check_branch_name(branch)
 
     if preferred_loaders is not None:
         transformed = {}
@@ -291,7 +333,12 @@ async def add(
     # every item (the pipeline also passes the dataset via ctx — this keeps the
     # non-pipeline fallback on the cheap branch too).
     tasks = [
-        Task(resolve_data_directories, include_subdirectories=True, needs_llm=False),
+        Task(
+            resolve_data_directories,
+            include_subdirectories=True,
+            branch=branch,
+            needs_llm=False,
+        ),
         Task(
             ingest_data,
             dataset_name,
@@ -356,6 +403,8 @@ async def add(
         embedding_config=embedding_config,
         data_cache=data_cache,
         skip_connection_test=skip_connection_test,
+        # run_tasks resolves repository URLs itself, before this task list runs.
+        extras={"repo_branch": branch},
     )
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers

@@ -19,7 +19,8 @@ Vector ids mirror ``delete_from_graph_and_vector``:
     id = node_id;
   - edge -> ``EdgeType.id_for(edge_text)`` in ``EdgeType_relationship_name``;
     ``generate_node_id(source_id + relationship_name + target_id)`` in
-    ``Triplet_text`` (best-effort; the collection may not exist).
+    ``Triplet_text`` (best-effort; legacy rows only — cognee no longer writes
+    that collection, but databases built before SDK-1115 may hold it).
 """
 
 import dataclasses
@@ -44,11 +45,13 @@ class SourceRefRemovalResult:
 
     Consumed by session invalidation to find cached answers that used the
     deleted elements. Instances are always truthy — "handled, deleted nothing"
-    must still read as handled.
+    must still read as handled. ``matched`` is whether the refs owned any
+    artifact, deleted or surviving.
     """
 
     deleted_node_ids: list[str] = dataclasses.field(default_factory=list)
     deleted_edges: list[EdgeIdentity] = dataclasses.field(default_factory=list)
+    matched: bool = False
 
 
 def _is_unowned(current_refs: list[str], removed_refs: list[str]) -> bool:
@@ -169,6 +172,7 @@ async def execute_source_ref_removal(
     return SourceRefRemovalResult(
         deleted_node_ids=list(unowned_node_ids),
         deleted_edges=list(unowned_edges),
+        matched=bool(node_data or edge_data),
     )
 
 

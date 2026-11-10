@@ -1,12 +1,15 @@
 from datetime import datetime, timezone
-from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.operations import get_operation_origin, scrub_error_message
+from cognee.modules.operations import (
+    get_current_session_ids,
+    get_operation_origin,
+    scrub_error_message,
+)
 from cognee.modules.operations.usage_accumulator import get_parent_run_id
 from cognee.modules.pipelines.models import OperationOutcome, PipelineRun, PipelineRunStatus
-from cognee.modules.pipelines.utils import summarize_run_info_data
+from cognee.modules.pipelines.operations.run_sessions import add_run_sessions
 from cognee.modules.users.models import User
 
 
@@ -15,7 +18,6 @@ async def log_pipeline_run_error(
     pipeline_id: UUID,
     pipeline_name: str,
     dataset_id: UUID,
-    data: Any,
     e: Exception,
     *,
     user: User | None = None,
@@ -24,21 +26,22 @@ async def log_pipeline_run_error(
     started_at: datetime | None = None,
     tokens_in: int | None = None,
     tokens_out: int | None = None,
-    data_info: Any = None,
+    embedding_tokens: int | None = None,
     origin: str | None = None,
     parent_operation_id: UUID | None = None,
+    session_ids: tuple[str, ...] | None = None,
 ):
     """Append the ERRORED row for a run.
 
-    ``data_info``, ``origin`` and ``parent_operation_id`` default to what this
-    call's own context provides. A writer closing a run on behalf of a process
-    that is gone (startup recovery) passes the STARTED row's values instead, so
-    the ERRORED row describes the run that died, not the process closing it.
+    ``origin``, ``parent_operation_id`` and ``session_ids`` default to what this call's own
+    context provides. A writer closing a run on behalf of a process that is gone (startup
+    recovery) passes the STARTED row's values instead, so the ERRORED row describes the run
+    that died, not the process closing it.
     ``user_id`` and ``tenant_id`` preserve that stored identity without requiring
     a live ``User`` model. When ``user`` is supplied, its identity takes precedence.
     """
-    if data_info is None:
-        data_info = summarize_run_info_data(data)
+    if session_ids is None:
+        session_ids = get_current_session_ids()
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,
@@ -47,9 +50,8 @@ async def log_pipeline_run_error(
         status=PipelineRunStatus.DATASET_PROCESSING_ERRORED,
         dataset_id=dataset_id,
         run_info={
-            "data": data_info,
             # Scrubbed like error_message — persisting the raw text here would
-            # defeat the redaction (and run_info growth is capped, COG-5359).
+            # defeat the redaction, and the scrub also caps its length.
             "error": scrub_error_message(e),
         },
         user_id=user.id if user is not None else user_id,
@@ -62,6 +64,7 @@ async def log_pipeline_run_error(
         error_message=scrub_error_message(e),
         tokens_in=tokens_in,
         tokens_out=tokens_out,
+        embedding_tokens=embedding_tokens,
         origin=origin if origin is not None else get_operation_origin(),
         # This writer runs inside the pipeline's own parent_run_scope —
         # exclude it so the row parents to the next enclosing run.
@@ -75,7 +78,7 @@ async def log_pipeline_run_error(
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
-        session.add(pipeline_run)
+        add_run_sessions(session, pipeline_run, session_ids)
         await session.commit()
 
     return pipeline_run

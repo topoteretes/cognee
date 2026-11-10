@@ -4,9 +4,6 @@ Core owns OAuth, resource selection and dataset ownership. The bundled
 connector owns listing, document extraction, cursors and delete tombstones.
 """
 
-import re
-from hashlib import sha256
-
 from cognee.modules.integrations import ingestion
 from cognee.modules.integrations.google_drive import client
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
@@ -16,16 +13,23 @@ SYNC_STATUS_OK = "ok"
 SYNC_STATUS_DEGRADED = "degraded"
 
 
-def dataset_name_for_account(email: str, account_id: str = "") -> str:
-    """Keep the account's dataset stable and disambiguate slug collisions."""
-    slug = re.sub(r"[^A-Za-z0-9_]+", "_", email or "").strip("_").lower()
-    name = f"{GOOGLE_DRIVE_DATASET_PREFIX}_{slug or 'account'}"
-    return f"{name}_{sha256(account_id.encode()).hexdigest()[:10]}" if account_id else name
-
-
 def _dataset_name(credential: IntegrationCredential) -> str:
-    email = (credential.provider_metadata or {}).get("email") or ""
-    return dataset_name_for_account(email, str(credential.provider_account_id))
+    return ingestion.dataset_name_for_credential(GOOGLE_DRIVE_DATASET_PREFIX, credential)
+
+
+def _classify_error(error: BaseException) -> str:
+    """The count key a failed folder is reported under, from the source's typed error."""
+    from cognee.tasks.ingestion.connectors.google_drive import DriveAuthError
+
+    # dlt and remember() wrap the source's error; follow the chain to its end.
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        if isinstance(current, DriveAuthError):
+            return "failed_auth"
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return "failed_ingestion"
 
 
 async def sync_drive(credential: IntegrationCredential) -> None:
@@ -71,6 +75,7 @@ async def _sync_source(
             "folder_id": folder_id,
             "resource_name": resource_name,
             "service": service,
+            "service_factory": lambda: ingestion.build_service("google_drive", access_token),
             "check_active": check_active,
         }
         if folder_id in shared_drive_ids:
@@ -84,6 +89,7 @@ async def _sync_source(
         scopes=folder_ids,
         dataset_name=_dataset_name(credential),
         make_source=make_source,
+        classify_error=_classify_error,
     )
     if not counts["failed"]:
         await ingestion.retire_resources(

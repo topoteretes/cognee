@@ -43,6 +43,13 @@ class SessionStatus(str, Enum):
     ABANDONED = "abandoned"  # computed at read time, not stored
 
 
+class UsageKind(str, Enum):
+    """What a session_model_usage row counts: LLM completions or embeddings."""
+
+    LLM = "llm"
+    EMBEDDING = "embedding"
+
+
 # 30 minutes by default; overridable via env var for tests.
 def _abandon_after_seconds() -> int:
     raw = os.environ.get("SESSION_ABANDON_AFTER_SECONDS", "")
@@ -176,7 +183,10 @@ async def accumulate_usage(
     tokens_in: int = 0,
     tokens_out: int = 0,
     cost_usd: float = 0.0,
+    embedding_tokens: int = 0,
+    embedding_cost_usd: float = 0.0,
     model: str | None = None,
+    kind: UsageKind = UsageKind.LLM,
     errored: bool = False,
 ) -> None:
     """Atomically add usage counters to the session row + per-model row.
@@ -185,8 +195,20 @@ async def accumulate_usage(
     frozen. Per-model accumulation runs against
     ``session_model_usage`` via an upsert so mixed-model sessions
     attribute correctly in ``cost-by-model``.
+
+    Embedding usage (``kind=UsageKind.EMBEDDING``) goes to the session's own
+    embedding columns, never into its LLM ``tokens_in``/``cost_usd``; the
+    embedding model's per-model row is tagged with that kind.
     """
-    if tokens_in == 0 and tokens_out == 0 and cost_usd == 0.0 and not errored and model is None:
+    if (
+        tokens_in == 0
+        and tokens_out == 0
+        and cost_usd == 0.0
+        and embedding_tokens == 0
+        and embedding_cost_usd == 0.0
+        and not errored
+        and model is None
+    ):
         return
 
     engine = get_relational_engine()
@@ -201,9 +223,13 @@ async def accumulate_usage(
             values["tokens_out"] = SessionRecord.tokens_out + tokens_out
         if cost_usd:
             values["cost_usd"] = SessionRecord.cost_usd + cost_usd
+        if embedding_tokens:
+            values["embedding_tokens"] = SessionRecord.embedding_tokens + embedding_tokens
+        if embedding_cost_usd:
+            values["embedding_cost_usd"] = SessionRecord.embedding_cost_usd + embedding_cost_usd
         if errored:
             values["error_count"] = SessionRecord.error_count + 1
-        if model:
+        if model and kind == UsageKind.LLM:
             values["last_model"] = model
 
         if values:
@@ -219,6 +245,11 @@ async def accumulate_usage(
                 .values(**values)
             )
 
+        # An embedding model's own row counts its input tokens and cost in the
+        # ordinary columns; kind tells it apart from an LLM's row.
+        if kind == UsageKind.EMBEDDING:
+            tokens_in, tokens_out, cost_usd = embedding_tokens, 0, embedding_cost_usd
+
         # 2) Per-model row — only when there's usage to credit.
         if model and (tokens_in or tokens_out or cost_usd):
             now = datetime.now(timezone.utc)
@@ -231,6 +262,7 @@ async def accumulate_usage(
                     session_id=session_id,
                     user_id=user_id,
                     model=model,
+                    kind=kind.value,
                     tokens_in=tokens_in,
                     tokens_out=tokens_out,
                     cost_usd=cost_usd,
@@ -265,6 +297,7 @@ async def accumulate_usage(
                             session_id=session_id,
                             user_id=user_id,
                             model=model,
+                            kind=kind.value,
                             tokens_in=tokens_in,
                             tokens_out=tokens_out,
                             cost_usd=cost_usd,
@@ -503,25 +536,71 @@ _session_record_write_failed = False
 
 
 async def list_sessions_for_dataset(dataset_id: UUIDType) -> list[tuple[UUIDType, str]]:
-    """Return (user_id, session_id) pairs for sessions attributed to the dataset.
+    """Return (user_id, session_id) pairs for sessions attributed to the dataset."""
+    return await list_sessions_for_datasets([dataset_id])
 
-    Attribution is best-effort by design: ``dataset_id`` is backfilled on the
-    session row (heartbeats and remember() both fill it when they know the
-    dataset), and the per-dataset default session embeds the dataset id in its
-    session_id (``{default_session_id}_{dataset_id}``). Match on either, so
-    rows written before dataset threading existed are still found through
-    their session_id suffix.
+
+# The session id SessionManager uses when none is given; with a known dataset
+# it is ``f"{DEFAULT_SESSION_ID}_{dataset_id}"``.
+DEFAULT_SESSION_ID = "default_session"
+
+# Datasets per query, each adding two bound parameters: under every backend's
+# bind-parameter cap.
+_DATASETS_PER_QUERY = 100
+
+
+async def list_sessions_for_datasets(
+    dataset_ids: Sequence[UUIDType],
+) -> list[tuple[UUIDType, str]]:
+    """Return (user_id, session_id) pairs for sessions attributed to any of the datasets.
+
+    A session is attributed by the ``dataset_id`` on its row (heartbeats and
+    remember() both fill it when they know the dataset). A row written before
+    dataset threading has none; it counts only when its session_id is
+    exactly the dataset's default session (``default_session_{dataset_id}``).
+    Any other session_id is the client's choice and never attributes a
+    session, so nobody's session is deleted for ending in a dataset's id.
+    """
+    dataset_ids = list(dict.fromkeys(dataset_ids))
+    if not dataset_ids:
+        return []
+    engine = get_relational_engine()
+    pairs: dict[tuple[UUIDType, str], None] = {}
+    async with engine.get_async_session() as session:
+        for start in range(0, len(dataset_ids), _DATASETS_PER_QUERY):
+            chunk = dataset_ids[start : start + _DATASETS_PER_QUERY]
+            rows = (
+                await session.execute(
+                    select(SessionRecord.user_id, SessionRecord.session_id).where(
+                        or_(
+                            SessionRecord.dataset_id.in_(chunk),
+                            and_(
+                                SessionRecord.dataset_id.is_(None),
+                                SessionRecord.session_id.in_(
+                                    [f"{DEFAULT_SESSION_ID}_{dataset_id}" for dataset_id in chunk]
+                                ),
+                            ),
+                        )
+                    )
+                )
+            ).all()
+            pairs.update(((row.user_id, row.session_id), None) for row in rows)
+    return list(pairs)
+
+
+async def list_sessions_for_user(user_id: UUIDType) -> list[tuple[UUIDType, str]]:
+    """Return (user_id, session_id) pairs for every session the user owns.
+
+    Ownership is the ``user_id`` on the session row, nothing wider: a child
+    agent's sessions are the agent's own, and a dataset grant reaches a
+    session only through ``list_sessions_for_dataset``.
     """
     engine = get_relational_engine()
-    suffix = f"_{dataset_id}"
     async with engine.get_async_session() as session:
         rows = (
             await session.execute(
                 select(SessionRecord.user_id, SessionRecord.session_id).where(
-                    or_(
-                        SessionRecord.dataset_id == dataset_id,
-                        SessionRecord.session_id.endswith(suffix),
-                    )
+                    SessionRecord.user_id == user_id
                 )
             )
         ).all()

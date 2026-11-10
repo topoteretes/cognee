@@ -21,8 +21,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 # are explicit here.
 import cognee.modules.integrations.github
 import cognee.modules.integrations.gmail
+import cognee.modules.integrations.google_calendar
 import cognee.modules.integrations.google_drive
 import cognee.modules.integrations.linear
+import cognee.modules.integrations.notion
 from cognee.api.exception_telemetry import send_api_exception_telemetry
 from cognee.api.startup_checks import report_default_user_login_posture
 from cognee.api.v1.activity.routers import get_activity_router
@@ -31,6 +33,7 @@ from cognee.api.v1.agents.routers import get_agents_router
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
 from cognee.api.v1.cloud.routers import get_checks_router
 from cognee.api.v1.cognify.routers import get_cognify_router
+from cognee.api.v1.conflicts.routers import get_conflicts_router
 from cognee.api.v1.datasets.routers import get_datasets_router
 from cognee.api.v1.delete.routers import get_delete_router
 from cognee.api.v1.forget.routers import get_forget_router
@@ -145,6 +148,14 @@ async def lifespan(app: FastAPI):
 
     get_improve_config()
 
+    from cognee.tasks.ingestion.save_data_item_to_storage import local_file_paths_configured
+
+    if not local_file_paths_configured():
+        logger.info(
+            "Server-side file paths in raw_data are refused for HTTP requests "
+            "(set ACCEPT_LOCAL_FILE_PATH=true to allow them)"
+        )
+
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
@@ -177,11 +188,11 @@ async def lifespan(app: FastAPI):
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
 
-    # Flush in-flight telemetry and close its shared aiohttp session on the
-    # loop that owns them, instead of leaving it to the atexit fallback.
-    from cognee.shared.utils import close_telemetry_session
+    # Send queued telemetry before the server exits; on SIGTERM uvicorn runs
+    # this shutdown, while the sender's atexit hook may never run.
+    from cognee.shared.utils import flush_telemetry
 
-    await close_telemetry_session()
+    await flush_telemetry()
 
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
@@ -348,6 +359,14 @@ async def exception_handler(request: Request, exc: CogneeApiError) -> JSONRespon
         improperly_defined=improperly_defined,
     )
     content = {"detail": detail["message"]}
+    # A stable, machine-readable reason and the argument it concerns, for errors
+    # that carry them (SearchType.CODE's CodeSearchValidationError family), so a
+    # client can branch on `code` instead of parsing `detail`. Strings only: other
+    # exceptions may use an `error_code` attribute for something else.
+    for key, attribute in (("code", "error_code"), ("param", "error_param")):
+        value = getattr(exc, attribute, None)
+        if isinstance(value, str) and value:
+            content[key] = value
     # A hint the caller can act on: the exception's own remediation first, else the
     # shared first-run table. Only present when a fix is known, so existing clients
     # that read only `detail` are unaffected.
@@ -383,6 +402,7 @@ app.include_router(get_add_router(), prefix="/api/v1/add", tags=["add"])
 
 app.include_router(get_cognify_router(), prefix="/api/v1/cognify", tags=["cognify"])
 
+# Deprecated (SDK-1115); removed in the next release.
 app.include_router(get_memify_router(), prefix="/api/v1/memify", tags=["memify"])
 
 app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"])
@@ -392,6 +412,8 @@ app.include_router(
     prefix="/api/v1/permissions",
     tags=["permissions"],
 )
+
+app.include_router(get_conflicts_router(), prefix="/api/v1/conflicts", tags=["conflicts"])
 
 app.include_router(get_datasets_router(), prefix="/api/v1/datasets", tags=["datasets"])
 

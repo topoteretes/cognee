@@ -6,7 +6,7 @@ import Link from "next/link";
 import ModalShell from "@/ui/elements/ModalShell";
 import { googleApi, googleAuthorizeUrl, googleError, type GoogleConnection, type GoogleProvider, type GoogleResources } from "@/modules/integrations/googleApi";
 import { describeOAuthFailure, isFailureOutcome, takeOAuthOutcome } from "@/modules/integrations/oauthOutcome";
-import DataSourceCard from "./DataSourceCard";
+import SdkSourceCard, { type SdkSourceStatus } from "./SdkSourceCard";
 import ConnectorLogo from "./ConnectorLogo";
 
 // The SDK shell is dark even when Mantine's global scheme is light. Scope the
@@ -28,6 +28,15 @@ function Checkbox({ label, description, ...props }: InputHTMLAttributes<HTMLInpu
     <input {...props} aria-label={label} type="checkbox" className="mt-0.5 shrink-0 cursor-pointer accent-cognee-lavender disabled:cursor-not-allowed" style={{ width: 14, height: 14 }} />
     <span>{label}{description && <span className="mt-0.5 block text-[11px] text-white/55">{description}</span>}</span>
   </label>;
+}
+
+// takeOAuthOutcome returns the slug as a string here, and an object carrying
+// the slug once the SaaS frontend's version of oauthOutcome.ts is synced in.
+// Reading either keeps this card building on both sides of that sync.
+function outcomeSlug(taken: unknown): string | null {
+  if (typeof taken === "string") return taken;
+  if (typeof taken === "object" && taken !== null && "outcome" in taken && typeof taken.outcome === "string") return taken.outcome;
+  return null;
 }
 
 export default function GoogleIntegrationCard({ provider, connecting, setConnecting }: {
@@ -103,7 +112,7 @@ export default function GoogleIntegrationCard({ provider, connecting, setConnect
       if (!mounted.current || popup.closed) { popup.close(); setConnecting(null); return; }
       popup.location.href = googleAuthorizeUrl(result.authorize_url);
       popupPoll.current = setInterval(() => {
-        const outcome = takeOAuthOutcome(provider);
+        const outcome = outcomeSlug(takeOAuthOutcome(provider));
         const timedOut = Date.now() - startedAt > 120000;
         if (!outcome && !popup.closed && !timedOut) return;
         if (popupPoll.current) clearInterval(popupPoll.current);
@@ -158,34 +167,29 @@ export default function GoogleIntegrationCard({ provider, connecting, setConnect
   };
   const close = () => { cancelAuthorization(); setOpened(false); };
   const title = connection?.connected ? `${name} connected` : `Connect ${name}`;
+  const cardStatus: SdkSourceStatus | undefined = statusError ? "unavailable"
+    : !connection ? undefined
+    : !connection.connected ? "disconnected"
+    : syncIssue ? "needs_attention" : "connected";
+  const openManage = () => {
+    setError(null); setNotice(null); setDeleteData(false); setConfirmDisconnect(false); setOpened(true);
+  };
   const permissions = isDrive
     ? ["Read files from the folders and shared drives you select", "Keep your imported files searchable in Cognee"]
     : ["Read messages matching the labels you select", "Keep your imported messages searchable in Cognee"];
 
   return (
     <>
-      <DataSourceCard
-        cfg={{
-          key: provider, name,
-          description: `Read selected ${resourceName} into your Cognee memory.`,
-          initials: isDrive ? "Dr" : "Gm",
-          logo: isDrive ? "googledrive" : "gmail",
-          color: isDrive ? "#4285F4" : "#EA4335",
-          permissions: [], supportsChannelRouting: false,
-        }}
-        state={statusError ? { status: "unavailable" } : connection ? {
-          status: connection.connected ? "connected" : "disconnected",
-          syncStatus: syncIssue ? "degraded" : undefined,
-          lastSyncedAt: connection.last_synced_at ?? undefined,
-        } : undefined}
+      <SdkSourceCard
+        name={name}
+        description={`Read selected ${resourceName} into your Cognee memory.`}
+        initials={isDrive ? "Dr" : "Gm"}
+        logo={isDrive ? "googledrive" : "gmail"}
+        color={isDrive ? "#4285F4" : "#EA4335"}
+        status={cardStatus}
         healthText={syncSummary}
-        needsReconnect={false}
-        channels={undefined}
-        isOwner={true}
-        onManageClick={() => {
-          setError(null); setNotice(null); setDeleteData(false); setConfirmDisconnect(false); setOpened(true);
-        }}
-        onRetry={() => void refreshStatus()}
+        actionLabel={statusError ? "Retry" : connection?.connected ? "Manage" : "Connect"}
+        onAction={statusError ? () => void refreshStatus() : openManage}
       />
       {opened && <ModalShell label={title} width={420} onClose={close}>
         <div style={{ ...CONTENT_STYLE, display: "flex", flexDirection: "column", gap: 16 }}>

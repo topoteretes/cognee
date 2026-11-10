@@ -1,6 +1,12 @@
 name: release.yml
 on:
   workflow_dispatch:
+    inputs:
+      release_connectors:
+        description: "After a stable release, also release the cognee-connectors packages whose version is not on PyPI yet"
+        required: false
+        type: boolean
+        default: true
 
 # Minimal default permissions for all jobs (OSSF Scorecard: Token-Permissions).
 # Jobs that need more (release creation, OIDC, attestations) opt in explicitly.
@@ -509,6 +515,39 @@ jobs:
       tag: ${{ needs.release-github.outputs.tag }}
     # The sync needs REPO_DISPATCH_PAT_TOKEN to write to cognee-docs.
     secrets: inherit
+
+  release-connectors:
+    needs: [release-github, release-pypi-package]
+    name: Release the data connectors
+    # The connector packages (cognee-connectors/) version independently of
+    # cognee, so this only hands off to release_connectors.yml with `all`: it
+    # publishes every package whose current version is not on PyPI yet and skips
+    # the rest, so a cognee release ships whatever connector bumps landed since.
+    # Stable releases only (dev canaries and release candidates are skipped), and
+    # the `release_connectors` input turns it off. The connector run is separate:
+    # a connector failure shows up there and never fails this release.
+    if: >-
+      ${{ github.ref_name == 'main'
+          && inputs.release_connectors != false
+          && !contains(needs.release-github.outputs.version, 'dev')
+          && !contains(needs.release-github.outputs.version, 'rc') }}
+    permissions:
+      actions: write        # dispatch release_connectors.yml
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Dispatch release_connectors.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # On the tag this release just pushed, not on the branch: the connectors
+          # then release from the same commit as cognee, whatever merged since.
+          TAG: ${{ needs.release-github.outputs.tag }}
+        run: |
+          gh workflow run release_connectors.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${TAG}" \
+            -f connector=all
+          echo "Dispatched release_connectors.yml (connector=all) on ${TAG}:"
+          echo "https://github.com/${GITHUB_REPOSITORY}/actions/workflows/release_connectors.yml"
 
   trigger-docs-test-suite:
     needs: release-pypi-package

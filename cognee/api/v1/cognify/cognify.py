@@ -1,4 +1,5 @@
 import asyncio
+import warnings
 from typing import Literal
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import resolve_chunk_size
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.cognify.chunking_tasks import build_chunking_tasks, resolve_chunks_per_batch
 from cognee.modules.cognify.config import (
     GLINER_DEMO_EXTRACTOR,
     ensure_extractor_runtime,
@@ -17,6 +19,7 @@ from cognee.modules.cognify.config import (
     resolve_extractor,
     resolve_summary_method,
 )
+from cognee.modules.cognify.memory_pipelines import run_memory_pipelines
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.observability import (
@@ -35,12 +38,13 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
 )
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
-from cognee.modules.pipelines import run_pipeline
+from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.modules.pipelines.tasks.task import Task, pipeline_needs_llm
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME
 from cognee.tasks.code_graph.code_files import get_code_file_tasks
 from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
 from cognee.tasks.documents import (
@@ -48,14 +52,38 @@ from cognee.tasks.documents import (
     extract_chunks_from_documents,
 )
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
+from cognee.tasks.ingestion.document_structure import reconcile_document_structure
 from cognee.tasks.provenance import record_provenance
-from cognee.tasks.storage import add_data_points
-from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
-from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
-    extract_knowledge_graph_from_events,
-)
+from cognee.tasks.storage import add_data_points, find_indexed_chunks, index_chunks_for_search
 
 logger = get_logger("cognify")
+
+TEMPORAL_COGNIFY_DEPRECATED = (
+    "temporal_cognify is deprecated and ignored, and will be removed in the next release: "
+    "cognee 1.6.2 was the last release in which temporal_cognify=True built the event "
+    "graph; since 1.6.3 the flag has no effect. cognify() now extracts dates as Timestamp nodes by default, and SearchType.TEMPORAL "
+    "reranks by them. Drop the argument. A dataset built with temporal_cognify=True holds "
+    "Event nodes that current code no longer indexes: TEMPORAL search ignores them, graph "
+    "completion no longer searches their names, and the next triplet enrichment re-embeds "
+    "their triplets without the event name. Rebuild such a dataset with "
+    "forget(dataset=..., memory_only=True) and then cognify()."
+)
+
+
+def drop_deprecated_temporal_cognify(kwargs: dict) -> None:
+    """Strip the deprecated ``temporal_cognify`` flag from ``kwargs`` with a warning.
+
+    The event pipeline it switched to is gone, so any value runs the default pipeline.
+    Unknown cognify kwargs are forwarded into the extraction LLM call, so the flag
+    must never travel on. The warning is also logged: when the caller runs
+    ``asyncio.run(cognify(...))`` directly, Python attributes the warning to asyncio and
+    the default filters hide it.
+    """
+    if "temporal_cognify" not in kwargs:
+        return
+    kwargs.pop("temporal_cognify")
+    warnings.warn(TEMPORAL_COGNIFY_DEPRECATED, DeprecationWarning, stacklevel=3)
+    logger.warning(TEMPORAL_COGNIFY_DEPRECATED)
 
 
 def _wrap_cognify_exception(error: BaseException, datasets) -> "Exception":
@@ -129,6 +157,7 @@ async def cognify(
     extractor: Literal["llm", "gliner_demo", "gliner"] | None = None,
     ontology_file_path: str | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
+    early_chunk_indexing: bool | None = None,
     **kwargs,
 ):
     """
@@ -156,12 +185,24 @@ async def cognify(
             * Mixed multimedia content (with text extraction)
 
     Processing Pipeline:
+        Two pipeline runs per dataset, in order, so the data is searchable before its
+        entities are extracted (``early_chunk_indexing=False`` leaves out the first):
+
+        ``indexing_pipeline``: chunk search, no LLM call
         1. **Document Classification**: Identifies document types and structures
         2. **Text Chunking**: Breaks content into semantically meaningful segments
-        3. **Entity Extraction**: Identifies key concepts, people, places, organizations
-        4. **Relationship Detection**: Discovers connections between entities
-        5. **Graph Construction**: Builds semantic knowledge graph with embeddings
-        6. **Content Summarization**: Creates text summaries for navigation
+        3. **Chunk Indexing**: Stores and embeds the chunks; ``CHUNKS``,
+           ``CHUNKS_LEXICAL``, ``RAG_COMPLETION`` and ``HYBRID_COMPLETION`` answer.
+
+        ``cognify_pipeline``: the knowledge graph
+        4. **Entity Extraction**: Identifies key concepts, people, places, organizations
+        5. **Relationship Detection**: Discovers connections between entities
+        6. **Graph Construction**: Builds semantic knowledge graph with embeddings
+        7. **Content Summarization**: Creates text summaries for navigation
+
+        Each milestone is logged, and ``cognee.datasets.get_memory_status()`` and
+        ``GET /api/v1/datasets/status/memory`` report the memory state: what answers
+        now, and what improves next.
 
     Graph Model Customization:
         The `graph_model` parameter allows custom knowledge structures:
@@ -233,8 +274,17 @@ async def cognify(
                  makes one LLM call per chunk; "from_extraction" joins the chunk's
                  extracted types and relation texts with no LLM call, and a chunk
                  with no relations gets no summary. The explicit argument wins over
-                 the SUMMARY_METHOD setting ("llm" by default). Raises while
+                 the SUMMARY_METHOD setting ("from_extraction" by default). Raises while
                  connected to a remote instance.
+        early_chunk_indexing: Whether to run the indexing pipeline before the cognify
+                 pipeline: a separate ``indexing_pipeline`` run per dataset that
+                 chunks the documents and stores + embeds the chunks (no LLM call),
+                 so chunk-based searches answer while entities are still being
+                 extracted. The cognify run then finds those chunks in the vector
+                 store and does not embed them again. False skips that run, and the
+                 chunks become searchable only when extraction finishes. The explicit
+                 argument wins over the EARLY_CHUNK_INDEXING setting (on by default).
+                 Raises while connected to a remote instance.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -243,9 +293,14 @@ async def cognify(
                 * Extracted entity and relationship counts
                 * Processing duration and resource usage
                 * Error details if any failures occurred
-            - **Background mode**: List of PipelineRunInfo objects for tracking progress
-                * Use pipeline_run_id to monitor status
-                * Check completion via pipeline monitoring APIs
+                * ``after_run_error`` on a completed run whose step after the run
+                  (document structure pass, vector store compaction) failed; with
+                  ``raise_on_error=True`` (default) that raises ``AfterRunHookError``
+            - **Background mode**: Dictionary mapping dataset_id -> the cognify run's
+              started info
+                * Use pipeline_run_id to monitor status; while the indexing run works,
+                  its subscriber receives progress with current_stage "indexing_pipeline"
+                * Check the memory state via the dataset status APIs
 
     Next Steps:
         After successful cognify processing, use search functions to query the knowledge:
@@ -318,11 +373,9 @@ async def cognify(
     if "functional_relationships" in kwargs:
         raise TypeError(
             "cognify() no longer accepts functional_relationships; "
-            "use improve(review_conflicts=True)"
+            "improve() reviews conflicts by default"
         )
-    # temporal_cognify is accepted and ignored: the default pipeline extracts
-    # dates as Timestamp nodes, which SearchType.TEMPORAL reads.
-    kwargs.pop("temporal_cognify", None)
+    drop_deprecated_temporal_cognify(kwargs)
 
     cognify_config = get_cognify_config()
     # The extractor decision is made once, here, before any branch. Branches
@@ -378,12 +431,26 @@ async def cognify(
                 "summary_method is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose the summary method locally."
             )
+        if early_chunk_indexing is not None:
+            # Same again: the remote runs its own EARLY_CHUNK_INDEXING setting.
+            raise ValueError(
+                "early_chunk_indexing is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to choose it locally."
+            )
+        if ontology_file_path is not None:
+            # POST /cognify takes no ontology path, and the file is on this
+            # machine, not the server's: forwarding would silently drop it.
+            raise ValueError(
+                "ontology_file_path is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to use the ontology locally."
+            )
         return await client.cognify(
             datasets,
             chunk_size=chunk_size,
             chunks_per_batch=chunks_per_batch,
             custom_prompt=custom_prompt,
             run_in_background=run_in_background,
+            graph_model=graph_model,
         )
 
     # After the argument checks and the remote route: a cognify that raises above,
@@ -452,8 +519,8 @@ async def cognify(
                 chunks_per_batch=chunks_per_batch,
                 config=config,
                 chunk_attachment=chunk_attachment,
-                embed_triplets=cognify_config.triplet_embedding,
                 track_provenance=cognify_config.provenance_tracking,
+                early_chunk_indexing=early_chunk_indexing,
             )
         else:
             tasks = await get_default_tasks(
@@ -466,16 +533,41 @@ async def cognify(
                 chunks_per_batch=chunks_per_batch,
                 chunk_attachment=chunk_attachment,
                 summary_method=resolved_summary_method,
+                early_chunk_indexing=early_chunk_indexing,
                 **kwargs,
             )
 
         # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
         pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
+        # The indexing pipeline runs first, as its own run per dataset, unless
+        # early chunk indexing is off. Only standard-routed items go through
+        # it: DLT manifests write their row chunks in one LLM-free pass anyway
+        # and the code routes produce no text chunks, so those items resolve to
+        # an empty list and the indexing run leaves them out.
+        use_indexing = (
+            early_chunk_indexing
+            if early_chunk_indexing is not None
+            else cognify_config.early_chunk_indexing
+        )
+        resolve_indexing_tasks = None
+        if use_indexing:
+            indexing_tasks_by_route = {
+                CognifyRoute.STANDARD: await get_indexing_tasks(
+                    chunker=chunker, chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
+                ),
+                CognifyRoute.DLT_SOURCE: [],
+                CognifyRoute.CODE: [],
+                CognifyRoute.CODE_REPO: [],
+            }
+
+            def resolve_indexing_tasks(data_item):
+                return indexing_tasks_by_route[cognify_route_for(data_item)]
+
         # Per-item routing: each data item resolves to the task list its kind
         # requires — DLT-source manifests run the deterministic DLT list, code
         # files run the enola code graph list, everything else runs the
-        # standard (or temporal) list. The lists are built once up front and
+        # standard list. The lists are built once up front and
         # the resolver is a sync closure over them (the distributed runner
         # materializes per-item task columns, so it needs concrete lists, not
         # an async factory). One run_pipeline call, one cognify_pipeline run
@@ -505,11 +597,16 @@ async def cognify(
         )
 
         try:
+            # One executor call drives both runs (see
+            # cognee.modules.cognify.memory_pipelines): blocking mode still
+            # returns the cognify run's final info per dataset, background mode
+            # the cognify run's started info.
             result = await pipeline_executor_func(
-                pipeline=run_pipeline,
+                pipeline=run_memory_pipelines,
+                indexing_tasks=resolve_indexing_tasks,
                 datasets=datasets,
                 tasks=resolve_cognify_tasks,
-                pipeline_name="cognify_pipeline",
+                pipeline_name=COGNIFY_PIPELINE_NAME,
                 user=user,
                 vector_db_config=vector_db_config,
                 graph_db_config=graph_db_config,
@@ -521,11 +618,24 @@ async def cognify(
                 embedding_config=embedding_config,
                 data_cache=data_cache,
                 extras={"graph_extractor": resolved_extractor},
+                # Reconcile the structure document sources describe, also when an
+                # item failed: one bad page must not freeze the tree of the rest.
+                after_items_ran=reconcile_document_structure,
                 # Fold the vector fragments this run wrote, once per dataset,
                 # after the run is recorded complete; bounded per run, so a
                 # bloated store drains over several cognify runs.
                 after_run_completed=compact_vector_store,
             )
+        except AfterRunHookError as error:
+            # Every run completed and its data is stored; only the step after it
+            # failed. raise_on_error=False reports that on the runs, like an
+            # errored run, instead of raising.
+            if raise_on_error:
+                # A dataset whose run errored outranks one whose data is stored.
+                raise_if_cognify_errored(error.run_info)
+                raise
+            logger.warning("cognify: the step after the run failed: %s", error)
+            result = error.run_info
         except Exception as error:
             # Run-level failures (e.g. an AuthenticationError escaping a task)
             # re-raise straight out of the pipeline generator, bypassing the
@@ -574,32 +684,34 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunks_per_batch: int | None = None,
     chunk_attachment: Literal["direct", "all"] | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
+    early_chunk_indexing: bool | None = None,
     **kwargs,
 ) -> list[Task]:
     cognify_config = get_cognify_config()
-    embed_triplets = cognify_config.triplet_embedding
     summary_method = summary_method or cognify_config.summary_method
     track_provenance = cognify_config.provenance_tracking
+    if early_chunk_indexing is None:
+        early_chunk_indexing = cognify_config.early_chunk_indexing
+    chunks_per_batch = resolve_chunks_per_batch(chunks_per_batch)
 
-    if chunks_per_batch is None:
-        chunks_per_batch = (
-            cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 2000
+    # EXTRACT: classify raw Data items into typed Document objects, then split
+    # them into semantic text chunks. needs_llm=False marks the tasks that
+    # never call the LLM; the run's need is the union over the tasks, so the
+    # LLM connection probe runs exactly when some task in the list will use it.
+    tasks = list(build_chunking_tasks(chunker, await resolve_chunk_size(chunk_size)))
+    if early_chunk_indexing:
+        # The indexing pipeline (get_indexing_tasks) stored and embedded these
+        # very chunks before this run; find them in the vector store so the
+        # final add_data_points upserts them without embedding them again
+        # (SDK-397).
+        tasks.append(
+            Task(
+                find_indexed_chunks,
+                task_config={"batch_size": chunks_per_batch},
+                needs_llm=False,
+            )
         )
-
-    max_chunk_size = await resolve_chunk_size(chunk_size)
-    tasks = [
-        # needs_llm=False marks the tasks that never call the LLM; the run's
-        # need is the union over the tasks, so the LLM connection probe runs
-        # exactly when some task in the list will use it.
-        # EXTRACT: classify raw Data items into typed Document objects
-        Task(classify_documents, needs_llm=False),
-        # EXTRACT: split Documents into semantic text chunks
-        Task(
-            extract_chunks_from_documents,
-            max_chunk_size=max_chunk_size,
-            chunker=chunker,
-            needs_llm=False,
-        ),
+    tasks += [
         # COGNIFY: extract entities and relationships into a knowledge graph and
         # summarize each chunk for retrieval with the LLM.
         Task(
@@ -615,7 +727,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(
             add_data_points,
-            embed_triplets=embed_triplets,
             task_config={"batch_size": chunks_per_batch},
             needs_llm=False,
         ),
@@ -627,6 +738,33 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         )
 
     return tasks
+
+
+async def get_indexing_tasks(
+    chunker=TextChunker,
+    chunk_size: int | None = None,
+    chunks_per_batch: int | None = None,
+) -> list[Task]:
+    """The indexing pipeline's task list: classify, chunk, store + embed the chunks.
+
+    Run as ``indexing_pipeline`` before the cognify pipeline (SDK-397), it makes
+    a dataset answer chunk-based searches before any entity is extracted. No
+    task calls the LLM. Its chunking step comes from ``build_chunking_tasks``,
+    as the cognify task lists' does, so both runs cut the same chunks and the
+    cognify run finds them in the store instead of embedding them again. The
+    temporal hints are left out: nothing here reads them, and the cognify run
+    computes its own when it re-chunks.
+    """
+    return [
+        *build_chunking_tasks(chunker, await resolve_chunk_size(chunk_size), temporal_hints=False),
+        # LOAD: chunk and document nodes to the graph, chunk text to the vector
+        # store. From here on the dataset is searchable at chunk level.
+        Task(
+            index_chunks_for_search,
+            task_config={"batch_size": resolve_chunks_per_batch(chunks_per_batch)},
+            needs_llm=False,
+        ),
+    ]
 
 
 async def get_dlt_tasks(
@@ -665,7 +803,6 @@ async def get_dlt_tasks(
         # LOAD: persist row chunks and embeddings to graph/vector DBs
         Task(
             add_data_points,
-            embed_triplets=cognify_config.triplet_embedding,
             task_config={"batch_size": chunks_per_batch},
             needs_llm=False,
         ),
@@ -674,52 +811,3 @@ async def get_dlt_tasks(
         # source), so these Task objects are safe to share across datasets.
         Task(extract_dlt_source_edges, needs_llm=False),
     ]
-
-
-async def get_temporal_tasks(
-    user: User = None,
-    chunker=TextChunker,
-    chunk_size: int | None = None,
-    chunks_per_batch: int | None = None,
-) -> list[Task]:
-    """
-    Builds and returns a list of temporal processing tasks to be executed in sequence.
-
-    The pipeline includes:
-    1. Document classification.
-    2. Document chunking with a specified or default chunk size.
-    3. Event and timestamp extraction from chunks.
-    4. Knowledge graph extraction from events.
-    5. Batched insertion of data points.
-
-    Args:
-        user (User, optional): The user requesting task execution.
-        chunker (Callable, optional): A text chunking function/class to split documents. Defaults to TextChunker.
-        chunk_size (int, optional): Maximum token size per chunk. If not provided, uses system default.
-        chunks_per_batch (int, optional): Number of chunks to process in a single batch in Cognify
-
-    Returns:
-        list[Task]: A list of Task objects representing the temporal processing pipeline.
-    """
-    if chunks_per_batch is None:
-        configured = get_cognify_config().chunks_per_batch
-        chunks_per_batch = configured if configured is not None else 10
-
-    temporal_tasks = [
-        # EXTRACT: classify raw Data items into typed Document objects
-        Task(classify_documents),
-        # EXTRACT: split Documents into semantic text chunks
-        Task(
-            extract_chunks_from_documents,
-            max_chunk_size=await resolve_chunk_size(chunk_size),
-            chunker=chunker,
-        ),
-        # COGNIFY: extract temporal events and timestamps from chunks
-        Task(extract_events_and_timestamps, task_config={"batch_size": chunks_per_batch}),
-        # COGNIFY: build knowledge graph from extracted events
-        Task(extract_knowledge_graph_from_events),
-        # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
-        Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
-    ]
-
-    return temporal_tasks

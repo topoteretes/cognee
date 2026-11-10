@@ -65,6 +65,7 @@ from __future__ import annotations
 
 import base64
 import os
+import threading
 import time
 from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
@@ -97,6 +98,14 @@ _COST_GET_PROFILE = 1
 # googleapiclient retries rate limits (403/429), 5xx and dropped connections
 # with exponential backoff; 404/410 are never retried.
 _NUM_RETRIES = 6
+# The per-user quota is shared by every client of the same Google account under
+# the same Cloud project: another sync of this mailbox, another tenant, another
+# app. Local pacing cannot see that traffic, so when Google still answers
+# "rateLimitExceeded" after googleapiclient's own retries, wait out whole
+# quota windows before giving up. Five windows is about five minutes.
+_RATE_LIMIT_WINDOWS = 5
+_RATE_LIMIT_REASONS = ("rateLimitExceeded", "userRateLimitExceeded")
+_WINDOW_SECONDS = 60.0
 
 
 # ---------------------------------------------------------------------------
@@ -128,12 +137,72 @@ class GmailQuota:
             reset_at, _ = self._limiter.get_window_stats(self._item, "gmail")
             self._sleep(max(reset_at - self._clock(), 0.05))
 
+    def wait_for_window(self) -> None:
+        """Sleep through one full quota window after Google rejected a call."""
+        self._sleep(_WINDOW_SECONDS)
+
+
+_mailbox_quotas: dict[str, GmailQuota] = {}
+_mailbox_quotas_lock = threading.Lock()
+
+
+def shared_quota(mailbox: str, units_per_minute: int) -> GmailQuota:
+    """Return the one ``GmailQuota`` for ``mailbox`` in this process.
+
+    Two sources for the same account (a re-triggered sync overlapping a
+    running one, for instance) would otherwise each pace to the full budget
+    and together exceed it. The first budget registered for a mailbox wins.
+    """
+    with _mailbox_quotas_lock:
+        quota = _mailbox_quotas.get(mailbox)
+        if quota is None:
+            quota = _mailbox_quotas[mailbox] = GmailQuota(units_per_minute)
+        return quota
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    """True for Google's quota rejections (429, or 403 with a rate-limit reason)."""
+    status = getattr(getattr(exc, "resp", None), "status", None)
+    if status == 429:
+        return True
+    if status != 403:
+        return False
+    details = getattr(exc, "error_details", None) or []
+    reasons = {d.get("reason") for d in details if isinstance(d, dict)}
+    if reasons.intersection(_RATE_LIMIT_REASONS):
+        return True
+    # Older googleapiclient versions expose the reason only in the message.
+    # The rate-limit reason strings cannot appear in a request URL or a hex id.
+    return any(reason in str(exc) for reason in _RATE_LIMIT_REASONS)
+
 
 def _execute(request: Any, cost: int, quota: GmailQuota | None) -> Any:
-    """Wait for quota (when given), then run the request with Google's retries."""
-    if quota is not None:
-        quota.acquire(cost)
-    return request.execute(num_retries=_NUM_RETRIES)
+    """Wait for quota (when given), then run the request with Google's retries.
+
+    googleapiclient retries a rate-limited call a few times with short backoff.
+    If Google still rejects it, the per-user window is being drained by traffic
+    this process cannot see, so with a quota to pace on, wait a whole window
+    and try again, up to ``_RATE_LIMIT_WINDOWS`` times, before letting the
+    error abort the sync. Without a quota the error propagates at once.
+    """
+    windows = _RATE_LIMIT_WINDOWS if quota is not None else 0
+    for attempt in range(windows + 1):
+        if quota is not None:
+            quota.acquire(cost)
+        try:
+            return request.execute(num_retries=_NUM_RETRIES)
+        except Exception as exc:
+            if attempt == windows or not _is_rate_limited(exc):
+                raise
+            logger.warning(
+                "Gmail per-user quota exhausted (shared with other clients of this "
+                "account); waiting %ds for the window to reset, retry %d of %d.",
+                int(_WINDOW_SECONDS),
+                attempt + 1,
+                windows,
+            )
+            quota.wait_for_window()
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
@@ -602,10 +671,13 @@ def gmail_source(
             (handy for demos/tests). ``None`` = no cap.
         service: Pre-built Gmail API client. Mainly an injection point for
             tests; when omitted an OAuth client is built from the paths above.
-        quota_units_per_minute: Gmail API quota budget for this source.
+        quota_units_per_minute: Gmail API quota budget for this mailbox.
             Gmail allows 6,000 units per user per minute and fetching one
             message costs 20, so the default of 5,000 fetches about 250
             messages a minute. Lower it if other apps share the account.
+            Sources with the same ``resource_name`` share one budget, and a
+            call Google still rejects for quota waits out up to five
+            one-minute windows before the sync fails.
 
     Returns:
         A ``dlt`` resource (``gmail_messages``) configured with
@@ -628,8 +700,9 @@ def gmail_source(
         )
 
     stats: dict[str, int] = {}
-    # One budget per source (i.e. per mailbox), shared by every call in a sync.
-    quota = GmailQuota(quota_units_per_minute)
+    # One budget per mailbox, shared by every call of every source for it in
+    # this process. resource_name is account-specific by contract.
+    quota = shared_quota(resource_name, quota_units_per_minute)
 
     @dlt.resource(
         name=resource_name,
@@ -676,4 +749,5 @@ def gmail_source(
     setattr(resource, DOCUMENT_SOURCE_ATTR, "gmail")
     setattr(resource, dlt_utils.PIPELINE_SCOPE_ATTR, resource_name)
     resource.cognee_sync_stats = stats
+    resource.cognee_quota = quota
     return resource

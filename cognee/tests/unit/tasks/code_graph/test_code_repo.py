@@ -6,6 +6,7 @@ partition semantics: code and manifests go to the repo item, prose stays in
 the document pipeline, and binaries/dotfiles can never abort an add.
 """
 
+import importlib
 import json
 from pathlib import Path
 
@@ -93,8 +94,12 @@ async def test_directory_with_project_resolves_to_repo_item_plus_documents(tmp_p
 
     resolved = await resolve_data_directories([str(repo)])
 
-    manifest_items = [item for item in resolved if isinstance(item, DataItem)]
-    file_items = [item for item in resolved if isinstance(item, str)]
+    manifest_items = [
+        item for item in resolved if isinstance(item, DataItem) and not item.cognee_path
+    ]
+    # The project's documents are cognee-produced paths, marked so the
+    # server-path gate does not apply to them.
+    file_items = [item.data for item in resolved if isinstance(item, DataItem) and item.cognee_path]
     assert len(manifest_items) == 1
     assert manifest_items[0].system_metadata["source"] == "code_repo"
     assert manifest_items[0].system_metadata["file_count"] == 3
@@ -308,32 +313,34 @@ async def test_repository_url_is_cloned_and_resolved_like_a_project(
     _make_repo(clone)
     cloned_specs = []
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
-        cloned_specs.append(spec)
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+        cloned_specs.append((spec, branch))
         return clone
 
     monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
 
     resolved = await resolve_data_directories(
-        ["https://github.com/org/repo?tab=readme-ov-file", "plain text note"]
+        ["https://github.com/org/repo?tab=readme-ov-file", "plain text note"], branch="dev"
     )
 
-    # git gets the normalised URL, not the browser one.
-    assert cloned_specs == ["https://github.com/org/repo"]
-    manifest_items = [item for item in resolved if isinstance(item, DataItem)]
+    # The clone gets the normalised URL, not the browser one, and the branch asked for.
+    assert cloned_specs == [("https://github.com/org/repo", "dev")]
+    manifest_items = [
+        item for item in resolved if isinstance(item, DataItem) and not item.cognee_path
+    ]
     assert len(manifest_items) == 1
     manifest = manifest_items[0]
     assert manifest.system_metadata["source"] == "code_repo"
     assert manifest.system_metadata["repo_path"] == str(clone)
     assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo"
     assert manifest.system_metadata["file_count"] == 3
-    # The repo's documents ride along individually; unrelated items pass through.
-    string_items = [item for item in resolved if isinstance(item, str)]
-    assert {Path(item).name for item in string_items if item != "plain text note"} == {
-        "README.md",
-        "notes.txt",
-    }
-    assert "plain text note" in string_items
+    # The repo's documents ride along individually, as cognee-produced paths
+    # the server-path gate does not apply to; unrelated items pass through.
+    document_items = [
+        item.data for item in resolved if isinstance(item, DataItem) and item.cognee_path
+    ]
+    assert {Path(item).name for item in document_items} == {"README.md", "notes.txt"}
+    assert "plain text note" in resolved
 
 
 @pytest.mark.asyncio
@@ -347,7 +354,7 @@ async def test_repository_url_credentials_are_redacted_from_the_manifest(
     clone = _make_repo(tmp_path)
     cloned_specs = []
 
-    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
         cloned_specs.append(spec)
         return clone
 
@@ -360,6 +367,47 @@ async def test_repository_url_credentials_are_redacted_from_the_manifest(
     manifest = next(item for item in resolved if isinstance(item, DataItem))
     assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo"
     assert "tok" not in json.dumps(manifest.system_metadata)
+
+
+@pytest.mark.asyncio
+async def test_a_repository_url_keeps_one_data_row_whatever_the_branch(tmp_path, monkeypatch):
+    """Each branch is cloned into its own directory, but a dataset keeps one row per URL,
+    keyed as every URL row was before branches existed, so existing rows keep their ids."""
+    from unittest.mock import AsyncMock, Mock
+    from uuid import uuid4
+
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.code_graph.resolve_repo import clone_dir
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None, branch=None):
+        directory = tmp_path / (branch or "default")
+        directory.mkdir()
+        return _make_repo(directory)
+
+    keys = []
+
+    async def record_key(identifier, user, dataset_id=None):
+        keys.append(identifier)
+        return uuid4()
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.data.methods.get_unique_data_id"),
+        "get_unique_data_id",
+        record_key,
+    )
+    monkeypatch.setattr(
+        importlib.import_module("cognee.modules.data.methods"),
+        "reset_data_pipeline_status",
+        AsyncMock(),
+    )
+
+    for branch in (None, "dev"):
+        await code_repo_module.resolve_code_repository_url(
+            "https://github.com/org/repo", user=Mock(), dataset_id=uuid4(), branch=branch
+        )
+
+    assert keys == [f"code_repo:{clone_dir('https://github.com/org/repo')}"] * 2
 
 
 @pytest.mark.asyncio

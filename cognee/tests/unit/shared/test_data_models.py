@@ -31,3 +31,16 @@ def test_generate_graph_prompt_requests_concrete_edge_descriptions():
     assert "Alice works at Acme as a platform engineer on the search team." in prompt
     assert "Do not add outside knowledge." in prompt
     assert "This edge describes an employment relationship." in prompt
+
+
+def test_generate_graph_prompt_does_not_request_properties():
+    """The prompt must not ask for a field the extraction schema cannot carry.
+
+    ``Node`` and ``Edge`` expose id/name/type/description, and the graph expansion reads no
+    ``properties`` attribute, so a key-value instruction has nowhere to land.
+    """
+    prompt_path = Path(__file__).parents[3] / "infrastructure/llm/prompts/generate_graph_prompt.txt"
+    prompt = prompt_path.read_text().lower()
+
+    assert "property" not in prompt
+    assert "properties" not in prompt

@@ -6,7 +6,7 @@ const mockSaveCustomPrompt = jest.fn();
 const mockAssignPromptToDataset = jest.fn();
 const mockClearDatasetOutdated = jest.fn();
 jest.mock("@/modules/configuration/userConfiguration", () => ({
-  loadGraphModelsConfig: (...args: unknown[]) => mockLoadGraphModelsConfig(...args),
+  fetchGraphModelsConfig: (...args: unknown[]) => mockLoadGraphModelsConfig(...args),
   saveCustomPrompt: (...args: unknown[]) => mockSaveCustomPrompt(...args),
   assignPromptToDataset: (...args: unknown[]) => mockAssignPromptToDataset(...args),
   clearDatasetOutdated: (...args: unknown[]) => mockClearDatasetOutdated(...args),
@@ -52,6 +52,18 @@ describe("applyCreateBrainTemplate", () => {
 
     expect(mockSaveCustomPrompt).not.toHaveBeenCalled();
     expect(mockAssignPromptToDataset).toHaveBeenCalledWith(instance, DATASET_ID, documents?.promptName);
+  });
+
+  // A failed read taken for "no prompt saved under this name" would overwrite
+  // a prompt the user had customized.
+  it("changes nothing when the stored configuration cannot be read", async () => {
+    mockLoadGraphModelsConfig.mockRejectedValue(new Error("pod unreachable"));
+
+    await expect(applyCreateBrainTemplate(instance, DATASET_ID, "legal")).rejects.toThrow("pod unreachable");
+
+    expect(mockSaveCustomPrompt).not.toHaveBeenCalled();
+    expect(mockAssignPromptToDataset).not.toHaveBeenCalled();
+    expect(mockClearDatasetOutdated).not.toHaveBeenCalled();
   });
 
   it("does nothing when the template key is unknown", async () => {

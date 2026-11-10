@@ -21,6 +21,7 @@ def _unified(vector=None):
     unified.vector.has_collection = AsyncMock(return_value=False)
     unified.vector.embedding_engine.embed_text = AsyncMock(return_value=[QUERY_VECTOR])
     unified.graph = MagicMock()
+    unified.graph.get_filtered_graph_data = AsyncMock(return_value=([], []))
     unified.graph.is_empty = AsyncMock(return_value=False)
     unified.graph.get_neighborhood = AsyncMock(return_value=([], []))
     return unified

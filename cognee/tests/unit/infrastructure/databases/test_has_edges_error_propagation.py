@@ -26,7 +26,8 @@ def _adapter_with_query(query_mock) -> LadybugAdapter:
 
 @pytest.mark.asyncio
 async def test_has_edges_returns_existing_edges_on_success():
-    adapter = _adapter_with_query(AsyncMock(return_value=[("n1", "n2", "rel")]))
+    # Rows as the edge lookup returns them: from id, to id, relationship, properties.
+    adapter = _adapter_with_query(AsyncMock(return_value=[("n1", "n2", "rel", "{}")]))
     assert await adapter.has_edges([("n1", "n2", "rel")]) == [("n1", "n2", "rel")]
 
 

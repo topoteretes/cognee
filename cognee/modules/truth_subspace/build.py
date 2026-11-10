@@ -24,6 +24,9 @@ from uuid import UUID
 from cognee.context_global_variables import session_user, set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import (
+    EmbeddingGateway,
+)
 from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine import (
     get_embedding_engine,
 )
@@ -260,7 +263,7 @@ async def build_truth_subspace(
                 error=error,
             )
 
-        embedding_engine = get_embedding_engine()
+        embedding_engine = EmbeddingGateway(get_embedding_engine())
         try:
             learning_vecs = await embedding_engine.embed_text(learning_texts)
         except Exception as error:

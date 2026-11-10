@@ -5,7 +5,7 @@
 The coding agents module provides utilities for extracting developer coding rules and best practices from text and associating them with their original sources in Cognee’s knowledge graph. It uses LLM-powered structured extraction to identify rules from conversations, documentation, or commit messages.
 
 > [!NOTE]
-> This module runs **automatically** in `cognee.memify()` (the enrichment pipeline), but is **not** enabled by default in the standard `cognee.cognify()` pipeline.
+> This module is **not** part of any default pipeline (`cognify()`, `remember()` or `improve()`). Run it as a custom pipeline task or call it directly; `SearchType.CODING_RULES` reads the rules it stores.
 
 **Pipeline Position:** ingestion → graph extraction → **coding rule association** → storage / indexing
 
@@ -40,18 +40,24 @@ A collection of rules extracted in a single pass.
 
 ## Usage
 
-### Automatic (via Memify)
+### As a custom pipeline task
 
-The `memify` pipeline includes rule associations by default.
+Pass the text to distil as `data`; each item is forwarded to `add_rule_associations`.
 
 ```python
 import cognee
-from cognee.tasks.codingagents.coding_rule_associations import get_existing_rules
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.tasks.codingagents.coding_rule_associations import (
+    add_rule_associations,
+    get_existing_rules,
+)
 
+await cognee.remember("agent.md")  # Build the graph the rules link back to
 
-await cognee.add(["agent.md"])  # Add data (text or file paths)
-await cognee.cognify()  # Create Knowledge Graph
-await cognee.memify()  # Enrich Graph (Extract Rules automatically)
+await cognee.run_custom_pipeline(
+    tasks=[Task(add_rule_associations, rules_nodeset_name="coding_agent_rules")],
+    data=["Always use type hints in Python functions."],
+)
 
 rules = await get_existing_rules("coding_agent_rules")
 if rules:

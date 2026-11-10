@@ -315,3 +315,32 @@ def test_json_output_keeps_the_diagram_inline(capsys):
     # The status line precedes the JSON document, which starts on its own line.
     payload = json.loads(out[out.index("\n[") + 1 :])
     assert payload[0]["search_result"][0]["diagram"]["format"] == "mermaid"
+
+
+def test_code_query_help_lists_every_retriever_operation():
+    from cognee.cli.code_search import CODE_OPERATIONS
+    from cognee.modules.retrieval.code_retriever import _OPERATIONS
+
+    assert set(CODE_OPERATIONS) == _OPERATIONS
+    parser = argparse.ArgumentParser()
+    SearchCommand().configure_parser(parser)
+    help_text = next(action.help for action in parser._actions if action.dest == "code_query")
+    for operation in ("ask", "search", "neighbors", "subgraph", "flows", "hubs", "capabilities"):
+        assert operation in help_text
+
+
+def test_print_code_results_reports_navigation_truncation(capsys):
+    subgraph = {
+        "operation": "subgraph",
+        "nodes": [],
+        "edges": [],
+        "truncated": True,
+        "truncation_reason": "max_nodes",
+        "stats": {"nodes_visited": 140, "edges_considered": 300, "depth_reached": 2},
+    }
+    asked = {"operation": "ask", "question": "how?", "truncated": False}
+
+    assert print_code_results([subgraph, asked]) is True
+    out = capsys.readouterr().out
+    assert "subgraph (nodes_visited=140, truncated=True (max_nodes))" in out
+    assert "ask (truncated=False)" in out

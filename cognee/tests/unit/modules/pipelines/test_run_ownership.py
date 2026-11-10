@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -66,9 +67,16 @@ def test_os_releases_ownership_after_worker_death():
             assert claim is None
         child.kill()
         child.wait(timeout=5)
-        with ownership.claim_run_ownership(run) as claim:
-            assert claim is not None
-            claim.closed = True
+        # Windows releases a dead process's file handles a little after the
+        # process exits, so a single zero-timeout claim can still see the lock held.
+        deadline = time.monotonic() + 5
+        while True:
+            with ownership.claim_run_ownership(run) as claim:
+                if claim is not None:
+                    claim.closed = True
+                    break
+            assert time.monotonic() < deadline, "ownership was not released after worker death"
+            time.sleep(0.1)
     finally:
         if child.poll() is None:
             child.kill()

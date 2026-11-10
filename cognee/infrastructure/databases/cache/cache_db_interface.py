@@ -1,8 +1,15 @@
 import uuid
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 from cognee.infrastructure.databases.cache.models import SessionAgentTraceEntry, SessionQAEntry
+
+
+def qa_entry_time(entry: SessionQAEntry) -> datetime:
+    """The entry's ``time`` as an aware datetime; a naive value is UTC."""
+    parsed = datetime.fromisoformat(entry.time)
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
 class CacheDBInterface(ABC):
@@ -111,6 +118,24 @@ class CacheDBInterface(ABC):
         Retrieve all Q/A/context triplets for the given session.
         """
 
+    async def get_qa_entries_since(
+        self, user_id: str, session_id: str, since: datetime, lead_in: int = 0
+    ) -> list[SessionQAEntry]:
+        """
+        Retrieve the Q/A entries stored at or after ``since``, oldest first, preceded
+        by the ``lead_in`` entries stored just before it.
+
+        This default reads the whole session and filters on each entry's ``time``;
+        a backend that stores the time as a column overrides it with a query, so a
+        long session is not read in full on every call.
+        """
+        entries = await self.get_all_qa_entries(user_id, session_id)
+        first = next(
+            (index for index, entry in enumerate(entries) if qa_entry_time(entry) >= since),
+            len(entries),
+        )
+        return entries[max(first - lead_in, 0) :]
+
     @abstractmethod
     async def get_qa_entries_by_ids(
         self,
@@ -165,6 +190,28 @@ class CacheDBInterface(ABC):
         Returns True if deleted, False if session did not exist.
         """
 
+    @abstractmethod
+    async def list_session_ids(self, user_id: str) -> list[str]:
+        """
+        Return every session id the user has stored content for (QA entries,
+        agent traces or session context), in no particular order.
+        """
+
+    async def delete_sessions(self, sessions: list[tuple[str, str]]) -> list[bool]:
+        """
+        Delete each (user id, session id) pair whole: QA entries, agent traces
+        and session context. One flag per pair, True if any of its data existed.
+
+        Non-abstract so external adapters keep working: the default deletes one
+        session at a time; the in-tree adapters delete in a few round trips.
+        """
+        existed = []
+        for user_id, session_id in sessions:
+            context_existed = await self.delete_session_context(user_id, session_id)
+            session_existed = await self.delete_session(user_id, session_id)
+            existed.append(context_existed or session_existed)
+        return existed
+
     async def get_value(self, key: str) -> str | None:
         """
         Retrieve a raw string value stored under the given key, or None if absent/expired.
@@ -194,6 +241,15 @@ class CacheDBInterface(ABC):
         unimplemented.
         """
         raise NotImplementedError("This cache adapter does not support key/value storage.")
+
+    async def delete_values(self, keys: list[str]) -> None:
+        """
+        Delete the values stored under the given keys, those present.
+
+        The default deletes one key at a time with ``delete_value``.
+        """
+        for key in keys:
+            await self.delete_value(key)
 
     @abstractmethod
     async def append_agent_trace_step(

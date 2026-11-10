@@ -31,8 +31,9 @@ error (the query string ends up in browser history and access logs).
 The ``/plugins/{plugin_key}/…`` routes are a separate concern sharing the
 router: agent plugins (claude-code, codex, MCP clients, ...) are not OAuth
 providers but clients of cognee itself. Each connected plugin gets its own
-agent sub-user + labeled API key, so status, attribution, and revocation
-key off that identity instead of a shared tenant key. Declared before the
+agent sub-user, holding one labeled API key per machine the plugin runs on, so
+status, attribution, and revocation key off that identity instead of a shared
+tenant key. Declared before the
 generic ``{provider}`` routes so ``plugins`` is never captured as a
 provider name.
 """
@@ -52,6 +53,7 @@ from pydantic import Field
 from sqlalchemy.exc import IntegrityError
 
 from cognee.api.DTO import InDTO, OutDTO
+from cognee.api.v1.integrations.routers.get_sync_progress_router import get_sync_progress_router
 from cognee.infrastructure.background_tasks import register_background_task
 from cognee.modules.agents.create_agent import create_agent
 from cognee.modules.agents.list_agents import list_agents
@@ -66,6 +68,7 @@ from cognee.modules.integrations.connect import complete_installation
 from cognee.modules.integrations.credentials import (
     CrossUserConflictError,
     get_active_credential_for_user,
+    list_active_credentials_for_provider,
     list_active_credentials_for_user,
     revoke_credential_by_account,
     update_provider_metadata,
@@ -75,6 +78,15 @@ from cognee.modules.integrations.oauth_flow import (
     DEFAULT_STATE_TTL_SECONDS,
     make_state,
     validate_state,
+)
+from cognee.modules.integrations.outbound import (
+    OutboundHttpDisabledError,
+    require_outbound_http,
+)
+from cognee.modules.integrations.plugin_keys import (
+    PluginAgentKeyLimitError,
+    add_plugin_agent_key,
+    revoke_plugin_agent_keys,
 )
 from cognee.modules.integrations.plugin_status import (
     PluginStatusRow,
@@ -89,8 +101,8 @@ from cognee.modules.integrations.plugins import KNOWN_PLUGINS, get_plugin
 from cognee.modules.integrations.registry import get_integration, supported_integrations
 from cognee.modules.observability import new_span
 from cognee.modules.session_lifecycle.visibility import visible_user_ids
-from cognee.modules.users.api_key.create_api_key import create_api_key
 from cognee.modules.users.api_key.delete_api_key import delete_api_key
+from cognee.modules.users.api_key.exceptions import ApiKeyNotFoundError
 from cognee.modules.users.api_key.get_api_keys import get_api_keys
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.methods.get_principal_configuration import (
@@ -157,6 +169,23 @@ class DisconnectResultDTO(OutDTO):
     disconnected: bool
 
 
+class ConnectionDisconnectResultDTO(DisconnectResultDTO):
+    # True when ALLOW_HTTP_REQUESTS=false kept cognee from asking the provider to
+    # revoke the token: the local connection is gone, the token is still live at
+    # the provider until it expires or the user removes the app there.
+    remote_revoke_skipped: bool = False
+
+
+class ConnectionSummaryDTO(OutDTO):
+    provider_account_id: str
+    account_label: str | None = None
+    connected_at: datetime | None = None
+
+
+class ConnectionListDTO(OutDTO):
+    connections: list[ConnectionSummaryDTO]
+
+
 class IntegrationResourceDTO(OutDTO):
     id: str
     name: str
@@ -186,7 +215,24 @@ class PluginProvisionDTO(OutDTO):
     plugin_key: str
     agent_id: UUID
     api_key: str
+    key_id: UUID
     created: bool
+
+
+class PluginKeyDTO(OutDTO):
+    id: UUID
+    name: str | None = None
+    label: str | None = None
+    created_at: datetime | None = None
+    last_used_at: datetime | None = None
+
+
+class PluginKeyListDTO(OutDTO):
+    keys: list[PluginKeyDTO]
+
+
+class PluginKeyRevokeResultDTO(OutDTO):
+    revoked: bool
 
 
 class IntegrationStatusItemDTO(OutDTO):
@@ -215,11 +261,42 @@ class IntegrationsStatusDTO(OutDTO):
     plugins: list[PluginStatusItemDTO]
 
 
+def _outbound_http_or_503(provider: str) -> None:
+    """Refuse a connect or sync while ``ALLOW_HTTP_REQUESTS=false``.
+
+    Every provider call is already refused at its ``client_session``; here
+    the check answers the caller directly with a 503, instead of a sync
+    accepted into the background that fails where nobody sees it, or an
+    OAuth round trip whose callback cannot complete.
+    """
+    try:
+        require_outbound_http(provider)
+    except OutboundHttpDisabledError as error:
+        raise HTTPException(status_code=503, detail=error.message) from error
+
+
 def _integration_or_404(provider: str) -> OAuthIntegration:
     try:
         return get_integration(provider)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Unknown integration provider: {provider!r}")
+
+
+async def _credential_or_404(user: User, integration: OAuthIntegration, account_id: str | None):
+    """The user's newest active connection, or the one ``account_id`` names.
+
+    ``None`` means the user has no connection at all. A named account that is not the
+    user's (unknown, disconnected, or someone else's) is a 404 and never falls back to
+    another account: the caller asked for that one. A blank id names nothing and is a 422.
+    """
+    if account_id is not None and not account_id.strip():
+        raise HTTPException(status_code=422, detail="account_id must not be blank")
+    credential = await get_active_credential_for_user(user.id, integration.provider, account_id)
+    if credential is None and account_id is not None:
+        raise HTTPException(
+            status_code=404, detail=f"{integration.provider} account is not connected"
+        )
+    return credential
 
 
 def _plugin_or_404(plugin_key: str) -> dict:
@@ -252,7 +329,7 @@ async def _record_plugin_on_agent(agent_user_id: UUID, plugin_key: str) -> None:
 
     Stored under the same ``AGENT_CONFIG_NAME`` blob the agent-connection
     registry persists to, so no ``User`` schema change is needed. The first
-    ``provisioned_at`` sticks across re-provisions (key rotation isn't a new
+    ``provisioned_at`` sticks across re-provisions (another machine's key isn't a new
     install) — but only if it still parses as a datetime: the blob is
     agent-writable, so a tampered value is repaired here rather than
     preserved.
@@ -280,18 +357,25 @@ async def _record_plugin_on_agent(agent_user_id: UUID, plugin_key: str) -> None:
     )
 
 
-async def _rotate_agent_api_key(agent_user: User, plugin_key: str) -> str:
-    """Mint a fresh labeled key, then revoke every other key the agent holds.
+async def _add_plugin_key(agent_user_id: UUID, plugin_key: str):
+    """Add a key for this machine; a full agent is a 409, never an eviction."""
+    try:
+        return await add_plugin_agent_key(agent_user_id, plugin_key)
+    except PluginAgentKeyLimitError as error:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"The {plugin_key!r} agent already holds the maximum of {error.limit} API "
+                "keys. Revoke an old machine's key (GET and DELETE "
+                f"/api/v1/integrations/plugins/{plugin_key}/keys) and try again."
+            ),
+        )
 
-    Order matters: each key operation commits its own transaction, so minting
-    first means a failure anywhere in the rotation never leaves the plugin
-    keyless — at worst the old key briefly outlives the new one.
-    """
-    old_keys = await get_api_keys(agent_user)
-    new_key = await create_api_key(agent_user, plugin_key)
-    for old_key in old_keys:
-        await delete_api_key(agent_user, old_key.id)
-    return new_key.api_key
+
+def _reject_agent_caller(user: User) -> None:
+    """The key routes manage an agent's keys on behalf of its human owner only."""
+    if user.parent_user_id is not None:
+        raise HTTPException(status_code=403, detail="An agent cannot manage plugin keys.")
 
 
 # The state proves an install was started by some cognee user; it does not
@@ -408,6 +492,7 @@ def _frontend_redirect(integration: OAuthIntegration, outcome: str) -> RedirectR
 
 def get_integrations_router():
     integrations_router = APIRouter(lifespan=linear_resume_lifespan)
+    integrations_router.include_router(get_sync_progress_router())
 
     # ------------------------------------------------------------------ #
     # Aggregate status (fixed /status path — before the {provider} routes)
@@ -514,17 +599,27 @@ def get_integrations_router():
     # Agent plugins (fixed /plugins prefix — before the {provider} routes)
     # ------------------------------------------------------------------ #
 
-    @integrations_router.post("/plugins/{plugin_key}/provision")
+    @integrations_router.post(
+        "/plugins/{plugin_key}/provision",
+        # Capability marker: plugins read it from /openapi.json to learn that
+        # provisioning here only adds keys, so it is safe to call on any machine.
+        openapi_extra={"x-cognee-additive-plugin-keys": True},
+    )
     async def provision_plugin(
         plugin_key: str, user: User = Depends(get_authenticated_user)
     ) -> PluginProvisionDTO:
-        """Provision (or re-key) a dedicated agent identity for a plugin.
+        """Provision a dedicated agent identity for a plugin, and add a key for it.
 
         Idempotent get-or-create: the first call creates an agent sub-user
-        for ``(user, plugin_key)`` with a labeled API key; every later call
-        returns the same agent but rotates the key (old keys are revoked —
-        re-provision *is* the rotation flow). The returned key is shown once
-        and never retrievable again.
+        for ``(user, plugin_key)``; every later call returns the same agent.
+        Every call adds one new key, so each machine holds its own. The
+        returned key is shown once and never retrievable again.
+
+        Provisioning never deletes a key. An agent already holding
+        ``MAX_USER_API_KEYS`` keys (default 10) answers 409 and nothing changes:
+        free a slot through ``DELETE /plugins/{plugin_key}/keys/{key_id}``.
+        Provisioning does not revoke a leaked key either: revoke it the same
+        way, or every key through ``DELETE /plugins/{plugin_key}``.
 
         ## Path Parameters
         - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
@@ -535,14 +630,15 @@ def get_integrations_router():
 
             created = True
             try:
-                agent_user, api_key = await create_agent(plugin_key, user)
+                # Every key goes through add_plugin_agent_key below.
+                agent_user, _ = await create_agent(plugin_key, user, issue_api_key=False)
             except (UserAlreadyExists, IntegrityError):
-                # Already provisioned — same agent, new key (rotation).
+                # Already provisioned — same agent, one more key.
                 # IntegrityError covers the concurrent-first-provision race:
                 # fastapi-users' create is check-then-insert, so two
                 # simultaneous calls can both pass the email check and the
                 # loser hits the unique-email constraint instead of
-                # UserAlreadyExists. Same recovery: resolve and rotate.
+                # UserAlreadyExists. Same recovery: resolve the agent and add.
                 created = False
                 agent_user = await _find_plugin_agent(user, plugin_key)
                 if agent_user is None:
@@ -553,7 +649,8 @@ def get_integrations_router():
                         status_code=409,
                         detail=f"Plugin agent for {plugin_key!r} exists but could not be resolved.",
                     )
-                api_key = await _rotate_agent_api_key(agent_user, plugin_key)
+
+            new_key = await _add_plugin_key(agent_user.id, plugin_key)
 
             await _record_plugin_on_agent(agent_user.id, plugin_key)
 
@@ -573,13 +670,73 @@ def get_integrations_router():
                 metadata={"plugin_key": plugin_key},
             )
 
-            span.set_attribute("cognee.integrations.outcome", "created" if created else "rotated")
+            span.set_attribute("cognee.integrations.outcome", "created" if created else "added")
             return PluginProvisionDTO(
                 plugin_key=plugin_key,
                 agent_id=agent_user.id,
-                api_key=api_key,
+                api_key=new_key.api_key,
+                key_id=new_key.id,
                 created=created,
             )
+
+    @integrations_router.get("/plugins/{plugin_key}/keys")
+    async def list_plugin_keys(
+        plugin_key: str, user: User = Depends(get_authenticated_user)
+    ) -> PluginKeyListDTO:
+        """List the API keys of the caller's agent for a plugin — one per machine.
+
+        Metadata only (id, name, label, created, last used); the key
+        itself is never returned. Empty when the plugin was never provisioned.
+        An agent caller is a 403: only the agent's owner manages its keys.
+
+        ## Path Parameters
+        - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
+        """
+        _plugin_or_404(plugin_key)
+        _reject_agent_caller(user)
+        agent_user = await _find_plugin_agent(user, plugin_key)
+        if agent_user is None:
+            return PluginKeyListDTO(keys=[])
+        return PluginKeyListDTO(
+            keys=[
+                PluginKeyDTO(
+                    id=key.id,
+                    name=key.name,
+                    label=key.label,
+                    created_at=key.created_at,
+                    last_used_at=key.last_used_at,
+                )
+                for key in await get_api_keys(agent_user)
+            ]
+        )
+
+    @integrations_router.delete("/plugins/{plugin_key}/keys/{key_id}")
+    async def revoke_plugin_key(
+        plugin_key: str, key_id: UUID, user: User = Depends(get_authenticated_user)
+    ) -> PluginKeyRevokeResultDTO:
+        """Revoke one key of the caller's agent for a plugin (e.g. a retired machine).
+
+        Scoped to that plugin's agent of the authenticated user: a key of any
+        other principal is a 404, exactly like an unknown id. Other machines'
+        keys stay valid; ``DELETE /plugins/{plugin_key}`` revokes them all. An
+        agent caller is a 403.
+
+        ## Path Parameters
+        - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
+        - **key_id** (UUID): Id of the key (see GET /plugins/{plugin_key}/keys).
+        """
+        with new_span("cognee.integrations.plugins.revoke_key") as span:
+            span.set_attribute("cognee.integrations.plugin", plugin_key)
+            _plugin_or_404(plugin_key)
+            _reject_agent_caller(user)
+            agent_user = await _find_plugin_agent(user, plugin_key)
+            if agent_user is None:
+                raise HTTPException(status_code=404, detail="API key not found")
+            try:
+                await delete_api_key(agent_user, key_id)
+            except ApiKeyNotFoundError:
+                raise HTTPException(status_code=404, detail="API key not found")
+            return PluginKeyRevokeResultDTO(revoked=True)
 
     @integrations_router.delete("/plugins/{plugin_key}")
     async def disconnect_plugin(
@@ -603,8 +760,7 @@ def get_integrations_router():
             if agent_user is None:
                 return DisconnectResultDTO(disconnected=False)
 
-            for api_key in await get_api_keys(agent_user):
-                await delete_api_key(agent_user, api_key.id)
+            await revoke_plugin_agent_keys(agent_user.id)
 
             connection_id = build_agent_connection_id(
                 agent_session_name=_plugin_session_name(plugin_key),
@@ -633,6 +789,7 @@ def get_integrations_router():
         with new_span("cognee.integrations.authorize") as span:
             span.set_attribute("cognee.integrations.provider", provider)
             integration = _integration_or_404(provider)
+            _outbound_http_or_503(provider)
             try:
                 nonce = secrets.token_urlsafe(32)
                 state = make_state(
@@ -786,18 +943,53 @@ def get_integrations_router():
             )
             return {"ok": True}
 
+    @integrations_router.get("/{provider}/connections", response_model_exclude_none=True)
+    async def list_connections(
+        provider: str, user: User = Depends(get_authenticated_user)
+    ) -> ConnectionListDTO:
+        """The requesting user's active connections for a provider, newest first.
+
+        A provider authorized per workspace (Notion, Slack) can hold several. The
+        ``provider_account_id`` of one is what the other routes take as ``account_id``.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+        """
+        with new_span("cognee.integrations.connections") as span:
+            span.set_attribute("cognee.integrations.provider", provider)
+            integration = _integration_or_404(provider)
+            connections = await list_active_credentials_for_provider(user.id, integration.provider)
+            return ConnectionListDTO(
+                connections=[
+                    ConnectionSummaryDTO(
+                        provider_account_id=credential.provider_account_id,
+                        account_label=credential.account_label,
+                        connected_at=as_utc(credential.created_at),
+                    )
+                    for credential in connections
+                ]
+            )
+
     @integrations_router.get("/{provider}/connection", response_model_exclude_none=True)
     async def connection_status(
-        provider: str, user: User = Depends(get_authenticated_user)
+        provider: str,
+        account_id: str | None = None,
+        user: User = Depends(get_authenticated_user),
     ) -> ConnectionStatusDTO:
         """Connection state for the Integrations page.
 
         ## Path Parameters
         - **provider** (str): Key of a registered OAuth provider (see GET
           /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **account_id** (str, optional): The ``provider_account_id`` of one of the
+          user's connections (see GET /{provider}/connections). Without it the newest
+          connection answers. An id that is not the user's is a 404, never another account.
         """
         integration = _integration_or_404(provider)
-        credential = await get_active_credential_for_user(user.id, integration.provider)
+        credential = await _credential_or_404(user, integration, account_id)
         if credential is None:
             return ConnectionStatusDTO(connected=False)
 
@@ -831,7 +1023,9 @@ def get_integrations_router():
     @integrations_router.get("/{provider}/folders")
     @integrations_router.get("/{provider}/labels")
     async def integration_resources(
-        provider: str, user: User = Depends(get_authenticated_user)
+        provider: str,
+        account_id: str | None = None,
+        user: User = Depends(get_authenticated_user),
     ) -> IntegrationResourceListDTO:
         """List selectable resources for a connected integration.
 
@@ -839,11 +1033,22 @@ def get_integrations_router():
         want provider vocabulary; ``/resources`` is the stable generic path.
         The returned selection is three-state: ``null`` means all resources,
         an empty list means none, and a non-empty list is an allowlist.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **account_id** (Optional[str]): Connection to use (from GET
+          /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
+          An id that is not the caller's returns 404 and never falls back to another
+          connection; a blank id returns 422.
         """
         integration = _integration_or_404(provider)
+        _outbound_http_or_503(provider)
         if integration.resource_selection_key is None:
             raise HTTPException(status_code=404, detail=f"{provider} has no selectable resources")
-        credential = await get_active_credential_for_user(user.id, integration.provider)
+        credential = await _credential_or_404(user, integration, account_id)
         if credential is None:
             raise HTTPException(status_code=404, detail=f"{provider} is not connected")
         try:
@@ -884,21 +1089,48 @@ def get_integrations_router():
     async def set_integration_resources(
         provider: str,
         payload: IntegrationResourceSelectionPayload,
+        account_id: str | None = None,
         user: User = Depends(get_authenticated_user),
     ) -> IntegrationResourceSelectionResultDTO:
-        """Persist a full resource selection for a connected integration."""
+        """Persist a full resource selection for a connected integration.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **account_id** (Optional[str]): Connection to use (from GET
+          /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
+          An id that is not the caller's returns 404 and never falls back to another
+          connection; a blank id returns 422.
+
+        ## Request Parameters
+        - **resourceIds** (Optional[List[str]]): Full replacement list of selected resource
+          ids; duplicates are dropped, blank or whitespace-only ids give 422. Null (also the
+          value when omitted) means every resource and is a 422 for providers that do not
+          allow it.
+        """
         integration = _integration_or_404(provider)
         selection_key = integration.resource_selection_key
         if selection_key is None:
             raise HTTPException(status_code=404, detail=f"{provider} has no selectable resources")
-        credential = await get_active_credential_for_user(user.id, integration.provider)
+        credential = await _credential_or_404(user, integration, account_id)
         if credential is None:
             raise HTTPException(status_code=404, detail=f"{provider} is not connected")
+        if payload.resource_ids is None and not integration.resource_selection_allows_all:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{provider} needs an explicit list of resource ids; null is not supported",
+            )
         resource_ids = None
         if payload.resource_ids is not None:
-            resource_ids = list(
-                dict.fromkeys(str(resource_id) for resource_id in payload.resource_ids)
-            )
+            # A stored blank id fails every later sync of the providers that check the
+            # shape, and the account stays degraded until the user saves again.
+            if any(not resource_id.strip() for resource_id in payload.resource_ids):
+                raise HTTPException(
+                    status_code=422, detail="Resource ids must not be blank or whitespace only"
+                )
+            resource_ids = list(dict.fromkeys(payload.resource_ids))
         updated = await update_provider_metadata(
             provider,
             credential.provider_account_id,
@@ -910,11 +1142,25 @@ def get_integrations_router():
 
     @integrations_router.post("/{provider}/sync")
     async def sync_integration(
-        provider: str, user: User = Depends(get_authenticated_user)
+        provider: str,
+        account_id: str | None = None,
+        user: User = Depends(get_authenticated_user),
     ) -> IntegrationSyncResultDTO:
-        """Start a provider sync without changing its stored selection."""
+        """Start a provider sync without changing its stored selection.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **account_id** (Optional[str]): Connection to use (from GET
+          /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
+          An id that is not the caller's returns 404 and never falls back to another
+          connection; a blank id returns 422.
+        """
         integration = _integration_or_404(provider)
-        credential = await get_active_credential_for_user(user.id, integration.provider)
+        _outbound_http_or_503(provider)
+        credential = await _credential_or_404(user, integration, account_id)
         if credential is None:
             raise HTTPException(status_code=404, detail=f"{provider} is not connected")
         from cognee.modules.integrations.ingestion import sync_is_running
@@ -930,8 +1176,9 @@ def get_integrations_router():
     async def disconnect(
         provider: str,
         delete_data: bool = False,
+        account_id: str | None = None,
         user: User = Depends(get_authenticated_user),
-    ) -> DisconnectResultDTO:
+    ) -> ConnectionDisconnectResultDTO:
         """Disconnect the account connected by the requesting user.
 
         Marks the stored installation revoked, and best-effort asks the
@@ -944,13 +1191,31 @@ def get_integrations_router():
         ## Path Parameters
         - **provider** (str): Key of a registered OAuth provider (see GET
           /api/v1/integrations/status).
+
+        ## Query Parameters
+        - **account_id** (Optional[str]): Connection to use (from GET
+          /api/v1/integrations/{provider}/connections); the newest one is used when omitted.
+          An id that is not the caller's returns 404 and never falls back to another
+          connection; a blank id returns 422.
+        - **delete_data** (bool): When true, the integration's dataset is deleted after the
+          connection is revoked. A provider that exposes no deletable dataset returns 400
+          before anything is revoked; a deletion that fails after the disconnect returns
+          502, unless the deletion itself answered with an HTTP error, whose status is kept.
+          Ignored when account_id is omitted and the caller has no connection. Defaults to
+          False.
+
+        ## Response
+        - **disconnected** (bool): Whether a connection was revoked locally.
+        - **remoteRevokeSkipped** (bool): True when ``ALLOW_HTTP_REQUESTS=false`` kept the
+          server from asking the provider to revoke the token, which then stays live at the
+          provider until it expires or the user removes the app there.
         """
         with new_span("cognee.integrations.disconnect") as span:
             span.set_attribute("cognee.integrations.provider", provider)
             integration = _integration_or_404(provider)
-            credential = await get_active_credential_for_user(user.id, integration.provider)
+            credential = await _credential_or_404(user, integration, account_id)
             if credential is None or credential.provider_account_id is None:
-                return DisconnectResultDTO(disconnected=False)
+                return ConnectionDisconnectResultDTO(disconnected=False)
 
             dataset_name = None
             if delete_data:
@@ -961,14 +1226,28 @@ def get_integrations_router():
                         detail=f"{provider} does not expose a deletable dataset",
                     )
 
+            remote_revoke_skipped = False
             try:
-                await integration.revoke_remote(credential)
-            except Exception:  # a remote-revoke failure must never block disconnect
-                logger.exception(
-                    "%s revoke_remote raised for account %s",
+                require_outbound_http(provider)
+            except OutboundHttpDisabledError:
+                # Not attempted rather than attempted and swallowed: the caller is
+                # told, since the token stays live at the provider.
+                remote_revoke_skipped = True
+                logger.warning(
+                    "%s token for account %s was not revoked at the provider: "
+                    "ALLOW_HTTP_REQUESTS=false",
                     provider,
                     credential.provider_account_id,
                 )
+            else:
+                try:
+                    await integration.revoke_remote(credential)
+                except Exception:  # a remote-revoke failure must never block disconnect
+                    logger.exception(
+                        "%s revoke_remote raised for account %s",
+                        provider,
+                        credential.provider_account_id,
+                    )
 
             await revoke_credential_by_account(integration.provider, credential.provider_account_id)
             if delete_data:
@@ -988,6 +1267,8 @@ def get_integrations_router():
                         status_code=502,
                         detail=f"{provider} disconnected, but its data could not be deleted",
                     )
-            return DisconnectResultDTO(disconnected=True)
+            return ConnectionDisconnectResultDTO(
+                disconnected=True, remote_revoke_skipped=remote_revoke_skipped
+            )
 
     return integrations_router

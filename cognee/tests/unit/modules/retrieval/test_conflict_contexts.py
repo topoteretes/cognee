@@ -14,7 +14,6 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.lexical_retriever import LexicalRetriever, tokenize_words
-from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.modules.retrieval.utils import conflict_context
 from cognee.modules.retrieval.utils.conflict_context import get_chunk_conflicts
 
@@ -24,6 +23,7 @@ EXPLANATION = "Bob replaced Alice as Acme's CEO."
 @pytest.fixture
 def graph():
     return SimpleNamespace(
+        get_filtered_graph_data=AsyncMock(return_value=([], [])),
         get_neighborhood=AsyncMock(
             return_value=(
                 [("f1", {"type": "FactConflict", "text": EXPLANATION})],
@@ -37,7 +37,7 @@ def graph():
                     for chunk_id in ("c1", "c2")
                 ],
             )
-        )
+        ),
     )
 
 
@@ -166,7 +166,6 @@ async def test_lexical_annotations_do_not_modify_cached_payloads(with_scores, gr
         GraphCompletionRetriever,
         GraphCompletionCotRetriever,
         GraphCompletionContextExtensionRetriever,
-        TemporalRetriever,
     ],
 )
 async def test_graph_family_uses_chunk_conflict_block_with_lazy_engine(

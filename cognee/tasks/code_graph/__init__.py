@@ -4,8 +4,8 @@ These tasks build an architectural knowledge graph of a code repository using
 enola (https://github.com/enola-labs/enola) by Enola Labs, licensed under
 Apache-2.0. Cognee invokes the external enola binary (`enola --generate`) and
 parses its documented snapshot contract (`.enola/facts.jsonl`,
-`insights.json`, `receipt.json` — docs/schema/ upstream, format_version 1);
-no enola code is vendored into cognee.
+`insights.json`, `flows.json`, `receipt.json` — docs/schema/ upstream,
+format_version 1); no enola code is vendored into cognee.
 """
 
 from .enola import (
@@ -32,6 +32,7 @@ from .models import (
     ApiEndpoint,
     CodeAssociation,
     CodeExtractionAccount,
+    CodeFlow,
     CodeGraphEntity,
     CodeInsight,
     CodeIntent,

@@ -15,7 +15,7 @@ blocking path raises — is a bug here, not a quirk of streaming.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import litellm
 
@@ -81,6 +81,9 @@ async def stream_text_completion(
             stream_options=stream_options,
             **merged_kwargs,
         )
+        # litellm types acompletion() as ModelResponse | CustomStreamWrapper whatever
+        # `stream` is; with stream=True it is the wrapper.
+        stream = cast(litellm.CustomStreamWrapper, stream)
         try:
             async for chunk in stream:
                 # Some providers still send a trailing usage chunk with

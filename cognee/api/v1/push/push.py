@@ -71,8 +71,9 @@ def _resolve_client(url: str | None, api_key: str | None):
         return CloudClient(credentials.service_url, api_key or credentials.api_key), True
 
     raise RuntimeError(
-        "No Cognee Cloud connection configured. Run `cognee-cli serve` to log in, "
-        "pass url/api_key, or set COGNEE_SERVICE_URL and COGNEE_API_KEY."
+        "No Cognee Cloud connection configured. Connect once with "
+        "`cognee-cli serve --url <instance> --api-key <key>`, pass url/api_key, "
+        "or set COGNEE_SERVICE_URL and COGNEE_API_KEY."
     )
 
 
