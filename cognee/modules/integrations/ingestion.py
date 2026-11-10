@@ -456,6 +456,7 @@ async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
         CredentialInactiveError,
         record_sync_result,
     )
+    from cognee.modules.integrations.outbound import OutboundHttpDisabledError
     from cognee.modules.integrations.sync_progress import track_sync
 
     key = (provider, str(credential.provider_account_id))
@@ -463,6 +464,7 @@ async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
         return
     _running_syncs.add(key)
     counts = {"scanned": 0, "skipped": 0, "failed": 0}
+    progress = None
     try:
         async with track_sync(provider, credential) as progress:
             await progress.report(phase="checking", counts=counts)
@@ -501,6 +503,13 @@ async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
                     else None
                 ),
             )
+    except OutboundHttpDisabledError:
+        if progress is None:
+            # Refused at the entry: track_sync recorded the failed run, and this
+            # stamps the connection so it does not keep reading as healthy.
+            counts["failed"] = 1
+            await record_sync_result(credential, status="degraded", counts=counts)
+        raise
     finally:
         _running_syncs.discard(key)
 
