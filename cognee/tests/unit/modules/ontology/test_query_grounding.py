@@ -130,6 +130,29 @@ def test_grounding_matches_exact_keys_without_a_fuzzy_scan(monkeypatch):
     ]
 
 
+def test_each_concept_is_walked_once_per_resolver(monkeypatch):
+    resolver = _finance_resolver()
+    walked = []
+    get_subgraph = resolver.get_subgraph
+
+    def counting_get_subgraph(node_name, node_type="individuals", directed=True):
+        walked.append(node_name)
+        return get_subgraph(node_name=node_name, node_type=node_type, directed=directed)
+
+    monkeypatch.setattr(resolver, "get_subgraph", counting_get_subgraph)
+
+    ground_query("our credit exposure, and the credit exposures of Acme", resolver)
+    again = ground_query("which credit exposures does Acme have?", resolver)
+
+    # The repeated term is skipped before its walk; the second query walks nothing.
+    assert walked == ["creditexposure", "acme"]
+    assert [(c.term, c.canonical_name) for c in again] == [
+        ("credit exposures", "CreditExposure"),
+        ("acme", "Acme"),
+    ]
+    assert again[0].parents == ("RiskMetric",)
+
+
 def test_grounding_keeps_inner_stopwords_and_matches_each_occurrence():
     resolver = _finance_resolver()
 

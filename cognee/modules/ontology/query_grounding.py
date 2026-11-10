@@ -19,7 +19,7 @@ grounding, and the retriever runs exactly as it did before.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 
 from cognee.modules.engine.models import Entity, EntityType
@@ -130,6 +130,30 @@ def _concept_from_subgraph(
     )
 
 
+@dataclass
+class _ResolverIndex:
+    """What grounding reads from one resolver, kept between queries."""
+
+    indexes: list[tuple[str, dict[str, str]]]
+    longest_key: int
+    # ``(category, resolver key)`` -> its concept, filled the first time a query names it.
+    concepts: dict[tuple[str, str], GroundedConcept] = field(default_factory=dict)
+
+
+@lru_cache(maxsize=1)
+def _resolver_index(resolver: BaseOntologyResolver) -> _ResolverIndex:
+    """The compact key indexes of ``resolver``, built on its first query.
+
+    One entry, like ``_load_resolver``: recall grounds against one resolver at a time.
+    """
+    indexes = [
+        (category, compact_key_index(resolver, category))
+        for category in (ONTOLOGY_CLASS_CATEGORY, ONTOLOGY_INDIVIDUAL_CATEGORY)
+    ]
+    longest_key = max((len(key) for _, index in indexes for key in index), default=0)
+    return _ResolverIndex(indexes=indexes, longest_key=longest_key)
+
+
 def _match_run(run: list[str], indexes: list[tuple[str, dict[str, str]]]) -> tuple[str, str] | None:
     """``(category, resolver key)`` of the first index that holds ``run``, or None."""
     for category, index in indexes:
@@ -137,6 +161,26 @@ def _match_run(run: list[str], indexes: list[tuple[str, dict[str, str]]]) -> tup
         if key is not None:
             return category, key
     return None
+
+
+def _concept_for_key(
+    resolver: BaseOntologyResolver,
+    resolver_index: _ResolverIndex,
+    category: str,
+    key: str,
+    term: str,
+) -> GroundedConcept:
+    """The concept ``key`` names, reported for ``term``.
+
+    The key's ontology subgraph is walked the first time a query names it; later
+    queries against the same resolver reuse the result.
+    """
+    concept = resolver_index.concepts.get((category, key))
+    if concept is None:
+        nodes, edges, root = resolver.get_subgraph(node_name=key, node_type=category)
+        concept = _concept_from_subgraph(term, category, nodes, root, edges)
+        resolver_index.concepts[(category, key)] = concept
+    return replace(concept, term=term)
 
 
 def ground_query(
@@ -148,39 +192,38 @@ def ground_query(
     Every run of query words, longest first, is looked up by exact compact key, in the
     classes and then the individuals; a lone stopword ("will", "may") is not. A
     matched run uses up its words, so "credit exposure" suppresses a separate match on
-    "exposure"; each ontology node is reported once.
+    "exposure"; each ontology node is reported once. The resolver is treated as
+    read-only: its indexes and concepts are kept for the next query.
     """
     if not query or resolver is None:
         return []
 
-    indexes = [
-        (category, compact_key_index(resolver, category))
-        for category in (ONTOLOGY_CLASS_CATEGORY, ONTOLOGY_INDIVIDUAL_CATEGORY)
-    ]
-    # A run of more words than the longest key has characters cannot match.
-    longest_key = max((len(key) for _, index in indexes for key in index), default=0)
+    resolver_index = _resolver_index(resolver)
     tokens = tokens_of(query)
 
     concepts: list[GroundedConcept] = []
-    matched_nodes: set[tuple[str, str]] = set()
+    # A resolver key names exactly one ontology node, so matched keys are matched nodes.
+    matched_keys: set[tuple[str, str]] = set()
     used_positions: set[int] = set()
 
-    for size in range(min(len(tokens), longest_key), 0, -1):
+    # A run of more words than the longest key has characters cannot match.
+    for size in range(min(len(tokens), resolver_index.longest_key), 0, -1):
         for start in range(len(tokens) - size + 1):
             positions = range(start, start + size)
             run = tokens[start : start + size]
             if used_positions.intersection(positions):
                 continue
-            match = _match_run(run, indexes)
+            match = _match_run(run, resolver_index.indexes)
             if match is None:
                 continue
-            category, key = match
             used_positions.update(positions)
-            nodes, edges, root = resolver.get_subgraph(node_name=key, node_type=category)
-            if (category, root.name) in matched_nodes:
+            if match in matched_keys:
                 continue
-            matched_nodes.add((category, root.name))
-            concepts.append(_concept_from_subgraph(" ".join(run), category, nodes, root, edges))
+            matched_keys.add(match)
+            category, key = match
+            concepts.append(
+                _concept_for_key(resolver, resolver_index, category, key, " ".join(run))
+            )
 
     if concepts:
         logger.info(
