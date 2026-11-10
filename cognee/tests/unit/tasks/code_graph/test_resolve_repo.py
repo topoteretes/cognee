@@ -1,4 +1,7 @@
 import importlib
+import os
+import shutil
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -149,11 +152,37 @@ async def test_every_git_command_runs_with_lfs_downloads_off(monkeypatch):
     assert calls[1][1]["GIT_CONFIG_COUNT"] == "1"  # the caller's env still applies
 
 
-def test_credentials_header_is_scoped_to_the_repository_origin():
-    env = resolve_module._credential_env("tok", "https://gitlab.example.com:8443/org/repo.git")
+@pytest.mark.parametrize(
+    "url,origin",
+    [
+        ("https://gitlab.example.com:8443/org/repo.git", "https://gitlab.example.com:8443"),
+        ("https://github.com/org/repo.git", "https://github.com"),
+        ("https://[2001:db8::1]:8443/org/repo.git", "https://[2001:db8::1]:8443"),
+        ("https://[::1]/org/repo.git", "https://[::1]"),
+    ],
+)
+def test_credentials_header_is_scoped_to_the_repository_origin(url, origin):
+    env = resolve_module._credential_env("tok", url)
 
-    assert env["GIT_CONFIG_KEY_0"] == "http.https://gitlab.example.com:8443/.extraHeader"
+    assert env["GIT_CONFIG_KEY_0"] == f"http.{origin}/.extraHeader"
     assert env["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@pytest.mark.parametrize(
+    "url", ["https://gitlab.example.com:8443/org/repo.git", "https://[2001:db8::1]:8443/o/r.git"]
+)
+def test_git_applies_the_scoped_header_to_the_repository_url(url):
+    env = {**os.environ, **resolve_module._credential_env("tok", url)}
+    result = subprocess.run(
+        ["git", "config", "--get-urlmatch", "http.extraHeader", url],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,  # exit 1: no config entry matches the URL
+    )
+
+    assert result.stdout.strip() == env["GIT_CONFIG_VALUE_0"]
 
 
 @pytest.mark.asyncio

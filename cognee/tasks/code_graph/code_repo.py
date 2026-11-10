@@ -36,6 +36,7 @@ shallow clone (``resolve_code_repository_url``): the clone directory is the
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -157,10 +158,15 @@ def _is_skipped_path(relative_path: Path) -> bool:
 
 
 # Git LFS leaves a file it did not download as a small pointer (spec: under
-# 1024 bytes, starting with this line). cognee runs git with LFS downloads off,
-# so a repository's LFS documents arrive as pointers; ingesting one would store
-# the pointer text as if it were the document.
-_LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
+# 1024 bytes; a version line, optional ext lines, then oid and size). cognee runs
+# git with LFS downloads off, so a repository's LFS documents arrive as pointers;
+# ingesting one would store the pointer text as if it were the document.
+_LFS_POINTER = re.compile(
+    rb"version https://git-lfs\.github\.com/spec/v1\n"
+    rb"(?:ext-\d+-\w+ sha256:[0-9a-f]{64}\n)*"
+    rb"oid sha256:[0-9a-f]{64}\n"
+    rb"size \d+\n?"
+)
 _LFS_POINTER_MAX_BYTES = 1024
 
 
@@ -168,7 +174,7 @@ def _is_lfs_pointer(file_path: Path) -> bool:
     """Whether ``file_path`` is a Git LFS pointer rather than the file it stands for."""
     if file_path.stat().st_size >= _LFS_POINTER_MAX_BYTES:
         return False
-    return file_path.read_bytes().startswith(_LFS_POINTER_PREFIX)
+    return _LFS_POINTER.fullmatch(file_path.read_bytes()) is not None
 
 
 def _document_extensions() -> frozenset:

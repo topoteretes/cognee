@@ -229,7 +229,8 @@ def _credential_env(token: str, url: str) -> dict:
     host, never to another server a request ends up at.
     """
     parts = urlsplit(url)
-    origin = f"{parts.scheme}://{parts.hostname}" + (f":{parts.port}" if parts.port else "")
+    # netloc, not hostname: hostname drops an IPv6 literal's brackets, which git needs.
+    origin = f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}"
     basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
     return {
         "GIT_CONFIG_COUNT": "1",
