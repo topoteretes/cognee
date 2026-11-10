@@ -150,3 +150,72 @@ async def test_disabled_fetching_never_initializes_a_scraping_backend(monkeypatc
     tavily.assert_not_awaited()
     keenable.assert_not_awaited()
     crawler.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        "https://example.com/document",
+        "  http://example.com/document",
+        "https://github.com/org/repo",
+        ["plain text", "https://example.com/document"],
+        [["nested", "https://example.com/document"]],
+    ],
+)
+def test_up_front_check_refuses_inputs_that_name_a_url(monkeypatch, data):
+    from cognee.tasks.web_scraper.ssrf_protection import require_http_requests_allowed_for
+
+    monkeypatch.delenv("ALLOW_HTTP_REQUESTS", raising=False)
+
+    with (
+        operation_origin_scope("api"),
+        pytest.raises(SSRFProtectionError, match="Set ALLOW_HTTP_REQUESTS=true") as error,
+    ):
+        require_http_requests_allowed_for(data)
+
+    assert error.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        "plain text about https://example.com",
+        ["first note", "second note"],
+        "git@github.com:org/repo.git",  # add() stores this as text; only remember(code) clones it
+        b"https://example.com/document",
+    ],
+)
+def test_up_front_check_lets_inputs_without_a_url_through(monkeypatch, data):
+    from cognee.tasks.web_scraper.ssrf_protection import require_http_requests_allowed_for
+
+    monkeypatch.delenv("ALLOW_HTTP_REQUESTS", raising=False)
+
+    with operation_origin_scope("api"):
+        require_http_requests_allowed_for(data)
+
+
+def test_up_front_check_skips_literal_text_and_unwraps_data_items(monkeypatch):
+    from cognee.tasks.ingestion.data_item import DataItem
+    from cognee.tasks.web_scraper.ssrf_protection import require_http_requests_allowed_for
+
+    monkeypatch.delenv("ALLOW_HTTP_REQUESTS", raising=False)
+
+    with operation_origin_scope("api"):
+        require_http_requests_allowed_for(
+            DataItem(data="https://example.com/document", literal_text=True)
+        )
+        with pytest.raises(SSRFProtectionError):
+            require_http_requests_allowed_for(DataItem(data="https://example.com/document"))
+
+
+@pytest.mark.parametrize("origin,setting", [("sdk", None), ("api", "true")])
+def test_up_front_check_passes_when_fetching_is_allowed(monkeypatch, origin, setting):
+    from cognee.tasks.web_scraper.ssrf_protection import require_http_requests_allowed_for
+
+    if setting is None:
+        monkeypatch.delenv("ALLOW_HTTP_REQUESTS", raising=False)
+    else:
+        monkeypatch.setenv("ALLOW_HTTP_REQUESTS", setting)
+
+    with operation_origin_scope(origin):
+        require_http_requests_allowed_for("https://example.com/document")

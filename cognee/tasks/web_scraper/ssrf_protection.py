@@ -97,6 +97,36 @@ def require_http_requests_allowed() -> None:
     )
 
 
+def _names_a_url(item) -> bool:
+    """Whether ingestion would fetch ``item`` as a web page or clone it as a repository.
+
+    The same test both paths apply: a string with an ``http``/``https`` scheme. A
+    ``DataItem`` is unwrapped, and one marked ``literal_text`` is stored as text,
+    never fetched.
+    """
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    if isinstance(item, DataItem):
+        if item.literal_text:
+            return False
+        item = item.data
+    if isinstance(item, (list, tuple)):
+        return any(_names_a_url(entry) for entry in item)
+    return isinstance(item, str) and urlparse(item.strip()).scheme.lower() in ALLOWED_SCHEMES
+
+
+def require_http_requests_allowed_for(data) -> None:
+    """Refuse up front when ``data`` holds a URL and outbound fetching is disabled.
+
+    Called before ingestion starts, and before it is handed to a background task:
+    the check inside the fetch still runs, but in a background run its refusal
+    would reach only the run record and the server log, while the caller had
+    already been told the run started.
+    """
+    if not is_http_requests_allowed() and _names_a_url(data):
+        require_http_requests_allowed()
+
+
 def _is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
     """Return True if ``ip`` is not a routable, public address."""
     return (

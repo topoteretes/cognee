@@ -279,6 +279,12 @@ async def add(
         # Before anything is written, and before the name can reach git.
         check_branch_name(branch)
 
+    from cognee.tasks.web_scraper.ssrf_protection import require_http_requests_allowed_for
+
+    # Before any work starts: with run_in_background the fetch runs after this call
+    # has returned, where its refusal would never reach the caller.
+    require_http_requests_allowed_for(data)
+
     if preferred_loaders is not None:
         transformed = {}
         for item in preferred_loaders:

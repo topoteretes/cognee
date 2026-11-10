@@ -119,9 +119,12 @@ def network_never_reached(monkeypatch):
 @pytest.mark.parametrize("endpoint", ["add", "remember"])
 @pytest.mark.parametrize("url", ["https://example.com/document", "https://github.com/org/repo"])
 @pytest.mark.parametrize("setting", [None, "", "false", "flase"])
+@pytest.mark.parametrize("background", ["false", "true"])
 def test_ingestion_reports_how_to_enable_http_before_any_network_work(
-    client, monkeypatch, network_never_reached, endpoint, url, setting
+    client, monkeypatch, network_never_reached, endpoint, url, setting, background
 ):
+    """In the background too: the refusal is the response, not a started run that fails
+    later where only the run record and the server log would see it."""
     if setting is None:
         monkeypatch.delenv("ALLOW_HTTP_REQUESTS", raising=False)
     else:
@@ -129,7 +132,12 @@ def test_ingestion_reports_how_to_enable_http_before_any_network_work(
 
     response = client.post(
         f"/api/v1/{endpoint}",
-        data={"datasetName": "http_policy", "raw_data": url, "self_improvement": "false"},
+        data={
+            "datasetName": "http_policy",
+            "raw_data": url,
+            "self_improvement": "false",
+            "run_in_background": background,
+        },
     )
 
     assert response.status_code == 403, response.text
@@ -138,6 +146,33 @@ def test_ingestion_reports_how_to_enable_http_before_any_network_work(
     assert "on the server" in detail
     # Forwarded as the policy's own message, not re-wrapped with an exception class name.
     assert "SSRFProtectionError:" not in detail
+    for mock in network_never_reached.values():
+        mock.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "spec", ["https://github.com/org/repo", "git@github.com:org/repo.git", "ssh://git@host/r"]
+)
+@pytest.mark.parametrize("background", ["false", "true"])
+def test_code_remember_refuses_remote_repositories_before_cloning(
+    client, monkeypatch, network_never_reached, spec, background
+):
+    monkeypatch.delenv("ALLOW_HTTP_REQUESTS", raising=False)
+
+    response = client.post(
+        "/api/v1/remember",
+        data={
+            "datasetName": "http_policy_code",
+            "raw_data": spec,
+            "content_type": "code",
+            "run_in_background": background,
+        },
+    )
+
+    assert response.status_code == 403, response.text
+    detail = response.json()["detail"]
+    assert "Set ALLOW_HTTP_REQUESTS=true" in detail
+    assert "on the server" in detail
     for mock in network_never_reached.values():
         mock.assert_not_awaited()
 
