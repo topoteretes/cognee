@@ -18,6 +18,8 @@ from .metrics import (
     get_session_row,
     list_session_rows,
     list_sessions_for_dataset,
+    list_sessions_for_datasets,
+    list_sessions_for_user,
     mark_ended,
     touch_session,
 )
@@ -36,6 +38,8 @@ __all__ = [
     "get_sessions_with_agent_info",
     "list_session_rows",
     "list_sessions_for_dataset",
+    "list_sessions_for_datasets",
+    "list_sessions_for_user",
     "mark_ended",
     "record_llm_call",
     "touch_session",

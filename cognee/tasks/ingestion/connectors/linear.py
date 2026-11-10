@@ -228,7 +228,11 @@ class LinearClient:
             last = attempt == _RETRIES - 1
             try:
                 response = requests.post(
-                    GRAPHQL_URL, json=payload, headers=self._headers(), timeout=_TIMEOUT
+                    GRAPHQL_URL,
+                    json=payload,
+                    headers=self._headers(),
+                    timeout=_TIMEOUT,
+                    allow_redirects=False,  # a 3xx is an error answer, never a new target
                 )
             except requests.RequestException as exc:
                 if last:

@@ -343,7 +343,7 @@ def test_disconnect_with_delete_data_forgets_the_providers_dataset(client):
     ):
         response = client.delete("/api/v1/integrations/fake/connection?delete_data=true")
 
-    assert response.json() == {"disconnected": True}
+    assert response.json() == {"disconnected": True, "remoteRevokeSkipped": False}
     assert forget.await_args.kwargs["dataset"] == "fake_acme"
 
 
@@ -482,8 +482,36 @@ def test_disconnect_calls_revoke_remote_and_revokes_locally(client):
     ):
         response = client.delete("/api/v1/integrations/fake/connection")
 
-    assert response.json() == {"disconnected": True}
+    assert response.json() == {"disconnected": True, "remoteRevokeSkipped": False}
     revoke_remote.assert_awaited_once_with(fake_credential)
+    revoke_local.assert_awaited_once_with("fake", "ACC1")
+
+
+def test_disconnect_reports_a_skipped_remote_revoke_while_outbound_http_is_disabled(
+    client, monkeypatch
+):
+    """SDK-832: the local connection goes, but the token stays live at the provider
+    and the caller is told so instead of reading ``disconnected: true`` as revoked."""
+    fake_credential = type("Cred", (), {"provider_account_id": "ACC1"})()
+    integration = supported_integrations["fake"]
+    monkeypatch.setenv("ALLOW_HTTP_REQUESTS", "false")
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=fake_credential),
+        ),
+        patch.object(integration, "revoke_remote", new=AsyncMock()) as revoke_remote,
+        patch.object(
+            _router_module,
+            "revoke_credential_by_account",
+            new=AsyncMock(return_value=True),
+        ) as revoke_local,
+    ):
+        response = client.delete("/api/v1/integrations/fake/connection")
+
+    assert response.json() == {"disconnected": True, "remoteRevokeSkipped": True}
+    revoke_remote.assert_not_awaited()
     revoke_local.assert_awaited_once_with("fake", "ACC1")
 
 
@@ -494,7 +522,7 @@ def test_disconnect_with_no_active_credential_reports_false(client):
         new=AsyncMock(return_value=None),
     ):
         response = client.delete("/api/v1/integrations/fake/connection")
-    assert response.json() == {"disconnected": False}
+    assert response.json() == {"disconnected": False, "remoteRevokeSkipped": False}
 
 
 def _installed():
@@ -789,7 +817,7 @@ def test_disconnect_revokes_the_named_account_only(client):
             "/api/v1/integrations/fake/connection", params={"account_id": "ACC2"}
         )
 
-    assert response.json() == {"disconnected": True}
+    assert response.json() == {"disconnected": True, "remoteRevokeSkipped": False}
     revoke_remote.assert_awaited_once_with(credential)
     revoke_local.assert_awaited_once_with("fake", "ACC2")
 
@@ -820,3 +848,24 @@ def test_a_connection_without_a_label_leaves_the_field_out(client):
         body = client.get("/api/v1/integrations/fake/connections").json()
 
     assert body == {"connections": [{"providerAccountId": "ACC1"}]}
+
+
+def test_connect_and_sync_are_refused_while_outbound_http_is_disabled(client, monkeypatch):
+    """SDK-832: the flag that disables cognee's outbound HTTP disables the connectors too."""
+    monkeypatch.setenv("ALLOW_HTTP_REQUESTS", "false")
+    credential = type("Cred", (), {"provider_account_id": "ACC1"})()
+
+    authorize = client.post("/api/v1/integrations/fake/authorize")
+    with patch.object(
+        _router_module, "get_active_credential_for_user", new=AsyncMock(return_value=credential)
+    ):
+        sync = client.post("/api/v1/integrations/fake/sync")
+
+        resources = client.get("/api/v1/integrations/fake/resources")
+
+    assert authorize.status_code == 503
+    assert "ALLOW_HTTP_REQUESTS" in authorize.json()["detail"]
+    assert sync.status_code == 503
+    assert resources.status_code == 503
+    # No install was started: nothing for a callback to match.
+    assert not any(name.startswith("cognee_oauth_nonce_") for name in authorize.cookies)

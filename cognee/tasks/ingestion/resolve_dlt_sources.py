@@ -168,7 +168,7 @@ async def resolve_dlt_sources(
     # CSVs are NOT handled here anymore: they route through the loader engine
     # (dlt_csv_loader, registered above csv_loader) inside the ingest
     # pipeline, which owns localization (s3/file://) and manifest emission.
-    data_list = _normalize_structured_inputs(data_list, query)
+    data_list = await _normalize_structured_inputs(data_list, query)
 
     dlt_items = []
     non_dlt_items = []
@@ -337,18 +337,26 @@ async def resolve_dlt_sources(
     return result, orphan_cleanup
 
 
-def _normalize_structured_inputs(data_list: list, query: str | None) -> list:
+async def _normalize_structured_inputs(data_list: list, query: str | None) -> list:
     """Wrap auto-detected structured inputs in dlt sources.
 
     Connection strings become dlt sql_database sources; everything else
     passes through unchanged. CSV inputs are deliberately NOT handled here —
     the loader engine's dlt_csv_loader owns them inside the ingest pipeline
     (with localization of s3:// and file:// locations built in).
+
+    Building a sql_database source connects to the database and reflects its
+    schema, a blocking call that can wait out a connect timeout, so it runs in a
+    worker thread (the operation-origin context travels with it).
     """
+    import asyncio
+
     normalized = []
     for item in data_list:
         if isinstance(item, str) and is_connection_string(item):
-            normalized.append(create_dlt_source_from_connection_string(item, query=query))
+            normalized.append(
+                await asyncio.to_thread(create_dlt_source_from_connection_string, item, query=query)
+            )
         else:
             normalized.append(item)
     return normalized

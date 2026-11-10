@@ -15,6 +15,9 @@ class Entity(DataPoint):
     truth_alignment: list[float] | None = None
     truth_subspace_signature: str | None = None
     truth_epoch: int | None = None
+    # OMP header (JSON) of the COGX record this entity was imported from, so a
+    # re-export keeps its origin, evidence and confidence; None otherwise.
+    omp_header: str | None = None
     # identity_fields makes the id deterministic and namespaced by class
     # (``Entity:<name>``) when constructed without an explicit id — the same
     # value ``Entity.id_for(name)`` produces. Prevents the random-uuid4 footgun.
