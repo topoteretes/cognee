@@ -139,6 +139,7 @@ async def test_a_full_sync_while_one_runs_is_dropped_and_marked_running(monkeypa
         await release.wait()
 
     monkeypatch.setattr(adapter_module, "sync_repositories", sync_repositories)
+    monkeypatch.setattr(adapter_module, "sync_is_paused", AsyncMock(return_value=False))
     integration, credential = GithubIntegration(), SimpleNamespace(provider_account_id="42")
 
     first = asyncio.create_task(integration.sync_now(credential))
@@ -152,3 +153,19 @@ async def test_a_full_sync_while_one_runs_is_dropped_and_marked_running(monkeypa
 
     assert calls == [credential]
     assert not ingestion.sync_is_running("github", "42")
+
+
+@pytest.mark.asyncio
+async def test_the_install_sync_of_a_paused_connection_does_not_start(monkeypatch):
+    """An owner's paused default holds a connection from its first sync (SDK-1434)."""
+    from types import SimpleNamespace
+
+    from cognee.modules.integrations.github import adapter as adapter_module
+
+    sync = AsyncMock()
+    monkeypatch.setattr(adapter_module, "sync_repositories", sync)
+    monkeypatch.setattr(adapter_module, "sync_is_paused", AsyncMock(return_value=True))
+
+    await GithubIntegration().on_installed(SimpleNamespace(provider_account_id="42"))
+
+    sync.assert_not_awaited()

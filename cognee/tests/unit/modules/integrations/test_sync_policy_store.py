@@ -372,6 +372,25 @@ async def test_a_paused_default_holds_every_connection_and_a_paused_row_only_its
 
 
 @pytest.mark.asyncio
+async def test_a_webhook_or_install_sync_is_dropped_only_while_a_pause_holds_the_connection(
+    database,
+):
+    """The same rule as the scheduler and the manual route, read through the owner (SDK-1434)."""
+    from cognee.modules.integrations.ingestion import sync_is_paused
+
+    owner = _user()
+    credential = SimpleNamespace(id=uuid4(), workspace_id=None, user_id=owner.id)
+    assert not await sync_is_paused("github", credential, "push delivery")
+
+    await store.save_sync_policy(owner, owner.id, DAILY, now=NOW)
+    await store.pause_sync_policy(owner, owner.id, now=NOW)
+    assert await sync_is_paused("github", credential, "push delivery")
+
+    await store.resume_sync_policy(owner, owner.id, now=NOW)
+    assert not await sync_is_paused("github", credential, "push delivery")
+
+
+@pytest.mark.asyncio
 async def test_the_caller_reads_the_effective_policy_with_its_level_only_as_owner(database):
     owner, stranger = _user(), _user()
     credential_id = uuid4()

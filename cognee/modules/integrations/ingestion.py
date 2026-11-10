@@ -451,6 +451,27 @@ def sync_is_running(provider: str, account_id: str) -> bool:
     return (provider, str(account_id)) in _running_syncs
 
 
+async def sync_is_paused(provider: str, credential: Any, source: str) -> bool:
+    """True, and logged, when a pause holds this connection: its sync policy or its owner's
+    default. Webhooks and the install hook call it before a sync, as the scheduler and
+    the manual route do, so a paused connection indexes nothing new (SDK-1434)."""
+    from cognee.modules.integrations.credentials import owner_principal_id
+    from cognee.modules.integrations.sync_policy import get_sync_pause_level
+
+    level = await get_sync_pause_level(
+        credential_id=credential.id, principal_id=owner_principal_id(credential)
+    )
+    if level is not None:
+        logger.info(
+            "%s %s for connection %s dropped: sync is paused at the %s level",
+            provider,
+            source,
+            credential.id,
+            level,
+        )
+    return level is not None
+
+
 @contextmanager
 def exclusive_sync(provider: str, account_id: str) -> Iterator[bool]:
     """Mark the account as syncing for the block; yields False when one already runs."""
