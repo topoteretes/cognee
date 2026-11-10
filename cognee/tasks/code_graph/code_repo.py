@@ -36,6 +36,7 @@ shallow clone (``resolve_code_repository_url``): the clone directory is the
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -156,6 +157,26 @@ def _is_skipped_path(relative_path: Path) -> bool:
     return any(part in SKIP_DIRS or part.startswith(".") for part in relative_path.parts)
 
 
+# Git LFS leaves a file it did not download as a small pointer (spec: under
+# 1024 bytes; a version line, optional ext lines, then oid and size). cognee runs
+# git with LFS downloads off, so a repository's LFS documents arrive as pointers;
+# ingesting one would store the pointer text as if it were the document.
+_LFS_POINTER = re.compile(
+    rb"version https://git-lfs\.github\.com/spec/v1\n"
+    rb"(?:ext-\d+-\w+ sha256:[0-9a-f]{64}\n)*"
+    rb"oid sha256:[0-9a-f]{64}\n"
+    rb"size \d+\n?"
+)
+_LFS_POINTER_MAX_BYTES = 1024
+
+
+def _is_lfs_pointer(file_path: Path) -> bool:
+    """Whether ``file_path`` is a Git LFS pointer rather than the file it stands for."""
+    if file_path.stat().st_size >= _LFS_POINTER_MAX_BYTES:
+        return False
+    return _LFS_POINTER.fullmatch(file_path.read_bytes()) is not None
+
+
 def _document_extensions() -> frozenset:
     """Every path extension a registered non-code loader claims.
 
@@ -182,9 +203,9 @@ def partition_repo_files(directory: Path) -> tuple[list[Path], list[Path], list[
     covered: source files + project manifests — represented by the single
     repo item and consumed by enola. documents: files whose extension a
     non-code loader claims — emitted individually so their content stays in
-    the document pipeline. skipped: hidden files/dirs, build junk, and
-    unclaimed extensions (binaries) — never ingested, so one .pyc cannot
-    abort the add.
+    the document pipeline. skipped: hidden files/dirs, build junk,
+    unclaimed extensions (binaries) and Git LFS pointers of documents that were
+    not downloaded — never ingested, so one .pyc cannot abort the add.
     """
     from cognee.infrastructure.loaders.core.code_loader import SUPPORTED_CODE_EXTENSIONS
 
@@ -213,7 +234,7 @@ def partition_repo_files(directory: Path) -> tuple[list[Path], list[Path], list[
             covered.append(file_path)
         elif extension in REPO_SKIPPED_MEDIA_EXTENSIONS:
             skipped.append(file_path)
-        elif extension in document_extensions:
+        elif extension in document_extensions and not _is_lfs_pointer(file_path):
             documents.append(file_path)
         else:
             skipped.append(file_path)

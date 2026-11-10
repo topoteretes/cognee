@@ -1418,7 +1418,7 @@ def get_integrations_router():
                 remote_revoke_skipped = True
                 logger.warning(
                     "%s token for account %s was not revoked at the provider: "
-                    "ALLOW_HTTP_REQUESTS=false",
+                    "ALLOW_HTTP_REQUESTS disables outbound HTTP",
                     provider,
                     credential.provider_account_id,
                 )
