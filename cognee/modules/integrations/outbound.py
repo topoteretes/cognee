@@ -43,13 +43,15 @@ class OutboundHttpDisabledError(CogneeConfigurationError):
         super().__init__(
             message=(
                 f"The {provider} integration needs outbound HTTP, which "
-                f"ALLOW_HTTP_REQUESTS={configured} disables on this server."
+                f"ALLOW_HTTP_REQUESTS={configured} disables on this server. Set "
+                "ALLOW_HTTP_REQUESTS=true in the server's environment, or unset it, to "
+                "connect or sync integrations."
             ),
             name="OutboundHttpDisabledError",
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             remediation=(
-                "Set ALLOW_HTTP_REQUESTS=true (only true, 1, yes or on enable it), or unset "
-                "it, to connect or sync integrations."
+                "Set ALLOW_HTTP_REQUESTS=true (only true, 1, yes or on enable it) in the "
+                "server's environment, or unset it, to connect or sync integrations."
             ),
         )
 

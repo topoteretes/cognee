@@ -37,4 +37,6 @@ def test_a_set_value_that_is_not_true_stops_connectors(monkeypatch, origin, sett
 
     assert error.value.status_code == 503
     assert f"ALLOW_HTTP_REQUESTS={setting} disables" in error.value.message
+    # The router sends only the message as the 503 detail, so it carries the fix itself.
+    assert "Set ALLOW_HTTP_REQUESTS=true in the server's environment" in error.value.message
     assert "(the default)" not in error.value.remediation

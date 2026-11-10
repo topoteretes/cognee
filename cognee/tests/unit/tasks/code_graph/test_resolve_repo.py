@@ -115,7 +115,7 @@ async def test_clone_of_an_internal_address_is_a_403(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_every_git_command_runs_with_lfs_downloads_off(monkeypatch):
-    """A repository's .lfsconfig can name any server; no checkout may contact it."""
+    """Git LFS is disabled for every git command."""
     calls = []
 
     class _Process:

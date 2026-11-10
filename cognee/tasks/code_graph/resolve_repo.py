@@ -238,12 +238,8 @@ def _credential_env(token: str, url: str) -> dict:
     }
 
 
-# A repository's .lfsconfig can name any server as its LFS endpoint, and a
-# checkout (clone, pull, reset) on a machine with git-lfs installed would
-# contact it, from the server, carrying the clone's credentials. LFS downloads
-# are therefore off for every git command cognee runs: an LFS file is left as
-# its small pointer file. The skip variable covers git-lfs's own smudge; the
-# cleared filter settings cover a filter configured to ignore it.
+# Git LFS is disabled for every git command cognee runs: an LFS file is left
+# as its small pointer file.
 _LFS_OFF_ARGS = (
     "-c",
     "filter.lfs.smudge=",

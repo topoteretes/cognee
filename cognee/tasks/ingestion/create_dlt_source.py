@@ -222,9 +222,10 @@ def _require_database_ingestion_allowed() -> None:
     if allowed is None:
         if get_operation_origin() == ORIGIN_API:
             raise CogneeValidationError(
-                message="Ingesting a database from a connection string is not enabled for "
-                f"API callers on this server (set {ALLOW_DATABASE_INGESTION_ENV}=true to "
-                "allow it).",
+                message="Ingesting a database from a connection string is disabled by "
+                f"default for API requests because {ALLOW_DATABASE_INGESTION_ENV} is unset. "
+                f"Set {ALLOW_DATABASE_INGESTION_ENV}=true in the server's environment to "
+                "allow it.",
                 name="DatabaseIngestionDisabled",
             )
         return
@@ -233,7 +234,8 @@ def _require_database_ingestion_allowed() -> None:
         raise CogneeValidationError(
             message="Ingesting a database from a connection string is disabled on this "
             f"server ({ALLOW_DATABASE_INGESTION_ENV}={value}; only true, 1, yes or on "
-            "enable it).",
+            f"enable it). Set {ALLOW_DATABASE_INGESTION_ENV}=true in the Cognee "
+            "environment (on the server for API calls) to allow it.",
             name="DatabaseIngestionDisabled",
         )
 
