@@ -1,4 +1,5 @@
 import asyncio
+import os
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
@@ -61,6 +62,17 @@ async def close_run_with_cause(run: AsyncGenerator, cause: Exception) -> None:
         await run.aclose()
     finally:
         _close_cause.reset(token)
+
+
+def writes_durable_before_push() -> bool:
+    """Whether a run's writes are durable as soon as they are written.
+
+    With ``STORAGE_BACKEND=s3`` the embedded graph and relational databases are
+    local copies that reach S3 only through the ``push_to_s3`` after the item
+    loop (the adapters' own condition), so until that push a run's writes exist
+    in this process alone; on any other storage they are durable at once.
+    """
+    return os.getenv("STORAGE_BACKEND", "").lower() != "s3"
 
 
 async def run_tasks(
@@ -136,6 +148,10 @@ async def run_tasks(
         database_ready = False
         run_finished = False
         items_failed = False
+        # Whether this run's writes are durable: the rollback keeps the items the
+        # run completed only then, since a kept item must still be there for the
+        # next process. Becomes true after the S3 push below where one is needed.
+        writes_durable = writes_durable_before_push()
         async with AsyncExitStack() as stack:
             try:
                 yield PipelineRunStarted(
@@ -344,7 +360,9 @@ async def run_tasks(
                 # fails it must be treated as a failure of this run (rollback +
                 # PipelineRunErrored), not raised after the run has already been
                 # reported as completed — which would both roll back already-completed
-                # data and emit two contradictory terminal events for one run.
+                # data and emit two contradictory terminal events for one run. Until
+                # the push succeeds the writes are not durable (``writes_durable``),
+                # so a failure up to here rolls back the whole run, stamps included.
                 graph_engine = await get_graph_engine()
                 if hasattr(graph_engine, "push_to_s3"):
                     await graph_engine.push_to_s3()
@@ -352,6 +370,7 @@ async def run_tasks(
                 relational_engine = get_relational_engine()
                 if hasattr(relational_engine, "push_to_s3"):
                     await relational_engine.push_to_s3()
+                writes_durable = True
 
                 await log_pipeline_run_complete(
                     pipeline_run_id,
@@ -394,6 +413,7 @@ async def run_tasks(
                             data=data,
                             data_ingestion_info=locals().get("results"),
                             error=error,
+                            writes_durable=writes_durable,
                         )
                     except Exception:
                         logger.exception("Rollback errored")

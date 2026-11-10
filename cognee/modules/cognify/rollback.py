@@ -121,9 +121,19 @@ def _this_run_completed_data_ids(data_ingestion_info: Any) -> set[UUID] | None:
 
 
 async def _kept_data_ids(
-    session, target_data_ids: set, dataset_id: Any, pipeline_name: str, data_ingestion_info: Any
+    session,
+    target_data_ids: set,
+    dataset_id: Any,
+    pipeline_name: str,
+    data_ingestion_info: Any,
+    writes_durable: bool,
 ) -> set:
     """The ids among ``target_data_ids`` the rollback keeps: the run finished them.
+
+    Nothing is kept while the run's writes are not durable (``writes_durable``,
+    see ``run_tasks``): on S3 storage a run that failed before its push never
+    stored the completed items' writes where the next process reads them, so
+    keeping their stamps would make it skip documents it does not have.
 
     Kept means stamped complete for ``pipeline_name`` in ``dataset_id`` AND, when
     the run's per-item results are at hand (``run_tasks`` passes every result it
@@ -136,6 +146,8 @@ async def _kept_data_ids(
     decides alone. An item that completed in a non-incremental run is not
     stamped, so it is rolled back like the unfinished ones.
     """
+    if not writes_durable:
+        return set()
     kept = await _completed_data_ids(session, target_data_ids, dataset_id, pipeline_name)
     completed_this_run = _this_run_completed_data_ids(data_ingestion_info)
     if completed_this_run is not None:
@@ -149,6 +161,7 @@ async def cognify_rollback_handler(
     user: Any = None,
     data_ingestion_info: Any = None,
     pipeline_name: str | None = None,
+    writes_durable: bool = True,
     **kwargs: Any,
 ) -> None:
     """Undo the unfinished work ``pipeline_run_id`` wrote into ``dataset``.
@@ -165,6 +178,11 @@ async def cognify_rollback_handler(
     that did not complete. Startup recovery relies on the same rule: a later
     run may already have trusted those completed documents and skipped them,
     so deleting them would leave the dataset with holes nothing refills.
+
+    ``writes_durable`` (``run_tasks`` passes it) is false when the run failed
+    before its writes reached durable storage (S3, before the push); then the
+    whole run is rolled back, stamps included. Startup recovery passes nothing
+    and relies on the stamps.
 
     ``pipeline_name`` is the pipeline whose per-item completion stamps the run
     set (``run_tasks`` passes it): the cognify pipeline by default, or the
@@ -207,7 +225,12 @@ async def cognify_rollback_handler(
 
             async with db_engine.get_async_session() as session:
                 kept_data_ids = await _kept_data_ids(
-                    session, target_data_ids, dataset_id, pipeline_name, data_ingestion_info
+                    session,
+                    target_data_ids,
+                    dataset_id,
+                    pipeline_name,
+                    data_ingestion_info,
+                    writes_durable,
                 )
             await unified.rollback_by_pipeline_run_id(
                 str(pipeline_run_id), keep_data_ids=kept_data_ids
@@ -265,7 +288,7 @@ async def cognify_rollback_handler(
             | _extract_data_ids(data_ingestion_info)
         )
         kept_data_ids = await _kept_data_ids(
-            session, target_data_ids, dataset_id, pipeline_name, data_ingestion_info
+            session, target_data_ids, dataset_id, pipeline_name, data_ingestion_info, writes_durable
         )
         target_nodes = [node for node in target_nodes if node.data_id not in kept_data_ids]
         target_edges = [edge for edge in target_edges if edge.data_id not in kept_data_ids]

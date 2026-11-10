@@ -265,6 +265,88 @@ async def test_run_tasks_hands_the_rollback_the_items_completed_before_the_failu
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("s3_storage", "failure", "durable"),
+    [
+        # Local storage: writes are durable once written, whatever fails.
+        (False, "item", True),
+        (False, "run_record", True),
+        # S3: the embedded stores reach S3 only through the push, so a failure
+        # before it leaves the writes in this process alone.
+        (True, "item", False),
+        (True, "push", False),
+        # After a successful push the writes are in S3.
+        (True, "run_record", True),
+    ],
+)
+async def test_run_tasks_tells_the_rollback_whether_the_writes_are_durable(
+    monkeypatch, s3_storage, failure, durable
+):
+    """The rollback may keep the items a run completed only when their writes
+    are durable: on S3 that is after the push, so a failing push (or item)
+    rolls back the whole run and the next process redoes it."""
+    dataset = SimpleNamespace(id=uuid4(), name="dataset-1", owner_id=uuid4())
+    user = SimpleNamespace(id=uuid4(), tenant_id=None)
+    run_id = uuid4()
+
+    async def _item(data_item, *_args, **_kwargs):
+        if failure == "item" and data_item == 2:
+            await asyncio.sleep(0.01)  # let the other item finish first
+            raise ValueError("item failed")
+        return {
+            "run_info": PipelineRunCompleted(
+                pipeline_run_id=run_id, dataset_id=dataset.id, dataset_name=dataset.name
+            ),
+            "data_id": data_item,
+        }
+
+    async def _push():
+        if failure == "push":
+            raise OSError("S3 push failed")
+
+    async def _log_complete(*_args, **_kwargs):
+        if failure == "run_record":
+            raise RuntimeError("run record failed")
+
+    rollback_calls = []
+
+    async def _rollback_handler(**kwargs):
+        rollback_calls.append(kwargs)
+
+    monkeypatch.setattr(run_tasks_module, "writes_durable_before_push", lambda: not s3_storage)
+    monkeypatch.setattr(run_tasks_module, "get_relational_engine", lambda: _FakeEngine(dataset))
+    monkeypatch.setattr(
+        run_tasks_module,
+        "get_graph_engine",
+        AsyncMock(return_value=SimpleNamespace(push_to_s3=_push)),
+    )
+    monkeypatch.setattr(run_tasks_module, "set_database_global_context_variables", _no_op_context)
+    monkeypatch.setattr(
+        run_tasks_module,
+        "log_pipeline_run_start",
+        AsyncMock(return_value=SimpleNamespace(pipeline_run_id=run_id)),
+    )
+    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_complete", _log_complete)
+    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_error", AsyncMock())
+    monkeypatch.setattr(run_tasks_module, "log_pipeline_run_progress", AsyncMock())
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", _item)
+
+    with pytest.raises((ValueError, OSError, RuntimeError)):
+        async for _ in run_tasks_module.run_tasks(
+            tasks=[Task(lambda x: x)],
+            dataset_id=dataset.id,
+            data=[1, 2],
+            user=user,
+            pipeline_name="cognify_pipeline",
+            rollback_handler=_rollback_handler,
+        ):
+            pass
+
+    assert len(rollback_calls) == 1
+    assert rollback_calls[0]["writes_durable"] is durable
+
+
+@pytest.mark.asyncio
 async def test_run_tasks_marks_cancelled_run_as_errored_instead_of_stuck(monkeypatch):
     """CLO-365: asyncio.CancelledError is a BaseException, not an Exception, so
     a bare `except Exception` in run_tasks.py misses it — a cancelled run

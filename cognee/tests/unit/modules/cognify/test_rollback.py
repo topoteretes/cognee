@@ -810,3 +810,122 @@ def test_without_kept_refs_keeps_everything_when_nothing_is_kept():
 
     refs = {"n": [make_source_ref_key(uuid4(), uuid4())]}
     assert _without_kept_refs(refs, set()) == refs
+
+
+@pytest.mark.asyncio
+async def test_ledger_rollback_keeps_nothing_when_the_writes_are_not_durable(
+    monkeypatch, kept_evidence_calls
+):
+    """S3 storage, failure before the push: the stamped item's writes never
+    reached S3, so it is rolled back with the rest and its stamp cleared."""
+    pipeline_run_id, dataset_id = uuid4(), uuid4()
+    done_id, unfinished_id = uuid4(), uuid4()
+    done_node = SimpleNamespace(id=uuid4(), slug="n-done", data_id=done_id)
+    unfinished_node = SimpleNamespace(id=uuid4(), slug="n-unfinished", data_id=unfinished_id)
+    done_record = _stamped_record(done_id, dataset_id)
+    unfinished_record = SimpleNamespace(
+        id=unfinished_id,
+        pipeline_status={"cognify_pipeline": {str(dataset_id): "DATASET_PROCESSING_STARTED"}},
+    )
+
+    call_log, graph_deletes = [], []
+    session_discovery = _FakeSession(
+        [
+            _FakeExecuteResult([done_node, unfinished_node]),
+            _FakeExecuteResult([]),  # edges
+            # no completed-status lookup: nothing can be kept
+            _FakeExecuteResult([]),  # shared node slugs
+        ]
+    )
+    session_mutation = _FakeSession(
+        [_FakeExecuteResult(), _FakeExecuteResult([done_record, unfinished_record])],
+        call_log=call_log,
+    )
+    _install_ledger_path(
+        monkeypatch, _FakeEngine([session_discovery, session_mutation]), graph_deletes, call_log
+    )
+
+    await rollback_module.cognify_rollback_handler(
+        pipeline_run_id=pipeline_run_id,
+        dataset=SimpleNamespace(id=dataset_id),
+        data_ingestion_info=[
+            _entry(PipelineRunCompleted, pipeline_run_id, dataset_id, done_id),
+            _entry(PipelineRunErrored, pipeline_run_id, dataset_id, unfinished_id),
+        ],
+        writes_durable=False,
+    )
+
+    assert graph_deletes == [([done_node, unfinished_node], [])]
+    delete_statements = [s for s in session_mutation.statements if getattr(s, "is_delete", False)]
+    assert len(delete_statements) == 1
+    assert "NOT IN" not in str(delete_statements[0])
+    for record in (done_record, unfinished_record):
+        assert str(dataset_id) not in record.pipeline_status["cognify_pipeline"]
+    assert kept_evidence_calls == [(dataset_id, pipeline_run_id, set())]
+
+
+@pytest.mark.asyncio
+async def test_graph_provenance_rollback_keeps_nothing_when_the_writes_are_not_durable(
+    monkeypatch, kept_evidence_calls
+):
+    """Graph-provenance path of the same rule: no data id is kept, every
+    stamp of the run is cleared."""
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
+
+    pipeline_run_id, dataset_id = uuid4(), uuid4()
+    done_id, unfinished_id = uuid4(), uuid4()
+    rollback_calls = []
+
+    class _FakeGraph:
+        async def find_node_source_refs_by_pipeline_run(self, _run):
+            return {
+                "n-done": [make_source_ref_key(dataset_id, done_id)],
+                "n-unfinished": [make_source_ref_key(dataset_id, unfinished_id)],
+            }
+
+        async def find_edge_source_refs_by_pipeline_run(self, _run):
+            return {}
+
+    async def _rollback(run, *, keep_data_ids=None):
+        rollback_calls.append((run, keep_data_ids))
+
+    fake_unified = SimpleNamespace(
+        supports_graph_provenance_delete=lambda: True,
+        graph=_FakeGraph(),
+        rollback_by_pipeline_run_id=_rollback,
+    )
+    done_record = _stamped_record(done_id, dataset_id)
+    unfinished_record = SimpleNamespace(
+        id=unfinished_id,
+        pipeline_status={"cognify_pipeline": {str(dataset_id): "DATASET_PROCESSING_STARTED"}},
+    )
+    # The kept-ids session runs no query; the reset session clears both.
+    engine = _FakeEngine(
+        [_FakeSession([]), _FakeSession([_FakeExecuteResult([done_record, unfinished_record])])]
+    )
+
+    async def _get_unified_engine():
+        return fake_unified
+
+    async def _stores_provenance_in_graph(_graph):
+        return True
+
+    monkeypatch.setattr(rollback_module, "get_unified_engine", _get_unified_engine)
+    monkeypatch.setattr(rollback_module, "stores_provenance_in_graph", _stores_provenance_in_graph)
+    monkeypatch.setattr(rollback_module, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(rollback_module.orm_attributes, "flag_modified", lambda *_args: None)
+
+    await rollback_module.cognify_rollback_handler(
+        pipeline_run_id=pipeline_run_id,
+        dataset=SimpleNamespace(id=dataset_id),
+        data_ingestion_info=[
+            _entry(PipelineRunCompleted, pipeline_run_id, dataset_id, done_id),
+            _entry(PipelineRunErrored, pipeline_run_id, dataset_id, unfinished_id),
+        ],
+        writes_durable=False,
+    )
+
+    assert rollback_calls == [(str(pipeline_run_id), set())]
+    for record in (done_record, unfinished_record):
+        assert str(dataset_id) not in record.pipeline_status["cognify_pipeline"]
+    assert kept_evidence_calls == [(dataset_id, pipeline_run_id, set())]

@@ -353,6 +353,60 @@ async def test_cognify_rollback_keeps_the_documents_the_failed_run_completed(
 
 
 @pytest.mark.asyncio
+async def test_cognify_rollback_keeps_nothing_when_the_push_to_s3_fails(
+    clean_test_environment, monkeypatch
+):
+    """S3 storage: every item completes and is stamped, then the graph push
+    fails. The writes never reached S3, so the whole run is rolled back and
+    every stamp cleared; the next cognify extracts both documents again
+    instead of skipping documents another process does not have."""
+    from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
+    from cognee.modules.pipelines.models.DataItemStatus import is_item_stamped
+
+    run_tasks_module = importlib.import_module("cognee.modules.pipelines.operations.run_tasks")
+
+    user = await get_default_user()
+    dataset_name = "rollback_push_failure_dataset"
+    dataset = await create_authorized_dataset(dataset_name, user)
+    add_result = await cognee.add(
+        ["First document: Alice knows Bob.", "Second document: Carol knows Dave."],
+        dataset_name=dataset_name,
+        user=user,
+    )
+    data_ids = {item["data_id"] for item in add_result.data_ingestion_info[:2]}
+    monkeypatch.setattr(LLMGateway, "acreate_structured_output", _mock_structured_output)
+
+    # Simulate S3 storage: the writes become durable only through the push,
+    # and the push fails after every item has completed.
+    async def _push_fails(_self):
+        raise OSError("S3 push failed")
+
+    monkeypatch.setattr(run_tasks_module, "writes_durable_before_push", lambda: False)
+    monkeypatch.setattr(LadybugAdapter, "push_to_s3", _push_fails, raising=False)
+
+    with pytest.raises(CognifyFailedError, match="S3 push failed"):
+        await cognee.cognify(datasets=[dataset_name], user=user, early_chunk_indexing=False)
+
+    for data_id in data_ids:
+        assert not is_item_stamped(await _get_data_record(data_id), "cognify_pipeline", dataset.id)
+    names = await _graph_node_names()
+    assert names.isdisjoint({"alice", "bob", "carol", "dave"})
+
+    # The push works again: the next cognify extracts both documents.
+    async def _push_ok(_self):
+        return None
+
+    monkeypatch.setattr(LadybugAdapter, "push_to_s3", _push_ok, raising=False)
+    run_info = (await cognee.cognify(datasets=[dataset_name], user=user))[dataset.id]
+    assert run_info.status == "PipelineRunCompleted"
+    outcomes = {
+        entry["data_id"]: type(entry["run_info"]).__name__ for entry in run_info.data_ingestion_info
+    }
+    assert outcomes == {data_id: "PipelineRunCompleted" for data_id in data_ids}
+    assert {"alice", "bob", "carol", "dave"} <= await _graph_node_names()
+
+
+@pytest.mark.asyncio
 async def test_non_incremental_cognify_rollback_clears_the_failed_documents_stale_stamp(
     clean_test_environment, monkeypatch
 ):
