@@ -185,12 +185,10 @@ async def test_the_worker_outlives_a_failed_tick(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
-async def test_shutdown_waits_for_a_tick_in_flight_outside_the_background_registry(
-    monkeypatch, caplog
-):
-    """A tick cut off between its claim and its starts would lose the slot. The worker runs
-    until shutdown, so in the background registry it would keep
-    ``wait_for_background_tasks()`` from ever returning."""
+async def test_the_shutdown_drain_waits_for_a_tick_in_flight_within_its_budget(monkeypatch, caplog):
+    """A tick cut off between its claim and its starts would lose the slot, so the app's
+    bounded drain waits for it. While running, the worker stays out of the background
+    registry, or ``wait_for_background_tasks()`` would never return."""
     entered, release, finished = asyncio.Event(), asyncio.Event(), []
 
     async def run_due_syncs(now, owned, start):
@@ -210,13 +208,14 @@ async def test_shutdown_waits_for_a_tick_in_flight_outside_the_background_regist
         # The running worker is not background work a drain waits for.
         assert await wait_for_background_tasks(timeout=TICK)
 
-        closing = asyncio.create_task(lifespan.__aexit__(None, None, None))
-        await asyncio.sleep(TICK * 5)
-        # Shutdown waits for the tick in flight.
-        assert not closing.done()
+        # The lifespan exit does not wait itself; it hands the worker to the app's drain.
+        await asyncio.wait_for(lifespan.__aexit__(None, None, None), timeout=5)
+        # A tick stuck past the drain's budget does not hold shutdown.
+        assert not await wait_for_background_tasks(timeout=TICK)
         assert finished == []
         release.set()
-        await asyncio.wait_for(closing, timeout=5)
+        # Within the budget, the drain waits for the tick in flight.
+        assert await wait_for_background_tasks(timeout=5)
 
     assert finished == [True]
     assert "Scheduled sync worker stopped" in caplog.text
