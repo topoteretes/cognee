@@ -65,7 +65,6 @@
   "GET /api/v1/proposals/{proposal_id}",
   "GET /api/v1/provenance/anchors/verify",
   "GET /api/v1/provenance/check",
-  "GET /api/v1/provenance/drift",
   "GET /api/v1/provenance/entry/{entity_id}",
   "GET /api/v1/provenance/export",
   "GET /api/v1/provenance/history/{entity_id}",

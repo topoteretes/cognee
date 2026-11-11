@@ -1,9 +1,10 @@
-"""Journey: the audit ledger across every way a data item's memory is removed.
+"""Journey: the audit ledger across the life of a data item.
 
-With ``PROVENANCE_TRACKING`` on, each data item gets one ledger row, and that
-row is what a delete retracts: forgetting one document, dropping only its
-memory, deleting the dataset. A ledger that cannot be written fails the
-operation, and the retry completes it.
+With ``PROVENANCE_TRACKING`` on, each data item gets one ledger row and the
+nodes and edges it produced get none. The row gets a new version when the
+item's content changes, and a tombstone when its memory is removed: forgetting
+one document, dropping only its memory, deleting the dataset. A ledger that
+cannot be written fails the operation, and the retry completes it.
 """
 
 from __future__ import annotations
@@ -29,6 +30,10 @@ DOC_ORCHARD = (
 DOC_CHOIR = (
     "Title: Saltmarsh Choir\n\nThe Saltmarsh Choir rehearses in the Corn Exchange under conductor "
     "Yusuf Haldane."
+)
+DOC_CHOIR_V2 = (
+    "Title: Saltmarsh Choir\n\nThe Saltmarsh Choir rehearses in the Corn Exchange under conductor "
+    "Ingrid Solvay."
 )
 
 
@@ -58,7 +63,7 @@ async def _item(manager, dataset_id, data_id) -> dict:
 
 @pytest.mark.journey
 @pytest.mark.asyncio
-async def test_ledger_retracts_the_data_item_on_every_delete_path(
+async def test_ledger_follows_the_data_item_through_update_and_every_delete_path(
     clean_env, default_user, ledger_on
 ):
     manager = ledger_on
@@ -69,12 +74,24 @@ async def test_ledger_retracts_the_data_item_on_every_delete_path(
     orchard = await _data_id(dataset_id, default_user, "bramblefield")
     choir = await _data_id(dataset_id, default_user, "saltmarsh choir")
 
-    # --- every data item is recorded, and a fresh dataset shows no drift ----------
+    # --- one row per data item, attributed by id, and none for what it produced ---
     for data_id in (kites, orchard, choir):
-        assert (await _item(manager, dataset_id, data_id))["invalidated"] is False
-    drift = await manager.check_drift(dataset_id, default_user.id)
-    assert drift["valid"] is True, drift
-    assert drift["checked"] > 0
+        row = await _item(manager, dataset_id, data_id)
+        assert row["invalidated"] is False
+        assert row["agent_id"] == str(default_user.id)
+    snapshot = await _support.snapshot_dataset(dataset_id, default_user)
+    assert snapshot.graph_nodes > 3 and snapshot.graph_edges > 0
+    kinds = {row["entity_type"] async for row in manager.export(dataset_id=dataset_id)}
+    assert kinds == {"data_item"}
+
+    # --- an update is a new version that names the old and the new content -------
+    before = (await _item(manager, dataset_id, choir))["metadata"]["snapshot"]["hash"]
+    await cognee.update(data_id=choir, data=DOC_CHOIR_V2, dataset_id=dataset_id, user=default_user)
+    after = (await _item(manager, dataset_id, choir))["metadata"]["snapshot"]["hash"]
+    assert after != before
+    history = await manager.revision_history(ledger_data_item_key(dataset_id, choir))
+    assert len(history) == 2
+    assert history[-1]["delta"] == {"content_hash": [before, after]}
 
     # --- forget one document --------------------------------------------------------
     await cognee.forget(data_id=kites, dataset_id=dataset_id, user=default_user)
@@ -98,13 +115,7 @@ async def test_ledger_retracts_the_data_item_on_every_delete_path(
         assert tombstone["invalidated"] is True
         assert tombstone["invalidation_reason"] == "dataset_deleted"
 
-    # --- only data items are ever retracted, and the chain holds -------------------
-    retracted = {
-        row["entity_type"]
-        async for row in manager.export(dataset_id=dataset_id, include_archived=False)
-        if row["invalidated"]
-    }
-    assert retracted == {"data_item"}
+    # --- nothing was removed from the ledger, and the chain holds -------------------
     assert (await manager.verify_chain())["valid"] is True
     assert (await manager.check(dataset_id=dataset_id))["valid"] is True
 
@@ -134,6 +145,43 @@ async def test_a_tombstone_that_cannot_be_written_fails_the_delete_and_a_retry_w
     await cognee.forget(data_id=choir, dataset_id=dataset_id, user=default_user)
     assert (await _item(manager, dataset_id, choir))["invalidated"] is True
     assert await cognee.datasets.list_data(dataset_id, default_user) == []
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_an_update_the_ledger_cannot_record_fails_and_a_retry_records_it(
+    clean_env, default_user, ledger_on, monkeypatch
+):
+    manager = ledger_on
+    result = await cognee.remember([DOC_CHOIR], dataset_name=DATASET)
+    dataset_id = _support.as_uuid(result.dataset_id)
+    choir = await _data_id(dataset_id, default_user, "saltmarsh choir")
+    key = ledger_data_item_key(dataset_id, choir)
+
+    async def ledger_down(write_fns):
+        raise RuntimeError("ledger down")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(storage, "append_chained_many", ledger_down)
+        with pytest.raises(RuntimeError, match="ledger down"):
+            await cognee.update(
+                data_id=choir, data=DOC_CHOIR_V2, dataset_id=dataset_id, user=default_user
+            )
+    [original] = await manager.revision_history(key)
+
+    # The retry may rebuild the item from scratch, which the ledger records as
+    # memory dropped and brought back; either way it ends live on the new content.
+    await cognee.update(data_id=choir, data=DOC_CHOIR_V2, dataset_id=dataset_id, user=default_user)
+    latest = (await manager.revision_history(key))[-1]
+    assert latest.get("invalidated") is not True
+    assert latest["content_hash"] != original["content_hash"]
+    assert latest["delta"] == {"content_hash": [original["content_hash"], latest["content_hash"]]}
+    [row] = await cognee.datasets.list_data(dataset_id, default_user)
+    assert "ingrid solvay" in _support.stored_text(row)
+    chunks = await _support.vector_texts(dataset_id, default_user)
+    assert any("solvay" in text for text in chunks) and not any(
+        "haldane" in text for text in chunks
+    )
 
 
 @pytest.mark.journey

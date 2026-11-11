@@ -1,11 +1,10 @@
 """Integration: the audit ledger across a full memory lifecycle.
 
-cognify writes rows -> forget(memory_only) tombstones the data item -> re-cognify
-brings it back -> an external anchor is taken -> the dataset is deleted and
-the data item is retracted again. Lineage rows are assertions and stay; only
-the data item is ever tombstoned. The hash chain, referential integrity, and
-the anchor must hold at every step, and the export must be re-verifiable from
-its own content.
+cognify records the data item (and nothing it produced) -> forget(memory_only)
+tombstones it -> re-cognify brings it back -> an external anchor is taken ->
+the dataset is deleted and the data item is retracted again. The hash chain,
+referential integrity, and the anchor must hold at every step, and the export
+must be re-verifiable from its own content.
 
 Needs an LLM key (the graph is extracted by the configured model).
 """
@@ -26,6 +25,7 @@ from cognee.modules.engine.operations.setup import setup
 from cognee.modules.provenance import anchors, get_provenance_manager
 from cognee.modules.provenance.integrity import canonical_entity_id, compute_checksum
 from cognee.modules.provenance.models import ProvenanceEntry
+from cognee.modules.provenance.tombstones import ledger_data_item_key
 from cognee.modules.users.methods import get_default_user
 
 pytestmark = [
@@ -71,61 +71,28 @@ async def test_ledger_round_trip(tmp_path, monkeypatch):
     manager = get_provenance_manager()
     dataset_name = "ledger_round_trip"
 
-    # 1. cognify writes rows -------------------------------------------------- #
+    # 1. cognify records the data item, and only the data item ---------------- #
     await cognee.add([TEXT], dataset_name=dataset_name, user=user)
     await cognee.cognify([dataset_name], user=user)
     dataset_id = (await get_datasets_by_name(dataset_name, user.id))[0].id
+    [data] = await cognee.datasets.list_data(dataset_id, user)
+    item_key = ledger_data_item_key(dataset_id, data.id)
 
     stats = await manager.get_statistics(dataset_id=dataset_id)
-    assert stats["live_entries"] > 0
-    assert stats["invalidated_count"] == 0
-    assert {"entity", "relationship"} <= set(stats["entity_types"])
-    await _assert_intact(manager, dataset_id)
-    live_before, dead_before = await _live_and_dead(manager, dataset_id)
-    assert live_before and not dead_before
-
-    # Lineage of an edge reaches its endpoints, with checksums verified.
-    edge_key = next(key for key in live_before if key.startswith("rel:"))
-    lineage = await manager.get_lineage(edge_key)
-    assert lineage["entity_count"] >= 2
-    assert lineage["integrity_verified"] is True
-
-    # 1b. snapshots: every node row carries one; the graph matches the ledger.
-    entity_key = None
-    for key in sorted(live_before):
-        if key.startswith("rel:"):
-            continue
-        row = await manager.get_provenance(key)
-        if row["entity_type"] == "entity" and row["metadata"].get("snapshot"):
-            entity_key = key
-            break
-    assert entity_key is not None
-    entity_row = await manager.get_provenance(entity_key)
-    assert entity_row["metadata"]["snapshot"]["fields"]["name"]
-    drift_before = await manager.check_drift(dataset_id, user.id)
-    assert drift_before["valid"] is True, drift_before
-    assert drift_before["checked"] > 0 and drift_before["unsnapshotted"] == 0
-
-    # An out-of-band graph edit (no cognee write path) is reported as drift,
-    # while the ledger's own chain stays valid — the gap the snapshot closes.
+    assert stats["entity_types"] == {"data_item": 1}
+    assert stats["live_entries"] == 1 and stats["invalidated_count"] == 0
+    row = await manager.get_provenance(item_key)
+    assert row["metadata"]["snapshot"]["fields"] == {"content_hash": data.content_hash}
+    assert row["agent_id"] == str(user.id)
     async with set_database_global_context_variables(dataset_id, user.id):
-        graph = await get_graph_engine()
-        raw_id = entity_key.split(":", 1)[1]
-        assert await graph.update_node(raw_id, {"description": "edited behind cognee's back"})
-    drift_after = await manager.check_drift(dataset_id, user.id)
-    assert drift_after["valid"] is False
-    [drifted] = [d for d in drift_after["drifted"] if d["entity_id"] == entity_key]
-    assert drifted["delta"]["description"][1] == "edited behind cognee's back"
+        nodes, edges = await (await get_graph_engine()).get_graph_data()
+    assert len(nodes) > 1 and edges, "the graph holds what the ledger does not repeat"
     await _assert_intact(manager, dataset_id)
 
-    # 2. forget(memory_only) tombstones the data item, not its lineage -------- #
-    items_before = {key for key in live_before if ":data_item:" in key}
-    assert len(items_before) == 1
+    # 2. forget(memory_only) tombstones the data item ------------------------ #
     await cognee.forget(dataset=dataset_name, memory_only=True, user=user)
     live, dead = await _live_and_dead(manager, dataset_id)
-    assert dead == items_before
-    assert live == live_before - items_before
-    [item_key] = items_before
+    assert (live, dead) == (set(), {item_key})
     tombstone = await manager.get_provenance(item_key)
     assert tombstone["invalidated"] is True
     assert tombstone["invalidation_reason"] == "dataset_deleted"
@@ -134,7 +101,7 @@ async def test_ledger_round_trip(tmp_path, monkeypatch):
     # 3. re-cognify brings the data item back -------------------------------- #
     await cognee.cognify([dataset_name], user=user)
     live, dead = await _live_and_dead(manager, dataset_id)
-    assert not dead and item_key in live
+    assert (live, dead) == ({item_key}, set())
     history = await manager.revision_history(item_key)
     kinds = Counter("tombstone" if v.get("invalidated") else "assertion" for v in history)
     assert kinds == {"tombstone": 1, "assertion": 2}
@@ -150,7 +117,7 @@ async def test_ledger_round_trip(tmp_path, monkeypatch):
     total_before = (await manager.get_statistics())["total_entries"]
     await cognee.forget(dataset=dataset_name, user=user)
     live, dead = await _live_and_dead(manager, dataset_id)
-    assert dead == items_before and live
+    assert (live, dead) == (set(), {item_key})
     assert (await manager.get_statistics())["total_entries"] == total_before + 1  # one tombstone
     await _assert_intact(manager, dataset_id)
     assert (await manager.verify_anchors())["valid"] is True  # anchored row still there

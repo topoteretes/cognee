@@ -122,6 +122,7 @@ from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_sum
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
 from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
+from cognee.tasks.provenance.record_provenance import record_data_item_content
 from cognee.tasks.storage.add_data_points import add_data_points
 
 logger = get_logger("incremental_update")
@@ -1173,6 +1174,10 @@ async def _write_and_publish(
         for chunk_id in plan.reused
         if chunk_id not in redated
     )
+    # The audit ledger versions the data item on its new content hash before
+    # the row flips: a ledger failure leaves the row on the old version, and
+    # the update is retried.
+    await record_data_item_content(context, staged.content_hash)
     await publish_updated_data(data_id, dataset_id, staged, surviving_tokens + new_tokens, node_set)
 
     added_chunks = len(to_extract) + len(reused_chunks)

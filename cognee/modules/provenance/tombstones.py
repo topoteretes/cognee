@@ -1,12 +1,11 @@
 """Deletion-driven tombstones for the audit ledger, one per data item.
 
-The ledger is append-only. Node and relationship rows are assertions: they
-record what a data item produced, and are never retracted one by one. What is
-retracted is the data item itself. Every writer records a ``data_item`` row
-for the (dataset, data item) it stores output for (``record_provenance``), and
-when that item's memory leaves the graph this module invalidates that one row
-(``prov:Invalidation``). An assertion still stands while the data item named
-by its ``source_ref_key`` is live.
+The ledger is append-only and holds one row per data item: every writer
+records a ``data_item`` row for the (dataset, data item) it stores output for
+(``record_provenance``). When that item's memory leaves the graph this module
+invalidates that row (``prov:Invalidation``). The nodes and edges the item
+produced are not in the ledger; the graph's own source refs say which data
+item each came from.
 
 A tombstone therefore needs only ``(dataset_id, data_id)``, never the list of
 elements a graph delete removed. Every delete path knows those two ids, and a
@@ -80,15 +79,13 @@ def dataset_id_from_ledger_key(entity_id: str) -> UUID | None:
 
 
 def agent_id_for(user: Any) -> str:
-    """user.email > str(user.id) > "cognee" — the writer's attribution rule."""
-    if user is not None:
-        email = getattr(user, "email", None)
-        if email:
-            return str(email)
-        user_id = getattr(user, "id", None)
-        if user_id is not None:
-            return str(user_id)
-    return "cognee"
+    """Who a ledger row is attributed to: the user's id, else ``"cognee"``.
+
+    The id, never the email: the ledger is kept after the data it describes is
+    deleted, so it holds ids and hashes only.
+    """
+    user_id = getattr(user, "id", None)
+    return str(user_id) if user_id is not None else "cognee"
 
 
 async def _tombstone_ids(

@@ -294,23 +294,21 @@ class ProvenanceManager:
             logger.exception("Failed to track entity %r", entity_id)
             return None
 
-    def _unversioned_write(
+    def _relationship_write(
         self,
-        entity_id: str,
-        entity_type: str,
-        default_activity: str,
+        relationship_id: str,
         source: str,
         metadata: dict[str, Any] | None,
         kwargs: dict[str, Any],
     ) -> Callable[[AsyncSession, int, str | None], Awaitable[ProvenanceEntry]]:
-        """Build the chained write for a kind that never versions (relationship, data item)."""
+        """Build the chained write for one relationship track (never versions)."""
 
         def build_entry(first_seen: str | None) -> ProvenanceEntry:
             now = utc_now_iso()
             return ProvenanceEntry(
-                entity_id=entity_id,
-                entity_type=entity_type,
-                activity_id=kwargs.get("activity_id", default_activity),
+                entity_id=relationship_id,
+                entity_type="relationship",
+                activity_id=kwargs.get("activity_id", "relationship_tracking"),
                 metadata=dict(metadata or {}),
                 timestamp=now,
                 first_seen=first_seen or now,
@@ -322,7 +320,7 @@ class ProvenanceManager:
         async def write(
             session: AsyncSession, next_seq: int, prev_checksum: str | None
         ) -> ProvenanceEntry:
-            existing_row = await storage.retrieve_row(session, entity_id)
+            existing_row = await storage.retrieve_row(session, relationship_id)
             if existing_row is not None:
                 return await self._resurrect_or_noop(
                     session, existing_row, next_seq, prev_checksum, build_entry
@@ -337,26 +335,6 @@ class ProvenanceManager:
             return entry
 
         return write
-
-    def _relationship_write(
-        self,
-        relationship_id: str,
-        source: str,
-        metadata: dict[str, Any] | None,
-        kwargs: dict[str, Any],
-    ) -> Callable[[AsyncSession, int, str | None], Awaitable[ProvenanceEntry]]:
-        """Build the chained write for one relationship track (never versions)."""
-        return self._unversioned_write(
-            relationship_id, "relationship", "relationship_tracking", source, metadata, kwargs
-        )
-
-    def _data_item_write(
-        self, data_item_key: str, kwargs: dict[str, Any]
-    ) -> Callable[[AsyncSession, int, str | None], Awaitable[ProvenanceEntry]]:
-        """Build the chained write for one data item (see ``ProvenanceBatch.track_data_item``)."""
-        return self._unversioned_write(
-            data_item_key, "data_item", "data_item_tracking", "", None, kwargs
-        )
 
     async def track_relationship(
         self,
@@ -831,12 +809,6 @@ class ProvenanceManager:
             "dataset_id": str(dataset_id) if dataset_id is not None else None,
         }
 
-    async def check_drift(self, dataset_id: Any, owner_id: Any = None) -> dict[str, Any]:
-        """Compare each live node row's snapshot with the graph (see ``drift.py``)."""
-        from . import drift
-
-        return await drift.check_drift(dataset_id, owner_id)
-
     async def anchor(self) -> dict[str, Any] | None:
         """Sign the chain head and append it to the external anchor file.
 
@@ -938,16 +910,27 @@ class ProvenanceBatch:
             )
         )
 
-    def track_data_item(self, data_item_key: str, **kwargs) -> None:
-        """Queue the row of one data item, the unit a deletion tombstones.
+    def track_data_item(
+        self, data_item_key: str, content_hash: str | None = None, **kwargs
+    ) -> None:
+        """Queue the row of one data item: what the ledger records and a deletion retracts.
 
-        Like a relationship it never versions: a live row is a chain-preserving
-        no-op, so every batch stored for the item may queue it, and a tombstoned
-        one is resurrected (the item's memory came back).
+        The row holds the item's content hash and nothing else about its
+        content. The same hash on a live row is a chain-preserving no-op, so
+        every batch stored for the item may queue it. A different hash versions
+        the row, with the old and new hash in ``metadata["delta"]`` (an
+        update). A tombstoned row is resurrected: the item has memory again.
         """
         self._manager._validate_id(data_item_key, "data_item_key")
         self._manager._warn_unknown_kwargs("track_data_item", kwargs)
-        self._write_fns.append(self._manager._data_item_write(data_item_key, kwargs))
+        metadata = {
+            "snapshot": {"fields": {"content_hash": content_hash}, "hash": content_hash or ""}
+        }
+        self._write_fns.append(
+            self._manager._entity_write(
+                data_item_key, "", metadata, {**kwargs, "entity_type": "data_item"}
+            )
+        )
 
     def invalidate(
         self,

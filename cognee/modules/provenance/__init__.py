@@ -20,25 +20,24 @@ every ledger entry (``source_ref_key``) instead of inventing a new identifier.
 It never touches graph marking, never overwrites ``source_*`` fields, and is
 written passively at the ``add_data_points`` storage seam (opt-in via
 ``PROVENANCE_TRACKING``, default off; ``cognee/tasks/provenance/``) so every
-pipeline that stores DataPoints is covered. Next to what a batch produced, the
-writer records the data item the batch belongs to. Deletions retract that one
-row: the graph delete choke points and the cognify rollback call
-``tombstones.py``, which writes an ``invalidate`` tombstone per data item
-(never a row delete). The rows of what the item produced are assertions and
-stay. A later re-ingest brings the data item back, tombstone kept in its
-version history. A write or a tombstone that fails raises, so the ingestion
-or the delete fails with it instead of leaving a gap nothing reports.
+pipeline that stores DataPoints is covered. It records the data item a batch
+was stored for, one row holding ids and the item's content hash, and never
+the nodes and edges the item produced: the graph's source refs already say
+which data item each came from, and a row per node and edge costs about ten
+times the source text. The row gets a new version when the item's content
+hash changes (an update). Deletions retract it: the graph delete choke points
+and the cognify rollback call ``tombstones.py``, which writes an
+``invalidate`` tombstone on the data item's row (never a row delete), and a
+later re-ingest brings it back, tombstone kept in its version history. A
+write or a tombstone that fails raises, so the ingestion or the delete fails
+with it instead of leaving a gap nothing reports.
 
 Reading it: ``ProvenanceManager`` (``get_lineage`` / ``revision_history`` /
 ``verify_chain`` / ``check`` / ``get_statistics`` / ``export``, all
 dataset-scopable), ``cognee-cli provenance`` and ``/api/v1/provenance``.
 ``anchors.py`` adds external HMAC anchors of the chain head
 (``PROVENANCE_ANCHOR_KEY`` / ``PROVENANCE_ANCHOR_PATH``) — the defense against
-a ledger that is rewritten and re-chained in place. ``snapshot.py`` puts a
-compact content snapshot on every node row (field deltas between versions,
-no-op suppression of identical re-mentions) and ``drift.py`` compares those
-snapshots with the live graph — the defense against a graph edited behind
-the ledger's back.
+a ledger that is rewritten and re-chained in place.
 
 Three env flags govern three of these systems and must not be mixed up:
 

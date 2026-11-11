@@ -12,7 +12,7 @@ something" is never a pass here.
 | `test_session_journey.py` | Remember in a session, recall from cache, bridge into the graph with improve, delete the session | Session cache, keyword session search, improve bridging, cache deletion |
 | `test_data_lifecycle.py` | remember, update, forget one item, forget dataset, forget everything, remember again; snapshot all three stores after each step | Stale vectors or graph nodes after update/delete, deletion leaving zombies |
 | `test_idempotency_and_recovery.py` | Same content twice, explicit cognify re-run, injected LLM outage, retry | Duplicate ingestion, half-written graphs, dishonest pipeline status |
-| `test_provenance_ledger_journey.py` | With `PROVENANCE_TRACKING` on: forget one item, drop its memory only, re-cognify, delete the dataset; a ledger that cannot be written | A delete path that writes no tombstone, drift reported on a fresh dataset, a ledger failure that is swallowed |
+| `test_provenance_ledger_journey.py` | With `PROVENANCE_TRACKING` on: remember, update, forget one item, drop its memory only, re-cognify, delete the dataset; a ledger that cannot be written | Ledger rows for nodes or edges, an update the ledger does not version, a delete path that writes no tombstone, a ledger failure that is swallowed |
 | `test_http_api_journey.py` | Register, login, add, cognify (blocking + background polling), search, remember/recall, isolation between users, delete; route-table snapshot | Wire-shape drift, auth holes, 500s on bad input, polling contract |
 
 ## Modes

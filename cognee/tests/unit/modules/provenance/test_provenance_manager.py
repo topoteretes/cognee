@@ -237,24 +237,30 @@ class TestInvalidate:
             await batch.commit()
         assert (await manager.get_provenance("e1"))["invalidated"] is False
 
-    async def test_data_item_row_never_versions_and_is_resurrected(self, manager):
-        async def track(run_id):
+    async def test_data_item_row_versions_on_its_content_hash_only(self, manager):
+        async def track(run_id, content_hash):
             batch = manager.batch()
-            batch.track_data_item("ds:data_item:d1", bundle_id=run_id)
+            batch.track_data_item("ds:data_item:d1", content_hash=content_hash, bundle_id=run_id)
             return await batch.commit()
 
-        [created] = await track("run-1")
+        [created] = await track("run-1", "hash-1")
         assert created.entity_type == "data_item" and created.bundle_id == "run-1"
-        # Queued with every batch stored for the item: a live row is a no-op.
-        [again] = await track("run-2")
+        # Queued with every batch stored for the item: the same content is a no-op.
+        [again] = await track("run-2", "hash-1")
         assert again.sequence_id == created.sequence_id and again.bundle_id == "run-1"
         assert (await manager.get_statistics())["total_entries"] == 1
 
+        # New content is a new version that names both hashes.
+        [updated] = await track("run-3", "hash-2")
+        assert updated.bundle_id == "run-3"
+        assert updated.metadata["delta"] == {"content_hash": ["hash-1", "hash-2"]}
+
+        # A tombstoned row comes back even with the content it had.
         await manager.invalidate("ds:data_item:d1", "forget", reason="data_deleted")
-        [resurrected] = await track("run-3")
-        assert resurrected.invalidated is False and resurrected.bundle_id == "run-3"
+        [resurrected] = await track("run-4", "hash-2")
+        assert resurrected.invalidated is False and resurrected.bundle_id == "run-4"
         history = await manager.revision_history("ds:data_item:d1")
-        assert [bool(version.get("invalidated")) for version in history] == [False, True, False]
+        assert [bool(v.get("invalidated")) for v in history] == [False, False, True, False]
         assert (await manager.verify_chain())["valid"] is True
 
 

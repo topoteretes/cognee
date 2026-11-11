@@ -35,26 +35,20 @@ USER = SimpleNamespace(id=uuid4(), email="u@x.io")
 
 
 async def _seed_items(manager, dataset_id, data_ids, run_id="run-1"):
-    """Write what record_provenance writes per data item: its row and one assertion."""
+    """Write what record_provenance writes: one row per data item."""
     batch = manager.batch()
     for data_id in data_ids:
-        common = {"bundle_id": run_id, "source_ref_key": make_source_ref_key(dataset_id, data_id)}
-        batch.track_data_item(ledger_data_item_key(dataset_id, data_id), **common)
-        batch.track_entity(
-            ledger_node_key(dataset_id, f"node-of-{data_id}"),
-            source="doc",
-            entity_type="entity",
-            **common,
+        batch.track_data_item(
+            ledger_data_item_key(dataset_id, data_id),
+            content_hash="hash-1",
+            bundle_id=run_id,
+            source_ref_key=make_source_ref_key(dataset_id, data_id),
         )
     await batch.commit()
 
 
 async def _item(manager, dataset_id, data_id):
     return await manager.get_provenance(ledger_data_item_key(dataset_id, data_id))
-
-
-async def _node(manager, dataset_id, data_id):
-    return await manager.get_provenance(ledger_node_key(dataset_id, f"node-of-{data_id}"))
 
 
 def _ledger_down(monkeypatch):
@@ -82,15 +76,14 @@ class TestKeys:
         ):
             assert dataset_id_from_ledger_key(key) == dataset_id
 
-    def test_agent_id_precedence(self):
+    def test_rows_are_attributed_to_the_user_id_never_the_email(self):
         user_id = uuid4()
-        assert agent_id_for(SimpleNamespace(email="u@x.io", id=user_id)) == "u@x.io"
-        assert agent_id_for(SimpleNamespace(email=None, id=user_id)) == str(user_id)
+        assert agent_id_for(SimpleNamespace(email="u@x.io", id=user_id)) == str(user_id)
         assert agent_id_for(None) == "cognee"
 
 
 class TestTombstoneDataItem:
-    async def test_retracts_the_item_and_leaves_its_assertions(self, manager):
+    async def test_retracts_that_item_only(self, manager):
         dataset_id, deleted, kept = uuid4(), uuid4(), uuid4()
         await _seed_items(manager, dataset_id, [deleted, kept])
 
@@ -99,9 +92,7 @@ class TestTombstoneDataItem:
         tombstone = await _item(manager, dataset_id, deleted)
         assert tombstone["invalidated"] is True
         assert tombstone["invalidation_reason"] == "data_deleted"
-        assert tombstone["invalidated_by"] == "u@x.io"
-        # Assertions are never retracted one by one, and the other item is live.
-        assert (await _node(manager, dataset_id, deleted))["invalidated"] is False
+        assert tombstone["invalidated_by"] == str(USER.id)
         assert (await _item(manager, dataset_id, kept))["invalidated"] is False
         assert (await manager.get_statistics())["invalidated_count"] == 1
         assert (await manager.verify_chain())["valid"] is True
@@ -161,7 +152,6 @@ class TestTombstoneDataset:
             tombstone = await _item(manager, dataset_a, data_id)
             assert tombstone["invalidated"] is True
             assert tombstone["invalidation_reason"] == "dataset_deleted"
-            assert (await _node(manager, dataset_a, data_id))["invalidated"] is False
         assert (await _item(manager, dataset_b, item_b))["invalidated"] is False
         assert await tombstone_dataset(dataset_a, user=USER) == 0
         assert (await manager.verify_chain())["valid"] is True

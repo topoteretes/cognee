@@ -655,7 +655,7 @@ async def test_fresh_chunks_are_extracted_in_bounded_batches(monkeypatch):
         for i in range(7)
     ]
     bundle = {
-        "staged": SimpleNamespace(),
+        "staged": SimpleNamespace(content_hash="staged-hash"),
         "document": SimpleNamespace(id=uuid4(), belongs_to_set=None, source_node_set=None),
         "stored_chunks": [],
         "plan": ChunkPlan(fresh=fresh, regions=1),

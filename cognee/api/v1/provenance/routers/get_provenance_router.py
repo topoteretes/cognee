@@ -2,8 +2,8 @@
 
 Every endpoint is read-only — the ledger is written by ingestion and by the
 delete paths (tombstones), never through HTTP. Access control follows the
-dataset namespace baked into every ledger key (``{dataset_id}:{node_id}`` /
-``rel:{dataset_id}:...``): a per-entity lookup is allowed when the caller can
+dataset namespace baked into every ledger key
+(``{dataset_id}:data_item:{data_id}``): a per-entity lookup is allowed when the caller can
 read the dataset the key belongs to, and the ledger-wide walks (verify,
 check, statistics, export) require a ``dataset_id`` unless the caller is a
 superuser. Keys without a dataset prefix (custom pipelines that bypass the
@@ -123,20 +123,6 @@ def get_provenance_router() -> APIRouter:
         """Dangling lineage links (parent / used / version / activity references)."""
         await _authorize_scope(user, dataset_id)
         return await get_provenance_manager().check(strict=strict, dataset_id=dataset_id)
-
-    @router.get("/drift", summary="Compare the ledger's snapshots with the graph")
-    @log_usage(function_name="GET /v1/provenance/drift", log_type="api_endpoint")
-    async def drift(
-        dataset_id: UUID = Query(...),
-        user: User = Depends(get_authenticated_user),
-    ) -> dict[str, Any]:
-        """Each node row carries a content snapshot; this re-reads the nodes that
-        are in the graph and reports the ones whose content changed out of band
-        (`drifted`, with a field delta)."""
-        dataset = await get_authorized_dataset(user, dataset_id, "read")
-        if dataset is None:
-            raise HTTPException(status_code=403, detail=f"No read access to dataset {dataset_id}.")
-        return await get_provenance_manager().check_drift(dataset_id, dataset.owner_id)
 
     @router.get("/statistics", summary="Ledger statistics")
     @log_usage(function_name="GET /v1/provenance/statistics", log_type="api_endpoint")
