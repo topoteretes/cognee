@@ -1,5 +1,4 @@
 import asyncio
-import os
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from contextvars import ContextVar
@@ -64,21 +63,16 @@ async def close_run_with_cause(run: AsyncGenerator, cause: Exception) -> None:
         _close_cause.reset(token)
 
 
-def writes_durable_before_push(graph_engine: Any, relational_engine: Any) -> bool:
+def writes_durable_before_push(*engines: Any) -> bool:
     """Whether a run's writes are durable as soon as they are written.
 
-    With ``STORAGE_BACKEND=s3`` an embedded graph or relational database
-    (Ladybug, SQLite) is a local temp copy that reaches S3 only through the
-    ``push_to_s3`` after the item loop, so until that push a run's writes exist
-    in this process alone. This is the condition the adapters' ``push_to_s3``
-    checks. Server databases (Neo4j, Postgres) and any other storage are
-    durable at once.
+    An engine with ``push_to_s3`` (Ladybug, SQLite) may keep its writes in a
+    local copy of an S3 database until the push after the item loop, so until
+    then they exist in this process alone; its ``needs_push_to_s3`` says so,
+    the same check its ``push_to_s3`` makes. Every such engine must define it:
+    a missing one raises rather than passing writes off as durable.
     """
-    if os.getenv("STORAGE_BACKEND", "").lower() != "s3":
-        return True
-    return not (
-        hasattr(graph_engine, "temp_graph_file") or hasattr(relational_engine, "temp_db_file")
-    )
+    return not any(engine.needs_push_to_s3() for engine in engines if hasattr(engine, "push_to_s3"))
 
 
 async def run_tasks(
