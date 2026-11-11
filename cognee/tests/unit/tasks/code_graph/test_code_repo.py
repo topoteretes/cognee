@@ -105,6 +105,25 @@ def test_lfs_pointers_of_documents_are_skipped(tmp_path):
     assert {"lfs-notes.md", "lfs-short.md", "lfs-almost.md"} <= document_names
 
 
+def test_lfs_pointers_with_crlf_are_skipped(tmp_path):
+    """Git checkouts on Windows with core.autocrlf convert pointer line endings to CRLF.
+    They must still be recognized as pointers and skipped."""
+    repo = _make_repo(tmp_path)
+    (repo / "crlf-manual.pdf").write_bytes(
+        f"version https://git-lfs.github.com/spec/v1\r\noid sha256:{'a' * 64}\r\nsize 2048000\r\n".encode(
+            "ascii"
+        )
+    )
+    (repo / "crlf-deck.pptx").write_bytes(
+        f"version https://git-lfs.github.com/spec/v1\r\next-0-foo sha256:{'b' * 64}\r\noid sha256:{'a' * 64}\r\nsize 12\r\n".encode(
+            "ascii"
+        )
+    )
+    _covered, _documents, skipped = partition_repo_files(repo)
+    skipped_names = {path.relative_to(repo).as_posix() for path in skipped}
+    assert {"crlf-manual.pdf", "crlf-deck.pptx"} <= skipped_names
+
+
 def test_manifest_hash_tracks_code_content(tmp_path):
     repo = _make_repo(tmp_path)
     covered, _documents, _skipped = partition_repo_files(repo)
@@ -121,7 +140,7 @@ def test_manifest_hash_tracks_code_content(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_directory_with_project_resolves_to_repo_item_plus_documents(tmp_path):
+async def test_directory_with_project_resolves_to_repo_item_plus_documents(tmp_path, llm_key_set):
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
 
@@ -312,7 +331,10 @@ async def test_symlinks_are_not_followed_into_the_manifest(tmp_path):
     repo.mkdir()
     (repo / "pyproject.toml").write_text("[project]\nname='x'")
     (repo / "real.py").write_text("x = 1")
-    (repo / "creds.py").symlink_to(secret)
+    try:
+        (repo / "creds.py").symlink_to(secret)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlink creation not permitted or supported on this environment")
 
     covered, documents, _skipped = partition_repo_files(repo)
 
