@@ -19,6 +19,11 @@ ends, the pipe closes, and the worker cancels its items and exits (see
 long as that cancellation takes. Nothing makes a process that recovers the run
 wait for it: the run's ownership lock, which recovery goes by, was this
 process's alone.
+
+A run that is cancelled or fails asks its workers to stop and waits for them,
+so that none still writes when the run is rolled back. A worker that has not
+ended ``STOP_WAIT_SECONDS`` after it was asked is killed. A worker that is
+running its shard is never timed: it is waited for however long it takes.
 """
 
 import asyncio
@@ -33,6 +38,9 @@ logger = get_logger("process_worker_backend")
 
 WORKER_COMMAND = (sys.executable, "-m", "cognee.modules.pipelines.execution.worker")
 
+# How long a worker that was asked to stop has to end before it is killed.
+STOP_WAIT_SECONDS = 60
+
 
 class ProcessWorkerBackend:
     """``WorkerBackend`` that runs each shard in a process on this machine.
@@ -42,10 +50,10 @@ class ProcessWorkerBackend:
     to register) passes a command that does it and then runs ``worker.main``.
 
     The process ``command`` starts has to be the worker itself, with the
-    standard input it is given: it is the process that is asked to stop and
-    waited for, and its standard input is how it learns that this process is
-    gone. A shell or wrapper that runs the worker as a child of its own is
-    stopped in its place and leaves it running.
+    standard input it is given: it is the process that is asked to stop, waited
+    for and killed if it does not end, and its standard input is how it learns
+    that this process is gone. A shell or wrapper that runs the worker as a
+    child of its own is stopped in its place and leaves it running.
     """
 
     def __init__(self, max_workers: int, command: Sequence[str] = WORKER_COMMAND):
@@ -82,8 +90,7 @@ class ProcessWorkerBackend:
             exit_code = await worker.wait()
         finally:
             if worker.returncode is None:
-                worker.terminate()
-                await _to_its_end(worker.wait())
+                await _to_its_end(_stop(worker, pipeline_run_id, shard_id))
 
         if exit_code != 0:
             # Whether it stored a result is on the shard's row. Why it failed is
@@ -94,6 +101,32 @@ class ProcessWorkerBackend:
                 shard_id,
                 exit_code,
             )
+
+
+async def _stop(worker: asyncio.subprocess.Process, pipeline_run_id: UUID, shard_id: UUID) -> None:
+    """Ask ``worker`` to stop and wait for its end, killing it when it has not
+    ended after ``STOP_WAIT_SECONDS``.
+
+    A worker stops by cancelling its items in its event loop, so one whose loop
+    is blocked does not hear the request. Killed, it is a worker that died: the
+    run it worked for is ending and rolls back what it left unfinished.
+    """
+    worker.terminate()
+    try:
+        await asyncio.wait_for(worker.wait(), STOP_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        # It may have ended just as the wait ran out, and there is then no
+        # process to kill.
+        if worker.returncode is None:
+            logger.error(
+                "Run %s shard %s: the worker did not end within %d seconds of being asked"
+                " to stop and is killed.",
+                pipeline_run_id,
+                shard_id,
+                STOP_WAIT_SECONDS,
+            )
+            worker.kill()
+        await worker.wait()
 
 
 async def _to_its_end(work: Awaitable[object]) -> None:

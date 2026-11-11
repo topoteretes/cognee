@@ -16,17 +16,26 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.modules.pipelines.execution import process_backend
 from cognee.modules.pipelines.execution.process_backend import WORKER_COMMAND, ProcessWorkerBackend
 
 # Stand-in worker: ``python worker.py <notes folder> <shard id>``. What it does
 # is chosen by its shard id, looked up in the notes folder's ``modes.json``
-# (default: note the id it was started with and exit 0).
+# (default: note the id it was started with and exit 0). Asked to stop, "hang"
+# ends at once, "slow_stop" takes half a second and notes that it stopped, and
+# "deaf" does not hear it.
 WORKER = textwrap.dedent(
     """
-    import json, os, sys, time
+    import json, os, signal, sys, time
 
     notes, shard_id = sys.argv[1:3]
     mode = json.load(open(os.path.join(notes, "modes.json"))).get(shard_id, "ok")
+
+    asked_to_stop = []
+    if mode == "deaf":
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    if mode == "slow_stop":
+        signal.signal(signal.SIGTERM, lambda *_: asked_to_stop.append(True))
 
     running = os.path.join(notes, f"running-{os.getpid()}")
     open(running, "w").write(shard_id)
@@ -36,6 +45,16 @@ WORKER = textwrap.dedent(
     if mode == "hang":
         while True:
             time.sleep(0.05)
+    if mode == "deaf":
+        # It ends by itself, so a backend that only waits for it fails its test.
+        time.sleep(30)
+        sys.exit(0)
+    if mode == "slow_stop":
+        while not asked_to_stop:
+            time.sleep(0.05)
+        time.sleep(0.5)
+        open(os.path.join(notes, f"stopped-{os.getpid()}"), "w").close()
+        sys.exit(0)
     time.sleep(0.3)
     os.remove(running)
     if mode == "crash":
@@ -171,6 +190,50 @@ async def test_a_failing_run_leaves_no_worker_running(workers):
         await run
 
     assert not any(_alive(pid) for pid in pids)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="reads process state with POSIX signals")
+async def test_a_worker_that_does_not_stop_when_asked_is_killed(workers, monkeypatch):
+    """A worker hears the request to stop in its event loop, which can be
+    blocked. A run that is ending does not wait for such a worker for good."""
+    monkeypatch.setattr(process_backend, "STOP_WAIT_SECONDS", 1)
+    shard_ids = _shard_ids(2)
+    backend = workers(2, {str(shard_ids[0]): "deaf", str(shard_ids[1]): "hang"})
+
+    run = asyncio.create_task(_run(backend, shard_ids))
+    pids = await _worker_pids(workers.notes, 2)
+
+    cancelled_at = time.monotonic()
+    run.cancel()
+    # A shutdown cancels more than once, here also while the worker is waited for.
+    await asyncio.sleep(0.2)
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+
+    assert not any(_alive(pid) for pid in pids)
+    # Left alone, the deaf worker ends after 30 seconds.
+    assert time.monotonic() - cancelled_at < 15
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="reads process state with POSIX signals")
+async def test_a_worker_that_takes_time_to_stop_is_waited_for(workers):
+    """The wait is a worker's time to end the cancellation of its items: one
+    that is still stopping is not killed."""
+    shard_ids = _shard_ids(1)
+    backend = workers(1, {str(shard_ids[0]): "slow_stop"})
+
+    run = asyncio.create_task(_run(backend, shard_ids))
+    (pid,) = await _worker_pids(workers.notes, 1)
+
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+
+    assert (workers.notes / f"stopped-{pid}").exists()
+    assert not _alive(pid)
 
 
 async def _worker_pids(notes, count) -> list[int]:
