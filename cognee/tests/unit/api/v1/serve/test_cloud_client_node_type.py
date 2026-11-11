@@ -8,6 +8,7 @@ schema fetch. No probe runs when the field has no effect: the node-set default, 
 a typed class with no names, go to every server.
 """
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -54,8 +55,16 @@ class _Response:
         return str(self._payload)
 
 
+class _Stalled(_Response):
+    """A schema route that sends nothing before the probe's own timeout fires."""
+
+    async def __aenter__(self):
+        raise asyncio.TimeoutError
+
+
 class _FakeServer:
-    """One generation of server: its schema (None: no schema served) and what it got."""
+    """One generation of server: its schema (None: no schema served, "stall": a
+    route that times out) and what it got."""
 
     def __init__(self, openapi):
         self.openapi = openapi
@@ -69,6 +78,8 @@ class _FakeServer:
         self.schema_timeouts.append(timeout)
         if self.openapi is None:
             return _Response(404, {"detail": "Not Found"})
+        if self.openapi == "stall":
+            return _Stalled(None, None)
         return _Response(200, self.openapi)
 
     def post(self, url, *, json):
@@ -155,10 +166,12 @@ async def test_a_typed_class_without_names_goes_to_any_server_unprobed(openapi):
 
 
 @pytest.mark.asyncio
-async def test_unreadable_schema_refuses_the_typed_scope_and_asks_again_next_time():
+@pytest.mark.parametrize("openapi", [None, "stall"], ids=["no schema", "timed out"])
+async def test_unreadable_schema_refuses_the_typed_scope_and_asks_again_next_time(openapi):
     """Nothing in a response shows whether the server applied the type, so unknown
-    fails closed; the answer is not cached, so a later call can still find out."""
-    client, server = _client(None)
+    fails closed; the answer is not cached, so a later call can still find out. A
+    read that runs past the probe's timeout is unknown too, not a bare error."""
+    client, server = _client(openapi)
 
     for _ in range(2):
         with pytest.raises(RuntimeError, match="Could not read the remote server's schema"):
@@ -167,3 +180,11 @@ async def test_unreadable_schema_refuses_the_typed_scope_and_asks_again_next_tim
     assert server.posts == []
     assert server.schema_reads == 2
     assert client._node_type_supported is None
+
+
+@pytest.mark.asyncio
+async def test_a_timed_out_schema_read_is_unknown_for_the_content_hash_probe_too():
+    client, _server = _client("stall")
+
+    assert await client.supports_content_hash_lookup() is None
+    assert client._content_hash_lookup_supported is None

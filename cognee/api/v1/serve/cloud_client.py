@@ -1,5 +1,6 @@
 """Remote HTTP client that proxies V2 operations to a Cognee Cloud instance."""
 
+import asyncio
 import io
 import json
 from pathlib import Path
@@ -561,8 +562,9 @@ class CloudClient:
     async def _server_openapi(self) -> dict | None:
         """The server's OpenAPI document, fetched once per client.
 
-        ``None`` means it could not be read (no schema served, or not JSON) and
-        is not cached, so a later call can still find out.
+        ``None`` means it could not be read (no schema served, not JSON, or the
+        read ran past ``SCHEMA_PROBE_TIMEOUT``) and is not cached, so a later call
+        can still find out.
         """
         if self._openapi is not None:
             return self._openapi
@@ -574,7 +576,9 @@ class CloudClient:
                 if resp.status >= 400:
                     return None
                 schema = await resp.json()
-        except (aiohttp.ClientError, ValueError, TypeError):
+        # A total-timeout is a bare asyncio.TimeoutError (the builtin on 3.11+), not
+        # a ClientError: only a connect-phase timeout is one.
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError):
             logger.warning("could not read the server schema from /openapi.json")
             return None
         if not isinstance(schema, dict):
