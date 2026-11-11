@@ -13,6 +13,11 @@ from cognee.modules.improve.constants import AGENT_TRACE_FEEDBACKS_NODE_SET
 from cognee.modules.pipelines.exceptions import AfterRunHookError
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_memory.persist_code_findings import (
+    completed_run_id,
+    persist_code_findings,
+    window_data_id,
+)
 
 logger = get_logger("cognify_agent_trace_feedback")
 
@@ -82,6 +87,9 @@ async def cognify_agent_trace_feedback(
 
     try:
         windows: list[TracePersistWindow] = []
+        # Per window: the node set its text was added under and its data item,
+        # for the findings persisted after the batch is cognified.
+        staged: list[tuple[TracePersistWindow, list[str], UUID | None]] = []
         for item in items:
             window = item if isinstance(item, TracePersistWindow) else None
             text = window.text if window is not None else item
@@ -89,10 +97,12 @@ async def cognify_agent_trace_feedback(
             logger.info("Staging agent trace content for cognification")
             # Plain-text callers carry no session, so no pinned node set.
             node_set = bridge_node_set([node_set_name], window.node_set if window else ())
-            await cognee.add(text, dataset_id=dataset_id, node_set=node_set, user=user)
+            add_result = await cognee.add(text, dataset_id=dataset_id, node_set=node_set, user=user)
             logger.debug("Agent trace content added to cognee with node_set: %s", node_set)
             if window is not None:
                 windows.append(window)
+                if window.code_findings:
+                    staged.append((window, node_set, window_data_id(add_result)))
 
         # One cognify for the whole batch: the pipeline builds the staged
         # documents concurrently. A failed build raises with its root cause and
@@ -100,8 +110,9 @@ async def cognify_agent_trace_feedback(
         # A budget rejection is raised as LLMPaymentRequiredError: every later
         # window would fail the same way, so improve stops the run.
         hook_error: AfterRunHookError | None = None
+        cognify_result = None
         try:
-            await cognee.cognify(datasets=[dataset_id], user=user)
+            cognify_result = await cognee.cognify(datasets=[dataset_id], user=user)
         except AfterRunHookError as error:
             # The traces are cognified; only the step after the run failed. The
             # watermarks still move, so the windows are not rebuilt, and the error
@@ -111,6 +122,18 @@ async def cognify_agent_trace_feedback(
             raise_if_budget_exhausted(error)
             raise
         logger.info("Agent trace content successfully cognified (%d window(s))", len(items))
+
+        # The windows' findings about code, joined to the code graph by id.
+        # Before the watermarks move: a failed persist re-extracts the batch.
+        for window, node_set, data_id in staged:
+            await persist_code_findings(
+                window.code_findings,
+                node_set=node_set,
+                user=user,
+                dataset_id=dataset_id,
+                data_id=data_id,
+                pipeline_run_id=completed_run_id(cognify_result),
+            )
 
         for window in windows:
             await TRACE_PERSIST_WATERMARK.write_count(
