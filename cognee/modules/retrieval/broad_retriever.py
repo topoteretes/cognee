@@ -570,6 +570,3 @@ class BroadRetriever(CompletionRetriever):
 
     async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
         return completions
-
-    async def name_cited_documents(self, retrieved_objects: Any) -> None:
-        """BROAD cites no chunks: its context is a ``BroadContext``, not a list of them."""

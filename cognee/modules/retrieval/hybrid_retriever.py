@@ -33,7 +33,7 @@ from cognee.modules.retrieval.hybrid.facts import (
     edge_rank_by_id,
 )
 from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
-from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions, hybrid_chunks
+from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions
 from cognee.modules.retrieval.hybrid.truth import build_truth_context
 from cognee.modules.retrieval.utils.completion import (
     SessionPrompt,
@@ -201,6 +201,8 @@ class HybridRetriever(BaseRetriever):
         await attach_chunk_conflicts(
             chunk_objects.get("chunks", []), graph_engine=self._unified_engine.graph
         )
+        if self.include_references:
+            await name_chunk_documents(chunk_objects.get("chunks", []), current_dataset_id.get())
         return HybridCandidates(
             chunks=chunk_objects["chunks"],
             chunk_summaries=chunk_objects["chunk_summaries"],
@@ -372,15 +374,11 @@ class HybridRetriever(BaseRetriever):
         return await self.append_references(completions, retrieved_objects)
 
     async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
-        if not self.include_references:
-            return completions
-        await self.name_cited_documents(retrieved_objects)
         return cite_hybrid_completions(
-            completions, retrieved_objects, enabled=self.response_model is str
+            completions,
+            retrieved_objects,
+            enabled=self.include_references and self.response_model is str,
         )
-
-    async def name_cited_documents(self, retrieved_objects: Any) -> None:
-        await name_chunk_documents(hybrid_chunks(retrieved_objects), current_dataset_id.get())
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
         return merge_hybrid_results(

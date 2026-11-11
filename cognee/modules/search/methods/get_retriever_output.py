@@ -77,17 +77,6 @@ def _context_evidence(retriever_instance, retrieved_objects, kwargs: dict) -> li
         return []
 
 
-async def _name_cited_documents(retriever_instance, retrieved_objects) -> None:
-    """Name the cited documents; a citation never fails the answer, like the evidence hook."""
-    name_cited_documents = getattr(retriever_instance, "name_cited_documents", None)
-    if not callable(name_cited_documents):
-        return
-    try:
-        await name_cited_documents(retrieved_objects)
-    except Exception as error:
-        logger.warning("Unable to name the cited documents: %s", error, exc_info=True)
-
-
 async def get_retriever_output(
     query_type: SearchType, query_text: str, **kwargs
 ) -> SearchResultPayload:
@@ -131,10 +120,6 @@ async def get_retriever_output(
 
     evidence = []
     if kwargs.get("include_references", False):
-        if not completion:
-            # append_references names the cited chunks only for a written answer; without
-            # one (only_context, an empty context) the structured references are named here.
-            await _name_cited_documents(retriever_instance, retrieved_objects)
         evidence = _context_evidence(retriever_instance, retrieved_objects, kwargs)
         dataset = kwargs.get("dataset")
         if dataset is not None and any(reference.kind == "graph_edge" for reference in evidence):

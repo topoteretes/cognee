@@ -24,6 +24,7 @@ on the instance: last_interval, last_reason, last_anchors, last_baseline.
 
 import asyncio
 
+from cognee.context_global_variables import current_dataset_id
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.retrieval.hybrid.candidates import HybridCandidates
@@ -42,6 +43,7 @@ from cognee.modules.retrieval.temporal_hybrid.matching import (
     to_epoch_ms,
     window_span_ms,
 )
+from cognee.modules.retrieval.utils.document_sources import name_chunk_documents
 from cognee.modules.retrieval.utils.results import result_id
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.shared.logging_utils import get_logger
@@ -153,6 +155,8 @@ class TemporalHybridRetriever(HybridRetriever):
             self.node_name_filter_operator,
         )
         self.last_expansion = {result_id(chunk) for chunk in chunks}
+        if self.include_references:
+            await name_chunk_documents(chunks, current_dataset_id.get())
         return candidates.extend(chunks)
 
     async def get_retrieved_objects(self, query=None, query_batch=None) -> dict:

@@ -3,10 +3,13 @@
 A document-mode connector row (``resolve_dlt_sources._build_document_data_item``) keeps them
 in its data record's ``system_metadata`` (``title``, ``url``); chunks carry the stored file
 name (``text_<md5>``). Every other document has neither and keeps its file name: ``Data.label``
-is not read, so a label given to ``add()`` changes nothing here. ``system_metadata`` is
-cognee's own stamp, not an ``add()`` input, so a caller who writes those keys into a
-``DataItem`` by hand opts in. The link is provider content, so it is printed only when it is
-a plain http(s) URL, and the title always on one line.
+is not read, so a label given to ``add()`` changes nothing here. ``system_metadata`` is not
+an ``add()`` input over HTTP; an SDK caller who sets those keys on a ``DataItem`` opts in, and
+a title that is not text is left out. The link is provider content, so it is printed only
+when it is a plain http(s) URL, and the title always on one line.
+
+The retrievers that cite chunks (RAG, hybrid, temporal) name them where they retrieve them,
+when references are asked for, so every path that builds a reference sees the names.
 """
 
 import unicodedata
@@ -87,9 +90,6 @@ async def name_chunk_documents(chunks: list, dataset_id: UUID | None) -> None:
     """
     if dataset_id is not None and not isinstance(dataset_id, UUID):
         raise TypeError(f"dataset_id must be a UUID, not {type(dataset_id).__name__}")
-    if not isinstance(chunks, (list, tuple)):
-        # A retriever's own context object (BROAD's) holds no chunks to name.
-        return
 
     payloads_by_id: dict[UUID, list[dict]] = {}
     for chunk in chunks:

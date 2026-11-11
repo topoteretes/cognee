@@ -133,7 +133,7 @@ async def test_a_chunk_reference_names_its_document_by_title_and_link(cognified)
 
 @pytest.mark.asyncio
 async def test_a_hybrid_answer_names_its_document_in_the_text_only(cognified):
-    """Hybrid returns no structured evidence, as before: a consumer that builds its own
+    """Hybrid returns no structured evidence: a consumer that builds its own
     from the chunks (Cognee Cloud) must see no change for any document."""
     answer, evidence = await _search(SearchType.HYBRID_COMPLETION)
 
@@ -143,7 +143,7 @@ async def test_a_hybrid_answer_names_its_document_in_the_text_only(cognified):
 
 @pytest.mark.asyncio
 async def test_a_plain_document_keeps_its_file_name(cognified):
-    """A label given to ``add`` is not a connector title: the note is cited as before."""
+    """A label given to ``add`` is not a connector title: the note is cited by its file."""
     (result,) = await cognee.search(
         "What is the budget for Orion?",
         query_type=SearchType.RAG_COMPLETION,

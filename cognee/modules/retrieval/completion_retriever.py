@@ -180,6 +180,8 @@ class CompletionRetriever(BaseRetriever):
             ]
 
         await attach_chunk_conflicts(found_chunks)
+        if self.include_references:
+            await name_chunk_documents(found_chunks, current_dataset_id.get())
         return found_chunks
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
@@ -252,15 +254,11 @@ class CompletionRetriever(BaseRetriever):
         return [completion]
 
     async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
-        if not self.include_references:
-            return completions
-        await self.name_cited_documents(retrieved_objects)
         return append_chunk_evidence(
-            completions, retrieved_objects, enabled=self.response_model is str
+            completions,
+            retrieved_objects,
+            enabled=self.include_references and self.response_model is str,
         )
-
-    async def name_cited_documents(self, retrieved_objects: Any) -> None:
-        await name_chunk_documents(retrieved_objects or [], current_dataset_id.get())
 
     async def get_completion_from_context(
         self,
