@@ -1344,3 +1344,77 @@ def test_a_message_that_gets_replies_leaves_its_day_and_becomes_a_thread():
 
     assert rows[_day_id(_at(0, 1))]["content"] == "[2026-11-05 10:01 UTC] Ana Lee: First."
     assert rows[f"{CHANNEL}:{_at(0, 2)}"]["content"].endswith("Ana Lee: A reply.")
+
+
+# -- Review 2026-11-11 (F2, F5): red until fixed --------------------------------------
+
+
+class _BadThread(FakeSlack):
+    """Slack answers one thread's replies with a page that is not a list, every time."""
+
+    bad_root: str | None = None
+
+    def _conversations_replies(self, channel: str, ts: str, limit: int, cursor: str = ""):
+        if ts == self.bad_root:
+            return {"messages": "not a list"}
+        return super()._conversations_replies(channel, ts, limit, cursor)
+
+
+def _two_threads_the_older_one_bad() -> _BadThread:
+    fake = _BadThread()
+    fake.add_user("U1", real_name="Ana Lee")
+    fake.post(_at(-1, 0), "U1", "A note from the day before.")
+    fake.post(ts(1), "U1", "Old question?")
+    fake.reply(ts(1), ts(2), "U1", "Old answer.")
+    fake.post(ts(5), "U1", "New question?")
+    fake.reply(ts(5), ts(6), "U1", "New answer.")
+    fake.bad_root = ts(1)
+    return fake
+
+
+def test_a_malformed_answer_after_rows_keeps_the_rows_and_counts_the_failure():
+    """F2: a malformed Slack answer (here a replies page that is not a list) was raised
+    outside ``_call``, so after rows dlt dropped every row the run emitted and the stats
+    said ``failed=0``. It must follow the rule ``_call`` applies to any other Slack error
+    after rows (F-B4): the rows stay and the failure is counted."""
+    fake = _two_threads_the_older_one_bad()
+    stats = _stats()
+
+    rows = _walk(fake, {}, stats)
+
+    assert f"{CHANNEL}:{ts(5)}" in _ids(rows)
+    assert stats["failed"] >= 1
+
+
+def test_a_thread_slack_always_answers_badly_does_not_stop_the_walk_for_good():
+    """F2: the same malformed answer on every run stuck the channel at that thread: nothing
+    older was ever read, and nothing was ever forgotten. The walk must get past it (the
+    thread counted as failed) and read what is older."""
+    fake = _two_threads_the_older_one_bad()
+    state: dict = {}
+    emitted: list[str] = []
+    for _ in range(3):
+        try:
+            emitted += _ids(_walk(fake, state))
+        except SlackAPIError:
+            pass
+
+    assert _day_id(_at(-1, 0)) in emitted
+
+
+def test_the_stall_warning_names_no_channel(caplog):
+    """F5: the warning for a day no run can read whole logged the channel id; record ids
+    must not reach logs (the module docstring and ``slack.md`` Privacy)."""
+    fake = FakeSlack(page_limit=2)
+    fake.add_user("U1", real_name="Ana Lee")
+    for minute in range(1, 8):
+        fake.post(_at(0, minute), "U1", f"Note {minute}.")
+    state: dict = {}
+    _walk(fake, state, _stats(), max_requests=3)
+
+    with caplog.at_level("WARNING"):
+        stats = _stats()
+        _walk(fake, state, stats, max_requests=3)
+
+    assert stats["failed_day_too_large"] == 1
+    assert CHANNEL not in caplog.text

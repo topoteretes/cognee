@@ -7,6 +7,7 @@ sees it. Slack is stood in for by ``post_ephemeral`` and ``FakeSlack``.
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -20,6 +21,7 @@ TEAM = "T0TEAM"
 BOT = "U0BOT"
 MEMBER = "U0MEMBER"
 OWNER_ID = "11111111-1111-1111-1111-111111111111"
+WORKSPACE_DATASET = mention.dataset_name_for_credential(SimpleNamespace(provider_account_id=TEAM))
 
 
 def _credential(allowed=None, synced=()):
@@ -48,8 +50,18 @@ def _mention(text: str, channel: str = "C1", **extra) -> dict:
 
 @pytest.fixture
 def slack(monkeypatch):
-    """The connected workspace, the member's link, and every ephemeral reply."""
-    state = SimpleNamespace(credential=_credential(), owner=OWNER_ID, replies=[], threads=[])
+    """The connected workspace, the member's link, the channels Slack says the member is in,
+    the datasets the member can read (the workspace's and one of their own), and every
+    ephemeral reply."""
+    state = SimpleNamespace(
+        credential=_credential(),
+        owner=OWNER_ID,
+        replies=[],
+        threads=[],
+        channels={"C1", "C7"},
+        workspace=SimpleNamespace(id=uuid4(), name=WORKSPACE_DATASET),
+        own=SimpleNamespace(id=uuid4(), name="notes"),
+    )
 
     async def post_ephemeral(credential, channel, user, payload, thread_ts=None):
         state.replies.append((channel, user, payload))
@@ -62,6 +74,14 @@ def slack(monkeypatch):
         mention, "resolve_owner_user_id", AsyncMock(side_effect=lambda *args: state.owner)
     )
     monkeypatch.setattr(mention, "post_ephemeral", post_ephemeral)
+    monkeypatch.setattr(
+        mention, "member_channels", AsyncMock(side_effect=lambda *args: state.channels)
+    )
+    monkeypatch.setattr(
+        mention,
+        "get_authorized_existing_datasets",
+        AsyncMock(side_effect=lambda *args: [state.workspace, state.own]),
+    )
     return state
 
 
@@ -461,9 +481,11 @@ def test_a_reply_is_a_bold_title_over_one_line_and_progress_is_a_grey_line():
 
 @pytest.mark.asyncio
 async def test_a_question_nothing_answers_says_so_without_share_buttons(slack):
+    # The search retrieved nothing (an empty context); its completion still talks (F1).
     results = [
         {
             "text_result": ["The capital city is not specified in the provided context."],
+            "context_result": "",
             "evidence": [],
         }
     ]
@@ -573,3 +595,72 @@ async def test_here_in_a_direct_message_explains_that_it_needs_a_channel(slack):
 
     search.assert_not_awaited()
     assert _texts(slack)[-1] == mention.HERE_NEEDS_A_CHANNEL_MESSAGE
+
+
+@pytest.mark.asyncio
+async def test_the_workspace_dataset_is_searched_only_in_the_selected_channels_the_member_is_in(
+    slack,
+):
+    """F4: the workspace dataset holds every selected channel, private ones included; a
+    member is answered from it only within the channels Slack says they belong to, and
+    from their own datasets whole."""
+    slack.credential = _credential(synced=["C1", "G2", "C3"])
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=[])) as search,
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("when do we deploy?"))
+
+    calls = [(c.kwargs["dataset_ids"], c.kwargs["node_name"]) for c in search.await_args_list]
+    assert calls == [
+        ([slack.workspace.id], ["slack:channel:C1"]),
+        ([slack.own.id], None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_when_slack_cannot_say_where_the_member_is_the_workspace_is_left_out(slack):
+    """F4: an unknown membership fails closed: the workspace dataset is not searched, the
+    member is told, and their own datasets still answer."""
+    from cognee.tasks.ingestion.connectors.slack import SlackUnavailableError
+
+    slack.credential = _credential(synced=["C1"])
+    with (
+        patch.object(
+            mention,
+            "member_channels",
+            AsyncMock(side_effect=SlackUnavailableError("users.conversations", "http_503")),
+        ),
+        patch.object(mention, "cognee_search", AsyncMock(return_value=[])) as search,
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("when do we deploy?"))
+
+    assert [c.kwargs["dataset_ids"] for c in search.await_args_list] == [[slack.own.id]]
+    assert mention.MEMBERSHIP_UNKNOWN_MESSAGE in _texts(slack)
+
+
+# -- Review 2026-11-11 (F6): red until fixed ---------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_answer_can_still_be_shared_after_the_process_that_wrote_it_is_gone(slack):
+    """F6: the answer waiting for Share lived in one process's memory, so Share after a
+    restart, or on another worker, said "This answer is no longer available"."""
+    from cognee.modules.integrations.slack import handle_cognee_ask as ask
+
+    results = [{"text_result": ["We chose Neon for branching."], "evidence": []}]
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=results)),
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("why did we choose Neon?"))
+    *_, (_, _, answer) = slack.replies
+    (actions,) = [block for block in answer["blocks"] if block["type"] == "actions"]
+    share = next(b for b in actions["elements"] if b["action_id"] == ask.ASK_SHARE_ACTION_ID)
+
+    getattr(ask, "_pending_answers", {}).clear()  # what one process held in memory is gone
+    shared = await ask.handle_cognee_ask_share("https://hooks.slack.com/actions/x", share["value"])
+
+    assert shared.get("response_type") == "in_channel"
+    assert "Neon" in json.dumps(shared)

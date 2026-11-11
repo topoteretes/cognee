@@ -18,9 +18,9 @@ from cognee.modules.integrations.slack.handle_cognee_ask import (
     ASK_DISCARD_ACTION_ID,
     ASK_SHARE_ACTION_ID,
     _format_answer,
-    _pending_answers,
     handle_cognee_ask_discard,
     handle_cognee_ask_share,
+    keep_answer,
 )
 from cognee.modules.search.types import SearchType
 
@@ -49,13 +49,10 @@ def _credential(user_id=None):
 
 @pytest.mark.asyncio
 async def test_share_posts_the_question_and_answer_in_channel():
-    _pending_answers["abc123"] = (
-        "what happened in Q3?",
-        "*Answer:*\nfact one",
-        [{"type": "section"}],
-    )
+    _, blocks = _format_answer([_answer(["fact one"], [_cited("d1", TITLE, PERMALINK)])])
+    ref = await keep_answer(uuid4(), "slack:T1:U1", "what happened in Q3?", blocks)
 
-    response = await handle_cognee_ask_share("https://hooks.slack.com/x", "abc123")
+    response = await handle_cognee_ask_share("https://hooks.slack.com/x", ref)
 
     assert response["response_type"] == "in_channel"
     assert response["replace_original"] is True
@@ -65,7 +62,10 @@ async def test_share_posts_the_question_and_answer_in_channel():
     # nothing about either was visible to the channel before this.
     assert response["blocks"][0]["text"]["text"] == '*Asked:* "what happened in Q3?"'
     assert any(b.get("type") == "section" for b in response["blocks"][1:])
-    assert "abc123" not in _pending_answers  # popped, not left behind
+    assert PERMALINK in response["text"]  # the sources are shared with the answer
+    # Taken out of the session cache: a second click shares nothing twice.
+    again = await handle_cognee_ask_share("https://hooks.slack.com/x", ref)
+    assert "no longer available" in again["text"]
 
 
 @pytest.mark.asyncio
@@ -79,20 +79,18 @@ async def test_share_of_unknown_answer_id_is_a_clean_ephemeral_message():
 
 @pytest.mark.asyncio
 async def test_discard_drops_the_answer_and_replies_ephemeral():
-    _pending_answers["abc456"] = (
-        "what happened in Q3?",
-        "*Answer:*\nfact one",
-        [{"type": "section"}],
-    )
+    _, blocks = _format_answer([_answer(["fact one"])])
+    ref = await keep_answer(uuid4(), "slack:T1:U1", "what happened in Q3?", blocks)
 
-    response = await handle_cognee_ask_discard("abc456")
+    response = await handle_cognee_ask_discard(ref)
 
     assert response == {
         "response_type": "ephemeral",
         "text": "Discarded.",
         "replace_original": True,
     }
-    assert "abc456" not in _pending_answers
+    shared = await handle_cognee_ask_share("https://hooks.slack.com/x", ref)
+    assert "no longer available" in shared["text"]
 
 
 # ── _format_answer ──────────────────────────────────────────────────────────
@@ -105,6 +103,11 @@ async def test_discard_drops_the_answer_and_replies_ephemeral():
 
 def _answer(text, cited=None):
     return {"text_result": text, "objects_result": {"chunks": cited or []}}
+
+
+def _missed(text):
+    """A dataset whose retrieval found nothing: its completion still talks."""
+    return {"text_result": text, "context_result": "", "objects_result": {"chunks": []}}
 
 
 def _cited(document_id, title=None, url=None):
@@ -172,16 +175,12 @@ def test_format_answer_skips_unrecognized_result_shapes():
     assert blocks == []
 
 
-def test_format_answer_filters_out_refusal_facts():
-    # A chunk irrelevant to the question produces its own "I can't answer"
-    # completion alongside a real answer from a relevant chunk — the
-    # refusal must not show up as if it were a second fact.
+def test_format_answer_leaves_out_a_dataset_that_retrieved_nothing():
+    # A dataset whose retrieval found nothing still writes a completion; it must not show
+    # up as if it were a second fact, whatever it says.
     results = [
         _answer("LLMs are neural language models built on Transformers."),
-        _answer(
-            "I can't—the provided context only covers the 2026 FIFA World Cup "
-            "and contains no information about LLMs."
-        ),
+        _missed("The 2026 FIFA World Cup is in North America."),
     ]
     fallback_text, blocks = _format_answer(results)
     sections = [b for b in blocks if b["type"] == "section"]
@@ -190,8 +189,8 @@ def test_format_answer_filters_out_refusal_facts():
     assert "World Cup" not in fallback_text
 
 
-def test_format_answer_all_refusals_reads_as_no_relevant_information():
-    results = [_answer("I cannot answer this from the given context.")]
+def test_format_answer_all_misses_reads_as_no_relevant_information():
+    results = [_missed("I cannot answer this from the given context.")]
     fallback_text, blocks = _format_answer(results)
     assert fallback_text == "No relevant information found."
     assert blocks == []
@@ -201,13 +200,12 @@ def test_format_answer_all_refusals_reads_as_no_relevant_information():
 async def test_a_shared_answer_cannot_ping_the_channel_or_disguise_a_link():
     """Share posts in the channel: Slack's control sequences in the question or in an
     answer that quotes memory are escaped, so they show as text (G48)."""
-    fallback, blocks = _format_answer(
+    _, blocks = _format_answer(
         [_answer(["See <https://evil.example/?q=x|the runbook> & <!here>."])]
     )
-    answer_id = uuid4().hex
-    _pending_answers[answer_id] = ("<!channel> what is the salary?", fallback, blocks)
+    ref = await keep_answer(uuid4(), "slack:T1:U1", "<!channel> what is the salary?", blocks)
 
-    shared = await handle_cognee_ask_share("https://hooks.slack.com/actions/T/1/x", answer_id)
+    shared = await handle_cognee_ask_share("https://hooks.slack.com/actions/T/1/x", ref)
 
     posted = json.dumps(shared)
     for control in ("<!channel>", "<!here>", "<https://"):
@@ -218,13 +216,14 @@ async def test_a_shared_answer_cannot_ping_the_channel_or_disguise_a_link():
 def test_a_dataset_that_does_not_know_does_not_hide_the_one_that_does():
     """Live, 2026-11-10: every readable dataset answers on its own; the synced channel said
     "The capital city is not specified in the provided context." next to the note's
-    "Berlin.", and that sentence was shown as a fact."""
+    "Berlin.", and that sentence was shown as a fact. A dataset that retrieved nothing is
+    left out by its empty context, not by what its completion says (F1)."""
     _, blocks = _format_answer(
         [
-            _answer(["The capital city is not specified in the provided context."]),
-            _answer(["Berlin."]),
-            _answer(["The given context does not mention a capital."]),
-            _answer(["That is not mentioned in the context."]),
+            _missed(["The capital city is not specified in the provided context."]),
+            {**_answer(["Berlin."]), "context_result": "The capital of Germany is Berlin."},
+            _missed(["The given context does not mention a capital."]),
+            {"text_result": ["A capital."], "error": "no searchable memory"},
         ]
     )
     sections = [block["text"]["text"] for block in blocks if block["type"] == "section"]
@@ -293,9 +292,8 @@ def test_a_source_cannot_ping_or_disguise_a_link():
 
 
 def test_a_dataset_that_does_not_know_shows_no_sources():
-    evidence = [_cited("d1", TITLE, PERMALINK)]
     _, blocks = _format_answer(
-        [_answer(["That is not mentioned in the context."], evidence), _answer(["Berlin."])]
+        [_missed(["That is not mentioned in the context."]), _answer(["Berlin."])]
     )
     assert not [block for block in blocks if block["type"] == "context"]
 
@@ -332,3 +330,28 @@ def test_many_or_long_sources_stay_within_slacks_text_limit_and_none_is_dropped(
     for i in range(15):
         assert f"&amp; notes {i}>" in shown or f"notes {i}>" in shown
     assert "…" in shown
+
+
+# -- Review 2026-11-11 (F1): red until fixed ---------------------------------------------
+
+
+def test_a_long_answer_stays_within_slacks_text_limit_and_loses_nothing():
+    """F1: only the sources were held to Slack's 3,000-character text limit. A longer answer
+    made Slack refuse the whole message, so the member saw "Searching…" and then nothing."""
+    words = [f"word{i}" for i in range(900)]
+    _, blocks = _format_answer([_answer([" ".join(words)])])
+
+    sections = [block["text"]["text"] for block in blocks if block["type"] == "section"]
+    assert sections and all(len(text) <= 3000 for text in sections)
+    shown = " ".join(sections)
+    assert all(word in shown for word in words)
+
+
+def test_an_answer_that_uses_a_refusal_phrase_is_still_shown():
+    """F1: refusals were told apart by phrases ("not mentioned", "provided context"), so a
+    real answer that uses one was dropped as if the dataset did not know."""
+    answer = "The launch date was not mentioned until Friday; it is March 3."
+    _, blocks = _format_answer([_answer([answer])])
+
+    sections = [block["text"]["text"] for block in blocks if block["type"] == "section"]
+    assert sections == [answer]

@@ -151,8 +151,10 @@ deletes them. Any other token error (`invalid_auth` can be an IP allowlist) fail
 leaves the connection as it is.
 
 When the app is uninstalled (`app_uninstalled`), the connection is revoked and, as Slack's
-Developer Policy asks, the workspace's data is deleted 14 days later: its synced dataset (every
-owner's copy, a previous owner's who disconnected keeping it included), its dlt
+Developer Policy asks, the workspace's data is deleted 14 days later: the documents the
+connector synced into the workspace's dataset (every owner's copy, a previous owner's who
+disconnected keeping it included; a dataset is removed only when that leaves it empty, so
+anything else in a dataset of that name stays), its dlt
 staging database, state and completed load packages (`drop_dlt_dataset`), and every member's
 "Remember this" and `@cognee remember` items from that workspace
 (`sync.forget_uninstalled_workspaces`, run by the same in-process worker as the sync tick, every
@@ -173,7 +175,7 @@ and `im:history`, and the events `app_mention` and `message.im`, all in
 
 | Message | What it does |
 |---|---|
-| `@cognee <question>` | answers from the member's memory, visible only to them, with the *Sources* it read (each a link to its document, for a synced conversation the message in Slack) and *Share* (posts the question, answer and sources in the channel) and *Discard* |
+| `@cognee <question>` | answers from the member's memory (the workspace's dataset only within the selected channels Slack says the member is in, `users.conversations`; when Slack cannot say, without it, and the member is told), visible only to them, with the *Sources* it read (each a link to its document, for a synced conversation the message in Slack) and *Share* (posts the question, answer and sources in the channel) and *Discard*; the answer waits for them as session Q&A in Cognee's session cache (session `slack:<team>:<member>`, the cache's own expiry), so Share works after a restart or on another worker, and with `CACHING=false` the answer comes without Share |
 | `@cognee remember <text>` | saves a note Slack never saw, e.g. a decision from a call; the note is the item of that message, so `@cognee forget` in its thread, *Forget this* on it, or deleting the message forgets it |
 | `@cognee remember` in a thread | saves the thread's first message, followed like "Remember this": an edit or a deletion in Slack forgets the copy |
 | `@cognee forget` in a thread (a channel or a DM) | forgets the member's own copy or note of the thread's first message; the *Forget this* shortcut does it for any message. Other members' copies stay, and the channel allowlist never blocks it. On a message of a synced channel, its author or the connection's owner also takes it out of the workspace's memory (below) |
@@ -427,8 +429,9 @@ naming who can. A thread's first message taken out leaves its replies in memory.
   and `name`); in Slack, `@cognee here` filters by the channel it is sent in.
 - **A raw search hit names no source (G10).** A chunk returned by `CHUNKS` or `recall` carries
   the stored file name (`text_<md5>`) and the `data_id`, not the title or the link. A search
-  with `include_references=True` names each document it read by its data record's title
-  (`label`) and link (`system_metadata.url`), and `@cognee` asks that way: its answer ends
+  with `include_references=True` names each document it read by the title and link its data
+  record keeps in `system_metadata` (`title`, `url`), copied into the chunk payload as
+  `document_title` / `document_url` (SDK-1500), and `@cognee` asks that way: its answer ends
   with *Sources*, one link per conversation it read, to the message in Slack.
 - Direct messages and group DMs are not synced.
 - Documents written by the former history importer (`system_metadata.slack_history`) stay in
@@ -439,7 +442,8 @@ naming who can. A thread's first message taken out leaves its replies in memory.
 This reads the messages of the selected channels, the names of their authors and of the
 people mentioned, and the names of attached files (never their content). The text goes to the
 configured LLM and embedding providers, and anyone with read access to the target dataset can
-see it. A private channel is synced only when both the app and the Slack user who connected
+see it through search; `@cognee` answers a member only from the synced channels they are in. A
+private channel is synced only when both the app and the Slack user who connected
 the workspace are members. Errors and logs carry the API method and Slack's error code, never
 the token, a channel id, a URL or a response body.
 

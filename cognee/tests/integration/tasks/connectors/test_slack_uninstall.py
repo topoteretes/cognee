@@ -31,7 +31,10 @@ from cognee.modules.integrations.slack.remember_message import (
     remembered_message_id,
 )
 from cognee.modules.users.methods import create_user
+from cognee.tasks.ingestion.connectors import slack_source
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tests.unit.tasks.connectors.fake_slack import CHANNEL, FakeSlack
+from cognee.tests.unit.tasks.connectors.fake_slack import TEAM as FAKE_TEAM
 
 TEAM = "T0UNINSTALL"
 OTHER_TEAM = "T0OTHER"
@@ -74,11 +77,23 @@ async def _workspace_dataset_name() -> str:
 
 
 async def _sync_a_document(owner) -> None:
-    """What a channel sync leaves in the workspace dataset, without the cognify."""
+    """What a channel sync leaves in the workspace dataset, without the cognify: a real
+    ``slack_source`` run, so the row carries the connector's ``system_metadata``."""
+    fake = FakeSlack()
+    fake.add_user("U1", "ana")
+    fake.post("1793872800.000100", "U1", "In #general: the launch moved to Friday.")
     await cognee.add(
-        "In #general: the launch moved to Friday.",
+        slack_source(
+            service=fake,
+            team_id=FAKE_TEAM,
+            channel_id=CHANNEL,
+            resource_name=f"slack_channel_{owner.id.hex}",
+        ),
         dataset_name=await _workspace_dataset_name(),
         user=owner,
+        primary_key="id",
+        write_disposition="merge",
+        max_rows_per_table=0,
     )
 
 
@@ -318,3 +333,24 @@ async def test_a_workspace_connected_again_during_its_own_deletion_is_deleted_af
     await handle_slack_event(_event("app_uninstalled"))
     assert await sync_module.forget_uninstalled_workspaces(now=_days_later(15)) == 1
     assert (await _state(owner, member))[0] == 0
+
+
+# -- Review 2026-11-11 (F8): red until fixed ---------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_deletion_leaves_a_dataset_the_connector_did_not_make(clean_cognee):
+    """F8: the 14-day deletion forgot every dataset carrying the workspace's derived name,
+    whoever owned it. A user who never connected the workspace can create a dataset of that
+    name (it derives from the team id alone), and the uninstall deleted it."""
+    owner, _ = await _workspace_with_data()
+    outsider = await _user()
+    await cognee.add(
+        "The outsider's own notes.", dataset_name=await _workspace_dataset_name(), user=outsider
+    )
+    await handle_slack_event(_event("app_uninstalled"))
+
+    await sync_module.forget_uninstalled_workspaces(now=_days_later(15))
+
+    assert await _items(owner, await _workspace_dataset_name()) == 0
+    assert await _items(outsider, await _workspace_dataset_name()) == 1

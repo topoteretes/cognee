@@ -30,12 +30,13 @@ import re
 from collections.abc import Awaitable, Callable
 from functools import partial
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import aiohttp
 
 from cognee.api.v1.search.search import search as cognee_search
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.integrations import ingestion
 from cognee.modules.integrations.credentials import (
     REVOKED_BY_OWNER,
@@ -45,12 +46,16 @@ from cognee.modules.integrations.credentials import (
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 from cognee.modules.integrations.outbound import client_session, require_outbound_http
 from cognee.modules.integrations.slack.adapter import access_token_for
-from cognee.modules.integrations.slack.channel_membership import app_follows_channel
+from cognee.modules.integrations.slack.channel_membership import (
+    app_follows_channel,
+    member_channels,
+)
 from cognee.modules.integrations.slack.handle_cognee_ask import (
     ASK_DISCARD_ACTION_ID,
     ASK_SHARE_ACTION_ID,
     _format_answer,
-    _pending_answers,
+    ask_session_id,
+    keep_answer,
 )
 from cognee.modules.integrations.slack.handle_slack_link import (
     MEMBER_LINK_PROVIDER,
@@ -71,9 +76,14 @@ from cognee.modules.integrations.slack.remember_message import (
     remember_message,
     remember_note,
 )
-from cognee.modules.integrations.slack.sync import exclude_message, selected_channels
+from cognee.modules.integrations.slack.sync import (
+    dataset_name_for_credential,
+    exclude_message,
+    selected_channels,
+)
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_user
+from cognee.tasks.ingestion.connectors.slack import SlackSourceError
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +155,15 @@ NOT_CONFIGURED_MESSAGE = (
 SEARCH_FAILED_MESSAGE = "Search failed\nTry again in a moment."
 NOTHING_FOUND_MESSAGE = (
     "Nothing found\nYour Cognee memory has nothing on that yet. `@cognee remember` saves it."
+)
+SHARE_UNAVAILABLE_TEXT = (
+    "Sharing is off here: it needs Cognee's session memory (CACHING), which this server "
+    "has switched off."
+)
+MEMBERSHIP_UNKNOWN_MESSAGE = (
+    "Synced channels left out\n"
+    "Slack did not say which channels you are in, so this answer does not use the "
+    "workspace's synced channels. Try again in a moment."
 )
 NOT_CONNECTED_MESSAGE = (
     "Slack is not connected\nConnect this workspace from Integrations in Cognee."
@@ -275,14 +294,15 @@ async def _handle(team_id: str, event: dict[str, Any]) -> None:
         else:
             await ask(
                 reply,
-                team_id=team_id,
+                credential,
+                member=member,
                 owner_user_id=owner_user_id,
                 question=question,
-                node_name=[f"slack:channel:{channel}"],
+                here=channel,
             )
         return
 
-    await ask(reply, team_id=team_id, owner_user_id=owner_user_id, question=text)
+    await ask(reply, credential, member=member, owner_user_id=owner_user_id, question=text)
 
 
 def _without_the_mention(text: str, credential: IntegrationCredential) -> str:
@@ -293,16 +313,22 @@ def _without_the_mention(text: str, credential: IntegrationCredential) -> str:
 
 async def ask(
     reply: Reply,
+    credential: IntegrationCredential,
     *,
-    team_id: str,
+    member: str,
     owner_user_id: UUID,
     question: str,
-    node_name: list[str] | None = None,
+    here: str | None = None,
 ) -> None:
     """Answer ``question`` from the owner's memory, privately, with Share and Discard.
 
-    ``node_name`` narrows it to those node sets (``@cognee here``: one channel's rows).
+    Every selected channel lands in one workspace dataset, which its owner may share, so
+    that dataset is searched only within the selected channels Slack says ``member``
+    belongs to; the owner's other datasets are searched whole. ``here`` (``@cognee here``)
+    narrows both to that one channel. When Slack cannot say which channels the member is
+    in, the workspace dataset is left out and the member is told.
     """
+    team_id = str(credential.provider_account_id)
     await reply(notice(f"Searching your memory for “{_preview(question)}”", muted=True))
     try:
         owner = await get_user(owner_user_id)
@@ -311,32 +337,71 @@ async def ask(
         await reply(notice(NOT_CONFIGURED_MESSAGE))
         return
     try:
-        results = await cognee_search(
-            query_text=question,
-            # Graph traversal alone can come back empty on a thin graph, where the
-            # vector-search half still finds a relevant chunk.
-            query_type=SearchType.HYBRID_COMPLETION,
-            user=owner,
-            datasets=None,  # every dataset the owner can read
-            node_name=node_name,
-            # G10: each result carries the chunks it read (``objects_result``), whose
-            # payloads name their documents by title and link (SDK-1500); the answer shows
-            # them as its sources.
-            include_references=True,
-            verbose=True,
+        channels = await member_channels(credential, member)
+    except SlackSourceError as error:
+        logger.warning("Slack did not list a member's channels for team %s: %s", team_id, error)
+        channels = set()
+        await reply(notice(MEMBERSHIP_UNKNOWN_MESSAGE))
+    scope = [here] if here else selected_channels(credential)
+    visible = [channel for channel in scope if channel in channels]
+
+    workspace_name = dataset_name_for_credential(credential)
+    readable = await get_authorized_existing_datasets(None, "read", owner)
+    # A previous owner's copy of the workspace carries the same name (G44): scoped too.
+    workspace = [dataset.id for dataset in readable if dataset.name == workspace_name]
+    others = [dataset.id for dataset in readable if dataset.name != workspace_name]
+    searches = []
+    if workspace and visible:
+        searches.append((workspace, [f"slack:channel:{channel}" for channel in visible]))
+    if others:
+        searches.append((others, [f"slack:channel:{here}"] if here else None))
+    try:
+        answers = await asyncio.gather(
+            *(
+                cognee_search(
+                    query_text=question,
+                    # Graph traversal alone can come back empty on a thin graph, where the
+                    # vector-search half still finds a relevant chunk.
+                    query_type=SearchType.HYBRID_COMPLETION,
+                    user=owner,
+                    dataset_ids=dataset_ids,
+                    node_name=node_name,
+                    # G10: each result carries the chunks it read (``objects_result``),
+                    # whose payloads name their documents by title and link (SDK-1500);
+                    # the answer shows them as its sources.
+                    include_references=True,
+                    verbose=True,
+                )
+                for dataset_ids, node_name in searches
+            )
         )
     except Exception:  # a search failure degrades to a chat message
         logger.exception("Search failed for Slack team %s", team_id)
         await reply(notice(SEARCH_FAILED_MESSAGE))
         return
+    results = [result for answer in answers for result in answer]
 
     fallback_text, blocks = _format_answer(results)
     if not blocks:
         # Every dataset answered that it does not know: nothing to share.
         await reply(notice(NOTHING_FOUND_MESSAGE))
         return
-    answer_id = uuid4().hex
-    _pending_answers[answer_id] = (question, fallback_text, blocks)
+    answer_ref = await keep_answer(owner_user_id, ask_session_id(team_id, member), question, blocks)
+    if answer_ref is None:
+        # Share reads the answer back from the session cache, which is switched off.
+        await reply(
+            notice(
+                fallback_text,
+                blocks=[
+                    *blocks,
+                    {
+                        "type": "context",
+                        "elements": [{"type": "mrkdwn", "text": SHARE_UNAVAILABLE_TEXT}],
+                    },
+                ],
+            )
+        )
+        return
     await reply(
         notice(
             f"{fallback_text}\n\nShare this in the channel?",
@@ -350,13 +415,13 @@ async def ask(
                             "text": {"type": "plain_text", "text": "Share"},
                             "style": "primary",
                             "action_id": ASK_SHARE_ACTION_ID,
-                            "value": answer_id,
+                            "value": answer_ref,
                         },
                         {
                             "type": "button",
                             "text": {"type": "plain_text", "text": "Discard"},
                             "action_id": ASK_DISCARD_ACTION_ID,
-                            "value": answer_id,
+                            "value": answer_ref,
                         },
                     ],
                 },

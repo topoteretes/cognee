@@ -62,7 +62,7 @@ from bisect import bisect_left
 from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, NoReturn
 from urllib.parse import urlparse
 
 from cognee.shared.logging_utils import get_logger
@@ -117,6 +117,19 @@ _AUTH_CODES = frozenset(
 )
 # A thread that was deleted between the history page and the replies call.
 _THREAD_GONE = frozenset({"thread_not_found", "message_not_found"})
+# Answers Slack gave with ``ok`` that the walk cannot read: not a dict, a page that is not
+# a list, a timestamp that is not one, a cursor that is missing, repeats or does not move.
+_MALFORMED = frozenset(
+    {
+        "invalid_response",
+        "missing_cursor",
+        "repeated_cursor",
+        "invalid_timestamp",
+        "pagination_stalled",
+    }
+)
+# Stats key of the threads whose replies Slack answered malformed; each counts as failed.
+UNREADABLE_THREAD_KEY = "failed_thread_unreadable"
 # A user who is deleted from the workspace directory or hidden from the bot.
 _UNKNOWN_USER = frozenset({"user_not_found", "user_not_visible"})
 # Subtypes that carry what someone wrote. Every other subtype (joins, leaves, topic
@@ -528,12 +541,25 @@ class _Walker:
         except SlackAPIError as error:
             if error.code in answered:
                 raise
-            # An outage, or any other code Slack answers with (F-B4). Raising would make
-            # dlt drop every row this run already emitted; after rows the run is cut and
-            # the next one resumes, before any row the error is the run's.
-            if self.stats["emitted"]:
-                raise _CutShort("unavailable") from None
-            raise
+            self._fail(error)
+
+    def _fail(self, error: SlackAPIError) -> NoReturn:
+        """Stop the run on ``error``: an outage, any other code Slack answers with (F-B4)
+        or an answer the walk cannot read. Raising would make dlt drop every row this run
+        already emitted; after rows the run is cut and the next one resumes, before any row
+        the error is the run's."""
+        if self.stats["emitted"]:
+            raise _CutShort("unavailable") from None
+        raise error
+
+    def _malformed(self, method: str, code: str) -> NoReturn:
+        self._fail(SlackAPIError(method, code))
+
+    def _history_ts(self, message: Any) -> str:
+        try:
+            return _ts(message, "conversations.history")
+        except SlackAPIError as error:
+            self._fail(error)
 
     def _identify(self) -> None:
         identity = self._call("auth.test")
@@ -580,7 +606,9 @@ class _Walker:
         return self.channel_name
 
     def _thread(self, root_ts: str) -> list[dict[str, Any]]:
-        """The root and all of its replies, oldest first; ``[]`` when the thread is gone."""
+        """The root and all of its replies, oldest first; ``[]`` when the thread is gone.
+        Raises ``SlackAPIError`` with a ``_MALFORMED`` code when Slack's answer cannot be
+        read."""
         messages: dict[str, dict[str, Any]] = {}
         cursor = ""
         cursors: set[str] = set()
@@ -589,7 +617,9 @@ class _Walker:
             if cursor:
                 params["cursor"] = cursor
             try:
-                page = self._call("conversations.replies", answered=_THREAD_GONE, **params)
+                page = self._call(
+                    "conversations.replies", answered=_THREAD_GONE | _MALFORMED, **params
+                )
             except SlackAPIError as error:
                 if error.code in _THREAD_GONE:
                     return []
@@ -733,7 +763,18 @@ class _Walker:
             return
         if known is not None and _standalone(known):
             self._mark_day(_day(ts))  # it got replies: it leaves its day
-        row = self._render(f"{self.channel_id}:{ts}", self._thread(ts))
+        try:
+            thread = self._thread(ts)
+        except SlackAPIError as error:
+            if error.code not in _MALFORMED:
+                raise
+            # One thread Slack cannot answer readably is a failed item, not a failed run:
+            # its stored document and fingerprint stay, so the next run reads it again, and
+            # the walk goes on to older messages instead of stopping here on every run.
+            self.stats["failed"] = self.stats.get("failed", 0) + 1
+            self.stats[UNREADABLE_THREAD_KEY] = self.stats.get(UNREADABLE_THREAD_KEY, 0) + 1
+            return
+        row = self._render(f"{self.channel_id}:{ts}", thread)
         self.changed.discard(ts)
         if row is None:
             # Every message of the thread was deleted, or none was written by a person. It
@@ -824,20 +865,20 @@ class _Walker:
             self.reading_pages += 1
             messages = page.get("messages")
             if not isinstance(messages, list):
-                raise SlackAPIError("conversations.history", "invalid_response")
+                self._malformed("conversations.history", "invalid_response")
             oldest = None
             for message in messages:
-                ts = _ts(message, "conversations.history")
+                ts = self._history_ts(message)
                 oldest = ts if oldest is None or Decimal(ts) < Decimal(oldest) else oldest
                 if message.get("thread_ts", ts) == ts:
                     yield from self._root(message, roots)
             cursor = ((page.get("response_metadata") or {}).get("next_cursor") or "").strip()
             if not cursor:
                 if page.get("has_more"):
-                    raise SlackAPIError("conversations.history", "missing_cursor")
+                    self._malformed("conversations.history", "missing_cursor")
                 break
             if cursor in cursors:
-                raise SlackAPIError("conversations.history", "repeated_cursor")
+                self._malformed("conversations.history", "repeated_cursor")
             cursors.add(cursor)
             params["cursor"] = cursor
             if oldest is not None:
@@ -892,11 +933,11 @@ class _Walker:
             self.reading_pages += 1
             messages = page.get("messages")
             if not isinstance(messages, list):
-                raise SlackAPIError("conversations.history", "invalid_response")
+                self._malformed("conversations.history", "invalid_response")
             oldest = None
             seen = set()
             for message in messages:
-                ts = _ts(message, "conversations.history")
+                ts = self._history_ts(message)
                 oldest = ts if oldest is None or Decimal(ts) < Decimal(oldest) else oldest
                 if message.get("thread_ts", ts) != ts:
                     continue  # a reply also sent to the channel; it belongs to its thread
@@ -906,7 +947,7 @@ class _Walker:
             if more and (
                 oldest is None or (position is not None and Decimal(oldest) >= Decimal(position))
             ):
-                raise SlackAPIError("conversations.history", "pagination_stalled")
+                self._malformed("conversations.history", "pagination_stalled")
             # The page holds every message from its oldest one up to ``position``, so a
             # known root in that span that the page lacks is gone. The last page reaches
             # back to the start of the channel: a root older than anything Slack still
@@ -1000,9 +1041,8 @@ def _iter_rows(
             # that one day: a rate limit or a cut before any page is an ordinary cut (G73).
             stats[STALLED_KEY] = 1
             logger.warning(
-                "Slack sync for channel %s made no progress: one UTC day has more messages "
-                "than a run can read under the current rate limits.",
-                channel_id,
+                "Slack sync made no progress: one UTC day of a channel has more messages "
+                "than a run can read under the current rate limits."
             )
         else:
             logger.warning("Slack sync stopped early (%s); it resumes on the next run.", cut.reason)

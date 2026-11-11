@@ -285,3 +285,23 @@ async def test_forget_remembered_message_with_no_copy_forgets_nothing():
         await forget_remembered_message("T1", channel_id="C1", message_ts="1.1")
 
     forget.assert_not_awaited()
+
+
+# -- Review 2026-11-11 (F7): red until fixed ---------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store", [remember_message, remember_note])
+async def test_a_remembered_message_or_note_runs_no_improve(store):
+    """F7: "Remember this" and ``@cognee remember`` left ``self_improvement`` at its default,
+    so every click ran ``improve()`` (conflict review, the global context index: LLM calls on
+    the member's key) over the member's whole ``slack`` dataset. A host stores what it was
+    given, as the sync does (``self_improvement=False``)."""
+    owner = SimpleNamespace(id=uuid4())
+    with (
+        patch(f"{MODULE}.get_user", new=AsyncMock(return_value=owner)),
+        patch(f"{MODULE}.cognee_remember", new=AsyncMock()) as remember,
+    ):
+        await store(owner.id, text="ship it", **MESSAGE)
+
+    assert remember.call_args.kwargs.get("self_improvement") is False

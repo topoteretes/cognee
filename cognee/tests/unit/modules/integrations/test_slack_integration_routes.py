@@ -6,6 +6,7 @@ listing and the sync itself are stand-ins.
 """
 
 import asyncio
+import base64
 import importlib
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -494,3 +495,29 @@ def test_an_uninstalled_workspace_says_when_its_data_is_deleted():
         2026, 11, 21, 10, tzinfo=UTC
     )
     assert SlackIntegration().data_deleted_after(make_credential([])) is None
+
+
+# -- Review 2026-11-11 (F3): red until fixed ---------------------------------------------
+
+
+@pytest.mark.parametrize("integration_name", ["SlackIntegration", "SlackMemberIntegration"])
+def test_a_state_signed_with_the_slack_signing_secret_is_refused(monkeypatch, integration_name):
+    """F3: the OAuth state was signed with the Slack signing secret, which Slack and every
+    collaborator of the Slack app can read. With it anyone can mint a state carrying another
+    cognee user's id and their own browser nonce (so the nonce check passes), finish Sign in
+    with Slack with their own identity, and have ``@cognee`` answer them from that user's
+    memory. A state must be signed with a key only this server holds."""
+    from cognee.modules.integrations import slack as slack_package
+    from cognee.modules.integrations.crypto import oauth_state_signing_key
+    from cognee.modules.integrations.oauth_flow import make_state, validate_state
+    from cognee.modules.integrations.slack import slack_settings
+
+    monkeypatch.setenv("INTEGRATION_CREDENTIALS_KEY", base64.b64encode(b"k" * 32).decode())
+    monkeypatch.setattr(slack_settings.slack_settings, "signing_secret", "known-to-slack")
+    integration = getattr(slack_package, integration_name)()
+    forged = make_state(str(uuid4()), "attackers-nonce", signing_secret="known-to-slack")
+
+    fields = validate_state(forged, signing_secret=oauth_state_signing_key(), field_count=2)
+
+    assert not isinstance(fields, tuple)
+    assert not hasattr(integration, "state_signing_secret")

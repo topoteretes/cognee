@@ -77,6 +77,7 @@ from cognee.modules.integrations.credentials import (
     owner_principal_id,
     revoke_credential_by_account,
 )
+from cognee.modules.integrations.crypto import oauth_state_signing_key
 from cognee.modules.integrations.linear.resume_sync import linear_resume_lifespan
 from cognee.modules.integrations.oauth_flow import (
     DEFAULT_STATE_TTL_SECONDS,
@@ -524,7 +525,7 @@ def _start_authorization(provider: str, user: User) -> tuple[str, str]:
     _outbound_http_or_503(provider)
     try:
         nonce = secrets.token_urlsafe(32)
-        state = make_state(user.id, nonce, signing_secret=integration.state_signing_secret())
+        state = make_state(user.id, nonce, signing_secret=oauth_state_signing_key())
         return integration.authorize_url(state), nonce
     except RuntimeError:
         # A provider's require()-style settings guard raises when its client id/secret/
@@ -991,9 +992,7 @@ def get_integrations_router():
                 # cookie's own max-age.
                 return _frontend_redirect(integration, "cancelled")
 
-            fields = validate_state(
-                state, signing_secret=integration.state_signing_secret(), field_count=2
-            )
+            fields = validate_state(state, signing_secret=oauth_state_signing_key(), field_count=2)
             if not isinstance(fields, tuple):
                 span.set_attribute("cognee.integrations.outcome", "error_invalid_state")
                 return _frontend_redirect(integration, "error_invalid_state")

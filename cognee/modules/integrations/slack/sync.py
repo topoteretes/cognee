@@ -649,8 +649,9 @@ async def forget_uninstalled_workspaces(now: datetime | None = None) -> int:
     """Delete the data of every workspace uninstalled at least 14 days ago, and return how many.
 
     A workspace qualifies while its connection is still revoked and carries
-    ``UNINSTALLED_AT_KEY``: a reconnect makes it active again and clears the key. Its
-    synced dataset and every member's remembered copies from it are forgotten, then
+    ``UNINSTALLED_AT_KEY``: a reconnect makes it active again and clears the key. The
+    documents the connector synced (a dataset they leave empty goes with them) and every
+    member's remembered copies from it are forgotten, then
     ``UNINSTALL_DELETED_AT_KEY`` is stamped, so a workspace is deleted once and its owner is
     told when (G84). A workspace that fails is logged and tried again on the next tick.
     """
@@ -716,7 +717,8 @@ def _metadata_time(credential: IntegrationCredential, key: str) -> datetime | No
 
 
 async def _forget_workspace(credential: IntegrationCredential) -> None:
-    from cognee.api.v1.forget.forget import forget
+    from cognee.api.v1.datasets.datasets import datasets as datasets_api
+    from cognee.modules.data.methods import get_dataset_data
     from cognee.modules.data.models import Dataset
     from cognee.modules.integrations.credentials import change_provider_metadata
     from cognee.modules.integrations.slack.remember_message import forget_workspace_remembered
@@ -726,7 +728,10 @@ async def _forget_workspace(credential: IntegrationCredential) -> None:
     team_id = str(credential.provider_account_id)
     dataset_name = dataset_name_for_credential(credential)
     # Every owner's copy: a previous owner who disconnected keeping the data holds a
-    # dataset of the same name (the name derives from the workspace alone, G44).
+    # dataset of the same name (the name derives from the workspace alone, G44). The name
+    # is not proof that the connector made the dataset (anyone can create one by that
+    # name), so only the documents the connector wrote go, and a dataset only when they
+    # leave it empty.
     async with get_relational_engine().get_async_session() as db:
         datasets = (
             await db.execute(
@@ -734,7 +739,19 @@ async def _forget_workspace(credential: IntegrationCredential) -> None:
             )
         ).all()
     for dataset_id, owner_id in datasets:
-        await forget(dataset_id=dataset_id, user=await get_user(owner_id))
+        synced = [
+            data.id
+            for data in await get_dataset_data(dataset_id)
+            if isinstance(data.system_metadata, dict)
+            and data.system_metadata.get("source") == PROVIDER
+        ]
+        if not synced:
+            continue
+        owner = await get_user(owner_id)
+        for data_id in synced:
+            await datasets_api.delete_data(
+                dataset_id, data_id, user=owner, delete_dataset_if_empty=True
+            )
     # forget leaves the staging copy, the dlt state and the load packages, which hold
     # every message's text (G43).
     await drop_dlt_dataset(dataset_name)

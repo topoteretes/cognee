@@ -198,3 +198,86 @@ async def test_an_at_cognee_answer_names_the_slack_conversation_it_read(clean_en
         f"<{permalink}|Ana asks where the Postgres migration plan is. — ana,"
         in (sources[0]["elements"][0]["text"])
     )
+
+
+# -- Review 2026-11-11 (F4): red until fixed ---------------------------------------------
+
+PRIVATE = "G0LEADS"
+ASKER = "U0ASKER"
+
+
+@pytest.mark.asyncio
+async def test_a_member_is_not_answered_from_a_private_channel_they_are_not_in(
+    clean_environment, mock_ai, monkeypatch
+):
+    """F4: every selected channel lands in the installer's one workspace dataset, and
+    ``@cognee`` searched every dataset the asker can read. Once the installer shared that
+    dataset, a member got answers from every selected private channel, a member of it or
+    not. Slack's own rule must hold: a member is answered only from channels they can see."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from cognee.modules.integrations.slack import handle_cognee_mention as mention
+    from cognee.modules.users.methods import create_user
+    from cognee.modules.users.permissions.methods import give_permission_on_dataset
+
+    fake = _channel()
+    fake.add_channel(PRIVATE, "leads", is_private=True)
+    fake.members[PRIVATE] = ["U1"]  # the asker is not in it
+    fake.members[CHANNEL] = ["U1", ASKER]
+    fake.post("1793873100.000100", "U1", "Leads only: the salary review moves to May.", PRIVATE)
+    await _sync(fake)
+    await cognee.add(
+        slack_source(
+            service=fake, team_id=TEAM, channel_id=PRIVATE, resource_name="slack_channel_leads"
+        ),
+        dataset_name=DATASET,
+        primary_key="id",
+        write_disposition="merge",
+        max_rows_per_table=0,
+    )
+    await cognee.cognify(datasets=[DATASET])
+
+    installer = await get_default_user()
+    member = await create_user("asker@example.com", "pw-Test-123")
+    (dataset,) = await get_authorized_existing_datasets(
+        user=installer, permission_type="read", datasets=[DATASET]
+    )
+    await give_permission_on_dataset(member, dataset.id, "read")
+
+    credential = SimpleNamespace(
+        status="active",
+        provider_account_id=TEAM,
+        user_id=installer.id,
+        provider_metadata={"bot_user_id": "U0BOT", "selected_channels": [CHANNEL, PRIVATE]},
+        last_synced_at=None,
+        sync_status=None,
+    )
+    replies = []
+
+    async def post_ephemeral(credential, channel, user, payload, thread_ts=None):
+        replies.append(payload)
+
+    monkeypatch.setattr(mention, "get_by_team", AsyncMock(return_value=credential))
+    monkeypatch.setattr(mention, "resolve_owner_user_id", AsyncMock(return_value=member.id))
+    monkeypatch.setattr(mention, "post_ephemeral", post_ephemeral)
+    # Slack's membership answer (users.conversations) and the connection's dataset name
+    # (this module syncs into its own dataset) are the seams.
+    monkeypatch.setattr(
+        mention,
+        "member_channels",
+        AsyncMock(return_value={c for c, members in fake.members.items() if ASKER in members}),
+    )
+    monkeypatch.setattr(mention, "dataset_name_for_credential", lambda credential: DATASET)
+    event = {
+        "type": "app_mention",
+        "user": ASKER,
+        "channel": CHANNEL,
+        "ts": "1793873200.000100",
+        "text": "<@U0BOT> when is the salary review?",
+    }
+    await mention.handle_cognee_mention(TEAM, event)
+
+    shown = " ".join(str(payload) for payload in replies)
+    assert PRIVATE not in shown
+    assert "salary review moves to May" not in shown

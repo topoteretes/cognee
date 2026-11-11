@@ -109,6 +109,9 @@ async def remember_message(
         user=owner,
         run_in_background=True,
         node_set=SLACK_NODE_SET,
+        # A host stores what it was given, as the sync does: improve() would run conflict
+        # review and the global context index over the member's whole dataset per click.
+        self_improvement=False,
     )
 
 
@@ -150,6 +153,9 @@ async def remember_note(
         user=owner,
         run_in_background=True,
         node_set=SLACK_NODE_SET,
+        # A host stores what it was given, as the sync does: improve() would run conflict
+        # review and the global context index over the member's whole dataset per click.
+        self_improvement=False,
     )
 
 

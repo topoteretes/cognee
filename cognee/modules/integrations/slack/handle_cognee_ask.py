@@ -7,9 +7,13 @@ and answer together, since nothing was public before it), Discard drops it unsee
 """
 
 import logging
+import re
 from typing import Any
+from uuid import UUID
 
+from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.integrations.slack.response_url import post_to_response_url
+from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +23,9 @@ ASK_SHARE_ACTION_ID = "cognee_ask_share"
 ASK_DISCARD_ACTION_ID = "cognee_ask_discard"
 
 
-# A ready-to-share (question, answer) pair, keyed by a short id (never the
-# text itself — Slack button values cap at 2000 chars, easily blown by a
-# real question+answer). Popped on Share or Discard; an id missing here
-# (server restart, double-click) means "no longer available", not a crash.
-_pending_answers: dict[str, tuple[str, str, list[dict[str, Any]]]] = {}
+# The button value that names an answer kept in the session cache: the owner's user id,
+# the asker's session and the QA id, never the text (Slack caps a value at 2000 chars).
+_ANSWER_REF_SEPARATOR = "|"
 
 # Keep the placeholder/confirm text readable even if someone pastes an essay.
 _QUERY_PREVIEW_MAX_CHARS = 200
@@ -85,30 +87,92 @@ def _preview(text: str) -> str:
     return text if len(text) <= _QUERY_PREVIEW_MAX_CHARS else text[:_QUERY_PREVIEW_MAX_CHARS] + "…"
 
 
-async def handle_cognee_ask_share(response_url: str, answer_id: str) -> dict[str, Any]:
+def ask_session_id(team_id: str, member: str) -> str:
+    """The session an ``@cognee`` member's answers are kept in, one per Slack member."""
+    return f"slack:{team_id}:{member}"
+
+
+def _answer_text(blocks: list[dict[str, Any]]) -> str:
+    """What the member was shown, answer and sources, as one mrkdwn text."""
+    texts = [block["text"]["text"] for block in blocks if block["type"] == "section"]
+    texts += [
+        element["text"]
+        for block in blocks
+        if block["type"] == "context"
+        for element in block["elements"]
+    ]
+    return "\n\n".join(texts)
+
+
+async def keep_answer(
+    owner_user_id: UUID, session_id: str, question: str, blocks: list[dict[str, Any]]
+) -> str | None:
+    """Record a shown answer as session Q&A and return the reference Share and Discard
+    carry, or ``None`` when the session cache is off (``CACHING=false``). The cache's own
+    expiry applies; nothing here adds one. Any process can read it back, so Share works
+    after a restart or on another worker."""
+    qa_id = await get_session_manager().add_qa(
+        user_id=str(owner_user_id),
+        question=question,
+        context="",
+        answer=_answer_text(blocks),
+        session_id=session_id,
+    )
+    if qa_id is None:
+        return None
+    return _ANSWER_REF_SEPARATOR.join((str(owner_user_id), session_id, qa_id))
+
+
+def _answer_ref(value: str) -> tuple[str, str, str] | None:
+    parts = value.split(_ANSWER_REF_SEPARATOR)
+    if len(parts) != 3 or not all(parts):
+        return None
+    return parts[0], parts[1], parts[2]
+
+
+async def handle_cognee_ask_share(response_url: str, answer_ref: str) -> dict[str, Any]:
     """Handle the answer prompt's Share click — posts the question and its
     answer in_channel together, replacing the ephemeral review prompt. This
     is the first and only point either one becomes visible to anyone else.
+    The kept answer is removed, so a second click shares nothing twice.
     """
-    pending = _pending_answers.pop(answer_id, None)
-    if pending is None:
+    ref = _answer_ref(answer_ref)
+    entries = []
+    if ref is not None:
+        user_id, session_id, qa_id = ref
+        manager = get_session_manager()
+        entries = await manager.get_session_entries_by_ids(
+            user_id=user_id, qa_ids=[qa_id], session_id=session_id
+        )
+        await manager.delete_qa(user_id=user_id, qa_id=qa_id, session_id=session_id)
+    if not entries:
         return _ephemeral("This answer is no longer available.", replace_original=True)
 
-    question, fallback_text, blocks = pending
+    question, answer = entries[0].question, entries[0].answer
     question_block = {
         "type": "section",
         "text": {"type": "mrkdwn", "text": f'*Asked:* "{_escaped(_preview(question))}"'},
     }
     return _in_channel(
-        f'Asked: "{_escaped(_preview(question))}"\n\n{fallback_text}',
+        f'Asked: "{_escaped(_preview(question))}"\n\n{answer}',
         replace_original=True,
-        blocks=[question_block, {"type": "divider"}, *blocks],
+        blocks=[
+            question_block,
+            {"type": "divider"},
+            *(
+                {"type": "section", "text": {"type": "mrkdwn", "text": piece}}
+                for piece in _sections(answer)
+            ),
+        ],
     )
 
 
-async def handle_cognee_ask_discard(answer_id: str) -> dict[str, Any]:
+async def handle_cognee_ask_discard(answer_ref: str) -> dict[str, Any]:
     """Handle the answer prompt's Discard click — drops the answer for good."""
-    _pending_answers.pop(answer_id, None)
+    ref = _answer_ref(answer_ref)
+    if ref is not None:
+        user_id, session_id, qa_id = ref
+        await get_session_manager().delete_qa(user_id=user_id, qa_id=qa_id, session_id=session_id)
     return _ephemeral("Discarded.", replace_original=True)
 
 
@@ -218,37 +282,44 @@ def _fitted(title: str, room: int) -> str:
     return label
 
 
-# Substrings that mark a fact as "I can't answer this from the given
-# context" rather than an actual answer. HYBRID_COMPLETION can return a
-# separate per-chunk completion for each matched chunk group, and a chunk
-# irrelevant to the question still produces its own such completion —
-# _extract_fact has no way to tell that apart from a real answer (it's just
-# as valid a non-empty string), so it's filtered out here instead.
-_REFUSAL_MARKERS = (
-    "i can't",
-    "i cannot",
-    "i'm unable to",
-    "can't answer",
-    "cannot answer",
-    "no information about",
-    "no relevant information",
-    "doesn't contain",
-    "does not contain",
-    "contains no information",
-    # A dataset without the answer talks about its context instead (live, 2026-11-10:
-    # "The capital city is not specified in the provided context.").
-    "not specified",
-    "not mentioned",
-    "does not mention",
-    "doesn't mention",
-    "provided context",
-    "given context",
-)
+def _retrieved_something(result: dict[str, Any]) -> bool:
+    """Whether the search of one dataset found anything to answer from.
+
+    A completion is written even over an empty context ("the provided context does not
+    mention..."), so only the retrieval context tells an answer from a miss, whatever the
+    answer says. The rule is the search's own (``SearchResultPayload.retrieved_nothing``),
+    applied to the verbose result's fields.
+    """
+    return not SearchResultPayload.model_construct(
+        context=result.get("context_result"),
+        completion=result.get("text_result"),
+        result_object=result.get("objects_result"),
+        error=result.get("error"),
+    ).retrieved_nothing()
 
 
-def _is_refusal(fact: str) -> bool:
-    lowered = fact.lower()
-    return any(marker in lowered for marker in _REFUSAL_MARKERS)
+_WHITESPACE = re.compile(r"\s")
+
+
+def _sections(text: str) -> list[str]:
+    """``text`` as consecutive pieces within Slack's text limit, nothing left out.
+
+    Cut at the last whitespace that fits; a run of more characters than the limit without
+    any is cut at the limit, never inside an escape such as ``&amp;``.
+    """
+    pieces = []
+    while len(text) > _SLACK_TEXT_LIMIT:
+        spaces = [match.start() for match in _WHITESPACE.finditer(text, 1, _SLACK_TEXT_LIMIT + 1)]
+        if spaces:
+            cut = spaces[-1]
+        else:
+            cut = _SLACK_TEXT_LIMIT
+            escape = text.rfind("&", cut - len("&amp;"), cut)
+            if escape > 0 and ";" not in text[escape:cut]:
+                cut = escape
+        pieces.append(text[:cut].rstrip())
+        text = text[cut:].lstrip()
+    return [*pieces, text] if text else pieces
 
 
 def _format_answer(results: list[Any]) -> tuple[str, list[dict[str, Any]]]:
@@ -256,14 +327,17 @@ def _format_answer(results: list[Any]) -> tuple[str, list[dict[str, Any]]]:
 
     ``fallback_text`` is a plain-text summary for notifications/screen
     readers; ``blocks`` (Block Kit) is what actually renders when the client
-    supports it — a header and one section per fact, each followed by the documents it
-    read (``_sources``), with dividers between them. Presentation only: Share and
-    Discard are added by the caller.
+    supports it — a header and the sections of each fact (``_sections``), each followed by
+    the documents it read (``_sources``), with dividers between them. Only the results of a
+    search that retrieved something are shown (``_retrieved_something``). Presentation
+    only: Share and Discard are added by the caller.
     """
     answers = [
         (_escaped(fact), _sources(result))
         for result in results
-        if (fact := _extract_fact(result)) and not _is_refusal(fact)
+        if isinstance(result, dict)
+        and _retrieved_something(result)
+        and (fact := _extract_fact(result))
     ][:3]
     if not answers:
         return "No relevant information found.", []
@@ -272,7 +346,13 @@ def _format_answer(results: list[Any]) -> tuple[str, list[dict[str, Any]]]:
         {"type": "header", "text": {"type": "plain_text", "text": "Answer", "emoji": True}},
     ]
     for fact, sources in answers:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": fact}})
+        # Slack refuses the whole message over its text limit, so a long answer takes as
+        # many sections as it needs (at most 50 blocks a message: about 140,000 characters
+        # over three answers before Slack would refuse it).
+        blocks += [
+            {"type": "section", "text": {"type": "mrkdwn", "text": piece}}
+            for piece in _sections(fact)
+        ]
         for first in range(0, len(sources), _CONTEXT_ELEMENTS):
             texts = sources[first : first + _CONTEXT_ELEMENTS]
             blocks.append(

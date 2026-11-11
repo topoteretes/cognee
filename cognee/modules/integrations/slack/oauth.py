@@ -1,34 +1,17 @@
-"""Slack OAuth v2 install flow: authorize URL, signed state, code exchange.
+"""Slack OAuth v2 install flow: authorize URL and code exchange.
 
 https://docs.slack.dev/authentication/installing-with-oauth
 
-The ``state`` parameter is the CSRF defense AND the connecting-user binding:
-it is minted only for the authenticated cognee user who initiated the
-install, carries ``user_id:expiry`` signed with an HMAC, and the callback
-trusts nothing else — the callback itself is necessarily unauthenticated (the
-browser arrives from slack.com without a session header), so a valid state is
-the only thing that ties the incoming code back to a cognee user.
-
-The signing/validation mechanics themselves are provider-agnostic and live in
-:mod:`cognee.modules.integrations.oauth_flow`; this module only supplies
-Slack's own signing secret to them, plus everything that IS Slack-specific
-(the authorize/token-exchange endpoints, bot scopes, response shape).
+The ``state`` parameter (the CSRF defense and the connecting-user binding) is the
+integrations router's, signed by :mod:`cognee.modules.integrations.oauth_flow` with a
+key only this server holds; this module is what IS Slack-specific (the
+authorize/token-exchange endpoints, bot scopes, response shape).
 """
 
 from typing import Any
-from uuid import UUID
 
 import aiohttp
 
-from cognee.modules.integrations.oauth_flow import (
-    make_state as _make_state,
-)
-from cognee.modules.integrations.oauth_flow import (
-    sign_state_payload as _sign_state_payload,
-)
-from cognee.modules.integrations.oauth_flow import (
-    validate_state as _validate_state,
-)
 from cognee.modules.integrations.outbound import client_session
 from cognee.modules.integrations.slack.slack_settings import require
 
@@ -50,26 +33,6 @@ _BOT_SCOPES = (
 # oauth.v2.access is a synchronous call inside the callback request — cap it so
 # a hanging Slack never ties up a worker.
 _TIMEOUT = aiohttp.ClientTimeout(total=30)
-
-
-def _sign_state(payload: str) -> str:
-    # Keyed with the signing secret — a server-side-only secret Slack also
-    # holds, never exposed to the browser or the URL beyond the HMAC itself.
-    return _sign_state_payload(payload, signing_secret=require("signing_secret"))
-
-
-def make_state(user_id: UUID) -> str:
-    """Mint the CSRF state binding this install to its initiating cognee user."""
-    return _make_state(user_id, signing_secret=require("signing_secret"))
-
-
-def validate_state(state: str) -> UUID | None:
-    """Return the ``user_id`` for a valid, unexpired state; ``None`` otherwise.
-
-    Verifies the HMAC before reading any field, so a forged or tampered state
-    never influences behavior — not even error messages.
-    """
-    return _validate_state(state, signing_secret=require("signing_secret"))
 
 
 def build_authorize_url(state: str) -> str:

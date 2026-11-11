@@ -129,9 +129,6 @@ class SlackIntegration(OAuthIntegration):
             token_expires_at=token_expires_at,
         )
 
-    def state_signing_secret(self) -> str:
-        return require("signing_secret")
-
     def frontend_base_url(self) -> str:
         return require("frontend_base_url")
 

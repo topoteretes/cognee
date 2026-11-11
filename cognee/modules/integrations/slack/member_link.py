@@ -106,8 +106,5 @@ class SlackMemberIntegration(OAuthIntegration):
             token_payload={},
         )
 
-    def state_signing_secret(self) -> str:
-        return require("signing_secret")
-
     def frontend_base_url(self) -> str:
         return require("frontend_base_url")

@@ -1,9 +1,11 @@
-"""Whether Cognee will hear about edits and deletions in a Slack conversation.
+"""Who is in a Slack channel, as Slack says: the app, for remembering, and a member, for
+answering.
 
 A message remembered from a conversation is forgotten when Slack reports it edited or
 deleted, and Slack reports that only for the channels the app is a member of. Direct
 messages and group DMs are never reported (the app does not subscribe to them), so
-nothing is remembered from them either.
+nothing is remembered from them either. ``@cognee`` answers a member from the synced
+channels Slack says they belong to (``member_channels``).
 """
 
 import asyncio
@@ -42,3 +44,38 @@ async def app_follows_channel(credential: IntegrationCredential, channel_id: str
         and not info.get("is_mpim")
         and bool(info.get("is_member"))
     )
+
+
+async def member_channels(credential: IntegrationCredential, member: str) -> set[str]:
+    """The public and private channels Slack says ``member`` belongs to.
+
+    Asked with the bot token (``users.conversations``), every page. Raises
+    ``SlackSourceError`` when Slack gives no clear answer, so a caller never takes an
+    unknown membership for an empty or a full one.
+    """
+    from cognee.tasks.ingestion.connectors.slack import PAGE_SIZE, SlackAPIError
+
+    require_outbound_http(PROVIDER)
+    client = ingestion.build_service(PROVIDER, await access_token_for(credential))
+    channels: set[str] = set()
+    cursor = ""
+    cursors: set[str] = set()
+    while True:
+        params = {"user": member, "types": "public_channel,private_channel", "limit": PAGE_SIZE}
+        if cursor:
+            params["cursor"] = cursor
+        page = await asyncio.to_thread(client.call, "users.conversations", **params)
+        batch = page.get("channels")
+        if not isinstance(batch, list):
+            raise SlackAPIError("users.conversations", "invalid_response")
+        channels |= {
+            item["id"]
+            for item in batch
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+        cursor = ((page.get("response_metadata") or {}).get("next_cursor") or "").strip()
+        if not cursor:
+            return channels
+        if cursor in cursors:
+            raise SlackAPIError("users.conversations", "repeated_cursor")
+        cursors.add(cursor)
