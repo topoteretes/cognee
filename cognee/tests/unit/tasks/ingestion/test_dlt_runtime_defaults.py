@@ -1,4 +1,4 @@
-"""dlt keeps no row text and sends no telemetry of its own unless the user asks for it (B4).
+"""dlt keeps no row text and sends no telemetry of its own unless the user asks for it.
 
 dlt's defaults keep every completed load package, with the rendered text of every row,
 under its pipelines directory, outside cognee's data root, and post four telemetry events
@@ -6,6 +6,7 @@ per run to dltHub. cognee sets both off before it first builds a dlt source or p
 a value the user set wins.
 """
 
+import gzip
 import os
 import sqlite3
 
@@ -76,8 +77,8 @@ def test_a_database_source_is_built_with_the_defaults_in_place(tmp_path, monkeyp
 
 @pytest.mark.asyncio
 async def test_dropping_a_dataset_leaves_a_dataset_whose_name_starts_with_it(tmp_path, monkeypatch):
-    """G74: the staging files were matched by the prefix ``dlt_database_<name>__``, so
-    dropping ``slack_acme`` also deleted ``slack_acme__other``'s staging database."""
+    """Staging files are matched by exact name: a prefix would also match
+    ``slack_acme__other``'s staging database."""
     import importlib
     from types import SimpleNamespace
 
@@ -104,3 +105,104 @@ async def test_dropping_a_dataset_leaves_a_dataset_whose_name_starts_with_it(tmp
     await ingest.drop_dlt_dataset("slack_acme")
 
     assert sorted(path.name for path in tmp_path.iterdir() if path.is_file()) == sorted(other)
+
+
+def _ingest_into(dataset_name, rows):
+    """A document source ingested into ``dataset_name`` through the real pipeline."""
+    import dlt
+
+    from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, PIPELINE_SCOPE_ATTR
+    from cognee.tasks.ingestion.ingest_dlt_source import ingest_dlt_source
+
+    @dlt.resource(name="docs", primary_key="id")
+    def documents():
+        yield from rows
+
+    resource = documents()
+    setattr(resource, DOCUMENT_SOURCE_ATTR, "notion")
+    setattr(resource, PIPELINE_SCOPE_ATTR, dataset_name)
+    return ingest_dlt_source(
+        resource, dataset_name, primary_key="id", write_disposition="merge", max_rows_per_table=0
+    )
+
+
+def _text_on_disk(root, text: str) -> list:
+    """Files under ``root`` holding ``text``; dlt writes its load packages gzipped."""
+
+    def content(path):
+        data = path.read_bytes()
+        return gzip.decompress(data) if path.suffix == ".gz" else data
+
+    return [path for path in root.rglob("*") if path.is_file() and text.encode() in content(path)]
+
+
+@pytest.mark.asyncio
+async def test_dropping_a_dataset_removes_its_pipelines_and_keeps_another_datasets(
+    staging, tmp_path, monkeypatch
+):
+    """A name dlt normalizes differently (``team_a__b`` becomes ``team_a_b``), kept with
+    the completed packages a user asked dlt to keep, so the pipeline directory holds text."""
+    from cognee.tasks.ingestion.ingest_dlt_source import drop_dlt_dataset
+
+    monkeypatch.setenv("DLT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv(DELETE_JOBS, "false")
+    await _ingest_into("Team A__b", [{"id": "1", "title": "Plan", "content": "Dropped text."}])
+    await _ingest_into("other", [{"id": "1", "title": "Plan", "content": "Kept text."}])
+
+    await drop_dlt_dataset("Team A__b")
+
+    assert _text_on_disk(tmp_path, "Dropped text.") == []
+    assert sorted(p.name for p in tmp_path.glob("dlt_database_*")) == sorted(
+        ["dlt_database_other", "dlt_database_other__other", "dlt_database_other__other_staging"]
+    )
+    assert _text_on_disk(tmp_path / "pipelines", "Kept text.") != []
+
+
+@pytest.mark.asyncio
+async def test_a_pipeline_cognee_did_not_write_is_left_alone(staging, tmp_path, monkeypatch):
+    """dlt's pipelines directory is shared with the host's own pipelines: a state file
+    that is not a dlt state object is not ours, and does not stop the drop."""
+    from cognee.tasks.ingestion.ingest_dlt_source import drop_dlt_dataset
+
+    monkeypatch.setenv("DLT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv(DELETE_JOBS, "false")
+    for name, state in {"aaa_truncated": '{"dataset_name": "mi', "aab_list": "[]"}.items():
+        (tmp_path / "pipelines" / name).mkdir(parents=True)
+        (tmp_path / "pipelines" / name / "state.json").write_text(state)
+    await _ingest_into("mine", [{"id": "1", "title": "Plan", "content": "Dropped text."}])
+
+    await drop_dlt_dataset("mine")
+
+    assert _text_on_disk(tmp_path, "Dropped text.") == []
+    assert (tmp_path / "pipelines" / "aaa_truncated").is_dir()
+    assert (tmp_path / "pipelines" / "aab_list").is_dir()
+
+
+@pytest.mark.asyncio
+async def test_dropping_applies_the_defaults_before_dlt_starts(tmp_path, monkeypatch):
+    """Reading dlt's pipelines directory starts dlt's runtime, which reads the telemetry
+    setting once for the process."""
+    import importlib
+    from types import SimpleNamespace
+
+    import dlt.common.pipeline as dlt_pipeline
+
+    ingest = importlib.import_module("cognee.tasks.ingestion.ingest_dlt_source")
+    monkeypatch.setattr(
+        ingest,
+        "get_relational_config",
+        lambda: SimpleNamespace(db_provider="sqlite", db_path=str(tmp_path)),
+    )
+    monkeypatch.delenv(TELEMETRY, raising=False)
+    monkeypatch.delenv(DELETE_JOBS, raising=False)
+    seen = {}
+
+    def spy():
+        seen[TELEMETRY] = os.environ.get(TELEMETRY)
+        return str(tmp_path / "pipelines")
+
+    monkeypatch.setattr(dlt_pipeline, "get_dlt_pipelines_dir", spy)
+
+    await ingest.drop_dlt_dataset("mine")
+
+    assert seen == {TELEMETRY: "false"}

@@ -681,6 +681,8 @@ async def drop_dlt_dataset(dataset_name: str) -> None:
     packages, which hold the rendered text of every row). A later sync would read the
     staged rows back. Taken under the staging lock, so no dlt run is mid-write.
     """
+    apply_dlt_runtime_defaults()
+
     import shutil
     from pathlib import Path
 
@@ -701,7 +703,7 @@ async def drop_dlt_dataset(dataset_name: str) -> None:
         else:
             # The database and the two datasets dlt attaches to it, under the name as given
             # and as dlt normalizes it; never by prefix, which also matched a dataset whose
-            # name starts with this one (``<name>__other``, G74).
+            # name starts with this one (``<name>__other``).
             from dlt.common.normalizers.naming.snake_case import NamingConvention
 
             normalized = NamingConvention().normalize_identifier(safe_name)
@@ -716,8 +718,21 @@ async def drop_dlt_dataset(dataset_name: str) -> None:
             state_path = pipeline_dir / "state.json"
             if not state_path.is_file():
                 continue
-            if json.loads(state_path.read_text()).get("dataset_name") == safe_name:
+            if _pipeline_dataset(state_path) == safe_name:
                 shutil.rmtree(pipeline_dir)
+
+
+def _pipeline_dataset(state_path) -> str | None:
+    """The dataset a dlt pipeline loads into, or ``None`` for a state dlt did not write.
+
+    dlt's pipelines directory is shared with the host's own pipelines, and dlt writes its
+    state atomically, so a file that is not a state object belongs to someone else.
+    """
+    try:
+        state = json.loads(state_path.read_text())
+    except json.JSONDecodeError:
+        return None
+    return state.get("dataset_name") if isinstance(state, dict) else None
 
 
 def _to_safe_ident(s: str) -> str:

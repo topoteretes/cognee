@@ -55,7 +55,7 @@ STRUCTURE_COLUMN_HINT = {STRUCTURE_COLUMN: {"data_type": "json", "nullable": Tru
 DOCUMENT_COLUMN_HINTS = {**NODE_SET_COLUMN_HINT, **STRUCTURE_COLUMN_HINT}
 
 
-# dlt's own defaults that cognee turns off (B4). dlt keeps every completed load package,
+# dlt's own defaults that cognee turns off. dlt keeps every completed load package,
 # with the rendered text of every row, under its pipelines directory, outside cognee's data
 # root, so a forgotten or deleted record stays on disk; and it posts its own telemetry
 # events to dltHub on every run. A failed package is kept either way, for the retry.
