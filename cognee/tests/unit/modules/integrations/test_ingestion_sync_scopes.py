@@ -228,3 +228,59 @@ def test_only_a_scope_gone_at_the_provider_does_not_block_retirement(counts, gon
 def test_a_rate_limit_carries_the_wait_the_provider_named():
     assert ingestion.RateLimitedError("slow down", retry_after=30).retry_after == 30
     assert ingestion.RateLimitedError("slow down").retry_after is None
+
+
+@pytest.mark.parametrize("failure", ["api", "folder_not_found"])
+@pytest.mark.asyncio
+async def test_a_listing_failure_is_counted_once_with_a_reason(remember, failure):
+    from cognee.modules.integrations.dropbox.sync import _classify_error
+    from cognee.tasks.ingestion.connectors.dropbox import (
+        DropboxError,
+        _iter_rows,
+        _Session,
+        dropbox_source,
+    )
+    from cognee.tests.unit.tasks.connectors.fake_dropbox import ACCOUNT, FakeDropbox
+
+    fake = FakeDropbox()
+    folder = "id:never-listed"
+    if failure == "api":
+        folder = fake.mkdir("/Notes")
+        fake.queued["files/list_folder"] = [(403, {})]
+
+    def make_source(scope, name, check_active):
+        return dropbox_source(
+            folder_id=folder, account_id=ACCOUNT, resource_name=name, service=fake.client()
+        )
+
+    async def run_the_source(source, **_kwargs):
+        try:
+            list(
+                _iter_rows(
+                    _Session(fake.client(), None),
+                    folder_id=folder,
+                    account_id=ACCOUNT,
+                    state={},
+                    stats=source.cognee_sync_stats,
+                    max_bytes=None,
+                )
+            )
+        except DropboxError as error:
+            raise RuntimeError("pipeline step failed") from error
+
+    remember.side_effect = run_the_source
+    counts = {"scanned": 0, "skipped": 0, "failed": 0}
+
+    await ingestion.sync_scopes(
+        "dropbox",
+        CREDENTIAL,
+        counts,
+        scopes=[folder],
+        dataset_name="dropbox_acme",
+        make_source=make_source,
+        classify_error=_classify_error,
+    )
+
+    assert counts["failed"] == 1
+    reasons = {k: v for k, v in counts.items() if k.startswith("failed_") and v}
+    assert reasons == {"failed_listing": 1}

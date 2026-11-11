@@ -168,3 +168,88 @@ def test_a_request_httpx_cannot_send_names_no_token():
         repr(error.value.__context__),
     ):
         assert TOKEN not in text
+
+
+# ---------------------------------------------------------------- 401s by AuthError tag
+class _RenewingToken:
+    """A token source like the integration module's cache: ``invalidate`` renews it."""
+
+    def __init__(self, *tokens):
+        self.tokens = list(tokens)
+        self.renewals = 0
+
+    def __call__(self):
+        return self.tokens[0]
+
+    def invalidate(self):
+        self.renewals += 1
+        self.tokens.pop(0)
+
+
+def _answer_401(tag, *, accepted=None):
+    """Dropbox answers 401 with ``tag`` (None: no JSON body) except for ``accepted``."""
+    calls = []
+
+    def handler(request):
+        calls.append(request.headers["Authorization"])
+        if accepted and request.headers["Authorization"] == f"Bearer {accepted}":
+            return httpx.Response(200, json={"ok": True})
+        if tag is None:
+            return httpx.Response(401, content=b"<html>proxy says no</html>")
+        return httpx.Response(401, json={"error_summary": f"{tag}/..", "error": {".tag": tag}})
+
+    return handler, calls
+
+
+@pytest.mark.parametrize("tag", ["expired_access_token", "invalid_access_token", "other", None])
+def test_a_refused_token_is_renewed_once_and_the_request_retried(tag):
+    handler, calls = _answer_401(tag, accepted="sl.renewed")
+    token = _RenewingToken("sl.stale", "sl.renewed")
+    checks = []
+
+    result = client_for(handler, token=token).rpc(
+        "files/get_metadata", {"path": FILE_ID}, check_active=lambda: checks.append(1)
+    )
+
+    assert result == {"ok": True} and token.renewals == 1
+    assert calls == ["Bearer sl.stale", "Bearer sl.renewed"]
+    assert len(checks) == 2, "check_active runs before the first attempt and before the retry"
+
+
+@pytest.mark.parametrize("tag", ["expired_access_token", "invalid_access_token", "other", None])
+def test_a_second_401_after_the_renewal_is_an_auth_failure(tag):
+    handler, calls = _answer_401(tag)
+    token = _RenewingToken("sl.stale", "sl.renewed")
+
+    with pytest.raises(DropboxAuthError) as error:
+        client_for(handler, token=token).rpc("files/get_metadata", {"path": FILE_ID})
+
+    assert token.renewals == 1 and len(calls) == 2
+    assert_clean(error.value)
+
+
+@pytest.mark.parametrize("tag", ["missing_scope", "route_access_denied"])
+def test_a_missing_scope_is_never_renewed_and_says_to_reconnect(tag):
+    from cognee.tasks.ingestion.connectors.dropbox import DropboxScopeError
+
+    handler, calls = _answer_401(tag, accepted="sl.renewed")
+    token = _RenewingToken("sl.stale", "sl.renewed")
+
+    with pytest.raises(DropboxScopeError) as error:
+        client_for(handler, token=token).rpc("files/get_metadata", {"path": FILE_ID})
+
+    assert token.renewals == 0 and len(calls) == 1
+    assert "reconnect" in str(error.value) and "files.content.read" in str(error.value)
+    assert isinstance(error.value, DropboxAuthError), "counted as failed_auth"
+    assert_clean(error.value)
+
+
+@pytest.mark.parametrize("tag", ["user_suspended", "invalid_select_user", "invalid_select_admin"])
+def test_an_account_refusal_is_never_renewed_or_retried(tag):
+    handler, calls = _answer_401(tag, accepted="sl.renewed")
+    token = _RenewingToken("sl.stale", "sl.renewed")
+
+    with pytest.raises(DropboxAuthError) as error:
+        client_for(handler, token=token).rpc("files/get_metadata", {"path": FILE_ID})
+
+    assert token.renewals == 0 and len(calls) == 1 and error.value.tags == (tag,)

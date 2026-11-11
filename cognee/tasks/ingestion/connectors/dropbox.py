@@ -35,7 +35,7 @@ import zlib
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import date
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import dlt_utils
@@ -48,7 +48,19 @@ from cognee.tasks.ingestion.dlt_utils import (
 
 logger = get_logger("dropbox_connector")
 
-Token = str | Callable[[], str]
+
+class TokenSource(Protocol):
+    """Where the client takes its token from before every request attempt.
+
+    ``invalidate()`` is optional: a source that has it is told when Dropbox answered 401 for
+    the token it gave, and the client then asks it once more and retries that request once.
+    A plain zero-argument callable is a ``TokenSource`` without ``invalidate``.
+    """
+
+    def __call__(self) -> str: ...
+
+
+Token = str | TokenSource | Callable[[], str]
 
 _API = "https://api.dropboxapi.com/2/"
 _CONTENT = "https://content.dropboxapi.com/2/"
@@ -92,6 +104,7 @@ STATS_KEYS = (
     "failed",
     "failed_auth",
     "failed_account",
+    "failed_listing",
     "failed_rate_limit",
     "failed_retry",
     "team_space_unsupported",
@@ -112,7 +125,25 @@ class DropboxError(RuntimeError):
 
 
 class DropboxAuthError(DropboxError):
-    """Dropbox refused the access token (HTTP 401), or the token is not a valid header value."""
+    """Dropbox refused the access token (HTTP 401), or the token is not a valid header value.
+
+    ``tags`` holds Dropbox's AuthError tag when the 401 carried one (``expired_access_token``,
+    ``invalid_access_token``, ``user_suspended``, ...)."""
+
+
+class DropboxScopeError(DropboxAuthError):
+    """The token lacks a scope or a route the connector needs (``missing_scope``,
+    ``route_access_denied``). Renewing the token does not help: the account must reconnect
+    and grant files.metadata.read, files.content.read and account_info.read."""
+
+
+# Dropbox's AuthError tags (API reference, "AuthError" union), and what a 401 with each one
+# leads to. A token source that can renew (``TokenSource.invalidate``) gets one renewal and
+# one retry for a token Dropbox calls expired or invalid, and for a tag it does not list here
+# or a 401 without a readable body. The other tags are about the account or the app, not the
+# token: no renewal, no retry.
+_SCOPE_TAGS = frozenset({"missing_scope", "route_access_denied"})
+_ACCOUNT_TAGS = frozenset({"user_suspended", "invalid_select_user", "invalid_select_admin"})
 
 
 class DropboxRateLimitedError(DropboxError):
@@ -281,10 +312,22 @@ class DropboxClient:
                 retry_after = response.headers.get("Retry-After")
                 raise _Transient(status=status, endpoint=endpoint, retry_after=retry_after)
             if status == 401:
+                response.read()
+                tags = _error_tags(response)
+                if tags[:1] and tags[0] in _SCOPE_TAGS:
+                    raise DropboxScopeError(
+                        f"Dropbox {endpoint} refused the app's access (HTTP 401, {tags[0]}); "
+                        "reconnect the account and grant the scopes files.metadata.read, "
+                        "files.content.read and account_info.read",
+                        status=status,
+                        endpoint=endpoint,
+                        tags=tags,
+                    )
                 raise DropboxAuthError(
                     f"Dropbox {endpoint} refused the access token: HTTP 401",
                     status=status,
                     endpoint=endpoint,
+                    tags=tags,
                 )
             tags = ()
             if status == 409:
@@ -327,10 +370,34 @@ class DropboxClient:
                 if seconds > 0 and check_active is not None:
                     check_active()
 
+        # A token source that can drop its cached token (a host's cache) gets one more try
+        # after a 401: the cached token may be stale while the store holds a renewed one.
+        renew = getattr(self._token, "invalidate", None)
+        renewed = False
+
+        def attempt_with_renewal():
+            nonlocal renewed
+            try:
+                return attempt()
+            except DropboxAuthError as error:
+                if (
+                    renew is None
+                    or renewed
+                    or error.status != 401
+                    or isinstance(error, DropboxScopeError)
+                    or (error.tags[:1] and error.tags[0] in _ACCOUNT_TAGS)
+                ):
+                    raise
+            renewed = True
+            renew()
+            if check_active is not None:
+                check_active()
+            return attempt()
+
         failure = None
         try:
             return dlt_utils.with_retries(
-                attempt,
+                attempt_with_renewal,
                 retry_on=(_Transient,),
                 delay=delay,
                 attempts=RETRIES + 1,
@@ -459,6 +526,15 @@ def _resolve_folder(session: _Session, folder_id: str) -> tuple[str, str] | None
             "Dropbox files/get_metadata answered without a path", endpoint="files/get_metadata"
         )
     return meta["path_lower"], meta["path_display"]
+
+
+def _failure_key(error: DropboxError) -> str:
+    """The stats key a run that stops on ``error`` is counted under."""
+    if isinstance(error, DropboxAuthError):
+        return "failed_auth"
+    if isinstance(error, DropboxAccountMismatchError):
+        return "failed_account"
+    return "failed_listing"
 
 
 def _check_account(session: _Session, account_id: str, stats: dict[str, int]) -> None:
@@ -658,8 +734,10 @@ def _file_to_row(
     return {
         "id": entry["id"],
         "title": entry["name"],
-        # Where the file sits is in the structure column, which is not hashed, so a rename or
-        # a move extracts nothing again. The date is in the text, at day precision.
+        # Where the file sits is in the structure column, which is not hashed, so moving the
+        # file or renaming a folder above it extracts nothing again. The title is hashed, so
+        # renaming the file itself extracts it once more. The date is in the text, at day
+        # precision.
         "content": _render(entry, text),
         # Dropbox has no web link for a file without creating a shared link, which is a write.
         "url": None,
@@ -811,11 +889,10 @@ def _iter_rows(
         logger.warning("Dropbox: rate limited while listing; the next run lists again.")
         return
     except DropboxError as error:
+        # One failure, one reason key, so a host that classifies the raised error the same
+        # way (``dropbox/sync.py``) does not count it a second time.
         stats["failed"] += 1
-        if isinstance(error, DropboxAuthError):
-            stats["failed_auth"] += 1
-        elif isinstance(error, DropboxAccountMismatchError):
-            stats["failed_account"] += 1
+        stats[_failure_key(error)] += 1
         raise
 
     rows_stored = 0
@@ -945,8 +1022,9 @@ def dropbox_source(
         resource_name: Required: ``dropbox_`` followed by lowercase letters, digits and single
             underscores. It names the staging table and the sync state, so every folder of
             every account needs its own.
-        token: OAuth access token, or a zero-argument callable returning a fresh one before
-            every request. Give either this or ``service``.
+        token: OAuth access token, or a ``TokenSource`` (a zero-argument callable returning the
+            token, called before every request attempt, optionally with ``invalidate()`` for
+            a renewal and one retry after a 401). Give either this or ``service``.
         check_active: Host checkpoint, called before every request attempt and every wait, and
             around every row. What it raises stops the run as it is.
         service: A ``DropboxClient`` (see :func:`build_dropbox_service`); never closed here.

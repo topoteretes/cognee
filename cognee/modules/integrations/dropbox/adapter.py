@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlencode
 
+from cognee.modules.integrations import credentials as credential_store
 from cognee.modules.integrations.base import OAuthInstallation, OAuthIntegration
 from cognee.modules.integrations.credentials import (
     decrypt_token_payload,
@@ -36,8 +37,6 @@ logger = get_logger("dropbox_integration")
 
 _AUTHORIZE_URL = "https://www.dropbox.com/oauth2/authorize"
 SCOPES = "files.metadata.read files.content.read account_info.read"
-# Refresh this far before the token dies, so a sync does not expire halfway.
-_REFRESH_MARGIN = timedelta(minutes=5)
 # One lock per account, so the picker and a sync that both find the token expiring refresh
 # once. Process-local, like the sync guard in ``ingestion``.
 _refresh_locks: dict[str, asyncio.Lock] = {}
@@ -169,6 +168,10 @@ class DropboxIntegration(OAuthIntegration):
                     credential.provider_account_id,
                 )
             raise
+        expires_at = _expires_at(refreshed.get("expires_in"))
+        if expires_at is None:
+            # Stored without an expiry the token would be cached and never renewed.
+            raise client.DropboxIntegrationError("token refresh", "no_expires_in")
         await update_refreshed_credential(
             credential,
             # Dropbox does not rotate the refresh token, so the stored one is kept.
@@ -177,7 +180,7 @@ class DropboxIntegration(OAuthIntegration):
                 "refresh_token": refresh_token,
             },
             scopes=refreshed.get("scope") or credential.scopes,
-            token_expires_at=_expires_at(refreshed.get("expires_in")),
+            token_expires_at=expires_at,
         )
 
     async def revoke_remote(self, credential: IntegrationCredential) -> None:
@@ -192,7 +195,9 @@ class DropboxIntegration(OAuthIntegration):
         token = token_payload.get("access_token")
         refresh_token = token_payload.get("refresh_token")
         try:
-            if refresh_token and (not token or _is_expiring(credential)):
+            if refresh_token and (
+                not token or credential_store.token_is_expiring(credential.token_expires_at, _now())
+            ):
                 refreshed = await client.refresh_access_token(
                     refresh_token,
                     client_id=require("client_id"),
@@ -212,29 +217,36 @@ class DropboxIntegration(OAuthIntegration):
 
 async def access_token_for(credential: IntegrationCredential) -> str:
     """A bearer token, refreshed first when it is within five minutes of its expiry."""
-    credential = await require_active_credential(credential)
-    if _is_expiring(credential):
-        async with _refresh_locks.setdefault(str(credential.provider_account_id), asyncio.Lock()):
-            credential = await require_active_credential(credential)
-            if _is_expiring(credential):
-                await DropboxIntegration().refresh(credential)
-                # refresh() writes through its own session: read the row back.
-                credential = await require_active_credential(credential)
+    token, _expires_at_value, _ciphertext = await access_token_and_expiry(credential)
+    return token
+
+
+async def access_token_and_expiry(
+    credential: IntegrationCredential, rejected_ciphertext: bytes | None = None
+) -> tuple[str, datetime | None, bytes]:
+    """The bearer token, its expiry and the stored ciphertext it came from.
+
+    Renewed first when it is near its expiry, or when ``rejected_ciphertext`` (the stored
+    token Dropbox just answered 401 for) is still what the row holds.
+    """
+    credential = await credential_store.refreshed_credential(
+        credential,
+        DropboxIntegration().refresh,
+        locks=_refresh_locks,
+        read=require_active_credential,
+        now=_now,
+        rejected_ciphertext=rejected_ciphertext,
+    )
     token = decrypt_token_payload(credential).get("access_token")
     if not token:
         raise RuntimeError(
             f"Dropbox credential for account {credential.provider_account_id} holds no access token"
         )
-    return token
+    return token, credential.token_expires_at, credential.ciphertext
 
 
-def _is_expiring(credential: IntegrationCredential) -> bool:
-    expires_at = credential.token_expires_at
-    if expires_at is None:
-        return False
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    return expires_at - _REFRESH_MARGIN <= datetime.now(timezone.utc)
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _expires_at(expires_in: Any) -> datetime | None:

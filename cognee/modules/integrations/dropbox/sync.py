@@ -5,6 +5,9 @@ listing, extraction, cursors and delete tombstones.
 """
 
 import asyncio
+import threading
+from collections.abc import Callable
+from datetime import datetime
 
 from cognee.modules.integrations import ingestion
 from cognee.modules.integrations.dropbox import client
@@ -29,7 +32,9 @@ def _classify_error(error: BaseException) -> str:
     from cognee.modules.integrations.credentials import CredentialInactiveError
     from cognee.tasks.ingestion.connectors.dropbox import (
         DropboxAccountMismatchError,
+        DropboxApiError,
         DropboxAuthError,
+        DropboxFolderNotFoundError,
         DropboxRateLimitedError,
     )
 
@@ -46,6 +51,9 @@ def _classify_error(error: BaseException) -> str:
             return "failed_auth"
         if isinstance(current, DropboxRateLimitedError):
             return "failed_rate_limit"
+        if isinstance(current, (DropboxApiError, DropboxFolderNotFoundError)):
+            # The source raises these only while listing, and counts them the same way.
+            return "failed_listing"
         seen.add(id(current))
         current = current.__cause__ or current.__context__
     return "failed_ingestion"
@@ -78,6 +86,60 @@ async def refuse_nested_selection(
         raise NestedSelectionError("A selected Dropbox folder is inside another selected folder")
 
 
+class _TokenCache:
+    """The token the source's client sends, kept on dlt's worker thread between requests.
+
+    It is a ``TokenSource`` (see ``cognee.tasks.ingestion.connectors.dropbox``). The access
+    token lives about four hours and a sync of several folders can outlast it. The cache asks
+    the credential store again (``fetch``) only when the token it holds is within the refresh
+    margin of its expiry, or after Dropbox refused it: ``invalidate`` (called by the client on
+    a 401, before it retries that request once) passes the refused token to ``fetch``, which
+    renews it unless the row already holds another (renewed, or a reconnect). So the token
+    path reads the credential once per token lifetime. The host's active check
+    (``check_active``) still reads the row before every request.
+    """
+
+    def __init__(self, fetch: Callable[[bytes | None], tuple[str, datetime | None, bytes]]):
+        self._fetch = fetch
+        self._lock = threading.Lock()
+        self._token: str | None = None
+        self._expires_at: datetime | None = None
+        self._ciphertext: bytes | None = None
+        self._refused: bytes | None = None
+
+    def __call__(self) -> str:
+        from cognee.modules.integrations import credentials as credential_store
+        from cognee.modules.integrations.dropbox.adapter import _now
+
+        with self._lock:
+            if self._token is None or credential_store.token_is_expiring(self._expires_at, _now()):
+                self._token, self._expires_at, self._ciphertext = self._fetch_or_auth_error()
+                self._refused = None
+            return self._token
+
+    def _fetch_or_auth_error(self) -> tuple[str, datetime | None, bytes]:
+        from cognee.modules.integrations.dropbox import client
+        from cognee.tasks.ingestion.connectors.dropbox import DropboxAuthError
+
+        failure = None
+        try:
+            return self._fetch(self._refused)
+        except client.DropboxIntegrationError as error:
+            if error.code != "invalid_grant":
+                raise
+            failure = error
+        # Dropbox refused the refresh token: the adapter has revoked the connection. Raised
+        # as the source's auth error, so the run stops cleanly and keeps the rows it has.
+        raise DropboxAuthError(
+            f"Dropbox refused the stored refresh token ({failure.code}); reconnect the account"
+        )
+
+    def invalidate(self) -> None:
+        with self._lock:
+            self._refused = self._ciphertext
+            self._token = None
+
+
 async def sync_dropbox(credential: IntegrationCredential) -> None:
     """Run a manual or scheduled sync and record its outcome."""
     await ingestion.run_sync("dropbox", credential, _sync_source)
@@ -86,7 +148,11 @@ async def sync_dropbox(credential: IntegrationCredential) -> None:
 async def _sync_source(
     credential: IntegrationCredential, counts: dict[str, int]
 ) -> tuple[str, dict[str, int]]:
-    from cognee.modules.integrations.dropbox.adapter import access_token_for
+    from cognee.modules.integrations.dropbox.adapter import (
+        access_token_and_expiry,
+        access_token_for,
+    )
+    from cognee.modules.integrations.dropbox.dropbox_settings import dropbox_settings
 
     selected = (credential.provider_metadata or {}).get(SELECTION_KEY)
     dataset_name = dataset_name_for_credential(credential)
@@ -101,12 +167,11 @@ async def _sync_source(
 
     source_factory = ingestion.source_factory("dropbox")
     loop = asyncio.get_running_loop()
-
-    def fresh_token() -> str:
-        # Called by the source's client before every request, on dlt's worker thread. The
-        # access token lives about four hours and a sync of several folders can outlast it,
-        # so each request asks the credential store, which refreshes it near expiry.
-        return asyncio.run_coroutine_threadsafe(access_token_for(credential), loop).result()
+    fresh_token = _TokenCache(
+        lambda refused: asyncio.run_coroutine_threadsafe(
+            access_token_and_expiry(credential, rejected_ciphertext=refused), loop
+        ).result()
+    )
 
     def make_source(folder_id: str, resource_name: str, check_active):
         return source_factory(
@@ -115,6 +180,7 @@ async def _sync_source(
             resource_name=resource_name,
             token=fresh_token,
             check_active=check_active,
+            max_file_size_mb=dropbox_settings.max_file_size_mb,
         )
 
     retained = await ingestion.sync_scopes(

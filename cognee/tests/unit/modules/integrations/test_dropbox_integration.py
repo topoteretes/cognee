@@ -44,6 +44,7 @@ def credential(**metadata):
         provider_metadata={"email": "person@example.com", **metadata},
         token_expires_at=None,
         scopes=None,
+        ciphertext=b"stored",
     )
 
 
@@ -358,19 +359,22 @@ def test_client_errors_carry_a_tag_or_a_status_only(body, status, code):
 
 
 @pytest.mark.asyncio
-async def test_each_folder_asks_the_credential_store_for_a_fresh_token(sync_mocks):
-    """A sync of several folders can outlast a four-hour token: no folder keeps the first."""
+async def test_the_cached_token_is_fetched_again_once_it_nears_expiry(sync_mocks):
+    """A sync of several folders can outlast a four-hour token: the cache goes back to the
+    credential store when the token it holds is within the refresh margin."""
     import asyncio
+    from datetime import datetime, timedelta, timezone
 
-    sync_mocks.token.side_effect = ["at-start", "renewed-1", "renewed-2"]
-
-    await DropboxIntegration().sync_now(credential(selected_folder_ids=["id:n", "id:w"]))
-
-    second = sync_mocks.source.call_args_list[1].kwargs["token"]
-    first = sync_mocks.source.call_args_list[0].kwargs["token"]
-    # The source's client calls it on dlt's worker thread, before each request.
-    assert await asyncio.to_thread(second) == "renewed-1"
-    assert await asyncio.to_thread(first) == "renewed-2"
+    expired = datetime.now(timezone.utc) - timedelta(minutes=1)
+    fetch = AsyncMock(side_effect=[("renewed-1", expired, b"1"), ("renewed-2", None, b"2")])
+    with patch.object(adapter_module, "access_token_and_expiry", fetch):
+        await DropboxIntegration().sync_now(credential(selected_folder_ids=["id:n", "id:w"]))
+        token = sync_mocks.source.call_args_list[1].kwargs["token"]
+        # The source's client calls it on dlt's worker thread, before each request.
+        assert await asyncio.to_thread(token) == "renewed-1"
+        assert await asyncio.to_thread(token) == "renewed-2"
+        assert await asyncio.to_thread(token) == "renewed-2"
+    assert fetch.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -541,3 +545,373 @@ async def test_a_token_that_expires_between_two_folders_is_renewed_for_the_secon
         "access_token": "sl.renewed",
         "refresh_token": "refresh",
     }
+
+
+# ---------------------------------------------------------------- PR #6668 review bot
+async def _real_two_folder_sync(monkeypatch, *, requests_per_folder, expires_in):
+    """A sync over a real credential row whose source makes ``requests_per_folder`` requests.
+
+    Returns the number of credential reads the adapter made and the tokens the requests used.
+    """
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from uuid import uuid4
+
+    from cognee.modules.integrations import credentials as store
+
+    row = await store.upsert_credential(
+        provider="dropbox",
+        provider_account_id=ACCOUNT,
+        user_id=uuid4(),
+        token_payload={"access_token": "sl.first", "refresh_token": "refresh"},
+        provider_metadata={"email": "p@example.com", "selected_folder_ids": ["id:n", "id:w"]},
+        token_expires_at=datetime.now(timezone.utc) + expires_in,
+    )
+    reads = []
+    real_read = adapter_module.require_active_credential
+
+    async def counted_read(credential):
+        reads.append(1)
+        return await real_read(credential)
+
+    monkeypatch.setattr(adapter_module, "require_active_credential", counted_read)
+
+    async def dropbox_http(operation, url, **kwargs):
+        if url == client_module.METADATA_URL:
+            path = {"id:n": "/notes", "id:w": "/work"}[kwargs["json"]["path"]]
+            return {".tag": "folder", "path_lower": path}
+        raise AssertionError(url)
+
+    monkeypatch.setattr(client_module, "_post", dropbox_http)
+    tokens = []
+
+    async def remember(source, **_kwargs):
+        for _ in range(requests_per_folder):
+            tokens.append(await asyncio.to_thread(source.token))
+
+    monkeypatch.setattr(import_module("cognee.api.v1.remember.remember"), "remember", remember)
+    monkeypatch.setattr(
+        sync_module.ingestion,
+        "source_factory",
+        lambda _provider: lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    monkeypatch.setattr(sync_module.ingestion, "retire_resources", AsyncMock())
+    monkeypatch.setattr(
+        "cognee.modules.integrations.sync_progress.report_sync_progress", AsyncMock()
+    )
+    monkeypatch.setattr("cognee.modules.users.methods.get_user", AsyncMock(return_value="owner"))
+    counts = {"scanned": 0, "skipped": 0, "failed": 0}
+    await sync_module._sync_source(row, counts)
+    return len(reads), tokens
+
+
+@pytest.mark.asyncio
+async def test_the_token_path_reads_the_credential_once_per_token_lifetime(
+    credential_db, monkeypatch
+):
+    from datetime import timedelta
+
+    reads, tokens = await _real_two_folder_sync(
+        monkeypatch, requests_per_folder=25, expires_in=timedelta(hours=4)
+    )
+
+    assert tokens == ["sl.first"] * 50
+    # The host's active check (check_active, not called by this test's source) still reads the
+    # row before every request; this counts the token path alone.
+    assert reads <= 2, f"{reads} credential reads for 50 requests"
+
+
+def test_a_cached_token_is_replaced_after_a_401_and_the_request_retried_once():
+    import httpx
+
+    from cognee.modules.integrations.dropbox.sync import _TokenCache
+
+    tokens = iter(["sl.stale", "sl.renewed"])
+    cache = _TokenCache(lambda _refused: (next(tokens), None, b"row"))
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers["Authorization"])
+        if request.headers["Authorization"] == "Bearer sl.stale":
+            return httpx.Response(401, json={"error": {".tag": "expired_access_token"}})
+        return httpx.Response(200, json={"ok": True})
+
+    from cognee.tasks.ingestion.connectors.dropbox import DropboxClient
+
+    client = DropboxClient(cache, http=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert client.rpc("files/get_metadata", {"path": "id:x"}) == {"ok": True}
+    assert seen == ["Bearer sl.stale", "Bearer sl.renewed"]
+
+
+@pytest.mark.asyncio
+async def test_the_file_size_setting_reaches_every_source(sync_mocks, monkeypatch):
+    monkeypatch.setattr(dropbox_settings, "max_file_size_mb", 5.0, raising=False)
+    await DropboxIntegration().sync_now(credential(selected_folder_ids=["id:n"]))
+    assert sync_mocks.source.call_args.kwargs["max_file_size_mb"] == 5.0
+
+    monkeypatch.setattr(dropbox_settings, "max_file_size_mb", None, raising=False)
+    await DropboxIntegration().sync_now(credential(selected_folder_ids=["id:w"]))
+    assert sync_mocks.source.call_args.kwargs["max_file_size_mb"] is None
+
+
+def test_the_file_size_setting_comes_from_the_environment(monkeypatch):
+    from cognee.modules.integrations.dropbox.dropbox_settings import DropboxSettings
+
+    monkeypatch.setenv("DROPBOX_MAX_FILE_SIZE_MB", "2.5")
+    assert DropboxSettings().max_file_size_mb == 2.5
+    monkeypatch.delenv("DROPBOX_MAX_FILE_SIZE_MB")
+    assert DropboxSettings().max_file_size_mb is None
+
+
+@pytest.mark.asyncio
+async def test_the_folder_picker_reuses_one_session_across_pages_and_keeps_folders_only(
+    monkeypatch,
+):
+    pages = iter(
+        [
+            {
+                "entries": [
+                    {".tag": "folder", "id": "id:a", "path_display": "/A"},
+                    {".tag": "file", "id": "id:f", "path_display": "/A/f.md"},
+                ],
+                "cursor": "c1",
+                "has_more": True,
+            },
+            {
+                "entries": [{".tag": "folder", "id": "id:b", "path_display": "/B"}],
+                "cursor": "c2",
+                "has_more": False,
+            },
+        ]
+    )
+    sessions = []
+
+    class Response:
+        status = 200
+
+        async def json(self, content_type=None):
+            return next(pages)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+    class Session:
+        def __init__(self, **_kwargs):
+            sessions.append(self)
+
+        def post(self, *_args, **_kwargs):
+            return Response()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+    monkeypatch.setattr(client_module, "client_session", lambda _provider, **kw: Session(**kw))
+
+    folders = await client_module.list_folders("sl.token")
+
+    assert [f["id"] for f in folders] == ["id:a", "id:b"]
+    assert len(sessions) == 1, f"{len(sessions)} HTTP sessions for two pages"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["notion", "dropbox"])
+async def test_notion_and_dropbox_renew_tokens_through_one_shared_helper(provider):
+    from cognee.modules.integrations import credentials
+
+    adapter = import_module(f"cognee.modules.integrations.{provider}.adapter")
+    row = credential()
+    with (
+        patch.object(credentials, "refreshed_credential", AsyncMock(return_value=row)) as shared,
+        patch.object(adapter, "decrypt_token_payload", return_value={"access_token": "tok"}),
+    ):
+        assert await adapter.access_token_for(row) == "tok"
+    shared.assert_awaited_once()
+
+
+# ---------------------------------------------------------------- review swarm round 8
+@pytest.mark.parametrize("value", ["", " "])
+def test_an_empty_file_size_setting_means_no_limit(monkeypatch, value):
+    from cognee.modules.integrations.dropbox.dropbox_settings import DropboxSettings
+
+    monkeypatch.setenv("DROPBOX_MAX_FILE_SIZE_MB", value)
+    assert DropboxSettings().max_file_size_mb is None
+
+
+@pytest.mark.parametrize("value", ["inf", "nan", "0", "-1"])
+def test_a_file_size_setting_that_would_skip_everything_or_nothing_is_refused(monkeypatch, value):
+    from pydantic import ValidationError
+
+    from cognee.modules.integrations.dropbox.dropbox_settings import DropboxSettings
+
+    monkeypatch.setenv("DROPBOX_MAX_FILE_SIZE_MB", value)
+    with pytest.raises(ValidationError):
+        DropboxSettings()
+
+
+def test_the_api_imports_with_an_empty_file_size_setting():
+    import os
+    import subprocess
+    import sys
+
+    env = {**os.environ, "DROPBOX_MAX_FILE_SIZE_MB": ""}
+    subprocess.run(
+        [sys.executable, "-c", "import cognee.modules.integrations.dropbox"], env=env, check=True
+    )
+
+
+async def _token_source_of_a_real_sync(monkeypatch, during):
+    """Run a one-folder sync over a real credential row; ``during(token, row)`` runs inside
+    the source's walk on dlt's worker thread and returns what the test wants to see."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from uuid import uuid4
+
+    from cognee.modules.integrations import credentials as store
+
+    row = await store.upsert_credential(
+        provider="dropbox",
+        provider_account_id=ACCOUNT,
+        user_id=uuid4(),
+        token_payload={"access_token": "sl.first", "refresh_token": "refresh"},
+        provider_metadata={"email": "p@example.com", "selected_folder_ids": ["id:n"]},
+        token_expires_at=datetime.now(timezone.utc) + timedelta(hours=4),
+    )
+    refreshes = []
+
+    async def dropbox_http(operation, url, **kwargs):
+        if url == client_module.TOKEN_URL:
+            refreshes.append(1)
+            return {"access_token": "sl.renewed", "expires_in": 14400}
+        if url == client_module.METADATA_URL:
+            return {".tag": "folder", "path_lower": "/notes"}
+        raise AssertionError(url)
+
+    monkeypatch.setattr(client_module, "_post", dropbox_http)
+    monkeypatch.setattr(adapter_module, "require", lambda _name: "configured")
+    seen = []
+    loop = asyncio.get_running_loop()
+
+    async def remember(source, **_kwargs):
+        def walk():
+            return during(source.token, row, loop)
+
+        seen.append(await asyncio.to_thread(walk))
+
+    monkeypatch.setattr(import_module("cognee.api.v1.remember.remember"), "remember", remember)
+    monkeypatch.setattr(
+        sync_module.ingestion,
+        "source_factory",
+        lambda _provider: lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    monkeypatch.setattr(sync_module.ingestion, "retire_resources", AsyncMock())
+    monkeypatch.setattr(
+        "cognee.modules.integrations.sync_progress.report_sync_progress", AsyncMock()
+    )
+    monkeypatch.setattr("cognee.modules.users.methods.get_user", AsyncMock(return_value="owner"))
+    await sync_module._sync_source(row, {"scanned": 0, "skipped": 0, "failed": 0})
+    return seen[0], refreshes
+
+
+@pytest.mark.asyncio
+async def test_a_401_on_a_token_the_store_thinks_fresh_refreshes_it(credential_db, monkeypatch):
+    def during(token, _row, _loop):
+        first = token()
+        token.invalidate()  # what the client does when Dropbox answers 401
+        return first, token()
+
+    (first, retried), refreshes = await _token_source_of_a_real_sync(monkeypatch, during)
+
+    assert first == "sl.first" and retried == "sl.renewed" and refreshes == [1]
+
+
+@pytest.mark.asyncio
+async def test_a_401_after_a_reconnect_takes_the_new_token_without_a_refresh(
+    credential_db, monkeypatch
+):
+    import asyncio
+
+    from cognee.modules.integrations import credentials as store
+
+    def during(token, row, loop):
+        first = token()
+        # The owner reconnects the same account while the sync runs; disconnect revoked the
+        # old token at Dropbox, so the next request answers 401.
+        asyncio.run_coroutine_threadsafe(
+            store.upsert_credential(
+                provider="dropbox",
+                provider_account_id=ACCOUNT,
+                user_id=row.user_id,
+                token_payload={"access_token": "sl.reconnected", "refresh_token": "r2"},
+            ),
+            loop,
+        ).result()
+        token.invalidate()
+        return first, token()
+
+    (first, retried), refreshes = await _token_source_of_a_real_sync(monkeypatch, during)
+
+    assert first == "sl.first" and retried == "sl.reconnected" and refreshes == []
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_answer_without_a_lifetime_is_refused():
+    with (
+        patch.object(
+            adapter_module,
+            "decrypt_token_payload",
+            return_value={"access_token": "a", "refresh_token": "r"},
+        ),
+        patch.object(
+            client_module, "refresh_access_token", AsyncMock(return_value={"access_token": "b"})
+        ),
+        patch.object(adapter_module, "update_refreshed_credential", AsyncMock()) as write,
+        pytest.raises(client_module.DropboxIntegrationError, match="no_expires_in"),
+    ):
+        await DropboxIntegration().refresh(credential())
+    write.assert_not_awaited()
+
+
+def test_a_refresh_token_dropbox_refuses_is_an_auth_error_of_the_source():
+    """invalid_grant: the adapter has revoked the connection; the source must see its own auth
+    error, so the run stops cleanly with the rows it already has (failed_auth)."""
+    from cognee.modules.integrations.dropbox.sync import _TokenCache
+    from cognee.tasks.ingestion.connectors.dropbox import DropboxAuthError
+
+    def fetch(_refused):
+        raise client_module.DropboxIntegrationError("token refresh", "invalid_grant")
+
+    with pytest.raises(DropboxAuthError, match="reconnect"):
+        _TokenCache(fetch)()
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_refused_mid_sync_revokes_the_connection_and_stops_with_failed_auth(
+    credential_db, monkeypatch
+):
+    from cognee.modules.integrations import credentials as store
+    from cognee.tasks.ingestion.connectors.dropbox import DropboxAuthError
+
+    async def refused(*_args, **_kwargs):
+        raise client_module.DropboxIntegrationError("token refresh", "invalid_grant")
+
+    def during(token, _row, _loop):
+        token()
+        token.invalidate()  # Dropbox answered 401 for the token
+        monkeypatch.setattr(client_module, "refresh_access_token", refused)
+        try:
+            token()
+        except DropboxAuthError as error:
+            return type(error).__name__
+        return "no error"
+
+    outcome, _ = await _token_source_of_a_real_sync(monkeypatch, during)
+
+    assert outcome == "DropboxAuthError"
+    persisted = await store.get_credential_by_account("dropbox", ACCOUNT)
+    assert persisted.status == "revoked"

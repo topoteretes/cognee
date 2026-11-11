@@ -47,14 +47,24 @@ assert source.cognee_sync_stats["failed"] == 0 and source.cognee_sync_stats["com
   documents. `dropbox_source` sees one folder and cannot check this; any other host (Cloud
   included) must refuse a nested selection itself.
 - `folder_id` is `id:...` or `""`. A path (`/Notes`) is refused at construction.
-- Give exactly one of `token` and `service`. `service=` takes a `DropboxClient`
-  (`build_dropbox_service(token)`), for hosts and tests; it is never closed by the source. The
-  integration module passes a token callable, so each request uses a token the credential
-  store renewed when it neared expiry.
+- Give exactly one of `token` and `service`. `token` is a string or a `TokenSource`: called
+  before every request attempt for the token to send, and optionally with `invalidate()`,
+  which the client calls on a 401 before it retries that request once (see "Limits").
+  `service=` takes a `DropboxClient` (`build_dropbox_service(token)`), for hosts and tests;
+  it is never closed by the source.
+- The integration module passes a `TokenSource` that caches the token on the sync's worker
+  thread and asks the credential store again only near its expiry or after a 401. The token
+  path therefore reads the credential once per token lifetime; the host's active check
+  (`check_active`) still reads it before every request.
+- The Cloud `_PROVIDERS` path builds the client from a plain access token
+  (`build_dropbox_service`): no renewal and no retry after a 401 (the run is cut with
+  `failed_auth` and Cloud renews the token before the next dispatch), and no
+  `DROPBOX_MAX_FILE_SIZE_MB`: Cloud passes its own `max_file_size_mb` if it wants a cap.
 - `check_active` is called before every request attempt and every wait (in one-second steps),
   and around every row. What it raises stops the run unchanged.
 - `max_file_size_mb` (default `None`, no limit) leaves out larger files, counted in
-  `skipped_too_large`.
+  `skipped_too_large`. The integration module passes `DROPBOX_MAX_FILE_SIZE_MB` (unset or
+  blank: no limit; 0, a negative number, `inf` or `nan` stop the server at startup).
 
 ## What is read
 
@@ -169,7 +179,15 @@ Gaps:
   not fit what is left cuts the run: rows already yielded stay, `failed_rate_limit` is set, the
   rest is fetched next run.
 - A 401 before anything was stored raises `DropboxAuthError`. After rows it cuts the run with
-  `failed_auth`; the next run resumes.
+  `failed_auth`; the next run resumes. With a renewing `TokenSource`, Dropbox's AuthError tag
+  decides first: `expired_access_token`, `invalid_access_token`, an unlisted tag or a 401
+  without a readable body renew the token once (under the per-account lock, `check_active`
+  before the retry) and retry the request once; a second 401 is `failed_auth`.
+  `missing_scope` and `route_access_denied` raise `DropboxScopeError` (a `DropboxAuthError`,
+  so `failed_auth`) that says to reconnect with the needed scopes, with no renewal or retry.
+  `user_suspended`, `invalid_select_user` and `invalid_select_admin` are `failed_auth` with no
+  renewal or retry. A refresh Dropbox answers `invalid_grant` revokes the connection and stops
+  the run as `failed_auth`, keeping the rows already stored.
 - `list_folder` pages at 2000 entries, the size Dropbox documents (approximately).
 - The `index` holds one path per file of the folder and is written each run.
 - **Team spaces are not supported.** Without the `Dropbox-API-Path-Root` header a team member
@@ -181,7 +199,9 @@ Gaps:
 `deleted`, `skipped` and its reasons (`skipped_too_large`, `skipped_unsupported_type`,
 `skipped_unparseable`, `skipped_empty_content`, `skipped_not_found`, `skipped_restricted`),
 `failed` and its reasons
-(`failed_auth`, `failed_account`, `failed_rate_limit`, `failed_retry` once per file still waiting for a
+(`failed_auth`, `failed_account`, `failed_listing` (the folder could not be resolved or
+listed: an API error, or a folder never listed that is not found), `failed_rate_limit`,
+`failed_retry` once per file still waiting for a
 retry), `team_space_unsupported` (0 or 1) and `complete` (1 when the run was not cut).
 
 ## Privacy

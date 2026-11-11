@@ -43,18 +43,18 @@ def _code(body: Any, status: int) -> str:
     return f"http_{status}"
 
 
-async def _post(operation: str, url: str, **kwargs: Any) -> dict[str, Any]:
-    """One POST, its JSON object on a 200, else the typed error. Redirects are refused."""
+async def _post(operation: str, url: str, *, session: Any = None, **kwargs: Any) -> dict[str, Any]:
+    """One POST, its JSON object on a 200, else the typed error. Redirects are refused.
+
+    ``session`` is an open ``client_session`` to send through (a paged listing reuses one);
+    without it the call opens and closes its own.
+    """
     try:
-        async with (
-            client_session("dropbox", timeout=TIMEOUT) as session,
-            session.post(url, allow_redirects=False, **kwargs) as response,
-        ):
-            status = response.status
-            try:
-                body = await response.json(content_type=None)
-            except (aiohttp.ClientError, ValueError):
-                body = None
+        if session is None:
+            async with client_session("dropbox", timeout=TIMEOUT) as own:
+                status, body = await _send(own, url, kwargs)
+        else:
+            status, body = await _send(session, url, kwargs)
     except asyncio.TimeoutError:
         raise DropboxIntegrationError(operation, "request_timeout") from None
     except (aiohttp.ClientError, OSError):
@@ -62,6 +62,14 @@ async def _post(operation: str, url: str, **kwargs: Any) -> dict[str, Any]:
     if status != 200 or not isinstance(body, dict):
         raise DropboxIntegrationError(operation, _code(body, status))
     return body
+
+
+async def _send(session: Any, url: str, kwargs: dict[str, Any]) -> tuple[int, Any]:
+    async with session.post(url, allow_redirects=False, **kwargs) as response:
+        try:
+            return response.status, await response.json(content_type=None)
+        except (aiohttp.ClientError, ValueError):
+            return response.status, None
 
 
 def _bearer(access_token: str) -> dict[str, str]:
@@ -121,23 +129,35 @@ async def get_folder(access_token: str, folder_id: str) -> dict[str, Any] | None
 
 
 async def list_folders(access_token: str) -> list[dict[str, Any]]:
-    """Every folder the account can see, for the picker, with its id and path."""
-    page = await _post(
-        "folder listing",
-        LIST_URL,
-        json={"path": "", "recursive": True, "limit": LIST_LIMIT},
-        headers=_bearer(access_token),
-    )
+    """Every folder the account can see, for the picker, with its id and path.
+
+    Cost: every picker open walks the whole account recursively, files included (Dropbox has
+    no folders-only listing), one ``list_folder`` page of up to 2000 entries per request, all
+    through one HTTP session.
+    """
+    headers = _bearer(access_token)
     folders: list[dict[str, Any]] = []
     seen: set[str] = set()
-    while True:
-        folders += [e for e in page.get("entries") or [] if e.get(".tag") == "folder"]
-        if not page.get("has_more"):
-            return folders
-        cursor = page.get("cursor")
-        if not isinstance(cursor, str) or cursor in seen:
-            raise DropboxIntegrationError("folder listing", "cursor_repeated")
-        seen.add(cursor)
+    async with client_session("dropbox", timeout=TIMEOUT) as session:
         page = await _post(
-            "folder listing", CONTINUE_URL, json={"cursor": cursor}, headers=_bearer(access_token)
+            "folder listing",
+            LIST_URL,
+            session=session,
+            json={"path": "", "recursive": True, "limit": LIST_LIMIT},
+            headers=headers,
         )
+        while True:
+            folders += [e for e in page.get("entries") or [] if e.get(".tag") == "folder"]
+            if not page.get("has_more"):
+                return folders
+            cursor = page.get("cursor")
+            if not isinstance(cursor, str) or cursor in seen:
+                raise DropboxIntegrationError("folder listing", "cursor_repeated")
+            seen.add(cursor)
+            page = await _post(
+                "folder listing",
+                CONTINUE_URL,
+                session=session,
+                json={"cursor": cursor},
+                headers=headers,
+            )

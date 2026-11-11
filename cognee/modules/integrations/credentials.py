@@ -9,9 +9,10 @@ encrypted here and never returned in plaintext except by
 need to call the provider's API.
 """
 
+import asyncio
 import logging
-from collections.abc import Callable
-from datetime import datetime, timezone
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta, timezone
 from typing import Any, Final, Literal
 from uuid import UUID
 
@@ -648,3 +649,54 @@ def decrypt_token_payload(credential: IntegrationCredential) -> dict[str, Any]:
         credential.encryption_version,
         credential.key_id,
     )
+
+
+# How long before its expiry a stored access token is renewed, so a sync that takes a while does
+# not expire halfway through its walk.
+TOKEN_REFRESH_MARGIN: Final = timedelta(minutes=5)
+
+
+def token_is_expiring(expires_at: datetime | None, now: datetime) -> bool:
+    """True when a token expiring at ``expires_at`` is within ``TOKEN_REFRESH_MARGIN`` of it.
+    ``None`` never expires. A naive timestamp is UTC (SQLite stores no timezone; it is written
+    as UTC)."""
+    if expires_at is None:
+        return False
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at - TOKEN_REFRESH_MARGIN <= now
+
+
+async def refreshed_credential(
+    credential: IntegrationCredential,
+    refresh: Callable[[IntegrationCredential], Awaitable[None]],
+    *,
+    locks: dict[str, asyncio.Lock],
+    read: Callable[[IntegrationCredential], Awaitable[IntegrationCredential]],
+    now: Callable[[], datetime],
+    rejected_ciphertext: bytes | None = None,
+) -> IntegrationCredential:
+    """The active row, with its token renewed first when it is near its expiry.
+
+    ``rejected_ciphertext`` is the stored token the provider just refused (an HTTP 401): it is
+    renewed whatever its expiry says, unless the row no longer holds it (another caller
+    renewed it, or the account was reconnected), in which case the current row is returned.
+
+    One lock per account in ``locks``, so callers that find the same token expiring or
+    refused renew it once; the others read the row back after the lock and find it renewed.
+    Reading back under the lock matters for a provider that rotates its refresh token: a
+    second refresh would spend a token that no longer works. ``read`` re-reads the active
+    row; a refresh writes through its own session, so the row is read back after it. The
+    lock is process-local; ``update_refreshed_credential``'s compare-and-swap covers a second
+    process.
+    """
+    credential = await read(credential)
+    if rejected_ciphertext is None and not token_is_expiring(credential.token_expires_at, now()):
+        return credential
+    async with locks.setdefault(str(credential.provider_account_id), asyncio.Lock()):
+        credential = await read(credential)
+        refused = rejected_ciphertext is not None and credential.ciphertext == rejected_ciphertext
+        if refused or token_is_expiring(credential.token_expires_at, now()):
+            await refresh(credential)
+            credential = await read(credential)
+    return credential

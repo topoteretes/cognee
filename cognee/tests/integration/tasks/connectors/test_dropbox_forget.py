@@ -346,3 +346,23 @@ async def test_the_date_line_reaches_the_chunk_and_a_lexical_search_finds_it(cle
     )
     found = str(results)
     assert ALPHA in found and "2025-03-14" in found
+
+
+@pytest.mark.asyncio
+async def test_a_file_rename_extracts_once_and_a_folder_rename_extracts_nothing(
+    clean_environment,
+):
+    """The title is part of the document cognee hashes, the folder path is not."""
+    fake, notes, _work = _scenario()
+    await _sync(fake, {"dropbox_notes": notes})
+    before = len(EXTRACTIONS)
+
+    fake.move("/Notes/decision.md", "/Notes/decision-final.md")
+    await _sync(fake, {"dropbox_notes": notes})
+    after_file_rename = len(EXTRACTIONS)
+
+    fake.move("/Notes", "/Journal")
+    await _sync(fake, {"dropbox_notes": notes})
+
+    assert after_file_rename - before == 1, "a renamed file is a new title: one extraction"
+    assert len(EXTRACTIONS) == after_file_rename, "a renamed folder is structure only"
