@@ -161,10 +161,15 @@ async def test_a_programming_error_is_not_swallowed(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_data_id_that_is_not_a_uuid_is_raised(relational):
-    """``document_id`` is written by cognify; a value that is not a uuid is a bug."""
-    with pytest.raises(ValueError):
-        await _name([_chunk("not-a-uuid")], DATASET_A)
+async def test_a_chunk_whose_document_id_is_not_a_uuid_is_skipped(relational):
+    """``document_id`` is a free-form string on a chunk (a custom chunker, a community store);
+    such a chunk is cited by its file as before, and the others are still named."""
+    odd, connector = _chunk("legacy-doc-1"), _chunk(relational[DATASET_A])
+
+    await _name([odd, connector], DATASET_A)
+
+    assert odd.payload == {"document_id": "legacy-doc-1", "document_name": "text_5f1c"}
+    assert connector.payload["document_title"] == TITLE
 
 
 @pytest.mark.asyncio

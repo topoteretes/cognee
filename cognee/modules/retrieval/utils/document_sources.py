@@ -17,6 +17,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
 from cognee.modules.retrieval.utils.results import payload
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import as_uuid
 
 logger = get_logger("document_sources")
 
@@ -28,13 +29,15 @@ async def name_chunk_documents(chunks: list) -> None:
     """Copy each connector chunk's document title and link into its payload, in one read.
 
     Only the records of the dataset the search runs in are read (``current_dataset_id``); a
-    chunk of any other dataset keeps no title. Values that are not text are left out.
+    chunk of any other dataset keeps no title. Values that are not text are left out, and a
+    chunk whose ``document_id`` is not a data id (a custom chunker's string) is left as is.
     """
     payloads_by_id: dict[UUID, list[dict]] = {}
     for chunk in chunks:
         chunk_payload = payload(chunk)
-        if chunk_payload.get("document_id"):
-            payloads_by_id.setdefault(UUID(chunk_payload["document_id"]), []).append(chunk_payload)
+        data_id = as_uuid(chunk_payload.get("document_id"))
+        if data_id is not None:
+            payloads_by_id.setdefault(data_id, []).append(chunk_payload)
     if not payloads_by_id:
         return
 
