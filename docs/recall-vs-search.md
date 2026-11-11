@@ -228,13 +228,19 @@ lose their routes too (both apply node sets only) and a date question lands on
 sources are never scoped by `node_name`.
 
 Over HTTP (`POST /api/v1/search`, `POST /api/v1/recall`) the field is `nodeType`,
-the class name as a string (`"SchemaColumn"`); omitted means node-set tags, and an
-unknown name is a 422 naming the value. The server resolves the name to the class
-(`resolve_node_type` in `cognee/modules/search/methods/node_type_resolution.py`)
-before calling the SDK, so the search is the one a local caller would run.
-`cognee.serve()` sends the class name the same way. A class built at runtime from
-a `graph_model` JSON schema exists only for the cognify call that built it, so its
-name does not resolve over HTTP.
+the bare class name as a string (`"SchemaColumn"`, never a dotted module path);
+omitted means node-set tags, and anything else is a 422 naming the value. The server
+resolves the name to the class (`resolve_node_type` in
+`cognee/modules/search/methods/node_type_resolution.py`) before calling the SDK, so
+the search is the one a local caller would run. Only classes the server ships or
+imports resolve: a class a remote cognify rebuilt from a `graph_model` JSON schema
+stays loaded on the worker that served that request, so its name is refused on every
+worker rather than resolving on one. `cognee.serve()` sends the class name the same
+way, and with `node_name` given it first checks the server's `/openapi.json` once for
+the field: a server that predates it would read the names as node-set tags and
+return results for the wrong scope without an error, so a typed scope is refused
+against such a server, and against one whose schema cannot be read. The node-set
+default, and a type with no names, go to any server.
 
 ```python
 # The DLT column anchors of SDK-1429, locally and over HTTP.

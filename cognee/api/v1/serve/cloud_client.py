@@ -326,7 +326,9 @@ class CloudClient:
             payload["top_k"] = kwargs["top_k"]
         if kwargs.get("system_prompt"):
             payload["system_prompt"] = kwargs["system_prompt"]
-        node_type_name = await self._node_type_payload(kwargs.get("node_type"))
+        node_type_name = await self._node_type_payload(
+            kwargs.get("node_type"), kwargs.get("node_name")
+        )
         if node_type_name is not None:
             payload["node_type"] = node_type_name
         if kwargs.get("node_name"):
@@ -520,10 +522,18 @@ class CloudClient:
             # UUIDs as UUID objects, the fallback reason as its enum member.
             return UpdateResult.model_validate(await resp.json()).model_dump()
 
-    # Set when the server's listing route has been probed for ``content_hash``;
-    # a class default so instances built without ``__init__`` (tests) start
-    # unknown too.
+    # Feature probes. The connect-time checks (/health, an authenticated GET) say
+    # the server is up and the key works, not which fields its routes know, so a
+    # feature a server predates is detected from its OpenAPI schema. The schema is
+    # fetched once per client; each probe caches its own answer. Class defaults so
+    # instances built without ``__init__`` (tests) start unknown too.
+    _openapi: dict | None = None
     _content_hash_lookup_supported: bool | None = None
+    _node_type_supported: bool | None = None
+
+    # The schema is a few hundred KiB; its own timeout keeps a slow docs route
+    # from holding a probe under the 600 s request timeout.
+    SCHEMA_PROBE_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
     _CONTENT_HASH_UNSUPPORTED = (
         "Remote server does not support content_hash lookup on "
@@ -532,30 +542,66 @@ class CloudClient:
         "rest of the dataset. Upgrade the server to use find_data() over serve()."
     )
 
+    _NODE_TYPE_UNSUPPORTED = (
+        "Remote server does not take node_type on POST /api/v1/search and "
+        "POST /api/v1/recall: it predates the field and would read node_name as node-set "
+        "tags, returning results for the wrong scope without an error. Upgrade the server "
+        "to use a typed node_type over serve(); node_name alone (node-set tags) still works."
+    )
+
+    _NODE_TYPE_UNKNOWN = (
+        "Could not read the remote server's schema (GET /openapi.json), so whether it "
+        "takes node_type on POST /api/v1/search and POST /api/v1/recall is unknown. A "
+        "server that predates the field would read node_name as node-set tags and return "
+        "results for the wrong scope without an error, so the typed scope is not sent. "
+        "Make /openapi.json reachable from this client; node_name alone (node-set tags) "
+        "still works."
+    )
+
+    async def _server_openapi(self) -> dict | None:
+        """The server's OpenAPI document, fetched once per client.
+
+        ``None`` means it could not be read (no schema served, or not JSON) and
+        is not cached, so a later call can still find out.
+        """
+        if self._openapi is not None:
+            return self._openapi
+        try:
+            session = await self._get_session()
+            async with session.get(
+                f"{self.service_url}/openapi.json", timeout=self.SCHEMA_PROBE_TIMEOUT
+            ) as resp:
+                if resp.status >= 400:
+                    return None
+                schema = await resp.json()
+        except (aiohttp.ClientError, ValueError, TypeError):
+            logger.warning("could not read the server schema from /openapi.json")
+            return None
+        if not isinstance(schema, dict):
+            return None
+        self._openapi = schema
+        return schema
+
     async def supports_content_hash_lookup(self) -> bool | None:
         """Whether the server's dataset listing takes a ``content_hash`` query param.
 
         FastAPI drops an unknown query param without an error, so a server
         older than the content-hash lookup answers ``?content_hash=`` with the
         whole dataset listing, which ``find_data()`` would then hand back as
-        matches. Probed once per client from ``/openapi.json`` (the check the
-        MCP server makes for ``QAEntry.node_set``). ``None`` means unknown (no
-        schema served, or no listing route in it) and is not cached, so a
-        later call can still find out; the row-level check in ``list_data``
-        fails closed either way.
+        matches. ``None`` means unknown (no schema served, or no listing route in
+        it) and is not cached; the row-level check in ``list_data`` fails closed
+        either way, so an unknown server is still asked.
         """
         if self._content_hash_lookup_supported is not None:
             return self._content_hash_lookup_supported
+        schema = await self._server_openapi()
+        if schema is None:
+            return None
         try:
-            session = await self._get_session()
-            async with session.get(f"{self.service_url}/openapi.json") as resp:
-                if resp.status >= 400:
-                    return None
-                schema = await resp.json()
             parameters = schema["paths"]["/api/v1/datasets/{dataset_id}/data"]["get"].get(
                 "parameters", []
             )
-        except (aiohttp.ClientError, ValueError, KeyError, TypeError, AttributeError):
+        except (KeyError, TypeError, AttributeError):
             logger.warning(
                 "find_data: could not read the server schema to check content_hash support"
             )
@@ -573,41 +619,26 @@ class CloudClient:
             )
         return self._content_hash_lookup_supported
 
-    # Set when the server's search and recall request schemas have been probed
-    # for ``nodeType``; a class default so instances built without ``__init__``
-    # (tests) start unknown too.
-    _node_type_supported: bool | None = None
-
-    _NODE_TYPE_UNSUPPORTED = (
-        "Remote server does not take node_type on POST /api/v1/search and "
-        "POST /api/v1/recall: it predates the field and would read node_name as node-set "
-        "tags, returning results for the wrong scope without an error. Upgrade the server "
-        "to use a typed node_type over serve(); node_name alone (node-set tags) still works."
-    )
-
     async def supports_node_type(self) -> bool | None:
         """Whether the server's search and recall request bodies take ``nodeType``.
 
         Request bodies ignore unknown fields, so a server older than the field
         accepts the body and reads ``nodeName`` as node-set tags: no error, and
-        results for the wrong scope. Probed once per client from ``/openapi.json``,
-        like ``supports_content_hash_lookup``. ``None`` means unknown (no schema
-        served) and is not cached, so a later call can still find out.
+        results for the wrong scope. ``None`` means unknown (no schema served) and
+        is not cached, so a later call can still find out.
         """
         if self._node_type_supported is not None:
             return self._node_type_supported
+        schema = await self._server_openapi()
+        if schema is None:
+            return None
         try:
-            session = await self._get_session()
-            async with session.get(f"{self.service_url}/openapi.json") as resp:
-                if resp.status >= 400:
-                    return None
-                schema = await resp.json()
             schemas = schema["components"]["schemas"]
             self._node_type_supported = all(
                 "nodeType" in schemas.get(name, {}).get("properties", {})
                 for name in ("SearchPayloadDTO", "RecallPayloadDTO")
             )
-        except (aiohttp.ClientError, ValueError, KeyError, TypeError, AttributeError):
+        except (KeyError, TypeError, AttributeError):
             logger.warning("could not read the server schema to check node_type support")
             return None
         if not self._node_type_supported:
@@ -617,13 +648,24 @@ class CloudClient:
             )
         return self._node_type_supported
 
-    async def _node_type_payload(self, node_type: Any) -> str | None:
-        """The ``node_type`` to send: None for the node-set default, which every
-        server reads, else the class name, refused when the server cannot read it.
-        Dropping the type or the names instead would return results the caller did
-        not ask for, with nothing to tell them."""
+    async def _node_type_payload(self, node_type: Any, node_name: Any) -> str | None:
+        """The ``node_type`` to send: None for the node-set default, else the class name.
+
+        ``node_type`` only changes what ``node_name`` means, so without names the
+        field has no effect and goes to any server unprobed. With names a typed
+        scope is sent only to a server known to read it: an old server would apply
+        the wrong scope, and a response carries nothing that would show it, so a
+        server whose schema cannot be read is refused too. Dropping the type or the
+        names instead would return results the caller did not ask for, with nothing
+        to tell them.
+        """
         node_type_name = _node_type_name(node_type)
-        if node_type_name is not None and await self.supports_node_type() is False:
+        if node_type_name is None or not node_name:
+            return node_type_name
+        supported = await self.supports_node_type()
+        if supported is None:
+            raise RuntimeError(self._NODE_TYPE_UNKNOWN)
+        if not supported:
             raise RuntimeError(self._NODE_TYPE_UNSUPPORTED)
         return node_type_name
 
@@ -772,7 +814,9 @@ class CloudClient:
             payload["topK"] = kwargs["top_k"]
         if kwargs.get("system_prompt"):
             payload["systemPrompt"] = kwargs["system_prompt"]
-        node_type_name = await self._node_type_payload(kwargs.get("node_type"))
+        node_type_name = await self._node_type_payload(
+            kwargs.get("node_type"), kwargs.get("node_name")
+        )
         if node_type_name is not None:
             payload["nodeType"] = node_type_name
         if kwargs.get("node_name"):

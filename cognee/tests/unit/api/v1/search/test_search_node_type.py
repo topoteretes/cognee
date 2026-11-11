@@ -176,7 +176,7 @@ class _Session:
         self.payload = json
         return _Response()
 
-    def get(self, _url):
+    def get(self, _url, timeout=None):
         return _OpenApi()
 
 

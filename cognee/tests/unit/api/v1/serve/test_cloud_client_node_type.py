@@ -3,8 +3,9 @@
 Request bodies ignore unknown fields, so a server older than ``nodeType`` accepts
 the body and reads ``nodeName`` as node-set tags: no error, results for the wrong
 scope. The client probes ``/openapi.json`` once and refuses the request instead,
-the way ``find_data()`` refuses a content-hash lookup. The node-set default needs
-no probe: every server reads it.
+the way ``find_data()`` refuses a content-hash lookup. Both probes read one cached
+schema fetch. No probe runs when the field has no effect: the node-set default, and
+a typed class with no names, go to every server.
 """
 
 from unittest.mock import AsyncMock
@@ -21,12 +22,17 @@ def _openapi(*, with_node_type: bool) -> dict:
     if with_node_type:
         properties["nodeType"] = {}
     return {
+        "paths": {
+            "/api/v1/datasets/{dataset_id}/data": {
+                "get": {"parameters": [{"name": "content_hash", "in": "query"}]}
+            }
+        },
         "components": {
             "schemas": {
                 "SearchPayloadDTO": {"properties": dict(properties)},
                 "RecallPayloadDTO": {"properties": dict(properties)},
             }
-        }
+        },
     }
 
 
@@ -54,11 +60,13 @@ class _FakeServer:
     def __init__(self, openapi):
         self.openapi = openapi
         self.schema_reads = 0
+        self.schema_timeouts = []
         self.posts = []
 
-    def get(self, url):
+    def get(self, url, timeout=None):
         assert url.endswith("/openapi.json")
         self.schema_reads += 1
+        self.schema_timeouts.append(timeout)
         if self.openapi is None:
             return _Response(404, {"detail": "Not Found"})
         return _Response(200, self.openapi)
@@ -88,6 +96,16 @@ async def test_current_server_gets_the_typed_scope_and_is_probed_once():
         ("search", "SchemaColumn"),
         ("recall", "SchemaColumn"),
     ]
+    assert server.schema_reads == 1
+    assert server.schema_timeouts == [CloudClient.SCHEMA_PROBE_TIMEOUT]
+
+
+@pytest.mark.asyncio
+async def test_both_feature_probes_read_one_schema_fetch():
+    client, server = _client(_openapi(with_node_type=True))
+
+    assert await client.supports_content_hash_lookup() is True
+    assert await client.supports_node_type() is True
     assert server.schema_reads == 1
 
 
@@ -121,12 +139,31 @@ async def test_old_server_still_takes_the_node_set_default_without_a_probe(node_
 
 
 @pytest.mark.asyncio
-async def test_unreadable_schema_sends_the_request_and_asks_again_next_time():
+@pytest.mark.parametrize("openapi", [_openapi(with_node_type=False), None])
+async def test_a_typed_class_without_names_goes_to_any_server_unprobed(openapi):
+    """Without node_name the type changes nothing, so an old server answers correctly."""
+    client, server = _client(openapi)
+
+    await client.search("q", node_type=SchemaColumn)
+    await client.recall("q", None, node_type=SchemaColumn)
+
+    assert [body.get("nodeType", body.get("node_type")) for _, body in server.posts] == [
+        "SchemaColumn",
+        "SchemaColumn",
+    ]
+    assert server.schema_reads == 0
+
+
+@pytest.mark.asyncio
+async def test_unreadable_schema_refuses_the_typed_scope_and_asks_again_next_time():
+    """Nothing in a response shows whether the server applied the type, so unknown
+    fails closed; the answer is not cached, so a later call can still find out."""
     client, server = _client(None)
 
-    await client.search("q", node_type=SchemaColumn, node_name=["genre:name"])
-    await client.search("q", node_type=SchemaColumn, node_name=["genre:name"])
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="Could not read the remote server's schema"):
+            await client.search("q", node_type=SchemaColumn, node_name=["genre:name"])
 
-    assert [body["nodeType"] for _, body in server.posts] == ["SchemaColumn", "SchemaColumn"]
+    assert server.posts == []
     assert server.schema_reads == 2
     assert client._node_type_supported is None

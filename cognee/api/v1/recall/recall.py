@@ -606,6 +606,11 @@ async def recall(
             ),
             name="InvalidCodeQueryError",
         )
+    # Names without a type are refused here, before any lane runs, so a call is
+    # accepted or refused the same way locally and over serve(), whatever its
+    # scope: the graph lane would raise the same error later, a session-only call
+    # would silently drop the names, and the wire cannot tell None from omitted.
+    node_name_scope(node_type, node_name)
     # "on_empty" means: go back to the source database only when cognee lacks
     # context — so tools must observe every other source's results first.
     if tools_trigger == "on_empty" and "tools" in sources:
@@ -649,9 +654,6 @@ async def recall(
             # and results come back with the validated dict in `structured`.
             # Read from the merged config so the dict form travels too.
             remote_response_model = (retriever_specific_config or {}).get("response_model")
-            # node_type travels as its class name, which cannot tell None from
-            # omitted, so the local rule for names without a type applies here.
-            node_name_scope(node_type, node_name)
             results = await client.recall(
                 query_text,
                 query_type,

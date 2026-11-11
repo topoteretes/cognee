@@ -18,22 +18,26 @@ import cognee.tasks.schema.models
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.migration.snapshot import datapoint_registry
+from cognee.shared.graph_model_utils import GENERATED_GRAPH_MODELS_MODULE
 
 
 def resolve_node_type(name: str | None) -> type:
     """The DataPoint class named ``name``; ``None`` is the ``NodeSet`` default.
 
-    Raises ``CogneeValidationError`` (HTTP 422) for a name no loaded DataPoint
-    subclass has. A class built at runtime from a ``graph_model`` JSON schema exists
-    only for the cognify call that built it, so its name is unknown here.
+    Raises ``CogneeValidationError`` (HTTP 422) for anything but the bare class name
+    of a DataPoint subclass the server ships or imports. Two kinds of loaded class
+    are refused on purpose, so the answer does not depend on the process's history:
+    a class a remote cognify rebuilt from a request's ``graph_model`` schema, which
+    exists only on the worker that served that request, and the stand-in a snapshot
+    import builds for a node type that was not loaded, which the registry already
+    skips. A dotted ``module.ClassName``, which the registry also keys, is refused
+    because the wire contract is the class name alone.
     """
     if name is None:
         return NodeSet
 
-    # The registry skips the stand-in classes a snapshot import builds for node types
-    # that were not loaded at the time, so one never shadows the real class here.
-    node_type = datapoint_registry().get(name)
-    if node_type is None:
+    node_type = datapoint_registry().get(name) if "." not in name else None
+    if node_type is None or node_type.__module__ == GENERATED_GRAPH_MODELS_MODULE:
         raise CogneeValidationError(
             message=(
                 f"Unknown node_type {name!r}: no graph node type has that name. node_type is "

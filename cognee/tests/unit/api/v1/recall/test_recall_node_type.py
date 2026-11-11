@@ -140,6 +140,25 @@ async def test_recall_refuses_names_with_an_explicit_none_type_before_routing(
 
 
 @pytest.mark.asyncio
+async def test_recall_refuses_names_with_an_explicit_none_type_on_every_scope(
+    api_recall_mod, graph_lane
+):
+    """A session-only recall never reaches the graph lane's check, so the rule runs
+    before any lane: the call is refused the same way locally and over serve()."""
+    with pytest.raises(QueryValidationError):
+        await api_recall_mod.recall(
+            query_text="q",
+            scope="session",
+            session_id="s1",
+            node_type=None,
+            node_name=["proj"],
+            user=_make_user(),
+        )
+
+    assert graph_lane == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("node_type", "expected_type"),
     [
@@ -250,7 +269,7 @@ async def test_cloud_client_recall_sends_the_node_type_name():
             self.payload = json
             return _Response()
 
-        def get(self, _url):
+        def get(self, _url, timeout=None):
             return _OpenApi()
 
     client = CloudClient("https://example.test", "key")
