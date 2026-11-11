@@ -1,5 +1,3 @@
-import asyncio
-
 from fastapi import APIRouter, Depends, File, Form, Path, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 
@@ -174,11 +172,7 @@ def get_ontology_router() -> APIRouter:
         )
 
         try:
-            # delete_ontology performs blocking filesystem IO (stat/unlink); run
-            # it off the event loop so this async route does not block.
-            await asyncio.to_thread(
-                ontology_service.delete_ontology, ontology_key=ontology_key, user=user
-            )
+            await ontology_service.delete_ontology(ontology_key=ontology_key, user=user)
             return {"status": "success", "ontology_key": ontology_key}
         except ValueError as error:
             logger.warning("Ontology delete request failed: %s", error)
@@ -213,8 +207,7 @@ def get_ontology_router() -> APIRouter:
         )
 
         try:
-            # list_ontologies reads metadata from disk; run it off the event loop.
-            metadata = await asyncio.to_thread(ontology_service.list_ontologies, user)
+            metadata = await ontology_service.list_ontologies(user)
             return metadata
         except CogneeApiError:
             raise
@@ -306,10 +299,9 @@ def get_ontology_router() -> APIRouter:
         _, media_type, extension = EXPORT_FORMATS[format]
 
         try:
-            # Parsing and serializing with rdflib is CPU-bound file IO; run it
-            # off the event loop like the other ontology routes.
-            payload = await asyncio.to_thread(
-                ontology_service.export_ontology,
+            # The service reads through the async file storage and runs the
+            # CPU-bound rdflib parse and serialize in worker threads itself.
+            payload = await ontology_service.export_ontology(
                 ontology_key=ontology_key,
                 user=user,
                 export_format=format,

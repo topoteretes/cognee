@@ -7,6 +7,7 @@ its filename and content type so ``RDFLibOntologyResolver`` parses it with the
 right parser rather than trial-and-error.
 """
 
+import asyncio
 import re
 import uuid
 from pathlib import Path
@@ -57,6 +58,15 @@ def user():
     return SimpleNamespace(id=str(uuid.uuid4()))
 
 
+def _list_ontologies(user) -> dict:
+    """The store is async; these tests drive the app through the sync TestClient."""
+    return asyncio.run(OntologyService().list_ontologies(user))
+
+
+def _get_ontology_files(keys: list[str], user) -> list[OntologyFile]:
+    return asyncio.run(OntologyService().get_ontology_files(keys, user))
+
+
 @pytest.fixture
 def client(monkeypatch, tmp_path, user):
     # Keep uploads out of the real data root and skip telemetry.
@@ -89,14 +99,14 @@ def test_turtle_upload_is_accepted(client, user):
 
     assert response.status_code == 200, response.text
     assert response.json()["uploaded_ontologies"][0]["filename"] == "vehicles.ttl"
-    assert OntologyService().list_ontologies(user)[key]["format"] == "turtle"
+    assert _list_ontologies(user)[key]["format"] == "turtle"
 
 
 def test_jsonld_upload_is_accepted(client, user):
     key, response = _upload(client, "vehicles.jsonld", _serialize("json-ld"), "application/ld+json")
 
     assert response.status_code == 200, response.text
-    assert OntologyService().list_ontologies(user)[key]["format"] == "json-ld"
+    assert _list_ontologies(user)[key]["format"] == "json-ld"
 
 
 @pytest.mark.parametrize(
@@ -109,7 +119,7 @@ def test_rdf_xml_extensions_are_accepted_without_content_type(
     key, response = _upload(client, filename, OWL_FIXTURE)
 
     assert response.status_code == 200, response.text
-    assert OntologyService().list_ontologies(user)[key]["format"] == expected_format
+    assert _list_ontologies(user)[key]["format"] == expected_format
 
 
 @pytest.mark.parametrize(
@@ -127,7 +137,7 @@ def test_content_type_only_upload_is_accepted(client, user):
     key, response = _upload(client, "vehicles", _serialize("turtle"), "text/turtle")
 
     assert response.status_code == 200, response.text
-    stored = OntologyService().list_ontologies(user)[key]
+    stored = _list_ontologies(user)[key]
     assert stored["content_type"] == "text/turtle"
     assert stored["format"] == "turtle"
 
@@ -136,7 +146,7 @@ def test_content_type_parameters_are_ignored(client, user):
     key, response = _upload(client, "vehicles", _serialize("turtle"), "text/turtle; charset=utf-8")
 
     assert response.status_code == 200, response.text
-    assert OntologyService().list_ontologies(user)[key]["content_type"] == "text/turtle"
+    assert _list_ontologies(user)[key]["content_type"] == "text/turtle"
 
 
 def test_unknown_extension_and_content_type_are_rejected_with_format_list(client, user):
@@ -158,7 +168,7 @@ def test_unknown_extension_and_content_type_are_rejected_with_format_list(client
     # Nothing from the request is echoed back.
     assert "vehicles.txt" not in error
     assert "text/plain" not in error
-    assert key not in OntologyService().list_ontologies(user)
+    assert key not in _list_ontologies(user)
 
 
 def test_unknown_extension_without_content_type_is_rejected(client):
@@ -176,7 +186,7 @@ def test_extension_outside_the_table_needs_a_content_type(client, user):
 
     key, accepted = _upload(client, "vehicles.json", _serialize("json-ld"), "application/ld+json")
     assert accepted.status_code == 200, accepted.text
-    assert OntologyService().list_ontologies(user)[key]["format"] == "json-ld"
+    assert _list_ontologies(user)[key]["format"] == "json-ld"
 
 
 def test_frontend_picker_matches_backend_extension_table():
@@ -198,7 +208,7 @@ def test_stored_format_is_tried_before_filename_and_content_type(client, user):
     key, response = _upload(client, "vehicles.ttl", _serialize("turtle"), "text/turtle")
     assert response.status_code == 200, response.text
 
-    (ontology_file,) = OntologyService().get_ontology_files([key], user)
+    (ontology_file,) = _get_ontology_files([key], user)
     assert ontology_file.rdf_format == "turtle"
 
     resolver = RDFLibOntologyResolver(ontology_file=None)
@@ -221,7 +231,7 @@ def test_stored_file_carries_filename_and_content_type_to_resolver(client, user)
     key, response = _upload(client, "vehicles", _serialize("turtle"), "text/turtle")
     assert response.status_code == 200, response.text
 
-    (ontology_file,) = OntologyService().get_ontology_files([key], user)
+    (ontology_file,) = _get_ontology_files([key], user)
     resolver = RDFLibOntologyResolver(ontology_file=None)
 
     assert isinstance(ontology_file, OntologyFile)
@@ -238,9 +248,8 @@ def test_turtle_upload_resolves_same_classes_as_owl(client, user):
     assert owl_response.status_code == 200, owl_response.text
     assert ttl_response.status_code == 200, ttl_response.text
 
-    service = OntologyService()
-    owl_resolver = RDFLibOntologyResolver(ontology_file=service.get_ontology_files([owl_key], user))
-    ttl_resolver = RDFLibOntologyResolver(ontology_file=service.get_ontology_files([ttl_key], user))
+    owl_resolver = RDFLibOntologyResolver(ontology_file=_get_ontology_files([owl_key], user))
+    ttl_resolver = RDFLibOntologyResolver(ontology_file=_get_ontology_files([ttl_key], user))
 
     assert set(owl_resolver.lookup["classes"]) == {"vehicle", "car"}
     assert ttl_resolver.lookup["classes"] == owl_resolver.lookup["classes"]
