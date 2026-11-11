@@ -1,7 +1,7 @@
 from typing import Any
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic import BaseModel, ConfigDict, PrivateAttr, field_serializer
 
 from cognee.modules.graph.exceptions import DimensionOutOfRangeError, InvalidDimensionsError
 
@@ -22,6 +22,9 @@ class Node(BaseModel):
     skeleton_edges: list["Edge"]
     status: np.ndarray
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    # Ids of skeleton_neighbours, so the duplicate check is O(1). A list scan made
+    # projecting a node with N edges O(N^2): minutes for a hub of ~50k edges.
+    _neighbour_ids: set[str] = PrivateAttr(default_factory=set)
 
     def __init__(
         self,
@@ -77,11 +80,13 @@ class Node(BaseModel):
         distances[query_index] = score
 
     def add_skeleton_neighbor(self, neighbor: "Node") -> None:
-        if neighbor not in self.skeleton_neighbours:
+        if neighbor.id not in self._neighbour_ids:
+            self._neighbour_ids.add(neighbor.id)
             self.skeleton_neighbours.append(neighbor)
 
     def remove_skeleton_neighbor(self, neighbor: "Node") -> None:
-        if neighbor in self.skeleton_neighbours:
+        if neighbor.id in self._neighbour_ids:
+            self._neighbour_ids.discard(neighbor.id)
             self.skeleton_neighbours.remove(neighbor)
 
     def add_skeleton_edge(self, edge: "Edge") -> None:
