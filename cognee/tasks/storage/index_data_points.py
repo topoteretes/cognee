@@ -1,4 +1,5 @@
 import asyncio
+from uuid import UUID
 
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
@@ -71,7 +72,8 @@ async def index_data_points(
 ):
     """Index data points in the vector engine by creating embeddings for specified fields.
 
-    Each ``(type, index field)`` pair is one collection. Its points are written in
+    Each ``(type, index field)`` pair is one collection. Duplicate IDs keep their
+    last input and merge their tags before embedding. Its points are written in
     batches of ``write_batch_size()`` rows; the engine embeds a batch (in requests of its
     own size) and upserts it. ``semaphore`` bounds how many batches are in flight at
     once; by default ``indexing_semaphore(vector_engine)``, which keeps at most
@@ -91,7 +93,7 @@ async def index_data_points(
     """
     vector_engine = vector_engine or await get_vector_engine_async()
 
-    points_by_collection: dict[tuple[str, str], list[DataPoint]] = {}
+    points_by_collection: dict[tuple[str, str], dict[UUID, DataPoint]] = {}
     for data_point in data_points:
         # Skip non-DataPoint objects (e.g. CogneeGraph) that may be
         # passed through the memify pipeline without metadata.
@@ -107,8 +109,20 @@ async def index_data_points(
             points = points_by_collection.get(key)
             if points is None:
                 await vector_engine.create_vector_index(type_name, field_name)
-                points = points_by_collection[key] = []
-            points.append(_for_field(data_point, field_name))
+                points = points_by_collection[key] = {}
+            point = _for_field(data_point, field_name)
+            existing = points.get(point.id)
+            if existing is not None:
+                # Identity normalization can give distinct edge texts the same ID.
+                # Collapse before batching: adapter-local deduplication cannot keep
+                # duplicates in separate batches from being embedded/written twice.
+                # Match the adapters' last-payload, union-of-tags conflict behavior.
+                tags = list(
+                    dict.fromkeys((existing.belongs_to_set or []) + (point.belongs_to_set or []))
+                )
+                if tags and tags != point.belongs_to_set:
+                    point = point.model_copy(update={"belongs_to_set": tags})
+            points[point.id] = point
 
     if semaphore is None:
         semaphore = indexing_semaphore(vector_engine)
@@ -118,13 +132,15 @@ async def index_data_points(
         async with semaphore:
             await vector_engine.index_data_points(type_name, field_name, batch)
 
-    tasks = [
-        asyncio.create_task(
-            _index_batch(type_name, field_name, points[start : start + rows_per_write])
+    tasks = []
+    for (type_name, field_name), points_by_id in points_by_collection.items():
+        points = list(points_by_id.values())
+        tasks.extend(
+            asyncio.create_task(
+                _index_batch(type_name, field_name, points[start : start + rows_per_write])
+            )
+            for start in range(0, len(points), rows_per_write)
         )
-        for (type_name, field_name), points in points_by_collection.items()
-        for start in range(0, len(points), rows_per_write)
-    ]
     await asyncio.gather(*tasks)
 
     return data_points
