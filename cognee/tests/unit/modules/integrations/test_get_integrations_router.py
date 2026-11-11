@@ -1274,7 +1274,7 @@ def test_connection_status_says_when_the_data_of_an_ended_connection_is_deleted(
     """A provider can schedule the deletion of an ended connection's data (Slack:
     14 days after an uninstall, also after the owner disconnected keeping it); the page must
     be able to warn the owner before it happens and say when it ran."""
-    from datetime import UTC, datetime
+    from datetime import datetime, timezone
 
     integration = supported_integrations["fake"]
     ended = type(
@@ -1284,7 +1284,7 @@ def test_connection_status_says_when_the_data_of_an_ended_connection_is_deleted(
             "account_label": "Acme",
             "provider_account_id": "ACC1",
             "revoked_by": revoked_by,
-            "revoked_at": datetime(2026, 11, 7, tzinfo=UTC),
+            "revoked_at": datetime(2026, 11, 7, tzinfo=timezone.utc),
         },
     )()
     with (
@@ -1294,10 +1294,14 @@ def test_connection_status_says_when_the_data_of_an_ended_connection_is_deleted(
         patch.object(_router_module, "get_ended_connection", new=AsyncMock(return_value=ended)),
         patch.object(integration, "dataset_name", return_value="fake_acme"),
         patch.object(
-            integration, "data_deleted_after", return_value=datetime(2026, 11, 21, tzinfo=UTC)
+            integration,
+            "data_deleted_after",
+            return_value=datetime(2026, 11, 21, tzinfo=timezone.utc),
         ),
         patch.object(
-            integration, "data_deleted_at", return_value=datetime(2026, 11, 21, 1, tzinfo=UTC)
+            integration,
+            "data_deleted_at",
+            return_value=datetime(2026, 11, 21, 1, tzinfo=timezone.utc),
         ),
         patch(
             "cognee.modules.integrations.ingestion.dataset_summary",
