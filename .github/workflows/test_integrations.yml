@@ -16,7 +16,8 @@ name: test | integrations
 # The live tier (tests/test_integration_*.py) needs secrets and spends LLM
 # tokens, so it runs only on dispatch: nightly_scheduler.yml dispatches it
 # against dev every evening. It fails when any of those tests skips, so a
-# missing dependency or key can never pass as green.
+# missing dependency or key can never pass as green, and `notify` posts every
+# live run's result, green included, to #nightly-ci-integrations.
 #
 # The case tables in integrations/conformance/ are a copy: the hook plugins in
 # topoteretes/cognee-integrations generate two of them and test against the
@@ -239,16 +240,19 @@ jobs:
 
       - name: Run the live round trip
         run: |
+          set -o pipefail
           if [ -z "${LLM_API_KEY}" ]; then
             echo "::error::The LLM_API_KEY secret is not available to this run; the live tier cannot run."
             exit 1
           fi
-          uv run --no-sync pytest tests/test_integration_*.py -v -rs --junitxml="${RUNNER_TEMP}/live.xml"
+          # tee keeps the log in the run and gives the Slack report its FAILED lines.
+          uv run --no-sync pytest tests/test_integration_*.py -v -rs \
+            --junitxml="${RUNNER_TEMP}/live.xml" 2>&1 | tee "${RUNNER_TEMP}/live.log"
 
       - name: Fail on skipped live tests
         # Only after a passing run: a failed one is already red.
         run: |
-          python3 - "${RUNNER_TEMP}/live.xml" <<'EOF'
+          python3 - "${RUNNER_TEMP}/live.xml" "${RUNNER_TEMP}/skipped.txt" <<'EOF'
           import sys
           import xml.etree.ElementTree as ET
 
@@ -258,11 +262,130 @@ jobs:
               if case.find("skipped") is not None
           ]
           if skipped:
+              with open(sys.argv[2], "w", encoding="utf-8") as out:
+                  out.write("".join(f"SKIPPED {name}\n" for name in skipped))
               print("::error::Live tests skipped, so the round trip was not proven:")
               print("\n".join(skipped))
               sys.exit(1)
           print("No live test skipped.")
           EOF
+
+      - name: Write this plugin's report
+        # Read by `notify`. First line is the job status, then up to 20 failed,
+        # errored or skipped tests.
+        if: ${{ always() }}
+        env:
+          SLUG: ${{ matrix.slug }}
+          STATUS: ${{ job.status }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/report"
+          {
+            echo "${STATUS}"
+            { grep -E '^(FAILED|ERROR) ' "${RUNNER_TEMP}/live.log" 2>/dev/null || true
+              cat "${RUNNER_TEMP}/skipped.txt" 2>/dev/null || true
+            } | cut -c1-200 | head -20
+          } > "${RUNNER_TEMP}/report/${SLUG}.txt"
+
+      - name: Upload this plugin's report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: live-report-${{ matrix.slug }}
+          path: ${{ runner.temp }}/report/${{ matrix.slug }}.txt
+          retention-days: 7
+
+  notify:
+    name: Slack live report
+    needs: [detect, live]
+    # Every live run, green included: a failure-only report makes a passing
+    # night and a broken notifier look the same. Not on push or PR runs.
+    if: ${{ always() && inputs.live }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Download the plugin reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          pattern: live-report-*
+          path: ${{ runner.temp }}/reports
+          merge-multiple: true
+        continue-on-error: true  # no report at all is reported below
+
+      - name: Post to #nightly-ci-integrations
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ secrets.SLACK_INTEGRATIONS_NIGHTLY_CHANNEL_ID }}
+          PLUGINS: ${{ needs.detect.outputs.live }}
+          DETECT_RESULT: ${{ needs.detect.result }}
+          LIVE_RESULT: ${{ needs.live.result }}
+          REPORTS: ${{ runner.temp }}/reports
+          REF: ${{ github.ref_name }}
+          TRIGGER: ${{ github.event_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import sys
+          import urllib.request
+          from pathlib import Path
+
+          token = os.environ["SLACK_BOT_TOKEN"].strip()
+          channel = os.environ["SLACK_CHANNEL"].strip()
+          if not token or not channel:
+              print("::error::SLACK_BOT_TOKEN / SLACK_INTEGRATIONS_NIGHTLY_CHANNEL_ID are not set; cannot post the live report.")
+              sys.exit(1)
+
+          icons = {
+              "success": ":white_check_mark:",
+              "failure": ":red_circle:",
+              "cancelled": ":octagonal_sign:",
+          }
+          try:
+              plugins = json.loads(os.environ.get("PLUGINS") or "[]")
+          except ValueError:
+              plugins = []
+          lines, outcomes = [], set()
+          if os.environ["DETECT_RESULT"] != "success":
+              outcomes.add("failure")
+              lines.append(":red_circle: *detect*: " + os.environ["DETECT_RESULT"] + " — no plugin was tested")
+          elif not plugins:
+              outcomes.add("skipped")
+              lines.append(":fast_forward: no plugin has a live tier (`tests/test_integration_*.py`)")
+          for slug in plugins:
+              report = Path(os.environ["REPORTS"]) / f"{slug}.txt"
+              if report.is_file():
+                  status, *tests = report.read_text(encoding="utf-8").splitlines()
+              else:
+                  status, tests = os.environ["LIVE_RESULT"] or "unknown", []
+              outcomes.add(status)
+              lines.append(f"{icons.get(status, ':white_circle:')} *{slug}*: {status}")
+              lines += [f"> `{t}`" for t in tests if t.strip()]
+              if status != "success" and not any(t.strip() for t in tests):
+                  lines.append("> no per-test summary — the job likely crashed or timed out; see the run log")
+
+          trigger = os.environ["TRIGGER"]
+          ref = os.environ["REF"]
+          if outcomes == {"success"}:
+              headline = f":large_green_circle: *Integrations live tier green* (`{ref}`, {trigger})"
+          elif "failure" in outcomes:
+              headline = f":rotating_light: *Integrations live tier failed* (`{ref}`, {trigger})"
+          else:
+              headline = f":warning: *Integrations live tier incomplete* (`{ref}`, {trigger}) — a plugin was cancelled or not run"
+          text = "\n".join([headline, *lines, f"<{os.environ['RUN_URL']}|Open the run>"])
+
+          request = urllib.request.Request(
+              "https://slack.com/api/chat.postMessage",
+              data=json.dumps({"channel": channel, "text": text, "unfurl_links": False}).encode(),
+              headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              body = json.load(response)
+          if not body.get("ok"):
+              print(f"::error::Slack chat.postMessage failed: {body.get('error')}")
+              sys.exit(1)
+          print(f"Posted: {headline}")
+          PYEOF
 
   conformance-drift:
     name: conformance tables match upstream
@@ -295,7 +418,7 @@ jobs:
 
   integrations-tests:
     name: integrations-tests
-    needs: [detect, python-plugin, live, conformance-drift]
+    needs: [detect, python-plugin, live, notify, conformance-drift]
     runs-on: ubuntu-22.04
     if: always()
     steps:

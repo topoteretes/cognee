@@ -74,6 +74,7 @@ have moved to the official listings, it is archived.
 Each plugin's README covers its own setup, tests and release steps.
 `.github/workflows/test_integrations.yml` lints and tests every plugin under
 `integrations/` that has a `pyproject.toml`, and runs each plugin's live round
-trip (`tests/test_integration_*.py`) nightly against `dev`. It needs no edit
-when a plugin moves here. Releases are per plugin for now, for example
+trip (`tests/test_integration_*.py`) nightly against `dev`, posting every
+result to `#nightly-ci-integrations` on Slack. It needs no edit when a plugin
+moves here. Releases are per plugin for now, for example
 `release_hermes_plugin.yml` for Hermes.
