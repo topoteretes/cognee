@@ -888,3 +888,88 @@ async def test_a_retriever_without_the_naming_hook_still_gets_its_evidence():
         )
 
     assert [reference.artifact_id for reference in result.evidence] == ["obj-1"]
+
+
+@pytest.mark.asyncio
+async def test_a_broad_context_only_search_with_references_returns_no_evidence():
+    """BROAD's context is not a list of chunks: naming its citations must not fail the
+    search after the decision call was paid for (review of #6659)."""
+    from cognee.modules.retrieval.broad_retriever import BroadContext, BroadRetriever
+
+    retriever = BroadRetriever(include_references=True)
+    broad_context = BroadContext(route="reading", text="Rows: 3", note="read whole")
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "run_session_aware_completion",
+            new_callable=AsyncMock,
+            return_value=(broad_context, "Rows: 3", None),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "build_only_context_prompt",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+    ):
+        result = await get_retriever_output(
+            SearchType.BROAD,
+            "How many orders are there?",
+            dataset=SimpleNamespace(id=uuid4(), name="shop", tenant_id=uuid4()),
+            include_references=True,
+            only_context=True,
+        )
+
+    assert result.evidence == []
+
+
+class _BrokenNamingRetriever(_NamingRetriever):
+    async def name_cited_documents(self, retrieved_objects):
+        raise RuntimeError("an unexpected context shape")
+
+
+@pytest.mark.asyncio
+async def test_a_naming_failure_never_fails_the_search():
+    """Like the evidence hook, a citation is never worth a failed answer."""
+    retriever = _BrokenNamingRetriever()
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "run_session_aware_completion",
+            new_callable=AsyncMock,
+            return_value=([{"id": "obj-1"}], "context", None),
+        ),
+    ):
+        result = await get_retriever_output(
+            SearchType.RAG_COMPLETION,
+            "What changed?",
+            dataset=SimpleNamespace(id=uuid4(), name="reports", tenant_id=uuid4()),
+            include_references=True,
+        )
+
+    assert result.evidence == []
+    assert retriever.calls == ["evidence"]

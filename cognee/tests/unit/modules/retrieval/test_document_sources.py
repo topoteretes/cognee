@@ -197,6 +197,18 @@ def test_a_link_that_cannot_be_printed_safely_is_left_out(url):
     assert document_source({"title": "Plan", "url": url}).url is None
 
 
+@pytest.mark.parametrize("title", [42, ["Plan"], {"text": "Plan"}])
+def test_a_title_that_is_not_text_leaves_the_file_name(title):
+    """A hand-built DataItem may set the key to anything; the reference keeps the file name."""
+    assert document_source({"title": title}).title is None
+
+
+@pytest.mark.asyncio
+async def test_a_context_that_is_not_a_list_of_chunks_names_nothing(relational):
+    """BROAD hands its own context object, not chunks; there is nothing to name."""
+    await name_chunk_documents(object(), DATASET_A)
+
+
 def test_a_web_link_is_kept():
     assert document_source({"title": "Plan", "url": "https://wiki.example.com/q3?x=1#y"}).url == (
         "https://wiki.example.com/q3?x=1#y"

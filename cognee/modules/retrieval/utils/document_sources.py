@@ -55,7 +55,7 @@ def document_source(system_metadata: dict | None) -> DocumentSource:
     metadata = system_metadata or {}
     title, url = metadata.get("title"), metadata.get("url")
     return DocumentSource(
-        title=_one_line(title) if title else None,
+        title=(_one_line(title) or None) if isinstance(title, str) else None,
         url=url if _printable_url(url) else None,
     )
 
@@ -87,6 +87,9 @@ async def name_chunk_documents(chunks: list, dataset_id: UUID | None) -> None:
     """
     if dataset_id is not None and not isinstance(dataset_id, UUID):
         raise TypeError(f"dataset_id must be a UUID, not {type(dataset_id).__name__}")
+    if not isinstance(chunks, (list, tuple)):
+        # A retriever's own context object (BROAD's) holds no chunks to name.
+        return
 
     payloads_by_id: dict[UUID, list[dict]] = {}
     for chunk in chunks:
