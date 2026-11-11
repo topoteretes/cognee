@@ -8,7 +8,8 @@ KMS that never leaves your account. This is what lets a deployment answer
 "bring your own key" at the Cognee layer rather than only at the AWS layer.
 
 **Scope.** File storage only: the ingested originals (uploads, fetched pages,
-raw text) and the text the loaders derive from them. Chunk text, summaries and
+raw text), the text the loaders derive from them, and the ontologies uploaded
+through `/api/v1/ontologies` with their index. Chunk text, summaries and
 entity descriptions in the graph and vector stores, the relational database, the
 session cache and logs are **not** covered by this layer; they rely on the
 backend's encryption at rest as before. Files Cognee did not copy (an `s3://`
