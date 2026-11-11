@@ -55,9 +55,9 @@ def get_add_router() -> APIRouter:
                 "Data given as strings instead of uploads, one entry each: raw text to "
                 "ingest, a local file or directory path on the server's filesystem or an "
                 "s3:// object read with the server's AWS credentials (both require "
-                "ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
-                "ALLOW_HTTP_REQUESTS), a GitHub/GitLab repository URL, which is "
-                "shallow-cloned and indexed as a code graph by cognify, or a database "
+                "ACCEPT_LOCAL_FILE_PATH), a web URL to fetch, a GitHub/GitLab repository URL, "
+                "which is shallow-cloned and indexed as a code graph by cognify (both "
+                "require ALLOW_HTTP_REQUESTS=true on the server), or a database "
                 "connection string (postgresql://, mysql://, sqlite:///, ...), refused "
                 "over the API with 422 DatabaseIngestionDisabled unless the server sets "
                 "ALLOW_DATABASE_INGESTION=true. Combined with "
@@ -126,8 +126,9 @@ def get_add_router() -> APIRouter:
           - A file, directory or s3:// path read with the server's own access: refused
             over HTTP unless ACCEPT_LOCAL_FILE_PATH=true (then COGNEE_ALLOWED_LOCAL_FILE_ROOTS
             limits where local paths may point)
-          - A web URL, fetched as a page (requires ALLOW_HTTP_REQUESTS)
+          - A web URL, fetched as a page (requires ALLOW_HTTP_REQUESTS=true on the server)
           - A GitHub/GitLab repository URL, shallow-cloned and indexed as a code graph
+            (same requirement)
           - A database connection string (postgresql://, mysql://, sqlite:///, ...),
             read with the server's own network position. Disabled over the API by
             default: the request fails with 422 DatabaseIngestionDisabled unless the

@@ -45,6 +45,7 @@ from cognee.modules.integrations.github.github_settings import GithubSettings, r
 from cognee.modules.integrations.github.handle_github_event import handle_github_event
 from cognee.modules.integrations.github.sync import sync_repositories
 from cognee.modules.integrations.github.verify_github_signature import GithubWebhookVerifier
+from cognee.modules.integrations.ingestion import exclusive_sync, sync_is_paused
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 from cognee.modules.integrations.outbound import client_session
 
@@ -159,9 +160,19 @@ class GithubIntegration(OAuthIntegration):
         The ``installation.created`` webhook usually races ahead of the
         OAuth callback storing the credential and is dropped as unknown —
         this hook, firing after the upsert, is what actually performs the
-        initial sync.
+        initial sync. An owner's paused default holds it too.
         """
-        await sync_repositories(credential)
+        if await sync_is_paused(self.provider, credential, "install sync"):
+            return
+        await self.sync_now(credential)
 
     async def sync_now(self, credential: IntegrationCredential) -> None:
-        await sync_repositories(credential)
+        """Index every repository, unless a full sync of this installation already runs.
+
+        The scheduler, the manual route and the install hook land here, and a sync can
+        outlast a short interval. Webhook syncs of named repositories are not held, so
+        a push during a full sync is still indexed.
+        """
+        with exclusive_sync(self.provider, credential.provider_account_id) as acquired:
+            if acquired:
+                await sync_repositories(credential)

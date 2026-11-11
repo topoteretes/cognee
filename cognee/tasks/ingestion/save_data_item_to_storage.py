@@ -61,11 +61,16 @@ def require_server_path_access() -> None:
     if local_file_paths_accepted():
         return
     if local_file_paths_configured():
-        message = "Server-side paths are not accepted (ACCEPT_LOCAL_FILE_PATH=false)."
+        message = (
+            "Server-side paths are not accepted (ACCEPT_LOCAL_FILE_PATH=false). Set "
+            "ACCEPT_LOCAL_FILE_PATH=true in the Cognee environment (on the server for API "
+            "calls) to allow them, or upload the file instead."
+        )
     else:
         message = (
-            "Server-side paths are not accepted for HTTP requests on this server "
-            "(set ACCEPT_LOCAL_FILE_PATH=true to allow them)."
+            "Server-side paths are not accepted for API requests by default because "
+            "ACCEPT_LOCAL_FILE_PATH is unset. Set ACCEPT_LOCAL_FILE_PATH=true in the "
+            "server's environment to allow them, or upload the file instead."
         )
     raise IngestionError(message=message, status_code=status.HTTP_403_FORBIDDEN)
 
