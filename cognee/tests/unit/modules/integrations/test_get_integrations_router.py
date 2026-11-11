@@ -461,11 +461,7 @@ def put_resources(client, integration, body, *, allows_all, monkeypatch):
             )()
         ),
     )
-
-    async def change_provider_metadata(provider, account_id, change):
-        return await update(provider, account_id, change({}))
-
-    monkeypatch.setattr(_router_module, "change_provider_metadata", change_provider_metadata)
+    monkeypatch.setattr(_router_module, "update_provider_metadata", update)
     response = client.put("/api/v1/integrations/fake/resources", json={"resourceIds": body})
     return response, update
 
@@ -1010,11 +1006,11 @@ def test_connect_and_sync_are_refused_while_outbound_http_is_disabled(client, mo
 
 
 @pytest.fixture(autouse=True)
-def no_pause(monkeypatch):
-    """No connection is paused unless a test says so (the pause lives in the database)."""
-    monkeypatch.setattr(
-        "cognee.modules.integrations.ingestion.sync_is_paused", AsyncMock(return_value=False)
-    )
+def no_staging_drop(monkeypatch):
+    """A real drop takes the process-wide staging lock and deletes files under dlt's
+    pipelines directory; a drop that outlives the test client's loop would keep that lock
+    for every later dlt test. Tests that are about the drop pass their own."""
+    monkeypatch.setattr(_ingest_dlt_module, "drop_dlt_dataset", AsyncMock())
 
 
 def test_disconnect_with_delete_data_drops_the_staging_copy_too(client):
@@ -1196,79 +1192,6 @@ def test_disconnect_reports_related_data_that_could_not_be_deleted(client):
     assert response.status_code == 502
 
 
-def save_selection(client, monkeypatch, *, stored, body):
-    """PUT ``body`` over a connection whose stored selection is ``stored``."""
-    integration = supported_integrations["fake"]
-    credential = type(
-        "Cred", (), {"provider_account_id": "ACC1", "provider_metadata": {"picked": stored}}
-    )()
-    updated = type(
-        "Cred", (), {"provider_account_id": "ACC1", "provider_metadata": {"picked": body}}
-    )()
-    sync_now = AsyncMock()
-    monkeypatch.setattr(integration, "resource_selection_key", "picked")
-    monkeypatch.setattr(integration, "resource_selection_allows_all", False)
-    monkeypatch.setattr(integration, "sync_now", sync_now)
-    monkeypatch.setattr(
-        _router_module, "get_active_credential_for_user", AsyncMock(return_value=credential)
-    )
-
-    async def change_provider_metadata(provider, account_id, change):
-        change({"picked": stored})
-        return updated
-
-    monkeypatch.setattr(_router_module, "change_provider_metadata", change_provider_metadata)
-    response = client.put("/api/v1/integrations/fake/resources", json={"resourceIds": body})
-    return response, sync_now, updated
-
-
-@pytest.mark.parametrize(
-    ("stored", "body"),
-    [(["a"], ["a", "b"]), (["a", "b"], ["a"]), (["a", "b"], [])],
-    ids=["a_scope_added", "a_scope_removed", "everything_deselected"],
-)
-def test_a_changed_selection_starts_a_sync_at_once(client, monkeypatch, stored, body):
-    """What the user picked shows, and what they removed leaves, without waiting for the
-    next scheduled sync; deselecting everything included, which no schedule would run."""
-    response, sync_now, updated = save_selection(client, monkeypatch, stored=stored, body=body)
-
-    assert response.status_code == 200
-    sync_now.assert_called_once_with(updated)
-
-
-def test_a_changed_selection_of_a_paused_connection_is_saved_and_not_synced(client, monkeypatch):
-    """The pause (SDK-1434) holds a selection save too, for every provider."""
-    monkeypatch.setattr(
-        "cognee.modules.integrations.ingestion.sync_is_paused", AsyncMock(return_value=True)
-    )
-    response, sync_now, _ = save_selection(client, monkeypatch, stored=["a"], body=["a", "b"])
-
-    assert response.status_code == 200
-    sync_now.assert_not_called()
-
-
-def test_an_unchanged_selection_starts_no_sync(client, monkeypatch):
-    response, sync_now, _ = save_selection(client, monkeypatch, stored=["a"], body=["a"])
-
-    assert response.status_code == 200
-    sync_now.assert_not_called()
-
-
-def test_a_selection_saved_during_a_sync_runs_once_more_after_it(client, monkeypatch):
-    from cognee.modules.integrations import ingestion
-
-    ingestion._running_syncs.add(("fake", "ACC1"))
-    try:
-        response, sync_now, _ = save_selection(client, monkeypatch, stored=["a"], body=[])
-        # The running sync read the old selection; a second one would be dropped.
-        sync_now.assert_not_called()
-        assert ingestion.request_rerun_if_running("fake", "ACC1")
-    finally:
-        ingestion._running_syncs.discard(("fake", "ACC1"))
-        ingestion._rerun_requested.discard(("fake", "ACC1"))
-    assert response.status_code == 200
-
-
 @pytest.mark.parametrize("revoked_by", ["provider", "owner"])
 def test_connection_status_says_when_the_data_of_an_ended_connection_is_deleted(client, revoked_by):
     """A provider can schedule the deletion of an ended connection's data (Slack:
@@ -1335,38 +1258,6 @@ def test_start_needs_a_logged_in_user():
     assert response.status_code == 401
 
 
-def test_a_selection_is_compared_with_what_is_stored_when_it_is_written(client, monkeypatch):
-    """Two saves at once (X to Y, then Y back to X): the second read X before the first wrote
-    Y, so against its own copy nothing changed and no sync started, while the sync the first
-    started may already have read Y. The comparison is made under the connection's lock."""
-    integration = supported_integrations["fake"]
-    stale = type(
-        "Cred", (), {"provider_account_id": "ACC1", "provider_metadata": {"picked": ["x"]}}
-    )()
-    updated = type(
-        "Cred", (), {"provider_account_id": "ACC1", "provider_metadata": {"picked": ["x"]}}
-    )()
-
-    async def change_provider_metadata(provider, account_id, change):
-        patch_ = change({"picked": ["y"]})  # what the concurrent save left
-        assert patch_ == {"picked": ["x"]}
-        return updated
-
-    sync_now = AsyncMock()
-    monkeypatch.setattr(integration, "resource_selection_key", "picked")
-    monkeypatch.setattr(integration, "resource_selection_allows_all", False)
-    monkeypatch.setattr(integration, "sync_now", sync_now)
-    monkeypatch.setattr(
-        _router_module, "get_active_credential_for_user", AsyncMock(return_value=stale)
-    )
-    monkeypatch.setattr(_router_module, "change_provider_metadata", change_provider_metadata)
-
-    response = client.put("/api/v1/integrations/fake/resources", json={"resourceIds": ["x"]})
-
-    assert response.status_code == 200
-    sync_now.assert_called_once_with(updated)
-
-
 def test_deleting_the_data_waits_for_no_running_sync(client):
     """A sync running while its data is deleted could store a scope it already started into
     the dataset just deleted; the owner is told to retry once it has finished."""
@@ -1390,3 +1281,96 @@ def test_deleting_the_data_waits_for_no_running_sync(client):
     assert response.status_code == 409, response.text
     revoke.assert_not_awaited()
     forget.assert_not_awaited()
+
+
+def _disconnect_deleting_data(client, monkeypatch, drop):
+    """DELETE the connection with ``delete_data``; the calls the deletion made, in order."""
+    integration = supported_integrations["fake"]
+    calls = []
+    monkeypatch.setattr(_ingest_dlt_module, "drop_dlt_dataset", drop)
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+        ),
+        patch.object(integration, "dataset_name", return_value="fake_acme"),
+        patch.object(integration, "revoke_remote", new=AsyncMock()),
+        patch.object(
+            integration,
+            "forget_related_data",
+            new=AsyncMock(side_effect=lambda *_: calls.append("related")),
+        ),
+        patch.object(
+            _router_module, "revoke_credential_by_account", new=AsyncMock(return_value=True)
+        ),
+        patch.object(
+            _forget_module, "forget", AsyncMock(side_effect=lambda **_: calls.append("forget"))
+        ),
+    ):
+        response = client.delete("/api/v1/integrations/fake/connection?delete_data=true")
+    return response, calls
+
+
+def test_a_staging_copy_that_cannot_be_dropped_is_reported(client, monkeypatch):
+    """The staging copy holds every synced row's text and would bring the documents back on
+    the next connect, so the owner is told when it was not deleted."""
+
+    async def drop(name):
+        raise OSError("disk full")
+
+    response, calls = _disconnect_deleting_data(client, monkeypatch, drop)
+
+    assert response.status_code == 502, response.text
+    assert calls == ["forget", "related"]
+
+
+def test_a_staging_drop_still_waiting_does_not_hold_the_disconnect(client, monkeypatch):
+    """The drop waits for the lock every dlt run in the process holds, which another
+    connection's backfill can keep for minutes; past a short wait it finishes in the
+    background and the disconnect answers."""
+    import asyncio
+    import time
+
+    monkeypatch.setattr(_router_module, "STAGING_DROP_WAIT_SECONDS", 0.05)
+
+    async def drop(name):
+        await asyncio.sleep(5)
+
+    started = time.monotonic()
+    response, calls = _disconnect_deleting_data(client, monkeypatch, drop)
+
+    assert response.status_code == 200, response.text
+    assert time.monotonic() - started < 4
+    assert calls == ["forget", "related"]
+
+
+@pytest.mark.asyncio
+async def test_a_disconnect_cancelled_while_its_drop_waits_still_finishes_the_drop(monkeypatch):
+    """A request cancelled during the wait (a shutdown past its grace period) leaves the drop
+    to the background work the shutdown drains, where a failure is logged."""
+    import asyncio
+
+    spawned = []
+    monkeypatch.setattr(
+        _router_module,
+        "spawn_background",
+        lambda coroutine, *, description: spawned.append(asyncio.ensure_future(coroutine)),
+    )
+    released = asyncio.Event()
+    dropped = []
+
+    async def drop(name):
+        await released.wait()
+        dropped.append(name)
+
+    waiting = asyncio.ensure_future(_router_module._drop_staging_copy("fake", "fake_acme", drop))
+    await asyncio.sleep(0)
+    waiting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiting
+
+    released.set()
+    await asyncio.gather(*spawned)
+    assert dropped == ["fake_acme"]
+    assert len(spawned) == 1

@@ -38,6 +38,7 @@ generic ``{provider}`` routes so ``plugins`` is never captured as a
 provider name.
 """
 
+import asyncio
 import hmac
 import logging
 import secrets
@@ -68,13 +69,13 @@ from cognee.modules.integrations.connect import complete_installation
 from cognee.modules.integrations.credentials import (
     REVOKED_BY_OWNER,
     CrossUserConflictError,
-    change_provider_metadata,
     get_active_credential_for_user,
     get_ended_connection,
     list_active_credentials_for_provider,
     list_active_credentials_for_user,
     owner_principal_id,
     revoke_credential_by_account,
+    update_provider_metadata,
 )
 from cognee.modules.integrations.linear.resume_sync import linear_resume_lifespan
 from cognee.modules.integrations.oauth_flow import (
@@ -134,10 +135,11 @@ from cognee.modules.users.models import User
 
 logger = logging.getLogger(__name__)
 
-
-def _as_set(selection: list[str] | None) -> frozenset[str] | None:
-    """A selection compared without its order; ``None`` (everything) stays ``None``."""
-    return None if selection is None else frozenset(selection)
+# How long a disconnect waits for its staging copy to be dropped before it answers and lets
+# the drop finish in the background. The drop takes the lock every dlt run in the process
+# holds, which another connection's backfill can keep for minutes; a drop that fails within
+# the wait is reported to the owner.
+STAGING_DROP_WAIT_SECONDS = 10
 
 
 # Plugin keys with a native AgentConnectionType; anything else registers as
@@ -527,6 +529,25 @@ def _start_authorization(provider: str, user: User) -> tuple[str, str]:
             status_code=503,
             detail=f"{provider} integration is not configured on this server.",
         )
+
+
+async def _drop_staging_copy(provider: str, dataset_name: str, drop_dlt_dataset) -> None:
+    """Drop the staging copy, waiting at most ``STAGING_DROP_WAIT_SECONDS``.
+
+    A failure within the wait raises, so the owner is told. The drop is background work from
+    the start, so whatever ends the wait (the timeout, a cancelled request) it still finishes,
+    the shutdown drains it, and a failure is logged.
+    """
+    drop = asyncio.ensure_future(drop_dlt_dataset(dataset_name))
+    spawn_background(_finish(drop), description=f"{provider} staging copy drop on disconnect")
+    try:
+        await asyncio.wait_for(asyncio.shield(drop), timeout=STAGING_DROP_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        logger.info("%s staging copy drop continues in the background", provider)
+
+
+async def _finish(task: asyncio.Future) -> None:
+    await task
 
 
 def _set_install_nonce(response: Response, request: Request, provider: str, nonce: str) -> None:
@@ -1280,10 +1301,6 @@ def get_integrations_router():
           ids; duplicates are dropped, blank or whitespace-only ids give 422. Null (also the
           value when omitted) means every resource and is a 422 for providers that do not
           allow it.
-
-        A changed selection starts a sync at once, or one more run of the sync already
-        running, so added resources arrive and removed ones leave memory without waiting
-        for the schedule. An unchanged selection starts nothing.
         """
         integration = _integration_or_404(provider)
         selection_key = integration.resource_selection_key
@@ -1312,29 +1329,11 @@ def get_integrations_router():
                     status_code=422,
                     detail=f"Not a {provider} resource id: {', '.join(invalid)}",
                 )
-        changed = False
-
-        def select(current: dict) -> dict:
-            # Compared with what is stored under the connection's lock, not with the copy
-            # read above: of two saves at once, the second must see the first's selection.
-            nonlocal changed
-            changed = _as_set(current.get(selection_key)) != _as_set(resource_ids)
-            return {selection_key: resource_ids}
-
-        updated = await change_provider_metadata(provider, credential.provider_account_id, select)
-        if changed:
-            from cognee.modules.integrations import ingestion
-
-            # A paused connection keeps the new selection for its first sync after the
-            # resume.
-            paused = await ingestion.sync_is_paused(provider, updated, "selection change")
-            if not paused and not ingestion.request_rerun_if_running(
-                provider, credential.provider_account_id
-            ):
-                spawn_background(
-                    integration.sync_now(updated),
-                    description=f"{provider} sync after a selection change",
-                )
+        updated = await update_provider_metadata(
+            provider,
+            credential.provider_account_id,
+            {selection_key: resource_ids},
+        )
         return IntegrationResourceSelectionResultDTO(
             selected=(updated.provider_metadata or {}).get(selection_key)
         )
@@ -1496,10 +1495,12 @@ def get_integrations_router():
           from that workspace). A dataset that was never created (nothing synced yet) is
           nothing to delete, and the app's data is deleted whatever happens to the dataset. A
           provider that exposes no deletable dataset returns 400, and a sync of the connection
-          still running returns 409, both before anything is revoked; a
-          deletion that fails after the disconnect returns 502, unless the deletion itself answered
-          with an HTTP error, whose status is kept. Ignored when account_id is omitted and the
-          caller has no connection. Defaults to False.
+          still running returns 409, both before anything is revoked; a deletion that fails after
+          the disconnect returns 502, unless the deletion itself answered with an HTTP error,
+          whose status is kept. A staging copy still waiting for its lock after
+          ``STAGING_DROP_WAIT_SECONDS`` is dropped in the background, and a failure there is
+          logged. Ignored when account_id is omitted and the caller has no connection. Defaults
+          to False.
 
         ## Response
         - **disconnected** (bool): Whether a connection was revoked locally.
@@ -1575,14 +1576,14 @@ def get_integrations_router():
                             await forget(dataset=dataset_name, user=user)
                         except DatasetNotFoundError:
                             pass  # nothing was synced yet, so there is no dataset to delete
-                        # forget leaves dlt's staging copy, state and load packages, which
-                        # hold every synced row's text: the next connect and sync would
-                        # build every document again.
-                        await drop_dlt_dataset(dataset_name)
                     finally:
                         # The credential is already revoked, so this is the only chance to
                         # delete the app's own data: it runs whatever the dataset did.
                         await integration.forget_related_data(credential, user)
+                    # forget leaves dlt's staging copy, state and load packages, which hold
+                    # every synced row's text: the next connect and sync would build every
+                    # document again.
+                    await _drop_staging_copy(provider, dataset_name, drop_dlt_dataset)
                 except HTTPException:
                     raise
                 except Exception:
