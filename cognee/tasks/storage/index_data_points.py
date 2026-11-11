@@ -141,6 +141,10 @@ async def index_data_points(
             )
             for start in range(0, len(points), rows_per_write)
         )
-    await asyncio.gather(*tasks)
+    # A failed batch must not leave sibling writes running after this call returns.
+    outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+    for outcome in outcomes:
+        if isinstance(outcome, BaseException):
+            raise outcome
 
     return data_points
