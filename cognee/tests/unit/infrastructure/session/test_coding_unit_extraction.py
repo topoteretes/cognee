@@ -764,3 +764,46 @@ async def test_traces_without_an_answer_wait_and_nothing_is_sealed(monkeypatch):
         == []
     )
     assert calls == [] and manager.watermark() is None
+
+
+# -- LLM failure candidates link the errored traces of their turn ---------------------
+
+
+def _failure_candidate(content):
+    return {"section": "failure_lessons", "content": content, "confidence": 0.9}
+
+
+@pytest.mark.asyncio
+async def test_an_llm_failure_candidate_links_the_errored_traces_of_its_turn(monkeypatch):
+    """The distillation keeps a writer-typed pitfall only when a ``failure_lessons``
+    member links an errored trace; an LLM candidate used to link nothing, so every such
+    pitfall became a change."""
+    failed = _edit_failure()
+    traces = [_trace("Read", params={"file_path": f"{REPO}/src/app.py"}), failed]
+    manager = FakeSessionManager(traces=traces, qa=_qa())
+    _llm(
+        monkeypatch,
+        [
+            _failure_candidate("Edit rejects identical old/new strings; change the replacement."),
+            _candidate("The app entry point is src/app.py."),
+        ],
+    )
+
+    await extract_coding_unit_context(session_manager=manager, user_id="u", session_id="s")
+
+    rows = {row["section"]: row for row in manager.lessons()}
+    assert rows["failure_lessons"]["source_trace_ids"] == [failed.trace_id]
+    assert rows["success_patterns"]["source_trace_ids"] == []
+    assert rows["failure_lessons"]["source_qa_ids"] == [manager.rows[0].qa_id]
+
+
+@pytest.mark.asyncio
+async def test_a_failure_candidate_without_an_errored_trace_stays_unlinked(monkeypatch):
+    traces = [_trace("Read", params={"file_path": f"{REPO}/src/app.py"})]
+    manager = FakeSessionManager(traces=traces, qa=_qa())
+    _llm(monkeypatch, [_failure_candidate("A failing test means the parser is wrong.")])
+
+    await extract_coding_unit_context(session_manager=manager, user_id="u", session_id="s")
+
+    (row,) = manager.lessons()
+    assert row["section"] == "failure_lessons" and row["source_trace_ids"] == []

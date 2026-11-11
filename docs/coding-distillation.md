@@ -86,7 +86,9 @@ Parts run in order so each sees the candidates of the earlier ones; up to 10 can
 call, each naming the turn it was learned in (`CodingAgentContextExtraction`; a number
 outside the input's turns counts as its newest). Every stored candidate links that turn's
 Q&A row (`SessionContextEntry.source_qa_ids`), which is how the distillation finds the
-request and answer to judge it against. After the last part, each fixed error group stores
+request and answer to judge it against. A `failure_lessons` candidate also links the errored
+traces of its turn (`source_trace_ids`), the evidence the pitfall rule below looks for; one
+from a turn with no errored trace links none. After the last part, each fixed error group stores
 one deterministic `failure_lessons` candidate (confidence 0.9) that opens with its pitfall
 key, linked to its failing trace's turn, so it survives the curator as a pitfall and
 replaces its predecessor:
@@ -107,13 +109,22 @@ models. The candidates are batched six at a time in the order of their turns, an
 batch opens with the request and final answer of the turns its candidates were learned in
 (a candidate that links no turn is judged against the newest one), so the call count is
 the same as with one pinned turn while each candidate is judged against its own request
-and answer. Each accepted lesson takes the date, commit and branch of its own turn (the
+and answer. Batches of one turn all see the same final answer and tend to propose the same
+headline fact, so when more than one batch proposes lessons, one more call names the
+proposals that state the same fact (`find_duplicate_proposals`, prompt
+`session_distillation_merge_system.txt`). Its input is the numbered working statements and
+nothing else, and its answer is groups of numbers, so it stays small however long the session
+was. The code then folds each group into one of its proposals, the last keyed one or else the
+first, which keeps its statement and gains the members of the others
+(`merge_duplicate_proposals`). The step can only remove a restatement: a proposal in no group
+is untouched, a number the call got wrong is skipped, a group that spans two different keys
+(a footprint and a pitfall) is left alone, and a failed call keeps every proposal. Each accepted lesson takes the date, commit and branch of its own turn (the
 newest of its members' turns). The writer additionally gets `PROPOSED STATE KEY`, a glossary recased from
 the session's own text (the graph stores `marktaskcommand`; the lesson says
 `MarkTaskCommand`) and a compact STYLE line (statements of about 25 words). Evidence rules
 then settle the type: a lesson backed by a repeated-error candidate is a `pitfall` with that
 candidate's key; a `pitfall` with no failed-trace candidate behind it becomes a `change`;
-only `state` and `pitfall` lessons keep a state key.
+only `state` and `pitfall` lessons keep a state key. Every type the rules change is logged.
 
 ## The lesson document
 

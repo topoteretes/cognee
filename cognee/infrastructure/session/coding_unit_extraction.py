@@ -828,6 +828,13 @@ async def extract_coding_unit_context(
         return touched
 
 
+def _section(candidate) -> str:
+    """A candidate's section, whether it is a model or a plain dict."""
+    if isinstance(candidate, dict):
+        return str(candidate.get("section") or "")
+    return str(getattr(candidate, "section", "") or "")
+
+
 async def _extract_window(
     *, session_manager, user_id: str, session_id: str, dataset, unit: UnitOfWork, system_prompt
 ) -> list[str]:
@@ -835,7 +842,9 @@ async def _extract_window(
 
     Every candidate is linked to the Q&A row of its turn: the LLM names the turn of
     each lesson (a number outside the chunk's turns counts as its newest), a failure
-    candidate takes its failing trace's turn.
+    candidate takes its failing trace's turn. An LLM ``failure_lessons`` candidate is
+    also linked to the errored traces of its turn, the evidence the distillation's
+    pitfall rule looks for; with none it stays unlinked and its lesson is a change.
     """
     groups = group_repeated_errors(unit.traces)
     chunks = plan_extraction_parts(unit, groups)
@@ -855,14 +864,20 @@ async def _extract_window(
             number = item.turn if item.turn in chunk.turns else chunk.turns[-1]
             by_turn.setdefault(number, []).append(item.lesson)
         for number, candidates in by_turn.items():
-            touched += await apply_candidate_updates(
-                session_manager=session_manager,
-                user_id=user_id,
-                session_id=session_id,
-                source_id="",
-                candidates=candidates,
-                qa_id=unit.turns[number - 1].qa_id,
-            )
+            turn = unit.turns[number - 1]
+            errored = [trace.trace_id for trace in turn.traces if trace.status == "error"]
+            failures = [c for c in candidates if _section(c) == "failure_lessons"]
+            others = [c for c in candidates if _section(c) != "failure_lessons"]
+            for source_id, batch in ((errored, failures), ("", others)):
+                if batch:
+                    touched += await apply_candidate_updates(
+                        session_manager=session_manager,
+                        user_id=user_id,
+                        session_id=session_id,
+                        source_id=source_id,
+                        candidates=batch,
+                        qa_id=turn.qa_id,
+                    )
 
     for source_id, candidate in build_failure_candidates(groups, unit.repo_root):
         touched += await apply_candidate_updates(

@@ -100,6 +100,18 @@ class CodingCuratorBatchOutput(BaseModel):
     lessons: list[CodingProposedLesson] = Field(default_factory=list)
 
 
+class DuplicateProposalGroups(BaseModel):
+    """The proposals of one run that state the same fact, by their numbers in the input."""
+
+    groups: list[list[int]] = Field(
+        default_factory=list,
+        description=(
+            "Each group lists the numbers of lessons that are duplicates of each other "
+            "(two or more). Lessons without a duplicate are left out."
+        ),
+    )
+
+
 # -- Writer/rejecter output (one call per proposed lesson) -------------------
 
 

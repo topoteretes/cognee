@@ -28,6 +28,7 @@ from cognee.modules.session_distillation.distill import (
     keep_state_key_update,
     lesson_metadata,
     newest_per_state_key,
+    propose_lessons,
     publish_distilled_lessons,
     recase_glossary,
     write_or_reject,
@@ -771,3 +772,184 @@ async def test_coding_scope_requires_delete_permission(monkeypatch):
         await distill_module.resolve_distillation_scope(
             session_id="s-1", dataset=DATASET.name, user=USER, replaces_lessons=True
         )
+
+
+# -- Duplicate proposals of several curator batches are folded (coding mode) --------
+
+
+def _curator_fake(monkeypatch, per_batch, groups=()):
+    """Stand-ins for the curator and the duplicate check.
+
+    ``curate_batch`` returns the next item of ``per_batch``; ``find_duplicate_proposals``
+    returns ``groups`` (an exception instance is raised) and records the proposals it got.
+    """
+    batch_calls, merge_calls = [], []
+    outputs = iter(per_batch)
+
+    async def fake_curate(batch_text, *, coding=False):
+        batch_calls.append(batch_text)
+        return next(outputs)
+
+    async def fake_duplicates(proposed):
+        merge_calls.append([lesson.working_statement for lesson in proposed])
+        if isinstance(groups, Exception):
+            raise groups
+        return groups
+
+    monkeypatch.setattr(distill_module, "curate_batch", fake_curate)
+    monkeypatch.setattr(distill_module, "find_duplicate_proposals", fake_duplicates)
+    return batch_calls, merge_calls
+
+
+def _proposal(statement, members=(), state_key=""):
+    return CodingProposedLesson(
+        working_statement=statement, member_entry_ids=list(members), state_key=state_key
+    )
+
+
+def _seven_entries():
+    """Seven candidates of one turn: two curator batches."""
+    return [_entry(f"candidate {i}", entry_id=f"c{i}", source_qa_ids=["q1"]) for i in range(7)]
+
+
+QA_ROW = [{"qa_id": "q1", "question": "Fix exits", "answer": "Command.execute exits 1."}]
+
+
+@pytest.mark.asyncio
+async def test_duplicates_across_batches_are_folded_and_the_rest_is_untouched(monkeypatch):
+    """Two batches of one turn both propose the headline fact; one lesson remains, with
+    the members of both, and the proposal nobody grouped is the object it was."""
+    first = _proposal("Command.execute exits 1 on XitError.", ["c0"])
+    other = _proposal("The CLI entry point is cli.py.", ["c1"])
+    second = _proposal("Command.execute in commands.py exits with status 1.", ["c6"])
+    batch_calls, merge_calls = _curator_fake(monkeypatch, [[first, other], [second]], [[1, 3]])
+
+    run = await propose_lessons(QA_ROW, _seven_entries(), coding=True)
+
+    assert len(batch_calls) == 2 and len(merge_calls) == 1
+    assert [lesson.working_statement for lesson in run.proposed] == [
+        "Command.execute exits 1 on XitError.",
+        "The CLI entry point is cli.py.",
+    ]
+    assert run.proposed[0].member_entry_ids == ["c0", "c6"]
+    assert run.proposed[1] is other
+    assert run.curated_entry_ids == {f"c{i}" for i in range(7)}
+
+
+@pytest.mark.asyncio
+async def test_the_duplicate_check_sees_the_statements_only(monkeypatch):
+    """The call's input is one numbered line per proposal: no turns, no candidates."""
+    seen = {}
+
+    async def fake_llm(*, text_input, system_prompt, response_model):
+        seen.update(text=text_input, prompt=system_prompt, model=response_model)
+        return response_model(groups=[[1, 2]])
+
+    monkeypatch.setattr(distill_module.LLMGateway, "acreate_structured_output", fake_llm)
+    proposals = [
+        _proposal("[state-key: test-baseline] pytest -q:\n41 passed.", ["c0"], "test-baseline"),
+        _proposal("Tests pass.", ["c6"]),
+    ]
+
+    groups = await distill_module.find_duplicate_proposals(proposals)
+
+    assert seen["text"] == "1. pytest -q: 41 passed.\n2. Tests pass."
+    assert seen["prompt"] == read_query_prompt("coding/session_distillation_merge_system.txt")
+    assert seen["prompt"].strip() and "Propose at most" not in seen["prompt"]
+    assert groups == [[1, 2]]
+
+
+def test_a_group_keeps_its_keyed_proposal_and_never_spans_two_keys():
+    """The state lesson survives its unkeyed restatement; a footprint and a pitfall the
+    model grouped stay two lessons."""
+    pitfall = _entry(
+        "[state-key: pitfall:Edit:no-changes-to-make:py] Edit failed → Bash python",
+        section="failure_lessons",
+        source_trace_ids=["t1"],
+        entry_id="pf",
+    )
+    proposals = [
+        _proposal("Tests pass.", ["c0"]),
+        _proposal("pytest -q: 41 passed.", ["c1"], "test-baseline"),
+        _proposal("Export consists of export.py and cli.py.", ["c2"], "footprint:export"),
+        _proposal("Edit on an unchanged string fails → use python.", ["pf"]),
+    ]
+    keys = [distill_module.proposal_key(lesson, {"pf": pitfall}) for lesson in proposals]
+
+    merged = distill_module.merge_duplicate_proposals(proposals, [[1, 2], [3, 4]], keys)
+
+    assert keys == ["", "test-baseline", "footprint:export", "pitfall:Edit:no-changes-to-make:py"]
+    assert [lesson.working_statement for lesson in merged] == [
+        "pytest -q: 41 passed.",
+        "Export consists of export.py and cli.py.",
+        "Edit on an unchanged string fails → use python.",
+    ]
+    assert merged[0].state_key == "test-baseline" and merged[0].member_entry_ids == ["c1", "c0"]
+    assert merged[1] is proposals[2] and merged[2] is proposals[3]
+
+
+def test_a_group_the_model_got_wrong_loses_nothing():
+    """Unknown numbers, a number used twice and a group of one change nothing."""
+    proposals = [_proposal(f"Lesson {i}.", [f"c{i}"]) for i in range(4)]
+    keys = ["", "", "", ""]
+
+    merged = distill_module.merge_duplicate_proposals(
+        proposals, [[1, 2], [2, 3], [4], [0, 9, 4]], keys
+    )
+
+    assert [lesson.working_statement for lesson in merged] == [
+        "Lesson 0.",
+        "Lesson 2.",
+        "Lesson 3.",
+    ]
+    assert merged[0].member_entry_ids == ["c0", "c1"]
+    assert merged[1] is proposals[2] and merged[2] is proposals[3]
+
+
+@pytest.mark.asyncio
+async def test_one_batch_is_not_checked_for_duplicates(monkeypatch):
+    entries = [_entry(f"candidate {i}", entry_id=f"c{i}") for i in range(3)]
+    batch_calls, merge_calls = _curator_fake(
+        monkeypatch, [[_proposal("A.", ["c0"]), _proposal("B.", ["c1"])]], [[1, 2]]
+    )
+
+    run = await propose_lessons([{"question": "q", "answer": "a"}], entries, coding=True)
+
+    assert len(batch_calls) == 1 and merge_calls == [] and len(run.proposed) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("groups", [None, []])
+async def test_a_failed_or_empty_duplicate_check_keeps_the_proposals(monkeypatch, groups):
+    first, second = _proposal("A.", ["c0"]), _proposal("B.", ["c6"])
+    _curator_fake(monkeypatch, [[first], [second]], groups)
+
+    run = await propose_lessons(QA_ROW, _seven_entries(), coding=True)
+
+    assert run.proposed == [first, second]
+    assert run.failed_batches == 0 and not run.budget_exhausted
+
+
+@pytest.mark.asyncio
+async def test_an_exhausted_budget_in_the_duplicate_check_stops_the_run(monkeypatch):
+    _curator_fake(
+        monkeypatch,
+        [[_proposal("A.", ["c0"])], [_proposal("B.", ["c6"])]],
+        distill_module.LLMPaymentRequiredError("budget"),
+    )
+
+    run = await propose_lessons(QA_ROW, _seven_entries(), coding=True)
+
+    assert run.budget_exhausted and len(run.proposed) == 2
+
+
+@pytest.mark.asyncio
+async def test_default_mode_never_checks_for_duplicates(monkeypatch):
+    entries = [_entry(f"candidate {i}", entry_id=f"c{i}") for i in range(7)]
+    batch_calls, merge_calls = _curator_fake(
+        monkeypatch, [[_proposal("A.", ["c0"])], [_proposal("A.", ["c6"])]], [[1, 2]]
+    )
+
+    run = await propose_lessons([{"question": "q", "answer": "a", "time": "t"}], entries)
+
+    assert len(batch_calls) == 2 and merge_calls == [] and len(run.proposed) == 2
