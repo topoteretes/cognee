@@ -41,14 +41,13 @@ from cognee.modules.retrieval.utils.completion import (
     generate_completion_batch,
 )
 from cognee.modules.retrieval.utils.conflict_context import attach_chunk_conflicts
-from cognee.modules.retrieval.utils.document_sources import get_document_sources
+from cognee.modules.retrieval.utils.document_sources import name_chunk_documents
 from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
     search_top_global_context_summaries,
 )
-from cognee.modules.retrieval.utils.references import chunk_data_ids
 from cognee.modules.retrieval.utils.resolved_context import user_resolution_scope
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.modules.user_preferences import load_preference_text, load_preference_weights
@@ -374,14 +373,15 @@ class HybridRetriever(BaseRetriever):
         return await self.append_references(completions, retrieved_objects)
 
     async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
-        if not (self.include_references and self.response_model is str):
+        if not self.include_references:
             return completions
-        sources = await get_document_sources(
-            chunk_data_ids(hybrid_chunks(retrieved_objects)), current_dataset_id.get()
-        )
+        await self.name_cited_documents(retrieved_objects)
         return cite_hybrid_completions(
-            completions, retrieved_objects, enabled=True, sources=sources
+            completions, retrieved_objects, enabled=self.response_model is str
         )
+
+    async def name_cited_documents(self, retrieved_objects: Any) -> None:
+        await name_chunk_documents(hybrid_chunks(retrieved_objects), current_dataset_id.get())
 
     def get_context_evidence(self, retrieved_objects: Any, dataset_id: Any = None):
         """The chunk lane's chunks that were in this answer's context."""

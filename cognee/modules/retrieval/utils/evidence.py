@@ -10,7 +10,12 @@ from uuid import UUID
 
 from cognee.infrastructure.databases.provenance import make_source_ref_key
 from cognee.modules.engine.utils import generate_edge_object_id
-from cognee.modules.retrieval.utils.document_sources import DocumentSource, document_label
+from cognee.modules.retrieval.utils.document_sources import (
+    TITLE_KEY,
+    URL_KEY,
+    document_label,
+    document_source,
+)
 from cognee.modules.search.models.EvidenceReference import EvidenceReference
 
 
@@ -84,6 +89,8 @@ def chunk_context_evidence(
                 chunk_id=chunk_id,
                 chunk_index=chunk_index,
                 document_name=_string(payload.get("document_name")),
+                title=payload.get(TITLE_KEY),
+                url=payload.get(URL_KEY),
                 rank=rank,
                 score=_score(getattr(obj, "score", None)),
             )
@@ -199,6 +206,7 @@ async def graph_source_evidence(
 
     records = await get_edge_evidence_records(edge_ids, normalized_dataset_id)
     rank_offset = len(context_evidence)
+    sources = [document_source(record.label, record.system_metadata) for record in records]
     return [
         EvidenceReference(
             kind="segment",
@@ -211,9 +219,11 @@ async def graph_source_evidence(
             chunk_id=str(record.chunk_id),
             chunk_index=record.chunk_index,
             document_name=record.document_name,
+            title=source.title,
+            url=source.url,
             rank=rank_offset + rank,
         )
-        for rank, record in enumerate(records)
+        for rank, (record, source) in enumerate(zip(records, sources))
     ]
 
 
@@ -240,7 +250,6 @@ def append_source_evidence_text(
         chunk_number = (
             str(reference.chunk_index + 1) if reference.chunk_index is not None else "unknown"
         )
-        source = DocumentSource(title=reference.title, url=reference.url)
         identifiers = []
         if reference.data_id:
             identifiers.append(f"data_id: {reference.data_id}")
@@ -248,7 +257,8 @@ def append_source_evidence_text(
             identifiers.append(f"chunk_id: {reference.chunk_id}")
         suffix = f" ({', '.join(identifiers)})" if identifiers else ""
         bullets.append(
-            f"- chunk {chunk_number} of {document_label(reference.document_name, source)}{suffix}"
+            f"- chunk {chunk_number} of "
+            f"{document_label(reference.document_name, reference.title, reference.url)}{suffix}"
         )
 
     if not bullets:

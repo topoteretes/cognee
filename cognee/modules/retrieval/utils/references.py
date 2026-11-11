@@ -20,10 +20,9 @@ when there is nothing usable, and never raise on backend failures.
 """
 
 import re
-from collections.abc import Mapping
 from typing import Any
 
-from cognee.modules.retrieval.utils.document_sources import DocumentSource, document_label
+from cognee.modules.retrieval.utils.document_sources import TITLE_KEY, URL_KEY, document_label
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("references")
@@ -277,10 +276,7 @@ def _significant_terms(text: str) -> set[str]:
 
 
 def format_chunk_references(
-    retrieved_objects: Any,
-    answer: str | None = None,
-    limit: int = 5,
-    sources: Mapping[str, DocumentSource] | None = None,
+    retrieved_objects: Any, answer: str | None = None, limit: int = 5
 ) -> str:
     """Build an Evidence block from retrieved vector payloads, grounded in the answer.
 
@@ -288,8 +284,8 @@ def format_chunk_references(
     to ``payload["chunk_index"] + 1``), and ``payload["text"]`` from each
     retrieved object. Entries missing usable document name or chunk-number
     metadata are skipped. Results are deduplicated by chunk id and capped at
-    3-5 bullets. A document found in ``sources`` (by its data id, see
-    ``get_document_sources``) is named by its title and link instead of its file.
+    3-5 bullets. A chunk named by ``name_chunk_documents`` cites its document by
+    title and link instead of its file.
 
     When ``answer`` is provided, candidates that share no significant terms
     with the answer are dropped and the remainder is ranked by term overlap,
@@ -329,7 +325,7 @@ def format_chunk_references(
             # rather than presenting unverifiable retrieval order as provenance.
             return ""
 
-    # (overlap_score, document_name, number, text, data_id, chunk_id) per candidate.
+    # (overlap_score, document, number, text, data_id, chunk_id) per candidate.
     candidates: list[tuple[int, str, int, str, str | None, str | None]] = []
     seen: set = set()
 
@@ -367,7 +363,8 @@ def format_chunk_references(
                 # certainly not a source of the answer.
                 continue
 
-        candidates.append((score, document_name, number, text, data_id, chunk_id))
+        document = document_label(document_name, payload.get(TITLE_KEY), payload.get(URL_KEY))
+        candidates.append((score, document, number, text, data_id, chunk_id))
 
     if not candidates:
         return ""
@@ -377,11 +374,9 @@ def format_chunk_references(
         candidates.sort(key=lambda candidate: -candidate[0])
 
     max_bullets = _clamp_limit(limit)
-    sources = sources or {}
     bullets = [
-        f"- chunk {number} of {document_label(document_name, sources.get(data_id or ''))}"
-        f'{_provenance_suffix(data_id, chunk_id)}: "{_snippet(text)}"'
-        for _, document_name, number, text, data_id, chunk_id in candidates[:max_bullets]
+        f'- chunk {number} of {document}{_provenance_suffix(data_id, chunk_id)}: "{_snippet(text)}"'
+        for _, document, number, text, data_id, chunk_id in candidates[:max_bullets]
     ]
 
     return EVIDENCE_HEADER + "\n" + "\n".join(bullets)
@@ -432,23 +427,8 @@ async def build_answer_grounded_chunk_references(
     return format_chunk_references(found_chunks, answer=cleaned_answer, limit=limit)
 
 
-def chunk_data_ids(retrieved_objects: Any) -> list[str]:
-    """The data ids of retrieved chunks (``payload["document_id"]``), to name their
-    documents with ``get_document_sources``."""
-    data_ids = []
-    for obj in retrieved_objects or []:
-        payload = _get_payload(obj)
-        data_id = _clean_str(payload.get("document_id")) if payload else None
-        if data_id:
-            data_ids.append(data_id)
-    return data_ids
-
-
 def append_chunk_evidence(
-    completions: list[Any],
-    retrieved_objects: Any,
-    enabled: bool,
-    sources: Mapping[str, DocumentSource] | None = None,
+    completions: list[Any], retrieved_objects: Any, enabled: bool
 ) -> list[Any]:
     """Append an answer-grounded chunk Evidence block to string completions.
 
@@ -465,7 +445,7 @@ def append_chunk_evidence(
         if not isinstance(completion, str):
             appended.append(completion)
             continue
-        evidence = format_chunk_references(retrieved_objects, answer=completion, sources=sources)
+        evidence = format_chunk_references(retrieved_objects, answer=completion)
         appended.append(f"{completion}\n\n{evidence}" if evidence else completion)
     return appended
 

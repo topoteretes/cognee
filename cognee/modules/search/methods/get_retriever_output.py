@@ -2,7 +2,6 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.only_context_prompt import build_only_context_prompt
 from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
-from cognee.modules.retrieval.utils.document_sources import name_evidence_sources
 from cognee.modules.retrieval.utils.evidence import (
     append_source_evidence_text,
     graph_source_evidence,
@@ -121,19 +120,19 @@ async def get_retriever_output(
 
     evidence = []
     if kwargs.get("include_references", False):
+        if only_context:
+            # No answer was written, so append_references did not name the chunks.
+            await retriever_instance.name_cited_documents(retrieved_objects)
         evidence = _context_evidence(retriever_instance, retrieved_objects, kwargs)
         dataset = kwargs.get("dataset")
-        dataset_id = getattr(dataset, "id", None)
         if dataset is not None and any(reference.kind == "graph_edge" for reference in evidence):
             # Indexed relational sidecar lookup; cheap next to the LLM
             # completion that already ran inside the session-aware door.
             try:
-                evidence.extend(await graph_source_evidence(evidence, dataset_id))
+                evidence.extend(await graph_source_evidence(evidence, getattr(dataset, "id", None)))
+                completion = append_source_evidence_text(completion, evidence)
             except Exception as error:
                 logger.warning("Unable to resolve graph source evidence: %s", error, exc_info=True)
-        # One lookup names every cited document by its title and link.
-        evidence = await name_evidence_sources(evidence, dataset_id)
-        completion = append_source_evidence_text(completion, evidence)
 
     return SearchResultPayload(
         result_object=retrieved_objects,

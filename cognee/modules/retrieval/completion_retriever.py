@@ -15,10 +15,10 @@ from cognee.modules.retrieval.utils.conflict_context import (
     attach_chunk_conflicts,
     render_chunk_context,
 )
-from cognee.modules.retrieval.utils.document_sources import get_document_sources
+from cognee.modules.retrieval.utils.document_sources import name_chunk_documents
 from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
 from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
-from cognee.modules.retrieval.utils.references import append_chunk_evidence, chunk_data_ids
+from cognee.modules.retrieval.utils.references import append_chunk_evidence
 from cognee.modules.retrieval.utils.scoped_chunk_search import search_scoped_chunks
 from cognee.modules.retrieval.utils.used_graph_elements import extract_from_scored_results
 from cognee.modules.user_preferences import (
@@ -252,12 +252,15 @@ class CompletionRetriever(BaseRetriever):
         return [completion]
 
     async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
-        if not (self.include_references and self.response_model is str):
+        if not self.include_references:
             return completions
-        sources = await get_document_sources(
-            chunk_data_ids(retrieved_objects), current_dataset_id.get()
+        await self.name_cited_documents(retrieved_objects)
+        return append_chunk_evidence(
+            completions, retrieved_objects, enabled=self.response_model is str
         )
-        return append_chunk_evidence(completions, retrieved_objects, enabled=True, sources=sources)
+
+    async def name_cited_documents(self, retrieved_objects: Any) -> None:
+        await name_chunk_documents(retrieved_objects or [], current_dataset_id.get())
 
     async def get_completion_from_context(
         self,

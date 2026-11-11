@@ -154,3 +154,50 @@ async def test_an_edge_reference_names_its_document_by_title_and_link(cognified)
     assert supporting, "the graph answer cites the chunks its edges came from"
     assert (TITLE, URL) in _sources(supporting)
     assert f'"{TITLE}" <{URL}>' in answer
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query_type",
+    [SearchType.RAG_COMPLETION, SearchType.HYBRID_COMPLETION, SearchType.GRAPH_COMPLETION],
+)
+async def test_a_search_reads_the_cited_documents_once(cognified, query_type):
+    """The Evidence block and the structured references share one read of the data records."""
+    from sqlalchemy import event
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+
+    reads = []
+
+    def count(conn, cursor, statement, parameters, context, executemany):
+        if "data.label" in statement:
+            reads.append(statement)
+
+    engine = get_relational_engine().engine.sync_engine
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        _, evidence = await _search(query_type)
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+
+    assert (TITLE, URL) in _sources(evidence)
+    assert len(reads) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query_type",
+    [SearchType.RAG_COMPLETION, SearchType.HYBRID_COMPLETION, SearchType.GRAPH_COMPLETION],
+)
+async def test_a_context_only_search_names_its_references_too(cognified, query_type):
+    """``only_context`` skips the answer, not the references' titles."""
+    (result,) = await cognee.search(
+        QUESTION,
+        query_type=query_type,
+        datasets=[DATASET],
+        include_references=True,
+        only_context=True,
+        verbose=True,
+    )
+
+    assert (TITLE, URL) in _sources(result["evidence"])

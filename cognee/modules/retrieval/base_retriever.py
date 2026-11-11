@@ -120,6 +120,10 @@ class BaseRetriever(ABC):
         """Apply retriever-owned references; unsupported retrievers leave answers unchanged."""
         return completions
 
+    async def name_cited_documents(self, retrieved_objects: Any) -> None:
+        """Give the cited chunks their documents' titles and links, before references are
+        built from them. Retrievers without a chunk lane have nothing to name."""
+
     def get_context_evidence(
         self,
         retrieved_objects: Any,
