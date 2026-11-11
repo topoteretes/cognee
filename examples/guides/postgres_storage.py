@@ -6,8 +6,10 @@ on the vector database. The default database-per-dataset handlers also require
 CREATE DATABASE. Run: python examples/guides/postgres_storage.py
 
 VECTOR_WRITE_BATCH_SIZE=128 is independent of EMBEDDING_BATCH_SIZE. Four COPY
-writers per collection overlap embedding and writes; VECTOR_POOL_ARGS still caps
-connections. Graph and vector transactions commit separately. A vector failure
+writers per collection overlap embedding and writes. The binary write pool adds
+up to eight connections per adapter; VECTOR_POOL_ARGS controls the separate
+SQLAlchemy pool. Measure COPY with your workload: the default binary writes can
+be faster. Graph and vector transactions commit separately. A vector failure
 does not roll back already committed graph rows or earlier vector batches.
 
 COGNEE_STORAGE_TRACE=true emits payload-free per-batch timing. Keep CACHING=true
