@@ -33,6 +33,7 @@ from cognee.modules.observability import (
     record_operation_duration,
 )
 from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_configured_authoritative_sources,
     get_configured_ontology_mode,
     get_configured_ontology_resolver,
 )
@@ -477,10 +478,12 @@ async def cognify(
             config, ontology_file_path=ontology_file_path
         )
         resolved_ontology_mode = get_configured_ontology_mode(config)
+        resolved_authoritative_sources = get_configured_authoritative_sources(config)
         config = {
             "ontology_config": {
                 "ontology_resolver": resolved_resolver,
                 "ontology_mode": resolved_ontology_mode,
+                "authoritative_sources": resolved_authoritative_sources,
             }
         }
 
@@ -579,7 +582,7 @@ async def cognify(
         tasks_by_route = {
             CognifyRoute.STANDARD: tasks,
             CognifyRoute.DLT_SOURCE: await get_dlt_tasks(
-                chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
+                chunk_size=chunk_size, chunks_per_batch=chunks_per_batch, config=config
             ),
             CognifyRoute.CODE: get_code_file_tasks(),
             CognifyRoute.CODE_REPO: get_code_repo_tasks(),
@@ -768,13 +771,17 @@ async def get_indexing_tasks(
 
 
 async def get_dlt_tasks(
-    chunk_size: int | None = None, chunks_per_batch: int | None = None
+    chunk_size: int | None = None,
+    chunks_per_batch: int | None = None,
+    *,
+    config: Config,
 ) -> list[Task]:
     """Deterministic pipeline for DLT-source manifest datasets.
 
     No LLM tasks: each manifest row becomes one DocumentChunk (vector-indexed
     by add_data_points) and the graph structure comes from the relational
-    schema via extract_dlt_source_edges.
+    schema via extract_dlt_source_edges. ``config`` is the one cognify resolved:
+    its ontology resolver and authoritative sources align the tables.
     """
     from cognee.tasks.ingestion.extract_dlt_source_edges import extract_dlt_source_edges
     from cognee.tasks.ingestion.purge_stale_dlt_source_artifacts import (
@@ -809,5 +816,10 @@ async def get_dlt_tasks(
         # LOAD: schema nodes and deterministic FK edges from the manifest.
         # Cross-batch dedup state lives in ctx.extras (per data item = per
         # source), so these Task objects are safe to share across datasets.
-        Task(extract_dlt_source_edges, needs_llm=False),
+        Task(
+            extract_dlt_source_edges,
+            ontology_resolver=config["ontology_config"]["ontology_resolver"],
+            authoritative_sources=config["ontology_config"]["authoritative_sources"],
+            needs_llm=False,
+        ),
     ]
