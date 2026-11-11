@@ -66,8 +66,10 @@ from cognee.modules.integrations.background import spawn_background
 from cognee.modules.integrations.base import OAuthIntegration
 from cognee.modules.integrations.connect import complete_installation
 from cognee.modules.integrations.credentials import (
+    REVOKED_BY_OWNER,
     CrossUserConflictError,
     get_active_credential_for_user,
+    get_ended_connection,
     list_active_credentials_for_provider,
     list_active_credentials_for_user,
     owner_principal_id,
@@ -160,6 +162,11 @@ class ConnectionStatusDTO(OutDTO):
     sync_status: str | None = None
     last_synced_at: datetime | None = None
     sync_counts: dict[str, int] | None = None
+    # Set only when ``connected`` is false for a connection the user had: "owner" (a
+    # disconnect) or "provider" (an uninstall, a rejected token), absent when unknown.
+    # Its data stays in ``dataset_id``.
+    disconnected_by: str | None = None
+    disconnected_at: datetime | None = None
 
 
 class DisconnectResultDTO(OutDTO):
@@ -329,14 +336,20 @@ async def _credential_or_404(user: User, integration: OAuthIntegration, account_
     user's (unknown, disconnected, or someone else's) is a 404 and never falls back to
     another account: the caller asked for that one. A blank id names nothing and is a 422.
     """
-    if account_id is not None and not account_id.strip():
-        raise HTTPException(status_code=422, detail="account_id must not be blank")
+    _require_non_blank(account_id)
     credential = await get_active_credential_for_user(user.id, integration.provider, account_id)
     if credential is None and account_id is not None:
-        raise HTTPException(
-            status_code=404, detail=f"{integration.provider} account is not connected"
-        )
+        raise _account_not_connected(integration)
     return credential
+
+
+def _require_non_blank(account_id: str | None) -> None:
+    if account_id is not None and not account_id.strip():
+        raise HTTPException(status_code=422, detail="account_id must not be blank")
+
+
+def _account_not_connected(integration: OAuthIntegration) -> HTTPException:
+    return HTTPException(status_code=404, detail=f"{integration.provider} account is not connected")
 
 
 async def _connected_credential_or_404(
@@ -1077,13 +1090,37 @@ def get_integrations_router():
         - **account_id** (str, optional): The ``provider_account_id`` of one of the
           user's connections (see GET /{provider}/connections). Without it the newest
           connection answers. An id that is not the user's is a 404, never another account.
-        """
-        integration = _integration_or_404(provider)
-        credential = await _credential_or_404(user, integration, account_id)
-        if credential is None:
-            return ConnectionStatusDTO(connected=False)
 
+        With no active connection, the newest one the user had (or the one named) answers
+        ``connected: false`` with ``disconnectedBy`` (``"owner"`` for a disconnect,
+        ``"provider"`` for an app uninstalled or a token it no longer accepts, absent when
+        unknown), ``disconnectedAt`` and the dataset its data stays in; the data is deleted
+        only from the datasets. A named account the user never had is still a 404.
+        """
         from cognee.modules.integrations.ingestion import dataset_summary, sync_is_running
+
+        integration = _integration_or_404(provider)
+        _require_non_blank(account_id)
+        credential = await get_active_credential_for_user(user.id, integration.provider, account_id)
+        if credential is None:
+            ended = await get_ended_connection(user.id, integration.provider, account_id)
+            if ended is None:
+                if account_id is not None:
+                    raise _account_not_connected(integration)
+                return ConnectionStatusDTO(connected=False)
+            dataset_id, stored_items = None, None
+            dataset_name = integration.dataset_name(ended)
+            if dataset_name is not None:
+                dataset_id, stored_items = await dataset_summary(ended, dataset_name)
+            return ConnectionStatusDTO(
+                connected=False,
+                dataset_id=dataset_id,
+                stored_items=stored_items,
+                account_label=ended.account_label,
+                provider_account_id=ended.provider_account_id,
+                disconnected_by=ended.revoked_by,
+                disconnected_at=as_utc(ended.revoked_at),
+            )
 
         dataset_id, stored_items = None, None
         dataset_name = integration.dataset_name(credential)
@@ -1364,8 +1401,8 @@ def get_integrations_router():
     ) -> ConnectionDisconnectResultDTO:
         """Disconnect the account connected by the requesting user.
 
-        Marks the stored installation revoked, and best-effort asks the
-        provider to kill the token on its own side via
+        Marks the stored installation revoked by its owner, then best-effort asks
+        the provider to kill the token on its own side via
         ``integration.revoke_remote``. That call is wrapped here too, on top
         of each adapter's own best-effort handling — a third-party
         integration that doesn't honor the "never raise" contract on
@@ -1409,6 +1446,15 @@ def get_integrations_router():
                         detail=f"{provider} does not expose a deletable dataset",
                     )
 
+            # Ended locally first, so the provider's echo of this revoke (Slack's
+            # tokens_revoked, a refresh that meets the revoked token) finds it ended by
+            # its owner and records nothing over it.
+            await revoke_credential_by_account(
+                integration.provider,
+                credential.provider_account_id,
+                revoked_by=REVOKED_BY_OWNER,
+            )
+
             remote_revoke_skipped = False
             try:
                 require_outbound_http(provider)
@@ -1432,7 +1478,6 @@ def get_integrations_router():
                         credential.provider_account_id,
                     )
 
-            await revoke_credential_by_account(integration.provider, credential.provider_account_id)
             if delete_data:
                 try:
                     from cognee.api.v1.forget.forget import forget
