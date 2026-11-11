@@ -8,7 +8,10 @@ from collections import Counter
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from cognee.infrastructure.databases.postgres.admin import create_pg_database_if_not_exists
+from cognee.infrastructure.databases.postgres.admin import (
+    create_pg_database_if_not_exists,
+    drop_pg_database_if_exists,
+)
 from cognee.infrastructure.databases.relational.config import get_relational_config
 from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.data.models import Data
@@ -18,6 +21,7 @@ from cognee.tasks.ingestion.dlt_utils import (
     DOCUMENT_COLUMN_HINTS,
     NODE_SET_COLUMN,
     STRUCTURE_COLUMN,
+    apply_dlt_runtime_defaults,
     document_source_tag,
     pipeline_name_for_source,
 )
@@ -71,6 +75,8 @@ async def ingest_dlt_source(
     Returns:
         List[DltRowData]: Per-row data objects for downstream processing.
     """
+
+    apply_dlt_runtime_defaults()
 
     valid_dispositions = ("merge", "append", "replace")
     if write_disposition not in valid_dispositions:
@@ -663,6 +669,55 @@ def _key_value(row, key_columns: list[str]) -> str:
 # guarantee visible to static dataflow analysis (CodeQL py/path-injection):
 # the result provably contains no path or SQL metacharacters.
 _SAFE_IDENT_CHARS = {c: c for c in "abcdefghijklmnopqrstuvwxyz0123456789_"}
+
+
+async def drop_dlt_dataset(dataset_name: str) -> None:
+    """Delete everything dlt keeps of ``dataset_name``, for a dataset deleted for good.
+
+    ``forget`` removes the documents, graph and vectors, not the staging copy: the staging
+    database (``dlt_database_<dataset>``, on SQLite with its attached ``__<dataset>`` and
+    ``__<dataset>_staging`` files) and, under dlt's pipelines directory, the working
+    directory of every pipeline that loaded into it (state, schemas and completed load
+    packages, which hold the rendered text of every row). A later sync would read the
+    staged rows back. Taken under the staging lock, so no dlt run is mid-write.
+    """
+    import shutil
+    from pathlib import Path
+
+    from dlt.common.pipeline import get_dlt_pipelines_dir
+
+    safe_name = _to_safe_ident(dataset_name)
+    db_name = f"dlt_database_{safe_name}"
+    relational_config = get_relational_config()
+    async with _staging_lock:
+        if relational_config.db_provider == "postgres":
+            await drop_pg_database_if_exists(
+                db_name=db_name,
+                host=relational_config.db_host,
+                port=relational_config.db_port,
+                username=relational_config.db_username,
+                password=relational_config.db_password,
+            )
+        else:
+            # The database and the two datasets dlt attaches to it, under the name as given
+            # and as dlt normalizes it; never by prefix, which also matched a dataset whose
+            # name starts with this one (``<name>__other``, G74).
+            from dlt.common.normalizers.naming.snake_case import NamingConvention
+
+            normalized = NamingConvention().normalize_identifier(safe_name)
+            files = {db_name}
+            for dataset in {safe_name, normalized}:
+                files |= {f"{db_name}__{dataset}", f"{db_name}__{dataset}_staging"}
+            for name in files:
+                Path(relational_config.db_path, name).unlink(missing_ok=True)
+
+        pipelines = Path(get_dlt_pipelines_dir())
+        for pipeline_dir in pipelines.iterdir() if pipelines.is_dir() else []:
+            state_path = pipeline_dir / "state.json"
+            if not state_path.is_file():
+                continue
+            if json.loads(state_path.read_text()).get("dataset_name") == safe_name:
+                shutil.rmtree(pipeline_dir)
 
 
 def _to_safe_ident(s: str) -> str:

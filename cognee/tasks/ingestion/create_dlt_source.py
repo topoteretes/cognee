@@ -4,7 +4,7 @@ import re
 
 from cognee.shared.logging_utils import get_logger
 
-from .dlt_utils import SOURCE_LABEL_ATTR
+from .dlt_utils import SOURCE_LABEL_ATTR, apply_dlt_runtime_defaults
 
 logger = get_logger("create_dlt_source")
 
@@ -68,6 +68,7 @@ def create_dlt_source_from_connection_string(
     from cognee.exceptions import CogneeValidationError
 
     _require_database_ingestion_allowed()
+    apply_dlt_runtime_defaults()
     if connection_string.startswith("sqlite:///"):
         connection_string = _allowed_sqlite_connection_string(connection_string)
     else:

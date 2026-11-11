@@ -1,6 +1,7 @@
 """Shared utilities for DLT ingestion."""
 
 import json
+import os
 
 # A dlt source sets this attribute to opt into the "document" ingestion path:
 # each row becomes a text document that flows through normal cognify (LLM entity
@@ -52,6 +53,27 @@ NODE_SET_COLUMN_HINT = {NODE_SET_COLUMN: {"data_type": "json", "nullable": True}
 STRUCTURE_COLUMN = "cognee_structure"
 STRUCTURE_COLUMN_HINT = {STRUCTURE_COLUMN: {"data_type": "json", "nullable": True}}
 DOCUMENT_COLUMN_HINTS = {**NODE_SET_COLUMN_HINT, **STRUCTURE_COLUMN_HINT}
+
+
+# dlt's own defaults that cognee turns off (B4). dlt keeps every completed load package,
+# with the rendered text of every row, under its pipelines directory, outside cognee's data
+# root, so a forgotten or deleted record stays on disk; and it posts its own telemetry
+# events to dltHub on every run. A failed package is kept either way, for the retry.
+DLT_RUNTIME_DEFAULTS = {
+    "LOAD__DELETE_COMPLETED_JOBS": "true",
+    "RUNTIME__DLTHUB_TELEMETRY": "false",
+}
+
+
+def apply_dlt_runtime_defaults() -> None:
+    """Set ``DLT_RUNTIME_DEFAULTS`` in the environment, keeping any value the user set.
+
+    Called before cognee builds a dlt source or pipeline: dlt reads its telemetry setting
+    once, when its runtime first starts (``sql_database()`` starts it), and ``dlt.config``
+    set afterwards does not reach it, so only the environment, set first, does.
+    """
+    for name, value in DLT_RUNTIME_DEFAULTS.items():
+        os.environ.setdefault(name, value)
 
 
 def guarded_rows(rows, check_active=None):
