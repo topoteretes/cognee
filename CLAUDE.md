@@ -173,7 +173,7 @@ Triplet embeddings were removed (SDK-1115). What callers used to reach them stay
 #### 1. Pipeline-Based Processing
 All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks are composable units that can run sequentially or in parallel. Example pipeline tasks: `classify_documents`, `extract_graph_from_data`, `add_data_points`. The runner semantics (a task's `batch_size` batches the *previous* task's output, `enriches`, `ctx` injection, and which of the two `run_pipeline` functions to import) are in the `cognee/modules/pipelines/__init__.py` docstring; the index of all task implementations is `cognee/tasks/README.md`.
 
-Abandoned-run recovery checks at API startup and every 60 seconds. The
+Abandoned-run recovery checks at API startup and every 5 minutes. The
 `COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS` setting (default 3600, nonnegative)
 is an eligibility floor, not proof of inactivity. Each new pipeline run holds
 an OS lock under `SYSTEM_ROOT_DIRECTORY/pipeline_run_locks` from its persisted
