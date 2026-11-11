@@ -1,12 +1,12 @@
-"""A search reference names its source document by title and link, not by its stored file.
+"""A connector chunk carries its document's title and link in the search result's payload.
 
 End to end on the default local stores (SQLite, Ladybug, LanceDB) with the journeys tier's
 deterministic LLM and embeddings. A document-mode dlt row with a ``title`` and a ``url`` and a
 plain note with a ``label`` are added and cognified, then searched with
-``include_references=True``. The connector row's reference carries its title and link
-(``Data.system_metadata``), and the Evidence block appended to the answer names them, for the
-chunk lane (RAG, hybrid) and the graph lane (edge evidence) alike; the plain note keeps its
-file name.
+``include_references=True``. The connector row's chunks carry ``document_title`` and
+``document_url`` (from ``Data.system_metadata``) in ``objects_result``; the answer text and
+the structured evidence are exactly as before for every document, and the plain note's
+payload gains nothing.
 """
 
 import dlt
@@ -101,70 +101,48 @@ def _wiki_page():
     return resource
 
 
-async def _search(query_type: SearchType) -> tuple[str, list[dict]]:
-    """The answer text and the structured references of one dataset's result."""
+async def _search(query_type: SearchType, **kwargs) -> dict:
+    """One dataset's verbose result."""
     (result,) = await cognee.search(
         QUESTION,
         query_type=query_type,
         datasets=[DATASET],
         include_references=True,
         verbose=True,
+        **kwargs,
     )
-    answer = result["text_result"]
-    answer = answer[0] if isinstance(answer, list) else answer
-    return answer, result["evidence"]
+    return result
 
 
-def _sources(evidence: list[dict]) -> set[tuple]:
+def _payloads(result: dict) -> list[dict]:
+    """The chunk payloads of a RAG (list) or hybrid (dict of channels) result."""
+    objects = result["objects_result"]
+    chunks = objects.get("chunks", []) if isinstance(objects, dict) else objects
+    return [
+        chunk.get("payload", chunk) if isinstance(chunk, dict) else chunk.payload
+        for chunk in chunks
+    ]
+
+
+def _named(result: dict) -> set[tuple]:
     return {
-        (reference.get("title"), reference.get("url"))
-        for reference in evidence
-        if reference["kind"] == "segment"
+        (payload.get("document_title"), payload.get("document_url"))
+        for payload in _payloads(result)
+        if "document_title" in payload or "document_url" in payload
     }
 
 
-@pytest.mark.asyncio
-async def test_a_chunk_reference_names_its_document_by_title_and_link(cognified):
-    answer, evidence = await _search(SearchType.RAG_COMPLETION)
-
-    assert (TITLE, URL) in _sources(evidence)
-    assert f'"{TITLE}" <{URL}>' in answer
+def _answer(result: dict) -> str:
+    answer = result["text_result"]
+    return answer[0] if isinstance(answer, list) else answer
 
 
 @pytest.mark.asyncio
-async def test_a_hybrid_answer_names_its_document_in_the_text_only(cognified):
-    """Hybrid returns no structured evidence: a consumer that builds its own
-    from the chunks (Cognee Cloud) must see no change for any document."""
-    answer, evidence = await _search(SearchType.HYBRID_COMPLETION)
+@pytest.mark.parametrize("query_type", [SearchType.RAG_COMPLETION, SearchType.HYBRID_COMPLETION])
+async def test_a_connector_chunk_carries_its_title_and_link(cognified, query_type):
+    result = await _search(query_type)
 
-    assert f'"{TITLE}" <{URL}>' in answer
-    assert evidence == []
-
-
-@pytest.mark.asyncio
-async def test_a_plain_document_keeps_its_file_name(cognified):
-    """A label given to ``add`` is not a connector title: the note is cited by its file."""
-    (result,) = await cognee.search(
-        "What is the budget for Orion?",
-        query_type=SearchType.RAG_COMPLETION,
-        datasets=[DATASET],
-        include_references=True,
-        verbose=True,
-    )
-    sources = _sources(result["evidence"])
-    assert (None, None) in sources
-    assert all(title != NOTE_LABEL for title, _ in sources)
-
-
-@pytest.mark.asyncio
-async def test_an_edge_reference_names_its_document_by_title_and_link(cognified):
-    """The graph lane cites the chunk an edge was extracted from (edge evidence)."""
-    answer, evidence = await _search(SearchType.GRAPH_COMPLETION)
-
-    supporting = [r for r in evidence if r["role"] == "supports_assertion"]
-    assert supporting, "the graph answer cites the chunks its edges came from"
-    assert (TITLE, URL) in _sources(supporting)
-    assert f'"{TITLE}" <{URL}>' in answer
+    assert _named(result) == {(TITLE, URL)}
 
 
 @pytest.mark.asyncio
@@ -172,8 +150,39 @@ async def test_an_edge_reference_names_its_document_by_title_and_link(cognified)
     "query_type",
     [SearchType.RAG_COMPLETION, SearchType.HYBRID_COMPLETION, SearchType.GRAPH_COMPLETION],
 )
+async def test_the_answer_and_its_evidence_are_unchanged(cognified, query_type):
+    """The Evidence text names documents by file and the structured evidence has no new
+    fields, for connector documents too: only the payload carries the title."""
+    result = await _search(query_type)
+
+    # The chunk's own text starts with "# <title>", so the snippet may quote it; the
+    # bullet must still name the document by its file, never by title or link.
+    assert f'of "{TITLE}"' not in _answer(result)
+    assert URL not in _answer(result)
+    for reference in result["evidence"]:
+        assert "title" not in reference and "url" not in reference
+
+
+@pytest.mark.asyncio
+async def test_a_plain_document_payload_gains_nothing(cognified):
+    """A label given to ``add`` is not a connector title: the note's payload is untouched."""
+    (result,) = await cognee.search(
+        "What is the budget for Orion?",
+        query_type=SearchType.RAG_COMPLETION,
+        datasets=[DATASET],
+        include_references=True,
+        verbose=True,
+    )
+    notes = [p for p in _payloads(result) if "budget" in str(p.get("text", ""))]
+    assert notes
+    for payload in notes:
+        assert "document_title" not in payload and "document_url" not in payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query_type", [SearchType.RAG_COMPLETION, SearchType.HYBRID_COMPLETION])
 async def test_a_search_reads_the_cited_documents_once(cognified, query_type):
-    """The Evidence block and the structured references share one read of the data records."""
+    """One read of the data records per search names every chunk."""
     from sqlalchemy import event
 
     from cognee.infrastructure.databases.relational import get_relational_engine
@@ -187,25 +196,16 @@ async def test_a_search_reads_the_cited_documents_once(cognified, query_type):
     engine = get_relational_engine().engine.sync_engine
     event.listen(engine, "before_cursor_execute", count)
     try:
-        answer, _ = await _search(query_type)
+        result = await _search(query_type)
     finally:
         event.remove(engine, "before_cursor_execute", count)
 
-    assert f'"{TITLE}" <{URL}>' in answer
+    assert _named(result) == {(TITLE, URL)}
     assert len(reads) == 1
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("query_type", [SearchType.RAG_COMPLETION, SearchType.GRAPH_COMPLETION])
-async def test_a_context_only_search_names_its_references_too(cognified, query_type):
-    """``only_context`` skips the answer, not the references' titles."""
-    (result,) = await cognee.search(
-        QUESTION,
-        query_type=query_type,
-        datasets=[DATASET],
-        include_references=True,
-        only_context=True,
-        verbose=True,
-    )
+async def test_a_context_only_search_names_its_chunks_too(cognified):
+    result = await _search(SearchType.HYBRID_COMPLETION, only_context=True)
 
-    assert (TITLE, URL) in _sources(result["evidence"])
+    assert _named(result) == {(TITLE, URL)}

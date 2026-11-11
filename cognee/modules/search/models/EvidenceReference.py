@@ -28,10 +28,6 @@ class EvidenceReference(BaseModel):
     chunk_id: str | None = None
     chunk_index: int | None = None
     document_name: str | None = None
-    # A document-mode connector row's title and link (its ``system_metadata``); ``None`` for
-    # any other document. ``document_name`` is the stored file's name either way.
-    title: str | None = None
-    url: str | None = None
 
     source_node_id: str | None = None
     target_node_id: str | None = None

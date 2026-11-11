@@ -10,14 +10,15 @@ from uuid import UUID
 
 from cognee.infrastructure.databases.provenance import make_source_ref_key
 from cognee.modules.engine.utils import generate_edge_object_id
-from cognee.modules.retrieval.utils.document_sources import (
-    TITLE_KEY,
-    URL_KEY,
-    chunk_payload,
-    document_label,
-    document_source,
-)
 from cognee.modules.search.models.EvidenceReference import EvidenceReference
+
+
+def _payload(obj: Any) -> dict:
+    if isinstance(obj, dict):
+        nested = obj.get("payload")
+        return nested if isinstance(nested, dict) else obj
+    value = getattr(obj, "payload", None)
+    return value if isinstance(value, dict) else {}
 
 
 def _string(value: Any) -> str | None:
@@ -55,7 +56,7 @@ def chunk_context_evidence(
     normalized_dataset_id = _string(dataset_id)
 
     for rank, obj in enumerate(retrieved_objects):
-        payload = chunk_payload(obj)
+        payload = _payload(obj)
         chunk_id = _string(getattr(obj, "id", None)) or _string(payload.get("id"))
         if chunk_id is None:
             continue
@@ -82,8 +83,6 @@ def chunk_context_evidence(
                 chunk_id=chunk_id,
                 chunk_index=chunk_index,
                 document_name=_string(payload.get("document_name")),
-                title=payload.get(TITLE_KEY),
-                url=payload.get(URL_KEY),
                 rank=rank,
                 score=_score(getattr(obj, "score", None)),
             )
@@ -199,7 +198,6 @@ async def graph_source_evidence(
 
     records = await get_edge_evidence_records(edge_ids, normalized_dataset_id)
     rank_offset = len(context_evidence)
-    sources = [document_source(record.system_metadata) for record in records]
     return [
         EvidenceReference(
             kind="segment",
@@ -212,11 +210,9 @@ async def graph_source_evidence(
             chunk_id=str(record.chunk_id),
             chunk_index=record.chunk_index,
             document_name=record.document_name,
-            title=source.title,
-            url=source.url,
             rank=rank_offset + rank,
         )
-        for rank, (record, source) in enumerate(zip(records, sources))
+        for rank, record in enumerate(records)
     ]
 
 
@@ -243,16 +239,14 @@ def append_source_evidence_text(
         chunk_number = (
             str(reference.chunk_index + 1) if reference.chunk_index is not None else "unknown"
         )
+        document_name = reference.document_name or "unknown"
         identifiers = []
         if reference.data_id:
             identifiers.append(f"data_id: {reference.data_id}")
         if reference.chunk_id:
             identifiers.append(f"chunk_id: {reference.chunk_id}")
         suffix = f" ({', '.join(identifiers)})" if identifiers else ""
-        bullets.append(
-            f"- chunk {chunk_number} of "
-            f"{document_label(reference.document_name, reference.title, reference.url)}{suffix}"
-        )
+        bullets.append(f"- chunk {chunk_number} of document {document_name}{suffix}")
 
     if not bullets:
         return completions

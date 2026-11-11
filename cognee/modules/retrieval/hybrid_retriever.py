@@ -198,11 +198,16 @@ class HybridRetriever(BaseRetriever):
             self.include_external_metadata,
             self.external_metadata_keys,
         )
-        await attach_chunk_conflicts(
-            chunk_objects.get("chunks", []), graph_engine=self._unified_engine.graph
+        chunks = chunk_objects.get("chunks", [])
+        # Different payload keys, so the graph read and the title read run side by side.
+        naming = (
+            [name_chunk_documents(chunks, current_dataset_id.get())]
+            if self.include_references
+            else []
         )
-        if self.include_references:
-            await name_chunk_documents(chunk_objects.get("chunks", []), current_dataset_id.get())
+        await asyncio.gather(
+            attach_chunk_conflicts(chunks, graph_engine=self._unified_engine.graph), *naming
+        )
         return HybridCandidates(
             chunks=chunk_objects["chunks"],
             chunk_summaries=chunk_objects["chunk_summaries"],

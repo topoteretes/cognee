@@ -715,8 +715,8 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     content = _clean(row_data.get("content"))
     text = f"# {title}\n\n{content}".strip() if title else content
 
-    # References name a connector document by this title and url (document_sources), not by
-    # Data.label, which callers and Cognee Cloud use as their own display name.
+    # A search with references carries this title and url in the row's chunk payloads
+    # (document_sources); Data.label is the caller's and Cognee Cloud's display name.
     system_metadata = {
         "source": source_tag,
         "title": title or None,

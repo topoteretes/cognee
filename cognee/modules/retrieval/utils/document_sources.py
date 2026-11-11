@@ -1,15 +1,16 @@
-"""The title and link a reference names a connector's document by.
+"""The title and link of a cited connector document, carried in its chunks' payloads.
 
 A document-mode connector row (``resolve_dlt_sources._build_document_data_item``) keeps them
-in its data record's ``system_metadata`` (``title``, ``url``); chunks carry the stored file
-name (``text_<md5>``). Every other document has neither and keeps its file name: ``Data.label``
-is not read, so a label given to ``add()`` changes nothing here. ``system_metadata`` is not
-an ``add()`` input over HTTP; an SDK caller who sets those keys on a ``DataItem`` opts in, and
-a title that is not text is left out. The link is provider content, so it is printed only
-when it is a plain http(s) URL, and the title always on one line.
+in its data record's ``system_metadata`` (``title``, ``url``); chunks carry only the stored
+file name (``text_<md5>``). The retrievers that cite chunks (RAG, hybrid, temporal) name them
+where they retrieve them, when references are asked for, as ``document_title`` and
+``document_url`` in the payload a verbose search returns. Nothing else changes: the answer, its
+Evidence text and the structured evidence stay as they are, and every other document's payload
+gains nothing (``Data.label`` is not read, so a label given to ``add()`` changes nothing here).
 
-The retrievers that cite chunks (RAG, hybrid, temporal) name them where they retrieve them,
-when references are asked for, so every path that builds a reference sees the names.
+``system_metadata`` is not an ``add()`` input over HTTP; an SDK caller who sets those keys on a
+``DataItem`` opts in, and a title that is not text is left out. Both are provider content, so
+the title is kept on one line and the link only when it is a plain http(s) URL.
 """
 
 import unicodedata
@@ -27,7 +28,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("document_sources")
 
 # Payload keys a connector chunk carries its document's title and link under, once named;
-# public, like the rest of the payload, and absent on every other chunk.
+# absent on every other chunk.
 TITLE_KEY = "document_title"
 URL_KEY = "document_url"
 
@@ -43,7 +44,7 @@ def _one_line(text: str) -> str:
 
 
 def _printable_url(url: Any) -> bool:
-    """A web link that cannot end the ``<url>`` it is printed in or start a new line."""
+    """A web link that cannot end a ``<url>`` it is printed in or start a new line."""
     return (
         isinstance(url, str)
         and url.startswith(("https://", "http://"))
@@ -54,7 +55,7 @@ def _printable_url(url: Any) -> bool:
 
 
 def document_source(system_metadata: dict | None) -> DocumentSource:
-    """The title and link of a connector row, as a reference may print them."""
+    """The title and link of a connector row, safe to print."""
     metadata = system_metadata or {}
     title, url = metadata.get("title"), metadata.get("url")
     return DocumentSource(
@@ -63,18 +64,7 @@ def document_source(system_metadata: dict | None) -> DocumentSource:
     )
 
 
-def document_label(document_name: str | None, title: str | None, url: str | None) -> str:
-    """How an Evidence bullet names a document: ``"<title>" <url>``, else its file."""
-    name = (
-        f'"{title.replace(chr(34), chr(39))}"'
-        if title
-        else f"document {_one_line(document_name or '') or 'unknown'}"
-    )
-    return f"{name} <{url}>" if url else name
-
-
-def chunk_payload(chunk: Any) -> dict:
-    """A retrieved chunk's payload: a ``ScoredResult``'s, a wrapped dict's, or the dict."""
+def _payload(chunk: Any) -> dict:
     if isinstance(chunk, dict):
         inner = chunk.get("payload")
         return inner if isinstance(inner, dict) else chunk
@@ -83,17 +73,18 @@ def chunk_payload(chunk: Any) -> dict:
 
 
 async def name_chunk_documents(chunks: list, dataset_id: UUID | None) -> None:
-    """Write each chunk's document title and link into its payload, from one read.
+    """Write each connector chunk's document title and link into its payload, from one read.
 
-    ``dataset_id`` is the dataset the search read, so nothing outside it is read; it is
-    ``None`` only with backend access control off, where every dataset shares one store.
+    ``dataset_id`` is the dataset the search named (``None`` only for a search without one), so
+    only its records are read; a chunk of another dataset, possible in a store shared with
+    backend access control off, keeps its file name.
     """
     if dataset_id is not None and not isinstance(dataset_id, UUID):
         raise TypeError(f"dataset_id must be a UUID, not {type(dataset_id).__name__}")
 
     payloads_by_id: dict[UUID, list[dict]] = {}
     for chunk in chunks:
-        payload = chunk_payload(chunk)
+        payload = _payload(chunk)
         if payload.get("document_id"):
             payloads_by_id.setdefault(UUID(payload["document_id"]), []).append(payload)
     if not payloads_by_id:
@@ -106,7 +97,7 @@ async def name_chunk_documents(chunks: list, dataset_id: UUID | None) -> None:
         async with get_relational_engine().get_async_session() as session:
             rows = (await session.execute(statement)).all()
     except SQLAlchemyError as error:
-        # A reference never fails the answer: the documents keep their file names.
+        # A store that cannot be read leaves the chunks unnamed; it never fails the search.
         logger.warning("Unable to read the cited documents' titles: %s", error)
         return
 

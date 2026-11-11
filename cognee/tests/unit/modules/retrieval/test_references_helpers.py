@@ -9,13 +9,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from cognee.modules.retrieval.utils.evidence import append_source_evidence_text
 from cognee.modules.retrieval.utils.references import (
     EVIDENCE_HEADER,
     build_answer_grounded_chunk_references,
     format_chunk_references,
 )
-from cognee.modules.search.models.EvidenceReference import EvidenceReference
 
 # ---------------------------------------------------------------------------
 # format_chunk_references (no answer: legacy retrieval-order behavior)
@@ -69,58 +67,6 @@ def test_format_chunk_references_includes_data_id_and_chunk_id():
 
     assert (
         "- chunk 5 of document annual_report.pdf (data_id: data-123, chunk_id: chunk-9):" in result
-    )
-
-
-def test_format_chunk_references_names_the_document_by_its_title_and_link():
-    """A document with a title and a link is named by them, not by its stored file."""
-    result = format_chunk_references(
-        [
-            _payload(
-                document_id="data-123",
-                id="chunk-9",
-                document_title="Q3 plan",
-                document_url="https://wiki.example.com/q3",
-            )
-        ]
-    )
-
-    assert (
-        '- chunk 5 of "Q3 plan" <https://wiki.example.com/q3> '
-        "(data_id: data-123, chunk_id: chunk-9):" in result
-    )
-
-
-def test_format_chunk_references_keeps_the_file_name_of_a_document_without_a_title():
-    result = format_chunk_references(
-        [_payload(document_id="data-123", document_url="https://wiki.example.com/q3")]
-    )
-
-    assert (
-        "- chunk 5 of document annual_report.pdf <https://wiki.example.com/q3> "
-        "(data_id: data-123):" in result
-    )
-
-
-def test_source_evidence_text_names_the_document_by_its_title_and_link():
-    """The graph lane's Evidence block (edge evidence) names the document the same way."""
-    reference = EvidenceReference(
-        kind="segment",
-        artifact_id="chunk-9",
-        role="supports_assertion",
-        data_id="data-123",
-        chunk_id="chunk-9",
-        chunk_index=0,
-        document_name="text_5f1c",
-        title="Q3 plan",
-        url="https://wiki.example.com/q3",
-    )
-
-    text = append_source_evidence_text("The plan moved.", [reference])
-
-    assert (
-        '- chunk 1 of "Q3 plan" <https://wiki.example.com/q3> '
-        "(data_id: data-123, chunk_id: chunk-9)" in text
     )
 
 
