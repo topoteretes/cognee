@@ -65,6 +65,12 @@ def _asana_service(access_token: str) -> Any:
     return build_asana_service(access_token)
 
 
+def _dropbox_service(access_token: str) -> Any:
+    from cognee.tasks.ingestion.connectors.dropbox import build_dropbox_service
+
+    return build_dropbox_service(access_token)
+
+
 _PROVIDERS: dict[str, _Provider] = {
     "google_drive": _Provider(
         prefix="google_drive_files",
@@ -114,6 +120,13 @@ _PROVIDERS: dict[str, _Provider] = {
         source_module="cognee.tasks.ingestion.connectors.asana",
         source_name="asana_source",
         service_builder=_asana_service,
+    ),
+    # One source per selected folder; the scope is the folder id (``id:...``).
+    "dropbox": _Provider(
+        prefix="dropbox",
+        source_module="cognee.tasks.ingestion.connectors.dropbox",
+        source_name="dropbox_source",
+        service_builder=_dropbox_service,
     ),
 }
 
@@ -366,8 +379,11 @@ async def sync_scopes(
             raise
         except Exception as exc:
             key = (classify_error(exc) if classify_error else None) or "failed_ingestion"
-            counts["failed"] += 1
-            counts[key] = counts.get(key, 0) + 1
+            # A source that counted this failure under the same key before raising has said
+            # it already; its stats are added below, so counting it here too would double it.
+            if not source_counts(source).get(key):
+                counts["failed"] += 1
+                counts[key] = counts.get(key, 0) + 1
             logger.exception(
                 "%s sync failed for account %s scope %s",
                 provider,

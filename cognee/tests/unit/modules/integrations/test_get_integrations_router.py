@@ -464,6 +464,67 @@ def test_a_null_selection_is_refused_for_a_provider_that_cannot_select_all(clien
     update.assert_not_awaited()
 
 
+def test_a_selection_the_provider_refuses_is_a_422_and_is_not_stored(client, monkeypatch):
+    integration = supported_integrations["fake"]
+    monkeypatch.setattr(
+        integration,
+        "validate_resource_selection",
+        AsyncMock(side_effect=ValueError("A selected folder is inside another")),
+    )
+
+    response, update = put_resources(
+        client, integration, ["outer", "inner"], allows_all=False, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "A selected folder is inside another"
+    update.assert_not_awaited()
+
+
+def _refusing(error):
+    return AsyncMock(side_effect=error)
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "detail"),
+    [
+        (
+            "inactive",
+            404,
+            "fake is not connected",
+        ),
+        ("outbound", 503, "ALLOW_HTTP_REQUESTS"),
+        ("provider", 502, "Could not check the fake selection; try again"),
+        ("network", 502, "Could not check the fake selection; try again"),
+    ],
+)
+def test_a_selection_check_that_fails_is_a_clear_error_and_nothing_is_stored(
+    client, monkeypatch, error, status, detail
+):
+    from cognee.modules.integrations.credentials import CredentialInactiveError
+    from cognee.modules.integrations.outbound import OutboundHttpDisabledError
+
+    secret = "sl.secret-token id:SecretFolder /Private/path"
+    raised = {
+        "inactive": CredentialInactiveError(secret),
+        "outbound": OutboundHttpDisabledError("fake"),
+        "provider": RuntimeError(f"HTTP 401 for {secret}"),
+        "network": OSError(f"cannot reach {secret}"),
+    }[error]
+    monkeypatch.setenv("ALLOW_HTTP_REQUESTS", "false")
+    integration = supported_integrations["fake"]
+    monkeypatch.setattr(integration, "validate_resource_selection", _refusing(raised))
+
+    response, update = put_resources(
+        client, integration, ["a", "b"], allows_all=False, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == status
+    assert detail in response.json()["detail"]
+    assert secret not in response.text and "SecretFolder" not in response.text
+    update.assert_not_awaited()
+
+
 def test_a_null_selection_is_still_stored_for_a_provider_that_allows_all(client, monkeypatch):
     response, update = put_resources(
         client, supported_integrations["fake"], None, allows_all=True, monkeypatch=monkeypatch
@@ -991,3 +1052,20 @@ def test_connect_and_sync_are_refused_while_outbound_http_is_disabled(client, mo
     assert resources.status_code == 503
     # No install was started: nothing for a callback to match.
     assert not any(name.startswith("cognee_oauth_nonce_") for name in authorize.cookies)
+
+
+@pytest.mark.parametrize("selection", [["id:"], ["id:a b"], ["/Notes"]])
+def test_a_dropbox_selection_the_source_would_refuse_is_a_422(client, monkeypatch, selection):
+    from cognee.modules.integrations.dropbox.adapter import DropboxIntegration
+
+    integration = supported_integrations["fake"]
+    monkeypatch.setattr(
+        integration, "validate_resource_selection", DropboxIntegration().validate_resource_selection
+    )
+
+    response, update = put_resources(
+        client, integration, selection, allows_all=False, monkeypatch=monkeypatch
+    )
+
+    assert response.status_code == 422 and "folder ids" in response.json()["detail"]
+    update.assert_not_awaited()

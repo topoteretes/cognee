@@ -112,3 +112,69 @@ async def test_a_rate_limit_error_is_recorded_as_one_whatever_its_text(monkeypat
         await ingestion.run_sync("linear", CREDENTIAL, sync_source)
 
     assert recorded.await_args.kwargs["counts"]["failed_rate_limit"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failure_the_source_already_counted_is_counted_once(remember):
+    """Dropbox counts an account mismatch in its own stats before raising; the loop must not
+    add the classified key on top, or one refusal reads as two."""
+    from cognee.modules.integrations.dropbox.sync import _classify_error
+    from cognee.tasks.ingestion.connectors.dropbox import (
+        DropboxAccountMismatchError,
+        _iter_rows,
+        _Session,
+        dropbox_source,
+    )
+    from cognee.tests.unit.tasks.connectors.fake_dropbox import FakeDropbox
+
+    fake = FakeDropbox()
+    fake.account = "dbid:another-account"
+
+    def make_source(scope, name, check_active):
+        return dropbox_source(
+            folder_id="",
+            account_id="dbid:AAAfakeaccount",
+            resource_name=name,
+            service=fake.client(),
+        )
+
+    async def run_the_source(source, **_kwargs):
+        # What remember() does with the resource, reduced to its walk; dlt wraps what it raises.
+        try:
+            list(
+                _iter_rows(
+                    _Session(fake.client(), None),
+                    folder_id="",
+                    account_id="dbid:AAAfakeaccount",
+                    state={},
+                    stats=source.cognee_sync_stats,
+                    max_bytes=None,
+                )
+            )
+        except DropboxAccountMismatchError as error:
+            raise RuntimeError("pipeline step failed") from error
+
+    remember.side_effect = run_the_source
+    counts = {"scanned": 0, "skipped": 0, "failed": 0}
+
+    await ingestion.sync_scopes(
+        "dropbox",
+        CREDENTIAL,
+        counts,
+        scopes=[""],
+        dataset_name="dropbox_acme",
+        make_source=make_source,
+        classify_error=_classify_error,
+    )
+
+    assert counts["failed"] == 1 and counts["failed_account"] == 1
+    assert counts.get("failed_auth", 0) == 0 and "failed_ingestion" not in counts
+
+
+@pytest.mark.asyncio
+async def test_a_failure_the_source_did_not_count_is_still_counted(remember):
+    remember.side_effect = RuntimeError("boom")
+
+    _, counts, _ = await _run(["t1"])
+
+    assert counts["failed"] == 1 and counts["failed_ingestion"] == 1

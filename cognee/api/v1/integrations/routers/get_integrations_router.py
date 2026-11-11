@@ -67,6 +67,7 @@ from cognee.modules.integrations.base import OAuthIntegration
 from cognee.modules.integrations.connect import complete_installation
 from cognee.modules.integrations.credentials import (
     REVOKED_BY_OWNER,
+    CredentialInactiveError,
     CrossUserConflictError,
     get_active_credential_for_user,
     get_ended_connection,
@@ -1210,6 +1211,29 @@ def get_integrations_router():
             selected=selected,
         )
 
+    async def _validate_selection_or_http_error(integration, credential, resource_ids):
+        """Ask the provider to check a selection, mapped like the listing route's errors.
+
+        A refused selection is 422 with the provider's message. A connection that is no
+        longer active is 404, as on the progress route; outbound HTTP switched off is 503;
+        any other provider failure (a refused token, the network, a 5xx) is 502 as when
+        listing resources, with a fixed message and the cause in the server log only.
+        """
+        provider = integration.provider
+        try:
+            await integration.validate_resource_selection(credential, resource_ids)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        except CredentialInactiveError:
+            raise HTTPException(status_code=404, detail=f"{provider} is not connected") from None
+        except OutboundHttpDisabledError as error:
+            raise HTTPException(status_code=503, detail=error.message) from None
+        except Exception:
+            logger.exception("Could not check the %s selection for its connection", provider)
+            raise HTTPException(
+                status_code=502, detail=f"Could not check the {provider} selection; try again"
+            ) from None
+
     @integrations_router.put("/{provider}/resources")
     @integrations_router.put("/{provider}/folders")
     @integrations_router.put("/{provider}/labels")
@@ -1258,6 +1282,7 @@ def get_integrations_router():
                     status_code=422, detail="Resource ids must not be blank or whitespace only"
                 )
             resource_ids = list(dict.fromkeys(payload.resource_ids))
+            await _validate_selection_or_http_error(integration, credential, resource_ids)
         updated = await update_provider_metadata(
             provider,
             credential.provider_account_id,

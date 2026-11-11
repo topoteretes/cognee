@@ -143,3 +143,39 @@ def test_importing_the_neutral_module_loads_no_provider_library():
         "assert not bad, bad"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_dropbox_names_are_pinned_and_a_valid_resource_name():
+    # Same rule as the Linear pin: the literal is deliberate. One selected folder is one scope,
+    # named by its Dropbox folder id so a rename keeps the table.
+    name = ingestion.resource_name("dropbox", CREDENTIAL, "id:folder-1")
+    assert name == "dropbox_85beb5eb5e658f00e364d3ab"
+    assert len(name) <= 63
+    assert ingestion.source_factory("dropbox").__module__ == (
+        "cognee.tasks.ingestion.connectors.dropbox"
+    )
+    # The pinned name is one dropbox_source accepts.
+    ingestion.source_factory("dropbox")(
+        folder_id="id:folder-1", account_id="dbid:A", resource_name=name, token="t"
+    )
+
+
+def test_dropbox_service_from_providers_sends_the_oauth_token_as_bearer():
+    import httpx
+
+    from cognee.tasks.ingestion.connectors.dropbox import DropboxAuthError, DropboxClient
+
+    token = "sl.cloud-oauth-access-token"
+    service = ingestion.build_service("dropbox", token)
+    assert isinstance(service, DropboxClient) and token not in repr(service)
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers["Authorization"])
+        return httpx.Response(401, json={"error": {".tag": "expired_access_token"}})
+
+    service._http = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(DropboxAuthError) as error:
+        service.rpc("users/get_current_account", None)
+    assert seen == [f"Bearer {token}"]
+    assert token not in f"{error.value} {error.value!r}"

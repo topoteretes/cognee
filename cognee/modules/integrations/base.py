@@ -186,6 +186,17 @@ class OAuthIntegration(ABC):
         """Return provider resources for a generic picker, or ``None``."""
         return None
 
+    async def validate_resource_selection(
+        self, credential: IntegrationCredential, resource_ids: list[str]
+    ) -> None:
+        """Refuse a selection the provider cannot sync, before it is stored.
+
+        Default: accept. Raise :class:`ValueError` with a message safe to show the user
+        (the resource picker answers 422 with it); the sync must still check, since a
+        stored selection can predate a change at the provider.
+        """
+        return
+
     def dataset_name(self, credential: IntegrationCredential) -> str | None:
         """Return the provider dataset to delete on an opted-in disconnect."""
         return None

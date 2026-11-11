@@ -84,6 +84,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`image_ocr_extraction.py`](guides/image_ocr_extraction.py) | Vision transcription + OCR text for an image |
 | [`code_graph_example.py`](guides/code_graph_example.py) | Code-graph pipeline + `SearchType.CODE` |
 | [`gmail.py`](guides/gmail.py) | Ingest Gmail with the bundled SDK connector, incremental sync and delete propagation (needs `cognee[gmail]`) |
+| [`dropbox.py`](guides/dropbox.py) | Sync one Dropbox folder by its folder id with the bundled SDK connector (no extra) |
 | [`google_drive.py`](guides/google_drive.py) | Ingest a Drive folder with the bundled SDK connector (needs `cognee[google-drive]`) |
 | [`google_calendar.py`](guides/google_calendar.py) | Ingest a Google Calendar with the bundled SDK connector, incremental sync through Google's sync token (needs `cognee[google-calendar]`) |
 | [`obsidian.py`](guides/obsidian.py) | Ingest a local Obsidian vault with the bundled SDK connector: an edited note replaces its old version and a deleted note is forgotten on the next sync |
