@@ -2,15 +2,38 @@
 
 import argparse
 import json
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
 from cognee.cli.commands.provenance_command import ProvenanceCommand
 from cognee.cli.exceptions import CliCommandException
+from cognee.modules.provenance import access
 from cognee.modules.provenance.tombstones import ledger_edge_key, ledger_node_key
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.fixture(autouse=True)
+def cli_user(monkeypatch):
+    """The user the CLI acts as: a superuser, as the default user is.
+
+    A test narrows it by flipping ``is_superuser`` and listing ``readable`` datasets.
+    """
+    user = SimpleNamespace(id=uuid4(), is_superuser=True, readable=set())
+
+    async def _resolve(user_id=None, strict=False):
+        assert strict, "an unknown --user-id must not fall back to the default superuser"
+        return user
+
+    async def _authorized(acting_user, dataset_id, permission_type="read"):
+        allowed = acting_user.is_superuser or dataset_id in acting_user.readable
+        return SimpleNamespace(id=dataset_id) if allowed else None
+
+    monkeypatch.setattr("cognee.cli.user_resolution.resolve_cli_user", _resolve)
+    monkeypatch.setattr(access, "get_authorized_dataset", _authorized)
+    return user
 
 
 def _parse(*argv):
@@ -133,6 +156,47 @@ class TestActions:
         with pytest.raises(CliCommandException) as raised:
             await command._anchor(_parse("anchor"))
         assert raised.value.error_code == 1
+
+    async def test_a_user_reads_only_the_datasets_they_may_read(self, manager, cli_user, capsys):
+        ds = await _seed(manager)
+        cli_user.is_superuser = False
+        command = ProvenanceCommand()
+        key = ledger_node_key(ds, "n1")
+
+        denied = (
+            (command._stats, _parse("stats", "--dataset-id", str(ds))),
+            (command._verify, _parse("verify", "--dataset-id", str(ds))),
+            (command._check, _parse("check", "--dataset-id", str(ds))),
+            (command._export, _parse("export", "--dataset-id", str(ds))),
+            (command._history, _parse("history", key)),
+            (command._entry, _parse("entry", key)),
+            (command._lineage, _parse("lineage", key)),
+        )
+        for handler, args in denied:
+            with pytest.raises(CliCommandException) as raised:
+                await handler(args)
+            assert raised.value.error_code == 1
+        assert "No read access" in capsys.readouterr().err
+
+        cli_user.readable.add(ds)
+        for handler, args in denied:
+            await handler(args)
+
+    async def test_the_whole_ledger_and_anchoring_are_superuser_only(self, manager, cli_user):
+        await _seed(manager)
+        cli_user.is_superuser = False
+        command = ProvenanceCommand()
+        for handler, args in (
+            (command._stats, _parse("stats")),
+            (command._verify, _parse("verify")),
+            (command._verify, _parse("verify", "--anchors")),
+            (command._check, _parse("check")),
+            (command._export, _parse("export")),
+            (command._anchor, _parse("anchor")),
+        ):
+            with pytest.raises(CliCommandException) as raised:
+                await handler(args)
+            assert raised.value.error_code == 1
 
     async def test_conflicting_scope_flags(self, manager):
         with pytest.raises(CliCommandException):

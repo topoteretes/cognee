@@ -7,10 +7,12 @@ dataset namespace baked into every ledger key
 read the dataset the key belongs to, and the ledger-wide walks (verify,
 check, statistics, export) require a ``dataset_id`` unless the caller is a
 superuser. Keys without a dataset prefix (custom pipelines that bypass the
-writer's namespacing) are superuser-only for the same reason.
+writer's namespacing) are superuser-only for the same reason. The rule itself
+lives in ``cognee.modules.provenance.access`` and is shared with the CLI.
 """
 
 import json
+from collections.abc import Awaitable
 from typing import Any
 from uuid import UUID
 
@@ -18,9 +20,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import Path as PathParam
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from cognee.modules.data.methods import get_authorized_dataset
 from cognee.modules.provenance import get_provenance_manager
-from cognee.modules.provenance.tombstones import dataset_id_from_ledger_key
+from cognee.modules.provenance.access import (
+    authorize_anchoring,
+    authorize_ledger_key,
+    authorize_ledger_scope,
+)
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -29,32 +35,12 @@ from cognee.shared.usage_logger import log_usage
 logger = get_logger()
 
 
-async def _authorize_dataset(user: User, dataset_id: UUID) -> None:
-    if await get_authorized_dataset(user, dataset_id, "read") is None:
-        raise HTTPException(status_code=403, detail=f"No read access to dataset {dataset_id}.")
-
-
-async def _authorize_scope(user: User, dataset_id: UUID | None) -> None:
-    """Ledger-wide reads are superuser-only; scoped reads need dataset read access."""
-    if dataset_id is None:
-        if not getattr(user, "is_superuser", False):
-            raise HTTPException(
-                status_code=403,
-                detail="dataset_id is required; the whole ledger is readable by superusers only.",
-            )
-        return
-    await _authorize_dataset(user, dataset_id)
-
-
-async def _authorize_key(user: User, entity_id: str) -> None:
-    dataset_id = dataset_id_from_ledger_key(entity_id)
-    if dataset_id is None:
-        if not getattr(user, "is_superuser", False):
-            raise HTTPException(
-                status_code=403, detail="Unscoped ledger keys are readable by superusers only."
-            )
-        return
-    await _authorize_dataset(user, dataset_id)
+async def _authorize(check: Awaitable[None]) -> None:
+    """Run one ledger access check (``cognee.modules.provenance.access``); a denial is a 403."""
+    try:
+        await check
+    except PermissionDeniedError as error:
+        raise HTTPException(status_code=403, detail=error.message) from error
 
 
 def get_provenance_router() -> APIRouter:
@@ -67,7 +53,7 @@ def get_provenance_router() -> APIRouter:
         user: User = Depends(get_authenticated_user),
     ) -> dict[str, Any]:
         """The live row (or current tombstone) for a ledger key; 404 if never tracked."""
-        await _authorize_key(user, entity_id)
+        await _authorize(authorize_ledger_key(user, entity_id))
         entry = await get_provenance_manager().get_provenance(entity_id)
         if entry is None:
             raise HTTPException(status_code=404, detail="Entity is not in the ledger.")
@@ -81,7 +67,7 @@ def get_provenance_router() -> APIRouter:
     ) -> dict[str, Any]:
         """Everything the entity was derived from (parent + used entities, BFS),
         with per-row checksums re-verified (`integrity_verified`)."""
-        await _authorize_key(user, entity_id)
+        await _authorize(authorize_ledger_key(user, entity_id))
         lineage = await get_provenance_manager().get_lineage(entity_id)
         if not lineage:
             raise HTTPException(status_code=404, detail="Entity is not in the ledger.")
@@ -95,7 +81,7 @@ def get_provenance_router() -> APIRouter:
     ) -> list[dict[str, Any]]:
         """Oldest-first versions; tombstone versions carry `invalidated_by` /
         `invalidation_reason`, so a row reads "asserted by A, retracted by B"."""
-        await _authorize_key(user, entity_id)
+        await _authorize(authorize_ledger_key(user, entity_id))
         history = await get_provenance_manager().revision_history(entity_id)
         if not history:
             raise HTTPException(status_code=404, detail="Entity is not in the ledger.")
@@ -110,7 +96,7 @@ def get_provenance_router() -> APIRouter:
         """Tamper evidence. Without `dataset_id` (superusers) the whole chain is
         walked; with it, each of the dataset's rows is checked against the
         checksum stored at the previous chain position."""
-        await _authorize_scope(user, dataset_id)
+        await _authorize(authorize_ledger_scope(user, dataset_id))
         return await get_provenance_manager().verify_chain(dataset_id=dataset_id)
 
     @router.get("/check", summary="Referential-integrity check")
@@ -121,7 +107,7 @@ def get_provenance_router() -> APIRouter:
         user: User = Depends(get_authenticated_user),
     ) -> dict[str, Any]:
         """Dangling lineage links (parent / used / version / activity references)."""
-        await _authorize_scope(user, dataset_id)
+        await _authorize(authorize_ledger_scope(user, dataset_id))
         return await get_provenance_manager().check(strict=strict, dataset_id=dataset_id)
 
     @router.get("/statistics", summary="Ledger statistics")
@@ -132,7 +118,7 @@ def get_provenance_router() -> APIRouter:
     ) -> dict[str, Any]:
         """Row counts (total / live / archived), per-type counts, distinct sources,
         and live tombstones."""
-        await _authorize_scope(user, dataset_id)
+        await _authorize(authorize_ledger_scope(user, dataset_id))
         return await get_provenance_manager().get_statistics(dataset_id=dataset_id)
 
     @router.get("/export", summary="Export ledger rows as JSON Lines")
@@ -146,7 +132,7 @@ def get_provenance_router() -> APIRouter:
     ):
         """Streams one JSON object per line in chain order, so the export can be
         re-verified offline with `cognee.modules.provenance.integrity`."""
-        await _authorize_scope(user, dataset_id)
+        await _authorize(authorize_ledger_scope(user, dataset_id))
         manager = get_provenance_manager()
 
         async def lines():
@@ -170,8 +156,7 @@ def get_provenance_router() -> APIRouter:
         Returns the anchor; `{"anchor": null}` on an empty ledger."""
         from cognee.modules.provenance.anchors import AnchoringNotConfiguredError
 
-        if not getattr(user, "is_superuser", False):
-            raise HTTPException(status_code=403, detail="Anchoring is superuser-only.")
+        await _authorize(authorize_anchoring(user))
         try:
             return {"anchor": await get_provenance_manager().anchor()}
         except AnchoringNotConfiguredError as error:
@@ -184,8 +169,7 @@ def get_provenance_router() -> APIRouter:
         chain position must still carry the anchored checksum."""
         from cognee.modules.provenance.anchors import AnchoringNotConfiguredError
 
-        if not getattr(user, "is_superuser", False):
-            raise HTTPException(status_code=403, detail="Anchor verification is superuser-only.")
+        await _authorize(authorize_anchoring(user))
         try:
             return await get_provenance_manager().verify_anchors()
         except AnchoringNotConfiguredError as error:

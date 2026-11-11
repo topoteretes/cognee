@@ -15,16 +15,14 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 
-import cognee.api.v1.provenance.routers.get_provenance_router
 from cognee.api.v1.provenance.routers import get_provenance_router
+from cognee.modules.provenance import access as access_module
 from cognee.modules.provenance.tombstones import (
     dataset_id_from_ledger_key,
     ledger_edge_key,
     ledger_node_key,
 )
 from cognee.modules.users.methods import get_authenticated_user
-
-router_module = sys.modules["cognee.api.v1.provenance.routers.get_provenance_router"]
 
 pytestmark = pytest.mark.asyncio
 
@@ -53,7 +51,7 @@ async def app(manager, monkeypatch):
             return None
         return SimpleNamespace(id=dataset_id, owner_id=uuid4())
 
-    monkeypatch.setattr(router_module, "get_authorized_dataset", AsyncMock(side_effect=_authorized))
+    monkeypatch.setattr(access_module, "get_authorized_dataset", AsyncMock(side_effect=_authorized))
 
     app = FastAPI()
     app.include_router(get_provenance_router(), prefix="/api/v1/provenance")

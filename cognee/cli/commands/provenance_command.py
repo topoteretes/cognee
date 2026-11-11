@@ -2,9 +2,11 @@
 
 Read-only. The ledger is written by ingestion (``PROVENANCE_TRACKING=true``)
 and by the delete paths (tombstones); this command inspects, verifies and
-exports it. In-process the CLI runs as the default (or ``--user-id``) user
-with direct DB access, so no dataset ACL is applied here — the HTTP surface
-(``/api/v1/provenance``) is the one that enforces per-dataset read access.
+exports it. The CLI acts as the default user, or the one ``--user-id`` names,
+and applies the same access rule as the HTTP surface
+(``cognee.modules.provenance.access``): a dataset's rows need read access to
+it, and the whole ledger and anchoring are superuser-only. The default user is
+a superuser.
 """
 
 import argparse
@@ -137,7 +139,43 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
     # -- helpers -------------------------------------------------------------- #
 
     @staticmethod
-    async def _resolve_dataset_id(args: argparse.Namespace) -> UUID | None:
+    async def _user(args: argparse.Namespace):
+        """The user this command acts as. An unknown ``--user-id`` is an error:
+        falling back to the default user, a superuser, would skip the access check."""
+        from cognee.cli.user_resolution import resolve_cli_user
+
+        return await resolve_cli_user(getattr(args, "user_id", None), strict=True)
+
+    @staticmethod
+    async def _authorize(check) -> None:
+        """Run one ledger access check; a denial ends the command."""
+        from cognee.modules.users.exceptions import PermissionDeniedError
+
+        try:
+            await check
+        except PermissionDeniedError as error:
+            fmt.error(error.message)
+            raise CliCommandException("Permission denied", error_code=1) from error
+
+    async def _authorized_scope(self, args: argparse.Namespace) -> UUID | None:
+        """The dataset the command is scoped to, once the user may read that scope."""
+        from cognee.modules.provenance.access import authorize_ledger_scope
+
+        dataset_id = await self._resolve_dataset_id(args)
+        await self._authorize(authorize_ledger_scope(await self._user(args), dataset_id))
+        return dataset_id
+
+    async def _authorize_key(self, args: argparse.Namespace) -> None:
+        from cognee.modules.provenance.access import authorize_ledger_key
+
+        await self._authorize(authorize_ledger_key(await self._user(args), args.entity_id))
+
+    async def _authorize_anchoring(self, args: argparse.Namespace) -> None:
+        from cognee.modules.provenance.access import authorize_anchoring
+
+        await self._authorize(authorize_anchoring(await self._user(args)))
+
+    async def _resolve_dataset_id(self, args: argparse.Namespace) -> UUID | None:
         dataset_id = getattr(args, "dataset_id", None)
         dataset = getattr(args, "dataset", None)
         if dataset_id and dataset:
@@ -150,10 +188,9 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
                 fmt.error(f"Invalid dataset id: {dataset_id}")
                 raise CliCommandException("Invalid dataset id", error_code=1) from error
         if dataset:
-            from cognee.cli.user_resolution import resolve_cli_user
             from cognee.modules.data.methods import get_datasets_by_name
 
-            user = await resolve_cli_user(getattr(args, "user_id", None))
+            user = await self._user(args)
             found = await get_datasets_by_name(dataset, user.id)
             if not found:
                 fmt.error(f"Dataset '{dataset}' not found.")
@@ -170,7 +207,9 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
     # -- actions -------------------------------------------------------------- #
 
     async def _verify(self, args: argparse.Namespace) -> None:
-        dataset_id = await self._resolve_dataset_id(args)
+        dataset_id = await self._authorized_scope(args)
+        if getattr(args, "anchors", False):
+            await self._authorize_anchoring(args)
         result = await self._manager().verify_chain(dataset_id=dataset_id)
         if getattr(args, "anchors", False):
             result["anchors"] = await self._verify_anchors()
@@ -216,6 +255,7 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
     async def _anchor(self, args: argparse.Namespace) -> None:
         from cognee.modules.provenance.anchors import AnchoringNotConfiguredError, anchor_path
 
+        await self._authorize_anchoring(args)
         try:
             anchor = await self._manager().anchor()
         except AnchoringNotConfiguredError as error:
@@ -233,7 +273,7 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
         )
 
     async def _check(self, args: argparse.Namespace) -> None:
-        dataset_id = await self._resolve_dataset_id(args)
+        dataset_id = await self._authorized_scope(args)
         result = await self._manager().check(dataset_id=dataset_id)
         if args.output_format == "json":
             _print_json(result)
@@ -251,7 +291,7 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
             raise CliCommandException("Ledger check failed", error_code=2)
 
     async def _stats(self, args: argparse.Namespace) -> None:
-        dataset_id = await self._resolve_dataset_id(args)
+        dataset_id = await self._authorized_scope(args)
         stats = await self._manager().get_statistics(dataset_id=dataset_id)
         if args.output_format == "json":
             _print_json(stats)
@@ -268,6 +308,7 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
                 fmt.echo(f"  {entity_type:<16} {count}")
 
     async def _lineage(self, args: argparse.Namespace) -> None:
+        await self._authorize_key(args)
         lineage = await self._manager().get_lineage(args.entity_id)
         if not lineage:
             fmt.error(f"'{args.entity_id}' is not in the ledger.")
@@ -290,6 +331,7 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
             fmt.echo(f"  {entry['entity_type']:<13} {entry['entity_id']}{marker}")
 
     async def _history(self, args: argparse.Namespace) -> None:
+        await self._authorize_key(args)
         history = await self._manager().revision_history(args.entity_id)
         if not history:
             fmt.error(f"'{args.entity_id}' is not in the ledger.")
@@ -315,6 +357,7 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
                     )
 
     async def _entry(self, args: argparse.Namespace) -> None:
+        await self._authorize_key(args)
         entry = await self._manager().get_provenance(args.entity_id)
         if entry is None:
             fmt.error(f"'{args.entity_id}' is not in the ledger.")
@@ -322,7 +365,7 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
         _print_json(entry)
 
     async def _export(self, args: argparse.Namespace) -> None:
-        dataset_id = await self._resolve_dataset_id(args)
+        dataset_id = await self._authorized_scope(args)
         rows = self._manager().export(dataset_id=dataset_id, include_archived=not args.current_only)
         count = 0
         if args.output:
