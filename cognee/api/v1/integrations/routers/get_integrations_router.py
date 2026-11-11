@@ -565,9 +565,11 @@ def get_integrations_router():
         """Create or replace the caller's default sync policy. A pause is kept.
 
         ## Request Parameters
-        - **intervalMinutes** (int): Minutes between syncs for the default policy; a value
-          that is neither one of the offered presets nor a whole number of hours in the
-          supported custom range is rejected with 400. Saving recomputes the next due slot.
+        - **intervalMinutes** (int): Minutes between syncs for the default policy: one of the
+          presets 15, 30, 60, 120, 240, 360, 480, 1440 (daily) or 10080 (weekly), or whole
+          hours from 1 to 23 (60 to 1380); any other value is rejected with 400. Daily and
+          weekly run once, at 10:00 local; shorter intervals repeat from local midnight.
+          Saving recomputes the next due slot.
         - **timezone** (str): IANA timezone name (for example Europe/Belgrade) in which the
           weekdays and slot times are interpreted; a name not present in the tz database is
           rejected with 400. Defaults to 'UTC'.
@@ -1315,8 +1317,10 @@ def get_integrations_router():
 
         ## Request Parameters
         - **intervalMinutes** (int): Minutes between syncs for this connection, overriding
-          the default policy; a value that is neither an offered preset nor a whole number
-          of hours in the supported custom range is rejected with 400.
+          the default policy: one of the presets 15, 30, 60, 120, 240, 360, 480, 1440 (daily)
+          or 10080 (weekly), or whole hours from 1 to 23 (60 to 1380); any other value is
+          rejected with 400. Daily and weekly run once, at 10:00 local; shorter intervals
+          repeat from local midnight. Saving recomputes the next due slot.
         - **timezone** (str): IANA timezone name (for example Europe/Belgrade) in which this
           connection's weekdays and slot times are interpreted; a name not present in the tz
           database is rejected with 400. Defaults to 'UTC'.
