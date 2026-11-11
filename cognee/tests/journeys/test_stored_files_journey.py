@@ -5,8 +5,9 @@ text a loader derived from it. ``forget()`` removes the files a ``Data`` row
 points at, so a file no row points at would stay on disk for good, with the
 content of a document the user updated or deleted. After every step here the
 data root holds the current version of the document and nothing else: an
-update removes the version it replaced, and an update that does not publish
-removes what it staged. A file another document still uses is kept.
+update removes the version it replaced, an update that does not publish
+removes what it staged, and a duplicate add removes its unused copy. A file
+another document still uses is kept.
 """
 
 from __future__ import annotations
@@ -159,3 +160,23 @@ async def test_a_file_another_document_still_uses_is_kept(clean_env, default_use
 
     await cognee.forget(data_id=other_row.id, dataset_id=other_id, user=default_user)
     assert _versions(clean_env) == {"v2"}
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_a_duplicate_upload_under_another_name_leaves_no_second_file(clean_env, default_user):
+    result = await cognee.remember(_upload("v1"), dataset_name=DATASET, self_improvement=False)
+    dataset_id = _support.as_uuid(result.dataset_id)
+    before = _stored(clean_env)
+
+    # Same bytes, another filename: the document already exists, so the add is
+    # skipped and the copy it saved has no row to belong to.
+    again = await cognee.remember(
+        _upload("v1", filename="choir_copy.txt"), dataset_name=DATASET, self_improvement=False
+    )
+    assert again.status == "completed"
+    row = await _only_row(dataset_id, default_user)
+    assert _stored(clean_env) == before
+
+    await cognee.forget(data_id=row.id, dataset_id=dataset_id, user=default_user)
+    assert _stored(clean_env) == {}
