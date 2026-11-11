@@ -7,9 +7,11 @@ name: release_hermes_plugin.yml
 # names are the same as when the plugin lived in topoteretes/cognee-integrations.
 #
 # Release flow:
-#   1. Bump the version in pyproject.toml, plugin.yaml and
-#      cognee_integration_hermes/_plugin_root/plugin.yaml (the tests check they
-#      match), re-lock, and add a CHANGELOG.md section. Merge that to main.
+#   1. Bump the version in pyproject.toml, plugin.yaml,
+#      cognee_integration_hermes/_plugin_root/plugin.yaml and the hermes-agent
+#      entry of cognee-integrations/integrations/inventory.yml (the tests and
+#      the inventory check verify they match), re-lock, and add a CHANGELOG.md
+#      section. Merge that to main.
 #   2. Run this workflow from main. It tests, builds, attests, publishes and
 #      then tags the released commit hermes-agent-v<version>.
 #
@@ -87,7 +89,7 @@ jobs:
           # rejected. Fail here, with a message that says what to do, rather
           # than at the upload step.
           if curl -fsS "https://pypi.org/pypi/cognee-integration-hermes-agent/${VERSION}/json" >/dev/null 2>&1; then
-            echo "::error::cognee-integration-hermes-agent ${VERSION} is already on PyPI. Bump the version (pyproject.toml and both plugin.yaml files) and re-lock before releasing."
+            echo "::error::cognee-integration-hermes-agent ${VERSION} is already on PyPI. Bump the version (pyproject.toml, both plugin.yaml files and inventory.yml) and re-lock before releasing."
             exit 1
           fi
           if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then

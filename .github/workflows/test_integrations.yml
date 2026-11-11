@@ -416,9 +416,25 @@ jobs:
           [ "${drift}" = 0 ] && echo "All case tables match upstream main."
           exit "${drift}"
 
+  inventory:
+    name: inventory matches the plugins
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+
+      - name: Check inventory.yml and the README table
+        # Every plugin folder has an entry, each entry matches its manifest,
+        # and the README table is the one inventory.yml renders.
+        run: uv run --no-project --python 3.12 --with pyyaml==6.0.2 python cognee-integrations/scripts/inventory.py --check
+
   integrations-tests:
     name: integrations-tests
-    needs: [detect, python-plugin, live, notify, conformance-drift]
+    needs: [detect, python-plugin, live, notify, conformance-drift, inventory]
     runs-on: ubuntu-22.04
     if: always()
     steps:

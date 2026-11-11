@@ -1,0 +1,40 @@
+# Inventory of the agent plugins in cognee-integrations/integrations/: one entry
+# per plugin folder.
+#
+# scripts/inventory.py checks this file against the plugin folders and their
+# manifests, and renders the plugin table of cognee-integrations/README.md from
+# it; `--check` runs in .github/workflows/test_integrations.yml.
+#
+# The plugins that have not moved yet are listed in integrations/inventory.yml
+# of topoteretes/cognee-integrations, which keeps the same field names (slug,
+# name, language, registry, package_name, cognee_dependency, current_version).
+# Moving a plugin here moves its entry too, with the fields below that only
+# apply here.
+#
+# Fields of an entry:
+#   slug               the folder name under integrations/
+#   name               the name shown in the README table
+#   language           python | typescript
+#   registry           pypi | npm | none
+#   package_name       the published package name, or null when registry is none
+#   cognee_dependency  how the plugin talks to cognee: http-api | sdk
+#   current_version    the version in the plugin's pyproject.toml or package.json;
+#                      bump it together with them
+#   path               integrations/<slug>
+#   tag_prefix         <slug>-v: release tags are <tag_prefix><version>
+#   release_workflow   the workflow in .github/workflows/ that publishes it, or null
+#   moved_from         the topoteretes/cognee-integrations commit the code was
+#                      copied from
+
+integrations:
+  - slug: hermes-agent
+    name: "Cognee Memory Plugin for Hermes Agent"
+    language: python
+    registry: pypi
+    package_name: "cognee-integration-hermes-agent"
+    cognee_dependency: http-api
+    current_version: "1.4.3"
+    path: integrations/hermes-agent
+    tag_prefix: hermes-agent-v
+    release_workflow: release_hermes_plugin.yml
+    moved_from: "topoteretes/cognee-integrations@3b2a19b6"
