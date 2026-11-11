@@ -156,3 +156,29 @@ jobs:
           payload: |
             channel: ${{ secrets.SLACK_NIGHTLY_CHANNEL_ID }}
             text: "Nightly Scheduler failed to dispatch Nightly Tests at `${{ steps.pick.outputs.ref }}` — tonight's nightly will not run and will post nothing. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+  # The integrations' live round trip (test_integrations.yml, `live`), every
+  # evening against dev: plugin fixes land on dev, and main only moves at core
+  # releases, so main's copy of the plugins would be weeks old. Its own job, so a
+  # failure here never stops the core nightly above. Skips the Sunday 06:00 cron,
+  # which would run it a second time that day.
+  dispatch-integrations:
+    name: Dispatch the integrations live tier
+    if: ${{ github.event_name == 'schedule' && github.event.schedule != '0 6 * * 0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch test_integrations.yml at dev with live
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          jq -nc '{ref: "dev", inputs: {live: true}}' \
+          | gh api -X POST \
+              "repos/$GH_REPO/actions/workflows/test_integrations.yml/dispatches" \
+              --input -
+          echo "Integrations live tier dispatched at \`dev\`." >> "$GITHUB_STEP_SUMMARY"

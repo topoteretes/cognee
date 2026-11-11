@@ -1,8 +1,13 @@
 > **Copy.** These case tables are shared by every Cognee agent plugin. Only the
-> Hermes plugin has moved into this repository so far; Claude Code, Codex and
-> OpenClaw still test against the copy in `integrations/conformance/` of
-> [topoteretes/cognee-integrations](https://github.com/topoteretes/cognee-integrations).
-> Until they move too, change a table in both places.
+> Hermes plugin has moved into this repository so far. The canonical tables are
+> in `integrations/conformance/` of
+> [topoteretes/cognee-integrations](https://github.com/topoteretes/cognee-integrations):
+> `recall_text_cases.json` and `capture_policy_cases.json` are generated there
+> from the hook plugins' `_recall_text.py` and `_capture_policy.py`, and Claude
+> Code, Codex and OpenClaw test against them there. Change a table there first,
+> then copy it here; `.github/workflows/test_integrations.yml` fails when the
+> two differ. The test paths below are paths in that repository, except
+> hermes-agent's, which are under `cognee-integrations/` here.
 
 # Session id sanitization conformance
 
