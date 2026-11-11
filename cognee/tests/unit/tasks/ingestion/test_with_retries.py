@@ -128,3 +128,28 @@ def test_with_retries_runs_without_a_check():
 
     assert _run(attempt, None, sleep) == "ok"
     assert events == ["attempt", "sleep 1", "attempt"]
+
+
+def test_the_default_wait_is_time_sleep_read_at_call_time(monkeypatch):
+    """A test or host that patches ``time.sleep`` reaches the helper's default wait."""
+    from cognee.tasks.ingestion import dlt_utils
+
+    waits = []
+    monkeypatch.setattr(dlt_utils.time, "sleep", waits.append)
+    answers = [_Transient(), "ok"]
+
+    def attempt():
+        answer = answers.pop(0)
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    result = with_retries(attempt, retry_on=(_Transient,), delay=lambda e, n: 0.5, attempts=2)
+
+    assert result == "ok"
+    assert waits == [0.5]
+
+
+def test_with_retries_needs_at_least_one_attempt():
+    with pytest.raises(ValueError, match="at least one attempt"):
+        with_retries(lambda: "ok", retry_on=(ValueError,), delay=lambda e, n: 0, attempts=0)

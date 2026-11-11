@@ -27,7 +27,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "cognee-connectors-core[dlt]>=0.1,<1",
+    "cognee-connectors-core[dlt]>=0.2,<1",
     # The async GraphQL client (client.py) the connector and the agent loop use;
     # cognee's range.
     "aiohttp>=3.13.5,<4.0.0",

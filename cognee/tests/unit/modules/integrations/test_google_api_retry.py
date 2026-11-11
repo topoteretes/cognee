@@ -10,6 +10,7 @@ call between attempts. No Google libraries are needed: errors are recognised by 
 
 import errno
 import json
+import logging
 import ssl
 import sys
 from types import SimpleNamespace
@@ -174,6 +175,17 @@ def test_any_other_error_is_raised_at_once(error):
 
 
 # --- how many attempts and how long the waits are ---
+def test_a_retry_wait_is_logged_without_the_answer(caplog):
+    """The library logged each backoff wait; a wait here is logged too, by status alone."""
+    with caplog.at_level(logging.WARNING):
+        _run([_HttpError(503, {"error": {"message": "secret body"}})])
+
+    waits = [message for message in caplog.messages if "retry" in message]
+    assert len(waits) == 1
+    assert "Google API request failed (status 503); retry 1 of 3 in 1.0s." in waits[0]
+    assert "secret body" not in caplog.text
+
+
 def test_num_retries_is_one_less_than_the_attempts_and_the_last_error_is_raised_as_it_is():
     errors = [_HttpError(503) for _ in range(RETRIES + 1)]
 

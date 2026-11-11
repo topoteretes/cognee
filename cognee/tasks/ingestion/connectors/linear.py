@@ -467,7 +467,13 @@ class _Walker:
 
     # -- requests ----------------------------------------------------------
     def _call(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        self._check_budget()
+        try:
+            self._check_budget()
+        except _CutShort:
+            # A cut ends the run as resumable; a revoked one must end as revoked instead.
+            if self.check_active is not None:
+                self.check_active()
+            raise
         self.requests += 1
         try:
             # The client checks before every attempt, so a retry never outlives a revoked run.

@@ -8,6 +8,8 @@ Every case drives the real client through ``httpx.MockTransport``, so the token 
 that builds an error message is the code under test. No network.
 """
 
+import time
+
 import httpx
 import pytest
 from fake_onenote import Graph
@@ -29,7 +31,7 @@ def test_retry_after_and_five_total_attempts(monkeypatch, status):
     from cognee_connector_onenote import source as onenote
 
     sleeps = []
-    monkeypatch.setattr(onenote.time, "sleep", sleeps.append)
+    monkeypatch.setattr(time, "sleep", sleeps.append)
     requests = []
 
     def throttled(request):
@@ -40,17 +42,19 @@ def test_retry_after_and_five_total_attempts(monkeypatch, status):
 
     with (
         httpx.Client(transport=httpx.MockTransport(throttled)) as client,
-        pytest.raises(OneNoteError),
+        pytest.raises(OneNoteError) as failure,
     ):
         list_onenote_notebooks("offline-token", http_client=client)
     assert len(requests) == 5
     assert sleeps == [2] * 4
+    expected = onenote.OneNoteRateLimitedError if status == 429 else OneNoteError
+    assert type(failure.value) is expected, "the caller sees the public error type"
 
 
 def test_retry_recovers_and_token_is_not_in_error(monkeypatch):
     from cognee_connector_onenote import source as onenote
 
-    monkeypatch.setattr(onenote.time, "sleep", lambda _: None)
+    monkeypatch.setattr(time, "sleep", lambda _: None)
     requests = []
 
     def response(request):
@@ -74,7 +78,7 @@ def test_transport_failure_has_bounded_backoff_and_redacted_diagnostics(monkeypa
     from cognee_connector_onenote import source as onenote
 
     requests, sleeps = [], []
-    monkeypatch.setattr(onenote.time, "sleep", sleeps.append)
+    monkeypatch.setattr(time, "sleep", sleeps.append)
 
     def timeout(request):
         requests.append(request)
@@ -88,6 +92,7 @@ def test_transport_failure_has_bounded_backoff_and_redacted_diagnostics(monkeypa
     assert len(requests) == 5
     assert sleeps == [1, 2, 4, 8]
     assert "secret-token" not in str(failure.value)
+    assert str(failure.value) == "Graph transport failed after five attempts"
 
 
 @pytest.mark.parametrize("retry_after", ["bad", "-1", "inf", "nan"])
@@ -95,7 +100,7 @@ def test_invalid_retry_after_uses_bounded_fallback(monkeypatch, retry_after):
     from cognee_connector_onenote import source as onenote
 
     sleeps = []
-    monkeypatch.setattr(onenote.time, "sleep", sleeps.append)
+    monkeypatch.setattr(time, "sleep", sleeps.append)
     with (
         httpx.Client(
             transport=httpx.MockTransport(
@@ -135,7 +140,7 @@ def _revoked_on_second_check():
 def test_a_revoked_connection_stops_a_retry_before_it_waits(monkeypatch, answer):
     """The host's check runs before every attempt and every wait, not once per request."""
     requests, sleeps = [], []
-    monkeypatch.setattr(onenote.time, "sleep", sleeps.append)
+    monkeypatch.setattr(time, "sleep", sleeps.append)
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
@@ -287,7 +292,7 @@ def test_long_retry_after_stops_without_retrying_early(monkeypatch):
     from cognee_connector_onenote import source as onenote
 
     delays = []
-    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    monkeypatch.setattr(time, "sleep", delays.append)
     client = httpx.Client(
         transport=httpx.MockTransport(lambda _: httpx.Response(429, headers={"Retry-After": "301"}))
     )
@@ -300,7 +305,7 @@ def test_cumulative_retry_wait_budget_never_retries_early(monkeypatch):
     from cognee_connector_onenote import source as onenote
 
     delays, requests = [], []
-    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    monkeypatch.setattr(time, "sleep", delays.append)
 
     def response(request):
         requests.append(request)
@@ -318,7 +323,7 @@ def test_cumulative_retry_wait_budget_never_retries_early(monkeypatch):
 def test_retry_wait_budget_constant_bounds_the_cumulative_sleep(monkeypatch):
     monkeypatch.setattr(onenote, "RETRY_WAIT_BUDGET_SECONDS", 5)
     delays, requests = [], []
-    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    monkeypatch.setattr(time, "sleep", delays.append)
 
     def response(request):
         requests.append(request)
@@ -337,7 +342,7 @@ def test_retry_wait_budget_constant_bounds_the_cumulative_sleep(monkeypatch):
 def test_transport_retries_stop_at_the_wait_budget(monkeypatch):
     monkeypatch.setattr(onenote, "RETRY_WAIT_BUDGET_SECONDS", 3)
     requests, sleeps = [], []
-    monkeypatch.setattr(onenote.time, "sleep", sleeps.append)
+    monkeypatch.setattr(time, "sleep", sleeps.append)
 
     def timeout(request):
         requests.append(request)
@@ -357,7 +362,7 @@ def test_transport_retries_stop_at_the_wait_budget(monkeypatch):
 def test_retry_wait_budget_is_spent_by_the_whole_run_not_by_each_request(monkeypatch):
     monkeypatch.setattr(onenote, "RETRY_WAIT_BUDGET_SECONDS", 5)
     delays, answers = [], iter([429, 200, 429, 200])
-    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    monkeypatch.setattr(time, "sleep", delays.append)
 
     def response(request):
         status = next(answers)
@@ -379,7 +384,7 @@ def test_retry_wait_budget_is_spent_by_the_whole_run_not_by_each_request(monkeyp
 def test_transport_retry_wait_is_also_spent_by_the_whole_run(monkeypatch):
     monkeypatch.setattr(onenote, "RETRY_WAIT_BUDGET_SECONDS", 1)
     sleeps, outcomes = [], iter(["fail", "ok", "fail", "ok"])
-    monkeypatch.setattr(onenote.time, "sleep", sleeps.append)
+    monkeypatch.setattr(time, "sleep", sleeps.append)
 
     def respond(request):
         if next(outcomes) == "fail":
@@ -405,7 +410,7 @@ def _chain_text(error):
 
 def test_token_with_a_trailing_newline_is_stripped_and_never_retried(monkeypatch):
     delays, seen = [], []
-    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    monkeypatch.setattr(time, "sleep", delays.append)
 
     def response(request):
         seen.append(request.headers["Authorization"])
@@ -419,7 +424,7 @@ def test_token_with_a_trailing_newline_is_stripped_and_never_retried(monkeypatch
 
 def test_token_with_inner_whitespace_is_rejected_without_leaking_it(monkeypatch):
     delays, requests = [], []
-    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    monkeypatch.setattr(time, "sleep", delays.append)
 
     def response(request):
         requests.append(request)
@@ -436,7 +441,7 @@ def test_token_with_inner_whitespace_is_rejected_without_leaking_it(monkeypatch)
 
 def test_a_protocol_error_is_not_retried_and_leaves_no_token_in_the_chain(monkeypatch):
     delays, requests = [], []
-    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    monkeypatch.setattr(time, "sleep", delays.append)
 
     def refuse(request):
         requests.append(request)
@@ -488,7 +493,7 @@ def test_next_link_with_dot_segments_never_receives_the_token(path):
 @pytest.mark.parametrize("token", ["SECRET\u00e9", "SECRET\x7f", "SECRET\x00"])
 def test_token_that_is_not_a_header_value_is_refused_without_leaking_it(token, monkeypatch, caplog):
     delays, requests = [], []
-    monkeypatch.setattr(onenote.time, "sleep", delays.append)
+    monkeypatch.setattr(time, "sleep", delays.append)
 
     def response(request):
         requests.append(request)

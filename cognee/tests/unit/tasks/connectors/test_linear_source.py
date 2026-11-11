@@ -414,6 +414,29 @@ def test_server_errors_are_retried_a_bounded_number_of_times(monkeypatch):
         client.execute("query A { x }")
 
 
+def test_a_500_and_a_dropped_connection_are_retried_with_backoff(monkeypatch):
+    import requests
+
+    answers = [
+        _Response(500),
+        requests.ConnectionError("dropped"),
+        _Response(200, {"data": {"ok": 1}}),
+    ]
+    waits = []
+
+    def post(url, json=None, headers=None, timeout=None, **kwargs):
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr("requests.post", post)
+    client = LinearClient(TOKEN, sleep=waits.append)
+
+    assert client.execute("query A { x }") == {"ok": 1}
+    assert waits == [1, 2]
+
+
 def test_a_revoked_connection_stops_a_retry_before_it_waits(monkeypatch):
     """The host's check runs before every attempt, so a revoked run does not sleep a backoff."""
     posted, waits, checks = [], [], []
@@ -503,6 +526,24 @@ def test_resource_name_defaults_to_a_linear_prefixed_table_name():
     resource = linear_source(team_id="0A1B-2C3D", access_token=TOKEN)
     assert resource.name == "linear_0a1b_2c3d"
     assert resource.cognee_sync_stats == {}
+
+
+def test_a_revoked_run_is_not_reported_as_a_spent_budget(team):
+    """A walk that hits its budget after the connection was revoked raises the revocation."""
+
+    def check_active():
+        if len(team.calls) >= 2:
+            raise PermissionError("access revoked")
+
+    stats = _stats()
+    with pytest.raises(PermissionError):
+        list(
+            _iter_rows(
+                team, TEAM, {}, stats, page_size=1, max_requests=2, check_active=check_active
+            )
+        )
+
+    assert "failed_budget" not in stats
 
 
 def test_check_active_runs_before_every_request(team):

@@ -583,7 +583,13 @@ class _Walker:
 
     # -- requests ----------------------------------------------------------
     def _call(self, method: str, path: str, **kwargs: Any) -> Any:
-        self._check_budget(path)
+        try:
+            self._check_budget(path)
+        except _CutShortError:
+            # A cut ends the run as resumable; a revoked one must end as revoked instead.
+            if self.check_active is not None:
+                self.check_active()
+            raise
         # A call the client retries on a 5xx or a network error still counts once: the budget
         # and this count are about what the run asks for, and the client owns its retries.
         self.stats["requests"] += 1

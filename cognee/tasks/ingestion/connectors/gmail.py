@@ -136,9 +136,14 @@ class GmailQuota:
         self._clock = clock
         self._sleep = sleep
 
-    def acquire(self, cost: int) -> None:
-        """Block until ``cost`` units fit in the current window, then spend them."""
+    def acquire(self, cost: int, check_active: Callable[[], None] | None = None) -> None:
+        """Block until ``cost`` units fit in the current window, then spend them.
+
+        ``check_active`` runs before every wait, so a revoked run does not wait for quota.
+        """
         while not self._limiter.hit(self._item, "gmail", cost=cost):
+            if check_active is not None:
+                check_active()
             reset_at, _ = self._limiter.get_window_stats(self._item, "gmail")
             self._sleep(max(reset_at - self._clock(), 0.05))
 
@@ -210,7 +215,7 @@ def _execute(
         return request_with_retries()
 
     def paced_request() -> Any:
-        quota.acquire(cost)
+        quota.acquire(cost, check_active=host_checkpoint(check_active))
         return request_with_retries()
 
     def window_delay(error: BaseException, number: int) -> float | None:

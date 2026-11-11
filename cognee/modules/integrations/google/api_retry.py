@@ -18,13 +18,14 @@ import random
 import socket
 import ssl
 import sys
-import time
 from collections.abc import Callable
 from typing import TypeVar
 
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.dlt_utils import with_retries
 
 _T = TypeVar("_T")
+logger = get_logger("google_api_retry")
 
 # http._retry_request retries a bare OSError only for these errno names; names, not numbers,
 # because the numbers differ by platform.
@@ -62,11 +63,6 @@ def host_checkpoint(check_active: Callable[[], None] | None) -> Callable[[], Non
 def is_host_stop(error: BaseException) -> bool:
     """Whether ``error`` was raised by a ``host_checkpoint``; such an error is always re-raised."""
     return getattr(error, _HOST_STOP_ATTR, False)
-
-
-def _sleep(seconds: float) -> None:
-    # Looked up at call time, so a test can replace ``time.sleep`` without a parameter.
-    time.sleep(seconds)
 
 
 def _should_retry_response(status: int, content: bytes | None) -> bool:
@@ -124,7 +120,7 @@ def with_google_retries(
     *,
     num_retries: int,
     check_active: Callable[[], None] | None = None,
-    sleep: Callable[[float], None] = _sleep,
+    sleep: Callable[[float], None] | None = None,
     rand: Callable[[], float] = random.random,
 ) -> _T:
     """Run one Google API request with ``num_retries`` retries, as ``num_retries=`` did.
@@ -136,7 +132,20 @@ def with_google_retries(
     """
 
     def delay(error: BaseException, number: int) -> float | None:
-        return rand() * 2 ** (number + 1) if _is_transient(error) else None
+        if not _is_transient(error):
+            return None
+        wait = rand() * 2 ** (number + 1)
+        if number < num_retries:
+            status = getattr(getattr(error, "resp", None), "status", None)
+            cause = f"status {status}" if isinstance(status, int) else type(error).__name__
+            logger.warning(
+                "Google API request failed (%s); retry %d of %d in %.1fs.",
+                cause,
+                number + 1,
+                num_retries,
+                wait,
+            )
+        return wait
 
     return with_retries(
         attempt,

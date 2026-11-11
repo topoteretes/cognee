@@ -90,7 +90,6 @@ Limitations
 
 import logging
 import os
-import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -168,15 +167,17 @@ class _NotionClient:
     ) -> dict:
         import httpx
 
-        return dlt_utils.with_retries(
-            lambda: self._attempt(method, path, params, json_body),
-            retry_on=(httpx.TransportError, _RetryableStatusError),
-            delay=lambda error, number: _retry_delay(path, error, number),
-            attempts=_MAX_RETRIES,
-            check_active=self._check_active,
-            # Read at call time, so a test that patches ``time.sleep`` sees the waits.
-            sleep=time.sleep,
-        )
+        try:
+            return dlt_utils.with_retries(
+                lambda: self._attempt(method, path, params, json_body),
+                retry_on=(httpx.TransportError, _RetryableStatusError),
+                delay=lambda error, number: _retry_delay(path, error, number),
+                attempts=_MAX_RETRIES,
+                check_active=self._check_active,
+            )
+        except _RetryableStatusError as error:
+            # Out of retries: the caller sees the public error, as for any other status.
+            raise NotionAPIError(error.status_code, str(error)) from None
 
     def _attempt(self, method: str, path: str, params: dict | None, json_body: dict | None) -> dict:
         response = self._http.request(
@@ -187,11 +188,15 @@ class _NotionClient:
             headers=self._headers,
         )
         status = response.status_code
-        message = f"Notion API error {status} on {path}: {response.text}"
         if status == 429 or status >= 500:
-            raise _RetryableStatusError(status, message, response.headers)
-        if status >= 400:
-            raise NotionAPIError(status, message)
+            raise _RetryableStatusError(
+                status, _error_message(status, path, response), response.headers
+            )
+        # Only a 200 carries a listing. Redirects are not followed (httpx's default), and
+        # a 3xx answer with a JSON body must not be read as an empty page, which would
+        # tombstone everything below it.
+        if status != 200:
+            raise NotionAPIError(status, _error_message(status, path, response))
         return response.json()
 
     def get_self(self) -> dict:
@@ -205,6 +210,10 @@ class _NotionClient:
 
     def get_data_source(self, data_source_id: str) -> dict:
         return self.request("GET", f"data_sources/{data_source_id}")
+
+
+def _error_message(status: int, path: str, response: Any) -> str:
+    return f"Notion API error {status} on {path}: {response.text}"
 
 
 def _retry_delay(path: str, error: BaseException, number: int) -> float | None:

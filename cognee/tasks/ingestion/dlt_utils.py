@@ -87,7 +87,7 @@ def with_retries(
     delay: Callable[[BaseException, int], float | None],
     attempts: int,
     check_active: Callable[[], None] | None = None,
-    sleep: Callable[[float], None] = time.sleep,
+    sleep: Callable[[float], None] | None = None,
 ) -> _T:
     """Run one provider request, retried by the connector's own policy.
 
@@ -101,6 +101,7 @@ def with_retries(
     answers ``None`` (a provider window the connector does not wait out) or it was the
     last of ``attempts``: then it is raised as it is, like any other error. ``delay`` may
     also raise an error of its own (a spent wait budget), which propagates as it is.
+    ``sleep`` defaults to ``time.sleep``, read at call time.
     """
     for number in range(attempts):
         if check_active is not None:
@@ -113,7 +114,7 @@ def with_retries(
                 raise
         if check_active is not None:
             check_active()
-        sleep(wait)
+        (sleep or time.sleep)(wait)
     raise ValueError("with_retries needs at least one attempt")
 
 

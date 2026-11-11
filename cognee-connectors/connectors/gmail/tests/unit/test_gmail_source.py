@@ -852,6 +852,20 @@ def test_a_revoked_connection_stops_a_quota_window_wait(make_quota, waits):
     assert [request.executions for request in service.requests] == [1]
 
 
+def test_a_revoked_connection_stops_a_wait_for_quota(make_quota, waits):
+    """A spent local quota waits for its window to free up; a revocation stops that wait."""
+    quota, clock = make_quota(units_per_minute=_COST_MESSAGES_GET)
+    quota.acquire(_COST_MESSAGES_GET)
+    service = FakeGmailService(messages=[_make_message("a")])
+
+    # Call 1 precedes the first attempt; call 2 is before the wait for quota.
+    with pytest.raises(_Revoked):
+        _get_message(service, "a", quota=quota, check_active=_revoked_on_call(2))
+
+    assert clock.sleeps == [], "the revoked run did not wait for quota"
+    assert [request.executions for request in service.requests] == [0], "nothing was sent"
+
+
 def test_a_revoked_connection_is_not_swallowed_by_the_baseline_read():
     # _mailbox_history_id turns a failed profile read into "no baseline"; a revoked
     # connection must not take that path.
@@ -902,7 +916,7 @@ def test_a_missing_message_is_not_retried(waits):
 def test_quota_is_spent_once_per_request_not_once_per_retry(make_quota, monkeypatch, waits):
     quota, _ = make_quota(units_per_minute=6000)
     spent = []
-    monkeypatch.setattr(quota, "acquire", spent.append)
+    monkeypatch.setattr(quota, "acquire", lambda cost, **_: spent.append(cost))
     service = FakeGmailService(messages=[_make_message("a")], get_errors={"a": 503})
 
     with pytest.raises(_HttpError):

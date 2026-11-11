@@ -12,7 +12,6 @@ import hashlib
 import json
 import math
 import re
-import time
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -132,15 +131,22 @@ class _Graph:
             or not parsed.path.startswith("/v1.0/me/onenote/")
         ):
             raise OneNoteError("Unsafe Graph URL rejected")
-        return dlt_utils.with_retries(
-            lambda: self._attempt(url, html),
-            retry_on=(_Transient,),
-            delay=self._retry_delay,
-            attempts=_ATTEMPTS,
-            check_active=self.check_active,
-            # Read at call time, so a test that patches ``time.sleep`` sees the waits.
-            sleep=time.sleep,
-        )
+        try:
+            return dlt_utils.with_retries(
+                lambda: self._attempt(url, html),
+                retry_on=(_Transient,),
+                delay=self._retry_delay,
+                attempts=_ATTEMPTS,
+                check_active=self.check_active,
+            )
+        except _Transient as error:
+            # Out of retries: the caller sees the public error, as for any other answer.
+            public = (
+                OneNoteRateLimitedError
+                if isinstance(error, OneNoteRateLimitedError)
+                else OneNoteError
+            )
+            raise public(str(error), status=error.status, code=error.code) from None
 
     def _retry_delay(self, error: _Transient, number: int) -> float | None:
         """Seconds to wait before the next attempt, charged to the run's wait budget.
