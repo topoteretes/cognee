@@ -2,6 +2,7 @@
 rollback) and closed as ERRORED with the STARTED row's own metadata; nothing else is touched."""
 
 import asyncio
+import importlib
 import inspect
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
@@ -10,13 +11,22 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 
+from cognee.infrastructure.databases.relational import Base
+from cognee.infrastructure.databases.relational.create_relational_engine import (
+    create_relational_engine,
+)
 from cognee.modules.cognify import recovery as recovery_module
 from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
-from cognee.modules.pipelines.models import PipelineRunStatus
+from cognee.modules.pipelines.methods import get_unterminated_pipeline_runs
+from cognee.modules.pipelines.methods.get_pipeline_run import get_latest_pipeline_run
+from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
+from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
 
 TWO_HOURS_AGO = datetime.now(timezone.utc) - timedelta(hours=2)
+ONE_HOUR_AGO = datetime.now(timezone.utc) - timedelta(hours=1)
 
 
 class _FakeSession:
@@ -66,14 +76,22 @@ def _run(pipeline_name, status=PipelineRunStatus.DATASET_PROCESSING_STARTED, **o
     return SimpleNamespace(**fields)
 
 
-def _wire(monkeypatch, runs, datasets, *, rollback_fails=False, users=None):
+def _wire(monkeypatch, runs, datasets, *, rollback_fails=False, users=None, newest_rows=None):
     """Patch the module's collaborators and return the ordered list of calls made.
 
     ``users`` maps a run's ``user_id`` to the model recovery loads for its
     telemetry; any other id is "not found", so the stored id is sent.
+    ``newest_rows`` maps a dataset id to the newest row of the pipeline on it;
+    a dataset not in it has its candidate run's own row as its newest.
     """
     calls = []
     users = users or {}
+    newest_rows = newest_rows or {}
+
+    async def _newest_row(dataset_id, _pipeline_name):
+        if dataset_id in newest_rows:
+            return newest_rows[dataset_id]
+        return next((run for run in runs if run.dataset_id == dataset_id), None)
 
     async def _get_user(user_id):
         if user_id not in users:
@@ -98,6 +116,7 @@ def _wire(monkeypatch, runs, datasets, *, rollback_fails=False, users=None):
 
     monkeypatch.setattr(recovery_module, "get_relational_engine", lambda: _FakeEngine(datasets))
     monkeypatch.setattr(recovery_module, "get_unterminated_pipeline_runs", _latest_runs)
+    monkeypatch.setattr(recovery_module, "get_pipeline_run_by_dataset", _newest_row)
     monkeypatch.setattr(recovery_module, "set_database_global_context_variables", _no_op_context)
     monkeypatch.setattr(recovery_module, "ROLLBACK_HANDLERS", {"cognify_pipeline": _rollback})
     monkeypatch.setattr(recovery_module, "log_pipeline_run_error", _log_error)
@@ -149,6 +168,8 @@ async def test_cognify_run_is_rolled_back_then_closed_with_its_own_metadata(monk
     assert error["started_at"] == run.started_at
     assert error["origin"] == "api"
     assert error["parent_operation_id"] == run.parent_operation_id
+    # The run is its dataset's newest: its closing row is dated now.
+    assert error["created_at"] is None
 
 
 @pytest.mark.asyncio
@@ -472,3 +493,150 @@ async def test_recovering_an_agents_run_attributes_the_agent(monkeypatch):
     assert properties["agent_owner_id"] == str(parent_id)
     assert properties["agent_plugin"] == "codex"
     assert properties["tenant_id"] == str(run.tenant_id)
+
+
+@pytest.mark.asyncio
+async def test_a_run_a_later_run_has_followed_is_rolled_back_and_closed_beneath_it(monkeypatch):
+    run = _run("cognify_pipeline")
+    later = _run("cognify_pipeline", dataset_id=run.dataset_id, created_at=ONE_HOUR_AGO)
+    calls = _wire(
+        monkeypatch,
+        [run],
+        {run.dataset_id: _dataset_for(run)},
+        newest_rows={run.dataset_id: later},
+    )
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert [name for name, _ in calls] == ["rollback", "error"]
+    assert calls[1][1]["created_at"] == TWO_HOURS_AGO + timedelta(microseconds=1)
+
+
+@pytest.mark.asyncio
+async def test_a_run_with_no_room_beneath_the_later_run_stays_started(monkeypatch):
+    run = _run("cognify_pipeline")
+    later = _run("cognify_pipeline", dataset_id=run.dataset_id, created_at=run.created_at)
+    calls = _wire(
+        monkeypatch,
+        [run],
+        {run.dataset_id: _dataset_for(run)},
+        newest_rows={run.dataset_id: later},
+    )
+    ownerships = []
+
+    @contextmanager
+    def claim(_run):
+        ownerships.append(SimpleNamespace(closed=False))
+        yield ownerships[-1]
+
+    monkeypatch.setattr(recovery_module, "claim_run_ownership", claim)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    # No ERRORED row and the ownership marker kept: the next pass sees the run again.
+    assert [name for name, _ in calls] == ["rollback"]
+    assert [ownership.closed for ownership in ownerships] == [False]
+
+
+_ENGINE_USERS = [
+    importlib.import_module(name)
+    for name in (
+        "cognee.modules.pipelines.operations.log_pipeline_run_error",
+        "cognee.modules.pipelines.methods.get_pipeline_run_by_dataset",
+        "cognee.modules.pipelines.methods.get_pipeline_run",
+    )
+]
+
+
+@pytest_asyncio.fixture
+async def runs_engine(tmp_path, monkeypatch):
+    """A SQLite engine holding only ``pipeline_runs``, read and written by the real functions."""
+    engine = create_relational_engine(
+        db_path=str(tmp_path),
+        db_name="recovery_test.db",
+        db_host="",
+        db_port="",
+        db_username="",
+        db_password="",
+        db_provider="sqlite",
+    )
+    async with engine.engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all, tables=[PipelineRun.__table__])
+    for module in _ENGINE_USERS:
+        monkeypatch.setattr(module, "get_relational_engine", lambda: engine)
+    yield engine
+    await engine.engine.dispose()
+
+
+async def _store(engine, *rows):
+    async with engine.get_async_session() as session:
+        session.add_all(
+            [
+                PipelineRun(
+                    pipeline_run_id=run_id,
+                    pipeline_name="cognify_pipeline",
+                    pipeline_id=uuid4(),
+                    status=status,
+                    dataset_id=dataset_id,
+                    run_info={},
+                    created_at=created_at,
+                )
+                for run_id, dataset_id, status, created_at in rows
+            ]
+        )
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_closing_a_run_a_later_run_has_followed_leaves_the_datasets_status(runs_engine):
+    dataset_id, abandoned, later = uuid4(), uuid4(), uuid4()
+    started, completed = (
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+    )
+    await _store(
+        runs_engine,
+        (abandoned, dataset_id, started, TWO_HOURS_AGO),
+        (later, dataset_id, started, ONE_HOUR_AGO),
+        (later, dataset_id, completed, ONE_HOUR_AGO + timedelta(minutes=10)),
+    )
+
+    await recovery_module._close_as_abandoned(
+        await get_latest_pipeline_run(abandoned), SimpleNamespace(id=dataset_id), []
+    )
+
+    # The abandoned run is closed, and the dataset still reads as the later run left it.
+    closed = await get_latest_pipeline_run(abandoned)
+    assert closed.status == PipelineRunStatus.DATASET_PROCESSING_ERRORED
+    assert closed.error_class == "AbandonedPipelineRunError"
+    assert await get_unterminated_pipeline_runs() == []
+    assert await get_pipeline_status([dataset_id], "cognify_pipeline") == {
+        str(dataset_id): completed
+    }
+
+
+@pytest.mark.asyncio
+async def test_closing_the_datasets_newest_run_makes_it_the_datasets_status(runs_engine):
+    dataset_id, earlier, abandoned = uuid4(), uuid4(), uuid4()
+    started, completed = (
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+    )
+    await _store(
+        runs_engine,
+        (earlier, dataset_id, started, TWO_HOURS_AGO),
+        (earlier, dataset_id, completed, TWO_HOURS_AGO + timedelta(minutes=10)),
+        (abandoned, dataset_id, started, ONE_HOUR_AGO),
+    )
+    before = datetime.now(timezone.utc)
+
+    await recovery_module._close_as_abandoned(
+        await get_latest_pipeline_run(abandoned), SimpleNamespace(id=dataset_id), []
+    )
+
+    closed = await get_latest_pipeline_run(abandoned)
+    assert closed.created_at.replace(tzinfo=timezone.utc) >= before
+    assert await get_unterminated_pipeline_runs() == []
+    assert await get_pipeline_status([dataset_id], "cognify_pipeline") == {
+        str(dataset_id): PipelineRunStatus.DATASET_PROCESSING_ERRORED
+    }

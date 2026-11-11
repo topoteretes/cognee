@@ -184,6 +184,9 @@ remove their markers; a crashed writer leaves its marker for recovery.
 Legacy rows and markers unavailable on this filesystem are skipped, so workers
 need the same persistent system directory with working OS file locks to recover
 each other's runs. Missing ownership is never inferred from run age alone.
+A run that a later run of the same pipeline has followed on its dataset is
+rolled back like any other, but its closing row is dated just after its own
+last row, so closing it late does not change the dataset's status.
 
 
 #### 2. Interface-Based Database Adapters
