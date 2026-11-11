@@ -1,3 +1,6 @@
+import codecs
+
+
 def is_text_content(content):
     """
     Determine if the content is text-based.
@@ -16,21 +19,21 @@ def is_text_content(content):
 
         - bool: Returns True if the content is determined to be text, False otherwise.
     """
-    # Check for null bytes
-    if b"\0" in content:
-        return False
-
-    # Check for common text encodings (BOMs)
+    # Recognized text BOMs take precedence over null bytes in UTF-16/UTF-32.
     if content.startswith(
         (
-            b"\xef\xbb\xbf",  # UTF-8
-            b"\xff\xfe",  # UTF-16 LE
-            b"\xfe\xff",  # UTF-16 BE
-            b"\x00\x00\xfe\xff",  # UTF-32 LE
-            b"\xff\xfe\x00\x00",  # UTF-32 BE
+            codecs.BOM_UTF8,
+            codecs.BOM_UTF16_LE,
+            codecs.BOM_UTF16_BE,
+            codecs.BOM_UTF32_LE,
+            codecs.BOM_UTF32_BE,
         )
     ):
         return True
+
+    # Null-containing content without a recognized BOM is binary.
+    if b"\0" in content:
+        return False
 
     # Check for ASCII characters
     if all(0x20 <= byte <= 0x7E or byte in (b"\n", b"\r", b"\t") for byte in content):
