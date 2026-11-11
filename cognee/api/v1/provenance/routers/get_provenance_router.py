@@ -49,7 +49,9 @@ def get_provenance_router() -> APIRouter:
     @router.get("/entry/{entity_id:path}", summary="Current ledger row of one entity")
     @log_usage(function_name="GET /v1/provenance/entry", log_type="api_endpoint")
     async def get_entry(
-        entity_id: str = PathParam(..., description="Ledger key, e.g. `{dataset_id}:{node_id}`"),
+        entity_id: str = PathParam(
+            ..., description="Ledger key, e.g. `{dataset_id}:data_item:{data_id}`"
+        ),
         user: User = Depends(get_authenticated_user),
     ) -> dict[str, Any]:
         """The live row (or current tombstone) for a ledger key; 404 if never tracked."""
