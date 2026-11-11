@@ -41,6 +41,7 @@ async def forget(
     everything: bool = False,
     memory_only: bool = False,
     clean_history: bool = False,
+    keep_acls: bool = False,
     user: Any = None,
 ) -> dict:
     """Remove data from the knowledge graph.
@@ -55,6 +56,9 @@ async def forget(
 
         # Forget an entire dataset (all data + graph nodes + vector entries)
         await cognee.forget(dataset="scientists")
+
+        # Forget an entire dataset while preserving non-owner ACL grants
+        await cognee.forget(dataset="scientists", keep_acls=True)
 
         # Forget everything the current user owns
         await cognee.forget(everything=True)
@@ -97,6 +101,11 @@ async def forget(
             document. A dataset or everything forget purges the deleted
             datasets' history for every user regardless of this flag. Alone,
             with no target, the call deletes only the history.
+        keep_acls: If True on a dataset forget, preserve the dataset record and
+            all ACL grants (including non-owner user, role, tenant, and agent
+            grants) after deleting all data, graph elements, vector embeddings,
+            sessions, and search history. Default False (deletes the dataset
+            record and cascades its ACLs).
         user: User context. Resolved to default user when None.
 
     Returns:
@@ -251,7 +260,7 @@ async def forget(
             elif data_id is not None:
                 result = await _forget_data_item(data_id, dataset_ref, user)
             else:
-                result = await _forget_dataset(dataset_ref, user)
+                result = await _forget_dataset(dataset_ref, user, keep_acls=keep_acls)
             result["history_cleaned"] = clean_history
             return result
 
@@ -350,11 +359,14 @@ async def _forget_everything(user: Any) -> dict:
     }
 
 
-async def _forget_dataset(dataset_ref: str | UUID, user: Any) -> dict:
+async def _forget_dataset(
+    dataset_ref: str | UUID, user: Any, *, keep_acls: bool = False
+) -> dict:
     """Delete an entire dataset by name or UUID.
 
     Cleanup scope:
-    - Relational DB (datasets, data records): yes
+    - Relational DB (datasets, data records): yes (when ``keep_acls=True``, the
+      empty Dataset record and its ACL rows are preserved)
     - Graph DB (nodes, edges): yes
     - Vector DB (embeddings): yes
     - Session cache: yes — sessions attributed to the dataset (via
@@ -368,14 +380,17 @@ async def _forget_dataset(dataset_ref: str | UUID, user: Any) -> dict:
 
     dataset_id = await _resolve_dataset_id(dataset_ref, user)
 
-    await datasets.empty_dataset(dataset_id, user=user)
+    await datasets.empty_dataset(dataset_id, user=user, keep_acls=keep_acls)
 
     logger.info("forget: deleted dataset=%s for user=%s", dataset_id, user.id)
-    return {
+    result = {
         "dataset_id": str(dataset_id),
         "search_history_removed": True,
         "status": "success",
     }
+    if keep_acls:
+        result["acls_preserved"] = True
+    return result
 
 
 async def _forget_data_item(data_id: UUID, dataset_ref: str | UUID, user: Any) -> dict:

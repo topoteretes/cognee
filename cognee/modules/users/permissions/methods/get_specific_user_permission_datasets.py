@@ -8,6 +8,31 @@ from cognee.modules.users.permissions.methods.get_all_user_permission_datasets i
 )
 
 
+async def _get_existing_tenant_datasets(
+    dataset_ids: list[UUID], tenant_id: UUID | None
+) -> list[Dataset]:
+    """Return existing Dataset rows from ``dataset_ids`` belonging to ``tenant_id``.
+
+    Best-effort diagnostic lookup: returns an empty list if the relational
+    engine is unavailable or mocked in unit tests.
+    """
+    if not dataset_ids:
+        return []
+    try:
+        from sqlalchemy import select
+
+        from cognee.infrastructure.databases.relational import get_relational_engine
+
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            rows = (
+                await session.scalars(select(Dataset).where(Dataset.id.in_(dataset_ids)))
+            ).all()
+        return [row for row in rows if getattr(row, "tenant_id", None) == tenant_id]
+    except Exception:
+        return []
+
+
 async def get_specific_user_permission_datasets(
     user_id: UUID, permission_type: str, dataset_ids: list[UUID] | None = None
 ) -> list[Dataset]:
@@ -33,9 +58,32 @@ async def get_specific_user_permission_datasets(
         ]
         # If there are requested datasets that user does not have access to raise error
         if len(search_datasets) != len(dataset_ids):
-            raise PermissionDeniedError(
-                f"Request owner does not have necessary permission: [{permission_type}] for all datasets requested."
+            permitted_ids = {dataset.id for dataset in search_datasets}
+            denied_ids = [
+                dataset_id
+                for dataset_id in dict.fromkeys(dataset_ids)
+                if dataset_id not in permitted_ids
+            ]
+            existing_denied = await _get_existing_tenant_datasets(
+                denied_ids, getattr(user, "tenant_id", None)
             )
+            base_message = (
+                f"Request owner does not have necessary permission: [{permission_type}] "
+                "for all datasets requested."
+            )
+            if existing_denied:
+                details = ", ".join(
+                    f"{ds.id} (name={ds.name!r}, created_at="
+                    f"{ds.created_at.isoformat() if getattr(ds, 'created_at', None) else 'unknown'})"
+                    for ds in existing_denied
+                )
+                raise PermissionDeniedError(
+                    f"{base_message} Principal {user.id} has no [{permission_type}] ACL on "
+                    f"dataset(s): {details} (if the dataset was deleted and recreated under "
+                    "the same deterministic ID, non-owner ACLs were cleared and must be "
+                    "granted again)."
+                )
+            raise PermissionDeniedError(base_message)
     else:
         search_datasets = user_permission_access_datasets
 
