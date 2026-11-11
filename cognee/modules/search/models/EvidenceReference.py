@@ -28,6 +28,10 @@ class EvidenceReference(BaseModel):
     chunk_id: str | None = None
     chunk_index: int | None = None
     document_name: str | None = None
+    # The cited document's title (``Data.label``) and link (``system_metadata["url"]``),
+    # when it has them; ``document_name`` is the stored file's name.
+    title: str | None = None
+    url: str | None = None
 
     source_node_id: str | None = None
     target_node_id: str | None = None

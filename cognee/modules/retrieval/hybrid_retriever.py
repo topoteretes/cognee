@@ -2,7 +2,7 @@ import asyncio
 from typing import Any
 
 from cognee.base_config import get_base_config
-from cognee.context_global_variables import session_user
+from cognee.context_global_variables import current_dataset_id, session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
@@ -33,7 +33,7 @@ from cognee.modules.retrieval.hybrid.facts import (
     edge_rank_by_id,
 )
 from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
-from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions
+from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions, hybrid_chunks
 from cognee.modules.retrieval.hybrid.truth import build_truth_context
 from cognee.modules.retrieval.utils.completion import (
     SessionPrompt,
@@ -41,11 +41,14 @@ from cognee.modules.retrieval.utils.completion import (
     generate_completion_batch,
 )
 from cognee.modules.retrieval.utils.conflict_context import attach_chunk_conflicts
+from cognee.modules.retrieval.utils.document_sources import get_document_sources
+from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
     search_top_global_context_summaries,
 )
+from cognee.modules.retrieval.utils.references import chunk_data_ids
 from cognee.modules.retrieval.utils.resolved_context import user_resolution_scope
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.modules.user_preferences import load_preference_text, load_preference_weights
@@ -371,11 +374,18 @@ class HybridRetriever(BaseRetriever):
         return await self.append_references(completions, retrieved_objects)
 
     async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
-        return cite_hybrid_completions(
-            completions,
-            retrieved_objects,
-            enabled=self.include_references and self.response_model is str,
+        if not (self.include_references and self.response_model is str):
+            return completions
+        sources = await get_document_sources(
+            chunk_data_ids(hybrid_chunks(retrieved_objects)), current_dataset_id.get()
         )
+        return cite_hybrid_completions(
+            completions, retrieved_objects, enabled=True, sources=sources
+        )
+
+    def get_context_evidence(self, retrieved_objects: Any, dataset_id: Any = None):
+        """The chunk lane's chunks that were in this answer's context."""
+        return chunk_context_evidence(hybrid_chunks(retrieved_objects), dataset_id=dataset_id)
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
         return merge_hybrid_results(

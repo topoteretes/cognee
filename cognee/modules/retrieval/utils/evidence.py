@@ -10,6 +10,7 @@ from uuid import UUID
 
 from cognee.infrastructure.databases.provenance import make_source_ref_key
 from cognee.modules.engine.utils import generate_edge_object_id
+from cognee.modules.retrieval.utils.document_sources import DocumentSource, document_label
 from cognee.modules.search.models.EvidenceReference import EvidenceReference
 
 
@@ -239,14 +240,16 @@ def append_source_evidence_text(
         chunk_number = (
             str(reference.chunk_index + 1) if reference.chunk_index is not None else "unknown"
         )
-        document_name = reference.document_name or "unknown"
+        source = DocumentSource(title=reference.title, url=reference.url)
         identifiers = []
         if reference.data_id:
             identifiers.append(f"data_id: {reference.data_id}")
         if reference.chunk_id:
             identifiers.append(f"chunk_id: {reference.chunk_id}")
         suffix = f" ({', '.join(identifiers)})" if identifiers else ""
-        bullets.append(f"- chunk {chunk_number} of document {document_name}{suffix}")
+        bullets.append(
+            f"- chunk {chunk_number} of {document_label(reference.document_name, source)}{suffix}"
+        )
 
     if not bullets:
         return completions
