@@ -24,6 +24,7 @@ heavy to fire on every delivery.
 import asyncio
 import logging
 import re
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -117,20 +118,26 @@ class _LinearService:
         )
         return future.result()
 
-    def execute(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+    def execute(
+        self,
+        query: str,
+        variables: dict[str, Any] | None = None,
+        *,
+        check_active: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
         from cognee_connector_linear.source import LinearAuthError, LinearClient
 
         token = self._token()
         client = LinearClient(token)
         try:
             try:
-                return client.execute(query, variables)
+                return client.execute(query, variables, check_active=check_active)
             except LinearAuthError:
                 fresh = self._token(rejected=token)
                 if fresh == token:
                     raise
                 client = LinearClient(fresh)
-                return client.execute(query, variables)
+                return client.execute(query, variables, check_active=check_active)
         finally:
             self.rate_limit = client.rate_limit
 

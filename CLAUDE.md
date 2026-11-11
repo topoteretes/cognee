@@ -730,6 +730,8 @@ ONTOLOGY_REASONING=none   # Default: asserted triples only. owl_rl expands the O
 
 `ONTOLOGY_REASONING=owl_rl` runs an OWL 2 RL deductive closure (via the optional `owlrl` package, `pip install cognee[ontology]`) over the parsed ontology before the lookup is built, so `owl:inverseOf`, `rdfs:domain`/`rdfs:range` typing, `owl:equivalentClass`, `owl:sameAs` and transitive properties are honoured by matching and subgraph extraction. It is opt-in because the closure is materialised in memory and its cost grows with ontology size. Enabling it without `owlrl` installed raises `OntologyReasoningDependencyError`. Per call: `config={"ontology_config": {"ontology_reasoning": "owl_rl", ...}}` (applies when cognee builds the resolver; a pre-built `ontology_resolver` instance keeps its own setting).
 
+Ontologies uploaded over HTTP (`POST /api/v1/ontologies`, then `ontology_key` on cognify/remember) are kept per user by `OntologyService` (`cognee/api/v1/ontologies/ontologies.py`) in cognee's file storage under the data root: `<user id>/metadata.json` (the index) and `<user id>/<blake2s of the key>.owl`. They go through `get_file_storage`, so they are objects in the bucket on an `s3://` data root and are sealed when `FILE_ENCRYPTION_ENABLED` is on. The store's methods are async. The index is read, changed and written back without a lock, so two concurrent uploads or deletes by one user can lose an entry.
+
 Implementation: `cognee/modules/ontology/`
 
 ## Branching Strategy

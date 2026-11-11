@@ -766,7 +766,7 @@ class CogneeClient:
                     # Same loader as the REST cognify/remember routers: the stored
                     # upload keeps its detected format, filename and content type,
                     # so Turtle/JSON-LD ontologies are parsed with the right parser.
-                    ontology_files = OntologyService().get_ontology_files(ontology_keys, user)
+                    ontology_files = await OntologyService().get_ontology_files(ontology_keys, user)
                     ontology_config = {
                         "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_files)
                     }

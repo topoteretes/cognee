@@ -33,7 +33,9 @@ def fake_media_stream(monkeypatch):
     """googleapiclient is an optional extra; the chunked download is replaced by a copy
     of what the fake request returns, so the tests cover the spool, decode and parse."""
     monkeypatch.setattr(
-        gd_source, "_stream_media", lambda request, buffer: buffer.write(request.execute())
+        gd_source,
+        "_stream_media",
+        lambda request, buffer, **_kwargs: buffer.write(request.execute()),
     )
 
 
@@ -42,6 +44,8 @@ class _FakeRequest:
         self._result = result
 
     def execute(self, num_retries=0):
+        if isinstance(self._result, Exception):
+            raise self._result
         return self._result
 
 
@@ -400,7 +404,9 @@ def test_missing_loader_fails_the_file_with_its_reason(loader_engine):
     assert stats["failed_loader_unavailable"] == 1
 
 
-def test_download_is_chunked_with_retries(monkeypatch):
+def test_download_is_chunked_and_leaves_the_retries_to_the_connector(monkeypatch):
+    # next_chunk(num_retries=0) inside api_retry: the host's check runs before a chunk's retry
+    # and its wait, never before a chunk that downloads first time.
     import sys
     import types
 
@@ -422,10 +428,89 @@ def test_download_is_chunked_with_retries(monkeypatch):
     monkeypatch.setitem(sys.modules, "googleapiclient", types.ModuleType("googleapiclient"))
     monkeypatch.setitem(sys.modules, "googleapiclient.http", module)
     buffer = io.BytesIO()
-    _REAL_STREAM_MEDIA(object(), buffer)
+    checks = []
+    _REAL_STREAM_MEDIA(object(), buffer, check_active=lambda: checks.append(1))
     assert buffer.getvalue() == b"chunk1;chunk2;chunk3;"
+    assert checks == [], "a chunk that downloads first time costs no host check"
     assert seen["chunksize"] == gd_source.DOWNLOAD_CHUNK_BYTES
-    assert seen["retries"] == [gd_source.API_RETRIES] * 3
+    assert seen["retries"] == [0] * 3
+
+
+class _Revoked(Exception):
+    pass
+
+
+class _HttpError(Exception):
+    """What googleapiclient raises: the status on ``resp``."""
+
+    def __init__(self, status):
+        super().__init__(f"<HttpError {status}>")
+        self.resp = type("Resp", (), {"status": status})()
+
+
+def _install_downloader(monkeypatch, failures):
+    """A MediaIoBaseDownload whose next_chunk() raises ``failures`` in turn, then finishes."""
+    import sys
+    import types
+
+    attempts = []
+
+    class _Downloader:
+        def __init__(self, buffer, request, chunksize):
+            self.buffer = buffer
+
+        def next_chunk(self, num_retries=0):
+            attempts.append(num_retries)
+            if len(attempts) <= len(failures):
+                raise failures[len(attempts) - 1]
+            self.buffer.write(b"done")
+            return None, True
+
+    module = types.ModuleType("googleapiclient.http")
+    module.MediaIoBaseDownload = _Downloader
+    monkeypatch.setitem(sys.modules, "googleapiclient", types.ModuleType("googleapiclient"))
+    monkeypatch.setitem(sys.modules, "googleapiclient.http", module)
+    return attempts
+
+
+def test_a_revoked_connection_stops_a_chunk_retry_before_it_waits(monkeypatch, waits):
+    """googleapiclient used to retry inside next_chunk(), so a revoked connection kept sleeping."""
+    attempts = _install_downloader(monkeypatch, [_HttpError(503)] * 3)
+    checks = []
+
+    def check_active():
+        checks.append(1)
+        if len(checks) == 1:  # the first attempt runs unchecked; this is before its backoff wait
+            raise _Revoked
+
+    with pytest.raises(_Revoked):
+        _REAL_STREAM_MEDIA(object(), io.BytesIO(), check_active=check_active)
+
+    assert attempts == [0], "exactly one next_chunk() call, with googleapiclient's own retries off"
+    assert waits == []
+
+
+def test_a_chunk_that_failed_with_a_503_is_retried(monkeypatch, waits):
+    attempts = _install_downloader(monkeypatch, [_HttpError(503)] * 2)
+    buffer = io.BytesIO()
+
+    _REAL_STREAM_MEDIA(object(), buffer)
+
+    assert buffer.getvalue() == b"done"
+    assert attempts == [0, 0, 0]
+    assert [wait <= 2 ** (retry + 1) for retry, wait in enumerate(waits)] == [True, True]
+
+
+def test_a_revoked_connection_is_not_a_failed_extraction():
+    # extract_file_content turns any request failure into "skip this file" (None); a revoked
+    # connection must stop the run instead. The check before the 503's retry raises.
+    service = _FakeService(_FakeFiles(export_result=_HttpError(503)))
+
+    def check_active():
+        raise _Revoked
+
+    with pytest.raises(_Revoked):
+        extract_file_content(service, "f", GOOGLE_DOC_MIME_TYPE, "Doc", check_active=check_active)
 
 
 def test_text_is_read_from_a_file_object_that_has_only_read_and_seek(monkeypatch):
@@ -443,7 +528,7 @@ def test_text_is_read_from_a_file_object_that_has_only_read_and_seek(monkeypatch
             return self._buffer.seek(offset, whence)
 
     @contextmanager
-    def download(_service, _file_id):
+    def download(_service, _file_id, **_kwargs):
         yield _OnlyReadAndSeek("héllo \xff wörld".encode("latin-1"))
 
     monkeypatch.setattr(gd_source, "_download_media", download)
@@ -451,3 +536,14 @@ def test_text_is_read_from_a_file_object_that_has_only_read_and_seek(monkeypatch
     assert (
         extract_file_content(service, "t", "text/plain", "n.txt") == "h\ufffdllo \ufffd w\ufffdrld"
     )
+
+
+@pytest.fixture(autouse=True)
+def waits(monkeypatch):
+    """The backoff waits ``api_retry`` asked for, in order, without sleeping for real.
+
+    A fake that raises a 5xx or 429 is retried by the connector, so every test needs this.
+    """
+    recorded: list[float] = []
+    monkeypatch.setattr("time.sleep", recorded.append)
+    return recorded
