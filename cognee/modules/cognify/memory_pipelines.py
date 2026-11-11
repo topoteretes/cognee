@@ -40,7 +40,6 @@ from the run rows.
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
-from functools import partial
 from typing import Any
 from uuid import UUID
 
@@ -86,9 +85,6 @@ _SHARED_RUN_PARAMS = (
 
 # The stage name the cognify run's subscribers see while the indexing run works.
 INDEXING_STAGE = "indexing_pipeline"
-
-# Per-item rollback: a failed item never takes the other items' chunks with it.
-_indexing_rollback_handler = partial(cognify_rollback_handler, keep_completed_data=True)
 
 
 def _item_counts(run_info: PipelineRunInfo) -> tuple[int, int]:
@@ -173,7 +169,7 @@ async def _run_indexing(
         tasks=indexing_tasks,
         pipeline_name=INDEXING_PIPELINE_NAME,
         needs_llm=False,
-        rollback_handler=_indexing_rollback_handler,
+        rollback_handler=cognify_rollback_handler,
         **run_params,
     )
     async with aclosing(indexing_run):
