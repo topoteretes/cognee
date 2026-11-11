@@ -25,6 +25,10 @@ documents: steps 1 and 2, then `storage.index_chunks_for_search`, which writes
 the chunk and document nodes and embeds the chunk text, so chunk-based searches
 answer while extraction runs (`cognee/modules/cognify/memory_pipelines.py`).
 
+Plugins add their own tasks right after step 2, in this list, the indexing
+pipeline's, the GLiNER demo's and the dlt route's, with `register_chunk_task`
+(`cognee.modules.cognify`; contract in `cognee/modules/cognify/chunk_task_registry.py`).
+
 The dlt route adds
 `ingestion.purge_stale_dlt_source_artifacts` and `ingestion.extract_dlt_source_edges`.
 After each dataset's run, `cognify()` reconciles the structure document sources describe

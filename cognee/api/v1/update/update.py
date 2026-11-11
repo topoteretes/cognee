@@ -17,6 +17,10 @@ from cognee.api.v1.update.incremental import (
 from cognee.api.v1.update.result import Fallback, UpdateError, UpdateResult
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
 from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.cognify.chunking_tasks import (
+    build_registered_chunk_tasks,
+    resolve_chunks_per_batch,
+)
 from cognee.modules.cognify.config import (
     ensure_extractor_runtime,
     get_cognify_config,
@@ -121,7 +125,9 @@ async def update(
                  rebuild (memory dropped, row refreshed by a pinned re-add, cognify) when
                  chunk-level preconditions are
                  not met (first ingestion, non-text content, unverified graph adapter,
-                 a code file or a DLT source manifest — those routes keep no chunks).
+                 a code file or a DLT source manifest — those routes keep no chunks —
+                 or tasks registered with ``register_chunk_task``, which only the
+                 rebuild's cognify runs).
                  Permission errors always propagate and never trigger the fallback.
         chunker: Chunking strategy. Must match the one that built the document's stored
                  chunks — a mismatch is refused (and falls back) rather than surfacing
@@ -399,9 +405,11 @@ def _full_rebuild_reason(
     chunk-level engine: it reconciles chunks, not document metadata; the
     baseline does not persist the model or prompt that produced its graph, so
     a different one applied to fresh chunks only would mix extraction schemas
-    inside one document; and it resolves its stores through the dataset
+    inside one document; it resolves its stores through the dataset
     context, not per-call config dicts, so running it with those would read
-    and write the default stores while the caller's stores never see the edit.
+    and write the default stores while the caller's stores never see the edit;
+    and it extracts fresh chunks directly, not through a task list, so the
+    tasks plugins register to run on every chunk would never see them.
     """
     from cognee.tasks.ingestion.data_item import DataItem
 
@@ -429,5 +437,10 @@ def _full_rebuild_reason(
                 "chunk-level update does not take per-call vector_db_config/graph_db_config; "
                 "configure stores through environment settings and the dataset-context routing"
             ),
+        )
+    if build_registered_chunk_tasks(resolve_chunks_per_batch()):
+        return (
+            RefusalReason.CHUNK_TASKS_REGISTERED,
+            "chunk-level update does not run the tasks registered with register_chunk_task",
         )
     return None

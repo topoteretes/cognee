@@ -141,13 +141,14 @@ class RefusalReason(str, Enum):
     a permanent misconfiguration (an incompatible chunker, an unsupported
     backend) looked exactly like a first ingestion. The reason is logged as a
     structured field and returned in ``UpdateResult.fallback`` so they
-    are separable. The first three come from ``update()`` before this engine
+    are separable. The first four come from ``update()`` before this engine
     is consulted; the rest are this engine's own refusals.
     """
 
     DISABLED = "disabled"  # the caller passed chunk_level_diff=False
     CUSTOM_EXTRACTION_CONFIG = "custom_extraction_config"  # graph_model / custom_prompt
     PER_CALL_DB_CONFIG = "per_call_db_config"  # vector_db_config / graph_db_config
+    CHUNK_TASKS_REGISTERED = "chunk_tasks_registered"  # register_chunk_task
     UNSUPPORTED_BACKEND = "unsupported_backend"
     UNSUPPORTED_CHUNKER = "unsupported_chunker"
     UNSUPPORTED_METADATA = (

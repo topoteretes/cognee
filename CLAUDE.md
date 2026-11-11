@@ -713,6 +713,7 @@ SYSTEM_ROOT_DIRECTORY="s3://your-bucket/cognee/system"
 4. **New Document Processor**: Implement `LoaderInterface` in `cognee/infrastructure/loaders/` and register it in `supported_loaders.py` there
 5. **New Search Type**: Add to `SearchType` enum and implement retriever in `cognee/modules/retrieval/`
 6. **Custom Graph Models**: Define Pydantic models extending `DataPoint` in your code
+7. **Tasks After Chunking**: `register_chunk_task(name, factory)` / `unregister_chunk_task(name)` (`cognee.modules.cognify`) run a plugin's tasks right after chunking in every task list that chunks documents (cognify's LLM and GLiNER demo lists, the indexing pipeline's, and the dlt route's, whose chunks are source rows), in registration order; with nothing registered the lists are unchanged. `factory(chunks_per_batch=..., **kwargs)` returns a `Task` or a list of them: give the task `batch_size=chunks_per_batch` (a task's batch size batches the chunker's output) and `needs_llm=False` unless it calls the LLM. While the factories return tasks, `update()` takes the full rebuild (`chunk_tasks_registered`). Contract: `cognee/modules/cognify/chunk_task_registry.py`
 
 ### Working with Ontologies
 Cognee supports ontology-based entity extraction to ground knowledge graphs in standardized semantic frameworks (e.g., OWL ontologies).
