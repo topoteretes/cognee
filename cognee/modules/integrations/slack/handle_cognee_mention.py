@@ -319,8 +319,9 @@ async def ask(
             user=owner,
             datasets=None,  # every dataset the owner can read
             node_name=node_name,
-            # G10: each result carries the documents it read (``evidence``, with their
-            # titles and links), which the answer shows as its sources.
+            # G10: each result carries the chunks it read (``objects_result``), whose
+            # payloads name their documents by title and link (SDK-1500); the answer shows
+            # them as its sources.
             include_references=True,
             verbose=True,
         )

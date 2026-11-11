@@ -98,16 +98,22 @@ async def test_discard_drops_the_answer_and_replies_ephemeral():
 # ── _format_answer ──────────────────────────────────────────────────────────
 #
 # ``@cognee`` asks ``cognee.search(..., verbose=True, include_references=True)``, which
-# returns one dict per dataset searched with the answer in "text_result" and the
-# documents it read in "evidence", whether backend access control is on or off.
+# returns one dict per dataset searched with the answer in "text_result" and the chunks it
+# read in "objects_result" (``{"chunks": [...]}`` for hybrid, a list for RAG). A connector
+# chunk's payload carries its document's ``document_title`` and ``document_url``.
 
 
-def _answer(text, evidence=None):
-    return {"text_result": text, "evidence": evidence or []}
+def _answer(text, cited=None):
+    return {"text_result": text, "objects_result": {"chunks": cited or []}}
 
 
-def _cited(data_id, title=None, url=None):
-    return {"kind": "segment", "data_id": data_id, "title": title, "url": url}
+def _cited(document_id, title=None, url=None):
+    payload = {"document_id": document_id, "text": "a chunk"}
+    if title is not None:
+        payload["document_title"] = title
+    if url is not None:
+        payload["document_url"] = url
+    return {"id": f"chunk-{document_id}", "payload": payload}
 
 
 def test_format_answer_fallback_text_joins_up_to_three_results():
@@ -250,6 +256,24 @@ def test_an_answer_names_the_documents_it_read_as_links():
         f"Sources: <{PERMALINK}|{TITLE}> · {second}"
     ]
     assert "data_id" not in fallback and "Evidence" not in fallback
+
+
+def test_a_rag_answer_names_its_documents_too():
+    """RAG returns its chunks as a list, not under "chunks"."""
+    result = {"text_result": ["Ben owns it."], "objects_result": [_cited("d1", TITLE, PERMALINK)]}
+    _, blocks = _format_answer([result])
+
+    (sources,) = [block for block in blocks if block["type"] == "context"]
+    assert sources["elements"][0]["text"] == f"Sources: <{PERMALINK}|{TITLE}>"
+
+
+def test_structured_evidence_names_no_source():
+    """SDK-1500: the title and link are on the chunk payload only; evidence keeps the
+    stored file name, which tells a member nothing."""
+    evidence = [{"kind": "segment", "data_id": "d1", "title": TITLE, "url": PERMALINK}]
+    _, blocks = _format_answer([{"text_result": ["Yes."], "evidence": evidence}])
+
+    assert not [block for block in blocks if block["type"] == "context"]
 
 
 def test_a_source_cannot_ping_or_disguise_a_link():

@@ -142,27 +142,44 @@ _CONTEXT_ELEMENTS = 10
 _SOURCES_LEAD = "Sources: "
 
 
+def _cited_chunks(result: Any) -> list[dict[str, Any]]:
+    """The payloads of the chunks one answer read, in the order the search ranked them.
+
+    ``objects_result`` holds them as a list (RAG) or under ``"chunks"`` (hybrid, temporal);
+    anything else reads as no chunks.
+    """
+    objects = result.get("objects_result") if isinstance(result, dict) else None
+    chunks = objects.get("chunks") if isinstance(objects, dict) else objects
+    payloads = []
+    for chunk in chunks if isinstance(chunks, list) else []:
+        chunk_payload = (
+            chunk.get("payload", chunk)
+            if isinstance(chunk, dict)
+            else getattr(chunk, "payload", None)
+        )
+        if isinstance(chunk_payload, dict):
+            payloads.append(chunk_payload)
+    return payloads
+
+
 def _sources(result: Any) -> list[str]:
     """The documents one answer read, as Slack links, in element texts within Slack's limit.
 
-    Read from the result's structured ``evidence``: a chunk's document is named by its
-    title (``Data.label``) and linked to its ``url`` (a Slack permalink for a synced
-    message), once per document, in the order the search ranked them (G10). A document
-    without a title is left out: its stored file name tells a member nothing. Only an https
-    link becomes one, and the title is escaped like an answer. Every source is shown: the
-    links fill one element after another (G86); only a title that alone would pass Slack's
-    limit is shortened.
+    Read from the payloads of the chunks it read: a connector chunk carries its document's
+    title (``document_title``) and link (``document_url``, a Slack permalink for a synced
+    message), SDK-1500. Each document is named once, in the order the search ranked them
+    (G10). A document without a title is left out: its stored file name tells a member
+    nothing. Only an https link becomes one, and the title is escaped like an answer. Every
+    source is shown: the links fill one element after another (G86); only a title that alone
+    would pass Slack's limit is shortened.
     """
-    evidence = result.get("evidence") if isinstance(result, dict) else None
     links: list[str] = []
     seen: set[str] = set()
-    for reference in evidence or []:
-        if not isinstance(reference, dict) or reference.get("kind") != "segment":
-            continue
-        title, url = reference.get("title"), reference.get("url")
+    for chunk_payload in _cited_chunks(result):
+        title, url = chunk_payload.get("document_title"), chunk_payload.get("document_url")
         if not isinstance(title, str) or not title.strip():
             continue
-        key = str(reference.get("data_id") or title)
+        key = str(chunk_payload.get("document_id") or title)
         if key in seen:
             continue
         seen.add(key)
