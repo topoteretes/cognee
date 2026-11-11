@@ -367,8 +367,8 @@ def test_non_pitfall_documents_carry_no_count_and_no_key_without_one():
 
 def test_pitfall_sessions_are_the_distinct_sessions_that_stored_the_key():
     rows = [
-        SimpleNamespace(external_metadata={"session_id": "s-1"}),  # a row before the list
-        SimpleNamespace(external_metadata={"session_id": "s-2", "seen_sessions": ["s-1", "s-2"]}),
+        SimpleNamespace(system_metadata={"session_id": "s-1"}),  # a row before the list
+        SimpleNamespace(system_metadata={"session_id": "s-2", "seen_sessions": ["s-1", "s-2"]}),
     ]
     assert pitfall_sessions([], "s-1") == ["s-1"]
     assert pitfall_sessions(rows, "s-2") == ["s-1", "s-2"]  # re-distilling s-2 stays at 2
@@ -386,15 +386,26 @@ def test_project_scope_ignores_the_distillations_own_node_sets():
 def test_lessons_in_scope_keep_generated_lessons_of_the_same_project_only():
     same = SimpleNamespace(
         node_set='["session_learnings", "proj:acme"]',
-        external_metadata={"lesson_type": "state", "state_key": "test-baseline"},
+        system_metadata={"lesson_type": "state", "state_key": "test-baseline"},
     )
     other_project = SimpleNamespace(
         node_set='["session_learnings", "proj:other"]',
-        external_metadata={"lesson_type": "state", "state_key": "test-baseline"},
+        system_metadata={"lesson_type": "state", "state_key": "test-baseline"},
     )
+    # What a user with write access can plant: the lesson keys in the free-form
+    # external_metadata, dated in the future. It is not a lesson, so it is never
+    # counted, never wins the key and never gets the real lesson deleted.
     users_document = SimpleNamespace(
-        node_set='["proj:acme"]', external_metadata={"state_key": "test-baseline"}
+        id=uuid4(),
+        node_set='["session_learnings", "proj:acme"]',
+        external_metadata={
+            "lesson_type": "state",
+            "state_key": "test-baseline",
+            "session_date": "9999-12-31",
+            "seen_sessions": ["s-x", "s-y"],
+        },
     )
+    assert pitfall_sessions([users_document], "s-1") == ["s-1"]
     rows = [same, other_project, users_document]
     assert lessons_in_scope(rows, ["session_learnings", "session_learnings:s-2", "proj:acme"]) == [
         same
@@ -419,15 +430,15 @@ def test_one_run_stores_one_lesson_per_state_key():
 
 def test_rows_to_delete_lets_the_newest_session_date_win():
     new_id = uuid4()
-    older = SimpleNamespace(id=uuid4(), external_metadata={"session_date": "2026-11-01"})
-    newer = SimpleNamespace(id=uuid4(), external_metadata={"session_date": "2026-11-05"})
-    stored = SimpleNamespace(id=new_id, external_metadata={"session_date": "2026-11-03"})
+    older = SimpleNamespace(id=uuid4(), system_metadata={"session_date": "2026-11-01"})
+    newer = SimpleNamespace(id=uuid4(), system_metadata={"session_date": "2026-11-05"})
+    stored = SimpleNamespace(id=new_id, system_metadata={"session_date": "2026-11-03"})
 
     assert rows_to_delete([older, stored], {new_id: "2026-11-03"}) == [older]
     # A later session already stored the key: this session's lesson is the one dropped.
     assert rows_to_delete([older, newer, stored], {new_id: "2026-11-03"}) == [older, stored]
     # Without a date on both sides the lesson just stored wins.
-    undated = SimpleNamespace(id=uuid4(), external_metadata={"session_date": ""})
+    undated = SimpleNamespace(id=uuid4(), system_metadata={"session_date": ""})
     assert rows_to_delete([undated, newer, stored], {new_id: ""}) == [undated, newer]
 
 
@@ -481,6 +492,7 @@ def publish_env(monkeypatch):
                         id=item.data_id,
                         node_set='["session_learnings"]',
                         external_metadata=item.external_metadata,
+                        system_metadata=item.system_metadata,
                     )
                 )
 
@@ -502,7 +514,7 @@ def publish_env(monkeypatch):
         return [
             row
             for row in calls.existing
-            if row.external_metadata["state_key"] == state_key and row.id not in calls.deleted
+            if row.system_metadata["state_key"] == state_key and row.id not in calls.deleted
         ]
 
     async def fake_delete(*, dataset_id, data_id, user, delete_dataset_if_empty):
@@ -522,7 +534,7 @@ async def test_publish_stores_typed_items_and_replaces_the_older_state_key(publi
     scope = SimpleNamespace(session_id="s-2", user=USER, user_id=str(USER.id), dataset=DATASET)
     older = SimpleNamespace(
         id=uuid4(),
-        external_metadata={
+        system_metadata={
             "lesson_type": "state",
             "state_key": "test-baseline",
             "session_id": "s-1",
@@ -531,7 +543,7 @@ async def test_publish_stores_typed_items_and_replaces_the_older_state_key(publi
     )
     older_pitfall = SimpleNamespace(
         id=uuid4(),
-        external_metadata={
+        system_metadata={
             "lesson_type": "pitfall",
             "state_key": "pitfall:Edit:no-changes-to-make:py",
             "session_id": "s-1",
@@ -551,6 +563,8 @@ async def test_publish_stores_typed_items_and_replaces_the_older_state_key(publi
     documents = await publish_distilled_lessons(scope, accepted, coding=True)
 
     items = publish_env.added
+    # The lesson store reads the copy users cannot write.
+    assert all(item.system_metadata == item.external_metadata for item in items)
     assert [item.external_metadata["lesson_type"] for item in items] == [
         "state",
         "pitfall",
@@ -596,7 +610,7 @@ async def test_publish_of_an_older_session_does_not_displace_a_newer_state(publi
     newer = SimpleNamespace(
         id=uuid4(),
         node_set='["session_learnings"]',
-        external_metadata={
+        system_metadata={
             "lesson_type": "state",
             "state_key": "test-baseline",
             "session_id": "s-new",
@@ -625,7 +639,7 @@ async def test_publish_replaces_the_older_lesson_even_when_the_hook_after_cognif
     older = SimpleNamespace(
         id=uuid4(),
         node_set='["session_learnings"]',
-        external_metadata={
+        system_metadata={
             "lesson_type": "state",
             "state_key": "test-baseline",
             "session_id": "s-1",
@@ -650,9 +664,7 @@ async def test_publish_keeps_the_same_sessions_identical_lesson(publish_env):
     lesson = _written("state", "test-baseline", "pytest -q passes.")
     await publish_distilled_lessons(scope, [lesson], coding=True)
     (item,) = publish_env.added
-    publish_env.existing = [
-        SimpleNamespace(id=item.data_id, external_metadata=item.external_metadata)
-    ]
+    publish_env.existing = [SimpleNamespace(id=item.data_id, system_metadata=item.system_metadata)]
 
     await publish_distilled_lessons(scope, [lesson], coding=True)
 
@@ -953,3 +965,44 @@ async def test_default_mode_never_checks_for_duplicates(monkeypatch):
     run = await propose_lessons([{"question": "q", "answer": "a", "time": "t"}], entries)
 
     assert len(batch_calls) == 2 and merge_calls == [] and len(run.proposed) == 2
+
+
+# -- Lessons already in memory are the project's own ----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_payload_search_keeps_the_hits_of_its_project_scope_only():
+    """Repositories can share a dataset: a lesson of another project, or of none, is
+    not one "already in memory" for this project."""
+    seen = {}
+
+    class Engine:
+        async def search(self, collection, **kwargs):
+            seen.update(kwargs)
+            return [
+                SimpleNamespace(
+                    payload={"text": text, "belongs_to_set": ["session_learnings", *sets]}
+                )
+                for text, sets in (
+                    ("Ours.", ["session_learnings:s-1", "proj:acme"]),
+                    ("Theirs.", ["proj:other"]),
+                    ("Both.", ["proj:acme", "proj:other"]),
+                    ("Unscoped.", []),
+                )
+            ]
+
+    texts = await distill_module.search_payload_texts(
+        Engine(),
+        "DocumentChunk_text",
+        8,
+        query_text="q",
+        node_name=["session_learnings", "proj:acme"],
+        node_name_filter_operator="AND",
+        project_scope=("proj:acme",),
+    )
+
+    assert texts == ["Ours."]
+    assert seen["node_name_filter_operator"] == "AND"
+    assert await distill_module.search_payload_texts(
+        Engine(), "DocumentChunk_text", 8, query_text="q", project_scope=()
+    ) == ["Unscoped."]

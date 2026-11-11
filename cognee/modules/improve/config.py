@@ -148,10 +148,12 @@ class ImproveConfig(BaseSettings):
 def coding_distillation_enabled() -> bool:
     """True when ``DISTILLATION_MODE=coding`` is set.
 
-    Read fresh, not through the cached config: the mode is toggled after
-    ``import cognee`` in tests and demos, and the gates must see the live env.
+    Read from the cached config, the one an improve run's stages get as
+    ``inputs.config``: the stage gate, the distillation and the per-trace hook then
+    agree on the mode for the life of the process, and a trace write builds nothing.
+    Code that changes the env afterwards clears ``get_improve_config``'s cache.
     """
-    return ImproveConfig().coding_distillation
+    return get_improve_config().coding_distillation
 
 
 @lru_cache

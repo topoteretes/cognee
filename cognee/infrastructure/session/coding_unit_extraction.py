@@ -76,6 +76,7 @@ from cognee.infrastructure.session.session_context_models import (
     CodingAgentContextExtraction,
     ContextProfile,
 )
+from cognee.infrastructure.session.session_node_set import get_session_node_set
 from cognee.infrastructure.session.session_persist_watermark import StateRowWatermark
 from cognee.infrastructure.session.trace_phases import PhaseBlock, split_into_parts
 from cognee.modules.agent_memory.sanitization import sanitize_value
@@ -489,13 +490,24 @@ def select_memory_lessons(session_lessons: list[str], dataset_lessons: list[str]
     return chosen
 
 
-async def _search_memory_lessons(dataset, session_id: str, query: str) -> list[str]:
+async def _search_memory_lessons(
+    dataset, session_id: str, query: str, project: tuple[str, ...] = ()
+) -> list[str]:
+    """This session's stored lessons, then the dataset's lessons of the same project.
+
+    ``project`` is the session's pinned node set (the plugin's repository). Repositories
+    can share a dataset, and the prompt tells the model not to restate these lessons,
+    so another project's lesson must not be shown: the dataset search asks for the
+    lessons set and the project's sets together, and only hits scoped to exactly this
+    project are kept (a session with no pin sees the unscoped lessons only).
+    """
     # Imported here: distill imports this module, and the session package must not
     # load the vector stack on import.
     from cognee.context_global_variables import set_database_global_context_variables
     from cognee.infrastructure.databases.vector import get_vector_engine_async
     from cognee.modules.improve.constants import SESSION_LEARNINGS_NODE_SET
     from cognee.modules.session_distillation.distill import search_payload_texts
+    from cognee.modules.session_distillation.lesson_store import project_node_sets
     from cognee.modules.truth_subspace.constants import truth_session_node_set
 
     async with set_database_global_context_variables(dataset.id, dataset.owner_id):
@@ -512,13 +524,15 @@ async def _search_memory_lessons(dataset, session_id: str, query: str) -> list[s
             "DocumentChunk_text",
             MEMORY_LESSONS_SHOWN,
             query_text=query,
-            node_name=[SESSION_LEARNINGS_NODE_SET],
+            node_name=[SESSION_LEARNINGS_NODE_SET, *project],
+            node_name_filter_operator="AND",
+            project_scope=project_node_sets(list(project)),
         )
     return select_memory_lessons(session_lessons, dataset_lessons)
 
 
 async def memory_lessons_for_part(
-    dataset, session_id: str, traces: list, repo_root: str
+    dataset, session_id: str, traces: list, repo_root: str, project: tuple[str, ...] = ()
 ) -> list[str]:
     """Stored lessons most similar to the part; ``[]`` when there is no dataset, on a
     timeout (``MEMORY_SEARCH_TIMEOUT_SECONDS``) or on any failure, so the section is left out."""
@@ -529,7 +543,8 @@ async def memory_lessons_for_part(
         return []
     try:
         return await asyncio.wait_for(
-            _search_memory_lessons(dataset, session_id, query), MEMORY_SEARCH_TIMEOUT_SECONDS
+            _search_memory_lessons(dataset, session_id, query, project),
+            MEMORY_SEARCH_TIMEOUT_SECONDS,
         )
     except Exception as error:
         logger.warning(
@@ -811,6 +826,12 @@ async def extract_coding_unit_context(
         if not system_prompt:
             raise RuntimeError("Coding unit extraction: system prompt not found")
 
+        # The session's project, for the memory search; read strictly, like the
+        # bridging stages do, so an unreadable pin is never taken for "no project".
+        project: tuple[str, ...] = ()
+        if dataset is not None:
+            project = await get_session_node_set(session_manager, user_id, session_id)
+
         touched: list[str] = []
         for window in trace_windows(backlog.traces):
             sealed += len(window)
@@ -821,6 +842,7 @@ async def extract_coding_unit_context(
                 dataset=dataset,
                 unit=window_unit(window, backlog.turns),
                 system_prompt=system_prompt,
+                project=project,
             )
             await TRACE_EXTRACTION_WATERMARK.write_count(
                 session_manager, user_id, session_id, count=sealed
@@ -836,7 +858,14 @@ def _section(candidate) -> str:
 
 
 async def _extract_window(
-    *, session_manager, user_id: str, session_id: str, dataset, unit: UnitOfWork, system_prompt
+    *,
+    session_manager,
+    user_id: str,
+    session_id: str,
+    dataset,
+    unit: UnitOfWork,
+    system_prompt,
+    project: tuple[str, ...] = (),
 ) -> list[str]:
     """One window's extraction calls and failure candidates; returns the touched ids.
 
@@ -853,7 +882,9 @@ async def _extract_window(
     for chunk in chunks:
         # Re-read per chunk, so each sees the candidates the earlier ones produced.
         existing = await recent_agent_lessons(session_manager, user_id, session_id)
-        memory = await memory_lessons_for_part(dataset, session_id, chunk.traces, unit.repo_root)
+        memory = await memory_lessons_for_part(
+            dataset, session_id, chunk.traces, unit.repo_root, project
+        )
         result = await LLMGateway.acreate_structured_output(
             text_input=render_extraction_input(unit, existing, memory, groups, chunk),
             system_prompt=system_prompt,

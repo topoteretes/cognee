@@ -126,3 +126,19 @@ def test_distillation_mode_rejects_unknown_values(monkeypatch):
     monkeypatch.setenv("DISTILLATION_MODE", "research")
     with pytest.raises(ValidationError):
         ImproveConfig(_env_file=None)
+
+
+def test_the_mode_has_one_source_for_the_whole_process(monkeypatch):
+    """The stage gate reads ``inputs.config`` (the cached config) and the distillation
+    and the per-trace hook read ``coding_distillation_enabled()``; they must agree, so
+    the function reads the same cached config instead of the live env."""
+    from cognee.modules.improve.config import coding_distillation_enabled
+
+    monkeypatch.setenv("DISTILLATION_MODE", "coding")
+    assert get_improve_config().coding_distillation and coding_distillation_enabled()
+
+    monkeypatch.delenv("DISTILLATION_MODE")
+    assert coding_distillation_enabled() is get_improve_config().coding_distillation is True
+
+    get_improve_config.cache_clear()
+    assert coding_distillation_enabled() is get_improve_config().coding_distillation is False

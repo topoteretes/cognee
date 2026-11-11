@@ -686,8 +686,14 @@ async def search_payload_texts(
     query_text: str | None = None,
     query_vector: list | None = None,
     node_name: list[str] | None = None,
+    node_name_filter_operator: str = "OR",
+    project_scope: tuple[str, ...] | None = None,
 ) -> list[str]:
-    """Vector-search one collection and return de-duplicated payload texts; [] on failure."""
+    """Vector-search one collection and return de-duplicated payload texts; [] on failure.
+
+    With ``project_scope`` only hits whose node sets name exactly that project scope
+    (``lesson_store.project_node_sets``) are kept.
+    """
     try:
         results = await vector_engine.search(
             collection,
@@ -696,6 +702,7 @@ async def search_payload_texts(
             limit=limit,
             include_payload=True,
             node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
         )
     except Exception as error:
         logger.debug("Distillation search on %s failed open: %s", collection, error, exc_info=True)
@@ -706,6 +713,10 @@ async def search_payload_texts(
     for result in results or []:
         payload = getattr(result, "payload", None)
         if not isinstance(payload, dict):
+            continue
+        if project_scope is not None and (
+            project_node_sets(payload.get("belongs_to_set") or []) != project_scope
+        ):
             continue
         text = payload.get("text") or payload.get("name")
         if not text:
@@ -998,7 +1009,8 @@ def lesson_metadata(
     seen: list[str] | None,
     node_set: list[str] | None = None,
 ) -> dict:
-    """The ``Data.external_metadata`` of one coding lesson (SDK-1336 reads it from the listing).
+    """The metadata of one coding lesson: stored as ``Data.external_metadata`` (SDK-1336
+    reads it from the listing) and as ``Data.system_metadata`` (what the lesson store reads).
 
     ``seen`` is the list of sessions a pitfall was seen in, this one included; it is
     stored as ``seen_sessions`` with its length as ``seen_in_sessions``.
@@ -1123,6 +1135,8 @@ async def publish_distilled_lessons(
         DataItem(
             data=lesson.text,
             external_metadata=lesson.metadata,
+            # The copy the lesson store trusts: users cannot write system_metadata.
+            system_metadata=dict(lesson.metadata),
             data_id=lesson.data_id,
             literal_text=True,
         )

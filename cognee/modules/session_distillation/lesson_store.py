@@ -12,6 +12,11 @@ Its ``Data`` row carries the same facts in ``external_metadata`` (the column the
 dataset listing exposes, which is how the Claude Code plugin reads them, SDK-1336):
 ``lesson_type``, ``state_key``, ``session_id``, ``session_date``, ``git_commit``,
 ``git_branch``, ``files``, ``project_node_sets``, ``seen_sessions`` and ``seen_in_sessions``.
+The same dict is stored in ``system_metadata``, and that copy is the one this module
+reads: ``external_metadata`` is the user's free-form field, which anyone who may write
+to the dataset can set on a document of their own, so a row is a coding lesson, and its
+key, date and sessions count, only by what cognee wrote itself. Otherwise a planted
+row dated in the future would win a key and have the real lesson deleted.
 
 A state key names one current fact *per project*: the lessons of one dataset are
 scoped by the project node sets their rows carry (the session's pinned node set, which
@@ -110,15 +115,18 @@ def project_node_sets(node_set) -> tuple[str, ...]:
 
 
 def _metadata(row) -> dict:
-    metadata = getattr(row, "external_metadata", None)
+    """The lesson facts cognee stored on the row (``system_metadata``, never the
+    user-writable ``external_metadata``)."""
+    metadata = getattr(row, "system_metadata", None)
     return metadata if isinstance(metadata, dict) else {}
 
 
 def lessons_in_scope(rows: list, node_set) -> list:
     """The coding lessons among ``rows`` whose project scope is ``node_set``'s.
 
-    A row is a coding lesson when its metadata carries ``lesson_type``; a document a
-    user added with a ``state_key`` of their own is never touched.
+    A row is a coding lesson when its ``system_metadata`` carries ``lesson_type``; a
+    document a user added with lesson keys in its ``external_metadata`` is never
+    counted, kept as a winner or deleted.
     """
     scope = project_node_sets(node_set)
     return [
@@ -137,7 +145,7 @@ async def find_lessons_by_state_key(dataset_id: UUID, state_key: str, node_set) 
 
     query = select(Data).where(
         Data.dataset_id == dataset_id,
-        Data.external_metadata["state_key"].as_string() == state_key,
+        Data.system_metadata["state_key"].as_string() == state_key,
     )
     async with get_relational_engine().get_async_session() as session:
         rows = list((await session.execute(query)).scalars().all())

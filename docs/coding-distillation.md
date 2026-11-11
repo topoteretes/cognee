@@ -8,6 +8,9 @@ prompts and lesson documents are exactly the default ones.
 DISTILLATION_MODE=coding   # no IMPROVE_ prefix
 ```
 
+The mode is read once, with the rest of the improve settings (`get_improve_config()`, cached
+for the process), so the stage, the distillation and the per-trace hook always agree on it.
+
 ## Why
 
 The default agent-context extraction runs while the agent works: every ten traces, over a
@@ -68,7 +71,9 @@ the number of turns), in this order:
 1. `EXISTING LESSONS`: the session's 40 newest candidates.
 2. `LESSONS ALREADY IN MEMORY`: up to 8 stored lessons, 1,500 chars in all, from a vector
    search over a query built from the part's file paths, first error lines, commands and
-   patterns; this session's lessons first, then the dataset's, without duplicates. The
+   patterns; this session's lessons first, then the dataset's lessons of the same project
+   (the session's pinned node set; repositories that share a dataset never see each other's
+   lessons here, and a session with no pin sees the unscoped ones), without duplicates. The
    search has a 30 s timeout and is fail-open: when it fails, the section is left out.
 3. `TRACES (part k of N, phase <phase>)`: a `-- turn k: <request> --` line opens each
    turn's traces, then one line per trace, `- <tool> <input> [<status>] | feedback | error | output`,
@@ -146,7 +151,9 @@ Edit on an unchanged string fails with "No changes to make" → rewrite the file
   survives the replacement of older rows and re-distilling a session keeps its number.
 
 The document's `Data` row carries the same facts in `external_metadata`, which the dataset
-listing exposes: `lesson_type`, `state_key`, `session_id`, `session_date`, `git_commit`,
+listing exposes, and a copy in `system_metadata`. The replacement and the pitfall counts read
+the `system_metadata` copy only: `external_metadata` is the user's free-form field, so a
+document someone added with lesson keys of their own is never taken for a lesson. The facts: `lesson_type`, `state_key`, `session_id`, `session_date`, `git_commit`,
 `git_branch`, `files` (file names the statement mentions, in their original casing),
 `project_node_sets` (the lesson's project scope: its node sets without the distillation's
 own `session_learnings` ones, empty when the session pinned none; the listing does not

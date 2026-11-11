@@ -104,7 +104,7 @@ class FakeSessionManager:
     async def get_session(self, *, user_id, session_id, last_n=None, formatted=False):
         return list(self.rows)
 
-    async def get_session_context_entries(self, *, user_id, session_id):
+    async def get_session_context_entries(self, *, user_id, session_id, raise_on_error=False):
         return list(self.store)
 
     async def create_session_context_entry(self, *, user_id, session_id, entry_dump):
@@ -583,10 +583,11 @@ async def test_phase_parts_become_separate_inputs_in_order(monkeypatch):
 @pytest.mark.asyncio
 async def test_memory_lessons_are_searched_per_part_and_rendered_second(monkeypatch):
     dataset = SimpleNamespace(id="d", owner_id="o")
-    queries = []
+    queries, projects = [], []
 
-    async def fake_search(dataset_arg, session_id, query):
+    async def fake_search(dataset_arg, session_id, query, project):
         queries.append(query)
+        projects.append(project)
         return ["Stored lesson about a.py."]
 
     monkeypatch.setattr(cue, "_search_memory_lessons", fake_search)
@@ -595,13 +596,19 @@ async def test_memory_lessons_are_searched_per_part_and_rendered_second(monkeypa
         traces=traces,
         qa=_qa(context=f'{{"cwd": "{REPO}"}}'),
     )
+
+    # The session's pinned node set: the project whose lessons the search may show.
+    async def pinned(session_manager, user_id, session_id):
+        return ("proj:acme",)
+
+    monkeypatch.setattr(cue, "get_session_node_set", pinned)
     calls = _llm(monkeypatch)
 
     await extract_coding_unit_context(
         session_manager=manager, user_id="u", session_id="s", dataset=dataset
     )
 
-    assert queries == ["a.py"]
+    assert queries == ["a.py"] and projects == [("proj:acme",)]
     text = calls[0]
     assert text.index("LESSONS ALREADY IN MEMORY") < text.index("TRACES (part")
     assert "- Stored lesson about a.py." in text
@@ -611,7 +618,7 @@ async def test_memory_lessons_are_searched_per_part_and_rendered_second(monkeypa
 async def test_memory_search_timeout_or_failure_leaves_the_section_out(monkeypatch):
     dataset = SimpleNamespace(id="d", owner_id="o")
 
-    async def slow(dataset_arg, session_id, query):
+    async def slow(dataset_arg, session_id, query, project):
         await asyncio.sleep(1)
         return ["late"]
 
@@ -627,7 +634,7 @@ async def test_memory_search_timeout_or_failure_leaves_the_section_out(monkeypat
     assert "LESSONS ALREADY IN MEMORY" not in calls[0]
     assert manager.watermark() == 1  # the extraction itself still ran
 
-    async def broken(dataset_arg, session_id, query):
+    async def broken(dataset_arg, session_id, query, project):
         raise RuntimeError("vector store down")
 
     monkeypatch.setattr(cue, "_search_memory_lessons", broken)
