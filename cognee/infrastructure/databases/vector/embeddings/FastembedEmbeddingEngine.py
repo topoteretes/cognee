@@ -7,6 +7,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .array_format import native_embedding
+
 try:
     from fastembed import TextEmbedding
 except ImportError:
@@ -256,7 +258,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                         parallel=None,
                     )
 
-                embeddings = [e.tolist() for e in embeddings]
+                embeddings = [native_embedding(e) for e in embeddings]
 
         except Exception as error:
             error_str = str(error).lower()
@@ -350,7 +352,9 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             self.embed_text([right_part]),
         )
         (left_vec,), (right_vec,) = left_result, right_result
-        pooled = (np.array(left_vec) + np.array(right_vec)) / 2
+        pooled = (
+            np.asarray(left_vec, dtype=np.float64) + np.asarray(right_vec, dtype=np.float64)
+        ) / 2
         # Tokens are what the model processed, overlaps included - as the hosted
         # engines that count what they were billed for; with recursive splitting
         # this can be several times the text's own count.

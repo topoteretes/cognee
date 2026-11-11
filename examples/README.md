@@ -100,6 +100,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 ### Backends & deployment
 | Script | Prerequisite |
 |---|---|
+| [`postgres_storage.py`](guides/postgres_storage.py) | Matching Cognee and Postgres plugin builds, Postgres + pgvector, and an embedding provider; opt-in COPY writes and ownership batching |
 | [`neptune_analytics_example.py`](guides/neptune_analytics_example.py) | AWS account + provisioned Neptune Analytics graph |
 | [`local_ollama_example.py`](guides/local_ollama_example.py) | `ollama serve` + two pulled models — fully local |
 | [`turso_local_example.py`](guides/turso_local_example.py) | Relational, graph, vector and session cache all on the Turso rewrite engine (`cognee[turso]`); `ingest` / `verify` / `cleanup` phases show persistence across a restart |

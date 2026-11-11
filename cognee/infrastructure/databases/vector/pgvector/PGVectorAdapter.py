@@ -7,7 +7,9 @@ from typing import Any
 from uuid import UUID
 
 import asyncpg
+import numpy as np
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
+from numpy.typing import NDArray
 from pydantic import BaseModel
 from sqlalchemy import (
     JSON,
@@ -38,6 +40,7 @@ from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.databases.postgres.deadlock import is_deadlock
 from cognee.infrastructure.databases.relational import get_relational_config, get_relational_engine
+from cognee.infrastructure.databases.unified.storage_trace import storage_batch, storage_span
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
@@ -535,7 +538,15 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             self._write_pool_loop = loop
             return pool
 
-    async def _write_rows(self, collection_name: str, rows: list[dict], statement_for) -> None:
+    async def _write_rows(
+        self,
+        collection_name: str,
+        rows: list[dict],
+        statement_for,
+        *,
+        use_copy=False,
+        write_gate=None,
+    ) -> None:
         """Upsert ``rows`` (``id``, ``payload``, ``vector`` each), in their order, in one
         transaction on the write pool: one statement per row, prepared once per
         connection and pipelined by asyncpg. ``statement_for(table, collection_name)``
@@ -543,27 +554,64 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """
         if not rows:
             return
-        statement = statement_for(self._qualified_table(collection_name), collection_name)
-        params = [(row["id"], json.dumps(row["payload"]), row["vector"]) for row in rows]
+        with storage_span("prepare_parameters"):
+            params = [(row["id"], json.dumps(row["payload"]), row["vector"]) for row in rows]
         pool = await self._get_write_pool()
-        async with pool.acquire() as connection, connection.transaction():
-            await connection.executemany(statement, params)
+        if write_gate is not None:
+            with storage_span("writer_wait"):
+                await write_gate.acquire()
+        try:
+            with storage_span("pool_wait"):
+                connection = await pool.acquire()
+            try:
+                transaction = connection.transaction()
+                await transaction.start()
+                try:
+                    if use_copy:
+                        # Each checked-out connection has its own staging table. It is
+                        # emptied by commit and rolled back with a failed batch.
+                        with storage_span("staging"):
+                            await connection.execute(
+                                "CREATE TEMP TABLE IF NOT EXISTS cognee_vector_stage "
+                                "(id uuid, payload json, vector vector) ON COMMIT DELETE ROWS"
+                            )
+                        with storage_span("copy"):
+                            await connection.copy_records_to_table(
+                                "cognee_vector_stage",
+                                schema_name="pg_temp",
+                                records=params,
+                                columns=("id", "payload", "vector"),
+                            )
+                        statement = statement_for(
+                            self._qualified_table(collection_name),
+                            collection_name,
+                            source_sql="SELECT id, payload, vector FROM pg_temp.cognee_vector_stage ORDER BY id",
+                        )
+                        with storage_span("merge"):
+                            await connection.execute(statement)
+                    else:
+                        statement = statement_for(
+                            self._qualified_table(collection_name), collection_name
+                        )
+                        with storage_span("merge"):
+                            await connection.executemany(statement, params)
+                except BaseException:
+                    await transaction.rollback()
+                    raise
+                else:
+                    with storage_span("commit"):
+                        await transaction.commit()
+            finally:
+                await pool.release(connection)
+        finally:
+            if write_gate is not None:
+                write_gate.release()
 
-    async def embed_data(self, data: list[str]) -> list[list[float]]:
-        """
-        Embed a list of texts into vectors using the specified embedding engine.
+    async def embed_data(self, data: list[str]) -> list[NDArray[np.float32]]:
+        """Embed once and retain float32 arrays for pgvector's binary codec."""
+        from ..embeddings.array_format import embed_float32
 
-        Parameters:
-        -----------
-
-            - data (list[str]): A list of strings to be embedded into vectors.
-
-        Returns:
-        --------
-
-            - list[list[float]]: A list of lists of floats representing embedded vectors.
-        """
-        return await self.embedding_engine.embed_text(data)
+        return await embed_float32(self.embedding_engine, data)
 
     async def get_stored_vector_size(self) -> int | None:
         """Width of the vectors already in this store, or None when nothing is stored yet.
@@ -784,14 +832,16 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         return f"(({merged}) {volatile}) IS DISTINCT FROM ({stored} {volatile})"
 
     @classmethod
-    def _data_point_upsert_sql(cls, table: str, collection_name: str) -> str:
+    def _data_point_upsert_sql(
+        cls, table: str, collection_name: str, source_sql: str = "VALUES ($1, $2, $3)"
+    ) -> str:
         """The statement ``create_data_points`` runs per row: insert, or on a conflicting
         id merge ``belongs_to_set``, keep the vector unless the text changed, and skip the
         update altogether when nothing but the timestamps differs. ``table`` is the
         schema-qualified name; the conflict clause refers to the target by its bare name.
         """
         return (
-            f"INSERT INTO {table} (id, payload, vector) VALUES ($1, $2, $3) "
+            f"INSERT INTO {table} (id, payload, vector) {source_sql} "
             "ON CONFLICT (id) DO UPDATE SET "
             f"payload = ({cls._merged_payload_sql(collection_name)})::json, "
             f"vector = {cls._vector_if_text_changed_sql(collection_name)} "
@@ -799,11 +849,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
 
     @classmethod
-    def _raw_vector_upsert_sql(cls, table: str, collection_name: str) -> str:
+    def _raw_vector_upsert_sql(
+        cls, table: str, collection_name: str, source_sql: str = "VALUES ($1, $2, $3)"
+    ) -> str:
         """The statement ``upsert_raw_vectors`` runs per row: a conflicting id takes the
         new payload (tags merged) and the new vector."""
         return (
-            f"INSERT INTO {table} (id, payload, vector) VALUES ($1, $2, $3) "
+            f"INSERT INTO {table} (id, payload, vector) {source_sql} "
             "ON CONFLICT (id) DO UPDATE SET "
             f"payload = ({cls._merged_payload_sql(collection_name)})::json, "
             "vector = EXCLUDED.vector"
@@ -815,7 +867,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         wait=wait_exponential(multiplier=2, min=1, max=6),
         reraise=True,
     )
-    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
+    async def create_data_points(
+        self, collection_name: str, data_points: list[DataPoint], *, use_copy=False, write_gate=None
+    ):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict.
 
         The rows reach Postgres as plain ``(id, payload, vector)`` tuples over the binary
@@ -824,15 +878,36 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """
         if not data_points:
             return
+        with storage_batch(collection_name, len(data_points)):
+            rows = await self._prepare_data_points(collection_name, data_points)
+            await self._write_rows(
+                collection_name,
+                rows,
+                self._data_point_upsert_sql,
+                use_copy=use_copy,
+                write_gate=write_gate,
+            )
+
+    async def _prepare_data_points(self, collection_name, data_points):
         if not await self.has_collection(collection_name):
             await self.create_collection(
                 collection_name=collection_name,
                 payload_schema=type(data_points[0]),
             )
 
-        data_vectors = await self.embed_data(
-            [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
-        )
+        with storage_span("embed"):
+            data_vectors = await self.embed_data(
+                [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
+            )
+        with storage_span("prepare"):
+            return self._data_point_rows(data_points, data_vectors)
+
+    @staticmethod
+    def _data_point_rows(data_points, data_vectors):
+        if len(data_points) != len(data_vectors):
+            raise ValueError(
+                "Embedding provider returned a different number of vectors than inputs"
+            )
 
         # Dedup by id within the batch: the same id twice would otherwise be two
         # upserts of one row, and entity extraction may still emit same-UUID5
@@ -857,14 +932,20 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             rows_by_id[key] = {"id": data_point.id, "payload": payload, "vector": vector}
         rows = sorted(rows_by_id.values(), key=lambda row: _row_order(row["id"]))
 
-        await self._write_rows(collection_name, rows, self._data_point_upsert_sql)
+        return rows
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """Create the underlying index collection (table) for the given name/property pair."""
         await self.create_collection(f"{index_name}_{index_property_name}")
 
     async def index_data_points(
-        self, index_name: str, index_property_name: str, data_points: list[DataPoint]
+        self,
+        index_name: str,
+        index_property_name: str,
+        data_points: list[DataPoint],
+        *,
+        use_copy=False,
+        write_gate=None,
     ):
         """Write index rows derived from `data_points` into the `{index}_{property}` table."""
         await self.create_data_points(
@@ -886,6 +967,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 )
                 for data_point in data_points
             ],
+            use_copy=use_copy,
+            write_gate=write_gate,
         )
 
     async def get_table(self, collection_name: str) -> Table:
