@@ -1,7 +1,7 @@
 from typing import Any
 
 from cognee.base_config import get_base_config
-from cognee.context_global_variables import current_dataset_id, session_user
+from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
@@ -181,7 +181,7 @@ class CompletionRetriever(BaseRetriever):
 
         await attach_chunk_conflicts(found_chunks)
         if self.include_references:
-            await name_chunk_documents(found_chunks, current_dataset_id.get())
+            await name_chunk_documents(found_chunks)
         return found_chunks
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:

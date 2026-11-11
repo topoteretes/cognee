@@ -145,22 +145,44 @@ async def test_a_connector_chunk_carries_its_title_and_link(cognified, query_typ
     assert _named(result) == {(TITLE, URL)}
 
 
+def _bullets(answer: str) -> list[str]:
+    """The Evidence block's lines, without the quoted snippet each one ends with."""
+    return [line.split(': "')[0] for line in answer.splitlines() if line.startswith("- chunk ")]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "query_type",
     [SearchType.RAG_COMPLETION, SearchType.HYBRID_COMPLETION, SearchType.GRAPH_COMPLETION],
 )
 async def test_the_answer_and_its_evidence_are_unchanged(cognified, query_type):
-    """The Evidence text names documents by file and the structured evidence has no new
-    fields, for connector documents too: only the payload carries the title."""
+    """The Evidence block names every document by its file and the structured evidence keeps
+    its fields and file names, for the connector document too: only the payload changes."""
     result = await _search(query_type)
 
-    # The chunk's own text starts with "# <title>", so the snippet may quote it; the
-    # bullet must still name the document by its file, never by title or link.
-    assert f'of "{TITLE}"' not in _answer(result)
-    assert URL not in _answer(result)
+    bullets = _bullets(_answer(result))
+    assert bullets, "the answer cites its sources"
+    for bullet in bullets:
+        assert " of document " in bullet
+        assert TITLE not in bullet and URL not in bullet
+    if query_type == SearchType.HYBRID_COMPLETION:
+        assert result["evidence"] == []
+    else:
+        assert result["evidence"]
     for reference in result["evidence"]:
         assert "title" not in reference and "url" not in reference
+        name = reference.get("document_name")
+        assert name is None or name.startswith("text_")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query_type", [SearchType.RAG_COMPLETION, SearchType.HYBRID_COMPLETION])
+async def test_without_references_no_payload_is_named(cognified, query_type):
+    (result,) = await cognee.search(
+        QUESTION, query_type=query_type, datasets=[DATASET], verbose=True
+    )
+
+    assert _named(result) == set()
 
 
 @pytest.mark.asyncio

@@ -2,7 +2,7 @@ import asyncio
 from typing import Any
 
 from cognee.base_config import get_base_config
-from cognee.context_global_variables import current_dataset_id, session_user
+from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.session.get_session_manager import get_session_manager
@@ -198,16 +198,11 @@ class HybridRetriever(BaseRetriever):
             self.include_external_metadata,
             self.external_metadata_keys,
         )
-        chunks = chunk_objects.get("chunks", [])
-        # Different payload keys, so the graph read and the title read run side by side.
-        naming = (
-            [name_chunk_documents(chunks, current_dataset_id.get())]
-            if self.include_references
-            else []
+        await attach_chunk_conflicts(
+            chunk_objects.get("chunks", []), graph_engine=self._unified_engine.graph
         )
-        await asyncio.gather(
-            attach_chunk_conflicts(chunks, graph_engine=self._unified_engine.graph), *naming
-        )
+        if self.include_references:
+            await name_chunk_documents(chunk_objects.get("chunks", []))
         return HybridCandidates(
             chunks=chunk_objects["chunks"],
             chunk_summaries=chunk_objects["chunk_summaries"],

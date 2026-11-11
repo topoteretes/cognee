@@ -752,7 +752,8 @@ async def test_retrieve_in_collections_keeps_id_order_and_first_collection_wins(
 
 
 @pytest.mark.asyncio
-async def test_window_expansion_names_the_chunks_it_adds(monkeypatch):
+@pytest.mark.parametrize("include_references", [True, False])
+async def test_window_expansion_names_the_chunks_it_adds(monkeypatch, include_references):
     """Chunks the window adds after hybrid's fetch are cited like the fetched ones,
     so they carry their document's title too."""
     retriever, _engine, _fetch, _extract = _retriever(
@@ -764,7 +765,7 @@ async def test_window_expansion_names_the_chunks_it_adds(monkeypatch):
         neighborhood=_dated_graph(),
         vector_rows=_rows(),
     )
-    retriever.include_references = True
+    retriever.include_references = include_references
     name = AsyncMock()
     monkeypatch.setattr(
         "cognee.modules.retrieval.temporal_hybrid_retriever.name_chunk_documents", name
@@ -772,5 +773,8 @@ async def test_window_expansion_names_the_chunks_it_adds(monkeypatch):
 
     await retriever.get_retrieved_objects(query="in 1950")
 
+    if not include_references:
+        name.assert_not_awaited()
+        return
     name.assert_awaited_once()
     assert {chunk["id"] for chunk in name.await_args.args[0]} == {"r1", "r2", "r3"}
