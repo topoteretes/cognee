@@ -251,11 +251,11 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
         return self.batch_size
 
     async def input_limit(self) -> int | None:
-        """The tokens of text one input may have, counted as cognee counts chunks
-        (without special tokens): the worker's ``max_text_tokens`` for the input
-        type sent, lowered to EMBEDDING_MAX_COMPLETION_TOKENS when that is set and
-        smaller. A configured value above the worker's is a misconfiguration:
-        warned about, and the worker's budget applies.
+        """The model's limit: the tokens of text one input may have, counted as
+        cognee counts chunks (without special tokens). That is the worker's
+        ``max_text_tokens`` for the input type sent; ``resolve_input_limit``
+        then lowers it to EMBEDDING_MAX_COMPLETION_TOKENS when that is smaller,
+        and warns when the configured value is larger, as for every engine.
 
         A worker whose info has no ``max_text_tokens`` gives ``max_input_tokens``
         minus its ``special_tokens``, or, without those either, ``max_input_tokens``
@@ -268,20 +268,7 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
         info = self.worker_info
         if info is None:
             return self.input_cap
-        worker_limit = self._text_budget(info)
-        if self.input_cap is None or self.input_cap == worker_limit:
-            return worker_limit
-        if self.input_cap > worker_limit:
-            logger.warning(
-                "EMBEDDING_MAX_COMPLETION_TOKENS=%s exceeds the %s tokens of text the embedding "
-                "worker's model %r accepts per input; inputs are limited to %s tokens.",
-                self.input_cap,
-                worker_limit,
-                info.model,
-                worker_limit,
-            )
-            return worker_limit
-        return self.input_cap
+        return self._text_budget(info)
 
     def _text_budget(self, info: WorkerInfo) -> int:
         """Tokens of text per input, special tokens and prefix taken out."""
@@ -571,6 +558,10 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
     async def _run_probe(self, worker: SharedWorker) -> None:
         label = worker.transport.endpoint_label
         await self._with_retries(worker.transport.readiness, label, "readiness")
+        if worker.info is None and self.worker_info is not None:
+            # Learned already, by the blocking size lookup on its own loop: no
+            # second info request, which could queue behind the embed backlog.
+            worker.info = self.worker_info
         if worker.info is None:
             # Asked until the worker answers with one, then kept: an info message
             # queues behind the embed backlog, so asking on every probe would
@@ -638,6 +629,10 @@ class EmbeddingWorkerEmbeddingEngine(EmbeddingEngine):
         finally:
             if own:
                 await transport.aclose()
+        # The worker answered, so a latched outage is over: the next call need
+        # not probe once more to find that out.
+        if isinstance(self._failure, EmbeddingWorkerUnavailableError):
+            self._failure = None
 
     async def _with_retries(self, call: Callable[[], Awaitable[T]], endpoint: str, what: str) -> T:
         last = self._retry.attempts - 1

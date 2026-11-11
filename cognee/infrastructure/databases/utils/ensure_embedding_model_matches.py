@@ -22,6 +22,7 @@ from cognee.infrastructure.databases.vector.embeddings.config import (
     get_embedding_context_config,
     resolve_embedding_defaults,
 )
+from cognee.infrastructure.databases.vector.embeddings.vector_size import engine_vector_size
 from cognee.infrastructure.databases.vector.exceptions import EmbeddingDimensionMismatchError
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.modules.users.models import DatasetDatabase
@@ -99,11 +100,7 @@ async def ensure_embedding_model_matches(dataset_database: DatasetDatabase) -> N
 
 
 async def _engine_vector_size() -> int:
-    embedding_engine = (await get_vector_engine_async()).embedding_engine
-    resolve = getattr(embedding_engine, "resolve_vector_size", None)
-    if resolve is not None:
-        return await resolve()
-    return embedding_engine.get_vector_size()
+    return await engine_vector_size((await get_vector_engine_async()).embedding_engine)
 
 
 async def _record_embedding_model(dataset_database: DatasetDatabase, record: dict) -> None:

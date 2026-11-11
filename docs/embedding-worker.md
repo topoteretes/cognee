@@ -175,16 +175,22 @@ has answered, so:
 
 - In the usual flow the size is known before anyone asks: the startup
   connection test (unless `COGNEE_SKIP_CONNECTION_TEST=true`) resolves the
-  input limit and embeds a test text, which fetches the info, and then records
-  the size in the embedding config. The dataset check compares stored vectors
-  with the size it gets from `resolve_vector_size()`, which asks the worker on
-  the running event loop.
-- If `get_vector_size()` is called first, it fetches the info synchronously, on
-  a thread of its own with its own short-lived broker connection and the usual
-  retries, and caches the result. The caller and its event loop are blocked for
-  one round trip, or up to the retry budget (16–32 s) when no worker is up, in
+  input limit and embeds a test text, which fetches the info. The engine keeps
+  the size itself; it is not written into the embedding config (that would
+  make the next `get_embedding_engine()` build a second engine that takes it
+  for `EMBEDDING_DIMENSIONS`).
+- Async code asks without blocking: the dataset check and dataset routing
+  await `engine_vector_size()` (`vector_size.py`), which calls the engine's
+  `resolve_vector_size()` on the running event loop.
+- If the sync `get_vector_size()` is still called first (a vector adapter
+  creating a collection), it fetches the info synchronously, on a thread of
+  its own with its own short-lived broker connection and the usual retries,
+  and caches the result. The caller and its event loop are blocked for one
+  round trip, or up to the retry budget (16–32 s) when no worker is up, in
   which case the call raises `EmbeddingWorkerUnavailableError` and the outage is
-  latched as below. This happens at most once per process when it succeeds.
+  latched as below. When it succeeds it happens at most once per process: the
+  info is reused for the shared connection (no second info request), and a
+  latched outage is released.
 
 ## Wire protocol
 

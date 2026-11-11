@@ -425,6 +425,29 @@ def test_get_vector_size_with_a_configured_size_never_asks():
     assert transport.info_requests == 0 and transport.probes == 0
 
 
+@pytest.mark.asyncio
+async def test_after_the_blocking_size_lookup_the_info_is_not_asked_again():
+    # The lookup ran on a throwaway worker; the shared one reuses its info.
+    transport = FakeTransport()
+    engine = make_engine(transport, dimensions=None)
+    assert engine.get_vector_size() == DIMS
+    assert transport.info_requests == 1
+    await engine.embed_text(["x"])
+    assert transport.info_requests == 1  # one readiness probe, no second info request
+
+
+@pytest.mark.asyncio
+async def test_a_successful_size_lookup_releases_a_latched_outage():
+    answers = [EmbeddingWorkerUnavailableError("down")] * 3  # the policy's attempts
+    transport = FakeTransport(ready=lambda: answers.pop(0) if answers else None)
+    engine = make_engine(transport, dimensions=None)
+    with pytest.raises(EmbeddingWorkerUnavailableError):
+        await engine.embed_text(["x"])
+    assert isinstance(engine._failure, EmbeddingWorkerUnavailableError)
+    assert engine.get_vector_size() == DIMS  # the worker is back
+    assert engine._failure is None
+
+
 def test_get_vector_size_against_a_dead_worker_raises_and_latches():
     transport = FakeTransport(ready=lambda: EmbeddingWorkerUnavailableError("down"))
     engine = make_engine(transport, dimensions=None)
@@ -494,7 +517,7 @@ async def test_a_smaller_batch_size_is_kept():
         (None, 510),  # unset: the worker's document text budget
         (256, 256),  # smaller config lowers it
         (510, 510),
-        (512, 510),  # larger config: warned, the worker's
+        (512, 510),  # larger config: warned (once), the worker's
         (8192, 510),
     ],
 )
@@ -502,15 +525,24 @@ async def test_a_smaller_batch_size_is_kept():
 async def test_input_limit_is_the_workers_text_budget_lowered_by_the_config(
     configured, expected, caplog
 ):
+    from cognee.infrastructure.databases.vector.embeddings.input_limit import resolve_input_limit
+
     transport = FakeTransport(
         info=lambda: worker_info(
             max_input_tokens=512, max_text_tokens={"document": 510, "query": 502}
         )
     )
     engine = make_engine(transport, max_completion_tokens=configured)
+    # input_limit() is the model's limit; the shared resolver lowers it to
+    # the config and warns, exactly once, about a larger configured value.
+    assert await engine.input_limit() == 510
     with caplog.at_level(logging.WARNING):
-        assert await engine.input_limit() == expected
-    assert ("exceeds the 510 tokens of text" in caplog.text) == (configured in (512, 8192))
+        assert await resolve_input_limit(engine) == expected
+    assert engine.max_completion_tokens == expected
+    # One warning about the setting, not one from the engine and one from the resolver.
+    assert caplog.text.count(f"EMBEDDING_MAX_COMPLETION_TOKENS={configured} exceeds") == (
+        configured in (512, 8192)
+    )
 
 
 @pytest.mark.asyncio
