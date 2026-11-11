@@ -16,6 +16,11 @@ the package with itself and never refuses an old cognee.
 
 import importlib
 import json
+import time
+from collections.abc import Callable
+from typing import TypeVar
+
+_T = TypeVar("_T")
 
 # A dlt source sets this attribute to opt into the "document" ingestion path:
 # each row becomes a text document that flows through normal cognify (LLM entity
@@ -131,6 +136,39 @@ def guarded_rows(rows, check_active=None):
         if check_active is not None:
             check_active()
         yield row
+
+
+def with_retries(
+    attempt: Callable[[], _T],
+    *,
+    retry_on: tuple[type[BaseException], ...],
+    delay: Callable[[BaseException, int], float | None],
+    attempts: int,
+    check_active: Callable[[], None] | None = None,
+    sleep: Callable[[float], None] | None = None,
+) -> _T:
+    """Run one provider request, retried by the connector's own policy.
+
+    ``attempt`` makes one request. An error of a ``retry_on`` class is retried after
+    ``delay(error, number)`` seconds unless it was the last of ``attempts`` or ``delay`` answers
+    ``None``; then it is raised as it is. ``check_active`` runs before every wait and every
+    retry, never before a first attempt, and what it raises propagates as it is.
+    """
+    for number in range(attempts):
+        if number and check_active is not None:
+            check_active()
+        try:
+            return attempt()
+        except retry_on as error:
+            if number == attempts - 1:
+                raise
+            wait = delay(error, number)
+            if wait is None:
+                raise
+        if check_active is not None:
+            check_active()
+        (sleep or time.sleep)(wait)
+    raise ValueError("with_retries needs at least one attempt")
 
 
 def document_source_tag(item) -> str | None:

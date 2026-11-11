@@ -243,10 +243,13 @@ def test_callback_unexpected_error_redirects_exchange_failed(client):
 
 
 def test_connection_status_reports_disconnected_by_default(client):
-    with patch.object(
-        _router_module,
-        "get_active_credential_for_user",
-        new=AsyncMock(return_value=None),
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=None),
+        ),
+        patch.object(_router_module, "get_ended_connection", new=AsyncMock(return_value=None)),
     ):
         response = client.get("/api/v1/integrations/fake/connection")
     assert response.json() == {"connected": False}
@@ -323,6 +326,78 @@ def test_connection_status_has_no_dataset_for_a_provider_that_names_none(client)
 
     summary.assert_not_awaited()
     assert body.get("datasetId") is None
+
+
+def _ended_credential(revoked_by):
+    return type(
+        "Cred",
+        (),
+        {
+            "account_label": "Acme",
+            "provider_account_id": "ACC1",
+            "revoked_by": revoked_by,
+            "revoked_at": __import__("datetime").datetime(2026, 11, 1, 12, 0),
+        },
+    )()
+
+
+@pytest.mark.parametrize("account_id", [None, "ACC1"])
+def test_connection_status_tells_the_owner_who_ended_the_connection(client, account_id):
+    """An uninstall or a rejected token ends a connection without its owner; the page
+    says who ended it, when, and where the data stays."""
+    integration = supported_integrations["fake"]
+    ended = AsyncMock(return_value=_ended_credential("provider"))
+    with (
+        patch.object(
+            _router_module, "get_active_credential_for_user", new=AsyncMock(return_value=None)
+        ),
+        patch.object(_router_module, "get_ended_connection", new=ended),
+        patch.object(integration, "dataset_name", return_value="fake_acme"),
+        patch(
+            "cognee.modules.integrations.ingestion.dataset_summary",
+            AsyncMock(return_value=("dataset-1", 7)),
+        ),
+    ):
+        query = f"?account_id={account_id}" if account_id else ""
+        body = client.get(f"/api/v1/integrations/fake/connection{query}").json()
+
+    ended.assert_awaited_once_with(USER_ID, "fake", account_id)
+    assert body == {
+        "connected": False,
+        "datasetId": "dataset-1",
+        "storedItems": 7,
+        "accountLabel": "Acme",
+        "providerAccountId": "ACC1",
+        "disconnectedBy": "provider",
+        "disconnectedAt": "2026-11-01T12:00:00Z",
+    }
+
+
+def test_connection_status_of_a_connected_user_reads_no_ended_connection(client):
+    ended = AsyncMock()
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=_connected_credential()),
+        ),
+        patch.object(_router_module, "get_ended_connection", new=ended),
+    ):
+        assert client.get("/api/v1/integrations/fake/connection").json()["connected"] is True
+
+    ended.assert_not_awaited()
+
+
+def test_connection_status_of_an_unknown_named_account_is_still_a_404(client):
+    with (
+        patch.object(
+            _router_module, "get_active_credential_for_user", new=AsyncMock(return_value=None)
+        ),
+        patch.object(_router_module, "get_ended_connection", new=AsyncMock(return_value=None)),
+    ):
+        response = client.get("/api/v1/integrations/fake/connection?account_id=NOPE")
+
+    assert response.status_code == 404
 
 
 def test_disconnect_with_delete_data_forgets_the_providers_dataset(client):
@@ -440,16 +515,30 @@ def test_ids_are_stored_as_given_and_deduplicated(client, monkeypatch):
     update.assert_awaited_once_with("fake", "ACC1", {"picked": ["b", " a "]})
 
 
+def _sync_credential(account_id):
+    return type(
+        "Cred",
+        (),
+        {
+            "id": uuid4(),
+            "user_id": USER_ID,
+            "workspace_id": None,
+            "provider_account_id": account_id,
+        },
+    )()
+
+
 def test_a_manual_sync_is_not_accepted_while_one_is_running(client):
     from cognee.modules.integrations import ingestion
 
-    credential = type("Cred", (), {"provider_account_id": "ACC1"})()
+    credential = _sync_credential("ACC1")
     integration = supported_integrations["fake"]
     sync_now = AsyncMock()
     with (
         patch.object(
             _router_module, "get_active_credential_for_user", new=AsyncMock(return_value=credential)
         ),
+        patch.object(_router_module, "require_sync_not_paused", new=AsyncMock()),
         patch.object(integration, "sync_now", sync_now),
     ):
         ingestion._running_syncs.add(("fake", "ACC1"))
@@ -484,7 +573,35 @@ def test_disconnect_calls_revoke_remote_and_revokes_locally(client):
 
     assert response.json() == {"disconnected": True, "remoteRevokeSkipped": False}
     revoke_remote.assert_awaited_once_with(fake_credential)
-    revoke_local.assert_awaited_once_with("fake", "ACC1")
+    revoke_local.assert_awaited_once_with("fake", "ACC1", revoked_by="owner")
+
+
+def test_disconnect_records_the_owner_before_asking_the_provider_to_revoke(client):
+    """The provider's echo of our own revoke (Slack ``tokens_revoked``, a refresh that
+    hits the revoked token) must find the connection already ended by its owner."""
+    fake_credential = type("Cred", (), {"provider_account_id": "ACC1"})()
+    integration = supported_integrations["fake"]
+    calls = []
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=fake_credential),
+        ),
+        patch.object(
+            integration,
+            "revoke_remote",
+            new=AsyncMock(side_effect=lambda *_: calls.append("remote")),
+        ),
+        patch.object(
+            _router_module,
+            "revoke_credential_by_account",
+            new=AsyncMock(side_effect=lambda *_, **__: calls.append("local") or True),
+        ),
+    ):
+        client.delete("/api/v1/integrations/fake/connection")
+
+    assert calls == ["local", "remote"]
 
 
 def test_disconnect_reports_a_skipped_remote_revoke_while_outbound_http_is_disabled(
@@ -512,7 +629,7 @@ def test_disconnect_reports_a_skipped_remote_revoke_while_outbound_http_is_disab
 
     assert response.json() == {"disconnected": True, "remoteRevokeSkipped": True}
     revoke_remote.assert_not_awaited()
-    revoke_local.assert_awaited_once_with("fake", "ACC1")
+    revoke_local.assert_awaited_once_with("fake", "ACC1", revoked_by="owner")
 
 
 def test_disconnect_with_no_active_credential_reports_false(client):
@@ -697,10 +814,8 @@ async def test_spawned_integration_work_is_registered_for_the_shutdown_drain():
     import asyncio
 
     from cognee.infrastructure import background_tasks
+    from cognee.modules.integrations.background import spawn_background
 
-    router_module = importlib.import_module(
-        "cognee.api.v1.integrations.routers.get_integrations_router"
-    )
     gate, finished = asyncio.Event(), []
 
     async def work():
@@ -708,7 +823,7 @@ async def test_spawned_integration_work_is_registered_for_the_shutdown_drain():
         finished.append(True)
 
     before = set(background_tasks._BACKGROUND_TASKS)
-    router_module._spawn_background(work(), description="test work")
+    spawn_background(work(), description="test work")
     assert len(background_tasks._BACKGROUND_TASKS - before) == 1
     gate.set()
     assert await background_tasks.wait_for_background_tasks(timeout=2)
@@ -745,11 +860,17 @@ _ACCOUNT_ROUTES = [
     ("put", "/api/v1/integrations/fake/resources"),
     ("post", "/api/v1/integrations/fake/sync"),
     ("delete", "/api/v1/integrations/fake/connection"),
+    ("get", "/api/v1/integrations/fake/sync/policy"),
+    ("put", "/api/v1/integrations/fake/sync/policy"),
+    ("delete", "/api/v1/integrations/fake/sync/policy"),
+    ("post", "/api/v1/integrations/fake/sync/policy/pause"),
+    ("post", "/api/v1/integrations/fake/sync/policy/resume"),
 ]
 
 
 def _call(client, method, url, **params):
-    kwargs = {"json": {"resource_ids": ["a"]}} if method == "put" else {}
+    body = {"interval_minutes": 60} if url.endswith("/sync/policy") else {"resource_ids": ["a"]}
+    kwargs = {"json": body} if method == "put" else {}
     return getattr(client, method)(url, params=params, **kwargs)
 
 
@@ -788,12 +909,13 @@ def test_without_an_account_id_the_lookup_is_the_newest_connection_as_before(cli
 
 
 def test_a_manual_sync_runs_for_the_named_account(client):
-    credential = type("Cred", (), {"provider_account_id": "ACC2"})()
+    credential = _sync_credential("ACC2")
     integration = supported_integrations["fake"]
     sync_now = AsyncMock()
     lookup = AsyncMock(return_value=credential)
     with (
         patch.object(_router_module, "get_active_credential_for_user", new=lookup),
+        patch.object(_router_module, "require_sync_not_paused", new=AsyncMock()),
         patch.object(integration, "sync_now", sync_now),
     ):
         response = client.post("/api/v1/integrations/fake/sync", params={"account_id": "ACC2"})
@@ -819,7 +941,7 @@ def test_disconnect_revokes_the_named_account_only(client):
 
     assert response.json() == {"disconnected": True, "remoteRevokeSkipped": False}
     revoke_remote.assert_awaited_once_with(credential)
-    revoke_local.assert_awaited_once_with("fake", "ACC2")
+    revoke_local.assert_awaited_once_with("fake", "ACC2", revoked_by="owner")
 
 
 @pytest.mark.parametrize("method, url", _ACCOUNT_ROUTES)

@@ -1,6 +1,12 @@
 """Shared utilities for DLT ingestion."""
 
 import json
+import os
+import time
+from collections.abc import Callable
+from typing import TypeVar
+
+_T = TypeVar("_T")
 
 # A dlt source sets this attribute to opt into the "document" ingestion path:
 # each row becomes a text document that flows through normal cognify (LLM entity
@@ -75,10 +81,86 @@ def guarded_rows(rows, check_active=None):
         yield row
 
 
+def with_retries(
+    attempt: Callable[[], _T],
+    *,
+    retry_on: tuple[type[BaseException], ...],
+    delay: Callable[[BaseException, int], float | None],
+    attempts: int,
+    check_active: Callable[[], None] | None = None,
+    sleep: Callable[[float], None] | None = None,
+) -> _T:
+    """Run one provider request, retried by the connector's own policy.
+
+    ``attempt`` makes one request. An error of a ``retry_on`` class is retried after
+    ``delay(error, number)`` seconds unless it was the last of ``attempts`` or ``delay`` answers
+    ``None``; then it is raised as it is. ``check_active`` runs before every wait and every
+    retry, never before a first attempt, and what it raises propagates as it is.
+    """
+    for number in range(attempts):
+        if number and check_active is not None:
+            check_active()
+        try:
+            return attempt()
+        except retry_on as error:
+            if number == attempts - 1:
+                raise
+            wait = delay(error, number)
+            if wait is None:
+                raise
+        if check_active is not None:
+            check_active()
+        (sleep or time.sleep)(wait)
+    raise ValueError("with_retries needs at least one attempt")
+
+
 def document_source_tag(item) -> str | None:
     """Return the document-source tag a dlt source opted into, else ``None``."""
     tag = getattr(item, DOCUMENT_SOURCE_ATTR, None)
     return tag if isinstance(tag, str) and tag else None
+
+
+def document_write_disposition(source) -> str | None:
+    """The write disposition a document source runs under when the caller names none.
+
+    ``None``, each resource's own, when every selected resource declares
+    ``merge``; ``"replace"`` otherwise. dlt reports a resource that declares
+    nothing as ``append``, the same as one that declares it, so only a declared
+    ``merge`` can be told apart and kept; ``append`` needs the caller's argument.
+    """
+    selected = getattr(source, "selected_resources", None)
+    resources = list(selected.values()) if selected is not None else [source]
+    return None if resources and all(_declares_merge(r) for r in resources) else "replace"
+
+
+def _declares_merge(resource) -> bool:
+    disposition = getattr(resource, "write_disposition", None)
+    if isinstance(disposition, dict):  # merge with a strategy: {"disposition": "merge", ...}
+        disposition = disposition.get("disposition")
+    return disposition == "merge"
+
+
+def apply_dlt_runtime_defaults() -> None:
+    """Set cognee's defaults for dlt's own settings in the environment.
+
+    Called before cognee builds a dlt source or pipeline: dlt reads its telemetry
+    setting once, when its runtime first starts (``sql_database()`` starts it), and
+    ``dlt.config`` set afterwards does not reach it, so only the environment, set
+    first, does. A value already in the environment is kept; one set only in dlt's
+    ``config.toml`` is not seen (reading it would start the runtime) and is
+    overridden. A process that used dlt before cognee's first dlt call has already
+    started dlt's telemetry: set ``RUNTIME__DLTHUB_TELEMETRY=false`` yourself.
+
+    - ``RUNTIME__DLTHUB_TELEMETRY=false`` when ``TELEMETRY_DISABLED`` is set, so
+      cognee's switch also stops the events dlt posts to dltHub on every run.
+    - ``LOAD__DELETE_COMPLETED_JOBS=true``: dlt keeps every completed load package,
+      with the rendered text of every row, under its pipelines directory, outside
+      cognee's data root, so a forgotten or deleted record stays on disk. A failed
+      package is kept either way, for the retry.
+    """
+    if os.getenv("TELEMETRY_DISABLED"):
+        os.environ.setdefault("RUNTIME__DLTHUB_TELEMETRY", "false")
+    os.environ.setdefault("LOAD__DELETE_COMPLETED_JOBS", "true")
 
 
 def metadata_source(metadata) -> str | None:

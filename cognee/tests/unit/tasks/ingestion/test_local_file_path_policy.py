@@ -132,6 +132,29 @@ def test_an_explicit_variable_is_honoured_everywhere(
         assert local_file_paths_accepted() is configured
 
 
+@pytest.mark.parametrize(
+    "configured,origin,reason",
+    [
+        (None, ORIGIN_API, "ACCEPT_LOCAL_FILE_PATH is unset"),
+        ("false", ORIGIN_SDK, "ACCEPT_LOCAL_FILE_PATH=false"),
+    ],
+)
+def test_the_refusal_says_how_to_allow_paths(
+    monkeypatch, fresh_settings, configured, origin, reason
+):
+    if configured is not None:
+        monkeypatch.setenv(VARIABLE, configured)
+    fresh_settings()
+
+    with operation_origin_scope(origin), pytest.raises(IngestionError) as error:
+        storage_module.require_server_path_access()
+
+    assert error.value.status_code == 403
+    assert reason in error.value.message
+    assert "Set ACCEPT_LOCAL_FILE_PATH=true" in error.value.message
+    assert "upload the file instead" in error.value.message
+
+
 # --- every path form is refused over the API, before anything is read ------
 
 
