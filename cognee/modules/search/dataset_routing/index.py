@@ -28,7 +28,6 @@ from cognee.shared.logging_utils import get_logger
 
 from .store import (
     DATASET_ROUTE_COLLECTION,
-    DatasetRoute,
     get_dataset_route_engine,
     routing_width_matches,
 )
@@ -76,10 +75,13 @@ async def sync_dataset_routes(
     configured model's; the rows wait for a prune.
 
     The rows are not embedded again: ``index_engine`` is the dataset's own
-    vector store, where the index build just embedded these summaries, and
-    their vectors are read back from it and written as they are. One embedding
-    model for the deployment is what makes the copy correct, and it is the
-    assumption routing rests on anyway (the width check above is its guard).
+    vector store, where the index build just embedded these summaries, and the
+    rows it stored for them are copied as they are, vector and payload, so a
+    routing row is the index row of every other ``<Type>_<field>`` collection
+    (the adapter's ``IndexSchema``; ``upsert_raw_vectors`` with no payload
+    schema stores that shape). One embedding model for the deployment is what
+    makes the copy correct, and it is the assumption routing rests on anyway
+    (the width check above is its guard).
     """
     if not backend_access_control_enabled():
         return 0
@@ -103,24 +105,22 @@ async def sync_dataset_routes(
     if stale:
         await engine.delete_data_points(DATASET_ROUTE_COLLECTION, stale)
     if changed:
-        vectors = await _index_vectors(index_engine, dataset_id, changed)
+        rows = await _index_rows(index_engine, dataset_id, changed)
         try:
             await engine.upsert_raw_vectors(
                 DATASET_ROUTE_COLLECTION,
                 [
                     {
                         "id": summary.id,
-                        "vector": vectors[str(summary.id)],
-                        "payload": DatasetRoute(
-                            id=summary.id,
-                            text=summary.text,
-                            dataset_id=dataset_id,
-                            is_root=summary.is_root,
-                        ).model_dump(),
+                        "vector": rows[str(summary.id)]["vector"],
+                        "payload": {
+                            key: value
+                            for key, value in rows[str(summary.id)].items()
+                            if key != "vector"
+                        },
                     }
                     for summary in changed
                 ],
-                payload_schema=DatasetRoute,
             )
         except NotImplementedError:
             logger.warning(
@@ -139,10 +139,14 @@ async def sync_dataset_routes(
     return len(changed) + len(stale)
 
 
-async def _index_vectors(
+async def _index_rows(
     index_engine, dataset_id: str, summaries: list[GlobalContextSummary]
-) -> dict[str, list[float]]:
-    """The vectors the index build stored for ``summaries``, by id, from the dataset's store."""
+) -> dict[str, dict]:
+    """The rows the index build stored for ``summaries``, by id, from the dataset's store.
+
+    Each is the stored payload with the vector under ``"vector"``, as
+    ``retrieve(..., include_vector=True)`` returns it.
+    """
     from cognee.tasks.memify.global_context_index.constants import (
         GLOBAL_CONTEXT_SUMMARY_COLLECTION,
     )
@@ -152,15 +156,15 @@ async def _index_vectors(
         [str(summary.id) for summary in summaries],
         include_vector=True,
     )
-    vectors = {str(row.id): row.payload["vector"] for row in rows}
-    missing = [str(summary.id) for summary in summaries if str(summary.id) not in vectors]
+    stored = {str(row.id): row.payload for row in rows}
+    missing = [str(summary.id) for summary in summaries if str(summary.id) not in stored]
     if missing:
         raise LookupError(
             f"Dataset routing: {len(missing)} index row(s) of dataset {dataset_id} have no "
             f"vector in {GLOBAL_CONTEXT_SUMMARY_COLLECTION}; the index is written before it "
             "is mirrored, so the routing rows copy its vectors instead of embedding again."
         )
-    return vectors
+    return stored
 
 
 async def remove_dataset_routes(dataset_id: UUID | str, document_ids: list[UUID | str]) -> None:
@@ -168,8 +172,9 @@ async def remove_dataset_routes(dataset_id: UUID | str, document_ids: list[UUID 
 
     Called with one document when it, or its memory, is deleted, and with all
     of them when the dataset is. The root goes either way: its text names every
-    document, so the index drops it with any of them, and the next build
-    writes both anew.
+    document, so the index drops it with any of them. After a document deletion
+    the index writes a ``from_entities`` root again at once and mirrors it here
+    (``rebuild_document_index_root``); the buckets wait for the next build.
     """
     if not backend_access_control_enabled():
         return

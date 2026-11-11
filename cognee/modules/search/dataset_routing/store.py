@@ -33,25 +33,11 @@ from contextvars import copy_context
 
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.vector.get_vector_engine import _VectorEngineHandle
-from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import get_logger
 
 DATASET_ROUTE_COLLECTION = "DatasetRoute_text"
 
 logger = get_logger("dataset_routing")
-
-
-class DatasetRoute(DataPoint):
-    """One routing row: a global context index summary, tagged with its dataset.
-
-    It keeps the id of the ``GlobalContextSummary`` it mirrors, so the read path
-    derives every row id it may score from the dataset and document ids alone.
-    """
-
-    text: str
-    dataset_id: str
-    is_root: bool = False
-    metadata: dict = {"index_fields": ["text"]}
 
 
 class _DatasetRouteEngineHandle(_VectorEngineHandle):

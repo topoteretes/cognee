@@ -312,9 +312,13 @@ class TestSessionQaVectorHelpers:
             _get_vector_engine,
         )
 
-        await delete_session_qa_vectors(user_id="u1", session_id="s1")
+        await delete_session_qa_vectors([("u1", "s1"), ("u2", "s2")])
 
-        assert vector_engine.remove_tags_call == [session_scope_tag("u1", "s1")]
+        # One call for every session, so the store is scanned once.
+        assert vector_engine.remove_tags_call == [
+            session_scope_tag("u1", "s1"),
+            session_scope_tag("u2", "s2"),
+        ]
 
 
 class TestRankerRelevance:

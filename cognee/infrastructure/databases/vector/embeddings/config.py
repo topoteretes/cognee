@@ -43,12 +43,16 @@ class KeylessEmbedderNotInstalledError(CogneeConfigurationError):
         )
 
 
+@lru_cache
 def _resolve_embedding_dimensions(provider: str | None, model: str | None) -> int | None:
     """Best-effort lookup of the embedding dimensionality for a provider+model.
 
     Returns the dimension count if we can confidently determine it, or None
     if the model is unknown to litellm and fastembed. Defensive against
     optional-dependency and registry-schema variations — never raises.
+
+    Cached per (provider, model): the fastembed and litellm registries are static
+    for the life of the process, and every embedding-engine lookup resolves this.
     """
     if not provider or not model:
         return None

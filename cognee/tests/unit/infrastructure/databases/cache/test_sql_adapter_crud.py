@@ -314,6 +314,58 @@ async def test_delete_session_does_not_touch_other_sessions(adapter):
     assert len(await adapter.get_all_qa_entries("u2", "s1")) == 1
 
 
+@pytest.mark.asyncio
+async def test_delete_sessions_deletes_each_pair_whole_and_nothing_else(adapter):
+    """One flag per pair: QA, trace and context rows all count, an expired row does not."""
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    await adapter.append_agent_trace_step(
+        "u1", "s2", trace_id="t1", origin_function="f", status="success"
+    )
+    await adapter.create_session_context_entry("u2", "s3", {"id": "c1", "kind": "context"})
+    await adapter.create_qa_entry("u1", "expired", "Q", "C", "A", qa_id="id2")
+    await _backdate_expirations(
+        adapter, cache_qa_entries, _past(), user_id="u1", session_id="expired"
+    )
+    await adapter.create_qa_entry("u1", "kept", "Q", "C", "A", qa_id="id3")
+    await adapter.create_qa_entry("u2", "s1", "Q", "C", "A", qa_id="id4")
+
+    existed = await adapter.delete_sessions(
+        [("u1", "s1"), ("u1", "s2"), ("u2", "s3"), ("u1", "expired"), ("u1", "missing")]
+    )
+
+    assert existed == [True, True, True, False, False]
+    assert sorted(await adapter.list_session_ids("u1")) == ["kept"]
+    assert await adapter.list_session_ids("u2") == ["s1"]
+    assert await _fetch_expirations(adapter, cache_qa_entries, session_id="expired") == []
+
+
+@pytest.mark.asyncio
+async def test_delete_values_deletes_only_the_given_keys(adapter):
+    for key in ("k1", "k2", "k3"):
+        await adapter.set_value(key, "v")
+
+    await adapter.delete_values(["k1", "k2", "absent"])
+
+    assert await adapter.get_value("k1") is None
+    assert await adapter.get_value("k2") is None
+    assert await adapter.get_value("k3") == "v"
+
+
+@pytest.mark.asyncio
+async def test_list_session_ids_lists_only_the_users_sessions(adapter):
+    """QA, trace and context rows all count; other users' sessions do not."""
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    await adapter.append_agent_trace_step(
+        "u1", "s2", trace_id="t1", origin_function="f", status="success"
+    )
+    await adapter.create_session_context_entry("u1", "s3", {"id": "c1", "kind": "context"})
+    await adapter.create_qa_entry("u1", "s1", "Q2", "C", "A", qa_id="id2")
+    await adapter.create_qa_entry("u2", "s4", "Q", "C", "A", qa_id="id3")
+
+    assert sorted(await adapter.list_session_ids("u1")) == ["s1", "s2", "s3"]
+    assert await adapter.list_session_ids("nobody") == []
+
+
 # --------------------------------------------------------------------------- #
 # Agent traces
 # --------------------------------------------------------------------------- #

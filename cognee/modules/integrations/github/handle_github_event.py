@@ -28,6 +28,7 @@ from cognee.modules.integrations.credentials import (
     revoke_credential_by_account,
 )
 from cognee.modules.integrations.github.sync import sync_repositories
+from cognee.modules.integrations.ingestion import sync_is_paused
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,9 @@ async def handle_github_event(raw_body: bytes, headers: dict[str, str]) -> None:
             event,
             installation_id,
         )
+        return
+
+    if await sync_is_paused(_PROVIDER, credential, f"{event} delivery"):
         return
 
     if event == "installation_repositories":

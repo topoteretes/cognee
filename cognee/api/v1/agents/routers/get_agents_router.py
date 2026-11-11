@@ -274,14 +274,17 @@ def get_agents_router() -> APIRouter:
         """Deactivate an agent connection by name.
 
         The connection is identified by agent_session_name plus the authenticated user's id.
-        Returns activeAgents, the number of connections still active in this process;
-        unregistering a name that is not active leaves that count unchanged. With
-        COGNEE_AGENT_MODE=true the server shuts itself down within 60 seconds once the
-        count reaches zero.
+        Returns activeAgents, the number of the caller's own connections still active in this
+        process; other users' connections are never counted. Unregistering a name that is not
+        active leaves that count unchanged. With COGNEE_AGENT_MODE=true the server shuts
+        itself down within 60 seconds once no connection of any user is active.
 
         ## Request Parameters
         - **agent_session_name** (str): The name used when registering the connection. Combined with
           the authenticated user's ID to identify which connection to deactivate.
+
+        ## Response
+        - **activeAgents** (int): The caller's own connections still active in this process.
         """
         count = await unregister_agent(user, request)
         return AgentModeDTO(active_agents=count)

@@ -53,10 +53,14 @@ def get_add_router() -> APIRouter:
             examples=[[]],
             description=(
                 "Data given as strings instead of uploads, one entry each: raw text to "
-                "ingest, a local file or directory path on the server's filesystem "
-                "(requires ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
-                "ALLOW_HTTP_REQUESTS), or a GitHub/GitLab repository URL, which is "
-                "shallow-cloned and indexed as a code graph by cognify. Combined with "
+                "ingest, a local file or directory path on the server's filesystem or an "
+                "s3:// object read with the server's AWS credentials (both require "
+                "ACCEPT_LOCAL_FILE_PATH), a web URL to fetch, a GitHub/GitLab repository URL, "
+                "which is shallow-cloned and indexed as a code graph by cognify (both "
+                "require ALLOW_HTTP_REQUESTS=true on the server), or a database "
+                "connection string (postgresql://, mysql://, sqlite:///, ...), refused "
+                "over the API with 422 DatabaseIngestionDisabled unless the server sets "
+                "ALLOW_DATABASE_INGESTION=true. Combined with "
                 "'data': uploads come first, then these entries; labels and "
                 "external_metadata pair with that combined order. Empty entries are "
                 "ignored."
@@ -119,9 +123,18 @@ def get_add_router() -> APIRouter:
         - **data** (List[UploadFile]): Files to upload.
         - **raw_data** (Optional[List[str]]): String inputs, one entry each:
           - Raw text to ingest
-          - A local file or directory path on the server (requires ACCEPT_LOCAL_FILE_PATH)
-          - A web URL, fetched as a page (requires ALLOW_HTTP_REQUESTS)
+          - A file, directory or s3:// path read with the server's own access: refused
+            over HTTP unless ACCEPT_LOCAL_FILE_PATH=true (then COGNEE_ALLOWED_LOCAL_FILE_ROOTS
+            limits where local paths may point)
+          - A web URL, fetched as a page (requires ALLOW_HTTP_REQUESTS=true on the server)
           - A GitHub/GitLab repository URL, shallow-cloned and indexed as a code graph
+            (same requirement)
+          - A database connection string (postgresql://, mysql://, sqlite:///, ...),
+            read with the server's own network position. Disabled over the API by
+            default: the request fails with 422 DatabaseIngestionDisabled unless the
+            server sets ALLOW_DATABASE_INGESTION=true (the SDK, CLI and MCP server
+            ingest databases without the setting). Cognee's own databases are refused
+            either way, and a sqlite:/// path must be an existing file.
           At least one of data or raw_data is required. Uploads come first, then
           raw_data entries; labels and external_metadata pair with that combined order.
         - **labels** (Optional[str]): JSON array of per-item labels, e.g.
@@ -154,6 +167,8 @@ def get_add_router() -> APIRouter:
           version to `PATCH /api/v1/update?data_id=...&dataset_id=...` so the document
           keeps its id. Re-adding identical content is a no-op, not an error.
         - **403 Forbidden**: User doesn't have permission to add to dataset
+          or a server-side path in raw_data while ACCEPT_LOCAL_FILE_PATH is unset or false
+          (IngestionError naming the setting)
 
         ## Notes
         - To add data to datasets not owned by the user, use dataset_id (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)
