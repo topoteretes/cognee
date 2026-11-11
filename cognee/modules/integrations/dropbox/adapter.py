@@ -114,10 +114,17 @@ class DropboxIntegration(OAuthIntegration):
     async def sync_now(self, credential: IntegrationCredential) -> None:
         await sync_dropbox(credential)
 
+    def invalid_resource_ids(self, resource_ids: list[str]) -> list[str]:
+        """Ids that are not Dropbox folder ids (``id:...``); the source refuses the same ones."""
+        from cognee.tasks.ingestion.connectors.dropbox import valid_folder_id
+
+        return [resource_id for resource_id in resource_ids if not valid_folder_id(resource_id)]
+
     async def validate_resource_selection(
         self, credential: IntegrationCredential, resource_ids: list[str]
     ) -> None:
-        """Folder ids only, and no folder inside another: its files would be two documents."""
+        """No folder inside another: its files would be two documents. The id shape is
+        checked before this, by ``invalid_resource_ids``."""
         folder_ids = check_selection_shape(resource_ids)
         if len(folder_ids) > 1:
             await refuse_nested_selection(

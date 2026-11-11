@@ -10,6 +10,7 @@ need to call the provider's API.
 """
 
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, Final, Literal
 from uuid import UUID
@@ -17,6 +18,7 @@ from uuid import UUID
 from sqlalchemy import and_, or_, select, update
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.integrations.crypto import decrypt_credentials, encrypt_credentials
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 
@@ -136,6 +138,18 @@ class CrossUserConflictError(Exception):
     """
 
 
+# One lock per connection, held by every write of ``provider_metadata``: each one
+# reads the row, merges in Python and writes the whole column back, so writes that
+# overlapped kept only the last one (a thread mark, a removed message, ``uninstalled_at``).
+# The row is also read ``FOR UPDATE``, which serializes writers across processes on
+# Postgres; SQLite has no row locks, so there it holds within one process.
+_metadata_locks: dict[tuple[str, str], LoopAgnosticLock] = {}
+
+
+def _metadata_lock(provider: str, provider_account_id: Any) -> LoopAgnosticLock:
+    return _metadata_locks.setdefault((provider, str(provider_account_id)), LoopAgnosticLock())
+
+
 async def upsert_credential(
     *,
     provider: str,
@@ -183,9 +197,10 @@ async def upsert_credential(
     ``None`` still means "no workspace owns this". Keys an adapter stops
     emitting now survive, so an adapter that builds its dict conditionally
     has to write the key with a null rather than leave it out. And a revoked
-    row is reused rather than replaced (see below), so a new owner connecting
-    a previously-connected account inherits its metadata, which for the
-    allowlist means starting restricted rather than open.
+    row is reused rather than replaced (see below); the merge keeps its metadata
+    only for the same owner. Another owner connecting it starts from what the
+    installation provides alone, as a first install does, so no selection,
+    setting or sync history of the previous owner reaches them.
 
     The other optional arguments (``account_label``, ``auth_type``,
     ``scopes``, ``token_expires_at``) are still assigned unconditionally: a
@@ -202,35 +217,46 @@ async def upsert_credential(
     ciphertext, nonce, encryption_version, key_id = encrypt_credentials(token_payload)
 
     engine = get_relational_engine()
-    async with engine.get_async_session() as db:
+    async with (
+        _metadata_lock(provider, provider_account_id),
+        engine.get_async_session() as db,
+    ):
         result = await db.execute(
-            select(IntegrationCredential).where(
+            select(IntegrationCredential)
+            .where(
                 IntegrationCredential.provider == provider,
                 IntegrationCredential.provider_account_id == provider_account_id,
             )
+            .with_for_update()
         )
         credential = result.scalar_one_or_none()
 
-        if credential is not None and credential.status == STATUS_ACTIVE:
-            existing_owner = (
-                credential.workspace_id if conflict_workspace_id is not None else credential.user_id
-            )
-            new_owner = conflict_workspace_id if conflict_workspace_id is not None else user_id
-            if existing_owner != new_owner:
-                logger.warning(
-                    "Refused %s reconnect: account %s already active for owner %s, not %s",
-                    provider,
-                    provider_account_id,
-                    existing_owner,
-                    new_owner,
-                )
-                raise CrossUserConflictError(provider_account_id)
-
+        new_owner = conflict_workspace_id if conflict_workspace_id is not None else user_id
         if credential is None:
             credential = IntegrationCredential(
                 provider=provider, provider_account_id=provider_account_id
             )
             db.add(credential)
+        else:
+            existing_owner = (
+                credential.workspace_id if conflict_workspace_id is not None else credential.user_id
+            )
+            if existing_owner != new_owner:
+                if credential.status == STATUS_ACTIVE:
+                    logger.warning(
+                        "Refused %s reconnect: account %s already active for owner %s, not %s",
+                        provider,
+                        provider_account_id,
+                        existing_owner,
+                        new_owner,
+                    )
+                    raise CrossUserConflictError(provider_account_id)
+                # Another owner takes over this account's revoked connection and starts as
+                # a first install does: everything kept on the row (the selection, settings,
+                # sync history, a provider's own markers) was the previous owner's.
+                credential.provider_metadata = {}
+                credential.last_synced_at = None
+                credential.sync_status = None
 
         credential.user_id = user_id
         if not isinstance(workspace_id, _Unset):
@@ -239,10 +265,7 @@ async def upsert_credential(
         credential.auth_type = auth_type
         credential.scopes = scopes
         if not isinstance(provider_metadata, _Unset):
-            # Best-effort under concurrency: this read-modify-write and
-            # update_provider_metadata's both run unlocked in separate
-            # transactions, so a reconnect racing a settings write can still
-            # lose one of them. Both windows are a single statement wide.
+            # Under the connection's metadata lock, like every other writer.
             credential.provider_metadata = {
                 **(credential.provider_metadata or {}),
                 **(provider_metadata or {}),
@@ -468,21 +491,46 @@ async def update_provider_metadata(
     ``None`` if no credential exists for that account — callers translate
     that into a 404, this module has no HTTP opinions of its own.
     """
+    return await change_provider_metadata(
+        provider, provider_account_id, lambda _current: metadata_patch
+    )
+
+
+async def change_provider_metadata(
+    provider: str,
+    provider_account_id: str,
+    change: Callable[[dict[str, Any]], dict[str, Any] | None],
+) -> IntegrationCredential | None:
+    """Merge the patch ``change`` computes from the stored ``provider_metadata``.
+
+    For a write that depends on what is stored (adding to a list, keeping the first
+    value): ``change`` gets the current metadata under the connection's lock, so a
+    concurrent write is never computed from a stale copy. A falsy patch writes nothing.
+    Returns ``None`` when no credential exists for that account.
+    """
     engine = get_relational_engine()
-    async with engine.get_async_session() as db:
+    async with (
+        _metadata_lock(provider, provider_account_id),
+        engine.get_async_session() as db,
+    ):
         result = await db.execute(
-            select(IntegrationCredential).where(
+            select(IntegrationCredential)
+            .where(
                 IntegrationCredential.provider == provider,
                 IntegrationCredential.provider_account_id == provider_account_id,
             )
+            .with_for_update()
         )
         credential = result.scalar_one_or_none()
         if credential is None:
             return None
 
-        credential.provider_metadata = {**(credential.provider_metadata or {}), **metadata_patch}
-        await db.commit()
-        await db.refresh(credential)
+        current = dict(credential.provider_metadata or {})
+        patch = change(current)
+        if patch:
+            credential.provider_metadata = {**current, **patch}
+            await db.commit()
+            await db.refresh(credential)
         return credential
 
 
@@ -541,12 +589,17 @@ async def record_sync_result(
         ran_for_owner = owner_principal_id(credential)
 
         engine = get_relational_engine()
-        async with engine.get_async_session() as db:
+        async with (
+            _metadata_lock(provider, provider_account_id),
+            engine.get_async_session() as db,
+        ):
             result = await db.execute(
-                select(IntegrationCredential).where(
+                select(IntegrationCredential)
+                .where(
                     IntegrationCredential.provider == provider,
                     IntegrationCredential.provider_account_id == provider_account_id,
                 )
+                .with_for_update()
             )
             current = result.scalar_one_or_none()
             if current is None:

@@ -32,6 +32,7 @@ from fastapi import Request
 from pydantic_settings import BaseSettings
 
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
+from cognee.modules.users.models import User
 
 
 class IntegrationSettings(BaseSettings):
@@ -186,6 +187,14 @@ class OAuthIntegration(ABC):
         """Return provider resources for a generic picker, or ``None``."""
         return None
 
+    def invalid_resource_ids(self, resource_ids: list[str]) -> list[str]:
+        """The ids of a saved selection this provider can never sync, refused with a 422.
+
+        A shape check, made before the selection is stored: an id that can never be valid
+        would fail every later sync. Whether the resource exists is the sync's to find out.
+        """
+        return []
+
     async def validate_resource_selection(
         self, credential: IntegrationCredential, resource_ids: list[str]
     ) -> None:
@@ -200,6 +209,32 @@ class OAuthIntegration(ABC):
     def dataset_name(self, credential: IntegrationCredential) -> str | None:
         """Return the provider dataset to delete on an opted-in disconnect."""
         return None
+
+    def data_deleted_after(self, credential: IntegrationCredential) -> datetime | None:
+        """When the data of a connection the provider ended is deleted, if that is scheduled.
+
+        Default ``None``: an ended connection keeps its data. Slack schedules a deletion 14
+        days after an uninstall; the connection status shows it so the page can warn the
+        owner before it happens.
+        """
+        return None
+
+    def data_deleted_at(self, credential: IntegrationCredential) -> datetime | None:
+        """When the scheduled deletion of an ended connection's data ran, if it did.
+
+        Default ``None``. With :meth:`data_deleted_after` it tells the owner whether the
+        data is about to go or is gone.
+        """
+        return None
+
+    async def forget_related_data(self, credential: IntegrationCredential, user: User) -> None:
+        """Delete what the provider's app stored for ``user`` outside ``dataset_name``.
+
+        Called on an opted-in disconnect, after the dataset is deleted. Default
+        no-op. Override where the app writes memory of its own (Slack's remembered
+        messages); delete only what ``user`` owns.
+        """
+        return
 
     async def revoke_remote(self, credential: IntegrationCredential) -> None:
         """Best-effort remote token revoke, called on disconnect.
