@@ -32,6 +32,7 @@ Install from PyPI; you do **not** need to clone the community monorepo to use th
 | Linear | bundled, no extra |
 | Apollo | bundled, no extra |
 | Asana | bundled, no extra |
+| Figma | bundled, no extra |
 | OneNote | bundled, no extra |
 | Obsidian (local vault, SDK only) | bundled, no extra |
 
@@ -67,6 +68,7 @@ privacy notes: [Gmail](../../cognee/tasks/ingestion/connectors/gmail.md),
 [Notion](../../cognee/tasks/ingestion/connectors/notion.md),
 [Apollo](../../cognee/tasks/ingestion/connectors/apollo.md),
 [Asana](../../cognee/tasks/ingestion/connectors/asana.md),
+[Figma](../../cognee/tasks/ingestion/connectors/figma.md),
 [OneNote](../../cognee/tasks/ingestion/connectors/onenote.md) and
 [Obsidian](../../cognee/tasks/ingestion/connectors/obsidian.md). The other connectors are documented
 in their community packages.
