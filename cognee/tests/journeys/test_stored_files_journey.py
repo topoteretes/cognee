@@ -1,0 +1,161 @@
+"""Journey: no stored file outlives the document that owned it.
+
+Cognee keeps a document's bytes under the data root: the original, and the
+text a loader derived from it. ``forget()`` removes the files a ``Data`` row
+points at, so a file no row points at would stay on disk for good, with the
+content of a document the user updated or deleted. After every step here the
+data root holds the current version of the document and nothing else: an
+update removes the version it replaced, and an update that does not publish
+removes what it staged. A file another document still uses is kept.
+"""
+
+from __future__ import annotations
+
+import io
+from pathlib import Path
+
+import pytest
+from starlette.datastructures import UploadFile
+
+import cognee
+from cognee.tests.journeys import _support, mock_ai
+
+DATASET = "journey_stored_files"
+OTHER_DATASET = "journey_stored_files_other"
+
+CONDUCTORS = {"v1": "Yusuf Haldane", "v2": "Ingrid Solvay", "v3": "Olamide Farquhar"}
+
+
+def _document(version: str) -> str:
+    return (
+        "Title: Saltmarsh Choir\n\nThe Saltmarsh Choir rehearses in the Corn Exchange under "
+        f"conductor {CONDUCTORS[version]}."
+    )
+
+
+def _upload(version: str, filename: str = "choir.txt") -> UploadFile:
+    """The document as an API upload: stored as an original plus its derived text."""
+    return UploadFile(file=io.BytesIO(_document(version).encode()), filename=filename)
+
+
+def _stored(root: Path) -> dict[str, str]:
+    """Every file under the data root, by path, with the version whose text it holds."""
+    stored = {}
+    for path in sorted((root / "data").rglob("*")):
+        if path.is_file():
+            text = path.read_text(errors="replace")
+            stored[str(path)] = next(
+                (version for version, name in CONDUCTORS.items() if name in text), "other"
+            )
+    return stored
+
+
+def _versions(root: Path) -> set[str]:
+    return set(_stored(root).values())
+
+
+async def _only_row(dataset_id, user):
+    [row] = await cognee.datasets.list_data(dataset_id, user)
+    return row
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+@pytest.mark.parametrize("as_upload", [False, True], ids=["text", "upload"])
+@pytest.mark.parametrize(
+    "chunk_level_diff, status", [(True, "incremental"), (False, "full_rebuild")]
+)
+async def test_an_update_leaves_only_the_current_version_on_disk(
+    clean_env, default_user, as_upload, chunk_level_diff, status
+):
+    def source(version):
+        return _upload(version) if as_upload else _document(version)
+
+    result = await cognee.remember(source("v1"), dataset_name=DATASET, self_improvement=False)
+    dataset_id = _support.as_uuid(result.dataset_id)
+    row = await _only_row(dataset_id, default_user)
+    assert _versions(clean_env) == {"v1"}
+    # An upload keeps two files, its original and the derived text; raw text is one.
+    assert len(_stored(clean_env)) == (2 if as_upload else 1)
+
+    for version in ("v2", "v3"):
+        updated = await cognee.update(
+            data_id=row.id,
+            data=source(version),
+            dataset_id=dataset_id,
+            user=default_user,
+            chunk_level_diff=chunk_level_diff,
+        )
+        assert updated["status"] == status
+        assert _versions(clean_env) == {version}, (
+            f"after the update to {version} the data root holds {_stored(clean_env)}"
+        )
+        assert len(_stored(clean_env)) == (2 if as_upload else 1)
+
+    # The row reads back from the files that are left.
+    row = await _only_row(dataset_id, default_user)
+    assert CONDUCTORS["v3"].lower() in _support.stored_text(row)
+
+    await cognee.forget(data_id=row.id, dataset_id=dataset_id, user=default_user)
+    assert _stored(clean_env) == {}, "forget() left a stored file behind"
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_an_update_that_does_not_publish_leaves_nothing_it_staged(clean_env, default_user):
+    result = await cognee.remember(_upload("v1"), dataset_name=DATASET, self_improvement=False)
+    dataset_id = _support.as_uuid(result.dataset_id)
+    row = await _only_row(dataset_id, default_user)
+    before = _stored(clean_env)
+    assert set(before.values()) == {"v1"} and len(before) == 2
+
+    # The same content again: nothing to publish, so the staged copy goes.
+    unchanged = await cognee.update(
+        data_id=row.id, data=_upload("v1"), dataset_id=dataset_id, user=default_user
+    )
+    assert unchanged["status"] == "unchanged"
+    assert _stored(clean_env) == before
+
+    # New content whose extraction fails: the document stays on v1, and the
+    # v2 content the update staged is not left on disk.
+    injector = mock_ai.inject_llm_failure(RuntimeError("injected LLM outage"))
+    try:
+        injector.armed = True
+        with pytest.raises(RuntimeError, match="injected LLM outage"):
+            await cognee.update(
+                data_id=row.id, data=_upload("v2"), dataset_id=dataset_id, user=default_user
+            )
+        assert injector.trips >= 1
+    finally:
+        injector.uninstall()
+    assert _stored(clean_env) == before
+
+    await cognee.forget(data_id=row.id, dataset_id=dataset_id, user=default_user)
+    assert _stored(clean_env) == {}
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_a_file_another_document_still_uses_is_kept(clean_env, default_user):
+    # Identical text in two datasets is one content-addressed file with two rows.
+    first = await cognee.remember(_document("v1"), dataset_name=DATASET, self_improvement=False)
+    second = await cognee.remember(
+        _document("v1"), dataset_name=OTHER_DATASET, self_improvement=False
+    )
+    dataset_id, other_id = _support.as_uuid(first.dataset_id), _support.as_uuid(second.dataset_id)
+    row = await _only_row(dataset_id, default_user)
+    other_row = await _only_row(other_id, default_user)
+    assert row.raw_data_location == other_row.raw_data_location
+    assert len(_stored(clean_env)) == 1
+
+    updated = await cognee.update(
+        data_id=row.id, data=_document("v2"), dataset_id=dataset_id, user=default_user
+    )
+    assert updated["status"] == "incremental"
+
+    # The first document moved on; the second still reads its v1 file.
+    assert _versions(clean_env) == {"v1", "v2"}
+    assert CONDUCTORS["v1"].lower() in _support.stored_text(other_row)
+
+    await cognee.forget(data_id=other_row.id, dataset_id=other_id, user=default_user)
+    assert _versions(clean_env) == {"v2"}

@@ -255,10 +255,11 @@ async def ingest_data(
 
         new_datapoints = []
         existing_data_points = []
-        # Originals replaced by a content-changed update: under content-
-        # addressed keys the old object is not overwritten, so it is reclaimed
-        # after the commit once nothing references it.
-        replaced_original_locations = []
+        # Stored files that re-ingested rows stop pointing at (the original and
+        # the text derived from it): a new file does not overwrite the old one
+        # unless it has the same name, so each is reclaimed after the commit
+        # once nothing references it.
+        replaced_locations = []
 
         if not isinstance(data, list):
             # Convert data to a list as we work with lists further down.
@@ -511,9 +512,15 @@ async def ingest_data(
                 new_content_hash = original_file_metadata["content_hash"]
                 content_changed = str(data_point.content_hash) != str(new_content_hash)
 
-                new_original_location = original_file_metadata["file_path"]
-                if content_changed and data_point.original_data_location != new_original_location:
-                    replaced_original_locations.append(data_point.original_data_location)
+                # The row is about to point at these two files. A file it points
+                # at now and will not afterwards is released after the commit:
+                # the stored original, and the text a loader derived from it.
+                for replaced, current in (
+                    (data_point.original_data_location, original_file_metadata["file_path"]),
+                    (data_point.raw_data_location, cognee_storage_file_path),
+                ):
+                    if replaced != current:
+                        replaced_locations.append(replaced)
 
                 # Rows are dataset-scoped (the startup migration backfills
                 # legacy rows). A row of another dataset can only reach this
@@ -643,9 +650,9 @@ async def ingest_data(
             _time.monotonic() - _loop4_start,
         )
 
-        # After the commit, the updated rows point at their new originals; the
-        # replaced objects are removed unless another row still shares them.
-        for replaced_location in replaced_original_locations:
+        # After the commit, the updated rows point at their new files; the
+        # replaced ones are removed unless another row still shares them.
+        for replaced_location in dict.fromkeys(replaced_locations):
             await db_engine.remove_data_file_if_unreferenced(replaced_location)
 
         _elapsed = _time.monotonic() - _store_start

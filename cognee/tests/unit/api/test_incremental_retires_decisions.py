@@ -21,6 +21,7 @@ def _patch_run(monkeypatch, bundle, write):
         return set()
 
     monkeypatch.setattr(incremental, "_stage_and_plan", AsyncMock(return_value=bundle))
+    monkeypatch.setattr(incremental, "_remove_unreferenced_files", AsyncMock())
     monkeypatch.setattr(incremental, "generate_pipeline_id", lambda *args: uuid4())
     monkeypatch.setattr(
         incremental,
@@ -35,6 +36,9 @@ def _patch_run(monkeypatch, bundle, write):
     return order
 
 
+CHANGED = {"status": "changed", "data_item": SimpleNamespace(), "staged": SimpleNamespace()}
+
+
 async def _run(dataset, user):
     return await incremental._run_incremental_update(
         uuid4(), "new text", dataset, user, None, None, None, None, None, None, None, "llm"
@@ -44,7 +48,7 @@ async def _run(dataset, user):
 @pytest.mark.asyncio
 async def test_decisions_are_retired_once_the_edit_is_written(monkeypatch):
     dataset, user = SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
-    order = _patch_run(monkeypatch, {"status": "changed"}, AsyncMock(return_value={}))
+    order = _patch_run(monkeypatch, CHANGED, AsyncMock(return_value={}))
 
     await _run(dataset, user)
 
@@ -54,9 +58,7 @@ async def test_decisions_are_retired_once_the_edit_is_written(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_failed_write_retires_nothing(monkeypatch):
     dataset, user = SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
-    order = _patch_run(
-        monkeypatch, {"status": "changed"}, AsyncMock(side_effect=RuntimeError("write failed"))
-    )
+    order = _patch_run(monkeypatch, CHANGED, AsyncMock(side_effect=RuntimeError("write failed")))
 
     with pytest.raises(RuntimeError, match="write failed"):
         await _run(dataset, user)

@@ -353,9 +353,13 @@ async def test_a_document_built_by_another_chunker_is_refused_by_name(monkeypatc
     async def _stored_chunks(*_args, **_kwargs):
         return stored
 
-    async def _stage(*_args, **_kwargs):
-        return SimpleNamespace(raw_data_location="/tmp/new.txt", content_hash="NEW")
+    staged = SimpleNamespace(raw_data_location="/tmp/new.txt", content_hash="NEW")
 
+    async def _stage(*_args, **_kwargs):
+        return staged
+
+    remove_files = AsyncMock()
+    monkeypatch.setattr(incremental, "_remove_unreferenced_files", remove_files)
     monkeypatch.setattr(incremental, "get_data", _get_data)
     monkeypatch.setattr(incremental, "_read_processed_text", _read)
     monkeypatch.setattr(incremental, "_get_stored_chunks", _stored_chunks)
@@ -378,6 +382,8 @@ async def test_a_document_built_by_another_chunker_is_refused_by_name(monkeypatc
 
     assert raised.value.reason is RefusalReason.UNSUPPORTED_CHUNKER
     assert "other_v1" in str(raised.value)
+    # Nothing will publish the staged content, so its files are not kept.
+    remove_files.assert_awaited_once_with(staged)
 
 
 @pytest.mark.asyncio
@@ -420,6 +426,8 @@ async def test_changed_content_with_changed_metadata_refuses_before_planning(mon
     monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock(return_value={}))
     monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=True))
     monkeypatch.setattr(incremental, "_stage_new_content", AsyncMock(return_value=staged))
+    remove_files = AsyncMock()
+    monkeypatch.setattr(incremental, "_remove_unreferenced_files", remove_files)
 
     with pytest.raises(IncrementalUpdateNotPossible) as raised:
         await incremental._stage_and_plan(
@@ -434,6 +442,7 @@ async def test_changed_content_with_changed_metadata_refuses_before_planning(mon
         )
 
     assert raised.value.reason is RefusalReason.UNSUPPORTED_METADATA
+    remove_files.assert_awaited_once_with(staged)
 
 
 @pytest.mark.asyncio
