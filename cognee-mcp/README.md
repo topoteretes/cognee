@@ -659,18 +659,20 @@ recall(query="What is the vault recovery phrase?", include_references=True)
 #
 #    Evidence:
 #    - chunk 1 of document text_<hash> (data_id: <uuid>, chunk_id: <uuid>): "The vault recovery phrase is ..."
-#      dataset: main_dataset (dataset_id=<uuid>)
+#      refs: data_id=<uuid>, dataset_id=<uuid>, document=text_<hash>
 forget(data_id="<uuid>", dataset_id="<uuid>")
 ```
 
 `include_references=True` shows the ids `forget` needs; without it the output is
-unchanged. The default answer cites its sources in an `Evidence:` block (best
-match first) and gets a `dataset:` line. CHUNKS, SUMMARIES, RAG and
-graph-completion hits get `refs: data_id=..., dataset_id=..., document=...`
-lines instead (at most five per hit, best match first). A chunk hit names the
-one item its text came from, while a graph-completion answer lists every item
-in its context, so use the default type or `search_type="CHUNKS"` to find one
-fact. Session hits are not stored data and carry no ids. With backend access
+unchanged. Every hit backed by stored data gets
+`refs: data_id=..., dataset_id=..., document=...` lines (at most five per hit,
+best match first), read from the hit's structured references; against a cognee
+release whose default answer carries none (up to 1.6.5) the data_ids its
+`Evidence:` block cites are used, paired with the hit's dataset. The default answer lists only the items it is grounded in (the ones its
+`Evidence:` block cites) and a chunk hit the one item its text came from, while
+a RAG or graph-completion answer lists every item in its context, so use the
+default type or `search_type="CHUNKS"` to find one fact. Session hits are not
+stored data and carry no ids. With backend access
 control off, ids are only shown when recall is scoped to a single dataset.
 
 `self_improvement` defaults to `True`; only an explicit `False` is forwarded, so

@@ -1,6 +1,15 @@
 from unittest.mock import MagicMock
+from uuid import UUID
 
-from cognee.modules.retrieval.hybrid.references import cite_hybrid_completions
+import pytest
+
+from cognee.modules.retrieval.hybrid.references import (
+    cite_hybrid_completions,
+    hybrid_cited_chunks,
+)
+from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+
+DATASET_ID = UUID("33333333-3333-3333-3333-333333333333")
 
 ANSWER = "Revenue grew 12 percent."
 
@@ -79,3 +88,60 @@ def test_batch_completion_without_matching_entry_is_untouched():
 
     assert "Evidence:" in cited[0]
     assert cited[1] == "second"
+
+
+def _doc_chunk(chunk_id, data_id, text):
+    chunk = MagicMock()
+    chunk.id = chunk_id
+    chunk.score = 0.2
+    chunk.payload = {
+        "document_name": f"{data_id}.txt",
+        "document_id": data_id,
+        "chunk_index": 0,
+        "text": text,
+    }
+    return chunk
+
+
+VAULT = _doc_chunk("chunk-vault", "data-vault", "The vault recovery phrase is amber-falcon-42.")
+COFFEE = _doc_chunk("chunk-coffee", "data-coffee", "The coffee machine is cleaned every Friday.")
+
+
+def test_cited_chunks_are_the_chunks_the_evidence_block_cites():
+    answer = "The vault recovery phrase is amber-falcon-42."
+    retrieved = {"chunks": [COFFEE, VAULT]}
+
+    assert hybrid_cited_chunks([answer], retrieved) == [VAULT]
+    assert "data_id: data-vault" in cite_hybrid_completions([answer], retrieved, enabled=True)[0]
+
+
+def test_cited_chunks_follow_each_batch_completion_and_skip_non_strings():
+    cited = hybrid_cited_chunks(
+        ["amber-falcon-42", {"structured": True}],
+        [{"chunks": [VAULT, COFFEE]}, {"chunks": [COFFEE]}],
+    )
+
+    assert cited == [VAULT]
+
+
+@pytest.mark.asyncio
+async def test_retriever_reports_cited_chunks_as_structured_evidence():
+    retriever = HybridRetriever(include_references=True)
+    retrieved = {"chunks": [COFFEE, VAULT]}
+    await retriever.append_references(["The vault recovery phrase is amber-falcon-42."], retrieved)
+
+    evidence = retriever.get_context_evidence(retrieved, dataset_id=DATASET_ID)
+
+    assert [(reference.data_id, reference.role) for reference in evidence] == [
+        ("data-vault", "supports_assertion")
+    ]
+    assert evidence[0].dataset_id == str(DATASET_ID)
+
+
+@pytest.mark.asyncio
+async def test_retriever_reports_no_evidence_without_include_references():
+    retriever = HybridRetriever(include_references=False)
+    retrieved = {"chunks": [VAULT]}
+    await retriever.append_references(["amber-falcon-42"], retrieved)
+
+    assert retriever.get_context_evidence(retrieved, dataset_id=DATASET_ID) == []
