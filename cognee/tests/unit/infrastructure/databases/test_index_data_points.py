@@ -14,29 +14,49 @@ class TestDataPoint(DataPoint):
 
 
 @pytest.mark.asyncio
-async def test_failed_batch_waits_for_sibling_writes():
-    completed = asyncio.Event()
-    started = asyncio.Event()
-
-    async def write(_index, _property, batch):
-        if batch[0].name == "fails":
-            await started.wait()
-            raise ValueError("write failed")
-        started.set()
-        await asyncio.sleep(0.01)
-        completed.set()
-
-    engine = AsyncMock()
-    engine.index_data_points.side_effect = write
-    points = [TestDataPoint(name=name) for name in ("fails", "finishes")]
+async def test_duplicate_ids_across_write_batches_merge_tags_and_embed_once_per_field():
+    first = TestDataPoint(name="old", description="old description", belongs_to_set=["a", "shared"])
+    other = TestDataPoint(name="other")
+    last = TestDataPoint(
+        id=first.id, name="new", description="new description", belongs_to_set=["shared", "b"]
+    )
+    points = [first, other, last]
     for point in points:
-        point.metadata = {"index_fields": ["name"]}
-    with (
-        patch.dict(index_data_points.__globals__, {"write_batch_size": lambda: 1}),
-        pytest.raises(ValueError, match="write failed"),
-    ):
-        await index_data_points(points, vector_engine=engine, semaphore=asyncio.Semaphore(2))
-    assert completed.is_set(), "no sibling write may outlive the failed storage call"
+        point.metadata = {"index_fields": ["name", "description"]}
+    before = [point.model_dump() for point in points]
+    engine = AsyncMock()
+    engine.embedding_engine.get_batch_size = MagicMock(return_value=32)
+    with patch.dict(index_data_points.__globals__, {"write_batch_size": lambda: 1}):
+        assert await index_data_points(points, vector_engine=engine) is points
+
+    written = [
+        (call.args[1], point)
+        for call in engine.index_data_points.await_args_list
+        for point in call.args[2]
+    ]
+    assert len(written) == 4
+    assert len({(field, point.id) for field, point in written}) == 4
+    for field, point in written:
+        assert point.metadata["index_fields"] == [field]
+        if point.id == first.id:
+            assert point.name == "new"
+            assert point.description == "new description"
+            assert point.belongs_to_set == ["a", "shared", "b"]
+    assert [point.model_dump() for point in points] == before
+
+
+@pytest.mark.asyncio
+async def test_edge_text_identity_collisions_are_indexed_once():
+    from cognee.modules.graph.models.EdgeType import EdgeType
+
+    first = EdgeType(relationship_name="IS A", number_of_edges=1)
+    last = EdgeType(relationship_name="is a", number_of_edges=2)
+    assert first.id == last.id
+    engine = AsyncMock()
+    engine.embedding_engine.get_batch_size = MagicMock(return_value=32)
+    with patch.dict(index_data_points.__globals__, {"write_batch_size": lambda: 1}):
+        await index_data_points([first, last], vector_engine=engine)
+    engine.index_data_points.assert_awaited_once_with("EdgeType", "relationship_name", [last])
 
 
 @pytest.mark.asyncio
@@ -227,3 +247,29 @@ async def test_index_data_points_does_not_mutate_metadata():
         await index_data_points([data_point])
 
     assert data_point.metadata["index_fields"] == original_index_fields
+
+
+@pytest.mark.asyncio
+async def test_failed_batch_waits_for_sibling_writes():
+    completed = asyncio.Event()
+    started = asyncio.Event()
+
+    async def write(_index, _property, batch):
+        if batch[0].name == "fails":
+            await started.wait()
+            raise ValueError("write failed")
+        started.set()
+        await asyncio.sleep(0.01)
+        completed.set()
+
+    engine = AsyncMock()
+    engine.index_data_points.side_effect = write
+    points = [TestDataPoint(name=name) for name in ("fails", "finishes")]
+    for point in points:
+        point.metadata = {"index_fields": ["name"]}
+    with (
+        patch.dict(index_data_points.__globals__, {"write_batch_size": lambda: 1}),
+        pytest.raises(ValueError, match="write failed"),
+    ):
+        await index_data_points(points, vector_engine=engine, semaphore=asyncio.Semaphore(2))
+    assert completed.is_set(), "no sibling write may outlive the failed storage call"
