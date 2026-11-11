@@ -118,7 +118,8 @@ def get_forget_router() -> APIRouter:
 
         ## Error Codes
         - **404 Not Found**: Dataset name does not exist or is not accessible
-        - **403 Forbidden**: Caller lacks delete permission on the dataset
+        - **403 Forbidden**: Caller lacks delete permission on the dataset (for a `dataId`
+          delete without `memoryOnly`, write permission suffices for an item the caller added)
         - **422 Unprocessable Entity**: Invalid parameter combination (e.g. both `dataset`
           and `datasetId`, `dataId` without a dataset, or `memoryOnly` without a dataset)
         - **500 Internal Server Error**: Error during deletion
