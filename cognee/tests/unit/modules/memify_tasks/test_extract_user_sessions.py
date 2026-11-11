@@ -330,3 +330,51 @@ async def test_one_strict_snapshot_serves_the_watermark_and_the_pin(mock_user, m
     assert windows[0].node_set == ("project-a",)
     mock_session_manager.get_session_context_entries.assert_awaited_once()
     assert mock_session_manager.get_session_context_entries.await_args.kwargs["raise_on_error"]
+
+
+@pytest.mark.asyncio
+async def test_entries_with_code_references_ride_on_the_window_as_findings(mock_user):
+    reference = {
+        "repo": "httpx",
+        "enola_id": "3dd612bf822d62516cc184abebddf52b",
+        "name": "httpx/_client.Client.send",
+        "file": "httpx/_client.py",
+        "line": 646,
+        "body_hash": "2d5be8556574e8c3",
+        "observed_commit": "a4463d044f370aef186f3c64bd79e236e4df9e2a",
+        "extractor_version": "0.4.38",
+    }
+    entries = [
+        SessionQAEntry(question="q", context="", answer="plain", time="t1", qa_id="qa-1"),
+        SessionQAEntry(
+            question="q2",
+            context="",
+            answer="send retries once",
+            time="t2",
+            qa_id="qa-2",
+            code_refs=[reference],
+        ),
+    ]
+    mock_session_manager = _make_mock_session_manager(entries)
+
+    with (
+        patch.object(extract_user_sessions_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_user_sessions_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+        (window,) = [
+            window async for window in extract_user_sessions([{}], session_ids=["test_session"])
+        ]
+
+    (finding,) = window.code_findings
+    assert (finding.entry_id, finding.text, finding.session_id, finding.user_id) == (
+        "qa-2",
+        "send retries once",
+        "test_session",
+        "test-user-123",
+    )
+    assert finding.cites[0].enola_id == reference["enola_id"]

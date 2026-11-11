@@ -13,6 +13,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
 )
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_memory.persist_code_findings import code_findings_from_trace_entries
 
 logger = get_logger("extract_agent_trace_feedbacks")
 
@@ -291,6 +292,12 @@ async def extract_agent_trace_feedbacks(
                         text=f"Session ID: {session_id}\n\n" + "\n".join(normalized_trace_values),
                         persisted_trace_count=window_end,
                         node_set=node_set_from_rows(context_rows),
+                        code_findings=code_findings_from_trace_entries(
+                            trace_session[window_start:window_end],
+                            [_normalize_trace_content(value) for value in pending_trace_values],
+                            user_id=user_id,
+                            session_id=session_id,
+                        ),
                     )
                 except Exception as error:
                     logger.warning(

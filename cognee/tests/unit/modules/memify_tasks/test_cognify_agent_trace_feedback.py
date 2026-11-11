@@ -325,3 +325,75 @@ async def test_a_failed_step_after_the_run_is_raised_after_the_watermarks_move()
     assert raised.value is failure
     assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "a") == 4
     assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "b") == 7
+
+
+@pytest.mark.asyncio
+async def test_findings_are_persisted_after_the_batch_run_and_before_the_watermarks():
+    from types import SimpleNamespace
+
+    from cognee.modules.improve.constants import AGENT_TRACE_FEEDBACKS_NODE_SET
+    from cognee.tasks.code_memory import code_finding
+
+    manager = _FakeSessionManager()
+    finding = code_finding(
+        user_id="u",
+        session_id="a",
+        entry_id="t-1",
+        entry_kind="trace",
+        text="read send",
+        code_refs=[
+            {
+                "repo": "httpx",
+                "enola_id": "3dd612bf822d62516cc184abebddf52b",
+                "name": "httpx/_client.Client.send",
+                "file": "httpx/_client.py",
+                "line": 646,
+                "body_hash": "2d5be8556574e8c3",
+                "observed_commit": "a4463d044f370aef186f3c64bd79e236e4df9e2a",
+                "extractor_version": "0.4.38",
+            }
+        ],
+    )
+    windows = [
+        TracePersistWindow(
+            user_id="u",
+            session_id="a",
+            text="Session ID: a\n\nread send",
+            persisted_trace_count=4,
+            code_findings=(finding,),
+        ),
+        _window(text="Session ID: b\n\nstep", persisted_trace_count=7, session_id="b"),
+    ]
+    data_id, run_id = uuid4(), uuid4()
+
+    async def persist(*args, **kwargs):
+        # The watermarks have not moved yet when the findings are persisted.
+        assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "a") == 0
+
+    persist_mock = AsyncMock(side_effect=persist)
+    with (
+        patch(
+            "cognee.add", new_callable=AsyncMock, return_value=SimpleNamespace(data_ids=[data_id])
+        ),
+        patch(
+            "cognee.cognify",
+            new_callable=AsyncMock,
+            return_value={"123": SimpleNamespace(pipeline_run_id=run_id)},
+        ),
+        patch.object(
+            cognify_agent_trace_feedback_module, "get_session_manager", return_value=manager
+        ),
+        patch.object(cognify_agent_trace_feedback_module, "persist_code_findings", persist_mock),
+    ):
+        await cognify_agent_trace_feedback(windows, dataset_id="123")
+
+    persist_mock.assert_awaited_once_with(
+        (finding,),
+        node_set=[AGENT_TRACE_FEEDBACKS_NODE_SET],
+        user=None,
+        dataset_id="123",
+        data_id=data_id,
+        pipeline_run_id=run_id,
+    )
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "a") == 4
+    assert await TRACE_PERSIST_WATERMARK.read_count(manager, "u", "b") == 7

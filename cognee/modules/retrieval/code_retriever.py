@@ -78,6 +78,15 @@ _KIND_BY_TYPE = {
 }
 _TYPE_BY_KIND = {kind: node_type for node_type, kind in _KIND_BY_TYPE.items()}
 _FLOW_TYPE = "CodeFlow"
+# The memories about code (cognee/tasks/code_memory): a CodeFinding cites the
+# ObservedDeclaration nodes it is about, each joined to the CodeSymbol its code
+# lives in by a resolves_to edge. Held aside like flows; read by findings.
+_FINDING_TYPE = "CodeFinding"
+_OBSERVED_TYPE = "ObservedDeclaration"
+_CITES_EDGE = "cites"
+_RESOLVES_TO_EDGE = "resolves_to"
+_FINDING_STATUSES = ("current", "changed", "ambiguous", "gone")
+_FINDINGS_MAX_NODES = 500
 # The kinds node_types/kinds filters accept: flows are not facts, so no
 # fact-shaped operation can select them.
 _FACT_TYPE_BY_KIND = {
@@ -103,9 +112,10 @@ _OPERATIONS = {
     "flows",
     "hubs",
     "ask",
+    "findings",
 }
 # Results with no node/edge graph to draw: asking them for a diagram is an error.
-_UNDRAWABLE_OPERATIONS = {"capabilities", "search", "flows", "hubs", "ask"}
+_UNDRAWABLE_OPERATIONS = {"capabilities", "search", "flows", "hubs", "ask", "findings"}
 # Edges that say where a fact lives rather than what it does. hubs and ask's
 # neighbourhood skip them unless relation_types names them (has_method stays:
 # a type's methods are its behaviour).
@@ -144,6 +154,7 @@ _LIMITS: dict[str, dict[str, Any]] = {
         "max_nodes": {"default": 60, "max": 200},
         "max_citations": {"default": 25, "max": 60},
     },
+    "findings": {"limit": {"default": 50, "max": 200}, "max_depth": {"default": 1, "max": 3}},
 }
 _NO_CODE_GRAPH_MESSAGE = (
     "CODE found no code graph in this dataset. Index a repository into it first (add or "
@@ -368,6 +379,20 @@ def _optional_bool(value: Any, *, field: str) -> bool | None:
     raise CodeSearchValidationError(f"CODE {field} must be a boolean.", param=field)
 
 
+def _statuses(value: Any) -> set[str] | None:
+    """The finding statuses a ``status`` argument keeps (a name or a list of names)."""
+    if value is None:
+        return None
+    values = _as_strings(value, "status")
+    unknown = sorted(set(values) - set(_FINDING_STATUSES))
+    if unknown:
+        raise CodeSearchValidationError(
+            f"CODE status must be among {', '.join(_FINDING_STATUSES)}; got {', '.join(unknown)}.",
+            param="status",
+        )
+    return set(values) or None
+
+
 def _direction(value: Any, *, default: str) -> str:
     direction = str(value or default).lower()
     if direction not in {"forward", "reverse", "both"}:
@@ -455,6 +480,10 @@ class _CodeGraphSnapshot:
         # fact operation sees them; flows, search, ask and capabilities read
         # them through the flow indexes built below.
         self.flows: dict[str, dict[str, Any]] = {}
+        # The memories about code, held aside the same way; the findings
+        # operation reads them through the join indexes built below.
+        self.findings: dict[str, dict[str, Any]] = {}
+        self.observed: dict[str, dict[str, Any]] = {}
         for item in raw_nodes or []:
             if not isinstance(item, (tuple, list)) or len(item) != 2:
                 continue
@@ -477,6 +506,14 @@ class _CodeGraphSnapshot:
                 properties["id"] = node_id
                 self.flows[node_id] = properties
                 continue
+            if node_type == _FINDING_TYPE:
+                properties["id"] = node_id
+                self.findings[node_id] = properties
+                continue
+            if node_type == _OBSERVED_TYPE:
+                properties["id"] = node_id
+                self.observed[node_id] = properties
+                continue
             if node_type not in CODE_NODE_TYPES:
                 continue
             properties["id"] = node_id
@@ -484,10 +521,30 @@ class _CodeGraphSnapshot:
 
         normalized_edges = []
         flow_edges: set[tuple[str, str, str]] = set()
+        # The join of the memories about code: finding -> observed declaration
+        # (cites) and observed declaration -> symbol (resolves_to, with the
+        # match the join recorded).
+        self.cites: dict[str, list[str]] = defaultdict(list)
+        self.findings_by_observed: dict[str, list[str]] = defaultdict(list)
+        self.resolves: dict[str, list[tuple[str, str]]] = defaultdict(list)
+        self.observed_by_symbol: dict[str, list[str]] = defaultdict(list)
+        self._symbol_index: Any = None
         for item in raw_edges or []:
             if not isinstance(item, (tuple, list)) or len(item) < 3:
                 continue
             source_id, target_id, relationship = map(str, item[:3])
+            if source_id in self.findings:
+                if relationship == _CITES_EDGE and target_id in self.observed:
+                    self.cites[source_id].append(target_id)
+                    self.findings_by_observed[target_id].append(source_id)
+                continue
+            if source_id in self.observed:
+                if relationship == _RESOLVES_TO_EDGE and target_id in self.nodes:
+                    properties = _normalize_properties(item[3] if len(item) > 3 else {})
+                    match = str(properties.get("match") or "exact")
+                    self.resolves[source_id].append((target_id, match))
+                    self.observed_by_symbol[target_id].append(source_id)
+                continue
             if source_id in self.flows and target_id in self.nodes:
                 flow_edges.add((source_id, relationship, target_id))
                 continue
@@ -678,6 +735,57 @@ class _CodeGraphSnapshot:
         if key in self.nodes:
             return key in self.test_nodes
         return _is_test_path(self.file_of(self.flows[key]))
+
+    def finding_sort_key(self, finding_id: str) -> tuple[str, str]:
+        finding = self.findings[finding_id]
+        return (str(finding.get("time") or ""), finding_id)
+
+    def symbol_index(self) -> Any:
+        """The symbols' current declarations by enola id and body hash (built once)."""
+        if self._symbol_index is None:
+            from cognee.tasks.code_memory.link_observed_declarations import CodeSymbolIndex
+
+            self._symbol_index = CodeSymbolIndex.from_nodes(self.nodes.items(), set(self.by_repo))
+        return self._symbol_index
+
+    def observed_status(self, observed_id: str) -> tuple[str, list[tuple[str, str]]]:
+        """Whether the code a finding's author saw is still the code, from the stored join.
+
+        Returns ``(status, [(symbol id, match)])``: ``current``, ``changed``,
+        ``ambiguous`` or ``gone`` -- the rule the join itself uses
+        (``observed_declaration_status``), applied to the edges it recorded.
+        """
+        from cognee.tasks.code_memory.link_observed_declarations import (
+            observed_declaration_status,
+        )
+
+        links = sorted(
+            self.resolves.get(observed_id, []), key=lambda link: self.node_sort_key(link[0])
+        )
+        return observed_declaration_status(
+            self.observed[observed_id], links, self.symbol_index()
+        ), links
+
+    def finding_payload(self, finding_id: str) -> dict[str, Any]:
+        finding = self.findings[finding_id]
+        keys = ("id", "text", "entry_kind", "entry_id", "session_id", "user_id", "time")
+        return {key: _normalize_value(finding.get(key)) for key in keys}
+
+    def declaration_payload(self, observed_id: str) -> dict[str, Any]:
+        observed = self.observed[observed_id]
+        keys = (
+            "id",
+            "name",
+            "repo",
+            "file",
+            "line",
+            "body_hash",
+            "decl_hash",
+            "observed_commit",
+            "extractor_version",
+            "resolution",
+        )
+        return {key: _normalize_value(observed.get(key)) for key in keys}
 
     def node_sort_key(self, node_id: str) -> tuple[str, ...]:
         node = self.nodes[node_id]
@@ -1381,7 +1489,7 @@ class CodeRetriever(BaseRetriever):
         async def load() -> _CodeGraphSnapshot:
             graph_engine = await get_graph_engine()
             nodes, edges = await graph_engine.get_filtered_graph_data(
-                [{"type": [*CODE_NODE_TYPES, "CodeRepository"]}]
+                [{"type": [*CODE_NODE_TYPES, "CodeRepository", _FINDING_TYPE, _OBSERVED_TYPE]}]
             )
             return _CodeGraphSnapshot(nodes, edges)
 
@@ -2352,7 +2460,11 @@ class CodeRetriever(BaseRetriever):
             "operation": "capabilities",
             "version": _CAPABILITIES_VERSION,
             "operations": sorted(_OPERATIONS),
-            "features": {"docs": bool(graph.documented), "flows": bool(graph.flows)},
+            "features": {
+                "docs": bool(graph.documented),
+                "flows": bool(graph.flows),
+                "findings": bool(graph.findings),
+            },
             "counts": {
                 "nodes": len(graph.nodes),
                 "edges": len(graph.edges),
@@ -2360,6 +2472,7 @@ class CodeRetriever(BaseRetriever):
                 "symbols_with_docs": len(graph.documented & symbols),
                 "flows": len(graph.flows),
                 "repositories": len(graph.repositories),
+                "findings": len(graph.findings),
             },
             "enola_versions": sorted(versions),
             "limits": copy.deepcopy(_LIMITS),
@@ -2887,6 +3000,133 @@ class CodeRetriever(BaseRetriever):
             "total": len(ranked),
             "limit": limit,
         }
+
+    def _findings(self, graph: _CodeGraphSnapshot, query: str) -> dict[str, Any]:
+        """The memories about code, each with whether its code is still the code.
+
+        A finding is a memory entry that named the declarations it is about
+        (``code_refs``); ``improve()`` stores it verbatim and joins each
+        declaration to the symbol its code lives in (``cognee/tasks/code_memory``).
+        With seeds (``names``/``seeds``, ``node_ids``/``seed_ids``, or the query
+        text) the operation walks ``max_depth`` (1, max 3) hops from them --
+        ``direction`` both by default; forward is the code the seeds depend on,
+        reverse the code that depends on them; ``relation_types`` filters the
+        edges -- and returns the findings joined to every symbol reached,
+        nearest first. Without seeds, ``repo`` lists the repository's findings,
+        the ones whose code is gone included (they are joined to nothing).
+        ``status`` keeps only the given statuses: ``current`` (the symbol still
+        holds the body the author saw), ``changed`` (the symbol, not that body),
+        ``ambiguous`` (several symbols hold the body; each is listed), ``gone``.
+        Paged by ``limit`` (50, max 200) and ``offset``.
+        """
+        direction = _direction(self.config.get("direction"), default="both")
+        max_depth = self._limit("findings", "max_depth")
+        statuses = _statuses(self.config.get("status"))
+        limit = self._limit("findings", "limit")
+        offset = _offset(self.config.get("offset"))
+        repo = self._identifier_arg("repo")
+        seeded = bool(query.strip()) or any(
+            self.config.get(field)
+            for field in ("name", "names", "seeds", "id", "node_ids", "seed_ids", "ids")
+        )
+        result: dict[str, Any] = {"operation": "findings"}
+        if seeded:
+            seeds = self._resolve_seeds(
+                graph,
+                query,
+                role="findings seed",
+                name_aliases=("seeds",),
+                id_aliases=("seed_ids", "ids"),
+            )
+            walk = self._traverse_graph(
+                graph,
+                seeds,
+                direction=direction,
+                relation_types=self._relation_types(),
+                node_types=None,
+                max_depth=max_depth,
+                max_nodes=_FINDINGS_MAX_NODES,
+            )
+            depth_of = {node["id"]: int(node["depth"]) for node in walk["nodes"]}
+            observed_ids = {
+                observed_id
+                for symbol_id in depth_of
+                for observed_id in graph.observed_by_symbol.get(symbol_id, ())
+            }
+            result["seeds"] = [graph.fact(seed, include_relations=False) for seed in seeds]
+            result["stats"] = walk["stats"]
+        else:
+            if not repo:
+                raise CodeSearchValidationError(
+                    "CODE findings requires query_text, names, node_ids or repo.", param="repo"
+                )
+            depth_of = {}
+            observed_ids = {
+                observed_id
+                for observed_id, observed in graph.observed.items()
+                if observed.get("repo") == repo
+            }
+            result["repo"] = repo
+
+        entries: list[tuple[int, tuple, tuple, str, str | None, str | None, str]] = []
+        for observed_id in observed_ids:
+            if repo and graph.observed[observed_id].get("repo") != repo:
+                continue
+            status, links = graph.observed_status(observed_id)
+            if statuses is not None and status not in statuses:
+                continue
+            targets: list[tuple[str | None, str | None]] = [
+                (symbol_id, match)
+                for symbol_id, match in links
+                if not depth_of or symbol_id in depth_of
+            ]
+            if not targets:
+                targets = [(None, None)]
+            for symbol_id, match in targets:
+                depth = depth_of.get(symbol_id, 0) if symbol_id else 0
+                symbol_key = graph.node_sort_key(symbol_id) if symbol_id else ()
+                for finding_id in graph.findings_by_observed.get(observed_id, ()):
+                    entries.append(
+                        (
+                            depth,
+                            symbol_key,
+                            graph.finding_sort_key(finding_id),
+                            observed_id,
+                            symbol_id,
+                            match,
+                            status,
+                        )
+                    )
+        entries.sort(key=lambda entry: entry[:4])
+
+        by_status = {status: 0 for status in _FINDING_STATUSES}
+        for entry in entries:
+            by_status[entry[6]] += 1
+        page = entries[offset : offset + limit]
+        has_more = offset + len(page) < len(entries)
+        result["findings"] = [
+            {
+                "finding": graph.finding_payload(finding_key[1]),
+                "declaration": graph.declaration_payload(observed_id),
+                "symbol": (
+                    graph.fact(symbol_id, depth=depth, include_relations=False)
+                    if symbol_id
+                    else None
+                ),
+                "match": match,
+                "status": status,
+            }
+            for depth, _symbol_key, finding_key, observed_id, symbol_id, match, status in page
+        ]
+        result.update(
+            by_status=by_status,
+            total=len(entries),
+            offset=offset,
+            limit=limit,
+            has_more=has_more,
+            truncated=has_more or bool(result.get("stats", {}).get("truncated")),
+        )
+        return result
 
     def _ask(self, graph: _CodeGraphSnapshot, query: str) -> dict[str, Any]:
         """Evidence for a natural-language question about the code, with citations.

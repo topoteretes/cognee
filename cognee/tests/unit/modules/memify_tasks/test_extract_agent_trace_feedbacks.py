@@ -551,3 +551,34 @@ async def test_a_pin_written_with_a_step_after_the_snapshot_is_still_carried(man
 
     assert [window.node_set for window in windows] == [("project-a",)]
     assert manager.strict_context_reads == 2
+
+
+@pytest.mark.asyncio
+async def test_steps_with_code_references_ride_on_the_window_as_findings(manager):
+    manager.add_step("s", feedback="plain step")
+    manager.traces["s"].append(
+        SessionAgentTraceEntry(
+            trace_id="t2",
+            origin_function="read_file",
+            status="success",
+            session_feedback="read send",
+            code_refs=[
+                {
+                    "repo": "httpx",
+                    "enola_id": "3dd612bf822d62516cc184abebddf52b",
+                    "name": "httpx/_client.Client.send",
+                    "file": "httpx/_client.py",
+                    "line": 646,
+                    "body_hash": "2d5be8556574e8c3",
+                    "observed_commit": "a4463d044f370aef186f3c64bd79e236e4df9e2a",
+                    "extractor_version": "0.4.38",
+                }
+            ],
+        )
+    )
+
+    (window,) = await _extract(["s"])
+
+    (finding,) = window.code_findings
+    assert (finding.entry_kind, finding.entry_id, finding.text) == ("trace", "t2", "read send")
+    assert window.persisted_trace_count == 2

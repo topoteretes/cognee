@@ -269,3 +269,62 @@ async def test_delta_write_adds_only_missing_edges_and_stamps_delta(tmp_path, mo
     assert stamped[0].last_delta["edges_removed"] == 0
     assert stamped[0].last_delta["nodes_removed"] == 0
     assert stamped[0].last_delta["snapshot_id"] == SNAPSHOT_ID
+
+
+@pytest.mark.asyncio
+async def test_ingest_joins_the_memories_about_the_repo_to_its_symbols(tmp_path, monkeypatch):
+    """A finding stored before its code was ingested gets its edge when the code arrives."""
+    from cognee.tasks.code_memory import RESOLVES_TO_RELATIONSHIP, observed_declaration
+
+    _write_snapshot(tmp_path, FACTS)
+    database_id = _node_id("symbol", "app/db.Database")
+    observed = observed_declaration(
+        {
+            "repo": REPO,
+            "enola_id": "a" * 32,
+            "name": "app/db.Database",
+            "file": "app/db.py",
+            "line": 1,
+            "body_hash": "1111111111111111",
+            "observed_commit": "c" * 40,
+            "extractor_version": "0.4.38",
+        }
+    )
+    observed_node = (
+        str(observed.id),
+        {**observed.model_dump(exclude={"id"}), "type": "ObservedDeclaration"},
+    )
+    # Pre-write state: the memory is there, the code is not.
+    engine = _mock_engine(monkeypatch, nodes=[observed_node])
+    # Post-write state the join reads: the symbol now carries the observed id.
+    engine.get_filtered_graph_data.return_value = (
+        [
+            observed_node,
+            (
+                database_id,
+                {
+                    "type": "CodeSymbol",
+                    "name": "app/db.Database",
+                    "repo": REPO,
+                    "enola_id": "a" * 32,
+                },
+            ),
+        ],
+        [],
+    )
+
+    data_points = await extract_code_graph(repo_path=f"/repos/{REPO}", snapshot_dir=tmp_path)
+    await add_code_graph_edges(data_points, snapshot_dir=tmp_path)
+
+    joins = [
+        edge
+        for call in engine.add_edges.await_args_list
+        for edge in call.args[0]
+        if edge[2] == RESOLVES_TO_RELATIONSHIP
+    ]
+    assert [(edge[0], edge[1], edge[3]["match"]) for edge in joins] == [
+        (str(observed.id), database_id, "exact")
+    ]
+    engine.get_filtered_graph_data.assert_awaited_once_with(
+        [{"type": ["ObservedDeclaration", "CodeSymbol"]}]
+    )

@@ -213,6 +213,9 @@ class SessionPersistWindow:
     # node set the window is added under.
     node_set: tuple[str, ...] = ()
     last_entry_time: str | None = None
+    # The window's entries that name the code they are about, as ``CodeFinding``
+    # nodes (``cognee.tasks.code_memory``); persisted once the text is cognified.
+    code_findings: tuple[Any, ...] = ()
 
 
 async def get_persisted_qa_count(session_manager, user_id: str, session_id: str) -> int:
@@ -256,6 +259,9 @@ class TracePersistWindow:
     # The session's pinned node set (``session_node_set``); appended to the
     # node set the window is added under.
     node_set: tuple[str, ...] = ()
+    # The window's steps that name the code they are about, as ``CodeFinding``
+    # nodes (``cognee.tasks.code_memory``); persisted once the batch is cognified.
+    code_findings: tuple[Any, ...] = ()
 
 
 # -- Stage 5: distilled context entries, per (session, dataset) --------------
