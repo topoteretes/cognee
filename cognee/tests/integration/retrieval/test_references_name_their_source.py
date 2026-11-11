@@ -124,12 +124,21 @@ def _sources(evidence: list[dict]) -> set[tuple]:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("query_type", [SearchType.RAG_COMPLETION, SearchType.HYBRID_COMPLETION])
-async def test_a_chunk_reference_names_its_document_by_title_and_link(cognified, query_type):
-    answer, evidence = await _search(query_type)
+async def test_a_chunk_reference_names_its_document_by_title_and_link(cognified):
+    answer, evidence = await _search(SearchType.RAG_COMPLETION)
 
     assert (TITLE, URL) in _sources(evidence)
     assert f'"{TITLE}" <{URL}>' in answer
+
+
+@pytest.mark.asyncio
+async def test_a_hybrid_answer_names_its_document_in_the_text_only(cognified):
+    """Hybrid returns no structured evidence, as before: a consumer that builds its own
+    from the chunks (Cognee Cloud) must see no change for any document."""
+    answer, evidence = await _search(SearchType.HYBRID_COMPLETION)
+
+    assert f'"{TITLE}" <{URL}>' in answer
+    assert evidence == []
 
 
 @pytest.mark.asyncio
@@ -178,19 +187,16 @@ async def test_a_search_reads_the_cited_documents_once(cognified, query_type):
     engine = get_relational_engine().engine.sync_engine
     event.listen(engine, "before_cursor_execute", count)
     try:
-        _, evidence = await _search(query_type)
+        answer, _ = await _search(query_type)
     finally:
         event.remove(engine, "before_cursor_execute", count)
 
-    assert (TITLE, URL) in _sources(evidence)
+    assert f'"{TITLE}" <{URL}>' in answer
     assert len(reads) == 1
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "query_type",
-    [SearchType.RAG_COMPLETION, SearchType.HYBRID_COMPLETION, SearchType.GRAPH_COMPLETION],
-)
+@pytest.mark.parametrize("query_type", [SearchType.RAG_COMPLETION, SearchType.GRAPH_COMPLETION])
 async def test_a_context_only_search_names_its_references_too(cognified, query_type):
     """``only_context`` skips the answer, not the references' titles."""
     (result,) = await cognee.search(

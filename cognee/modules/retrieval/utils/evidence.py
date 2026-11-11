@@ -13,18 +13,11 @@ from cognee.modules.engine.utils import generate_edge_object_id
 from cognee.modules.retrieval.utils.document_sources import (
     TITLE_KEY,
     URL_KEY,
+    chunk_payload,
     document_label,
     document_source,
 )
 from cognee.modules.search.models.EvidenceReference import EvidenceReference
-
-
-def _payload(obj: Any) -> dict:
-    if isinstance(obj, dict):
-        nested = obj.get("payload")
-        return nested if isinstance(nested, dict) else obj
-    value = getattr(obj, "payload", None)
-    return value if isinstance(value, dict) else {}
 
 
 def _string(value: Any) -> str | None:
@@ -62,7 +55,7 @@ def chunk_context_evidence(
     normalized_dataset_id = _string(dataset_id)
 
     for rank, obj in enumerate(retrieved_objects):
-        payload = _payload(obj)
+        payload = chunk_payload(obj)
         chunk_id = _string(getattr(obj, "id", None)) or _string(payload.get("id"))
         if chunk_id is None:
             continue

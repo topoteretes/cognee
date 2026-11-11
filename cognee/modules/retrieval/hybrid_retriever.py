@@ -42,7 +42,6 @@ from cognee.modules.retrieval.utils.completion import (
 )
 from cognee.modules.retrieval.utils.conflict_context import attach_chunk_conflicts
 from cognee.modules.retrieval.utils.document_sources import name_chunk_documents
-from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
@@ -382,10 +381,6 @@ class HybridRetriever(BaseRetriever):
 
     async def name_cited_documents(self, retrieved_objects: Any) -> None:
         await name_chunk_documents(hybrid_chunks(retrieved_objects), current_dataset_id.get())
-
-    def get_context_evidence(self, retrieved_objects: Any, dataset_id: Any = None):
-        """The chunk lane's chunks that were in this answer's context."""
-        return chunk_context_evidence(hybrid_chunks(retrieved_objects), dataset_id=dataset_id)
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
         return merge_hybrid_results(

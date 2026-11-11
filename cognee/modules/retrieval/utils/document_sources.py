@@ -1,9 +1,12 @@
 """The title and link a reference names a connector's document by.
 
-A connector row keeps them in its data record's ``system_metadata`` (``title``, ``url``);
-chunks carry the stored file name (``text_<md5>``). Any other document has neither and
-keeps its file name. Both come from a provider's content, so they are made safe to print
-on one line before any reference shows them.
+A document-mode connector row (``resolve_dlt_sources._build_document_data_item``) keeps them
+in its data record's ``system_metadata`` (``title``, ``url``); chunks carry the stored file
+name (``text_<md5>``). Every other document has neither and keeps its file name: ``Data.label``
+is not read, so a label given to ``add()`` changes nothing here. ``system_metadata`` is
+cognee's own stamp, not an ``add()`` input, so a caller who writes those keys into a
+``DataItem`` by hand opts in. The link is provider content, so it is printed only when it is
+a plain http(s) URL, and the title always on one line.
 """
 
 import unicodedata
@@ -20,7 +23,8 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("document_sources")
 
-# Payload keys a cited chunk carries its document's title and link under, once named.
+# Payload keys a connector chunk carries its document's title and link under, once named;
+# public, like the rest of the payload, and absent on every other chunk.
 TITLE_KEY = "document_title"
 URL_KEY = "document_url"
 
@@ -51,7 +55,7 @@ def document_source(system_metadata: dict | None) -> DocumentSource:
     metadata = system_metadata or {}
     title, url = metadata.get("title"), metadata.get("url")
     return DocumentSource(
-        title=_one_line(title) or None if isinstance(title, str) else None,
+        title=_one_line(title) if title else None,
         url=url if _printable_url(url) else None,
     )
 
@@ -66,12 +70,13 @@ def document_label(document_name: str | None, title: str | None, url: str | None
     return f"{name} <{url}>" if url else name
 
 
-def _payload(chunk: Any) -> dict | None:
+def chunk_payload(chunk: Any) -> dict:
+    """A retrieved chunk's payload: a ``ScoredResult``'s, a wrapped dict's, or the dict."""
     if isinstance(chunk, dict):
         inner = chunk.get("payload")
         return inner if isinstance(inner, dict) else chunk
     payload = getattr(chunk, "payload", None)
-    return payload if isinstance(payload, dict) else None
+    return payload if isinstance(payload, dict) else {}
 
 
 async def name_chunk_documents(chunks: list, dataset_id: UUID | None) -> None:
@@ -85,8 +90,8 @@ async def name_chunk_documents(chunks: list, dataset_id: UUID | None) -> None:
 
     payloads_by_id: dict[UUID, list[dict]] = {}
     for chunk in chunks:
-        payload = _payload(chunk)
-        if payload and payload.get("document_id"):
+        payload = chunk_payload(chunk)
+        if payload.get("document_id"):
             payloads_by_id.setdefault(UUID(payload["document_id"]), []).append(payload)
     if not payloads_by_id:
         return
@@ -105,5 +110,7 @@ async def name_chunk_documents(chunks: list, dataset_id: UUID | None) -> None:
     for data_id, system_metadata in rows:
         source = document_source(system_metadata)
         for payload in payloads_by_id[data_id]:
-            payload[TITLE_KEY] = source.title
-            payload[URL_KEY] = source.url
+            if source.title:
+                payload[TITLE_KEY] = source.title
+            if source.url:
+                payload[URL_KEY] = source.url

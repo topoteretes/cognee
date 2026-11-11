@@ -120,9 +120,11 @@ async def get_retriever_output(
 
     evidence = []
     if kwargs.get("include_references", False):
-        if only_context:
-            # No answer was written, so append_references did not name the chunks.
-            await retriever_instance.name_cited_documents(retrieved_objects)
+        name_cited_documents = getattr(retriever_instance, "name_cited_documents", None)
+        if not completion and callable(name_cited_documents):
+            # append_references names the cited chunks only for a written answer; without
+            # one (only_context, an empty context) the structured references are named here.
+            await name_cited_documents(retrieved_objects)
         evidence = _context_evidence(retriever_instance, retrieved_objects, kwargs)
         dataset = kwargs.get("dataset")
         if dataset is not None and any(reference.kind == "graph_edge" for reference in evidence):
