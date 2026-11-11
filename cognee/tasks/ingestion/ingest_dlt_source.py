@@ -48,11 +48,22 @@ _staging_lock = LoopAgnosticLock()
 _SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
 
+VALID_WRITE_DISPOSITIONS = ("merge", "append", "replace")
+
+
+def require_valid_write_disposition(write_disposition) -> None:
+    if write_disposition not in VALID_WRITE_DISPOSITIONS:
+        raise InvalidDLTArgumentError(
+            message=f"Invalid write_disposition '{write_disposition}'. "
+            f"Must be one of: {VALID_WRITE_DISPOSITIONS}"
+        )
+
+
 async def ingest_dlt_source(
     dlt_source,
     dataset_name: str,
     primary_key: str | None = None,
-    write_disposition: str = "replace",
+    write_disposition: str | None = "replace",
     max_rows_per_table: int | None = None,
 ) -> DltRows:
     """
@@ -68,21 +79,21 @@ async def ingest_dlt_source(
         primary_key: Optional primary key column name. If not provided, auto-detected
                      from schema or defaults to 'id' or first column.
         write_disposition: DLT write disposition. One of:
-            - "merge" (default): Upsert rows by primary key. Existing rows with the same
+            - "replace" (default): Drop and recreate the table on each run.
+            - "merge": Upsert rows by primary key. Existing rows with the same
               PK are updated; new rows are inserted.
             - "append": Always insert new rows without deduplication.
-            - "replace": Drop and recreate the table on each run.
+            - None: each resource runs under the disposition it declares. For
+              sources whose resources declare "merge" (see
+              ``document_write_disposition``).
     Returns:
         List[DltRowData]: Per-row data objects for downstream processing.
     """
 
     apply_dlt_runtime_defaults()
 
-    valid_dispositions = ("merge", "append", "replace")
-    if write_disposition not in valid_dispositions:
-        raise InvalidDLTArgumentError(
-            message=f"Invalid write_disposition '{write_disposition}'. Must be one of: {valid_dispositions}"
-        )
+    if write_disposition is not None:
+        require_valid_write_disposition(write_disposition)
 
     original_dataset_name = dataset_name
     dataset_name = _to_safe_ident(dataset_name)
@@ -106,13 +117,15 @@ async def ingest_dlt_source(
             "Only 'sqlite' and 'postgres' are supported."
         )
 
-    # Build run kwargs based on disposition
-    run_kwargs = {
-        "write_disposition": write_disposition,
-    }
+    # Build run kwargs based on disposition. A disposition passed to run()
+    # overrides the one every resource declares, so None passes nothing.
+    run_kwargs = {}
+    if write_disposition is not None:
+        run_kwargs["write_disposition"] = write_disposition
     # Only pass primary_key for merge disposition (required for upsert).
     # When the user didn't provide an explicit primary_key, omit it so dlt
-    # can auto-detect PKs from the source schema per table.
+    # can auto-detect PKs from the source schema per table. Resources running
+    # under their own disposition (None) keep their own key too.
     if write_disposition == "merge" and primary_key:
         run_kwargs["primary_key"] = primary_key
     if document_source_tag(dlt_source):

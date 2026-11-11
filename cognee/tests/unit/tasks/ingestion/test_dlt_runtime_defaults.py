@@ -1,9 +1,10 @@
-"""dlt keeps no row text and sends no telemetry of its own unless the user asks for it.
+"""dlt keeps no row text, and sends no telemetry of its own once cognee's is disabled.
 
 dlt's defaults keep every completed load package, with the rendered text of every row,
 under its pipelines directory, outside cognee's data root, and post four telemetry events
-per run to dltHub. cognee sets both off before it first builds a dlt source or pipeline;
-a value the user set wins.
+per run to dltHub. Before it first builds a dlt source or pipeline cognee turns the
+packages off, and the telemetry off when ``TELEMETRY_DISABLED`` is set; a value the user
+set wins.
 """
 
 import gzip
@@ -28,6 +29,7 @@ def _completed_jobs(pipelines_dir) -> list:
 
 @pytest.mark.asyncio
 async def test_a_sync_leaves_no_load_package_with_row_text(staging, tmp_path, monkeypatch):
+    monkeypatch.setenv("TELEMETRY_DISABLED", "1")
     monkeypatch.delenv(TELEMETRY, raising=False)
     monkeypatch.delenv(DELETE_JOBS, raising=False)
 
@@ -52,6 +54,7 @@ def test_a_database_source_is_built_with_the_defaults_in_place(tmp_path, monkeyp
     """``sql_database()`` starts dlt's runtime when it is built, before any pipeline runs,
     so the defaults have to be in place before it too."""
     pytest.importorskip("dlt")
+    monkeypatch.setenv("TELEMETRY_DISABLED", "1")
     monkeypatch.delenv(TELEMETRY, raising=False)
     monkeypatch.delenv(DELETE_JOBS, raising=False)
     path = tmp_path / "shop.db"
@@ -193,6 +196,7 @@ async def test_dropping_applies_the_defaults_before_dlt_starts(tmp_path, monkeyp
         "get_relational_config",
         lambda: SimpleNamespace(db_provider="sqlite", db_path=str(tmp_path)),
     )
+    monkeypatch.setenv("TELEMETRY_DISABLED", "1")
     monkeypatch.delenv(TELEMETRY, raising=False)
     monkeypatch.delenv(DELETE_JOBS, raising=False)
     seen = {}
