@@ -170,7 +170,8 @@ async def test_an_unnarrowed_decision_keeps_every_dataset(lane):
 
 
 @pytest.mark.asyncio
-async def test_routed_datasets_come_best_first_then_unindexed(lane):
+async def test_an_unindexed_dataset_is_not_searched_when_the_routed_one_finds_something(lane):
+    """SDK-1516: the routed dataset answers, so the unindexed one is never searched."""
     lane.readable = [_dataset("a"), _dataset("b"), _dataset("c")]
     a, b, c = (dataset.id for dataset in lane.readable)
     lane.decision = DatasetRoutingDecision(
@@ -180,7 +181,28 @@ async def test_routed_datasets_come_best_first_then_unindexed(lane):
 
     await _search(lane)
 
-    assert lane.fan_out_calls == [[c, a]]
+    assert lane.fan_out_calls == [[c]]
+
+
+@pytest.mark.asyncio
+async def test_an_unindexed_dataset_is_searched_when_the_routed_one_finds_nothing(lane):
+    """The answer may live only in a dataset the index never saw: the widening
+    pass reaches it, with every other dataset routing skipped."""
+    lane.readable = [_dataset("a"), _dataset("b"), _dataset("c")]
+    a, b, c = lane.readable
+    lane.decision = DatasetRoutingDecision(
+        candidates=(a.id, b.id, c.id),
+        routed=(c.id,),
+        unindexed=(a.id,),
+        scores={c.id: 0.1, b.id: 0.5},
+    )
+    lane.responses = [[_payload(c)], [_payload(a, ["only here"]), _payload(b)]]
+
+    out = await _search(lane)
+
+    assert lane.fan_out_calls == [[c.id], [a.id, b.id]]
+    assert lane.widening_flags == [False, True]
+    assert [payload.dataset_id for payload in out] == [a.id, b.id, c.id]
 
 
 @pytest.mark.asyncio

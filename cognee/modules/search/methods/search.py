@@ -280,7 +280,8 @@ async def authorized_search(
     if routed_datasets is None:
         return await _search(search_datasets)
 
-    # Routed: the best-scoring datasets plus every unindexed one. Retrieving
+    # Routed: the best-scoring datasets only; datasets with no routing row wait
+    # for the widening pass below, with the other skipped ones. Retrieving
     # nothing there (judged on the retrieval context, since a completion is
     # written even over an empty one) widens the search to the datasets
     # routing skipped, searched as the rest of this one search, so the routed
@@ -324,8 +325,12 @@ async def _route_datasets(
     """The datasets an unscoped search covers after routing, or None to cover them all.
 
     Routing applies only when the caller named no dataset, more than one is
-    readable, and backend access control gives each its own store. The decision keeps every dataset with no routing rows, so a dataset
-    never searched by the global context index is never dropped.
+    readable, and backend access control gives each its own store. A dataset
+    with no routing rows is not searched next to a routed one: it is covered
+    by the widening pass when the routed datasets retrieve nothing, so a
+    backlog of datasets the global context index never saw does not turn every
+    unscoped search into a search of all of them. With no dataset routed, every
+    readable dataset is searched.
     """
     from cognee.modules.search.dataset_routing import get_dataset_routing_config, route_datasets
 
@@ -376,7 +381,10 @@ async def _route_datasets(
         else ("matches, tied" if len(decision.routed) > config.top_k else "matches"),
         len(search_datasets),
         distances,
-        f", plus {len(decision.unindexed)} without a routing index" if decision.unindexed else "",
+        f"; {len(decision.unindexed)} without a routing index are searched only if "
+        f"{'it retrieves' if len(decision.routed) == 1 else 'they retrieve'} nothing"
+        if decision.unindexed
+        else "",
     )
     return routed
 
