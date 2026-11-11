@@ -127,10 +127,10 @@ class FakeNotion:
         return httpx.Response(200, json=store[object_id])
 
 
-def _client(fake: FakeNotion) -> _NotionClient:
+def _client(fake: FakeNotion, check_active=None) -> _NotionClient:
     transport = httpx.MockTransport(fake.handler)
     http_client = httpx.Client(transport=transport)
-    return _NotionClient(http_client, "secret_token")
+    return _NotionClient(http_client, "secret_token", check_active)
 
 
 def _basic_tree():
@@ -568,6 +568,62 @@ def test_429_is_retried_then_succeeds():
     assert any(r["id"] == ROOT_PAGE_ID for r in rows if not r.get("_deleted"))
 
 
+class _Revoked(Exception):
+    """What a host's check raises once the connection is gone."""
+
+
+def _revoked_on_third_check():
+    # The first check is the walk's, before it reads anything; the second is the client's,
+    # before the first attempt; the third is the client's again, before it waits.
+    checks = iter([None, None, _Revoked()])
+
+    def check_active():
+        failure = next(checks)
+        if failure is not None:
+            raise failure
+
+    return check_active
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"status_code": 503},
+        {"status_code": 429, "headers": {"Retry-After": "5"}},
+        {"error": httpx.ConnectError("refused")},
+    ],
+    ids=["outage", "rate_limit", "transport"],
+)
+def test_a_revoked_connection_stops_a_retry_before_it_waits(monkeypatch, answer):
+    """The host's check runs before every attempt and every wait, not once per page."""
+    pytest.importorskip("dlt")
+    from dlt.extract.exceptions import ResourceExtractionError
+
+    requests, sleeps = [], []
+    monkeypatch.setattr(notion_module.time, "sleep", sleeps.append)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if "error" in answer:
+            raise answer["error"]
+        return httpx.Response(json={"message": "try later"}, **answer)
+
+    resource = notion_source(
+        token="secret",
+        root_page_ids=[ROOT_PAGE_ID],
+        workspace_id=WORKSPACE_ID,
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        check_active=_revoked_on_third_check(),
+    )
+    # dlt wraps whatever a resource raises; the host's error is its cause, unchanged.
+    with pytest.raises(ResourceExtractionError) as captured:
+        list(resource)
+
+    assert isinstance(captured.value.__cause__, _Revoked)
+    assert len(requests) == 1
+    assert sleeps == []
+
+
 def test_refuses_core_without_document_row_contract(monkeypatch):
     pytest.importorskip("dlt")
     monkeypatch.setattr(notion_module.dlt_utils, "DOCUMENT_SYNC_VERSION", 1)
@@ -675,7 +731,9 @@ def test_has_more_without_a_cursor_aborts_instead_of_tombstoning():
         list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, previous, {}, {}))
 
 
-def test_check_active_runs_for_every_walked_page_even_when_nothing_changed():
+def test_check_active_runs_before_every_request_even_when_nothing_changed():
+    # The client checks before each attempt, so the host is asked once per request made;
+    # the walk no longer asks once per page on top of that.
     fake = _basic_tree()
     unchanged = {"last_edited_time": "2024-01-01T00:00:00.000Z", "root_id": ROOT_PAGE_ID}
     previous = {
@@ -685,18 +743,17 @@ def test_check_active_runs_for_every_walked_page_even_when_nothing_changed():
     calls = []
     rows = list(
         _iter_rows(
-            _client(fake),
+            _client(fake, lambda: calls.append(1)),
             [ROOT_PAGE_ID],
             [],
             WORKSPACE_ID,
             previous,
             {},
             {},
-            lambda: calls.append(1),
         )
     )
     assert rows == []
-    assert len(calls) == 2
+    assert len(calls) == len(fake.requests) > 0
 
 
 def test_table_cells_with_pipes_and_newlines_keep_the_table_shape():

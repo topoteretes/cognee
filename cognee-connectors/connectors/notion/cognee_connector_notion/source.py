@@ -132,12 +132,31 @@ class NotionAPIError(Exception):
         self.status_code = status_code
 
 
+class _RetryableStatusError(NotionAPIError):
+    """A 429 or 5xx answer, retried by the client and raised as it is on the last attempt."""
+
+    def __init__(self, status_code: int, message: str, headers):
+        super().__init__(status_code, message)
+        # The response headers, for the client's retry policy (Retry-After).
+        self.headers = headers
+
+
 # ---------------------------------------------------------------------------
 # HTTP client (thin wrapper: auth header, version header, retry/backoff)
 # ---------------------------------------------------------------------------
 class _NotionClient:
-    def __init__(self, http_client: Any, token: str):
+    """One Notion API session.
+
+    ``check_active`` is the host's authorization check; ``request`` runs it before every
+    attempt and every retry wait (``with_retries``), so a revoked connection never waits
+    out a backoff.
+    """
+
+    def __init__(
+        self, http_client: Any, token: str, check_active: Callable[[], None] | None = None
+    ):
         self._http = http_client
+        self._check_active = check_active
         self._headers = {
             "Authorization": f"Bearer {token}",
             "Notion-Version": NOTION_API_VERSION,
@@ -149,51 +168,31 @@ class _NotionClient:
     ) -> dict:
         import httpx
 
-        url = f"{NOTION_API_BASE_URL}/{path}"
-        for attempt in range(_MAX_RETRIES):
-            try:
-                response = self._http.request(
-                    method, url, params=params, json=json_body, headers=self._headers
-                )
-            except httpx.TransportError as exc:
-                if attempt == _MAX_RETRIES - 1:
-                    raise
-                delay = float(2**attempt)
-                logger.warning(
-                    "Notion: transport error on %s (%s), retrying in %.1fs.", path, exc, delay
-                )
-                time.sleep(delay)
-                continue
-
-            if response.status_code == 429 or response.status_code >= 500:
-                if attempt == _MAX_RETRIES - 1:
-                    raise NotionAPIError(
-                        response.status_code,
-                        f"Notion API error {response.status_code} on {path}: {response.text}",
-                    )
-                delay = _retry_after(response.headers, attempt)
-                logger.warning(
-                    "Notion: %s on %s, retrying in %.1fs (%d/%d).",
-                    response.status_code,
-                    path,
-                    delay,
-                    attempt + 1,
-                    _MAX_RETRIES,
-                )
-                time.sleep(delay)
-                continue
-
-            if response.status_code >= 400:
-                raise NotionAPIError(
-                    response.status_code,
-                    f"Notion API error {response.status_code} on {path}: {response.text}",
-                )
-
-            return response.json()
-
-        raise NotionAPIError(
-            0, f"Notion API request to {path} failed after {_MAX_RETRIES} retries."
+        return dlt_utils.with_retries(
+            lambda: self._attempt(method, path, params, json_body),
+            retry_on=(httpx.TransportError, _RetryableStatusError),
+            delay=lambda error, number: _retry_delay(path, error, number),
+            attempts=_MAX_RETRIES,
+            check_active=self._check_active,
+            # Read at call time, so a test that patches ``time.sleep`` sees the waits.
+            sleep=time.sleep,
         )
+
+    def _attempt(self, method: str, path: str, params: dict | None, json_body: dict | None) -> dict:
+        response = self._http.request(
+            method,
+            f"{NOTION_API_BASE_URL}/{path}",
+            params=params,
+            json=json_body,
+            headers=self._headers,
+        )
+        status = response.status_code
+        message = f"Notion API error {status} on {path}: {response.text}"
+        if status == 429 or status >= 500:
+            raise _RetryableStatusError(status, message, response.headers)
+        if status >= 400:
+            raise NotionAPIError(status, message)
+        return response.json()
 
     def get_self(self) -> dict:
         return self.request("GET", "users/me")
@@ -206,6 +205,26 @@ class _NotionClient:
 
     def get_data_source(self, data_source_id: str) -> dict:
         return self.request("GET", f"data_sources/{data_source_id}")
+
+
+def _retry_delay(path: str, error: BaseException, number: int) -> float | None:
+    """Seconds to wait before the next attempt; ``None`` on the last, which raises."""
+    if number == _MAX_RETRIES - 1:
+        return None
+    if isinstance(error, _RetryableStatusError):
+        delay = _retry_after(error.headers, number)
+        logger.warning(
+            "Notion: %s on %s, retrying in %.1fs (%d/%d).",
+            error.status_code,
+            path,
+            delay,
+            number + 1,
+            _MAX_RETRIES,
+        )
+        return delay
+    delay = float(2**number)
+    logger.warning("Notion: transport error on %s (%s), retrying in %.1fs.", path, error, delay)
+    return delay
 
 
 def _retry_after(headers, attempt: int) -> float:
@@ -387,7 +406,6 @@ def _iter_rows(
     previous_pages: dict[str, dict],
     state: dict,
     stats: dict[str, int],
-    check_active: Callable[[], None] | None = None,
 ):
     """Yield one document row per changed/new page, then deletion tombstones.
 
@@ -410,8 +428,6 @@ def _iter_rows(
 
     while queue:
         item = queue.popleft()
-        if check_active is not None:
-            check_active()
         if item.id in visited:
             continue
         visited.add(item.id)
@@ -829,7 +845,8 @@ def notion_source(
             state, so each run tombstones and forgets the other's pages. A
             source whose name changes starts over, and documents it synced
             under the old name are not cleaned up.
-        check_active: Optional host authorization checkpoint during extraction.
+        check_active: Optional host authorization checkpoint during extraction. It runs
+            before every request attempt and every retry wait, and around every row.
         http_client: Pre-built ``httpx`` client (mainly a test-injection
             point); when omitted one is built for this sync.
     """
@@ -865,7 +882,7 @@ def notion_source(
     def notion_pages():
         owned_client = None if http_client is not None else httpx.Client(timeout=30.0)
         try:
-            client = _NotionClient(http_client or owned_client, resolved_token)
+            client = _NotionClient(http_client or owned_client, resolved_token, check_active)
             resolved_workspace_id = _canonical_id(workspace_id or _resolve_workspace_id(client))
             state = dlt.current.resource_state()
             previous_pages = {
@@ -890,7 +907,6 @@ def notion_source(
                     previous_pages,
                     state,
                     stats,
-                    check_active,
                 ),
                 check_active,
             )

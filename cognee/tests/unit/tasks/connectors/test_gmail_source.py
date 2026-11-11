@@ -20,8 +20,11 @@ from types import SimpleNamespace
 import pytest
 
 from cognee.tasks.ingestion.connectors.gmail import (
+    _COST_MESSAGES_GET,
+    _NUM_RETRIES,
     _RATE_LIMIT_WINDOWS,
     GmailQuota,
+    _get_message,
     full_backfill,
     gmail_source,
     incremental_fetch,
@@ -110,14 +113,17 @@ class _Messages:
 
     def get(self, *, userId, id, format):
         if id in self._svc.get_errors:
-            return _Request(_HttpError(self._svc.get_errors[id]))
-        if id not in self._svc.messages:
-            return _Request(_HttpError(404))
-        rejections = self._svc.quota_rejections.pop(id, 0)
-        return _Request(
-            self._svc.messages[id],
-            fail_first=[_HttpError(403, reason="rateLimitExceeded")] * rejections,
-        )
+            request = _Request(_HttpError(self._svc.get_errors[id]))
+        elif id not in self._svc.messages:
+            request = _Request(_HttpError(404))
+        else:
+            rejections = self._svc.quota_rejections.pop(id, 0)
+            request = _Request(
+                self._svc.messages[id],
+                fail_first=[_HttpError(403, reason="rateLimitExceeded")] * rejections,
+            )
+        self._svc.requests.append(request)
+        return request
 
 
 class _History:
@@ -162,6 +168,8 @@ class FakeGmailService:
         # quota before letting it through (after googleapiclient's retries).
         self.quota_rejections: dict[str, int] = {}
         self.history_calls = []
+        # Every messages().get() request, to count its execute() attempts.
+        self.requests: list[_Request] = []
 
     def users(self):
         return _Users(self)
@@ -793,6 +801,115 @@ def test_forbidden_for_another_reason_is_not_retried(make_quota):
     assert 60.0 not in clock.sleeps
 
 
+# ---------------------------------------------------------------------------
+# Authorization checkpoint and the retries: the host's check runs before every attempt and
+# every wait, so a revoked connection stops a retry instead of sleeping through it.
+# ---------------------------------------------------------------------------
+class _Revoked(Exception):
+    pass
+
+
+def _revoked_on_call(number):
+    """A ``check_active`` that raises ``_Revoked`` on its ``number``-th call (counting from 1)."""
+    calls = []
+
+    def check_active():
+        calls.append(1)
+        if len(calls) == number:
+            raise _Revoked
+
+    return check_active
+
+
+def test_a_revoked_connection_stops_a_retry_before_it_waits(waits):
+    """googleapiclient used to retry inside execute(), so a revoked connection kept sleeping."""
+    service = FakeGmailService(messages=[_make_message("a")], get_errors={"a": 503})
+    stats: dict = {}
+
+    # Call 1 is before the first attempt, call 2 before the backoff wait that follows its 503.
+    with pytest.raises(_Revoked):
+        _get_message(service, "a", stats, check_active=_revoked_on_call(2))
+
+    (request,) = service.requests
+    assert request.executions == 1, "exactly the first request was made"
+    assert waits == [], "the revoked run did not wait"
+    assert stats == {"scanned": 1}, "a revoked connection is not a failed message fetch"
+
+
+def test_a_revoked_connection_stops_a_quota_window_wait(make_quota, waits):
+    quota, clock = make_quota(units_per_minute=6000)
+    service = FakeGmailService(messages=[_make_message("a")])
+    service.quota_rejections["a"] = 1
+
+    # Calls 1 and 2 precede the first attempt (window loop, then retry loop); the 403 is
+    # not retried by the retry loop, so call 3 is the one before the one-minute window wait.
+    with pytest.raises(_Revoked):
+        _get_message(service, "a", quota=quota, check_active=_revoked_on_call(3))
+
+    assert 60.0 not in clock.sleeps, "the revoked run did not wait out a quota window"
+    assert [request.executions for request in service.requests] == [1]
+
+
+def test_a_revoked_connection_is_not_swallowed_by_the_baseline_read():
+    # _mailbox_history_id turns a failed profile read into "no baseline"; a revoked
+    # connection must not take that path.
+    service = FakeGmailService(messages=[_make_message("a")])
+
+    with pytest.raises(_Revoked):
+        list(full_backfill(service, {}, label_ids=["INBOX"], check_active=_revoked_on_call(1)))
+
+    assert service.requests == [], "no message was fetched"
+
+
+# googleapiclient's policy with the connector's _NUM_RETRIES: N retries are N + 1 attempts, and
+# retry n waits up to 2**n seconds. The detailed status table is in test_google_api_retry.py.
+def test_a_transient_status_is_retried_num_retries_times_with_googles_backoff(waits):
+    service = FakeGmailService(messages=[_make_message("a")], get_errors={"a": 503})
+
+    with pytest.raises(_HttpError):
+        _get_message(service, "a")
+
+    (request,) = service.requests
+    assert request.executions == _NUM_RETRIES + 1
+    assert len(waits) == _NUM_RETRIES
+    assert all(0 <= wait <= 2 ** (retry + 1) for retry, wait in enumerate(waits))
+
+
+@pytest.mark.parametrize("status", [400, 401, 403])
+def test_a_permanent_status_is_not_retried_and_a_403_without_a_reason_is_permanent(waits, status):
+    service = FakeGmailService(messages=[_make_message("a")], get_errors={"a": status})
+
+    with pytest.raises(_HttpError):
+        _get_message(service, "a")
+
+    (request,) = service.requests
+    assert request.executions == 1
+    assert waits == []
+
+
+def test_a_missing_message_is_not_retried(waits):
+    service = FakeGmailService(messages=[_make_message("a")], get_errors={"a": 404})
+
+    assert _get_message(service, "a") is None
+
+    (request,) = service.requests
+    assert request.executions == 1
+    assert waits == []
+
+
+def test_quota_is_spent_once_per_request_not_once_per_retry(make_quota, monkeypatch, waits):
+    quota, _ = make_quota(units_per_minute=6000)
+    spent = []
+    monkeypatch.setattr(quota, "acquire", spent.append)
+    service = FakeGmailService(messages=[_make_message("a")], get_errors={"a": 503})
+
+    with pytest.raises(_HttpError):
+        _get_message(service, "a", quota=quota)
+
+    assert [request.executions for request in service.requests] == [_NUM_RETRIES + 1]
+    assert spent == [_COST_MESSAGES_GET]
+
+
 def test_sources_for_one_mailbox_share_a_quota():
     first = gmail_source(service=FakeGmailService(), resource_name="gmail_messages_acct1")
     second = gmail_source(service=FakeGmailService(), resource_name="gmail_messages_acct1")
@@ -801,3 +918,14 @@ def test_sources_for_one_mailbox_share_a_quota():
     assert first.cognee_quota is second.cognee_quota
     assert first.cognee_quota is not other.cognee_quota
     assert shared_quota("gmail_messages_acct1", 6000) is first.cognee_quota
+
+
+@pytest.fixture(autouse=True)
+def waits(monkeypatch):
+    """The backoff waits ``api_retry`` asked for, in order, without sleeping for real.
+
+    A fake that raises a 5xx or 429 is retried by the connector, so every test needs this.
+    """
+    recorded: list[float] = []
+    monkeypatch.setattr("time.sleep", recorded.append)
+    return recorded

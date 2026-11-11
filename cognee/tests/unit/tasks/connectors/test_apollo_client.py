@@ -189,6 +189,24 @@ def test_server_errors_and_network_failures_are_retried(monkeypatch):
     assert sleeps == [1, 2]
 
 
+def test_a_revoked_connection_stops_a_retry_before_it_waits(monkeypatch):
+    """The host's check runs before every attempt, so a revoked run does not sleep a backoff."""
+    client, calls, sleeps = _client(monkeypatch, _Response(503), _Response(200, {"ok": True}))
+    checks = []
+
+    def check_active():
+        checks.append(1)
+        if len(checks) == 2:
+            raise PermissionError("access revoked")
+
+    with pytest.raises(PermissionError, match="access revoked"):
+        client.request("GET", "/contacts", check_active=check_active)
+
+    assert len(calls) == 1
+    assert sleeps == []
+    assert len(checks) == 2
+
+
 def test_a_persistent_network_failure_raises_without_the_key(monkeypatch):
     client, _, _ = _client(monkeypatch, *[requests.ConnectionError(KEY)] * 3)
 

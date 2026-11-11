@@ -105,6 +105,50 @@ def test_invalid_retry_after_uses_bounded_fallback(monkeypatch, retry_after):
     assert sleeps == [1, 2, 4, 8]
 
 
+class _Revoked(Exception):
+    """What a host's check raises once the connection is gone."""
+
+
+def _revoked_on_second_check():
+    checks = iter([None, _Revoked()])
+
+    def check_active():
+        failure = next(checks)
+        if failure is not None:
+            raise failure
+
+    return check_active
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"status_code": 503},
+        {"status_code": 429, "headers": {"Retry-After": "5"}},
+        {"error": httpx.ReadTimeout("slow")},
+    ],
+    ids=["outage", "rate_limit", "transport"],
+)
+def test_a_revoked_connection_stops_a_retry_before_it_waits(monkeypatch, answer):
+    """The host's check runs before every attempt and every wait, not once per request."""
+    requests, sleeps = [], []
+    monkeypatch.setattr(onenote.time, "sleep", sleeps.append)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if "error" in answer:
+            raise answer["error"]
+        return httpx.Response(**answer)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        graph = onenote._Graph("offline-token", client, check_active=_revoked_on_second_check())
+        with pytest.raises(_Revoked):
+            graph.request("https://graph.microsoft.com/v1.0/me/onenote/notebooks")
+
+    assert len(requests) == 1
+    assert sleeps == []
+
+
 @pytest.mark.parametrize(
     "next_link",
     [

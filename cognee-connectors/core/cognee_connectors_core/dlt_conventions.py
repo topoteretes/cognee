@@ -16,6 +16,11 @@ the package with itself and never refuses an old cognee.
 
 import importlib
 import json
+import time
+from collections.abc import Callable
+from typing import TypeVar
+
+_T = TypeVar("_T")
 
 # A dlt source sets this attribute to opt into the "document" ingestion path:
 # each row becomes a text document that flows through normal cognify (LLM entity
@@ -131,6 +136,43 @@ def guarded_rows(rows, check_active=None):
         if check_active is not None:
             check_active()
         yield row
+
+
+def with_retries(
+    attempt: Callable[[], _T],
+    *,
+    retry_on: tuple[type[BaseException], ...],
+    delay: Callable[[BaseException, int], float | None],
+    attempts: int,
+    check_active: Callable[[], None] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> _T:
+    """Run one provider request, retried by the connector's own policy.
+
+    The one way a connector retries: ``check_active`` runs before every attempt and
+    before every wait, outside the retried call, so a host that revoked the run never
+    waits out a backoff, and what the check raises propagates as it is (it is not a
+    provider failure, so it is neither retried nor counted as one).
+
+    ``attempt`` makes exactly one request. An error of a ``retry_on`` class is retried
+    after ``delay(error, number)`` seconds (``number`` counts from 0), unless ``delay``
+    answers ``None`` (a provider window the connector does not wait out) or it was the
+    last of ``attempts``: then it is raised as it is, like any other error. ``delay`` may
+    also raise an error of its own (a spent wait budget), which propagates as it is.
+    """
+    for number in range(attempts):
+        if check_active is not None:
+            check_active()
+        try:
+            return attempt()
+        except retry_on as error:
+            wait = delay(error, number)
+            if wait is None or number == attempts - 1:
+                raise
+        if check_active is not None:
+            check_active()
+        sleep(wait)
+    raise ValueError("with_retries needs at least one attempt")
 
 
 def document_source_tag(item) -> str | None:

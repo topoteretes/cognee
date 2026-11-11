@@ -31,6 +31,8 @@ _RENDERER_VERSION = 2
 # One run may sleep at most this long in total across all its retries. The walk runs under
 # cognee's process-wide dlt staging lock, so a longer wait stops the run instead.
 RETRY_WAIT_BUDGET_SECONDS = 60
+_ATTEMPTS = 5
+_RETRY_STATUSES = (429, 500, 502, 503, 504)
 # Microsoft's OneNote error codes: 20113 "the resource specified in the request was deleted",
 # 20102 "you requested a resource that doesn't exist". Only 20113 counts as proof of a deletion;
 # 20102 also fits a resource this token can no longer see (see onenote.md).
@@ -55,6 +57,23 @@ class OneNoteRateLimitedError(OneNoteError):
 
 class OneNoteBudgetExceededError(OneNoteError):
     """The run spent its ``max_requests`` budget; it resumes on the next run."""
+
+
+class _Transient(OneNoteError):
+    """A failed attempt worth retrying; raised as it is when it was the last one."""
+
+    def __init__(self, message: str, *, status: int = 0, code: str = "", retry_after=None):
+        super().__init__(message, status=status, code=code)
+        # The raw Retry-After header, for the client's retry policy.
+        self.retry_after = retry_after
+
+
+class _TransientRateLimited(_Transient, OneNoteRateLimitedError):
+    """A transient 429, which is still a rate limit once the retries run out."""
+
+
+class _TransportFailure(_Transient):
+    """The request never got an answer."""
 
 
 def _identity(value: str) -> str:
@@ -95,8 +114,6 @@ class _Graph:
             self.client.close()
 
     def request(self, url: str, *, html: bool = False):
-        import httpx
-
         parsed = urlsplit(url)
         # Dot segments (also percent-encoded) are normalized by httpx, so a link under
         # /v1.0/me/onenote/ could otherwise send the token to another Graph endpoint.
@@ -115,85 +132,111 @@ class _Graph:
             or not parsed.path.startswith("/v1.0/me/onenote/")
         ):
             raise OneNoteError("Unsafe Graph URL rejected")
-        for attempt in range(5):
-            self.ensure_active()
-            if self.stats["requests"] >= self.max_requests:
-                raise OneNoteBudgetExceededError("Graph request budget exhausted")
-            token = self.token() if callable(self.token) else self.token
-            if not isinstance(token, str) or not token.strip():
-                raise OneNoteError("A delegated access token is required")
-            token = token.strip()
-            if any(char.isspace() for char in token):
-                raise OneNoteError("The access token must not contain whitespace")
-            if not token.isascii() or not token.isprintable():
-                raise OneNoteError("The access token is not a valid header value")
-            self.stats["requests"] += 1
-            # The failure is raised after the except block so no exception that mentions the
-            # request (and so possibly the token) stays attached as __context__.
-            failure = None
+        return dlt_utils.with_retries(
+            lambda: self._attempt(url, html),
+            retry_on=(_Transient,),
+            delay=self._retry_delay,
+            attempts=_ATTEMPTS,
+            check_active=self.check_active,
+            # Read at call time, so a test that patches ``time.sleep`` sees the waits.
+            sleep=time.sleep,
+        )
+
+    def _retry_delay(self, error: _Transient, number: int) -> float | None:
+        """Seconds to wait before the next attempt, charged to the run's wait budget.
+
+        Raises the budget errors itself, so their messages stay the ones callers match;
+        ``None`` (a retryable status on the last attempt) raises the attempt's own error.
+        """
+        if isinstance(error, _TransportFailure):
+            if number == _ATTEMPTS - 1:
+                raise OneNoteError("Graph transport failed after five attempts") from None
+            delay = 2**number
+            if self.slept + delay > RETRY_WAIT_BUDGET_SECONDS:
+                raise OneNoteError("Graph retry wait budget exhausted") from None
+        else:
+            if number == _ATTEMPTS - 1:
+                return None
             try:
-                response = self.client.get(
-                    url,
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=30,
-                    follow_redirects=False,
-                )
-            except httpx.LocalProtocolError:
-                failure = "protocol"
-            except httpx.TransportError:
-                failure = "transport"
-            if failure == "protocol":
-                raise OneNoteError("Graph request could not be sent; check the access token")
-            if failure == "transport":
-                if attempt == 4:
-                    raise OneNoteError("Graph transport failed after five attempts")
-                delay = 2**attempt
-                if self.slept + delay > RETRY_WAIT_BUDGET_SECONDS:
-                    raise OneNoteError("Graph retry wait budget exhausted")
-                self.slept += delay
-                time.sleep(delay)
-                continue
-            if response.status_code in (429, 500, 502, 503, 504) and attempt < 4:
-                try:
-                    delay = float(response.headers.get("Retry-After", 2**attempt))
-                    if not math.isfinite(delay) or delay < 0:
-                        delay = 2**attempt
-                except ValueError:
-                    delay = 2**attempt
-                if self.slept + delay > RETRY_WAIT_BUDGET_SECONDS:
-                    error = OneNoteRateLimitedError if response.status_code == 429 else OneNoteError
-                    raise error(
-                        "Graph Retry-After exceeds wait budget", status=response.status_code
-                    )
-                self.slept += delay
-                time.sleep(delay)
-                continue
-            if response.status_code != 200:
-                code = ""
-                try:
-                    code = str(response.json().get("error", {}).get("code", ""))
-                except (ValueError, AttributeError):
-                    # An unreadable error body leaves the code empty, which no caller treats
-                    # as proof of a deletion, so the request fails closed.
-                    pass
-                message = (
-                    "Graph rejected the token; reauthenticate the selected account"
-                    if response.status_code == 401
-                    else "Graph request failed; snapshot was not authorized for replacement"
-                )
-                error = OneNoteRateLimitedError if response.status_code == 429 else OneNoteError
-                raise error(message, status=response.status_code, code=code)
-            if html:
-                if "text/html" not in response.headers.get("content-type", "").lower():
-                    raise OneNoteError("Graph page content is not HTML")
-                return response.text
-            try:
-                result = response.json()
+                delay = float(error.retry_after if error.retry_after is not None else 2**number)
+                if not math.isfinite(delay) or delay < 0:
+                    delay = 2**number
             except ValueError:
-                raise OneNoteError("Malformed Graph JSON") from None
-            if not isinstance(result, dict):
-                raise OneNoteError("Expected a Graph object")
-            return result
+                delay = 2**number
+            if self.slept + delay > RETRY_WAIT_BUDGET_SECONDS:
+                exceeded = OneNoteRateLimitedError if error.status == 429 else OneNoteError
+                raise exceeded(
+                    "Graph Retry-After exceeds wait budget", status=error.status
+                ) from None
+        self.slept += delay
+        return delay
+
+    def _attempt(self, url: str, html: bool):
+        """One request; a transient failure raises a ``_Transient`` for the retry policy."""
+        import httpx
+
+        if self.stats["requests"] >= self.max_requests:
+            raise OneNoteBudgetExceededError("Graph request budget exhausted")
+        token = self.token() if callable(self.token) else self.token
+        if not isinstance(token, str) or not token.strip():
+            raise OneNoteError("A delegated access token is required")
+        token = token.strip()
+        if any(char.isspace() for char in token):
+            raise OneNoteError("The access token must not contain whitespace")
+        if not token.isascii() or not token.isprintable():
+            raise OneNoteError("The access token is not a valid header value")
+        self.stats["requests"] += 1
+        # The failure is raised after the except block so no exception that mentions the
+        # request (and so possibly the token) stays attached as __context__.
+        failure = None
+        try:
+            response = self.client.get(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=30,
+                follow_redirects=False,
+            )
+        except httpx.LocalProtocolError:
+            failure = "protocol"
+        except httpx.TransportError:
+            failure = "transport"
+        if failure == "protocol":
+            raise OneNoteError("Graph request could not be sent; check the access token")
+        if failure == "transport":
+            raise _TransportFailure("Graph transport failed")
+        if response.status_code != 200:
+            code = ""
+            try:
+                code = str(response.json().get("error", {}).get("code", ""))
+            except (ValueError, AttributeError):
+                # An unreadable error body leaves the code empty, which no caller treats
+                # as proof of a deletion, so the request fails closed.
+                pass
+            message = (
+                "Graph rejected the token; reauthenticate the selected account"
+                if response.status_code == 401
+                else "Graph request failed; snapshot was not authorized for replacement"
+            )
+            if response.status_code in _RETRY_STATUSES:
+                transient = _TransientRateLimited if response.status_code == 429 else _Transient
+                raise transient(
+                    message,
+                    status=response.status_code,
+                    code=code,
+                    retry_after=response.headers.get("Retry-After"),
+                )
+            raise OneNoteError(message, status=response.status_code, code=code)
+        if html:
+            if "text/html" not in response.headers.get("content-type", "").lower():
+                raise OneNoteError("Graph page content is not HTML")
+            return response.text
+        try:
+            result = response.json()
+        except ValueError:
+            raise OneNoteError("Malformed Graph JSON") from None
+        if not isinstance(result, dict):
+            raise OneNoteError("Expected a Graph object")
+        return result
 
     def collection(self, path: str):
         base = f"{_BASE}/{path}"
@@ -498,7 +541,8 @@ def onenote_source(
     should watch ``cognee_sync_stats['unresolved']``: pages Graph answered 20102 for are
     kept, not forgotten, and do not fail the run. Expected Graph failures, throttling and a
     spent ``max_requests`` budget return normally, publish nothing and checkpoint progress;
-    failures of ``check_active`` or of a token callable raise unchanged.
+    failures of ``check_active`` or of a token callable raise unchanged. ``check_active``
+    runs before every request attempt and every retry wait, and around every row.
 
     ``token`` is a delegated access token or a zero-argument callable returning one.
     ``http_client`` and ``service`` are two names for one ``httpx.Client`` (give at most

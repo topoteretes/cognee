@@ -99,7 +99,7 @@ from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import dlt_utils
-from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, NODE_SET_COLUMN
+from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, NODE_SET_COLUMN, with_retries
 
 logger = get_logger("asana_connector")
 
@@ -247,18 +247,15 @@ class AsanaClient:
         """The JSON object of a ``200`` answer, retrying a 5xx or a network error.
 
         ``check_active`` is called before each attempt, a retry included, and before its backoff
-        sleep, so a host that has revoked the run does not wait out the retries. What it raises
-        propagates as it is: it is no network error, so it is neither retried nor wrapped.
+        sleep (``with_retries``), so a host that has revoked the run does not wait out the
+        retries. What it raises propagates as it is: it is no network error, so it is neither
+        retried nor wrapped.
         """
         import requests  # lazy: importing the connectors package loads no client library
 
         headers = {"Authorization": f"Bearer {self._access_token}", "Accept": "application/json"}
-        response = None
-        for attempt in range(_RETRIES):
-            if check_active is not None:
-                check_active()
-            if attempt:
-                self._sleep(2 ** (attempt - 1))
+
+        def attempt() -> dict:
             try:
                 response = requests.request(
                     method,
@@ -269,14 +266,21 @@ class AsanaClient:
                     allow_redirects=False,  # a 3xx is an error answer, never a new target
                 )
             except requests.RequestException:
-                # Only the fact: the message of some requests errors holds a header.
+                # Only the fact: the message of some requests errors holds a header, so the
+                # error is raised outside this block, where it is no one's __context__.
                 response = None
-                continue
-            if response.status_code < 500:
-                break
-        if response is None:
-            raise AsanaAPIError(0, _endpoint(path))
-        return self._parse(response, path)
+            if response is None:
+                raise AsanaAPIError(0, _endpoint(path))
+            return self._parse(response, path)
+
+        return with_retries(
+            attempt,
+            retry_on=(AsanaAPIError,),
+            delay=_retry_delay,
+            attempts=_RETRIES,
+            check_active=check_active,
+            sleep=self._sleep,
+        )
 
     def _parse(self, response: Any, path: str) -> dict:
         status, endpoint = response.status_code, _endpoint(path)
@@ -307,6 +311,12 @@ class AsanaClient:
         if not isinstance(message, str):
             return ""
         return message.replace(self._access_token, "[token]")[:200]
+
+
+def _retry_delay(error: BaseException, number: int) -> float | None:
+    """No answer or a 5xx is retried after 1s, then 2s; every other answer is final."""
+    status = getattr(error, "status", None)
+    return 2**number if status == 0 or (status is not None and status >= 500) else None
 
 
 def build_asana_service(access_token: str) -> AsanaClient:
