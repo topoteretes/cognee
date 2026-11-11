@@ -55,6 +55,7 @@ from cognee.modules.integrations.credentials import (
     revoke_credential_if_current,
     update_refreshed_credential,
 )
+from cognee.modules.integrations.ingestion import sync_is_paused
 from cognee.modules.integrations.linear.client import LinearUnauthorizedError, graphql
 from cognee.modules.integrations.linear.handle_linear_event import handle_linear_event
 from cognee.modules.integrations.linear.linear_settings import LinearSettings, require
@@ -69,6 +70,7 @@ from cognee.modules.integrations.linear.sync import (
 )
 from cognee.modules.integrations.linear.verify_linear_signature import LinearWebhookVerifier
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
+from cognee.modules.integrations.outbound import client_session
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +209,7 @@ async def refresh_access_token(
     code so neither the request nor the response body can reach a log.
     """
     async with (
-        aiohttp.ClientSession(timeout=_REFRESH_TIMEOUT) as session,
+        client_session("linear", timeout=_REFRESH_TIMEOUT) as session,
         session.post(
             _TOKEN_URL,
             data={
@@ -565,7 +567,7 @@ class LinearIntegration(OAuthIntegration):
     async def exchange_code(self, code: str) -> dict[str, Any]:
         """Exchange the OAuth code for the workspace's agent token."""
         async with (
-            aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+            client_session("linear", timeout=_TIMEOUT) as session,
             session.post(
                 _TOKEN_URL,
                 data={
@@ -667,8 +669,11 @@ class LinearIntegration(OAuthIntegration):
         unknown (same race as GitHub's ``installation.created``). This hook,
         firing after the upsert, gives the agent something to recall from on
         day one. The admin chose the teams on Linear's install screen, so the
-        default is every granted team until the user narrows it.
+        default is every granted team until the user narrows it. An owner's paused
+        default holds it.
         """
+        if await sync_is_paused(self.provider, credential, "install sync"):
+            return
         await request_sync(credential)
 
     async def sync_now(self, credential: IntegrationCredential) -> None:
@@ -719,7 +724,7 @@ class LinearIntegration(OAuthIntegration):
                 continue
             try:
                 async with (
-                    aiohttp.ClientSession(timeout=_REVOKE_TIMEOUT) as session,
+                    client_session("linear", timeout=_REVOKE_TIMEOUT) as session,
                     session.post(
                         _REVOKE_URL,
                         data={"token": token, "token_type_hint": token_type},

@@ -3,7 +3,7 @@ callback extensions (callback_params passthrough, on_installed dispatch).
 
 Same fake-provider approach as test_get_integrations_router.py: what's
 under test is the router's generic logic, not any real provider. Detached
-work is intercepted at the _spawn_background seam so the tests can run the
+work is intercepted at the spawn_background seam so the tests can run the
 captured coroutines deterministically instead of racing the event loop.
 """
 
@@ -97,7 +97,7 @@ def spawned():
     def fake_spawn(coro, *, description):
         captured.append((coro, description))
 
-    with patch.object(_router_module, "_spawn_background", side_effect=fake_spawn):
+    with patch.object(_router_module, "spawn_background", side_effect=fake_spawn):
         yield captured
 
     for coro, _description in captured:

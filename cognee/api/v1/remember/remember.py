@@ -1686,6 +1686,22 @@ async def _remember_inner(
                 "(or a list of them) as data."
             )
 
+        # Before any clone starts, and before run_in_background hands the clones to a
+        # task: a refusal there would reach only the log, not the caller.
+        if any(is_remote_repo(spec) for spec in repo_specs):
+            from cognee.tasks.code_graph.resolve_repo import CodeRepositoryError
+            from cognee.tasks.web_scraper.ssrf_protection import (
+                SSRFProtectionError,
+                require_http_requests_allowed,
+            )
+
+            try:
+                require_http_requests_allowed()
+            except SSRFProtectionError as error:
+                raise CodeRepositoryError(
+                    message=error.message, status_code=error.status_code
+                ) from error
+
         send_telemetry(
             "cognee.remember.code_graph",
             kwargs.get("user", "sdk"),
@@ -2211,6 +2227,12 @@ async def _remember_inner(
                 result._task = _anchor_background_task(asyncio.create_task(_session_improve()))
 
             return result
+
+        from cognee.tasks.web_scraper.ssrf_protection import require_http_requests_allowed_for
+
+        # Before the run starts: add() checks too, but with run_in_background it runs
+        # inside the background task, where a refusal would never reach the caller.
+        require_http_requests_allowed_for(data)
 
         result = RememberResult(
             status="running",

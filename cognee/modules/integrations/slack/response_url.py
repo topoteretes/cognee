@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 
 import aiohttp
 
+from cognee.modules.integrations.outbound import client_session
+
 logger = logging.getLogger(__name__)
 
 _RESPONSE_URL_TIMEOUT = aiohttp.ClientTimeout(total=10)
@@ -77,7 +79,7 @@ async def post_to_response_url(response_url: str, payload: dict[str, Any]) -> No
         return
     try:
         async with (
-            aiohttp.ClientSession(timeout=_RESPONSE_URL_TIMEOUT) as session,
+            client_session("slack", timeout=_RESPONSE_URL_TIMEOUT) as session,
             # allow_redirects=False: aiohttp follows redirects by default, and the
             # guard above only ever sees hop 0. A 3xx from hooks.slack.com would
             # otherwise carry this request -- and on 307/308 the answer text itself,
