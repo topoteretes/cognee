@@ -5,7 +5,8 @@ destination that is a schema, and Postgres reserves the ``pg_`` prefix for
 system schemas: a dataset named ``pg_sales`` or ``PG Sales`` failed every dlt
 input with ``ReservedName: unacceptable schema name``, after the staging
 database had already been created. Such a name is now prefixed exactly like a
-name that starts with a digit, on every destination.
+name that starts with a digit, on every destination. So is ``information_schema``,
+a schema every Postgres database already holds (SDK-1466).
 """
 
 import importlib
@@ -71,9 +72,12 @@ def sqlite_staging(tmp_path, monkeypatch):
         ("pg", "d_pg"),
         ("pg_", "d_pg"),
         ("PG", "d_pg"),
+        # Present in every Postgres database and owned by the bootstrap superuser.
+        ("information_schema", "d_information_schema"),
+        ("Information Schema", "d_information_schema"),
     ],
 )
-def test_a_pg_prefixed_name_is_prefixed(dataset_name, ident):
+def test_a_reserved_name_is_prefixed(dataset_name, ident):
     assert ingest._to_safe_ident(dataset_name) == ident
 
 
@@ -90,6 +94,9 @@ def test_the_merge_staging_schema_is_never_reserved(dataset_name):
         "pgsales",
         "pgvector_data",
         "my_pg_sales",
+        # Only the exact system schema name exists in every database.
+        "information_schemas",
+        "my_information_schema",
         "sales",
         "main_dataset",
     ],
