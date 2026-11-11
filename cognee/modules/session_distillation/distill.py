@@ -7,8 +7,8 @@ Flow (curator calls parallel by batch; accept/write calls parallel by lesson):
            turns were already curated with the entries they produced).
 2. CURATE  pack them into batches; one curator LLM call per batch. Every new entry is
            curated unless ``IMPROVE_DISTILL_MAX_BATCHES_PER_RUN`` caps the run. In coding
-           mode, proposals from more than one batch go through one more curator call
-           that merges those about the same subject (``merge_proposed_lessons``).
+           mode, when more than one batch proposed lessons, one more call names the
+           proposals that restate each other and they are folded (``merge_proposed_lessons``).
 3. ACCEPT  per proposed lesson: search prior lessons/entities, then writer/rejecter LLM.
 4. PERSIST render accepted lessons as documents; add + cognify them in one pass.
 
@@ -93,6 +93,7 @@ from .models import (
     CodingWrittenLesson,
     CuratorBatchOutput,
     DistillationResult,
+    DuplicateProposalGroups,
     ProposedLesson,
     WrittenLesson,
 )
@@ -128,6 +129,7 @@ class CuratorRun:
 
 CURATOR_PROMPT_FILE = "session_distillation_curator_system.txt"
 WRITER_PROMPT_FILE = "session_distillation_writer_system.txt"
+MERGE_PROMPT_FILE = "session_distillation_merge_system.txt"
 CODING_PROMPT_DIR = "coding"
 
 # A candidate or statement that opens with this names a state key (coding mode).
@@ -486,57 +488,135 @@ async def curate_batch(batch_text: str, *, coding: bool = False) -> list[Propose
         return None
 
 
-async def merge_proposed_lessons(
-    proposed: list[ProposedLesson],
-    qa_rows: list[dict],
-    context_entries: list[SessionContextEntry],
+async def find_duplicate_proposals(proposed: list[ProposedLesson]) -> list[list[int]] | None:
+    """One LLM call that names the proposals stating the same fact (coding mode).
+
+    The input is the numbered working statements and nothing else, and the answer is
+    groups of numbers, so the call stays small however long the session was. ``None``
+    means the call FAILED; ``[]`` that nothing is a duplicate. An exhausted LLM budget
+    is raised, like in ``curate_batch``.
+    """
+    prompt_file = distillation_prompt_file(MERGE_PROMPT_FILE, True)
+    system_prompt = read_query_prompt(prompt_file)
+    if not system_prompt:
+        logger.warning("Distillation merge prompt not found: %s", prompt_file)
+        return None
+    lines = [
+        f"{number}. {' '.join(strip_state_key(lesson.working_statement).split())}"
+        for number, lesson in enumerate(proposed, start=1)
+    ]
+    try:
+        result = await LLMGateway.acreate_structured_output(
+            text_input="\n".join(lines),
+            system_prompt=system_prompt,
+            response_model=DuplicateProposalGroups,
+        )
+        return [list(group) for group in result.groups]
+    except LLMPaymentRequiredError:
+        raise
+    except Exception as error:
+        logger.warning("Distillation duplicate check failed: %s", error, exc_info=True)
+        return None
+
+
+def proposal_key(lesson: ProposedLesson, entries_by_id: dict) -> str:
+    """The key the proposal's lesson would be stored under: the curator's state key,
+    else the pitfall key of a repeated-error candidate among its members, else ``""``."""
+    state_key = str(getattr(lesson, "state_key", "") or "").strip()
+    if state_key:
+        return state_key
+    return member_pitfall_key(
+        [
+            entries_by_id[entry_id]
+            for entry_id in lesson.member_entry_ids
+            if entry_id in entries_by_id
+        ]
+    )
+
+
+def merge_duplicate_proposals(
+    proposed: list[ProposedLesson], groups: list[list[int]], keys: list[str]
 ) -> list[ProposedLesson]:
-    """One more curator call over the proposals of several batches (coding mode).
+    """Fold each group of duplicate proposals into one of them; every other proposal
+    stays exactly as it was.
+
+    ``groups`` holds 1-based numbers into ``proposed`` and ``keys`` each proposal's
+    ``proposal_key``. The group keeps one proposal unchanged, its last keyed one (the
+    newest state, the proposals being in turn order) or else its first, and gives it
+    the members of the others. Nothing is trusted beyond that: a number out of range
+    or already used by an earlier group is skipped, a group left with fewer than two
+    proposals does nothing, and a group that spans two different keys does nothing,
+    since a footprint and a pitfall are never one lesson.
+    """
+    absorbed_by: dict[int, int] = {}
+    taken: set[int] = set()
+    for group in groups:
+        indexes = sorted(
+            {
+                number - 1
+                for number in group
+                if isinstance(number, int)
+                and 1 <= number <= len(proposed)
+                and number - 1 not in taken
+            }
+        )
+        if len(indexes) < 2 or len({keys[index] for index in indexes} - {""}) > 1:
+            continue
+        keyed = [index for index in indexes if keys[index]]
+        kept = keyed[-1] if keyed else indexes[0]
+        taken.update(indexes)
+        for index in indexes:
+            if index != kept:
+                absorbed_by[index] = kept
+    merged: list[ProposedLesson] = []
+    for index, lesson in enumerate(proposed):
+        if index in absorbed_by:
+            continue
+        members = list(lesson.member_entry_ids)
+        for other, kept in absorbed_by.items():
+            if kept == index:
+                members.extend(proposed[other].member_entry_ids)
+        if len(members) > len(lesson.member_entry_ids):
+            lesson = lesson.model_copy(update={"member_entry_ids": list(dict.fromkeys(members))})
+        merged.append(lesson)
+    return merged
+
+
+async def merge_proposed_lessons(
+    proposed: list[ProposedLesson], context_entries: list[SessionContextEntry]
+) -> list[ProposedLesson]:
+    """Remove the duplicates among the proposals of several batches (coding mode).
 
     Each batch is curated on its own, with the turns of its candidates pinned, so
     batches of one turn all see the same final answer and propose the same headline
-    facts; nothing merged them, and one session stored several lessons per fact. The
-    proposals go back to the curator as candidates (``Candidate proposal-<n>``, a
-    state key kept as ``[state-key: ...]``) with the session's turns, and its
-    one-lesson-per-subject rule now applies across the session. A merged lesson's
-    members are the members of the proposals it names. Fail-open: a failed or empty
-    merge keeps the proposals as they were; an exhausted budget is raised.
+    facts; nothing compared them, and one session stored several lessons per fact.
+    One call names the duplicates (``find_duplicate_proposals``) and the code folds
+    them (``merge_duplicate_proposals``), so the step can only remove a restatement:
+    no proposal is rewritten, re-judged or dropped. Fail-open: a failed call keeps
+    the proposals as they were; an exhausted budget is raised.
     """
     if len(proposed) < 2:
         return proposed
-    by_id = {f"proposal-{index}": lesson for index, lesson in enumerate(proposed, start=1)}
-    turns: dict[str, str] = {}
-    for entry in context_entries:
-        for row in entry_turns(entry, qa_rows):
-            turns.setdefault(str(row.get("qa_id") or ""), _turn_block(row))
-    blocks = [block for block in turns.values() if block]
-    for proposal_id, lesson in by_id.items():
-        state_key = str(getattr(lesson, "state_key", "") or "").strip()
-        prefix = f"[state-key: {state_key}] " if state_key else ""
-        statement = " ".join(strip_state_key(lesson.working_statement).split())
-        blocks.append(f"Candidate {proposal_id} [agent/proposed]: {prefix}{statement}")
-    merged = await curate_batch("\n\n".join(blocks), coding=True)
-    if not merged:
-        logger.info(
-            "Coding distillation: merging %d proposals %s; keeping them as they were",
-            len(proposed),
-            "failed" if merged is None else "returned nothing",
-        )
+    groups = await find_duplicate_proposals(proposed)
+    if not groups:
+        if groups is None:
+            logger.info(
+                "Coding distillation: duplicate check over %d proposals failed; keeping "
+                "them as they were",
+                len(proposed),
+            )
         return proposed
-    result: list[ProposedLesson] = []
-    for lesson in merged:
-        members: list[str] = []
-        for proposal_id in lesson.member_entry_ids:
-            source = by_id.get(proposal_id)
-            if source is not None:
-                members.extend(source.member_entry_ids)
-        result.append(lesson.model_copy(update={"member_entry_ids": list(dict.fromkeys(members))}))
-    logger.info(
-        "Coding distillation: merged %d proposals from several curator batches into %d",
-        len(proposed),
-        len(result),
-    )
-    return result
+    entries_by_id = {entry.id: entry for entry in context_entries}
+    keys = [proposal_key(lesson, entries_by_id) for lesson in proposed]
+    merged = merge_duplicate_proposals(proposed, groups, keys)
+    if len(merged) < len(proposed):
+        logger.info(
+            "Coding distillation: %d of %d proposals from several curator batches restated "
+            "another one and were folded into it",
+            len(proposed) - len(merged),
+            len(proposed),
+        )
+    return merged
 
 
 async def propose_lessons(
@@ -580,7 +660,7 @@ async def propose_lessons(
     ]
     if coding and not budget_exhausted and sum(1 for lessons in per_batch if lessons) > 1:
         try:
-            proposed = await merge_proposed_lessons(proposed, qa_rows, context_entries)
+            proposed = await merge_proposed_lessons(proposed, context_entries)
         except LLMPaymentRequiredError:
             budget_exhausted = True
     curated_entry_ids = {

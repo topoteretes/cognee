@@ -109,10 +109,16 @@ models. The candidates are batched six at a time in the order of their turns, an
 batch opens with the request and final answer of the turns its candidates were learned in
 (a candidate that links no turn is judged against the newest one), so the call count is
 the same as with one pinned turn while each candidate is judged against its own request
-and answer. When more than one batch proposes lessons, the proposals go through one more
-curator call, as candidates with the session's turns, so the one-lesson-per-subject rule
-applies across batches; a merged lesson keeps the members of the proposals it names, and a
-failed merge keeps the proposals. Each accepted lesson takes the date, commit and branch of its own turn (the
+and answer. Batches of one turn all see the same final answer and tend to propose the same
+headline fact, so when more than one batch proposes lessons, one more call names the
+proposals that state the same fact (`find_duplicate_proposals`, prompt
+`session_distillation_merge_system.txt`). Its input is the numbered working statements and
+nothing else, and its answer is groups of numbers, so it stays small however long the session
+was. The code then folds each group into one of its proposals, the last keyed one or else the
+first, which keeps its statement and gains the members of the others
+(`merge_duplicate_proposals`). The step can only remove a restatement: a proposal in no group
+is untouched, a number the call got wrong is skipped, a group that spans two different keys
+(a footprint and a pitfall) is left alone, and a failed call keeps every proposal. Each accepted lesson takes the date, commit and branch of its own turn (the
 newest of its members' turns). The writer additionally gets `PROPOSED STATE KEY`, a glossary recased from
 the session's own text (the graph stores `marktaskcommand`; the lesson says
 `MarkTaskCommand`) and a compact STYLE line (statements of about 25 words). Evidence rules
