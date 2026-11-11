@@ -12,6 +12,7 @@ from .gmail import build_gmail_service_from_access_token, gmail_source
 from .google_calendar import build_calendar_service_from_access_token, google_calendar_source
 from .google_drive import build_drive_service_from_access_token, google_drive_source
 from .linear import build_linear_service, linear_source
+from .linkding import linkding_source
 from .notion import notion_source
 from .obsidian import obsidian_source
 from .onenote import list_onenote_notebooks, onenote_source
@@ -29,6 +30,7 @@ __all__ = [
     "google_calendar_source",
     "google_drive_source",
     "linear_source",
+    "linkding_source",
     "list_onenote_notebooks",
     "notion_source",
     "obsidian_source",
