@@ -165,6 +165,7 @@ class TapesCacheAdapter(SqlCacheAdapter):
         used_graph_element_ids: dict | None = None,
         memify_metadata: dict | None = None,
         used_session_context_ids: list | None = None,
+        code_refs: list[dict] | None = None,
     ):
         await super().create_qa_entry(
             user_id,
@@ -178,6 +179,7 @@ class TapesCacheAdapter(SqlCacheAdapter):
             used_graph_element_ids=used_graph_element_ids,
             memify_metadata=memify_metadata,
             used_session_context_ids=used_session_context_ids,
+            code_refs=code_refs,
         )
         await self._mirror_to_tapes(question=question, context=context, answer=answer)
 

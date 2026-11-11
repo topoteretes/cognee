@@ -517,6 +517,13 @@ async def _resolve_entry_dataset(
     return user, dataset, bound_dataset_id is not None
 
 
+def _code_refs_payload(entry: QAEntry | TraceEntry) -> list[dict] | None:
+    """The entry's code references as the session cache stores them."""
+    if entry.code_refs is None:
+        return None
+    return [reference.model_dump() for reference in entry.code_refs]
+
+
 async def _dispatch_session_entry(
     entry: "MemoryEntry",
     *,
@@ -673,6 +680,7 @@ async def _dispatch_session_entry(
             feedback_text=entry.feedback_text,
             feedback_score=entry.feedback_score,
             used_graph_element_ids=entry.used_graph_element_ids,
+            code_refs=_code_refs_payload(entry),
         )
         result.entry_id = qa_id
         if qa_id is None:
@@ -692,6 +700,7 @@ async def _dispatch_session_entry(
             method_params=entry.method_params,
             method_return_value=entry.method_return_value,
             error_message=entry.error_message,
+            code_refs=_code_refs_payload(entry),
         )
         result.entry_id = trace_id
         if trace_id is None:
