@@ -20,8 +20,9 @@ The row follows the item:
 - a batch stored for an item whose row is live with the same content hash is
   a no-op, so every batch may record it;
 - a different content hash versions the row (an update);
-- a delete tombstones it (``cognee/modules/provenance/tombstones.py``), and a
-  later write brings it back.
+- deleting the item tombstones it (``cognee/modules/provenance/tombstones.py``),
+  once its ``Data`` row is gone, and a later write brings it back; dropping
+  only its memory (``forget(memory_only=True)``) leaves the row as it is.
 
 ``record_provenance`` is the same writer as a pipeline ``Task`` for custom
 pipelines that store data points some other way; it records unconditionally

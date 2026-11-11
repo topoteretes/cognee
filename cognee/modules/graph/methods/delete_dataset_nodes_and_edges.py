@@ -18,7 +18,6 @@ from cognee.modules.graph.methods.delete_from_graph_and_vector import (
     delete_from_graph_and_vector,
 )
 from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
-from cognee.modules.provenance.tombstones import tombstone_dataset
 from cognee.modules.users.methods.get_user import get_user
 
 
@@ -36,9 +35,6 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Del
         graph_engine = unified.graph
         if await stores_provenance_in_graph(graph_engine):
             await unified.delete_by_dataset_id(str(dataset_id))
-            # The audit ledger retracts every data item of the dataset (a no-op
-            # unless PROVENANCE_TRACKING recorded them); it raises on a failed write.
-            await tombstone_dataset(dataset_id, user=user)
             return DeletedGraphElements()
 
     if backend_access_control_enabled():
@@ -62,7 +58,6 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Del
     # graph/vector nodes needed deletion (e.g. shared nodes across datasets).
     await delete_dataset_related_nodes(dataset_id)
     await delete_dataset_related_edges(dataset_id)
-    await tombstone_dataset(dataset_id, user=user)
     return DeletedGraphElements.from_ledger_rows(
         affected_nodes or [], affected_edges or [], owned=bool(affected_nodes)
     )

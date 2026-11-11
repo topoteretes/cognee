@@ -7,12 +7,10 @@ from uuid import uuid4
 
 import pytest
 
+import cognee.api.v1.datasets.datasets
 import cognee.modules.graph.methods.delete_data_nodes_and_edges
 import cognee.modules.graph.methods.delete_dataset_nodes_and_edges
 from cognee.infrastructure.databases.provenance import make_source_ref_key
-from cognee.infrastructure.databases.unified.provenance_delete_planner import (
-    SourceRefRemovalResult,
-)
 from cognee.modules.provenance import storage
 from cognee.modules.provenance.tombstones import (
     agent_id_for,
@@ -21,6 +19,7 @@ from cognee.modules.provenance.tombstones import (
     ledger_edge_key,
     ledger_node_key,
     tombstone_data_item,
+    tombstone_data_items,
     tombstone_dataset,
     tombstone_pipeline_run,
 )
@@ -28,6 +27,7 @@ from cognee.modules.provenance.tombstones import (
 # The package __init__ re-exports the functions under their module names.
 ddne_module = sys.modules["cognee.modules.graph.methods.delete_data_nodes_and_edges"]
 ddsne_module = sys.modules["cognee.modules.graph.methods.delete_dataset_nodes_and_edges"]
+datasets_module = sys.modules["cognee.api.v1.datasets.datasets"]
 
 pytestmark = pytest.mark.asyncio
 
@@ -137,6 +137,29 @@ class TestTombstoneDataItem:
         with pytest.raises(RuntimeError, match="ledger down"):
             await tombstone_data_item(dataset_id, data_id, user=USER)
         assert (await _item(manager, dataset_id, data_id))["invalidated"] is False
+
+
+class TestTombstoneDataItems:
+    async def test_retracts_the_listed_items_in_one_call(self, manager):
+        dataset_id = uuid4()
+        gone_a, gone_b, kept, never_recorded = uuid4(), uuid4(), uuid4(), uuid4()
+        await _seed_items(manager, dataset_id, [gone_a, gone_b, kept])
+
+        written = await tombstone_data_items(
+            dataset_id, [gone_a, never_recorded, gone_b], user=USER
+        )
+
+        assert written == 2
+        for data_id in (gone_a, gone_b):
+            row = await _item(manager, dataset_id, data_id)
+            assert row["invalidated"] is True
+            assert row["invalidation_reason"] == "data_deleted"
+            assert row["invalidated_by"] == str(USER.id)
+        assert (await _item(manager, dataset_id, kept))["invalidated"] is False
+
+    async def test_an_empty_list_writes_nothing(self, manager):
+        assert await tombstone_data_items(uuid4(), [], user=USER) == 0
+        assert (await manager.get_statistics())["total_entries"] == 0
 
 
 class TestTombstoneDataset:
@@ -302,127 +325,47 @@ class TestDatasetScopedReads:
 
 
 class TestDeleteWiring:
-    """The graph delete choke points retract the data item, whatever they removed."""
+    """Only the paths that remove the ``Data`` row write a tombstone, and they write it last."""
 
-    def _provenance_path(self, dataset_id, removal):
-        return (
-            patch.object(ddne_module, "get_user", AsyncMock(return_value=USER)),
-            patch.object(
-                ddne_module,
-                "get_authorized_dataset",
-                AsyncMock(return_value=SimpleNamespace(id=dataset_id)),
-            ),
-            patch.object(
-                ddne_module,
-                "try_delete_data_by_graph_provenance",
-                AsyncMock(return_value=removal),
-            ),
-        )
+    async def test_graph_delete_choke_points_do_not_write_the_ledger(self):
+        # They also serve forget(memory_only=True) and the DLT re-emission
+        # purge, which keep the document: its ledger row must stay live.
+        assert not hasattr(ddne_module, "tombstone_data_item")
+        assert not hasattr(ddsne_module, "tombstone_dataset")
 
-    async def test_delete_data_graph_provenance_path_tombstones(self):
-        dataset_id, data_id = uuid4(), uuid4()
-        removal = SourceRefRemovalResult(deleted_node_ids=["n1"])
-        user_patch, dataset_patch, delete_patch = self._provenance_path(dataset_id, removal)
+    async def test_dropping_an_emptied_dataset_tombstones_it_after_the_rows_are_gone(self):
+        dataset = SimpleNamespace(id=uuid4())
+        calls: list[tuple] = []
 
-        with (
-            user_patch,
-            dataset_patch,
-            delete_patch,
-            patch.object(ddne_module, "tombstone_data_item", AsyncMock()) as tombstone,
-        ):
-            result = await ddne_module.delete_data_nodes_and_edges(dataset_id, data_id, USER.id)
+        async def purge_history(dataset_id):
+            calls.append(("history", dataset_id))
 
-        tombstone.assert_awaited_once_with(dataset_id, data_id, user=USER)
-        assert result.node_ids == {"n1"}
+        async def delete_rows(deleted):
+            calls.append(("rows", deleted.id))
 
-    async def test_a_failed_tombstone_fails_the_delete(self):
-        dataset_id, data_id = uuid4(), uuid4()
-        user_patch, dataset_patch, delete_patch = self._provenance_path(
-            dataset_id, SourceRefRemovalResult()
-        )
+        async def tombstone(dataset_id, *, user):
+            calls.append(("tombstone", dataset_id, user))
 
         with (
-            user_patch,
-            dataset_patch,
-            delete_patch,
-            patch.object(
-                ddne_module,
-                "tombstone_data_item",
-                AsyncMock(side_effect=RuntimeError("ledger down")),
-            ),
-            pytest.raises(RuntimeError, match="ledger down"),
+            patch.object(datasets_module, "has_dataset_data", AsyncMock(return_value=False)),
+            patch("cognee.modules.search.operations.delete_dataset_search_history", purge_history),
+            patch("cognee.modules.data.methods.delete_dataset", delete_rows),
+            patch.object(datasets_module, "tombstone_dataset", tombstone),
         ):
-            await ddne_module.delete_data_nodes_and_edges(dataset_id, data_id, USER.id)
+            assert await datasets_module._delete_dataset_if_empty(dataset, True, USER) is True
 
-    async def test_delete_data_ledger_path_tombstones(self):
-        dataset_id, data_id = uuid4(), uuid4()
+        assert calls == [
+            ("history", dataset.id),
+            ("rows", dataset.id),
+            ("tombstone", dataset.id, USER),
+        ]
 
+    async def test_a_dataset_that_still_holds_data_is_kept_and_not_tombstoned(self):
+        dataset = SimpleNamespace(id=uuid4())
         with (
-            patch.object(ddne_module, "get_user", AsyncMock(return_value=USER)),
-            patch.object(
-                ddne_module,
-                "get_authorized_dataset",
-                AsyncMock(return_value=SimpleNamespace(id=dataset_id)),
-            ),
-            patch.object(
-                ddne_module, "try_delete_data_by_graph_provenance", AsyncMock(return_value=None)
-            ),
-            patch.object(ddne_module, "backend_access_control_enabled", lambda: False),
-            patch.object(ddne_module, "get_global_data_related_nodes", AsyncMock(return_value=[])),
-            patch.object(
-                ddne_module, "get_shared_slugs_losing_dataset_anchor", AsyncMock(return_value=[])
-            ),
-            patch.object(ddne_module, "delete_data_related_nodes", AsyncMock()),
-            patch.object(ddne_module, "delete_data_related_edges", AsyncMock()),
-            patch.object(ddne_module, "tombstone_data_item", AsyncMock()) as tombstone,
+            patch.object(datasets_module, "has_dataset_data", AsyncMock(return_value=True)),
+            patch.object(datasets_module, "tombstone_dataset", AsyncMock()) as tombstone,
         ):
-            await ddne_module.delete_data_nodes_and_edges(dataset_id, data_id, USER.id)
+            assert await datasets_module._delete_dataset_if_empty(dataset, True, USER) is False
 
-        tombstone.assert_awaited_once_with(dataset_id, data_id, user=USER)
-
-    async def test_delete_dataset_graph_provenance_path_tombstones(self):
-        dataset_id, user_id = uuid4(), uuid4()
-        user = SimpleNamespace(id=user_id, email="u@x.io")
-        unified = SimpleNamespace(
-            supports_graph_provenance_delete=lambda: True,
-            graph=object(),
-            delete_by_dataset_id=AsyncMock(),
-        )
-
-        with (
-            patch.object(ddsne_module, "get_user", AsyncMock(return_value=user)),
-            patch.object(
-                ddsne_module,
-                "get_authorized_dataset",
-                AsyncMock(return_value=SimpleNamespace(id=dataset_id)),
-            ),
-            patch.object(ddsne_module, "get_unified_engine", AsyncMock(return_value=unified)),
-            patch.object(ddsne_module, "stores_provenance_in_graph", AsyncMock(return_value=True)),
-            patch.object(ddsne_module, "tombstone_dataset", AsyncMock()) as tombstone,
-        ):
-            await ddsne_module.delete_dataset_nodes_and_edges(dataset_id, user_id)
-
-        tombstone.assert_awaited_once_with(dataset_id, user=user)
-
-    async def test_delete_dataset_ledger_path_tombstones(self):
-        dataset_id, user_id = uuid4(), uuid4()
-        user = SimpleNamespace(id=user_id, email="u@x.io")
-        unified = SimpleNamespace(supports_graph_provenance_delete=lambda: False)
-
-        with (
-            patch.object(ddsne_module, "get_user", AsyncMock(return_value=user)),
-            patch.object(
-                ddsne_module,
-                "get_authorized_dataset",
-                AsyncMock(return_value=SimpleNamespace(id=dataset_id)),
-            ),
-            patch.object(ddsne_module, "get_unified_engine", AsyncMock(return_value=unified)),
-            patch.object(ddsne_module, "backend_access_control_enabled", lambda: True),
-            patch.object(ddsne_module, "get_dataset_related_nodes", AsyncMock(return_value=[])),
-            patch.object(ddsne_module, "delete_dataset_related_nodes", AsyncMock()),
-            patch.object(ddsne_module, "delete_dataset_related_edges", AsyncMock()),
-            patch.object(ddsne_module, "tombstone_dataset", AsyncMock()) as tombstone,
-        ):
-            await ddsne_module.delete_dataset_nodes_and_edges(dataset_id, user_id)
-
-        tombstone.assert_awaited_once_with(dataset_id, user=user)
+        tombstone.assert_not_awaited()

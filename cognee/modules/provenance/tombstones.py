@@ -2,26 +2,31 @@
 
 The ledger is append-only and holds one row per data item: every writer
 records a ``data_item`` row for the (dataset, data item) it stores output for
-(``record_provenance``). When that item's memory leaves the graph this module
-invalidates that row (``prov:Invalidation``). The nodes and edges the item
-produced are not in the ledger; the graph's own source refs say which data
-item each came from.
+(``record_provenance``). When that item is deleted this module invalidates
+that row (``prov:Invalidation``). The nodes and edges the item produced are
+not in the ledger; the graph's own source refs say which data item each came
+from, so a tombstone needs only ``(dataset_id, data_id)``.
 
-A tombstone therefore needs only ``(dataset_id, data_id)``, never the list of
-elements a graph delete removed. Every delete path knows those two ids, and a
-delete that failed after the graph changed writes the tombstone on its retry.
+A ``data_deleted`` / ``dataset_deleted`` tombstone says the document is gone,
+so it is written last: after the ``Data`` row was removed and, for a single
+item, checked to be gone. A delete that fails earlier leaves the row live.
+Dropping only an item's memory (``forget(memory_only=True)``, a DLT source
+purged for re-emission) keeps the document and writes no tombstone.
 
 Three scopes:
 
-- **data item**: ``forget(data_id=...)``, ``datasets.delete_data`` and the DLT
-  purges, with or without the ``Data`` row surviving (``memory_only``).
-- **dataset**: every live data item of the dataset.
-- **pipeline run**: the data items whose memory a rolled-back run created.
+- **data item**: ``forget(data_id=...)`` / ``datasets.delete_data``, and the
+  DLT orphan sweep for the rows it removed.
+- **dataset**: every live data item of a deleted dataset.
+- **pipeline run**: the data items whose memory a rolled-back run created
+  (reason ``pipeline_run_rolled_back``; the documents stay).
 
 Only rows that exist and are live are invalidated (the ledger is opt-in, so
-most deletes find nothing). A tombstone that cannot be written raises: the
-delete fails with it and is retried, instead of leaving the ledger asserting
-memory the graph no longer holds.
+most deletes find nothing). A tombstone that cannot be written raises, so the
+delete fails with it. Deleting the same data item again writes it: a delete
+that finds no ``Data`` row still retracts a live ledger row for the id. A
+deleted dataset cannot be deleted again, so after such a failure its rows
+stay live.
 """
 
 from collections.abc import Iterable
@@ -114,16 +119,33 @@ async def tombstone_data_item(
     user: Any = None,
     reason: str = "data_deleted",
 ) -> int:
-    """Tombstone the ledger row of a data item whose memory left the graph.
+    """Tombstone the ledger row of a deleted data item.
 
     Returns the number of tombstones written: 1, or 0 when the ledger holds no
     live row for the item (never recorded, or already tombstoned).
     """
-    live_ids = await storage.retrieve_live_ids([ledger_data_item_key(dataset_id, data_id)])
+    return await tombstone_data_items(dataset_id, [data_id], user=user, reason=reason)
+
+
+async def tombstone_data_items(
+    dataset_id: UUID,
+    data_ids: Iterable[UUID],
+    *,
+    user: Any = None,
+    reason: str = "data_deleted",
+) -> int:
+    """Tombstone the ledger rows of deleted data items of one dataset.
+
+    One lookup and one chained write for the whole list, for a sweep that
+    removes many rows at once. Returns the number of tombstones written.
+    """
+    live_ids = await storage.retrieve_live_ids(
+        [ledger_data_item_key(dataset_id, data_id) for data_id in data_ids]
+    )
     if not live_ids:
         return 0
     written = await _tombstone_ids(live_ids, agent_id=agent_id_for(user), reason=reason)
-    logger.info("Tombstoned data item %s of dataset %s in the ledger", data_id, dataset_id)
+    logger.info("Tombstoned %d data item(s) of dataset %s in the ledger", written, dataset_id)
     return written
 
 

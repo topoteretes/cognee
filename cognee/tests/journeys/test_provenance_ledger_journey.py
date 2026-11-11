@@ -2,9 +2,11 @@
 
 With ``PROVENANCE_TRACKING`` on, each data item gets one ledger row and the
 nodes and edges it produced get none. The row gets a new version when the
-item's content changes, and a tombstone when its memory is removed: forgetting
-one document, dropping only its memory, deleting the dataset. A ledger that
-cannot be written fails the operation, and the retry completes it.
+item's content changes, and a tombstone when the document is deleted: forgetting
+one document or deleting the dataset. The tombstone is written last, once the
+document row is gone, so a delete that failed never left one; dropping only an
+item's memory keeps the document and writes none. A ledger that cannot be
+written fails the operation, and the retry completes it.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from __future__ import annotations
 import pytest
 
 import cognee
+import cognee.modules.data.methods as data_methods
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.provenance import get_provenance_manager, storage
 from cognee.modules.provenance.tombstones import ledger_data_item_key
@@ -100,13 +103,13 @@ async def test_ledger_follows_the_data_item_through_update_and_every_delete_path
     assert tombstone["invalidation_reason"] == "data_deleted"
     assert (await _item(manager, dataset_id, orchard))["invalidated"] is False
 
-    # --- drop only the memory of another, then build it again ----------------------
+    # --- drop only the memory of another, then build it again: the document never
+    # left, so there is no tombstone, and the same content is not a new version ---
     await cognee.forget(data_id=orchard, dataset_id=dataset_id, memory_only=True, user=default_user)
-    assert (await _item(manager, dataset_id, orchard))["invalidated"] is True
+    assert (await _item(manager, dataset_id, orchard))["invalidated"] is False
     await cognee.cognify([DATASET], user=default_user)
     assert (await _item(manager, dataset_id, orchard))["invalidated"] is False
-    history = await manager.revision_history(ledger_data_item_key(dataset_id, orchard))
-    assert [bool(version.get("invalidated")) for version in history] == [False, True, False]
+    assert len(await manager.revision_history(ledger_data_item_key(dataset_id, orchard))) == 1
 
     # --- delete the dataset ---------------------------------------------------------
     await cognee.forget(dataset=DATASET, user=default_user)
@@ -122,7 +125,36 @@ async def test_ledger_follows_the_data_item_through_update_and_every_delete_path
 
 @pytest.mark.journey
 @pytest.mark.asyncio
-async def test_a_tombstone_that_cannot_be_written_fails_the_delete_and_a_retry_writes_it(
+async def test_a_delete_that_fails_before_the_document_is_gone_writes_no_tombstone(
+    clean_env, default_user, ledger_on, monkeypatch
+):
+    manager = ledger_on
+    result = await cognee.remember([DOC_CHOIR], dataset_name=DATASET)
+    dataset_id = _support.as_uuid(result.dataset_id)
+    choir = await _data_id(dataset_id, default_user, "saltmarsh choir")
+
+    async def rows_stay(*args, **kwargs):
+        raise RuntimeError("relational delete failed")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(data_methods, "delete_data", rows_stay)
+        with pytest.raises(RuntimeError, match="relational delete failed"):
+            await cognee.forget(data_id=choir, dataset_id=dataset_id, user=default_user)
+
+    # The document is still stored, and the ledger does not say otherwise.
+    assert [row.id for row in await cognee.datasets.list_data(dataset_id, default_user)] == [choir]
+    assert (await _item(manager, dataset_id, choir))["invalidated"] is False
+
+    await cognee.forget(data_id=choir, dataset_id=dataset_id, user=default_user)
+    assert await cognee.datasets.list_data(dataset_id, default_user) == []
+    tombstone = await _item(manager, dataset_id, choir)
+    assert tombstone["invalidated"] is True
+    assert tombstone["invalidation_reason"] == "data_deleted"
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_a_tombstone_that_cannot_be_written_fails_the_delete_and_deleting_again_writes_it(
     clean_env, default_user, ledger_on, monkeypatch
 ):
     manager = ledger_on
@@ -138,13 +170,38 @@ async def test_a_tombstone_that_cannot_be_written_fails_the_delete_and_a_retry_w
         with pytest.raises(RuntimeError, match="ledger down"):
             await cognee.forget(data_id=choir, dataset_id=dataset_id, user=default_user)
 
-    # The delete did not finish: the data item is still there to be retried.
-    assert (await _item(manager, dataset_id, choir))["invalidated"] is False
-    assert [row.id for row in await cognee.datasets.list_data(dataset_id, default_user)] == [choir]
-
-    await cognee.forget(data_id=choir, dataset_id=dataset_id, user=default_user)
-    assert (await _item(manager, dataset_id, choir))["invalidated"] is True
+    # The document is gone and the caller was told the delete failed: the
+    # ledger still holds the item live, never a tombstone it could not write.
     assert await cognee.datasets.list_data(dataset_id, default_user) == []
+    assert (await _item(manager, dataset_id, choir))["invalidated"] is False
+
+    # Deleting the same id again finds no document and retracts the ledger row.
+    receipt = await cognee.datasets.delete_data(dataset_id, choir, default_user)
+    assert receipt["status"] == "not_found"
+    tombstone = await _item(manager, dataset_id, choir)
+    assert tombstone["invalidated"] is True
+    assert tombstone["invalidation_reason"] == "data_deleted"
+    assert (await manager.verify_chain())["valid"] is True
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_deleting_the_last_document_with_its_dataset_tombstones_every_row_of_the_dataset(
+    clean_env, default_user, ledger_on
+):
+    manager = ledger_on
+    result = await cognee.remember([DOC_CHOIR], dataset_name=DATASET)
+    dataset_id = _support.as_uuid(result.dataset_id)
+    choir = await _data_id(dataset_id, default_user, "saltmarsh choir")
+
+    receipt = await cognee.datasets.delete_data(
+        dataset_id, choir, default_user, delete_dataset_if_empty=True
+    )
+    assert receipt["status"] == "success" and receipt["dataset_deleted"] is True
+
+    assert (await _item(manager, dataset_id, choir))["invalidation_reason"] == "data_deleted"
+    current = [row async for row in manager.export(dataset_id=dataset_id, include_archived=False)]
+    assert current and all(row["invalidated"] for row in current)
 
 
 @pytest.mark.journey
@@ -169,10 +226,12 @@ async def test_an_update_the_ledger_cannot_record_fails_and_a_retry_records_it(
             )
     [original] = await manager.revision_history(key)
 
-    # The retry may rebuild the item from scratch, which the ledger records as
-    # memory dropped and brought back; either way it ends live on the new content.
+    # The retry may rebuild the item from scratch. The document never left, so
+    # either way the ledger shows one new version and no tombstone.
     await cognee.update(data_id=choir, data=DOC_CHOIR_V2, dataset_id=dataset_id, user=default_user)
-    latest = (await manager.revision_history(key))[-1]
+    history = await manager.revision_history(key)
+    latest = history[-1]
+    assert len(history) == 2
     assert latest.get("invalidated") is not True
     assert latest["content_hash"] != original["content_hash"]
     assert latest["delta"] == {"content_hash": [original["content_hash"], latest["content_hash"]]}

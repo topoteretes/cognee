@@ -25,12 +25,14 @@ was stored for, one row holding ids and the item's content hash, and never
 the nodes and edges the item produced: the graph's source refs already say
 which data item each came from, and a row per node and edge costs about ten
 times the source text. The row gets a new version when the item's content
-hash changes (an update). Deletions retract it: the graph delete choke points
-and the cognify rollback call ``tombstones.py``, which writes an
-``invalidate`` tombstone on the data item's row (never a row delete), and a
-later re-ingest brings it back, tombstone kept in its version history. A
-write or a tombstone that fails raises, so the ingestion or the delete fails
-with it instead of leaving a gap nothing reports.
+hash changes (an update). Deleting the item retracts it: the paths that
+remove its ``Data`` row call ``tombstones.py`` last, once the row is gone,
+which writes an ``invalidate`` tombstone on the data item's row (never a row
+delete). Dropping only the item's memory keeps the document and writes none;
+a cognify rollback retracts the items it gave memory to under its own reason.
+A later re-ingest brings a retracted item back, tombstone kept in its version
+history. A write or a tombstone that fails raises, so the ingestion or the
+delete fails with it instead of leaving a gap nothing reports.
 
 Reading it: ``ProvenanceManager`` (``get_lineage`` / ``revision_history`` /
 ``verify_chain`` / ``check`` / ``get_statistics`` / ``export``, all

@@ -31,7 +31,7 @@ from cognee.modules.pipelines.operations.get_pipeline_status import (
     get_pipeline_progress,
     get_pipeline_status,
 )
-from cognee.modules.provenance.tombstones import tombstone_data_item
+from cognee.modules.provenance.tombstones import tombstone_data_item, tombstone_dataset
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -126,12 +126,12 @@ async def _retire_forgotten_decisions(
     )
 
 
-async def _delete_dataset_if_empty(dataset, requested: bool) -> bool:
+async def _delete_dataset_if_empty(dataset, requested: bool, user: User) -> bool:
     """Drop ``dataset`` when the caller asked for it and no Data row is left.
 
     One count query, never a listing: the receipt only needs to know whether
     the dataset went away. As in ``empty_dataset``, the dataset's search
-    history goes first, then the dataset.
+    history goes first, then the dataset, then its audit-ledger tombstones.
     """
     if not requested or await has_dataset_data(dataset.id):
         return False
@@ -140,6 +140,7 @@ async def _delete_dataset_if_empty(dataset, requested: bool) -> bool:
 
     await delete_dataset_search_history(dataset.id)
     await delete_dataset(dataset)
+    await tombstone_dataset(dataset.id, user=user)
     return True
 
 
@@ -452,6 +453,11 @@ class datasets:
             # (files refcounted by raw_data_location) with the record.
             result = await delete_dataset(dataset)
 
+            # Last, once the rows are gone: the audit ledger retracts every
+            # data item of the dataset (a no-op unless PROVENANCE_TRACKING
+            # recorded them). It raises when the tombstones cannot be written.
+            await tombstone_dataset(dataset.id, user=user)
+
         return result
 
     @staticmethod
@@ -544,8 +550,13 @@ class datasets:
                             await _invalidate_sessions_for_deleted_data_nonfatal(
                                 dataset.id, invalidated, user.id
                             )
+                        # No Data row, so the document is gone. A ledger row
+                        # still live for the id (a delete whose tombstone
+                        # could not be written, or an id that only ever owned
+                        # graph elements) is retracted here.
+                        await tombstone_data_item(dataset_id, data_id, user=user)
                         dataset_deleted = await _delete_dataset_if_empty(
-                            dataset, delete_dataset_if_empty
+                            dataset, delete_dataset_if_empty, user
                         )
 
                     return _delete_data_receipt(
@@ -589,10 +600,6 @@ class datasets:
                             # data: it is a document that was never cognified,
                             # so there is nothing in the graph to delete.
                             deleted_elements = DeletedGraphElements()
-                        # These deletes do not pass through
-                        # delete_data_nodes_and_edges, which retracts the data
-                        # item in the audit ledger for the branch above.
-                        await tombstone_data_item(dataset_id, data_id, user=user)
 
                     await _invalidate_sessions_for_deleted_data_nonfatal(
                         dataset.id,
@@ -606,9 +613,15 @@ class datasets:
                     # the delete must never come back as a success receipt.
                     if await has_data(dataset.id, data_id):
                         raise DataDeletionIncompleteError(data_id, dataset.id)
+                    # The row is checked to be gone, so the audit ledger can
+                    # say so (a no-op unless PROVENANCE_TRACKING recorded the
+                    # item). Written last: a delete that failed above leaves
+                    # the ledger row live. It raises when it cannot be written,
+                    # and deleting the same id again writes it.
+                    await tombstone_data_item(dataset_id, data_id, user=user)
                     # Search history first, then the dataset (see the helper).
                     dataset_deleted = await _delete_dataset_if_empty(
-                        dataset, delete_dataset_if_empty
+                        dataset, delete_dataset_if_empty, user
                     )
 
                 # A dataset's code repositories are extracted together, so the

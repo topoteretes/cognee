@@ -94,3 +94,56 @@ async def test_a_failed_retirement_keeps_the_row_for_the_next_ingest():
         await _cleanup(user)
 
     delete.assert_not_awaited()
+
+
+def _ledger(tombstone):
+    return patch("cognee.modules.provenance.tombstones.tombstone_data_items", new=tombstone)
+
+
+@pytest.mark.asyncio
+async def test_orphan_cleanup_tombstones_the_rows_it_removed_after_they_are_gone():
+    dataset, user, orphan = _fixture()
+    order: list[str] = []
+
+    async def delete(rows, dataset_id):
+        order.append("rows")
+
+    async def tombstone(dataset_id, data_ids, *, user):
+        assert dataset.id in held_datasets.get()
+        order.append("tombstone")
+
+    tombstone = AsyncMock(side_effect=tombstone)
+    with (
+        _patches(dataset, orphan, AsyncMock(return_value=set()), delete, AsyncMock()),
+        _ledger(tombstone),
+    ):
+        await _cleanup(user)
+
+    assert order == ["rows", "tombstone"]
+    tombstone.assert_awaited_once_with(dataset.id, [orphan.id], user=user)
+
+
+@pytest.mark.asyncio
+async def test_orphan_cleanup_tombstones_nothing_when_the_row_delete_failed():
+    dataset, user, orphan = _fixture()
+    delete = AsyncMock(side_effect=RuntimeError("relational delete failed"))
+    tombstone = AsyncMock()
+    with (
+        _patches(dataset, orphan, AsyncMock(return_value=set()), delete, AsyncMock()),
+        _ledger(tombstone),
+    ):
+        await _cleanup(user)
+
+    tombstone.assert_awaited_once_with(dataset.id, [], user=user)
+
+
+@pytest.mark.asyncio
+async def test_orphan_cleanup_raises_when_the_tombstones_cannot_be_written():
+    dataset, user, orphan = _fixture()
+    tombstone = AsyncMock(side_effect=RuntimeError("ledger down"))
+    with (
+        _patches(dataset, orphan, AsyncMock(return_value=set()), AsyncMock(), AsyncMock()),
+        _ledger(tombstone),
+        pytest.raises(RuntimeError, match="ledger down"),
+    ):
+        await _cleanup(user)
