@@ -444,11 +444,10 @@ async def _sync_source(
     # A selected team that is gone fails on every run. It is reported, but it
     # must not keep the seed marker, the cleanup and the other teams' retirement
     # from ever happening.
-    hard_failures = counts["failed"] - counts.get("failed_team_not_found", 0)
     if not partial:
         cut_short = any(counts.get(key) for key in RESUMABLE_COUNT_KEYS)
         resume_at = datetime.now(timezone.utc).isoformat() if cut_short else None
-    if hard_failures > 0:
+    if ingestion.retirement_blocked(counts, gone_keys=("failed_team_not_found",)):
         if not partial:
             await _mark(credential, {RESUME_KEY: resume_at})
         return SYNC_STATUS_DEGRADED, counts

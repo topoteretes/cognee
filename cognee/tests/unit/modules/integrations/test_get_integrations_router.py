@@ -39,6 +39,7 @@ _router_module = importlib.import_module(
 # The forget package re-exports the function under the submodule's name, so a
 # dotted-string patch target resolves to the function on Python 3.10.
 _forget_module = importlib.import_module("cognee.api.v1.forget.forget")
+_ingest_dlt_module = importlib.import_module("cognee.tasks.ingestion.ingest_dlt_source")
 
 
 class _FakeUser:
@@ -403,14 +404,17 @@ def test_connection_status_of_an_unknown_named_account_is_still_a_404(client):
 def test_disconnect_with_delete_data_forgets_the_providers_dataset(client):
     integration = supported_integrations["fake"]
     forget = AsyncMock()
+    related = AsyncMock()
+    credential = type("Cred", (), {"provider_account_id": "ACC1"})()
     with (
         patch.object(
             _router_module,
             "get_active_credential_for_user",
-            new=AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+            new=AsyncMock(return_value=credential),
         ),
         patch.object(integration, "dataset_name", return_value="fake_acme"),
         patch.object(integration, "revoke_remote", new=AsyncMock()),
+        patch.object(integration, "forget_related_data", related),
         patch.object(
             _router_module, "revoke_credential_by_account", new=AsyncMock(return_value=True)
         ),
@@ -420,6 +424,10 @@ def test_disconnect_with_delete_data_forgets_the_providers_dataset(client):
 
     assert response.json() == {"disconnected": True, "remoteRevokeSkipped": False}
     assert forget.await_args.kwargs["dataset"] == "fake_acme"
+    # What the provider's app stored for the caller outside the dataset goes with it.
+    related.assert_awaited_once()
+    assert related.await_args.args[0] is credential
+    assert related.await_args.args[1] is forget.await_args.kwargs["user"]
 
 
 def test_disconnect_with_delete_data_is_refused_without_a_dataset(client):
@@ -447,9 +455,17 @@ def put_resources(client, integration, body, *, allows_all, monkeypatch):
     monkeypatch.setattr(
         _router_module,
         "get_active_credential_for_user",
-        AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+        AsyncMock(
+            return_value=type(
+                "Cred", (), {"provider_account_id": "ACC1", "provider_metadata": {}}
+            )()
+        ),
     )
-    monkeypatch.setattr(_router_module, "update_provider_metadata", update)
+
+    async def change_provider_metadata(provider, account_id, change):
+        return await update(provider, account_id, change({}))
+
+    monkeypatch.setattr(_router_module, "change_provider_metadata", change_provider_metadata)
     response = client.put("/api/v1/integrations/fake/resources", json={"resourceIds": body})
     return response, update
 
@@ -991,3 +1007,382 @@ def test_connect_and_sync_are_refused_while_outbound_http_is_disabled(client, mo
     assert resources.status_code == 503
     # No install was started: nothing for a callback to match.
     assert not any(name.startswith("cognee_oauth_nonce_") for name in authorize.cookies)
+
+
+@pytest.fixture(autouse=True)
+def no_pause(monkeypatch):
+    """No connection is paused unless a test says so (the pause lives in the database)."""
+    monkeypatch.setattr(
+        "cognee.modules.integrations.ingestion.sync_is_paused", AsyncMock(return_value=False)
+    )
+
+
+def test_disconnect_with_delete_data_drops_the_staging_copy_too(client):
+    """``forget`` leaves dlt's staging database, state and load packages, which hold the
+    text of every synced row, so the same owner's next connect and sync built every
+    document again (measured on Slack, 2026-11-10). They are deleted after the dataset."""
+    integration = supported_integrations["fake"]
+    calls = []
+    forget = AsyncMock(side_effect=lambda **_: calls.append("forget"))
+    drop = AsyncMock(side_effect=lambda name: calls.append(("drop", name)))
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+        ),
+        patch.object(integration, "dataset_name", return_value="fake_acme"),
+        patch.object(integration, "revoke_remote", new=AsyncMock()),
+        patch.object(integration, "forget_related_data", new=AsyncMock()),
+        patch.object(
+            _router_module, "revoke_credential_by_account", new=AsyncMock(return_value=True)
+        ),
+        patch.object(_forget_module, "forget", forget),
+        patch.object(_ingest_dlt_module, "drop_dlt_dataset", drop),
+    ):
+        response = client.delete("/api/v1/integrations/fake/connection?delete_data=true")
+
+    assert response.status_code == 200, response.text
+    assert calls == ["forget", ("drop", "fake_acme")]
+
+
+def test_a_dataset_that_could_not_be_deleted_keeps_its_staging_copy(client):
+    integration = supported_integrations["fake"]
+    drop = AsyncMock()
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+        ),
+        patch.object(integration, "dataset_name", return_value="fake_acme"),
+        patch.object(integration, "revoke_remote", new=AsyncMock()),
+        patch.object(integration, "forget_related_data", new=AsyncMock()),
+        patch.object(
+            _router_module, "revoke_credential_by_account", new=AsyncMock(return_value=True)
+        ),
+        patch.object(_forget_module, "forget", AsyncMock(side_effect=RuntimeError("store down"))),
+        patch.object(_ingest_dlt_module, "drop_dlt_dataset", drop),
+    ):
+        response = client.delete("/api/v1/integrations/fake/connection?delete_data=true")
+
+    assert response.status_code == 502
+    drop.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_with_delete_data_finishes_when_the_dataset_was_never_created():
+    """A connection that never synced has no dataset, which is nothing to delete.
+
+    The real ``forget`` runs here, with a real user (the other tests mock it): the dataset
+    a Slack connection names does not exist until its first sync, since the selection
+    starts empty. The credential is revoked before the deletion, so a failure here is
+    final: a retry finds no active connection, and the provider's related data (Slack's
+    remembered messages) has no other way out.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    from cognee.modules.users.methods import get_default_user
+
+    user = await get_default_user()
+    app = FastAPI()
+    app.include_router(get_integrations_router(), prefix="/api/v1/integrations")
+    app.dependency_overrides[get_authenticated_user] = lambda: user
+
+    before = dict(supported_integrations)
+    supported_integrations.clear()
+    integration = _FakeIntegration()
+    use_integration(integration)
+    credential = type("Cred", (), {"provider_account_id": "ACC1"})()
+    related = AsyncMock()
+    try:
+        with (
+            patch.object(
+                _router_module,
+                "get_active_credential_for_user",
+                new=AsyncMock(return_value=credential),
+            ),
+            patch.object(
+                integration, "dataset_name", return_value=f"fake_never_synced_{uuid4().hex}"
+            ),
+            patch.object(integration, "revoke_remote", new=AsyncMock()),
+            patch.object(integration, "forget_related_data", related),
+            patch.object(
+                _router_module, "revoke_credential_by_account", new=AsyncMock(return_value=True)
+            ),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as http:
+                response = await http.delete(
+                    "/api/v1/integrations/fake/connection?delete_data=true"
+                )
+    finally:
+        supported_integrations.clear()
+        supported_integrations.update(before)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"disconnected": True, "remoteRevokeSkipped": False}
+    related.assert_awaited_once()
+    assert related.await_args.args[0] is credential
+
+
+def test_disconnect_forgets_the_related_data_even_when_the_dataset_cannot_be_deleted(client):
+    integration = supported_integrations["fake"]
+    credential = type("Cred", (), {"provider_account_id": "ACC1"})()
+    related = AsyncMock()
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=credential),
+        ),
+        patch.object(integration, "dataset_name", return_value="fake_acme"),
+        patch.object(integration, "revoke_remote", new=AsyncMock()),
+        patch.object(integration, "forget_related_data", related),
+        patch.object(
+            _router_module, "revoke_credential_by_account", new=AsyncMock(return_value=True)
+        ),
+        patch.object(_forget_module, "forget", AsyncMock(side_effect=RuntimeError("store down"))),
+    ):
+        response = client.delete("/api/v1/integrations/fake/connection?delete_data=true")
+
+    # The dataset's failure is still reported, but it did not keep the app's data.
+    assert response.status_code == 502
+    related.assert_awaited_once()
+
+
+def test_disconnect_without_delete_data_leaves_the_providers_related_data(client):
+    integration = supported_integrations["fake"]
+    related = AsyncMock()
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+        ),
+        patch.object(integration, "revoke_remote", new=AsyncMock()),
+        patch.object(integration, "forget_related_data", related),
+        patch.object(
+            _router_module, "revoke_credential_by_account", new=AsyncMock(return_value=True)
+        ),
+    ):
+        response = client.delete("/api/v1/integrations/fake/connection")
+
+    assert response.json() == {"disconnected": True, "remoteRevokeSkipped": False}
+    related.assert_not_awaited()
+
+
+def test_disconnect_reports_related_data_that_could_not_be_deleted(client):
+    integration = supported_integrations["fake"]
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+        ),
+        patch.object(integration, "dataset_name", return_value="fake_acme"),
+        patch.object(integration, "revoke_remote", new=AsyncMock()),
+        patch.object(
+            integration, "forget_related_data", new=AsyncMock(side_effect=RuntimeError("boom"))
+        ),
+        patch.object(
+            _router_module, "revoke_credential_by_account", new=AsyncMock(return_value=True)
+        ),
+        patch.object(_forget_module, "forget", AsyncMock()),
+    ):
+        response = client.delete("/api/v1/integrations/fake/connection?delete_data=true")
+
+    assert response.status_code == 502
+
+
+def save_selection(client, monkeypatch, *, stored, body):
+    """PUT ``body`` over a connection whose stored selection is ``stored``."""
+    integration = supported_integrations["fake"]
+    credential = type(
+        "Cred", (), {"provider_account_id": "ACC1", "provider_metadata": {"picked": stored}}
+    )()
+    updated = type(
+        "Cred", (), {"provider_account_id": "ACC1", "provider_metadata": {"picked": body}}
+    )()
+    sync_now = AsyncMock()
+    monkeypatch.setattr(integration, "resource_selection_key", "picked")
+    monkeypatch.setattr(integration, "resource_selection_allows_all", False)
+    monkeypatch.setattr(integration, "sync_now", sync_now)
+    monkeypatch.setattr(
+        _router_module, "get_active_credential_for_user", AsyncMock(return_value=credential)
+    )
+
+    async def change_provider_metadata(provider, account_id, change):
+        change({"picked": stored})
+        return updated
+
+    monkeypatch.setattr(_router_module, "change_provider_metadata", change_provider_metadata)
+    response = client.put("/api/v1/integrations/fake/resources", json={"resourceIds": body})
+    return response, sync_now, updated
+
+
+@pytest.mark.parametrize(
+    ("stored", "body"),
+    [(["a"], ["a", "b"]), (["a", "b"], ["a"]), (["a", "b"], [])],
+    ids=["a_scope_added", "a_scope_removed", "everything_deselected"],
+)
+def test_a_changed_selection_starts_a_sync_at_once(client, monkeypatch, stored, body):
+    """What the user picked shows, and what they removed leaves, without waiting for the
+    next scheduled sync; deselecting everything included, which no schedule would run."""
+    response, sync_now, updated = save_selection(client, monkeypatch, stored=stored, body=body)
+
+    assert response.status_code == 200
+    sync_now.assert_called_once_with(updated)
+
+
+def test_a_changed_selection_of_a_paused_connection_is_saved_and_not_synced(client, monkeypatch):
+    """The pause (SDK-1434) holds a selection save too, for every provider."""
+    monkeypatch.setattr(
+        "cognee.modules.integrations.ingestion.sync_is_paused", AsyncMock(return_value=True)
+    )
+    response, sync_now, _ = save_selection(client, monkeypatch, stored=["a"], body=["a", "b"])
+
+    assert response.status_code == 200
+    sync_now.assert_not_called()
+
+
+def test_an_unchanged_selection_starts_no_sync(client, monkeypatch):
+    response, sync_now, _ = save_selection(client, monkeypatch, stored=["a"], body=["a"])
+
+    assert response.status_code == 200
+    sync_now.assert_not_called()
+
+
+def test_a_selection_saved_during_a_sync_runs_once_more_after_it(client, monkeypatch):
+    from cognee.modules.integrations import ingestion
+
+    ingestion._running_syncs.add(("fake", "ACC1"))
+    try:
+        response, sync_now, _ = save_selection(client, monkeypatch, stored=["a"], body=[])
+        # The running sync read the old selection; a second one would be dropped.
+        sync_now.assert_not_called()
+        assert ingestion.request_rerun_if_running("fake", "ACC1")
+    finally:
+        ingestion._running_syncs.discard(("fake", "ACC1"))
+        ingestion._rerun_requested.discard(("fake", "ACC1"))
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("revoked_by", ["provider", "owner"])
+def test_connection_status_says_when_the_data_of_an_ended_connection_is_deleted(client, revoked_by):
+    """A provider can schedule the deletion of an ended connection's data (Slack:
+    14 days after an uninstall, also after the owner disconnected keeping it); the page must
+    be able to warn the owner before it happens and say when it ran."""
+    from datetime import UTC, datetime
+
+    integration = supported_integrations["fake"]
+    ended = type(
+        "Cred",
+        (),
+        {
+            "account_label": "Acme",
+            "provider_account_id": "ACC1",
+            "revoked_by": revoked_by,
+            "revoked_at": datetime(2026, 11, 7, tzinfo=UTC),
+        },
+    )()
+    with (
+        patch.object(
+            _router_module, "get_active_credential_for_user", new=AsyncMock(return_value=None)
+        ),
+        patch.object(_router_module, "get_ended_connection", new=AsyncMock(return_value=ended)),
+        patch.object(integration, "dataset_name", return_value="fake_acme"),
+        patch.object(
+            integration, "data_deleted_after", return_value=datetime(2026, 11, 21, tzinfo=UTC)
+        ),
+        patch.object(
+            integration, "data_deleted_at", return_value=datetime(2026, 11, 21, 1, tzinfo=UTC)
+        ),
+        patch(
+            "cognee.modules.integrations.ingestion.dataset_summary",
+            new=AsyncMock(return_value=("dataset-1", 12)),
+        ),
+    ):
+        body = client.get("/api/v1/integrations/fake/connection").json()
+
+    assert body["disconnectedBy"] == revoked_by
+    assert body["dataDeletedAfter"] == "2026-11-21T00:00:00Z"
+    assert body["dataDeletedAt"] == "2026-11-21T01:00:00Z"
+
+
+def test_start_sends_the_browser_to_the_providers_authorize_page(client):
+    """A link opened from the provider (Slack's ``@cognee link``) starts the install in the
+    browser: the same nonce cookie as ``authorize``, then a redirect instead of JSON."""
+    response = client.get("/api/v1/integrations/fake/start", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"].startswith("https://fake.example/authorize?state=")
+    names = [name for name in response.cookies if name.startswith("cognee_oauth_nonce_fake_")]
+    assert len(names) == 1
+
+
+def test_start_needs_a_logged_in_user():
+    app = FastAPI()
+    app.include_router(get_integrations_router(), prefix="/api/v1/integrations")
+
+    response = TestClient(app).get("/api/v1/integrations/fake/start", follow_redirects=False)
+
+    assert response.status_code == 401
+
+
+def test_a_selection_is_compared_with_what_is_stored_when_it_is_written(client, monkeypatch):
+    """Two saves at once (X to Y, then Y back to X): the second read X before the first wrote
+    Y, so against its own copy nothing changed and no sync started, while the sync the first
+    started may already have read Y. The comparison is made under the connection's lock."""
+    integration = supported_integrations["fake"]
+    stale = type(
+        "Cred", (), {"provider_account_id": "ACC1", "provider_metadata": {"picked": ["x"]}}
+    )()
+    updated = type(
+        "Cred", (), {"provider_account_id": "ACC1", "provider_metadata": {"picked": ["x"]}}
+    )()
+
+    async def change_provider_metadata(provider, account_id, change):
+        patch_ = change({"picked": ["y"]})  # what the concurrent save left
+        assert patch_ == {"picked": ["x"]}
+        return updated
+
+    sync_now = AsyncMock()
+    monkeypatch.setattr(integration, "resource_selection_key", "picked")
+    monkeypatch.setattr(integration, "resource_selection_allows_all", False)
+    monkeypatch.setattr(integration, "sync_now", sync_now)
+    monkeypatch.setattr(
+        _router_module, "get_active_credential_for_user", AsyncMock(return_value=stale)
+    )
+    monkeypatch.setattr(_router_module, "change_provider_metadata", change_provider_metadata)
+
+    response = client.put("/api/v1/integrations/fake/resources", json={"resourceIds": ["x"]})
+
+    assert response.status_code == 200
+    sync_now.assert_called_once_with(updated)
+
+
+def test_deleting_the_data_waits_for_no_running_sync(client):
+    """A sync running while its data is deleted could store a scope it already started into
+    the dataset just deleted; the owner is told to retry once it has finished."""
+    integration = supported_integrations["fake"]
+    revoke = AsyncMock(return_value=True)
+    forget = AsyncMock()
+    with (
+        patch.object(
+            _router_module,
+            "get_active_credential_for_user",
+            new=AsyncMock(return_value=type("Cred", (), {"provider_account_id": "ACC1"})()),
+        ),
+        patch.object(integration, "dataset_name", return_value="fake_acme"),
+        patch.object(integration, "revoke_remote", new=AsyncMock()),
+        patch.object(_router_module, "revoke_credential_by_account", new=revoke),
+        patch.object(_forget_module, "forget", forget),
+        patch("cognee.modules.integrations.ingestion.sync_is_running", return_value=True),
+    ):
+        response = client.delete("/api/v1/integrations/fake/connection?delete_data=true")
+
+    assert response.status_code == 409, response.text
+    revoke.assert_not_awaited()
+    forget.assert_not_awaited()
