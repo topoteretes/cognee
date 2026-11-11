@@ -76,6 +76,7 @@ def test_lfs_pointers_of_documents_are_skipped(tmp_path):
     repo = _make_repo(tmp_path)
     # newline="\n": Git LFS writes a pointer with LF line endings on every
     # platform, and write_text alone would write CRLF on Windows.
+    # Git stores pointers with LF endings; newline="\n" keeps Windows from writing CRLF.
     (repo / "manual.pdf").write_text(
         f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize 2048000\n",
         newline="\n",
@@ -87,10 +88,11 @@ def test_lfs_pointers_of_documents_are_skipped(tmp_path):
     )
     # Prose that merely quotes the pointer header stays, short or long.
     (repo / "lfs-notes.md").write_text(
-        "version https://git-lfs.github.com/spec/v1 is the pointer header.\n" + "x" * 2000
+        "version https://git-lfs.github.com/spec/v1 is the pointer header.\n" + "x" * 2000,
+        newline="\n",
     )
     (repo / "lfs-short.md").write_text(
-        "version https://git-lfs.github.com/spec/v1 is the pointer header.\n"
+        "version https://git-lfs.github.com/spec/v1 is the pointer header.\n", newline="\n"
     )
     (repo / "lfs-almost.md").write_text(
         f"version https://git-lfs.github.com/spec/v1\noid sha256:{'a' * 64}\nsize 12\nmore prose\n",

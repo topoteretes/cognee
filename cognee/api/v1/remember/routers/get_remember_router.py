@@ -595,7 +595,7 @@ def get_remember_router() -> APIRouter:
                 ontology_service = OntologyService()
                 # File objects keep the upload's filename and content type so the
                 # resolver can pick the right RDF parser (Turtle, JSON-LD, ...).
-                ontology_streams = ontology_service.get_ontology_files(ontology_keys, user)
+                ontology_streams = await ontology_service.get_ontology_files(ontology_keys, user)
 
                 from cognee.modules.ontology.ontology_config import Config
                 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (

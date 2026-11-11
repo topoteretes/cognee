@@ -75,6 +75,11 @@ from limits import RateLimitItemPerMinute
 from limits.storage import MemoryStorage
 from limits.strategies import MovingWindowRateLimiter
 
+from cognee.modules.integrations.google.api_retry import (
+    host_checkpoint,
+    is_host_stop,
+    with_google_retries,
+)
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion import dlt_utils
 from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR
@@ -95,8 +100,8 @@ _COST_MESSAGES_GET = 20
 _COST_MESSAGES_LIST = 5
 _COST_HISTORY_LIST = 2
 _COST_GET_PROFILE = 1
-# googleapiclient retries rate limits (403/429), 5xx and dropped connections
-# with exponential backoff; 404/410 are never retried.
+# Retries per request on rate limits (403/429), 5xx and dropped connections, with
+# googleapiclient's exponential backoff (api_retry.py); 404/410 are never retried.
 _NUM_RETRIES = 6
 # The per-user quota is shared by every client of the same Google account under
 # the same Cloud project: another sync of this mailbox, another tenant, another
@@ -131,9 +136,14 @@ class GmailQuota:
         self._clock = clock
         self._sleep = sleep
 
-    def acquire(self, cost: int) -> None:
-        """Block until ``cost`` units fit in the current window, then spend them."""
+    def acquire(self, cost: int, check_active: Callable[[], None] | None = None) -> None:
+        """Block until ``cost`` units fit in the current window, then spend them.
+
+        ``check_active`` runs before every wait, so a revoked run does not wait for quota.
+        """
         while not self._limiter.hit(self._item, "gmail", cost=cost):
+            if check_active is not None:
+                check_active()
             reset_at, _ = self._limiter.get_window_stats(self._item, "gmail")
             self._sleep(max(reset_at - self._clock(), 0.05))
 
@@ -160,7 +170,7 @@ def shared_quota(mailbox: str, units_per_minute: int) -> GmailQuota:
         return quota
 
 
-def _is_rate_limited(exc: Exception) -> bool:
+def _is_rate_limited(exc: BaseException) -> bool:
     """True for Google's quota rejections (429, or 403 with a rate-limit reason)."""
     status = getattr(getattr(exc, "resp", None), "status", None)
     if status == 429:
@@ -176,33 +186,58 @@ def _is_rate_limited(exc: Exception) -> bool:
     return any(reason in str(exc) for reason in _RATE_LIMIT_REASONS)
 
 
-def _execute(request: Any, cost: int, quota: GmailQuota | None) -> Any:
+def _execute(
+    request: Any,
+    cost: int,
+    quota: GmailQuota | None,
+    check_active: Callable[[], None] | None = None,
+) -> Any:
     """Wait for quota (when given), then run the request with Google's retries.
 
-    googleapiclient retries a rate-limited call a few times with short backoff.
+    ``with_google_retries`` retries a rate-limited call a few times with short backoff.
     If Google still rejects it, the per-user window is being drained by traffic
     this process cannot see, so with a quota to pace on, wait a whole window
     and try again, up to ``_RATE_LIMIT_WINDOWS`` times, before letting the
     error abort the sync. Without a quota the error propagates at once.
+
+    ``check_active`` runs before every retry and every wait of both loops and before a wait
+    for quota; quota is spent once per window attempt, not per retry inside it.
     """
-    windows = _RATE_LIMIT_WINDOWS if quota is not None else 0
-    for attempt in range(windows + 1):
-        if quota is not None:
-            quota.acquire(cost)
-        try:
-            return request.execute(num_retries=_NUM_RETRIES)
-        except Exception as exc:
-            if attempt == windows or not _is_rate_limited(exc):
-                raise
-            logger.warning(
-                "Gmail per-user quota exhausted (shared with other clients of this "
-                "account); waiting %ds for the window to reset, retry %d of %d.",
-                int(_WINDOW_SECONDS),
-                attempt + 1,
-                windows,
-            )
-            quota.wait_for_window()
-    raise AssertionError("unreachable")  # pragma: no cover
+
+    def request_with_retries() -> Any:
+        return with_google_retries(
+            lambda: request.execute(num_retries=0),
+            num_retries=_NUM_RETRIES,
+            check_active=check_active,
+        )
+
+    if quota is None:
+        return request_with_retries()
+
+    def paced_request() -> Any:
+        quota.acquire(cost, check_active=host_checkpoint(check_active))
+        return request_with_retries()
+
+    def window_delay(error: BaseException, number: int) -> float | None:
+        if not _is_rate_limited(error):
+            return None
+        logger.warning(
+            "Gmail per-user quota exhausted (shared with other clients of this "
+            "account); waiting %ds for the window to reset, retry %d of %d.",
+            int(_WINDOW_SECONDS),
+            number + 1,
+            _RATE_LIMIT_WINDOWS,
+        )
+        return _WINDOW_SECONDS
+
+    return dlt_utils.with_retries(
+        paced_request,
+        retry_on=(Exception,),
+        delay=window_delay,
+        attempts=_RATE_LIMIT_WINDOWS + 1,
+        check_active=host_checkpoint(check_active),
+        sleep=lambda _seconds: quota.wait_for_window(),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +422,7 @@ def _list_message_ids(
     label_ids: list[str] | None,
     max_results: int | None,
     quota: GmailQuota | None = None,
+    check_active: Callable[[], None] | None = None,
 ) -> Iterator[str]:
     """Yield message ids matching the given labels, following pagination."""
     page_token = None
@@ -401,7 +437,7 @@ def _list_message_ids(
                 pageToken=page_token,
             )
         )
-        response = _execute(request, _COST_MESSAGES_LIST, quota)
+        response = _execute(request, _COST_MESSAGES_LIST, quota, check_active)
         for ref in response.get("messages", []) or []:
             yield ref["id"]
             fetched += 1
@@ -417,6 +453,7 @@ def _get_message(
     message_id: str,
     stats: dict[str, int] | None = None,
     quota: GmailQuota | None = None,
+    check_active: Callable[[], None] | None = None,
 ) -> dict | None:
     """Fetch a full message; return None only if it is genuinely gone (404/410).
 
@@ -434,8 +471,11 @@ def _get_message(
             service.users().messages().get(userId="me", id=message_id, format="full"),
             _COST_MESSAGES_GET,
             quota,
+            check_active,
         )
     except Exception as exc:
+        if is_host_stop(exc):
+            raise
         # Trust only the structured HTTP status: str(exc) embeds the request
         # URL, and a hex message id can spuriously contain "404"/"410".
         if getattr(getattr(exc, "resp", None), "status", None) in (404, 410):
@@ -447,13 +487,21 @@ def _get_message(
         raise
 
 
-def _mailbox_history_id(service: Any, quota: GmailQuota | None = None) -> str | None:
+def _mailbox_history_id(
+    service: Any,
+    quota: GmailQuota | None = None,
+    check_active: Callable[[], None] | None = None,
+) -> str | None:
     """Return the mailbox-wide ``historyId`` used as the incremental baseline."""
     try:
-        profile = _execute(service.users().getProfile(userId="me"), _COST_GET_PROFILE, quota)
+        profile = _execute(
+            service.users().getProfile(userId="me"), _COST_GET_PROFILE, quota, check_active
+        )
         history_id = profile.get("historyId")
         return str(history_id) if history_id is not None else None
     except Exception as exc:  # pragma: no cover - network dependent
+        if is_host_stop(exc):
+            raise
         logger.warning("Failed to read profile historyId: %s", exc, exc_info=True)
         return None
 
@@ -469,20 +517,22 @@ def full_backfill(
     max_results: int | None = None,
     stats: dict[str, int] | None = None,
     quota: GmailQuota | None = None,
+    check_active: Callable[[], None] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield every matching message and record the incremental baseline.
 
     The mailbox ``historyId`` is captured *before* listing so no change is
     missed in the window between backfill start and finish; it is written to
-    ``state['last_history_id']`` for the next incremental run.
+    ``state['last_history_id']`` for the next incremental run. ``check_active`` is the host
+    checkpoint of ``gmail_source``; it runs before every retry and every wait.
     """
-    baseline_history_id = _mailbox_history_id(service, quota)
+    baseline_history_id = _mailbox_history_id(service, quota, check_active)
 
     count = 0
     known_ids = set(state.get("known_ids", []))
     present_ids = set()
-    for message_id in _list_message_ids(service, label_ids, max_results, quota):
-        message = _get_message(service, message_id, stats, quota)
+    for message_id in _list_message_ids(service, label_ids, max_results, quota, check_active):
+        message = _get_message(service, message_id, stats, quota, check_active)
         if message is None:
             continue
         count += 1
@@ -520,6 +570,7 @@ def incremental_fetch(
     label_ids: list[str] | None = None,
     stats: dict[str, int] | None = None,
     quota: GmailQuota | None = None,
+    check_active: Callable[[], None] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield only changes since ``state['last_history_id']`` via the History API.
 
@@ -530,12 +581,19 @@ def incremental_fetch(
 
     If the stored history id is too old (Gmail expires history after ~a week),
     the API raises 404; we fall back to a full backfill so memory re-syncs
-    rather than silently stalling.
+    rather than silently stalling. ``check_active`` is as for ``full_backfill``.
     """
     start_history_id = state.get("last_history_id")
     if not start_history_id:
         # No cursor yet — caller should have backfilled. Be defensive.
-        yield from full_backfill(service, state, label_ids=label_ids, stats=stats, quota=quota)
+        yield from full_backfill(
+            service,
+            state,
+            label_ids=label_ids,
+            stats=stats,
+            quota=quota,
+            check_active=check_active,
+        )
         return
 
     page_token = None
@@ -557,6 +615,7 @@ def incremental_fetch(
                 ),
                 _COST_HISTORY_LIST,
                 quota,
+                check_active,
             )
         except Exception as exc:
             # A 404 means the cursor expired — recover with a full backfill.
@@ -569,7 +628,12 @@ def incremental_fetch(
                 )
                 state.pop("last_history_id", None)
                 yield from full_backfill(
-                    service, state, label_ids=label_ids, stats=stats, quota=quota
+                    service,
+                    state,
+                    label_ids=label_ids,
+                    stats=stats,
+                    quota=quota,
+                    check_active=check_active,
                 )
                 return
             raise
@@ -606,7 +670,7 @@ def incremental_fetch(
     added_count = 0
     known_ids = set(state.get("known_ids", []))
     for msg_id in seen_added:
-        message = _get_message(service, msg_id, stats, quota)
+        message = _get_message(service, msg_id, stats, quota, check_active)
         if message is None:
             # Genuinely gone (404/410) — treat as a deletion.
             seen_deleted.add(msg_id)
@@ -727,7 +791,12 @@ def gmail_source(
 
         if same_scope and resource_state.get("last_history_id"):
             rows = incremental_fetch(
-                client, resource_state, label_ids=label_ids, stats=stats, quota=quota
+                client,
+                resource_state,
+                label_ids=label_ids,
+                stats=stats,
+                quota=quota,
+                check_active=check_active,
             )
         else:
             rows = full_backfill(
@@ -737,6 +806,7 @@ def gmail_source(
                 max_results=max_results,
                 stats=stats,
                 quota=quota,
+                check_active=check_active,
             )
         yield from dlt_utils.guarded_rows(rows, check_active)
         # Do not persist the new scope if extraction fails midway through.

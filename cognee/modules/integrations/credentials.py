@@ -11,7 +11,7 @@ need to call the provider's API.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Final, Literal
 from uuid import UUID
 
 from sqlalchemy import and_, or_, select, update
@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 STATUS_ACTIVE = "active"
 STATUS_REVOKED = "revoked"
+# Who revoked a connection (``IntegrationCredential.revoked_by``).
+REVOKED_BY_OWNER: Final = "owner"
+REVOKED_BY_PROVIDER: Final = "provider"
 
 
 class CredentialInactiveError(RuntimeError):
@@ -87,12 +90,19 @@ async def update_refreshed_credential(
 
 
 async def revoke_credential_if_current(credential: IntegrationCredential) -> None:
-    """An old invalid_grant must not revoke a newly reconnected account."""
+    """Revoke a connection whose token the provider rejected (``revoked_by`` provider).
+
+    An old invalid_grant must not revoke a newly reconnected account.
+    """
     async with get_relational_engine().get_async_session() as db:
         await db.execute(
             update(IntegrationCredential)
             .where(*_current_token_conditions(credential))
-            .values(status=STATUS_REVOKED, revoked_at=datetime.now(timezone.utc))
+            .values(
+                status=STATUS_REVOKED,
+                revoked_at=datetime.now(timezone.utc),
+                revoked_by=REVOKED_BY_PROVIDER,
+            )
         )
         await db.commit()
 
@@ -244,6 +254,7 @@ async def upsert_credential(
         credential.token_expires_at = token_expires_at
         credential.status = STATUS_ACTIVE
         credential.revoked_at = None
+        credential.revoked_by = None
 
         await db.commit()
         await db.refresh(credential)
@@ -329,6 +340,32 @@ async def list_active_credential_ids_for_owner(principal_id: UUID) -> list[UUID]
         return list(result.scalars().all())
 
 
+async def get_ended_connection(
+    user_id: UUID, provider: str, provider_account_id: str | None = None
+) -> IntegrationCredential | None:
+    """The user's newest revoked connection to ``provider``, or to the account named.
+
+    Asked when the user has no active one, so the Integrations page can say who ended it
+    (``revoked_by``) and where its data stays. A row another user has since connected
+    over is theirs and never answers here.
+    """
+    conditions = [
+        IntegrationCredential.user_id == user_id,
+        IntegrationCredential.provider == provider,
+        IntegrationCredential.status == STATUS_REVOKED,
+    ]
+    if provider_account_id is not None:
+        conditions.append(IntegrationCredential.provider_account_id == provider_account_id)
+    async with get_relational_engine().get_async_session() as db:
+        result = await db.execute(
+            select(IntegrationCredential)
+            .where(*conditions)
+            .order_by(IntegrationCredential.revoked_at.desc().nulls_last())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+
 async def list_active_credentials_for_user(user_id: UUID) -> dict[str, IntegrationCredential]:
     """The user's active connections across all providers, one query.
 
@@ -381,10 +418,18 @@ async def get_active_credential_for_workspace(
         return result.scalars().first()
 
 
-async def revoke_credential_by_account(provider: str, provider_account_id: str) -> bool:
-    """Mark a connection revoked. Idempotent — providers retry webhooks and
-    give no ordering guarantee between uninstall/revoke events, so revoking an
-    already-revoked row is a silent no-op.
+async def revoke_credential_by_account(
+    provider: str,
+    provider_account_id: str,
+    revoked_by: Literal["owner", "provider"] | None = None,
+) -> bool:
+    """Mark a connection revoked, recording who did it (``REVOKED_BY_*``).
+
+    ``revoked_by`` stays ``None`` (unknown) for a caller that names no one, such as a
+    connector package released before the column. Idempotent — providers retry
+    webhooks and give no ordering guarantee between uninstall/revoke events, so
+    revoking an already-revoked row is a silent no-op that keeps the first
+    ``revoked_by``.
 
     Returns True when a row exists (already- or newly-revoked), False if none.
     """
@@ -405,6 +450,7 @@ async def revoke_credential_by_account(provider: str, provider_account_id: str) 
         if credential.status != STATUS_REVOKED:
             credential.status = STATUS_REVOKED
             credential.revoked_at = datetime.now(timezone.utc)
+            credential.revoked_by = revoked_by
             await db.commit()
 
         return True

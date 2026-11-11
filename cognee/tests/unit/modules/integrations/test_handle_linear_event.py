@@ -93,7 +93,7 @@ async def test_oauth_app_revoked_revokes_the_credential(mocks):
         {},
     )
 
-    mocks.revoke.assert_awaited_once_with("linear", "org-1")
+    mocks.revoke.assert_awaited_once_with("linear", "org-1", revoked_by="provider")
     mocks.agent_session.assert_not_awaited()
     mocks.request_sync.assert_not_awaited()
 
