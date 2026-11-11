@@ -290,4 +290,4 @@ ordinary questions to a slower or narrower retriever is a regression, not an
 improvement.
 
 Related: the search-type list in `CLAUDE.md` ("SEARCH: Retrieval"), `examples/guides/recall_core.py`,
-`examples/guides/hybrid_retrieval_recall.py`.
+`examples/guides/hybrid_retrieval_recall.py`, `docs/cognify-and-search-lifecycle.md`.
