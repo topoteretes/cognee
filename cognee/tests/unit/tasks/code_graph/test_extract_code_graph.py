@@ -764,3 +764,70 @@ async def test_public_code_graph_pipeline_accepts_repo_path_payload_with_access_
     storage_upsert_nodes.assert_not_awaited()
     storage_upsert_edges.assert_not_awaited()
     code_graph_upsert_edges.assert_not_awaited()
+
+
+def test_versioned_declarations_sharing_a_name_are_all_kept_on_the_symbol():
+    """A getter and its setter share one node; both body versions must survive.
+
+    The node's own content is the first declaration's (fact_node_id keeps the
+    first occurrence), so without ``declarations`` a rewrite of the setter was
+    invisible: the node's fact_hash did not change.
+    """
+    getter = {
+        "kind": "symbol",
+        "name": "m.C.x",
+        "repo": "repo",
+        "file": "m.py",
+        "line": 2,
+        "end_line": 4,
+        "id": "a" * 32,
+        "props": {"symbol_kind": "method", "body_hash": "aaaa", "decl_hash": "g", "span_start": 1},
+    }
+    setter = {
+        **getter,
+        "line": 6,
+        "end_line": 8,
+        "props": {"symbol_kind": "method", "body_hash": "bbbb", "decl_hash": "s", "span_start": 5},
+    }
+    unversioned = {
+        "kind": "symbol",
+        "name": "m.f",
+        "repo": "repo",
+        "file": "m.py",
+        "line": 10,
+        "props": {"symbol_kind": "function"},
+    }
+
+    def symbols(facts):
+        return {p.name: p for p in map_facts_to_data_points(facts) if isinstance(p, CodeSymbol)}
+
+    by_name = symbols([getter, setter, unversioned])
+    assert set(by_name) == {"m.C.x", "m.f"}
+    shared = by_name["m.C.x"]
+    assert shared.line == 2 and shared.fact_properties["body_hash"] == "aaaa"
+    assert shared.declarations == [
+        {
+            "id": "a" * 32,
+            "file": "m.py",
+            "line": 2,
+            "end_line": 4,
+            "body_hash": "aaaa",
+            "decl_hash": "g",
+            "span_start": 1,
+        },
+        {
+            "id": "a" * 32,
+            "file": "m.py",
+            "line": 6,
+            "end_line": 8,
+            "body_hash": "bbbb",
+            "decl_hash": "s",
+            "span_start": 5,
+        },
+    ]
+    # A snapshot without body hashes gains no key, so its fact_hash values stay
+    # byte-identical (the goldens in test_enola_docs_and_flows guard that).
+    assert by_name["m.f"].declarations == []
+
+    rewritten_setter = {**setter, "props": {**setter["props"], "body_hash": "cccc"}}
+    assert symbols([getter, rewritten_setter])["m.C.x"].fact_hash != shared.fact_hash

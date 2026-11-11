@@ -94,7 +94,13 @@ _SWEEP_CHUNK_SIZE = 2000
 # Bump it whenever that mapping changes, so a repository whose snapshot did not
 # change is still loaded again by the new mapping instead of being skipped.
 # 1: doc fields, CodeFlow nodes and declaration-view resolution (SDK-1119).
-CODE_GRAPH_MAPPING_VERSION = 1
+# 2: versioned declarations on CodeSymbol (body_hash, decl_hash, spans).
+# 3: repository-relative file paths for the members of a cluster snapshot
+#    (enola 0.4.39 marks the prefixed ones ``repo_prefixed``).
+CODE_GRAPH_MAPPING_VERSION = 3
+
+# The props of a versioned declaration kept on CodeSymbol.declarations.
+_DECLARATION_PROPS = ("body_hash", "decl_hash", "span_start")
 
 
 def _is_mappable_fact(kind: Any, name: Any) -> bool:
@@ -117,6 +123,13 @@ def fact_node_id(repo: str, kind: str, name: str) -> UUID:
 def _fact_repo(fact: dict, fallback_repo: str) -> str:
     repo = fact.get("repo")
     return repo if isinstance(repo, str) and repo else fallback_repo
+
+
+def _versioned_declaration(fact: dict, props: dict) -> dict[str, Any]:
+    """One declaration of a symbol as enola emitted it, with the version of its code."""
+    declaration = {key: fact.get(key) for key in ("id", "file", "line", "end_line")}
+    declaration.update({key: props.get(key) for key in _DECLARATION_PROPS})
+    return declaration
 
 
 def _resolve_fallback_repo(facts: list[dict], repo_path: str | Path | None) -> str:
@@ -194,6 +207,21 @@ def map_facts_to_data_points(
     unmapped_kinds: Counter = Counter()
     seen_ids: set = set()
 
+    # A node keeps its first fact's content (see fact_node_id), which drops a
+    # second declaration sharing its name: a property's setter after its
+    # getter. Every versioned declaration (one with a body_hash, enola >=
+    # 0.4.37) is kept on the symbol node instead, so no body version is lost.
+    declarations_by_node: dict[UUID, list[dict[str, Any]]] = {}
+    for fact in facts:
+        props = fact.get("props")
+        name = fact.get("name")
+        if fact.get("kind") != "symbol" or not isinstance(props, dict):
+            continue
+        if not isinstance(name, str) or not name or not props.get("body_hash"):
+            continue
+        node_id = fact_node_id(_fact_repo(fact, fallback_repo), "symbol", name)
+        declarations_by_node.setdefault(node_id, []).append(_versioned_declaration(fact, props))
+
     for fact in facts:
         kind = fact.get("kind")
         name = fact.get("name")
@@ -256,6 +284,11 @@ def map_facts_to_data_points(
         }
         if model is CodeSymbol:
             fields["symbol_kind"] = props.get("symbol_kind")
+            declarations = declarations_by_node.get(node_id)
+            if declarations:
+                # Only a versioned symbol gains the key, so a snapshot without
+                # body hashes keeps byte-identical fact_hash values.
+                fields["declarations"] = declarations
         if doc is not None:
             # Only a documented fact gains the key, so an undocumented fact's
             # fact_hash stays byte-identical to before docs were read.
