@@ -5,9 +5,6 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.shared.logging_utils import get_logger
-
-logger = get_logger("query_decomposition")
 
 
 class DecompositionMode(str, Enum):
@@ -67,18 +64,17 @@ def normalize_subqueries(
 async def decompose_query(
     query: str,
     *,
-    system_prompt: str | None,
+    system_prompt: str,
     context: str = "",
     max_subqueries: int = 5,
 ) -> list[str]:
     """Plan focused subqueries for ``query``, optionally reading ``context`` first.
 
-    Planning never fails a search: without a prompt, or when the LLM call fails,
-    the plan is the original query alone.
+    The caller asked for decomposition, so a missing prompt or a failed planning
+    call fails the search; neither is answered without decomposition.
     """
     if not system_prompt:
-        logger.warning("Decomposition prompt not found, falling back to original query.")
-        return [query]
+        raise ValueError("Query decomposition needs a system prompt, and none was found.")
 
     text_input = query
     if context:
@@ -87,19 +83,11 @@ async def decompose_query(
             "Context retrieved for the question so far:\n"
             f"<context>\n{context}\n</context>"
         )
-    try:
-        decomposition = await LLMGateway.acreate_structured_output(
-            text_input=text_input,
-            system_prompt=system_prompt,
-            response_model=QueryDecomposition,
-        )
-    except Exception as error:
-        logger.warning(
-            "Query decomposition failed, falling back to original query: %s",
-            error,
-            exc_info=True,
-        )
-        return [query]
+    decomposition = await LLMGateway.acreate_structured_output(
+        text_input=text_input,
+        system_prompt=system_prompt,
+        response_model=QueryDecomposition,
+    )
 
     return normalize_subqueries(
         query, getattr(decomposition, "subqueries", None), max_subqueries=max_subqueries

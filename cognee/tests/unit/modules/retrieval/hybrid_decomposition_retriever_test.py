@@ -1,17 +1,24 @@
 """HybridDecompositionRetriever: pass 1, context-primed decomposition, per-subquery hybrid
 retrieval and an id-keyed union, with mocked lanes and a mocked decomposition LLM."""
 
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
+from cognee.infrastructure.llm.exceptions import PromptPathOutsideBaseDirectoryError
+from cognee.modules.retrieval import session_aware_completion
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError, QueryValidationError
 from cognee.modules.retrieval.hybrid.results import empty_hybrid_result
 from cognee.modules.retrieval.hybrid_decomposition_retriever import (
+    MAX_SUBQUERIES,
     HybridDecompositionRetriever,
 )
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 from cognee.modules.retrieval.utils.query_decomposition import QueryDecomposition
+from cognee.modules.search.types import SearchType
 
 MODULE = "cognee.modules.retrieval.hybrid_decomposition_retriever"
 PLANNER = "cognee.modules.retrieval.utils.query_decomposition"
@@ -139,33 +146,31 @@ async def test_completion_answers_the_original_question_over_the_merged_context(
 
 
 @pytest.mark.asyncio
-async def test_decomposition_failure_falls_back_to_the_plain_hybrid_result():
+async def test_a_planning_failure_propagates_instead_of_answering_with_plain_hybrid():
     unified = _lanes(THREE_LEGS)
     retriever = HybridDecompositionRetriever(text_summaries_top_k=0)
     engine, decompose = _run(unified, decompose=AsyncMock(side_effect=RuntimeError("LLM down")))
 
-    with engine, decompose, patch(f"{PLANNER}.logger") as log:
-        merged = await retriever.get_retrieved_objects(query=QUESTION)
-
-    assert _ids(merged["chunks"]) == ["c1"]
-    assert _chunk_searches(unified) == 1
-    assert "falling back to original query" in log.warning.call_args.args[0]
+    with engine, decompose, pytest.raises(RuntimeError, match="LLM down"):
+        await retriever.get_retrieved_objects(query=QUESTION)
 
 
-@pytest.mark.asyncio
-async def test_missing_prompt_file_skips_the_llm_and_falls_back():
-    unified = _lanes(THREE_LEGS)
-    retriever = HybridDecompositionRetriever(
-        text_summaries_top_k=0, decomposition_system_prompt_path="no_such_prompt.txt"
-    )
-    engine, decompose = _run(unified)
+def test_a_missing_prompt_file_is_a_configuration_error():
+    with pytest.raises(QueryValidationError, match="no_such_prompt.txt"):
+        HybridDecompositionRetriever(decomposition_system_prompt_path="no_such_prompt.txt")
 
-    with engine, decompose as llm, patch(f"{PLANNER}.logger") as log:
-        merged = await retriever.get_retrieved_objects(query=QUESTION)
 
-    llm.assert_not_awaited()
-    assert _ids(merged["chunks"]) == ["c1"]
-    assert "prompt not found" in log.warning.call_args.args[0]
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../../../../pyproject.toml",
+        "../prompts/../../../../../pyproject.toml",
+        str(Path(__file__).resolve()),
+    ],
+)
+def test_a_prompt_path_outside_the_prompt_directory_is_refused(path):
+    with pytest.raises(PromptPathOutsideBaseDirectoryError):
+        HybridDecompositionRetriever(decomposition_system_prompt_path=path)
 
 
 @pytest.mark.asyncio
@@ -260,7 +265,65 @@ async def test_all_retrievals_share_the_parent_user_resolution_scope():
     unified.graph.get_filtered_graph_data.assert_awaited_once()
 
 
-@pytest.mark.parametrize("value", [0, -1])
-def test_max_subqueries_below_one_is_rejected(value):
-    with pytest.raises(ValueError, match="max_subqueries"):
+@pytest.mark.parametrize("value", [0, -1, MAX_SUBQUERIES + 1, 10**9, "7", 7.0, 2.5, True, None])
+def test_max_subqueries_outside_its_type_and_range_is_rejected(value):
+    with pytest.raises(QueryValidationError, match="max_subqueries"):
         HybridDecompositionRetriever(max_subqueries=value)
+
+
+@pytest.mark.parametrize("value", [1, MAX_SUBQUERIES])
+def test_max_subqueries_at_its_bounds_is_accepted(value):
+    assert HybridDecompositionRetriever(max_subqueries=value).max_subqueries == value
+
+
+@pytest.mark.asyncio
+async def test_a_session_turn_runs_sequentially_and_keeps_the_whole_union(monkeypatch):
+    """Concurrent session mode is on and a session is available. Plain hybrid would take the
+    concurrent runner, whose merge cuts each lane back to its top-k; this type takes the
+    sequential runner, so the union of pass 1 and every subquery reaches the answer intact."""
+    monkeypatch.setattr(
+        session_aware_completion,
+        "CacheConfig",
+        lambda: SimpleNamespace(session_search_mode=session_aware_completion.CONCURRENT_MODE),
+    )
+    monkeypatch.setattr(
+        session_aware_completion,
+        "session_user",
+        SimpleNamespace(get=lambda: SimpleNamespace(id=uuid4())),
+    )
+    monkeypatch.setattr(
+        session_aware_completion,
+        "get_session_manager",
+        lambda: SimpleNamespace(is_session_available_for_completion=lambda user_id: True),
+    )
+    monkeypatch.setattr(session_aware_completion, "update_node_access_timestamps", AsyncMock())
+    concurrent_runner = AsyncMock()
+    monkeypatch.setattr(session_aware_completion, "run_concurrent_session_turn", concurrent_runner)
+
+    options = {"chunks_top_k": 1, "text_summaries_top_k": 0, "session_id": "s1"}
+    assert session_aware_completion.should_run_concurrent(HybridRetriever(**options))
+    retriever = HybridDecompositionRetriever(**options)
+    assert not session_aware_completion.should_run_concurrent(retriever)
+
+    retriever.prepare_session_turn_for_retrieval = AsyncMock(
+        return_value=SimpleNamespace(should_answer=True, effective_query=None)
+    )
+    retriever.get_completion_from_context = AsyncMock(return_value=["answer"])
+    retriever.merge_retrieved_objects = MagicMock()
+    unified = _lanes({query: hits[:1] for query, hits in THREE_LEGS.items()})
+    engine, decompose = _run(unified, decompose=_decomposition(LEG_A, LEG_B))
+
+    with engine, decompose:
+        objects, context, completion = await session_aware_completion.run_session_aware_completion(
+            retriever,
+            raw_query=QUESTION,
+            original_search_type=SearchType.HYBRID_COMPLETION_DECOMPOSITION,
+        )
+
+    concurrent_runner.assert_not_awaited()
+    retriever.merge_retrieved_objects.assert_not_called()
+    # Three chunks with chunks_top_k=1: one per retrieval, none cut by a session merge.
+    assert _ids(objects["chunks"]) == ["c1", "c2", "c3"]
+    assert all(text in context for text in ("Acme ordered 40 units.", "Order: 40 units"))
+    assert completion == ["answer"]
+    assert retriever.get_completion_from_context.await_args.kwargs["retrieved_objects"] is objects

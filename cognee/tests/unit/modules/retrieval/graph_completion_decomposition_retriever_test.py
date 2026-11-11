@@ -98,7 +98,7 @@ def test_normalize_subqueries_honours_max_subqueries():
 
 
 @pytest.mark.asyncio
-async def test_decompose_query_falls_back_to_original_query_on_failure():
+async def test_decompose_query_propagates_a_planning_failure():
     retriever = GraphCompletionDecompositionRetriever()
 
     with (
@@ -111,10 +111,9 @@ async def test_decompose_query_falls_back_to_original_query_on_failure():
             new_callable=AsyncMock,
             side_effect=RuntimeError("LLM unavailable"),
         ),
+        pytest.raises(RuntimeError, match="LLM unavailable"),
     ):
-        subqueries = await retriever._decompose_query("Original query")
-
-    assert subqueries == ["Original query"]
+        await retriever._decompose_query("Original query")
 
 
 @pytest.mark.asyncio
@@ -140,16 +139,24 @@ async def test_decompose_query_returns_normalized_subqueries_on_success():
 
 
 @pytest.mark.asyncio
-async def test_decompose_query_falls_back_to_original_query_when_prompt_missing():
+@pytest.mark.parametrize("missing", ["", None])
+async def test_decompose_query_raises_when_the_prompt_is_missing(missing):
     retriever = GraphCompletionDecompositionRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.graph_completion_decomposition_retriever.read_query_prompt",
-        return_value="",
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_decomposition_retriever.read_query_prompt",
+            return_value=missing,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.query_decomposition.LLMGateway.acreate_structured_output",
+            new_callable=AsyncMock,
+        ) as llm,
+        pytest.raises(ValueError, match="needs a system prompt"),
     ):
-        subqueries = await retriever._decompose_query("Original query")
+        await retriever._decompose_query("Original query")
 
-    assert subqueries == ["Original query"]
+    llm.assert_not_awaited()
 
 
 @pytest.mark.asyncio

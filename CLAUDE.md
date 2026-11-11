@@ -310,7 +310,7 @@ Key files:
 
 Available search types (from `cognee/modules/search/types/SearchType.py`), passed as `query_type` to `recall()` or `search()`:
 - **HYBRID_COMPLETION** (default) - Document passages plus entity neighbourhoods, then LLM completion
-- **HYBRID_COMPLETION_DECOMPOSITION** - Hybrid retrieval for the full question, then LLM decomposition of question plus that context into up to 7 sub-queries, each retrieved through the hybrid lanes and merged content-keyed; single query only
+- **HYBRID_COMPLETION_DECOMPOSITION** - Hybrid retrieval for the full question, then LLM decomposition of question plus that context into up to `max_subqueries` sub-queries (default 7, at most 20), each retrieved through the hybrid lanes and merged content-keyed; single query only; planning errors propagate; context is uncapped (up to 8x each lane's top-k by default)
 - **GRAPH_COMPLETION** - Graph traversal + LLM completion
 - **GRAPH_SUMMARY_COMPLETION** - Graph traversal plus a second LLM call that summarizes the answer (reads no pre-computed summaries)
 - **GRAPH_COMPLETION_COT** - Chain-of-thought reasoning over graph

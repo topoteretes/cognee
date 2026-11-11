@@ -188,7 +188,9 @@ def test_union_drops_a_fact_another_result_shows_as_an_entity_edge():
     assert [fact["id"] for fact in merged["facts"]] == ["f2"]
 
 
-def test_two_way_merge_drops_a_secondary_fact_shown_as_a_primary_entity_edge():
+def test_two_way_merge_keeps_a_fact_an_entity_also_shows_as_an_edge():
+    """The session merge behind plain HYBRID_COMPLETION is unchanged: only the union drops
+    a fact that is already an entity edge."""
     primary = _leg(
         entities=[{"id": "acme", "name": "Acme", "edges": [_edge("Acme ordered", "edge-1")]}]
     )
@@ -198,7 +200,7 @@ def test_two_way_merge_drops_a_secondary_fact_shown_as_a_primary_entity_edge():
         primary, secondary, chunks_limit=5, entities_limit=5, facts_limit=5
     )
 
-    assert [fact["id"] for fact in merged["facts"]] == ["f2"]
+    assert [fact["id"] for fact in merged["facts"]] == ["edge-1", "f2"]
 
 
 def test_union_rebuilds_summaries_for_its_chunks_only():

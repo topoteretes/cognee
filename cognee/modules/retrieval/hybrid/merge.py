@@ -27,12 +27,6 @@ def merge_hybrid_results(
     """Merge each hybrid channel while preserving the result shape and its budgets."""
     primary = primary or {}
     secondary = secondary or {}
-    entities = merge_ranked(
-        primary.get("entities"),
-        secondary.get("entities"),
-        limit=entities_limit,
-        secondary_reserve=conversational_reserve(entities_limit),
-    )
     channels: dict[str, list] = {
         "chunks": merge_ranked(
             primary.get("chunks"),
@@ -40,10 +34,15 @@ def merge_hybrid_results(
             limit=chunks_limit,
             secondary_reserve=conversational_reserve(chunks_limit),
         ),
-        "entities": entities,
+        "entities": merge_ranked(
+            primary.get("entities"),
+            secondary.get("entities"),
+            limit=entities_limit,
+            secondary_reserve=conversational_reserve(entities_limit),
+        ),
         "facts": merge_ranked(
-            drop_facts_shown_as_edges(primary.get("facts") or [], entities),
-            drop_facts_shown_as_edges(secondary.get("facts") or [], entities),
+            primary.get("facts"),
+            secondary.get("facts"),
             limit=facts_limit,
             secondary_reserve=conversational_reserve(facts_limit),
         ),
