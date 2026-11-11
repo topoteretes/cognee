@@ -451,7 +451,8 @@ async def add_data_points(
 
     # Audit ledger (PROVENANCE_TRACKING): recorded here, at the one seam every
     # DataPoint batch crosses, so improve(), code graph, skills and custom
-    # pipelines are covered the same as cognify. Non-fatal, no-op when off.
+    # pipelines are covered the same as cognify. A no-op when off; when on, a
+    # ledger write that fails raises and this task fails with it.
     await record_provenance_at_storage(data_points, ctx)
 
     return data_points

@@ -20,12 +20,14 @@ every ledger entry (``source_ref_key``) instead of inventing a new identifier.
 It never touches graph marking, never overwrites ``source_*`` fields, and is
 written passively at the ``add_data_points`` storage seam (opt-in via
 ``PROVENANCE_TRACKING``, default off; ``cognee/tasks/provenance/``) so every
-pipeline that stores DataPoints is covered, and it can never break ingestion.
-Deletions reach it the same way: the graph delete choke points, cognify
-rollback and incremental update call ``tombstones.py``, which turns
-hard-deleted elements into ``invalidate`` tombstones (never row deletes) and
-can never break a delete. A later re-ingest of the same content resurrects
-them, tombstone kept in the version history.
+pipeline that stores DataPoints is covered. Next to what a batch produced, the
+writer records the data item the batch belongs to. Deletions retract that one
+row: the graph delete choke points and the cognify rollback call
+``tombstones.py``, which writes an ``invalidate`` tombstone per data item
+(never a row delete). The rows of what the item produced are assertions and
+stay. A later re-ingest brings the data item back, tombstone kept in its
+version history. A write or a tombstone that fails raises, so the ingestion
+or the delete fails with it instead of leaving a gap nothing reports.
 
 Reading it: ``ProvenanceManager`` (``get_lineage`` / ``revision_history`` /
 ``verify_chain`` / ``check`` / ``get_statistics`` / ``export``, all

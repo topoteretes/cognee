@@ -1,4 +1,4 @@
-"""Deletion-driven ledger tombstones: key mapping, sweeps, and delete wiring."""
+"""Deletion-driven ledger tombstones: one per data item, and the delete wiring."""
 
 import sys
 from types import SimpleNamespace
@@ -9,18 +9,19 @@ import pytest
 
 import cognee.modules.graph.methods.delete_data_nodes_and_edges
 import cognee.modules.graph.methods.delete_dataset_nodes_and_edges
-from cognee.infrastructure.databases.provenance.delete_data import EdgeIdentity
+from cognee.infrastructure.databases.provenance import make_source_ref_key
 from cognee.infrastructure.databases.unified.provenance_delete_planner import (
     SourceRefRemovalResult,
 )
-from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 from cognee.modules.provenance import storage
 from cognee.modules.provenance.tombstones import (
     agent_id_for,
+    dataset_id_from_ledger_key,
+    ledger_data_item_key,
     ledger_edge_key,
     ledger_node_key,
+    tombstone_data_item,
     tombstone_dataset,
-    tombstone_deleted_elements,
     tombstone_pipeline_run,
 )
 
@@ -30,31 +31,56 @@ ddsne_module = sys.modules["cognee.modules.graph.methods.delete_dataset_nodes_an
 
 pytestmark = pytest.mark.asyncio
 
+USER = SimpleNamespace(id=uuid4(), email="u@x.io")
 
-async def _seed_dataset(manager, dataset_id, node_ids, edges=()):
-    """Write a document-less slice of what record_provenance would write."""
+
+async def _seed_items(manager, dataset_id, data_ids, run_id="run-1"):
+    """Write what record_provenance writes per data item: its row and one assertion."""
     batch = manager.batch()
-    for node_id in node_ids:
-        batch.track_entity(ledger_node_key(dataset_id, node_id), source="doc", entity_type="entity")
-    for source, target, name in edges:
-        batch.track_relationship(
-            ledger_edge_key(dataset_id, source, target, name),
+    for data_id in data_ids:
+        common = {"bundle_id": run_id, "source_ref_key": make_source_ref_key(dataset_id, data_id)}
+        batch.track_data_item(ledger_data_item_key(dataset_id, data_id), **common)
+        batch.track_entity(
+            ledger_node_key(dataset_id, f"node-of-{data_id}"),
             source="doc",
-            used_entities=[
-                ledger_node_key(dataset_id, source),
-                ledger_node_key(dataset_id, target),
-            ],
+            entity_type="entity",
+            **common,
         )
     await batch.commit()
 
 
+async def _item(manager, dataset_id, data_id):
+    return await manager.get_provenance(ledger_data_item_key(dataset_id, data_id))
+
+
+async def _node(manager, dataset_id, data_id):
+    return await manager.get_provenance(ledger_node_key(dataset_id, f"node-of-{data_id}"))
+
+
+def _ledger_down(monkeypatch):
+    async def explode(write_fns):
+        raise RuntimeError("ledger down")
+
+    monkeypatch.setattr(storage, "append_chained_many", explode)
+
+
 class TestKeys:
     def test_keys_match_record_provenance_namespacing(self):
-        dataset_id = uuid4()
+        dataset_id, data_id = uuid4(), uuid4()
         assert ledger_node_key(dataset_id, "n1") == f"{dataset_id}:n1"
         assert ledger_edge_key(dataset_id, "a", "b", "knows") == (
             f"rel:{dataset_id}:a:knows:{dataset_id}:b"
         )
+        assert ledger_data_item_key(dataset_id, data_id) == f"{dataset_id}:data_item:{data_id}"
+
+    def test_every_key_names_its_dataset(self):
+        dataset_id = uuid4()
+        for key in (
+            ledger_node_key(dataset_id, "n1"),
+            ledger_edge_key(dataset_id, "a", "b", "knows"),
+            ledger_data_item_key(dataset_id, uuid4()),
+        ):
+            assert dataset_id_from_ledger_key(key) == dataset_id
 
     def test_agent_id_precedence(self):
         user_id = uuid4()
@@ -62,232 +88,141 @@ class TestKeys:
         assert agent_id_for(SimpleNamespace(email=None, id=user_id)) == str(user_id)
         assert agent_id_for(None) == "cognee"
 
-    def test_deleted_graph_elements_carry_edge_keys(self):
-        result = SourceRefRemovalResult(
-            deleted_node_ids=["n1"], deleted_edges=[EdgeIdentity("n1", "n2", "knows")]
-        )
-        deleted = DeletedGraphElements.from_source_ref_removal(result)
-        assert deleted.node_ids == {"n1"}
-        assert deleted.edge_keys == {("n1", "n2", "knows")}
-        assert len(deleted.edge_ids) == 1
 
-        other = DeletedGraphElements(node_ids={"n3"}, edge_keys={("n3", "n4", "x")})
-        deleted.merge(other)
-        assert deleted.edge_keys == {("n1", "n2", "knows"), ("n3", "n4", "x")}
+class TestTombstoneDataItem:
+    async def test_retracts_the_item_and_leaves_its_assertions(self, manager):
+        dataset_id, deleted, kept = uuid4(), uuid4(), uuid4()
+        await _seed_items(manager, dataset_id, [deleted, kept])
 
+        assert await tombstone_data_item(dataset_id, deleted, user=USER) == 1
 
-class TestTombstoneDeletedElements:
-    async def test_tombstones_only_live_tracked_elements(self, manager):
-        dataset_id, data_id = uuid4(), uuid4()
-        await _seed_dataset(manager, dataset_id, ["n1", "n2", "n3"], [("n1", "n2", "knows")])
-
-        deleted = DeletedGraphElements(
-            node_ids={"n1", "n2", "never-tracked"},
-            edge_keys={("n1", "n2", "knows"), ("n2", "n3", "untracked-edge")},
-        )
-        user = SimpleNamespace(email="auditor@x.io", id=uuid4())
-        written = await tombstone_deleted_elements(dataset_id, deleted, user=user, data_id=data_id)
-        assert written == 3  # n1, n2, rel — untracked keys are skipped, not raised
-
-        for raw in ("n1", "n2"):
-            stored = await manager.get_provenance(ledger_node_key(dataset_id, raw))
-            assert stored["invalidated"] is True
-            assert stored["invalidated_by"] == "auditor@x.io"
-            assert stored["invalidation_reason"] == "data_deleted"
-            assert stored["metadata"]["deleted_data_id"] == str(data_id)
-            assert stored["metadata"]["deleted_dataset_id"] == str(dataset_id)
-        rel = await manager.get_provenance(ledger_edge_key(dataset_id, "n1", "n2", "knows"))
-        assert rel["invalidated"] is True
-        # Survivor untouched.
-        assert (await manager.get_provenance(ledger_node_key(dataset_id, "n3")))[
-            "invalidated"
-        ] is False
+        tombstone = await _item(manager, dataset_id, deleted)
+        assert tombstone["invalidated"] is True
+        assert tombstone["invalidation_reason"] == "data_deleted"
+        assert tombstone["invalidated_by"] == "u@x.io"
+        # Assertions are never retracted one by one, and the other item is live.
+        assert (await _node(manager, dataset_id, deleted))["invalidated"] is False
+        assert (await _item(manager, dataset_id, kept))["invalidated"] is False
+        assert (await manager.get_statistics())["invalidated_count"] == 1
         assert (await manager.verify_chain())["valid"] is True
-        assert (await manager.check())["valid"] is True
 
-    async def test_repeat_is_noop(self, manager):
-        dataset_id = uuid4()
-        await _seed_dataset(manager, dataset_id, ["n1"])
-        deleted = DeletedGraphElements(node_ids={"n1"})
-        assert await tombstone_deleted_elements(dataset_id, deleted) == 1
-        assert await tombstone_deleted_elements(dataset_id, deleted) == 0
-        assert (await manager.get_statistics())["total_entries"] == 2  # live + one archive
+    async def test_repeat_and_unrecorded_items_write_nothing(self, manager):
+        dataset_id, data_id = uuid4(), uuid4()
+        await _seed_items(manager, dataset_id, [data_id])
+        await tombstone_data_item(dataset_id, data_id, user=USER)
+        total = (await manager.get_statistics())["total_entries"]
 
-    async def test_empty_and_none_inputs(self, manager):
-        assert await tombstone_deleted_elements(uuid4(), None) == 0
-        assert await tombstone_deleted_elements(uuid4(), DeletedGraphElements()) == 0
+        assert await tombstone_data_item(dataset_id, data_id, user=USER) == 0
+        assert await tombstone_data_item(dataset_id, uuid4(), user=USER) == 0
+        assert (await manager.get_statistics())["total_entries"] == total
 
-    async def test_never_raises(self, manager, monkeypatch):
-        async def explode(*args, **kwargs):
-            raise RuntimeError("db down")
+    async def test_same_data_id_in_another_dataset_is_untouched(self, manager):
+        dataset_a, dataset_b, data_id = uuid4(), uuid4(), uuid4()
+        await _seed_items(manager, dataset_a, [data_id])
+        await _seed_items(manager, dataset_b, [data_id])
 
-        monkeypatch.setattr(storage, "retrieve_live_ids", explode)
-        deleted = DeletedGraphElements(node_ids={"n1"})
-        assert await tombstone_deleted_elements(uuid4(), deleted) == 0
+        await tombstone_data_item(dataset_a, data_id, user=USER)
+
+        assert (await _item(manager, dataset_a, data_id))["invalidated"] is True
+        assert (await _item(manager, dataset_b, data_id))["invalidated"] is False
+
+    async def test_a_later_write_brings_the_item_back(self, manager):
+        dataset_id, data_id = uuid4(), uuid4()
+        await _seed_items(manager, dataset_id, [data_id])
+        await tombstone_data_item(dataset_id, data_id, user=USER, reason="memory_dropped")
+
+        await _seed_items(manager, dataset_id, [data_id], run_id="run-2")
+
+        current = await _item(manager, dataset_id, data_id)
+        assert current["invalidated"] is False and current["bundle_id"] == "run-2"
+        history = await manager.revision_history(ledger_data_item_key(dataset_id, data_id))
+        assert [bool(version.get("invalidated")) for version in history] == [False, True, False]
+
+    async def test_a_tombstone_that_cannot_be_written_raises(self, manager, monkeypatch):
+        dataset_id, data_id = uuid4(), uuid4()
+        await _seed_items(manager, dataset_id, [data_id])
+        _ledger_down(monkeypatch)
+
+        with pytest.raises(RuntimeError, match="ledger down"):
+            await tombstone_data_item(dataset_id, data_id, user=USER)
+        assert (await _item(manager, dataset_id, data_id))["invalidated"] is False
 
 
 class TestTombstoneDataset:
-    async def test_sweeps_namespace_only(self, manager):
-        dataset_id, other_dataset = uuid4(), uuid4()
-        await _seed_dataset(manager, dataset_id, ["n1", "n2"], [("n1", "n2", "knows")])
-        await _seed_dataset(manager, other_dataset, ["n1"], [("n1", "n1", "self")])
-        # A versioned entity: its archive shares the prefix but must not be
-        # tombstoned (it is history, not a live assertion).
-        await manager.track_entity(ledger_node_key(dataset_id, "n1"), source="doc-2")
+    async def test_retracts_every_item_of_that_dataset_only(self, manager):
+        dataset_a, dataset_b = uuid4(), uuid4()
+        items_a, item_b = [uuid4(), uuid4()], uuid4()
+        await _seed_items(manager, dataset_a, items_a)
+        await _seed_items(manager, dataset_b, [item_b])
 
-        written = await tombstone_dataset(dataset_id, user=SimpleNamespace(email="u@x.io"))
-        assert written == 3  # n1 (live), n2, rel
+        assert await tombstone_dataset(dataset_a, user=USER) == 2
 
-        for raw in ("n1", "n2"):
-            stored = await manager.get_provenance(ledger_node_key(dataset_id, raw))
-            assert stored["invalidated"] is True
-            assert stored["invalidation_reason"] == "dataset_deleted"
-        assert (await manager.get_provenance(ledger_edge_key(dataset_id, "n1", "n2", "knows")))[
-            "invalidated"
-        ] is True
-
-        # Other dataset's rows are live; archives are untouched.
-        assert (await manager.get_provenance(ledger_node_key(other_dataset, "n1")))[
-            "invalidated"
-        ] is False
-        archives = [
-            entry
-            for entry in await storage.retrieve_all()
-            if ":v:" in entry.entity_id and entry.entity_id.startswith(f"{dataset_id}:n1")
-        ]
-        # One archive from the re-track (live, pre-version) + one from the
-        # tombstone (the pre-invalidation state); neither is itself a tombstone.
-        assert len(archives) == 2
-        assert all(archive.invalidated is False for archive in archives)
+        for data_id in items_a:
+            tombstone = await _item(manager, dataset_a, data_id)
+            assert tombstone["invalidated"] is True
+            assert tombstone["invalidation_reason"] == "dataset_deleted"
+            assert (await _node(manager, dataset_a, data_id))["invalidated"] is False
+        assert (await _item(manager, dataset_b, item_b))["invalidated"] is False
+        assert await tombstone_dataset(dataset_a, user=USER) == 0
         assert (await manager.verify_chain())["valid"] is True
 
-        # Second sweep finds nothing live.
-        assert await tombstone_dataset(dataset_id) == 0
-
-    async def test_resurrection_after_dataset_sweep(self, manager):
-        """forget(memory_only=True) then cognify again: same ids, live again."""
+    async def test_a_tombstone_that_cannot_be_written_raises(self, manager, monkeypatch):
         dataset_id = uuid4()
-        await _seed_dataset(manager, dataset_id, ["n1"], [("n1", "n1", "self")])
-        assert await tombstone_dataset(dataset_id) == 2
-        await _seed_dataset(manager, dataset_id, ["n1"], [("n1", "n1", "self")])
-        assert (await manager.get_provenance(ledger_node_key(dataset_id, "n1")))[
-            "invalidated"
-        ] is False
-        assert (await manager.get_provenance(ledger_edge_key(dataset_id, "n1", "n1", "self")))[
-            "invalidated"
-        ] is False
-        assert (await manager.verify_chain())["valid"] is True
+        await _seed_items(manager, dataset_id, [uuid4()])
+        _ledger_down(monkeypatch)
 
-    async def test_never_raises(self, manager, monkeypatch):
-        async def explode(*args, **kwargs):
-            raise RuntimeError("db down")
-            yield  # pragma: no cover - makes this an async generator
-
-        monkeypatch.setattr(storage, "iter_live_with_prefix", explode)
-        assert await tombstone_dataset(uuid4()) == 0
+        with pytest.raises(RuntimeError, match="ledger down"):
+            await tombstone_dataset(dataset_id, user=USER)
 
 
 class TestTombstonePipelineRun:
-    async def test_retracts_only_what_the_run_first_asserted(self, manager):
-        from cognee.infrastructure.databases.provenance import make_source_ref_key
+    async def test_retracts_the_items_the_run_gave_memory_to(self, manager):
+        dataset_id, first, second, other = uuid4(), uuid4(), uuid4(), uuid4()
+        await _seed_items(manager, dataset_id, [first, second], run_id="rolled-back")
+        await _seed_items(manager, dataset_id, [other], run_id="other-run")
 
-        dataset_id, run_a, run_b = uuid4(), uuid4(), uuid4()
-        doc_x, doc_kept = uuid4(), uuid4()
-        ref_x = make_source_ref_key(dataset_id, doc_x)
-        ref_kept = make_source_ref_key(dataset_id, doc_kept)
+        assert await tombstone_pipeline_run(dataset_id, "rolled-back", user=USER) == 2
 
-        # Run A asserts n1. Run B re-mentions n1 (versions it), first-asserts
-        # n2 (doc_x), n3 (doc_kept) and the edge n2->n3.
-        await manager.track_entity(
-            ledger_node_key(dataset_id, "n1"),
-            source="a",
-            bundle_id=str(run_a),
-            source_ref_key=ref_x,
-        )
-        batch = manager.batch()
-        batch.track_entity(
-            ledger_node_key(dataset_id, "n1"),
-            source="b",
-            bundle_id=str(run_b),
-            source_ref_key=ref_x,
-        )
-        batch.track_entity(
-            ledger_node_key(dataset_id, "n2"),
-            source="b",
-            bundle_id=str(run_b),
-            source_ref_key=ref_x,
-        )
-        batch.track_entity(
-            ledger_node_key(dataset_id, "n3"),
-            source="b",
-            bundle_id=str(run_b),
-            source_ref_key=ref_kept,
-        )
-        batch.track_relationship(
-            ledger_edge_key(dataset_id, "n2", "n3", "knows"),
-            source="b",
-            bundle_id=str(run_b),
-            source_ref_key=ref_x,
-        )
-        await batch.commit()
+        for data_id in (first, second):
+            tombstone = await _item(manager, dataset_id, data_id)
+            assert tombstone["invalidated"] is True
+            assert tombstone["invalidation_reason"] == "pipeline_run_rolled_back"
+            assert tombstone["metadata"]["rolled_back_pipeline_run_id"] == "rolled-back"
+        assert (await _item(manager, dataset_id, other))["invalidated"] is False
 
-        written = await tombstone_pipeline_run(dataset_id, run_b, keep_data_ids={doc_kept})
-        assert written == 2  # n2 and the edge; n1 survives (re-mention), n3 is kept
+    async def test_completed_items_a_recovery_keeps_stay_live(self, manager):
+        dataset_id, kept, unfinished = uuid4(), uuid4(), uuid4()
+        await _seed_items(manager, dataset_id, [kept, unfinished], run_id="run")
 
-        get = manager.get_provenance
-        assert (await get(ledger_node_key(dataset_id, "n1")))["invalidated"] is False
-        assert (await get(ledger_node_key(dataset_id, "n2")))["invalidated"] is True
-        assert (await get(ledger_node_key(dataset_id, "n3")))["invalidated"] is False
-        edge = await get(ledger_edge_key(dataset_id, "n2", "n3", "knows"))
-        assert edge["invalidated"] is True
-        assert edge["invalidation_reason"] == "pipeline_run_rolled_back"
-        assert edge["metadata"]["rolled_back_pipeline_run_id"] == str(run_b)
-        assert (await manager.verify_chain())["valid"] is True
-        # Idempotent.
-        assert await tombstone_pipeline_run(dataset_id, run_b, keep_data_ids={doc_kept}) == 0
+        written = await tombstone_pipeline_run(dataset_id, "run", user=USER, keep_data_ids=[kept])
 
-    async def test_retracts_a_row_the_run_resurrected(self, manager):
-        """forget(memory_only=True), re-cognify, then the re-cognify rolls back.
+        assert written == 1
+        assert (await _item(manager, dataset_id, kept))["invalidated"] is False
+        assert (await _item(manager, dataset_id, unfinished))["invalidated"] is True
 
-        The resurrected row carries ``previous_version_id`` (the archived
-        tombstone), but nothing outside the run owns the entity, so the
-        rollback deletes it from the graph and the ledger must follow.
-        """
-        dataset_id, run_a, run_b = uuid4(), uuid4(), uuid4()
-        key = ledger_node_key(dataset_id, "n1")
-        await manager.track_entity(key, source="a", bundle_id=str(run_a))
-        assert await tombstone_dataset(dataset_id) == 1
-        await manager.track_entity(key, source="b", bundle_id=str(run_b))
-        resurrected = await manager.get_provenance(key)
-        assert resurrected["invalidated"] is False
-        assert resurrected["previous_version_id"]
+    async def test_item_that_had_memory_before_the_run_stays_live(self, manager):
+        # The indexing run stores the chunks first; a cognify run that fails
+        # afterwards is rolled back by run id and leaves them in the graph.
+        dataset_id, data_id = uuid4(), uuid4()
+        await _seed_items(manager, dataset_id, [data_id], run_id="indexing-run")
+        await _seed_items(manager, dataset_id, [data_id], run_id="cognify-run")
 
-        assert await tombstone_pipeline_run(dataset_id, run_b) == 1
-        tombstone = await manager.get_provenance(key)
-        assert tombstone["invalidated"] is True
-        assert tombstone["metadata"]["rolled_back_pipeline_run_id"] == str(run_b)
-        assert (await manager.verify_chain())["valid"] is True
+        assert await tombstone_pipeline_run(dataset_id, "cognify-run", user=USER) == 0
+        assert (await _item(manager, dataset_id, data_id))["invalidated"] is False
 
-    async def test_retracts_a_row_the_run_versioned_twice(self, manager):
-        """Two chunks of one run mention n1 with different content: the live
-        row's chain leads back only to the run's own first version, so a
-        rollback must tombstone it. n0, re-mentioned twice by the run but
-        first asserted by another run, survives."""
-        dataset_id, run_a, run_b = uuid4(), uuid4(), uuid4()
-        own, shared = ledger_node_key(dataset_id, "n1"), ledger_node_key(dataset_id, "n0")
-        await manager.track_entity(shared, source="a", bundle_id=str(run_a))
-        for _ in range(2):  # no snapshots: every re-track versions
-            await manager.track_entity(own, source="b", bundle_id=str(run_b))
-            await manager.track_entity(shared, source="b", bundle_id=str(run_b))
-        assert (await manager.get_provenance(own))["previous_version_id"]
+    async def test_item_the_run_brought_back_is_retracted(self, manager):
+        dataset_id, data_id = uuid4(), uuid4()
+        await _seed_items(manager, dataset_id, [data_id], run_id="first-run")
+        await tombstone_data_item(dataset_id, data_id, user=USER)
+        await _seed_items(manager, dataset_id, [data_id], run_id="second-run")
 
-        assert await tombstone_pipeline_run(dataset_id, run_b) == 1
-        assert (await manager.get_provenance(own))["invalidated"] is True
-        assert (await manager.get_provenance(shared))["invalidated"] is False
-        assert (await manager.verify_chain())["valid"] is True
+        assert await tombstone_pipeline_run(dataset_id, "second-run", user=USER) == 1
+        assert (await _item(manager, dataset_id, data_id))["invalidated"] is True
 
     async def test_unknown_run_is_noop(self, manager):
-        assert await tombstone_pipeline_run(uuid4(), uuid4()) == 0
+        dataset_id = uuid4()
+        await _seed_items(manager, dataset_id, [uuid4()])
+        assert await tombstone_pipeline_run(dataset_id, "no-such-run", user=USER) == 0
 
 
 class TestDatasetScopedReads:
@@ -377,17 +312,11 @@ class TestDatasetScopedReads:
 
 
 class TestDeleteWiring:
-    """The graph delete choke points hand their results to the ledger."""
+    """The graph delete choke points retract the data item, whatever they removed."""
 
-    async def test_delete_data_graph_provenance_path_tombstones(self):
-        dataset_id, data_id, user_id = uuid4(), uuid4(), uuid4()
-        user = SimpleNamespace(id=user_id, email="u@x.io")
-        removal = SourceRefRemovalResult(
-            deleted_node_ids=["n1"], deleted_edges=[EdgeIdentity("n1", "n2", "knows")]
-        )
-
-        with (
-            patch.object(ddne_module, "get_user", AsyncMock(return_value=user)),
+    def _provenance_path(self, dataset_id, removal):
+        return (
+            patch.object(ddne_module, "get_user", AsyncMock(return_value=USER)),
             patch.object(
                 ddne_module,
                 "get_authorized_dataset",
@@ -398,20 +327,48 @@ class TestDeleteWiring:
                 "try_delete_data_by_graph_provenance",
                 AsyncMock(return_value=removal),
             ),
-            patch.object(ddne_module, "tombstone_deleted_elements", AsyncMock()) as tombstone,
-        ):
-            result = await ddne_module.delete_data_nodes_and_edges(dataset_id, data_id, user_id)
+        )
 
-        tombstone.assert_awaited_once_with(dataset_id, result, user=user, data_id=data_id)
-        assert result.node_ids == {"n1"}
-        assert result.edge_keys == {("n1", "n2", "knows")}
-
-    async def test_delete_data_ledger_path_tombstones(self):
-        dataset_id, data_id, user_id = uuid4(), uuid4(), uuid4()
-        user = SimpleNamespace(id=user_id, email="u@x.io")
+    async def test_delete_data_graph_provenance_path_tombstones(self):
+        dataset_id, data_id = uuid4(), uuid4()
+        removal = SourceRefRemovalResult(deleted_node_ids=["n1"])
+        user_patch, dataset_patch, delete_patch = self._provenance_path(dataset_id, removal)
 
         with (
-            patch.object(ddne_module, "get_user", AsyncMock(return_value=user)),
+            user_patch,
+            dataset_patch,
+            delete_patch,
+            patch.object(ddne_module, "tombstone_data_item", AsyncMock()) as tombstone,
+        ):
+            result = await ddne_module.delete_data_nodes_and_edges(dataset_id, data_id, USER.id)
+
+        tombstone.assert_awaited_once_with(dataset_id, data_id, user=USER)
+        assert result.node_ids == {"n1"}
+
+    async def test_a_failed_tombstone_fails_the_delete(self):
+        dataset_id, data_id = uuid4(), uuid4()
+        user_patch, dataset_patch, delete_patch = self._provenance_path(
+            dataset_id, SourceRefRemovalResult()
+        )
+
+        with (
+            user_patch,
+            dataset_patch,
+            delete_patch,
+            patch.object(
+                ddne_module,
+                "tombstone_data_item",
+                AsyncMock(side_effect=RuntimeError("ledger down")),
+            ),
+            pytest.raises(RuntimeError, match="ledger down"),
+        ):
+            await ddne_module.delete_data_nodes_and_edges(dataset_id, data_id, USER.id)
+
+    async def test_delete_data_ledger_path_tombstones(self):
+        dataset_id, data_id = uuid4(), uuid4()
+
+        with (
+            patch.object(ddne_module, "get_user", AsyncMock(return_value=USER)),
             patch.object(
                 ddne_module,
                 "get_authorized_dataset",
@@ -427,11 +384,11 @@ class TestDeleteWiring:
             ),
             patch.object(ddne_module, "delete_data_related_nodes", AsyncMock()),
             patch.object(ddne_module, "delete_data_related_edges", AsyncMock()),
-            patch.object(ddne_module, "tombstone_deleted_elements", AsyncMock()) as tombstone,
+            patch.object(ddne_module, "tombstone_data_item", AsyncMock()) as tombstone,
         ):
-            result = await ddne_module.delete_data_nodes_and_edges(dataset_id, data_id, user_id)
+            await ddne_module.delete_data_nodes_and_edges(dataset_id, data_id, USER.id)
 
-        tombstone.assert_awaited_once_with(dataset_id, result, user=user, data_id=data_id)
+        tombstone.assert_awaited_once_with(dataset_id, data_id, user=USER)
 
     async def test_delete_dataset_graph_provenance_path_tombstones(self):
         dataset_id, user_id = uuid4(), uuid4()
@@ -479,39 +436,3 @@ class TestDeleteWiring:
             await ddsne_module.delete_dataset_nodes_and_edges(dataset_id, user_id)
 
         tombstone.assert_awaited_once_with(dataset_id, user=user)
-
-    async def test_incremental_update_tombstones_replaced_chunk_output(self):
-        from cognee.api.v1.update import incremental
-
-        dataset_id, data_id = uuid4(), uuid4()
-        user = SimpleNamespace(id=uuid4(), email="u@x.io")
-        removal = SourceRefRemovalResult(
-            deleted_node_ids=["c1", "e1"], deleted_edges=[EdgeIdentity("c1", "e1", "contains")]
-        )
-
-        with (
-            patch.object(
-                incremental, "delete_chunks_incremental", AsyncMock(return_value=removal)
-            ) as delete,
-            patch.object(incremental, "tombstone_deleted_elements", AsyncMock()) as tombstone,
-        ):
-            await incremental._retire_replaced_chunks(["c1"], dataset_id, data_id, user)
-
-        delete.assert_awaited_once_with(["c1"], dataset_id, data_id)
-        tombstone.assert_awaited_once()
-        args, kwargs = tombstone.await_args
-        assert args[0] == dataset_id
-        assert args[1].node_ids == {"c1", "e1"}
-        assert args[1].edge_keys == {("c1", "e1", "contains")}
-        assert kwargs == {"user": user, "data_id": data_id, "reason": "chunks_replaced"}
-
-    async def test_incremental_update_skips_ledger_when_nothing_was_deleted(self):
-        from cognee.api.v1.update import incremental
-
-        with (
-            patch.object(incremental, "delete_chunks_incremental", AsyncMock(return_value=None)),
-            patch.object(incremental, "tombstone_deleted_elements", AsyncMock()) as tombstone,
-        ):
-            await incremental._retire_replaced_chunks([], uuid4(), uuid4(), None)
-
-        tombstone.assert_not_awaited()

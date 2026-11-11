@@ -23,16 +23,19 @@ Three things fall out of it:
 
 What is snapshotted: every pydantic field of the DataPoint except identity,
 bookkeeping, attribution and tunable-weight fields (``EXCLUDED_FIELDS``), and
-except nested DataPoints / edges (those are rows of their own). Values are
-normalized through JSON so a DataPoint in memory and the same node read back
-from a graph adapter hash identically.
+except relationship fields, the ones declared to hold other DataPoints or
+edges (those are rows of their own). Values are normalized through JSON so a
+DataPoint in memory and the same node read back from a graph adapter hash
+identically.
 """
 
 import hashlib
 import json
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, get_args
 from uuid import UUID
+
+from cognee.infrastructure.engine import DataPoint, Edge
 
 # Identity, bookkeeping, attribution and weights: none of these are the
 # entity's content. ``feedback_weight`` / ``importance_weight`` are tuned by
@@ -99,12 +102,24 @@ def _is_data_point(value: Any) -> bool:
     return hasattr(value, "model_fields") and hasattr(value, "id") and hasattr(value, "metadata")
 
 
+def _declares_relationship(annotation: Any) -> bool:
+    """Whether a field's declared type can hold another DataPoint or an edge.
+
+    Decided by the declaration, not the value: the graph stores such a field
+    as edges, so an empty one (a chunk stored before extraction has
+    ``contains == []``) must not be recorded as content the node never keeps.
+    """
+    if isinstance(annotation, type):
+        return issubclass(annotation, (DataPoint, Edge))
+    return any(_declares_relationship(argument) for argument in get_args(annotation))
+
+
 def snapshot_fields(data_point: Any) -> dict[str, Any]:
     """The snapshot-able fields of a DataPoint, normalized."""
     model_fields = getattr(type(data_point), "model_fields", None) or {}
     fields: dict[str, Any] = {}
-    for name in model_fields:
-        if name in EXCLUDED_FIELDS:
+    for name, field in model_fields.items():
+        if name in EXCLUDED_FIELDS or _declares_relationship(field.annotation):
             continue
         value = getattr(data_point, name, None)
         if _is_data_point(value) or (

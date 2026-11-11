@@ -1,39 +1,34 @@
-"""Deletion-driven tombstones for the audit ledger.
+"""Deletion-driven tombstones for the audit ledger, one per data item.
 
-The ledger is append-only: when ``forget()`` / ``datasets.delete_data`` /
-``datasets.empty_dataset`` hard-delete graph artifacts, their ledger rows must
-not keep asserting them. This module is the one place that turns a graph
-deletion into ``invalidate`` tombstones (``prov:Invalidation``), and it is
-called from the two delete choke points in ``cognee/modules/graph/methods``
-(``delete_data_nodes_and_edges`` and ``delete_dataset_nodes_and_edges``) so
-every public delete surface — including the DLT orphan purge — gets it.
+The ledger is append-only. Node and relationship rows are assertions: they
+record what a data item produced, and are never retracted one by one. What is
+retracted is the data item itself. Every writer records a ``data_item`` row
+for the (dataset, data item) it stores output for (``record_provenance``), and
+when that item's memory leaves the graph this module invalidates that one row
+(``prov:Invalidation``). An assertion still stands while the data item named
+by its ``source_ref_key`` is live.
 
-Keys mirror the writer (``cognee/tasks/provenance/record_provenance.py``):
-every id is namespaced by the dataset (``"{dataset_id}:{raw_id}"``) and a
-relationship is ``"rel:{src}:{name}:{dst}"`` over the namespaced endpoints.
+A tombstone therefore needs only ``(dataset_id, data_id)``, never the list of
+elements a graph delete removed. Every delete path knows those two ids, and a
+delete that failed after the graph changed writes the tombstone on its retry.
 
-Two granularities:
+Three scopes:
 
-- **data item**: tombstone exactly the elements the graph delete reports as
-  hard-deleted (``DeletedGraphElements``). An entity that survives because
-  another document of the dataset still owns it is *not* tombstoned, which is
-  what the graph says too. Nothing is matched by ``source_ref_key`` — a
-  re-mentioned entity's live row carries only the latest document's key.
-- **dataset**: tombstone every live row in the dataset's namespace, whichever
-  delete path ran (the graph-provenance path reports no element list).
+- **data item**: ``forget(data_id=...)``, ``datasets.delete_data`` and the DLT
+  purges, with or without the ``Data`` row surviving (``memory_only``).
+- **dataset**: every live data item of the dataset.
+- **pipeline run**: the data items whose memory a rolled-back run created.
 
-Only rows that exist and are live are invalidated (``invalidate`` raises on
-untracked ids, and the ledger is opt-in, so most deletes find nothing).
-Tombstones are committed in chained batches, and like every other ledger
-write path this never raises: deletion must not fail because of the audit
-sidecar.
+Only rows that exist and are live are invalidated (the ledger is opt-in, so
+most deletes find nothing). A tombstone that cannot be written raises: the
+delete fails with it and is retried, instead of leaving the ledger asserting
+memory the graph no longer holds.
 """
 
 from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 
-from cognee.infrastructure.databases.provenance import get_data_id_from_source_ref_key
 from cognee.shared.logging_utils import get_logger
 
 from . import storage
@@ -61,10 +56,15 @@ def ledger_edge_key(
     )
 
 
+def ledger_data_item_key(dataset_id: UUID | str, data_id: UUID | str) -> str:
+    """Ledger key of a data item, as ``record_provenance`` writes it."""
+    return f"{dataset_id}:data_item:{data_id}"
+
+
 def dataset_id_from_ledger_key(entity_id: str) -> UUID | None:
     """The dataset that owns a ledger key, or None for an unscoped key.
 
-    Inverse of ``ledger_node_key`` / ``ledger_edge_key`` — the read surface
+    Inverse of the ``ledger_*_key`` builders — the read surface
     uses it to decide whose ACL governs a lookup. Archive suffixes do not
     matter: the dataset id is always the first (or, for edges, second)
     colon-separated segment.
@@ -96,7 +96,7 @@ async def _tombstone_ids(
     *,
     agent_id: str,
     reason: str,
-    metadata: dict[str, Any] | None,
+    metadata: dict[str, Any] | None = None,
 ) -> int:
     manager = get_provenance_manager()
     written = 0
@@ -104,96 +104,30 @@ async def _tombstone_ids(
     for entity_id in entity_ids:
         batch.invalidate(entity_id, agent_id=agent_id, reason=reason, metadata=metadata)
         if len(batch) >= _COMMIT_CHUNK:
-            results = await batch.commit()
-            if results is None:
-                return written
-            written += len(results)
+            written += len(await batch.commit())
     if len(batch):
-        results = await batch.commit()
-        if results is None:
-            return written
-        written += len(results)
+        written += len(await batch.commit())
     return written
 
 
-async def tombstone_deleted_elements(
+async def tombstone_data_item(
     dataset_id: UUID,
-    deleted_elements,
+    data_id: UUID,
     *,
     user: Any = None,
-    data_id: UUID | None = None,
     reason: str = "data_deleted",
 ) -> int:
-    """Tombstone the ledger rows of elements a data-item delete hard-deleted.
+    """Tombstone the ledger row of a data item whose memory left the graph.
 
-    ``deleted_elements`` is a ``DeletedGraphElements``. Returns the number of
-    tombstones written (0 when the ledger holds nothing for them, or on any
-    failure — never raises).
+    Returns the number of tombstones written: 1, or 0 when the ledger holds no
+    live row for the item (never recorded, or already tombstoned).
     """
-    if deleted_elements is None:
+    live_ids = await storage.retrieve_live_ids([ledger_data_item_key(dataset_id, data_id)])
+    if not live_ids:
         return 0
-    try:
-        keys = [ledger_node_key(dataset_id, node_id) for node_id in deleted_elements.node_ids]
-        keys += [
-            ledger_edge_key(dataset_id, source, target, relationship_name)
-            for source, target, relationship_name in getattr(deleted_elements, "edge_keys", ())
-        ]
-        if not keys:
-            return 0
-        live_ids = await storage.retrieve_live_ids(sorted(keys))
-        if not live_ids:
-            return 0
-        metadata = {"deleted_dataset_id": str(dataset_id)}
-        if data_id is not None:
-            metadata["deleted_data_id"] = str(data_id)
-        written = await _tombstone_ids(
-            live_ids, agent_id=agent_id_for(user), reason=reason, metadata=metadata
-        )
-        logger.info(
-            "Tombstoned %d ledger entries for data %s in dataset %s", written, data_id, dataset_id
-        )
-        return written
-    except Exception as error:
-        logger.warning(
-            "Ledger tombstoning failed for data %s in dataset %s (non-fatal): %s",
-            data_id,
-            dataset_id,
-            error,
-            exc_info=True,
-        )
-        return 0
-
-
-# Versions walked back per row when deciding whether a rolled-back run merely
-# re-mentioned an artifact. Deeper chains keep the row live (the pre-existing,
-# conservative behaviour) rather than tombstone something that may still exist.
-_CHAIN_WALK_LIMIT = 64
-
-
-async def _owned_outside_run(entry, pipeline_run_id: str) -> bool:
-    """Whether a live row the run wrote still has an owner the rollback keeps.
-
-    Walks ``previous_version_id`` back past versions the same run wrote. The
-    row survives only when the first version written by another run is live:
-    the run re-mentioned an artifact that stays in the graph. A chain that
-    ends, or reaches a tombstone first, means the run (re)created the artifact
-    — a first assertion, a second version of its own row, or a resurrection
-    after ``forget()`` — and the rollback hard-deleted it.
-    """
-    visited = {entry.entity_id}
-    cursor = entry
-    for _ in range(_CHAIN_WALK_LIMIT):
-        previous_id = cursor.previous_version_id
-        if not previous_id or previous_id in visited:
-            return False
-        visited.add(previous_id)
-        previous = await storage.retrieve(previous_id)
-        if previous is None or previous.invalidated:
-            return False
-        if previous.bundle_id != pipeline_run_id:
-            return True
-        cursor = previous
-    return True
+    written = await _tombstone_ids(live_ids, agent_id=agent_id_for(user), reason=reason)
+    logger.info("Tombstoned data item %s of dataset %s in the ledger", data_id, dataset_id)
+    return written
 
 
 async def tombstone_pipeline_run(
@@ -204,66 +138,41 @@ async def tombstone_pipeline_run(
     keep_data_ids: Iterable[UUID | str] | None = None,
     reason: str = "pipeline_run_rolled_back",
 ) -> int:
-    """Tombstone what a rolled-back cognify run (re)created.
+    """Tombstone the data items whose memory a rolled-back run created.
 
-    Rows are matched by ``bundle_id`` (the run id) inside the dataset's
-    namespace. A rollback removes the run's ownership refs and hard-deletes
-    artifacts left unowned, so a row is tombstoned unless its version chain
-    reaches a live version written by another run (see
-    ``_owned_outside_run``): an entity the run merely re-mentioned survives in
-    the graph and stays live here too — its chain still shows the run's
-    version, which is what happened. A row the run resurrected from a
-    tombstone, or versioned twice itself, is gone from the graph and is
-    tombstoned. Rows attributed to documents in ``keep_data_ids`` (completed
-    documents a recovery rollback keeps) are left alone. Never raises.
+    A data item row carries the ``bundle_id`` of the run that first stored
+    output for it (or that brought it back after a tombstone), and re-tracking
+    a live row is a no-op. So the rows under the rolled-back run are exactly
+    the items that had no memory before it. A cognify run rolled back after an
+    indexing run stored the chunks leaves the row with the indexing run, and
+    the item live: its chunks are still in the graph. Items in
+    ``keep_data_ids`` (completed documents a recovery rollback keeps) are left
+    alone.
     """
-    try:
-        kept = {str(data_id) for data_id in (keep_data_ids or ())}
-        run_id = str(pipeline_run_id)
-        # Collected before any chain walk: the walk opens its own sessions and
-        # must not interleave with the paging scan's.
-        candidates = []
-        for prefix in (f"{dataset_id}:", f"rel:{dataset_id}:"):
-            async for entry in storage.iter_live_by_bundle(run_id, prefix):
-                if kept and entry.source_ref_key:
-                    try:
-                        data_id = str(get_data_id_from_source_ref_key(entry.source_ref_key))
-                    except ValueError:
-                        data_id = None
-                    if data_id in kept:
-                        continue
-                candidates.append(entry)
-        pending: list[str] = []
-        for entry in candidates:
-            if entry.previous_version_id and await _owned_outside_run(entry, run_id):
-                continue
-            pending.append(entry.entity_id)
-        if not pending:
-            return 0
-        written = await _tombstone_ids(
-            pending,
-            agent_id=agent_id_for(user),
-            reason=reason,
-            metadata={
-                "deleted_dataset_id": str(dataset_id),
-                "rolled_back_pipeline_run_id": str(pipeline_run_id),
-            },
-        )
-        logger.info(
-            "Tombstoned %d ledger entries for rolled-back run %s (dataset %s)",
-            written,
-            pipeline_run_id,
-            dataset_id,
-        )
-        return written
-    except Exception as error:
-        logger.warning(
-            "Ledger tombstoning failed for rolled-back run %s (non-fatal): %s",
-            pipeline_run_id,
-            error,
-            exc_info=True,
-        )
+    kept = {str(data_id) for data_id in (keep_data_ids or ())}
+    prefix = ledger_data_item_key(dataset_id, "")
+    # Collected before writing: the scan and the tombstone writes must not
+    # interleave on one ledger.
+    pending = [
+        entry.entity_id
+        async for entry in storage.iter_live_by_bundle(str(pipeline_run_id), prefix)
+        if entry.entity_id[len(prefix) :] not in kept
+    ]
+    if not pending:
         return 0
+    written = await _tombstone_ids(
+        pending,
+        agent_id=agent_id_for(user),
+        reason=reason,
+        metadata={"rolled_back_pipeline_run_id": str(pipeline_run_id)},
+    )
+    logger.info(
+        "Tombstoned %d data item(s) in the ledger for rolled-back run %s (dataset %s)",
+        written,
+        pipeline_run_id,
+        dataset_id,
+    )
+    return written
 
 
 async def tombstone_dataset(
@@ -272,35 +181,15 @@ async def tombstone_dataset(
     user: Any = None,
     reason: str = "dataset_deleted",
 ) -> int:
-    """Tombstone every live ledger row in the dataset's namespace.
-
-    Covers nodes (``"{dataset_id}:..."``) and relationships
-    (``"rel:{dataset_id}:..."``). Returns the number of tombstones written;
-    never raises.
-    """
-    try:
-        metadata = {"deleted_dataset_id": str(dataset_id)}
-        agent_id = agent_id_for(user)
-        written = 0
-        for prefix in (f"{dataset_id}:", f"rel:{dataset_id}:"):
-            pending: list[str] = []
-            async for entity_id in storage.iter_live_with_prefix(prefix):
-                pending.append(entity_id)
-            # Collected before writing: the prefix scan and the tombstone
-            # writes must not interleave on one ledger (the scan session
-            # would otherwise observe its own in-flight invalidations).
-            if pending:
-                written += await _tombstone_ids(
-                    pending, agent_id=agent_id, reason=reason, metadata=metadata
-                )
-        if written:
-            logger.info("Tombstoned %d ledger entries for dataset %s", written, dataset_id)
-        return written
-    except Exception as error:
-        logger.warning(
-            "Ledger tombstoning failed for dataset %s (non-fatal): %s",
-            dataset_id,
-            error,
-            exc_info=True,
-        )
+    """Tombstone every live data item of the dataset. Returns the number written."""
+    # Collected before writing: the prefix scan must not observe its own
+    # in-flight invalidations.
+    pending = [
+        entity_id
+        async for entity_id in storage.iter_live_with_prefix(ledger_data_item_key(dataset_id, ""))
+    ]
+    if not pending:
         return 0
+    written = await _tombstone_ids(pending, agent_id=agent_id_for(user), reason=reason)
+    logger.info("Tombstoned %d data item(s) in the ledger for dataset %s", written, dataset_id)
+    return written

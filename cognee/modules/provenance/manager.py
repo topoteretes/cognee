@@ -4,14 +4,14 @@ Port of semantica's ProvenanceManager onto cognee's shared relational DB
 (SQLite + Postgres) via the async repository in ``storage.py``. The manager is
 stateless (sessions per call), so acquisition is a trivial cached factory.
 
-Tracking methods (``track_entity`` / ``track_relationship`` / ``track_chunk``)
-log and return ``None`` on storage failure — provenance must never break the
-host operation. ``invalidate`` is the exception: it is a user-initiated audit
-action and raises on an untracked entity.
+The single-call tracking methods (``track_entity`` / ``track_relationship`` /
+``track_chunk``) log and return ``None`` on storage failure. ``invalidate``
+raises on an untracked entity: it is a user-initiated audit action.
 
-Bulk writers should collect operations on ``manager.batch()`` and ``commit()``
-once: the whole batch becomes a single chained transaction (one lock
-acquisition, one COMMIT) instead of a round-trip per entry.
+Bulk writers (the storage hook, the tombstones) collect operations on
+``manager.batch()`` and ``commit()`` once: the whole batch becomes a single
+chained transaction (one lock acquisition, one COMMIT) instead of a round-trip
+per entry. ``commit()`` raises when the ledger cannot be written.
 
 Scoping: the ledger key is whatever ``entity_id`` the caller passes — the
 manager applies no user/dataset scoping of its own. Callers whose raw ids are
@@ -294,21 +294,23 @@ class ProvenanceManager:
             logger.exception("Failed to track entity %r", entity_id)
             return None
 
-    def _relationship_write(
+    def _unversioned_write(
         self,
-        relationship_id: str,
+        entity_id: str,
+        entity_type: str,
+        default_activity: str,
         source: str,
         metadata: dict[str, Any] | None,
         kwargs: dict[str, Any],
     ) -> Callable[[AsyncSession, int, str | None], Awaitable[ProvenanceEntry]]:
-        """Build the chained write for one relationship track (never versions)."""
+        """Build the chained write for a kind that never versions (relationship, data item)."""
 
         def build_entry(first_seen: str | None) -> ProvenanceEntry:
             now = utc_now_iso()
             return ProvenanceEntry(
-                entity_id=relationship_id,
-                entity_type="relationship",
-                activity_id=kwargs.get("activity_id", "relationship_tracking"),
+                entity_id=entity_id,
+                entity_type=entity_type,
+                activity_id=kwargs.get("activity_id", default_activity),
                 metadata=dict(metadata or {}),
                 timestamp=now,
                 first_seen=first_seen or now,
@@ -320,7 +322,7 @@ class ProvenanceManager:
         async def write(
             session: AsyncSession, next_seq: int, prev_checksum: str | None
         ) -> ProvenanceEntry:
-            existing_row = await storage.retrieve_row(session, relationship_id)
+            existing_row = await storage.retrieve_row(session, entity_id)
             if existing_row is not None:
                 return await self._resurrect_or_noop(
                     session, existing_row, next_seq, prev_checksum, build_entry
@@ -335,6 +337,26 @@ class ProvenanceManager:
             return entry
 
         return write
+
+    def _relationship_write(
+        self,
+        relationship_id: str,
+        source: str,
+        metadata: dict[str, Any] | None,
+        kwargs: dict[str, Any],
+    ) -> Callable[[AsyncSession, int, str | None], Awaitable[ProvenanceEntry]]:
+        """Build the chained write for one relationship track (never versions)."""
+        return self._unversioned_write(
+            relationship_id, "relationship", "relationship_tracking", source, metadata, kwargs
+        )
+
+    def _data_item_write(
+        self, data_item_key: str, kwargs: dict[str, Any]
+    ) -> Callable[[AsyncSession, int, str | None], Awaitable[ProvenanceEntry]]:
+        """Build the chained write for one data item (see ``ProvenanceBatch.track_data_item``)."""
+        return self._unversioned_write(
+            data_item_key, "data_item", "data_item_tracking", "", None, kwargs
+        )
 
     async def track_relationship(
         self,
@@ -866,8 +888,8 @@ class ProvenanceBatch:
     operations in a batch see earlier ones (same session), so
     chunk-then-entity parent heuristics work unchanged.
 
-    Mirrors the manager's degradation contract: ``commit()`` logs and returns
-    ``None`` on storage failure — provenance never breaks the host operation.
+    ``commit()`` raises when the ledger cannot be written: a dropped batch
+    leaves a gap nothing reports, so the host operation fails with it.
     """
 
     def __init__(self, manager: ProvenanceManager):
@@ -916,6 +938,17 @@ class ProvenanceBatch:
             )
         )
 
+    def track_data_item(self, data_item_key: str, **kwargs) -> None:
+        """Queue the row of one data item, the unit a deletion tombstones.
+
+        Like a relationship it never versions: a live row is a chain-preserving
+        no-op, so every batch stored for the item may queue it, and a tombstoned
+        one is resurrected (the item's memory came back).
+        """
+        self._manager._validate_id(data_item_key, "data_item_key")
+        self._manager._warn_unknown_kwargs("track_data_item", kwargs)
+        self._write_fns.append(self._manager._data_item_write(data_item_key, kwargs))
+
     def invalidate(
         self,
         entity_id: str,
@@ -931,18 +964,11 @@ class ProvenanceBatch:
             self._manager._invalidate_write(entity_id, agent_id, reason, metadata)
         )
 
-    async def commit(self) -> list[ProvenanceEntry | None] | None:
+    async def commit(self) -> list[ProvenanceEntry | None]:
         write_fns, self._write_fns = self._write_fns, []
         if not write_fns:
             return []
-        try:
-            return await storage.append_chained_many(write_fns)
-        except Exception:
-            logger.exception(
-                "Failed to commit provenance batch of %d entries",
-                len(write_fns),
-            )
-            return None
+        return await storage.append_chained_many(write_fns)
 
 
 @lru_cache

@@ -301,15 +301,11 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
                 )
             else:
                 fmt.error(
-                    f"Drift: {len(result['drifted'])} changed, "
-                    f"{len(result['missing_in_graph'])} missing in graph "
-                    f"(of {result['checked']} checked)."
+                    f"Drift: {len(result['drifted'])} changed (of {result['checked']} checked)."
                 )
                 for item in result["drifted"][:20]:
                     fields = ", ".join(item["delta"]) or "?"
                     fmt.echo(f"  changed  {item['entity_id']}  [{fields}]")
-                for entity_id in result["missing_in_graph"][:20]:
-                    fmt.echo(f"  missing  {entity_id}")
         if not result["valid"]:
             raise CliCommandException("Ledger drift detected", error_code=2)
 

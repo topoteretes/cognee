@@ -180,7 +180,7 @@ async def cognify_rollback_handler(
                 )
                 await session.commit()
 
-            # Audit ledger: what the run first asserted is retracted (non-fatal).
+            # Audit ledger: the data items this run gave memory to are retracted.
             await tombstone_pipeline_run(
                 dataset_id, pipeline_run_id, user=user, keep_data_ids=kept_data_ids
             )
@@ -319,7 +319,7 @@ async def cognify_rollback_handler(
 
         await session.commit()
 
-    # Audit ledger: what the run first asserted is retracted (non-fatal).
+    # Audit ledger: the data items this run gave memory to are retracted.
     await tombstone_pipeline_run(
         dataset_id, pipeline_run_id, user=user, keep_data_ids=kept_data_ids
     )

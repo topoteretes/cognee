@@ -1,10 +1,11 @@
 """Integration: the audit ledger across a full memory lifecycle.
 
-cognify writes rows -> forget(memory_only) tombstones them -> re-cognify
-resurrects what is re-extracted -> an external anchor is taken -> the dataset
-is deleted and every live row is retracted. The hash chain, referential
-integrity, and the anchor must hold at every step, and the export must be
-re-verifiable from its own content.
+cognify writes rows -> forget(memory_only) tombstones the data item -> re-cognify
+brings it back -> an external anchor is taken -> the dataset is deleted and
+the data item is retracted again. Lineage rows are assertions and stay; only
+the data item is ever tombstoned. The hash chain, referential integrity, and
+the anchor must hold at every step, and the export must be re-verifiable from
+its own content.
 
 Needs an LLM key (the graph is extracted by the configured model).
 """
@@ -117,27 +118,27 @@ async def test_ledger_round_trip(tmp_path, monkeypatch):
     assert drifted["delta"]["description"][1] == "edited behind cognee's back"
     await _assert_intact(manager, dataset_id)
 
-    # 2. forget(memory_only) tombstones everything ---------------------------- #
+    # 2. forget(memory_only) tombstones the data item, not its lineage -------- #
+    items_before = {key for key in live_before if ":data_item:" in key}
+    assert len(items_before) == 1
     await cognee.forget(dataset=dataset_name, memory_only=True, user=user)
     live, dead = await _live_and_dead(manager, dataset_id)
-    assert not live
-    assert dead == live_before
-    tombstone = await manager.get_provenance(edge_key)
+    assert dead == items_before
+    assert live == live_before - items_before
+    [item_key] = items_before
+    tombstone = await manager.get_provenance(item_key)
     assert tombstone["invalidated"] is True
     assert tombstone["invalidation_reason"] == "dataset_deleted"
     await _assert_intact(manager, dataset_id)
 
-    # 3. re-cognify resurrects what is extracted again ----------------------- #
+    # 3. re-cognify brings the data item back -------------------------------- #
     await cognee.cognify([dataset_name], user=user)
     live, dead = await _live_and_dead(manager, dataset_id)
-    assert live, "re-cognify must bring rows back to life"
-    assert not (live & dead)
-    resurrected = next(iter(live & live_before), None)
-    if resurrected is not None:
-        history = await manager.revision_history(resurrected)
-        kinds = Counter("tombstone" if v.get("invalidated") else "assertion" for v in history)
-        assert kinds["tombstone"] >= 1 and kinds["assertion"] >= 2
-        assert history[-1].get("invalidated") is not True
+    assert not dead and item_key in live
+    history = await manager.revision_history(item_key)
+    kinds = Counter("tombstone" if v.get("invalidated") else "assertion" for v in history)
+    assert kinds == {"tombstone": 1, "assertion": 2}
+    assert history[-1].get("invalidated") is not True
     await _assert_intact(manager, dataset_id)
 
     # 4. anchor the chain head ----------------------------------------------- #
@@ -145,12 +146,12 @@ async def test_ledger_round_trip(tmp_path, monkeypatch):
     assert anchor is not None and anchors.signature_valid(anchor)
     assert (await manager.verify_anchors())["valid"] is True
 
-    # 5. delete the dataset: live rows retracted, nothing removed ------------ #
+    # 5. delete the dataset: the data item is retracted, nothing removed ----- #
     total_before = (await manager.get_statistics())["total_entries"]
     await cognee.forget(dataset=dataset_name, user=user)
     live, dead = await _live_and_dead(manager, dataset_id)
-    assert not live and dead
-    assert (await manager.get_statistics())["total_entries"] > total_before  # tombstones add rows
+    assert dead == items_before and live
+    assert (await manager.get_statistics())["total_entries"] == total_before + 1  # one tombstone
     await _assert_intact(manager, dataset_id)
     assert (await manager.verify_anchors())["valid"] is True  # anchored row still there
 

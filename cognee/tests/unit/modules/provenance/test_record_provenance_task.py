@@ -1,4 +1,4 @@
-"""record_provenance task: ledger writes, degradation, and pipeline wiring."""
+"""record_provenance task: ledger writes, failure behaviour, and pipeline wiring."""
 
 import os
 import sys
@@ -77,7 +77,7 @@ def _ctx(dataset_id=None, pipeline_run_id=None):
 
 class TestRecordProvenanceTask:
     @pytest.mark.asyncio
-    async def test_writes_all_four_entry_types(self, manager):
+    async def test_writes_the_data_item_and_all_four_lineage_types(self, manager):
         document, chunk, entity, target, data_points = _pipeline_data()
         ctx = _ctx()
         scope = str(ctx.dataset.id)
@@ -88,6 +88,11 @@ class TestRecordProvenanceTask:
         entries = {entry.entity_id: entry for entry in await storage.retrieve_all()}
         run_id = str(ctx.pipeline_run_id)
         expected_ref = make_source_ref_key(ctx.dataset.id, ctx.data_item.id)
+
+        # The data item is the unit deletion tombstones; it holds ids only.
+        item_entry = entries[f"{scope}:data_item:{ctx.data_item.id}"]
+        assert item_entry.entity_type == "data_item"
+        assert item_entry.source_document == "" and item_entry.metadata == {}
 
         # Every ledger key is namespaced by the dataset id (tenant isolation
         # over globally deterministic uuid5 entity ids).
@@ -123,6 +128,7 @@ class TestRecordProvenanceTask:
 
         stats = await manager.get_statistics()
         assert stats["entity_types"] == {
+            "data_item": 1,
             "document": 1,
             "chunk": 1,
             "entity": 2,
@@ -144,7 +150,16 @@ class TestRecordProvenanceTask:
         _, _, _, _, data_points = _pipeline_data()
         await record_provenance(data_points, ctx=_ctx())
         # One batched append for the whole invocation, never one per entry.
-        assert calls == [6]
+        assert calls == [7]
+
+    @pytest.mark.asyncio
+    async def test_later_batches_of_one_data_item_keep_one_item_row(self, manager):
+        ctx = _ctx()
+        for _ in range(2):
+            _, _, _, _, data_points = _pipeline_data()
+            await record_provenance(data_points, ctx=ctx)
+        assert (await manager.get_statistics())["entity_types"]["data_item"] == 1
+        assert (await manager.verify_chain())["valid"] is True
 
     @pytest.mark.asyncio
     async def test_no_ctx_degrades_to_entries_without_source_ref(self, manager):
@@ -154,6 +169,7 @@ class TestRecordProvenanceTask:
 
         entries = await storage.retrieve_all()
         assert entries, "entries must still be written without ctx"
+        assert all(entry.entity_type != "data_item" for entry in entries)
         for entry in entries:
             assert entry.source_ref_key is None
             assert entry.bundle_id is None
@@ -277,14 +293,14 @@ class TestRecordProvenanceTask:
         assert entries[0].parent_entity_id is None
 
     @pytest.mark.asyncio
-    async def test_manager_failure_never_raises(self, monkeypatch):
-        def explode():
+    async def test_a_ledger_that_cannot_be_written_raises(self, manager, monkeypatch):
+        async def explode(write_fns):
             raise RuntimeError("ledger down")
 
-        monkeypatch.setattr(record_provenance_module, "get_provenance_manager", explode)
+        monkeypatch.setattr(storage, "append_chained_many", explode)
         _, _, _, _, data_points = _pipeline_data()
-        result = await record_provenance(data_points, ctx=_ctx())
-        assert result is data_points
+        with pytest.raises(RuntimeError, match="ledger down"):
+            await record_provenance(data_points, ctx=_ctx())
 
     @pytest.mark.asyncio
     async def test_empty_input_is_a_noop(self):
@@ -368,7 +384,7 @@ class TestStorageSeamHook:
         _, _, _, _, data_points = _pipeline_data()
         result = await record_provenance_at_storage(data_points, ctx=_ctx())
         assert result is data_points
-        assert (await manager.get_statistics())["total_entries"] == 6
+        assert (await manager.get_statistics())["total_entries"] == 7
 
     @pytest.mark.asyncio
     async def test_skips_when_flag_off(self, manager, monkeypatch):
@@ -387,13 +403,14 @@ class TestStorageSeamHook:
         assert (await manager.get_statistics())["total_entries"] == 0
 
     @pytest.mark.asyncio
-    async def test_gate_failure_never_raises(self, monkeypatch):
+    async def test_gate_failure_raises(self, monkeypatch):
         def explode():
             raise RuntimeError("settings unreadable")
 
         monkeypatch.setattr(record_provenance_module, "provenance_tracking_enabled", explode)
         _, _, _, _, data_points = _pipeline_data()
-        assert await record_provenance_at_storage(data_points, ctx=_ctx()) is data_points
+        with pytest.raises(RuntimeError, match="settings unreadable"):
+            await record_provenance_at_storage(data_points, ctx=_ctx())
 
     @pytest.mark.asyncio
     async def test_record_edges_provenance_writes_relationships(self, manager, monkeypatch):

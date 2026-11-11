@@ -52,6 +52,13 @@ class TestSnapshotFields:
         assert not (set(fields) & EXCLUDED_FIELDS)
         assert "feedback_weight" not in fields  # tuned by improve(), not content
 
+    def test_relationship_fields_are_left_out_even_when_empty(self):
+        # A chunk is stored before extraction with ``contains == []``. The graph
+        # keeps a relationship field as edges, never as that empty list.
+        fields = snapshot_fields(Person(name="Ada"))
+        assert "lives_in" not in fields and "friends" not in fields
+        assert snapshot_fields(Place(name="Paris"))["tags"] == []  # plain lists stay
+
     def test_long_text_is_hashed_not_stored(self):
         long = "x" * (MAX_INLINE_CHARS + 1)
         fields = snapshot_fields(Place(name="P", description=long))
@@ -212,17 +219,19 @@ class TestDrift:
         assert result["valid"] is True
         assert result["checked"] == 2  # relationship + legacy row skipped
         assert result["unsnapshotted"] == 1
-        assert result["drifted"] == [] and result["missing_in_graph"] == []
+        assert result["drifted"] == []
 
-    async def test_out_of_band_edit_and_delete_are_reported(self, manager, graph):
+    async def test_out_of_band_edit_is_reported_and_a_removed_node_is_not(self, manager, graph):
         ds = uuid4()
         paris, rome = await self._seed(manager, graph, ds)
         graph.nodes[str(paris.id)]["description"] = "forged"
+        # Removal is recorded on the data item, so a node that left the graph
+        # is not a finding here.
         del graph.nodes[str(rome.id)]
 
         result = await manager.check_drift(ds, uuid4())
         assert result["valid"] is False
-        assert result["missing_in_graph"] == [ledger_node_key(ds, str(rome.id))]
+        assert result["checked"] == 1
         [item] = result["drifted"]
         assert item["entity_id"] == ledger_node_key(ds, str(paris.id))
         assert item["delta"] == {"description": ["capital", "forged"]}

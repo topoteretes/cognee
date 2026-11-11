@@ -164,7 +164,6 @@ class TestActions:
                 "checked": 2,
                 "unsnapshotted": 0,
                 "drifted": [{"entity_id": f"{ds}:n1", "delta": {"description": ["a", "b"]}}],
-                "missing_in_graph": [f"{ds}:n2"],
             }
 
         monkeypatch.setattr(ProvenanceManager, "check_drift", _drift)
@@ -172,7 +171,7 @@ class TestActions:
             await command._drift(_parse("drift", "--dataset-id", str(ds)))
         assert raised.value.error_code == 2
         out = capsys.readouterr().out
-        assert "changed" in out and "missing" in out and "description" in out
+        assert "changed" in out and "description" in out
 
     async def test_conflicting_scope_flags(self, manager):
         with pytest.raises(CliCommandException):

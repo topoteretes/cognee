@@ -36,8 +36,8 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Del
         graph_engine = unified.graph
         if await stores_provenance_in_graph(graph_engine):
             await unified.delete_by_dataset_id(str(dataset_id))
-            # This path reports no element list, so the audit ledger is swept
-            # by dataset namespace (non-fatal; no-op without PROVENANCE_TRACKING).
+            # The audit ledger retracts every data item of the dataset (a no-op
+            # unless PROVENANCE_TRACKING recorded them); it raises on a failed write.
             await tombstone_dataset(dataset_id, user=user)
             return DeletedGraphElements()
 

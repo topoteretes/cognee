@@ -130,10 +130,9 @@ def get_provenance_router() -> APIRouter:
         dataset_id: UUID = Query(...),
         user: User = Depends(get_authenticated_user),
     ) -> dict[str, Any]:
-        """Each live node row carries a content snapshot; this re-reads the node
-        from the graph and reports rows whose content changed out of band
-        (`drifted`, with a field delta) or vanished without a tombstone
-        (`missing_in_graph`)."""
+        """Each node row carries a content snapshot; this re-reads the nodes that
+        are in the graph and reports the ones whose content changed out of band
+        (`drifted`, with a field delta)."""
         dataset = await get_authorized_dataset(user, dataset_id, "read")
         if dataset is None:
             raise HTTPException(status_code=403, detail=f"No read access to dataset {dataset_id}.")

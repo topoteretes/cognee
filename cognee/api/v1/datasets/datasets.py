@@ -31,6 +31,7 @@ from cognee.modules.pipelines.operations.get_pipeline_status import (
     get_pipeline_progress,
     get_pipeline_status,
 )
+from cognee.modules.provenance.tombstones import tombstone_data_item
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -588,6 +589,10 @@ class datasets:
                             # data: it is a document that was never cognified,
                             # so there is nothing in the graph to delete.
                             deleted_elements = DeletedGraphElements()
+                        # These deletes do not pass through
+                        # delete_data_nodes_and_edges, which retracts the data
+                        # item in the audit ledger for the branch above.
+                        await tombstone_data_item(dataset_id, data_id, user=user)
 
                     await _invalidate_sessions_for_deleted_data_nonfatal(
                         dataset.id,

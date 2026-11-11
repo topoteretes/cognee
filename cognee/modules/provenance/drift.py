@@ -4,18 +4,22 @@ The hash chain proves the *ledger* was not altered. It says nothing about
 the graph: an out-of-band edit to a node (a Cypher write, a migration, a
 backend restore) leaves the ledger internally valid and silently wrong.
 ``check_drift`` closes that gap using the snapshot every row carries
-(``snapshot.py``): each live node row of a dataset is read back from the
-graph, re-projected onto the fields the snapshot recorded, re-hashed and
+(``snapshot.py``): each node row of a dataset whose node is in the graph is
+read back, re-projected onto the fields the snapshot recorded, re-hashed and
 compared.
 
 Findings:
 
 - ``drifted``: the node exists but its content hash differs; the field
   level difference is reported.
-- ``missing_in_graph``: the ledger holds a live row but the graph has no
-  such node — deleted without a tombstone.
-- ``unsnapshotted``: live rows written before snapshots existed; counted,
-  not checked.
+- ``unsnapshotted``: rows written before snapshots existed; counted, not
+  checked.
+
+A row whose node is not in the graph is not a finding. Node rows are
+assertions and are never retracted one by one: removal is recorded on the
+data item (``tombstones.py``), and an update or a deleted document leaves the
+rows of what it replaced behind. ``checked`` counts the rows that were
+compared.
 
 Relationships are not checked (their ledger identity *is* their content).
 The graph is read under the dataset's database context, so this works on
@@ -44,7 +48,6 @@ async def check_drift(dataset_id: UUID | str, owner_id: UUID | None = None) -> d
     checked = 0
     unsnapshotted = 0
     drifted: list[dict[str, Any]] = []
-    missing: list[str] = []
 
     async def compare(page: list[Any], graph: Any) -> None:
         nonlocal checked
@@ -52,12 +55,11 @@ async def check_drift(dataset_id: UUID | str, owner_id: UUID | None = None) -> d
         nodes = await graph.get_nodes(raw_ids)
         by_id = {str(node.get("id")): node for node in nodes if isinstance(node, dict)}
         for entry, raw_id in zip(page, raw_ids):
-            checked += 1
-            snapshot = entry.metadata["snapshot"]
             node = by_id.get(raw_id)
             if node is None:
-                missing.append(entry.entity_id)
                 continue
+            checked += 1
+            snapshot = entry.metadata["snapshot"]
             fields = snapshot_from_mapping(node, snapshot.get("fields") or {})
             observed = content_hash(fields)
             if observed != snapshot.get("hash"):
@@ -91,10 +93,9 @@ async def check_drift(dataset_id: UUID | str, owner_id: UUID | None = None) -> d
             await compare(page, graph)
 
     return {
-        "valid": not drifted and not missing,
+        "valid": not drifted,
         "dataset_id": str(dataset_id),
         "checked": checked,
         "unsnapshotted": unsnapshotted,
         "drifted": drifted,
-        "missing_in_graph": missing,
     }

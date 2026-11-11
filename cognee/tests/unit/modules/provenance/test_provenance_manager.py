@@ -233,8 +233,29 @@ class TestInvalidate:
         await manager.track_entity("e1", source="d")
         batch = manager.batch()
         batch.invalidate("ghost", agent_id="forget")
-        assert await batch.commit() is None  # degraded, nothing written
+        with pytest.raises(ValueError):
+            await batch.commit()
         assert (await manager.get_provenance("e1"))["invalidated"] is False
+
+    async def test_data_item_row_never_versions_and_is_resurrected(self, manager):
+        async def track(run_id):
+            batch = manager.batch()
+            batch.track_data_item("ds:data_item:d1", bundle_id=run_id)
+            return await batch.commit()
+
+        [created] = await track("run-1")
+        assert created.entity_type == "data_item" and created.bundle_id == "run-1"
+        # Queued with every batch stored for the item: a live row is a no-op.
+        [again] = await track("run-2")
+        assert again.sequence_id == created.sequence_id and again.bundle_id == "run-1"
+        assert (await manager.get_statistics())["total_entries"] == 1
+
+        await manager.invalidate("ds:data_item:d1", "forget", reason="data_deleted")
+        [resurrected] = await track("run-3")
+        assert resurrected.invalidated is False and resurrected.bundle_id == "run-3"
+        history = await manager.revision_history("ds:data_item:d1")
+        assert [bool(version.get("invalidated")) for version in history] == [False, True, False]
+        assert (await manager.verify_chain())["valid"] is True
 
 
 class TestRevisionHistory:
@@ -353,14 +374,17 @@ class TestBatch:
         with pytest.raises(TypeError):
             batch.track_relationship(123, source="doc")
 
-    async def test_batch_commit_degrades_gracefully(self, manager, monkeypatch):
+    async def test_batch_commit_raises_when_the_ledger_cannot_be_written(
+        self, manager, monkeypatch
+    ):
         async def explode(write_fns):
             raise RuntimeError("db down")
 
         monkeypatch.setattr(storage, "append_chained_many", explode)
         batch = manager.batch()
         batch.track_entity("e1", source="doc")
-        assert await batch.commit() is None
+        with pytest.raises(RuntimeError, match="db down"):
+            await batch.commit()
 
 
 class TestUtility:

@@ -24,7 +24,7 @@ from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElem
 from cognee.modules.graph.methods.try_delete_data_by_graph_provenance import (
     try_delete_data_by_graph_provenance,
 )
-from cognee.modules.provenance.tombstones import tombstone_deleted_elements
+from cognee.modules.provenance.tombstones import tombstone_data_item
 from cognee.modules.users.methods.get_user import get_user
 from cognee.shared.logging_utils import get_logger
 
@@ -45,11 +45,11 @@ async def delete_data_nodes_and_edges(
     # graphs use this unified path; old/unmarked graphs stay on the ledger path.
     provenance_result = await try_delete_data_by_graph_provenance(dataset_id, data_id)
     if provenance_result is not None:
-        deleted = DeletedGraphElements.from_source_ref_removal(provenance_result)
-        # The audit ledger must stop asserting what the graph no longer holds
-        # (non-fatal; a no-op unless PROVENANCE_TRACKING wrote rows for them).
-        await tombstone_deleted_elements(dataset_id, deleted, user=user, data_id=data_id)
-        return deleted
+        # The audit ledger retracts the data item whose memory just left the
+        # graph (a no-op unless PROVENANCE_TRACKING recorded it). It raises when
+        # the tombstone cannot be written, and a retry of the delete writes it.
+        await tombstone_data_item(dataset_id, data_id, user=user)
+        return DeletedGraphElements.from_source_ref_removal(provenance_result)
 
     # Read before the ledger rows are removed: the id can own only nodes other
     # data shares, which survive and are absent from ``affected_nodes``.
@@ -135,8 +135,7 @@ async def delete_data_nodes_and_edges(
                 exc_info=True,
             )
 
-    deleted = DeletedGraphElements.from_ledger_rows(
+    await tombstone_data_item(dataset_id, data_id, user=user)
+    return DeletedGraphElements.from_ledger_rows(
         affected_nodes or [], affected_edges or [], owned=owned
     )
-    await tombstone_deleted_elements(dataset_id, deleted, user=user, data_id=data_id)
-    return deleted
