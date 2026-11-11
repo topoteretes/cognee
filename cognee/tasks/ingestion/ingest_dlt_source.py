@@ -771,7 +771,15 @@ def _to_safe_ident(s: str) -> str:
     s = "".join(_SAFE_IDENT_CHARS.get(ch, "_") for ch in s)
     if not s:
         raise InvalidDLTArgumentError(message="Invalid dataset name given for dlt ingestion.")
-    if s[0].isdigit():
+    # dlt uses this name as its staging dataset, which on Postgres is a schema,
+    # and Postgres reserves the ``pg_`` prefix for system schemas. A merge load
+    # also writes to a ``<name>_staging`` schema, so the bare name ``pg`` is
+    # reserved too. ``information_schema`` exists in every Postgres database and
+    # belongs to the bootstrap superuser: dlt sees the schema and creates the
+    # dataset's tables inside it, which a non-superuser role is denied. Such a
+    # name is prefixed like one that starts with a digit, on every destination,
+    # so a dataset stages under one name whatever the relational provider.
+    if s[0].isdigit() or s == "pg" or s.startswith("pg_") or s == "information_schema":
         s = f"d_{s}"
     return s[:63]
 

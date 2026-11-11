@@ -15,6 +15,7 @@ from cognee.modules.retrieval.utils.conflict_context import (
     attach_chunk_conflicts,
     render_chunk_context,
 )
+from cognee.modules.retrieval.utils.document_sources import name_chunk_documents
 from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
 from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
 from cognee.modules.retrieval.utils.references import append_chunk_evidence
@@ -179,6 +180,8 @@ class CompletionRetriever(BaseRetriever):
             ]
 
         await attach_chunk_conflicts(found_chunks)
+        if self.include_references:
+            await name_chunk_documents(found_chunks)
         return found_chunks
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
