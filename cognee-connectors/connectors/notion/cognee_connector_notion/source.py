@@ -147,8 +147,7 @@ class _NotionClient:
     """One Notion API session.
 
     ``check_active`` is the host's authorization check; ``request`` runs it before every
-    attempt and every retry wait (``with_retries``), so a revoked connection never waits
-    out a backoff.
+    retry and its wait (``with_retries``), so a revoked connection never waits out a backoff.
     """
 
     def __init__(
@@ -217,9 +216,7 @@ def _error_message(status: int, path: str, response: Any) -> str:
 
 
 def _retry_delay(path: str, error: BaseException, number: int) -> float | None:
-    """Seconds to wait before the next attempt; ``None`` on the last, which raises."""
-    if number == _MAX_RETRIES - 1:
-        return None
+    """Seconds to wait before the next attempt."""
     if isinstance(error, _RetryableStatusError):
         delay = _retry_after(error.headers, number)
         logger.warning(
@@ -415,6 +412,7 @@ def _iter_rows(
     previous_pages: dict[str, dict],
     state: dict,
     stats: dict[str, int],
+    check_active: Callable[[], None] | None = None,
 ):
     """Yield one document row per changed/new page, then deletion tombstones.
 
@@ -437,6 +435,8 @@ def _iter_rows(
 
     while queue:
         item = queue.popleft()
+        if check_active is not None:
+            check_active()
         if item.id in visited:
             continue
         visited.add(item.id)
@@ -855,7 +855,7 @@ def notion_source(
             source whose name changes starts over, and documents it synced
             under the old name are not cleaned up.
         check_active: Optional host authorization checkpoint during extraction. It runs
-            before every request attempt and every retry wait, and around every row.
+            for every walked page, before every retry wait, and around every row.
         http_client: Pre-built ``httpx`` client (mainly a test-injection
             point); when omitted one is built for this sync.
     """
@@ -916,6 +916,7 @@ def notion_source(
                     previous_pages,
                     state,
                     stats,
+                    check_active,
                 ),
                 check_active,
             )

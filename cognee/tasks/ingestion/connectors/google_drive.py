@@ -344,7 +344,7 @@ def _is_export_too_large(exc: Exception) -> bool:
 
 
 def _execute(request: Any, check_active: Callable[[], None] | None) -> Any:
-    """Run one Drive request with ``API_RETRIES`` retries, checking the host before each."""
+    """Run one Drive request with ``API_RETRIES`` retries, checking the host before each retry."""
     return with_google_retries(
         lambda: request.execute(num_retries=0),
         num_retries=API_RETRIES,
@@ -636,8 +636,7 @@ def _iter_rows(
     thread), else one by one on ``service``. ``state["versions"]`` maps a file id to the
     ``modifiedTime`` that produced its row, so a repeated run fetches only what failed or changed.
     Driven by tests with a plain dict as state and a fake Drive service. ``check_active`` is the
-    host checkpoint: it runs before every request attempt and backoff wait, on the fetch threads
-    too.
+    host checkpoint: it runs before every retry and backoff wait, on the fetch threads too.
     """
     if stats is None:
         stats = {}

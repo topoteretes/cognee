@@ -630,8 +630,8 @@ class _Revoked(Exception):
 
 
 def _revoked_on_third_check():
-    # The first check is the walk's, before it reads anything; the second is the client's,
-    # before the first attempt; the third is the client's again, before it waits.
+    # The first check is the row loop's, before it reads anything; the second is the walk's,
+    # before the root page; the third is the client's, before the wait after its request.
     checks = iter([None, None, _Revoked()])
 
     def check_active():
@@ -652,7 +652,7 @@ def _revoked_on_third_check():
     ids=["outage", "rate_limit", "transport"],
 )
 def test_a_revoked_connection_stops_a_retry_before_it_waits(monkeypatch, answer):
-    """The host's check runs before every attempt and every wait, not once per page."""
+    """The host's check runs before every wait, so a revoked run does not sleep a backoff."""
     pytest.importorskip("dlt")
     from dlt.extract.exceptions import ResourceExtractionError
 
@@ -788,9 +788,8 @@ def test_has_more_without_a_cursor_aborts_instead_of_tombstoning():
         list(_iter_rows(_client(fake), [ROOT_PAGE_ID], [], WORKSPACE_ID, previous, {}, {}))
 
 
-def test_check_active_runs_before_every_request_even_when_nothing_changed():
-    # The client checks before each attempt, so the host is asked once per request made;
-    # the walk no longer asks once per page on top of that.
+def test_check_active_runs_for_every_walked_page_even_when_nothing_changed():
+    # Once per walked page, not per request: in Cloud every check is a control-plane call.
     fake = _basic_tree()
     unchanged = {"last_edited_time": "2024-01-01T00:00:00.000Z", "root_id": ROOT_PAGE_ID}
     previous = {
@@ -807,10 +806,11 @@ def test_check_active_runs_before_every_request_even_when_nothing_changed():
             previous,
             {},
             {},
+            lambda: calls.append(1),
         )
     )
     assert rows == []
-    assert len(calls) == len(fake.requests) > 0
+    assert len(calls) == 2
 
 
 def test_table_cells_with_pipes_and_newlines_keep_the_table_shape():

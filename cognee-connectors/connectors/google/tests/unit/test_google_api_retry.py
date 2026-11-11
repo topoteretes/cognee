@@ -212,7 +212,7 @@ def test_no_retries_is_one_attempt():
 
 
 # --- the host's check ---
-def test_check_runs_before_every_attempt_and_every_wait():
+def test_check_runs_before_every_wait_and_every_retry_not_the_first_attempt():
     events = []
 
     def check_active():
@@ -220,8 +220,16 @@ def test_check_runs_before_every_attempt_and_every_wait():
 
     _run([_HttpError(503)] * 2, check_active=check_active)
 
-    # attempt 1, wait 1, attempt 2, wait 2, attempt 3
-    assert events == ["check"] * 5
+    # attempt 1 unchecked, then wait 1, attempt 2, wait 2, attempt 3
+    assert events == ["check"] * 4
+
+
+def test_a_request_that_succeeds_first_time_costs_no_check():
+    events = []
+
+    _run([], check_active=lambda: events.append("check"))
+
+    assert events == []
 
 
 def test_a_revoked_connection_stops_a_retry_before_it_waits():
@@ -229,7 +237,7 @@ def test_a_revoked_connection_stops_a_retry_before_it_waits():
 
     def check_active():
         calls.append(1)
-        if len(calls) == 2:  # before the first attempt, then before its backoff wait
+        if len(calls) == 1:  # the first attempt runs unchecked; this is before its backoff wait
             raise _Revoked
 
     trace = _run_failing([_HttpError(503)] * 3, check_active=check_active)
@@ -245,11 +253,11 @@ def test_an_error_of_the_check_is_marked_and_raised_as_it_is():
     def check_active():
         raise revoked
 
-    trace = _run_failing([], check_active=check_active)
+    trace = _run_failing([_HttpError(503)], check_active=check_active)
 
     assert trace.error is revoked
     assert is_host_stop(revoked)
-    assert trace.attempts == 0
+    assert trace.attempts == 1
 
 
 def test_a_request_error_is_not_marked_as_a_host_stop():

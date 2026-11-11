@@ -467,16 +467,13 @@ class _Walker:
 
     # -- requests ----------------------------------------------------------
     def _call(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        try:
-            self._check_budget()
-        except _CutShort:
-            # A cut ends the run as resumable; a revoked one must end as revoked instead.
-            if self.check_active is not None:
-                self.check_active()
-            raise
+        # Before the budget, so a revoked run ends as revoked, not as a resumable cut.
+        if self.check_active is not None:
+            self.check_active()
+        self._check_budget()
         self.requests += 1
         try:
-            # The client checks before every attempt, so a retry never outlives a revoked run.
+            # The client checks before every retry and wait, so none outlives a revoked run.
             return self.client.execute(query, variables, check_active=self.check_active)
         except LinearRateLimitedError:
             raise _CutShort("rate_limit") from None
@@ -758,11 +755,10 @@ def linear_source(
             when a host tracks the table by that prefix. Defaults to one derived
             from the team id.
         check_active: Optional host authorization checkpoint, called before each
-            request attempt and around each row, and once more when the rows end, so a
-            run its budget ends still raises a revocation.
+            request and before each retry and its wait.
         service: Pre-built client (see :func:`build_linear_service`). Mainly an
             injection point for tests and hosts. Its ``execute`` takes a ``check_active``
-            keyword and must call it before each request attempt, retries and waits included.
+            keyword and must call it before each retry and each wait.
         access_token: Used to build the client when ``service`` is omitted.
         include_archived: Include archived issues (Linear archives closed issues
             automatically). Trashed issues are always skipped.
@@ -803,7 +799,7 @@ def linear_source(
     def linear_team():
         stats.clear()
         stats.update(scanned=0, skipped=0, failed=0)
-        rows = _iter_rows(
+        yield from _iter_rows(
             client,
             team_id,
             dlt.current.resource_state(),
@@ -813,7 +809,6 @@ def linear_source(
             page_size=page_size,
             max_requests=max_requests,
         )
-        yield from dlt_utils.guarded_rows(rows, check_active)
 
     resource = linear_team()
     setattr(resource, DOCUMENT_SOURCE_ATTR, "linear")

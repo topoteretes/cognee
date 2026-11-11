@@ -202,8 +202,8 @@ def _execute(
     and try again, up to ``_RATE_LIMIT_WINDOWS`` times, before letting the
     error abort the sync. Without a quota the error propagates at once.
 
-    ``check_active`` runs before every attempt and every wait of both loops; quota is
-    spent once per window attempt, not per retry inside it, as before.
+    ``check_active`` runs before every retry and every wait of both loops and before a wait
+    for quota; quota is spent once per window attempt, not per retry inside it.
     """
 
     def request_with_retries() -> Any:
@@ -221,7 +221,7 @@ def _execute(
         return request_with_retries()
 
     def window_delay(error: BaseException, number: int) -> float | None:
-        if number == _RATE_LIMIT_WINDOWS or not _is_rate_limited(error):
+        if not _is_rate_limited(error):
             return None
         logger.warning(
             "Gmail per-user quota exhausted (shared with other clients of this "
@@ -528,7 +528,7 @@ def full_backfill(
     The mailbox ``historyId`` is captured *before* listing so no change is
     missed in the window between backfill start and finish; it is written to
     ``state['last_history_id']`` for the next incremental run. ``check_active`` is the host
-    checkpoint of ``gmail_source``; it runs before every request attempt and every wait.
+    checkpoint of ``gmail_source``; it runs before every retry and every wait.
     """
     baseline_history_id = _mailbox_history_id(service, quota, check_active)
 

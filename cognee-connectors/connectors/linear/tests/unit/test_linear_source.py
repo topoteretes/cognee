@@ -89,9 +89,6 @@ class FakeLinear:
 
     # -- transport ---------------------------------------------------------
     def execute(self, query, variables=None, *, check_active=None):
-        # One attempt per call, so one check, before the request is counted.
-        if check_active is not None:
-            check_active()
         variables = variables or {}
         self.calls.append(query)
         if self.fail_after is not None and len(self.calls) > self.fail_after:
@@ -447,7 +444,7 @@ def test_a_revoked_connection_stops_a_retry_before_it_waits(monkeypatch):
 
     def check_active():
         checks.append(1)
-        if len(checks) == 2:
+        if len(checks) == 1:  # the first attempt runs unchecked; this is before its wait
             raise PermissionError("access revoked")
 
     monkeypatch.setattr("requests.post", post)
@@ -458,7 +455,7 @@ def test_a_revoked_connection_stops_a_retry_before_it_waits(monkeypatch):
 
     assert len(posted) == 1
     assert waits == []
-    assert len(checks) == 2
+    assert len(checks) == 1
 
 
 def test_remaining_quota_headers_are_recorded(monkeypatch):
@@ -614,6 +611,28 @@ def test_a_budget_cut_never_hides_a_revocation(team):
         causes.append(error)
         error = error.__cause__ or error.__context__
     assert any(isinstance(cause, Revoked) for cause in causes)
+
+
+def test_the_resource_asks_the_host_once_per_request_not_per_row(team, tmp_path):
+    """In Cloud every check is a call to the control plane: one per request, as before."""
+    import dlt
+
+    checks = []
+    source = linear_source(
+        team_id=TEAM,
+        service=team,
+        resource_name="linear_team_1",
+        check_active=lambda: checks.append(1),
+    )
+    pipeline = dlt.pipeline(
+        pipeline_name="linear_checks",
+        destination=dlt.destinations.sqlalchemy(f"sqlite:///{tmp_path / 'l.db'}"),
+        dataset_name="linear",
+        pipelines_dir=str(tmp_path / "pipelines"),
+    )
+    pipeline.run(source)
+
+    assert len(checks) == len(team.calls)
 
 
 # -- regressions found by the review swarm ----------------------------------

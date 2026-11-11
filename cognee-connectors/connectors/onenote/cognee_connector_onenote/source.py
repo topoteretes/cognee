@@ -133,6 +133,7 @@ class _Graph:
             or not parsed.path.startswith("/v1.0/me/onenote/")
         ):
             raise OneNoteError("Unsafe Graph URL rejected")
+        self.ensure_active()
         try:
             return dlt_utils.with_retries(
                 lambda: self._attempt(url, html),
@@ -141,6 +142,8 @@ class _Graph:
                 attempts=_ATTEMPTS,
                 check_active=self.check_active,
             )
+        except _TransportFailure:
+            raise OneNoteError("Graph transport failed after five attempts") from None
         except _Transient as error:
             # Out of retries: the caller sees the public error, as for any other answer.
             public = (
@@ -153,18 +156,13 @@ class _Graph:
     def _retry_delay(self, error: _Transient, number: int) -> float | None:
         """Seconds to wait before the next attempt, charged to the run's wait budget.
 
-        Raises the budget errors itself, so their messages stay the ones callers match;
-        ``None`` (a retryable status on the last attempt) raises the attempt's own error.
+        Raises the budget errors itself, so their messages stay the ones callers match.
         """
         if isinstance(error, _TransportFailure):
-            if number == _ATTEMPTS - 1:
-                raise OneNoteError("Graph transport failed after five attempts") from None
             delay = 2**number
             if self.slept + delay > RETRY_WAIT_BUDGET_SECONDS:
                 raise OneNoteError("Graph retry wait budget exhausted") from None
         else:
-            if number == _ATTEMPTS - 1:
-                return None
             try:
                 delay = float(error.retry_after if error.retry_after is not None else 2**number)
                 if not math.isfinite(delay) or delay < 0:

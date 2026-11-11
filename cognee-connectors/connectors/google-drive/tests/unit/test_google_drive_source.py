@@ -1425,7 +1425,7 @@ def test_a_revoked_connection_stops_a_retry_before_it_waits(waits):
 
     def check_active():
         checks.append(1)
-        if len(checks) == 2:  # before the first attempt, then before its backoff wait
+        if len(checks) == 1:  # the first attempt runs unchecked; this is before its backoff wait
             raise _Revoked
 
     # pytest.raises(_Revoked) also proves it is not wrapped in the RuntimeError that a failed

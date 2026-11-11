@@ -242,11 +242,14 @@ def _http_error() -> Any:
 def _execute(request: Any, check_active: Callable[[], None] | None) -> Any:
     """Run one API request, retried as googleapiclient retries ``NUM_RETRIES`` times.
 
-    The host's checkpoint runs before every attempt and every backoff wait, so a revoked
-    connection stops the sync without sleeping and is never turned into a calendar failure.
+    The host's checkpoint runs before the call and before every retry and backoff wait, so a
+    revoked connection stops the sync between API calls, without sleeping, and is never turned
+    into a calendar failure.
     Google's HTTP errors become ``GoogleCalendarError``: their own text contains the request
     URL, and with it the calendar id.
     """
+    if check_active is not None:
+        check_active()
     try:
         return with_google_retries(
             lambda: request.execute(num_retries=0),

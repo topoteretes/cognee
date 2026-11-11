@@ -204,7 +204,7 @@ def test_a_revoked_connection_stops_a_retry_before_it_waits(monkeypatch):
 
     def check_active():
         checks.append(1)
-        if len(checks) == 2:
+        if len(checks) == 1:  # the first attempt runs unchecked; this is before its wait
             raise PermissionError("access revoked")
 
     with pytest.raises(PermissionError, match="access revoked"):
@@ -212,7 +212,7 @@ def test_a_revoked_connection_stops_a_retry_before_it_waits(monkeypatch):
 
     assert len(calls) == 1
     assert sleeps == []
-    assert len(checks) == 2
+    assert len(checks) == 1
 
 
 def test_a_persistent_network_failure_raises_without_the_key(monkeypatch):

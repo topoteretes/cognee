@@ -1,15 +1,10 @@
-"""googleapiclient's retry policy, run through the shared ``with_retries``.
+"""googleapiclient's retry policy, one ``execute(num_retries=0)`` per attempt through
+``with_retries``, so the host's check can run between attempts.
 
-``request.execute(num_retries=N)`` retries inside the library, where the host's
-authorization callback cannot run: a revoked connection kept retrying and sleeping. Here
-each attempt is one ``request.execute(num_retries=0)`` and ``with_retries`` repeats it, so
-the callback runs before every attempt and every backoff wait. Which answers are retried,
-how many times and how long the wait is stay the library's own (googleapiclient 2.200.0,
-``http._should_retry_response`` and ``http._retry_request``; re-check on an upgrade).
-
-The Google libraries are not imported: a pre-made service never needs them, so errors are
-recognised by shape (``resp.status`` and ``content`` of an ``HttpError``), which is also why
-``retry_on`` is ``Exception`` and ``_retry_delay`` is the filter.
+Copied from googleapiclient 2.200.0 (``http._should_retry_response``, ``http._retry_request``).
+This copy, not the installed library, decides what is retried across the declared
+``>=2.100,<3`` range; compare it with the library when the pin moves. Errors are recognised
+by shape (``resp.status``, ``content``), so the Google libraries are never imported here.
 """
 
 import errno
@@ -123,28 +118,24 @@ def with_google_retries(
     sleep: Callable[[float], None] | None = None,
     rand: Callable[[], float] = random.random,
 ) -> _T:
-    """Run one Google API request with ``num_retries`` retries, as ``num_retries=`` did.
-
-    ``attempt`` makes exactly one request and must pass ``num_retries=0`` to the library
-    (``lambda: request.execute(num_retries=0)``): ``num_retries`` N means N + 1 attempts, and
-    retry n waits ``rand() * 2**n`` seconds. ``check_active`` runs before every attempt and
-    every wait, outside the retried call, and what it raises propagates as it is.
+    """Run one Google API request (``attempt`` passes ``num_retries=0``) with ``num_retries``
+    retries; retry n waits ``rand() * 2**n`` seconds. ``check_active`` is as for
+    ``with_retries``.
     """
 
     def delay(error: BaseException, number: int) -> float | None:
         if not _is_transient(error):
             return None
         wait = rand() * 2 ** (number + 1)
-        if number < num_retries:
-            status = getattr(getattr(error, "resp", None), "status", None)
-            cause = f"status {status}" if isinstance(status, int) else type(error).__name__
-            logger.warning(
-                "Google API request failed (%s); retry %d of %d in %.1fs.",
-                cause,
-                number + 1,
-                num_retries,
-                wait,
-            )
+        status = getattr(getattr(error, "resp", None), "status", None)
+        cause = f"status {status}" if isinstance(status, int) else type(error).__name__
+        logger.warning(
+            "Google API request failed (%s); retry %d of %d in %.1fs.",
+            cause,
+            number + 1,
+            num_retries,
+            wait,
+        )
         return wait
 
     return with_retries(

@@ -149,7 +149,8 @@ class _Users:
 
     def getProfile(self, **kwargs):
         return _Request(
-            {"emailAddress": "me@example.com", "historyId": self._svc.profile_history_id}
+            {"emailAddress": "me@example.com", "historyId": self._svc.profile_history_id},
+            fail_first=self._svc.profile_errors,
         )
 
 
@@ -166,6 +167,8 @@ class FakeGmailService:
         # Map of message id -> HTTP status to raise from messages().get(), used
         # to simulate transient (non-404) fetch failures.
         self.get_errors = get_errors or {}
+        # Errors the profile read raises first, in turn.
+        self.profile_errors: list[Exception] = []
         # Map of message id -> how many times Google rejects the fetch for
         # quota before letting it through (after googleapiclient's retries).
         self.quota_rejections: dict[str, int] = {}
@@ -828,9 +831,9 @@ def test_a_revoked_connection_stops_a_retry_before_it_waits(waits):
     service = FakeGmailService(messages=[_make_message("a")], get_errors={"a": 503})
     stats: dict = {}
 
-    # Call 1 is before the first attempt, call 2 before the backoff wait that follows its 503.
+    # The first attempt runs unchecked; call 1 is before the backoff wait that follows its 503.
     with pytest.raises(_Revoked):
-        _get_message(service, "a", stats, check_active=_revoked_on_call(2))
+        _get_message(service, "a", stats, check_active=_revoked_on_call(1))
 
     (request,) = service.requests
     assert request.executions == 1, "exactly the first request was made"
@@ -843,10 +846,10 @@ def test_a_revoked_connection_stops_a_quota_window_wait(make_quota, waits):
     service = FakeGmailService(messages=[_make_message("a")])
     service.quota_rejections["a"] = 1
 
-    # Calls 1 and 2 precede the first attempt (window loop, then retry loop); the 403 is
-    # not retried by the retry loop, so call 3 is the one before the one-minute window wait.
+    # The first attempt runs unchecked and the retry loop does not retry the 403, so call 1
+    # is the one before the one-minute window wait.
     with pytest.raises(_Revoked):
-        _get_message(service, "a", quota=quota, check_active=_revoked_on_call(3))
+        _get_message(service, "a", quota=quota, check_active=_revoked_on_call(1))
 
     assert 60.0 not in clock.sleeps, "the revoked run did not wait out a quota window"
     assert [request.executions for request in service.requests] == [1]
@@ -858,18 +861,38 @@ def test_a_revoked_connection_stops_a_wait_for_quota(make_quota, waits):
     quota.acquire(_COST_MESSAGES_GET)
     service = FakeGmailService(messages=[_make_message("a")])
 
-    # Call 1 precedes the first attempt; call 2 is before the wait for quota.
+    # Call 1 is before the wait for quota.
     with pytest.raises(_Revoked):
-        _get_message(service, "a", quota=quota, check_active=_revoked_on_call(2))
+        _get_message(service, "a", quota=quota, check_active=_revoked_on_call(1))
 
     assert clock.sleeps == [], "the revoked run did not wait for quota"
     assert [request.executions for request in service.requests] == [0], "nothing was sent"
 
 
-def test_a_revoked_connection_is_not_swallowed_by_the_baseline_read():
+def test_a_message_fetched_first_time_costs_no_host_check(make_quota):
+    """The resource's row loop checks around every row; a request that succeeds adds no check."""
+
+    def checks_for(count):
+        quota, _ = make_quota(units_per_minute=60000)
+        service = FakeGmailService(messages=[_make_message(f"m{i}") for i in range(count)])
+        checks = []
+        rows = list(
+            full_backfill(
+                service, {}, label_ids=["INBOX"], quota=quota, check_active=lambda: checks.append(1)
+            )
+        )
+        assert len(rows) == count
+        return len(checks)
+
+    assert checks_for(5) == 0
+    assert checks_for(10) == 0
+
+
+def test_a_revoked_connection_is_not_swallowed_by_the_baseline_read(waits):
     # _mailbox_history_id turns a failed profile read into "no baseline"; a revoked
-    # connection must not take that path.
+    # connection must not take that path. The check before the profile read's retry raises.
     service = FakeGmailService(messages=[_make_message("a")])
+    service.profile_errors = [_HttpError(503)]
 
     with pytest.raises(_Revoked):
         list(full_backfill(service, {}, label_ids=["INBOX"], check_active=_revoked_on_call(1)))

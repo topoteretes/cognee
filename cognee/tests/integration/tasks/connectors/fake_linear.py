@@ -65,9 +65,6 @@ class FakeLinear:
 
     # -- transport ---------------------------------------------------------
     def execute(self, query, variables=None, *, check_active=None):
-        # One attempt per call, so one check, before the request is counted.
-        if check_active is not None:
-            check_active()
         variables = variables or {}
         self.calls.append(query)
         if self.fail_after is not None and len(self.calls) > self.fail_after:

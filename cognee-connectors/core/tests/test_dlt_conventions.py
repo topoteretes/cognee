@@ -282,13 +282,13 @@ def _run(attempt, check_active, sleep, *, attempts=3, delay=lambda error, number
     )
 
 
-def test_with_retries_checks_before_every_attempt_and_every_wait():
+def test_with_retries_checks_before_every_wait_and_retry_not_the_first_attempt():
+    """A first attempt costs no check (the connector checks where its work starts)."""
     attempt, check, sleep, events = _recorder(_Transient(), _Transient(), "ok")
 
     assert _run(attempt, check, sleep) == "ok"
 
     assert events == [
-        "check",
         "attempt",
         "check",
         "sleep 1",
@@ -304,7 +304,7 @@ def test_with_retries_checks_before_every_attempt_and_every_wait():
 def test_with_retries_stops_when_the_check_fails_before_a_wait():
     """A revoked run does not wait out a backoff, and its error is not a provider failure."""
     attempt, _, sleep, events = _recorder(_Transient(), "ok")
-    checks = iter([None, _Revoked()])
+    checks = iter([_Revoked()])
 
     def check_active():
         failure = next(checks)
@@ -323,7 +323,7 @@ def test_with_retries_raises_an_error_the_connector_does_not_retry_at_once():
     with pytest.raises(ValueError):
         _run(attempt, check, sleep)
 
-    assert events == ["check", "attempt"]
+    assert events == ["attempt"]
 
 
 def test_with_retries_raises_when_the_policy_declines_the_wait():
@@ -333,7 +333,7 @@ def test_with_retries_raises_when_the_policy_declines_the_wait():
     with pytest.raises(_Transient):
         _run(attempt, check, sleep, delay=lambda error, number: None)
 
-    assert events == ["check", "attempt"]
+    assert events == ["attempt"]
 
 
 def test_with_retries_raises_the_last_attempts_error():
@@ -342,12 +342,12 @@ def test_with_retries_raises_the_last_attempts_error():
     with pytest.raises(_Transient, match="2"):
         _run(attempt, check, sleep, attempts=2)
 
-    assert events == ["check", "attempt", "check", "sleep 1", "check", "attempt"]
+    assert events == ["attempt", "check", "sleep 1", "check", "attempt"]
 
 
 def test_with_retries_never_retries_the_checks_own_error():
     """The check sits outside the retried call, even when it raises a retried class."""
-    attempt, _, sleep, events = _recorder("ok")
+    attempt, _, sleep, events = _recorder(_Transient("busy"), "ok")
 
     def check_active():
         raise _Transient("revoked")
@@ -355,7 +355,7 @@ def test_with_retries_never_retries_the_checks_own_error():
     with pytest.raises(_Transient, match="revoked"):
         _run(attempt, check_active, sleep)
 
-    assert events == []
+    assert events == ["attempt"]
 
 
 def test_with_retries_runs_without_a_check():
@@ -390,3 +390,22 @@ def test_with_retries_needs_at_least_one_attempt():
         dlt_conventions.with_retries(
             lambda: "ok", retry_on=(ValueError,), delay=lambda e, n: 0, attempts=0
         )
+
+
+def test_with_retries_does_not_consult_the_policy_on_the_last_attempt():
+    """The last attempt's error is raised as it is; no wait is computed (or logged) for it."""
+    consulted = []
+
+    def delay(error, number):
+        consulted.append(number)
+        return 0
+
+    def attempt():
+        raise _Transient()
+
+    with pytest.raises(_Transient):
+        dlt_conventions.with_retries(
+            attempt, retry_on=(_Transient,), delay=delay, attempts=3, sleep=lambda s: None
+        )
+
+    assert consulted == [0, 1]

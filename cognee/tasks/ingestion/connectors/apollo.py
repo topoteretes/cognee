@@ -583,18 +583,15 @@ class _Walker:
 
     # -- requests ----------------------------------------------------------
     def _call(self, method: str, path: str, **kwargs: Any) -> Any:
-        try:
-            self._check_budget(path)
-        except _CutShortError:
-            # A cut ends the run as resumable; a revoked one must end as revoked instead.
-            if self.check_active is not None:
-                self.check_active()
-            raise
+        # Before the budget, so a revoked run ends as revoked, not as a resumable cut.
+        if self.check_active is not None:
+            self.check_active()
+        self._check_budget(path)
         # A call the client retries on a 5xx or a network error still counts once: the budget
         # and this count are about what the run asks for, and the client owns its retries.
         self.stats["requests"] += 1
         try:
-            # The client checks before every attempt, so a retry never outlives a revoked run.
+            # The client checks before every retry and wait, so none outlives a revoked run.
             return self.client.request(method, path, check_active=self.check_active, **kwargs)
         except ApolloRateLimitedError:
             raise _CutShortError("rate_limit") from None

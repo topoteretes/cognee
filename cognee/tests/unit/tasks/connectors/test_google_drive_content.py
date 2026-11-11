@@ -40,6 +40,8 @@ class _FakeRequest:
         self._result = result
 
     def execute(self, num_retries=0):
+        if isinstance(self._result, Exception):
+            raise self._result
         return self._result
 
 
@@ -395,8 +397,8 @@ def test_missing_loader_fails_the_file_with_its_reason(loader_engine):
 
 
 def test_download_is_chunked_and_leaves_the_retries_to_the_connector(monkeypatch):
-    # Was test_download_is_chunked_with_retries: next_chunk(num_retries=API_RETRIES) is now
-    # next_chunk(num_retries=0) inside api_retry, so the host's check runs before each attempt.
+    # next_chunk(num_retries=0) inside api_retry: the host's check runs before a chunk's retry
+    # and its wait, never before a chunk that downloads first time.
     import sys
     import types
 
@@ -418,8 +420,10 @@ def test_download_is_chunked_and_leaves_the_retries_to_the_connector(monkeypatch
     monkeypatch.setitem(sys.modules, "googleapiclient", types.ModuleType("googleapiclient"))
     monkeypatch.setitem(sys.modules, "googleapiclient.http", module)
     buffer = io.BytesIO()
-    _REAL_STREAM_MEDIA(object(), buffer)
+    checks = []
+    _REAL_STREAM_MEDIA(object(), buffer, check_active=lambda: checks.append(1))
     assert buffer.getvalue() == b"chunk1;chunk2;chunk3;"
+    assert checks == [], "a chunk that downloads first time costs no host check"
     assert seen["chunksize"] == gd_source.DOWNLOAD_CHUNK_BYTES
     assert seen["retries"] == [0] * 3
 
@@ -468,7 +472,7 @@ def test_a_revoked_connection_stops_a_chunk_retry_before_it_waits(monkeypatch, w
 
     def check_active():
         checks.append(1)
-        if len(checks) == 2:  # before the first attempt, then before its backoff wait
+        if len(checks) == 1:  # the first attempt runs unchecked; this is before its backoff wait
             raise _Revoked
 
     with pytest.raises(_Revoked):
@@ -491,8 +495,8 @@ def test_a_chunk_that_failed_with_a_503_is_retried(monkeypatch, waits):
 
 def test_a_revoked_connection_is_not_a_failed_extraction():
     # extract_file_content turns any request failure into "skip this file" (None); a revoked
-    # connection must stop the run instead.
-    service = _FakeService(_FakeFiles(export_result="text"))
+    # connection must stop the run instead. The check before the 503's retry raises.
+    service = _FakeService(_FakeFiles(export_result=_HttpError(503)))
 
     def check_active():
         raise _Revoked

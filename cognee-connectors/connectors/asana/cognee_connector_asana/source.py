@@ -279,6 +279,8 @@ class AsanaClient:
                 raise AsanaAPIError(0, _endpoint(path))
             return self._parse(response, path)
 
+        if check_active is not None:
+            check_active()
         return with_retries(
             attempt,
             retry_on=(AsanaAPIError,),
