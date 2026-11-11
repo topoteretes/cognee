@@ -6,7 +6,7 @@ import inspect
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -104,6 +104,7 @@ def _wire(monkeypatch, runs, datasets, *, rollback_fails=False, users=None):
     monkeypatch.setattr(recovery_module, "get_run_session_ids", _no_sessions)
     monkeypatch.setattr(recovery_module, "get_user", _get_user)
     monkeypatch.setattr(recovery_module, "STALE_RUN_MIN_AGE_SECONDS", 3600)
+    monkeypatch.setattr(recovery_module, "record_interrupted", AsyncMock())
 
     @contextmanager
     def claim(run):
@@ -237,6 +238,26 @@ async def test_failed_rollback_leaves_run_started(monkeypatch):
     await recovery_module.recover_stale_pipeline_runs_on_startup()
 
     assert calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rollback_fails", [False, True])
+async def test_a_closed_runs_unanswered_shards_are_recorded_interrupted(
+    monkeypatch, rollback_fails
+):
+    """Shards the run handed to workers and never heard back from would stay
+    pending for good. Only once the run is closed: after a failed rollback it is
+    still open, and the next pass comes back to it."""
+    run = _run("cognify_pipeline")
+    _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)}, rollback_fails=rollback_fails)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    recorded = recovery_module.record_interrupted
+    if rollback_fails:
+        recorded.assert_not_awaited()
+    else:
+        recorded.assert_awaited_once_with(run.pipeline_run_id)
 
 
 @pytest.mark.asyncio

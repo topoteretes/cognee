@@ -179,6 +179,20 @@ async def test_the_cognify_run_opens_first_and_the_indexing_run_works_in_between
 
 
 @pytest.mark.asyncio
+async def test_an_executor_given_to_the_call_goes_to_both_runs(monkeypatch, datasets, pushed):
+    """``cognify(data_item_executor=...)`` is for the call, so the indexing run it
+    starts gets the executor the cognify run gets."""
+    calls = _install_fake_run_pipeline(monkeypatch, ALL_COMPLETE)
+    executor = object()
+
+    await _collect(indexing_tasks="INDEX", data_item_executor=executor, **COGNIFY_PARAMS)
+
+    cognify, indexing = calls
+    assert cognify["data_item_executor"] is executor
+    assert indexing["data_item_executor"] is executor
+
+
+@pytest.mark.asyncio
 async def test_the_indexing_run_rolls_back_per_item(monkeypatch, datasets, pushed):
     """One failed item must not take the other items' chunks with it: the
     indexing run uses the cognify rollback handler, which rolls back per item."""

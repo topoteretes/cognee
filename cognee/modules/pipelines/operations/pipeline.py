@@ -10,6 +10,7 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.methods.get_selected_dataset_data import get_selected_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.exceptions import AfterRunHookError
+from cognee.modules.pipelines.execution import DataItemExecutor
 from cognee.modules.pipelines.layers import validate_pipeline_tasks
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
@@ -74,6 +75,7 @@ async def run_pipeline(
     extras: dict | None = None,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
     after_items_ran: Callable[[], Awaitable[Any]] | None = None,
+    data_item_executor: DataItemExecutor | None = None,
 ):
     """``tasks`` is either the task list every data item runs, or a callable
     mapping one item to its task list (a task resolver — see ``run_tasks``);
@@ -91,7 +93,11 @@ async def run_pipeline(
     ``after_items_ran`` also when items in the run failed, both inside that dataset's
     database context (see ``run_tasks``). When either fails on a completed run, the
     remaining datasets still run and one ``AfterRunHookError`` naming every failed
-    dataset is raised after them."""
+    dataset is raised after them.
+
+    ``data_item_executor`` may run this call's data items in other processes
+    (see ``cognee.modules.pipelines.execution``). It applies to this call only
+    and comes before an executor registered for the process."""
     if tasks is None:
         raise ValueError(
             "run_pipeline requires tasks: a task list or a per-item task resolver callable"
@@ -127,6 +133,7 @@ async def run_pipeline(
             extras=extras,
             after_run_completed=after_run_completed,
             after_items_ran=after_items_ran,
+            data_item_executor=data_item_executor,
         )
         run_completed = False
         try:
@@ -163,6 +170,7 @@ async def run_pipeline_per_dataset(
     extras: dict | None = None,
     after_run_completed: Callable[[], Awaitable[Any]] | None = None,
     after_items_ran: Callable[[], Awaitable[Any]] | None = None,
+    data_item_executor: DataItemExecutor | None = None,
 ):
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
@@ -192,6 +200,7 @@ async def run_pipeline_per_dataset(
             extras=extras,
             after_run_completed=after_run_completed,
             after_items_ran=after_items_ran,
+            data_item_executor=data_item_executor,
         )
 
         async with aclosing(pipeline_run):
