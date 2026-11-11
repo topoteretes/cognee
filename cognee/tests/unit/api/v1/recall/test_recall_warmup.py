@@ -698,7 +698,9 @@ async def test_without_an_llm_the_chunk_completion_returns_its_context(
     monkeypatch.setattr(
         router.RoutingConstraints,
         "from_config",
-        classmethod(lambda cls, llm_config=None, node_name=None: cls(llm_available=False)),
+        classmethod(
+            lambda cls, llm_config=None, node_type=None, node_name=None: cls(llm_available=False)
+        ),
     )
     monkeypatch.setattr(
         router,
