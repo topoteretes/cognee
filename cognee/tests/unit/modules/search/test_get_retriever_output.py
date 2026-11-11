@@ -804,3 +804,87 @@ async def test_feeling_lucky_with_a_node_name_filter_bounds_the_selector():
     assert SearchType.CHUNKS in allowed and SearchType.SUMMARIES not in allowed
     assert result.search_type is SearchType.CHUNKS
     assert factory.await_args.kwargs["node_name"] == ["doc_a"]
+
+
+class _NamingRetriever:
+    """Records the order of the reference hooks; it answered nothing."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def name_cited_documents(self, retrieved_objects):
+        self.calls.append("name")
+
+    def get_context_evidence(self, retrieved_objects, dataset_id=None):
+        self.calls.append("evidence")
+        return []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("completion", [None, []])
+async def test_cited_documents_are_named_when_no_answer_was_written(completion):
+    """append_references names the chunks only with an answer, so the structured
+    references of a turn without one are named here, before they are built."""
+    retriever = _NamingRetriever()
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "run_session_aware_completion",
+            new_callable=AsyncMock,
+            return_value=([{"id": "obj-1"}], "context", completion),
+        ),
+    ):
+        await get_retriever_output(
+            SearchType.RAG_COMPLETION,
+            "What changed?",
+            dataset=SimpleNamespace(id=uuid4(), name="reports", tenant_id=uuid4()),
+            include_references=True,
+        )
+
+    assert retriever.calls == ["name", "evidence"]
+
+
+@pytest.mark.asyncio
+async def test_a_retriever_without_the_naming_hook_still_gets_its_evidence():
+    """A community retriever that predates the hook keeps working, like get_context_evidence."""
+    retriever = _EvidenceRetriever()
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "run_session_aware_completion",
+            new_callable=AsyncMock,
+            return_value=([{"id": "obj-1"}], "context", []),
+        ),
+    ):
+        result = await get_retriever_output(
+            SearchType.RAG_COMPLETION,
+            "What changed?",
+            dataset=SimpleNamespace(id=uuid4(), name="reports", tenant_id=uuid4()),
+            include_references=True,
+        )
+
+    assert [reference.artifact_id for reference in result.evidence] == ["obj-1"]

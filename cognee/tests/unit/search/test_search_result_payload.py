@@ -131,6 +131,8 @@ def test_search_result_payload_serializes_structured_evidence():
             "chunk_id": "chunk-1",
             "chunk_index": None,
             "document_name": None,
+            "title": None,
+            "url": None,
             "source_node_id": None,
             "target_node_id": None,
             "relationship_name": None,

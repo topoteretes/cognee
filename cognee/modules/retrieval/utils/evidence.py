@@ -206,7 +206,7 @@ async def graph_source_evidence(
 
     records = await get_edge_evidence_records(edge_ids, normalized_dataset_id)
     rank_offset = len(context_evidence)
-    sources = [document_source(record.label, record.system_metadata) for record in records]
+    sources = [document_source(record.system_metadata) for record in records]
     return [
         EvidenceReference(
             kind="segment",

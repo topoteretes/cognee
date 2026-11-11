@@ -3,9 +3,10 @@
 End to end on the default local stores (SQLite, Ladybug, LanceDB) with the journeys tier's
 deterministic LLM and embeddings. A document-mode dlt row with a ``title`` and a ``url`` and a
 plain note with a ``label`` are added and cognified, then searched with
-``include_references=True``. Each reference carries the document's title (``Data.label``) and
-link (``Data.system_metadata["url"]``), and the Evidence block appended to the answer names
-them, for the chunk lane (RAG, hybrid) and the graph lane (edge evidence) alike.
+``include_references=True``. The connector row's reference carries its title and link
+(``Data.system_metadata``), and the Evidence block appended to the answer names them, for the
+chunk lane (RAG, hybrid) and the graph lane (edge evidence) alike; the plain note keeps its
+file name.
 """
 
 import dlt
@@ -129,12 +130,11 @@ async def test_a_chunk_reference_names_its_document_by_title_and_link(cognified,
 
     assert (TITLE, URL) in _sources(evidence)
     assert f'"{TITLE}" <{URL}>' in answer
-    assert "of document text_" not in answer
 
 
 @pytest.mark.asyncio
-async def test_a_document_without_a_link_is_named_by_its_title(cognified):
-    """A plain note has a label and no url: its reference carries the title alone."""
+async def test_a_plain_document_keeps_its_file_name(cognified):
+    """A label given to ``add`` is not a connector title: the note is cited as before."""
     (result,) = await cognee.search(
         "What is the budget for Orion?",
         query_type=SearchType.RAG_COMPLETION,
@@ -142,7 +142,9 @@ async def test_a_document_without_a_link_is_named_by_its_title(cognified):
         include_references=True,
         verbose=True,
     )
-    assert (NOTE_LABEL, None) in _sources(result["evidence"])
+    sources = _sources(result["evidence"])
+    assert (None, None) in sources
+    assert all(title != NOTE_LABEL for title, _ in sources)
 
 
 @pytest.mark.asyncio
@@ -170,7 +172,7 @@ async def test_a_search_reads_the_cited_documents_once(cognified, query_type):
     reads = []
 
     def count(conn, cursor, statement, parameters, context, executemany):
-        if "data.label" in statement:
+        if "data.system_metadata" in statement:
             reads.append(statement)
 
     engine = get_relational_engine().engine.sync_engine

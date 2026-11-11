@@ -27,7 +27,6 @@ class EdgeEvidenceRecord:
     document_name: str | None
     external_metadata: dict | None = None
     observed_at: datetime | None = None
-    label: str | None = None
     system_metadata: dict | None = None
 
 
@@ -119,7 +118,6 @@ async def get_edge_evidence_records(
             ranked_support.c.chunk_id,
             ranked_support.c.chunk_index,
             Data.name,
-            Data.label,
             Data.system_metadata,
         )
         .join(
@@ -147,7 +145,7 @@ async def get_edge_evidence_records(
     counts: dict[UUID, int] = {}
     seen: set[tuple[UUID, UUID, UUID]] = set()
     records: list[EdgeEvidenceRecord] = []
-    for edge_id, data_id, chunk_id, chunk_index, document_name, label, system_metadata in rows:
+    for edge_id, data_id, chunk_id, chunk_index, document_name, system_metadata in rows:
         key = (edge_id, data_id, chunk_id)
         if key in seen or counts.get(edge_id, 0) >= per_edge_limit:
             continue
@@ -160,7 +158,6 @@ async def get_edge_evidence_records(
                 chunk_id=chunk_id,
                 chunk_index=chunk_index,
                 document_name=document_name,
-                label=label,
                 system_metadata=system_metadata,
             )
         )

@@ -1,8 +1,9 @@
-"""The title and link a reference names its document by.
+"""The title and link a reference names a connector's document by.
 
-They live only on the document's data record (``Data.label``, ``Data.system_metadata["url"]``);
-chunks carry the stored file name (``text_<md5>``). Both may come from a provider's content, so
-they are made safe to print on one line before any reference shows them.
+A connector row keeps them in its data record's ``system_metadata`` (``title``, ``url``);
+chunks carry the stored file name (``text_<md5>``). Any other document has neither and
+keeps its file name. Both come from a provider's content, so they are made safe to print
+on one line before any reference shows them.
 """
 
 import unicodedata
@@ -45,11 +46,12 @@ def _printable_url(url: Any) -> bool:
     )
 
 
-def document_source(label: str | None, system_metadata: dict | None) -> DocumentSource:
-    """The title and link of a data record, as a reference may print them."""
-    url = (system_metadata or {}).get("url")
+def document_source(system_metadata: dict | None) -> DocumentSource:
+    """The title and link of a connector row, as a reference may print them."""
+    metadata = system_metadata or {}
+    title, url = metadata.get("title"), metadata.get("url")
     return DocumentSource(
-        title=_one_line(label) or None if label else None,
+        title=_one_line(title) or None if isinstance(title, str) else None,
         url=url if _printable_url(url) else None,
     )
 
@@ -89,7 +91,7 @@ async def name_chunk_documents(chunks: list, dataset_id: UUID | None) -> None:
     if not payloads_by_id:
         return
 
-    statement = select(Data.id, Data.label, Data.system_metadata).where(Data.id.in_(payloads_by_id))
+    statement = select(Data.id, Data.system_metadata).where(Data.id.in_(payloads_by_id))
     if dataset_id is not None:
         statement = statement.where(Data.dataset_id == dataset_id)
     try:
@@ -100,8 +102,8 @@ async def name_chunk_documents(chunks: list, dataset_id: UUID | None) -> None:
         logger.warning("Unable to read the cited documents' titles: %s", error)
         return
 
-    for data_id, label, system_metadata in rows:
-        source = document_source(label, system_metadata)
+    for data_id, system_metadata in rows:
+        source = document_source(system_metadata)
         for payload in payloads_by_id[data_id]:
             payload[TITLE_KEY] = source.title
             payload[URL_KEY] = source.url
