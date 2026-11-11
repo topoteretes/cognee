@@ -3,54 +3,53 @@
 Slack POSTs ``application/x-www-form-urlencoded`` for interactive payloads,
 with a single ``payload`` field holding a URL-encoded JSON string — unlike
 the Events API, which POSTs raw JSON directly. Parsed here from the
-verified raw bytes, same reasoning as ``handle_slack_command``'s module
-docstring (a parsed-body parameter would break signature verification).
+verified raw bytes (a parsed-body parameter would break signature verification).
 
-Handles the "Remember this" message shortcut and the ``/cognee-ask`` answer
-review prompt's Share/Discard buttons (see handle_cognee_ask.py). Every
+Handles the "Remember this" and "Forget this" message shortcuts and the Share/Discard
+buttons of an
+``@cognee`` answer (see handle_cognee_ask.py). Every
 other interactive payload type this app doesn't act on (other block
 actions, modals, future shortcuts) acks empty rather than erroring — same
 reasoning as unhandled slash commands and events: erroring only earns a
 Slack retry, never a better outcome for a payload this app doesn't act on.
 """
 
+import asyncio
 import json
 import logging
+from functools import partial
 from typing import Any
 from urllib.parse import parse_qs
+from uuid import UUID
 
-from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+from cognee.infrastructure.background_tasks import register_background_task
 from cognee.modules.integrations.slack.handle_cognee_ask import (
     ASK_DISCARD_ACTION_ID,
     ASK_SHARE_ACTION_ID,
     handle_cognee_ask_discard,
     handle_cognee_ask_share,
 )
-from cognee.modules.integrations.slack.handle_history import (
-    HISTORY_SHORTCUT,
-    HISTORY_VIEW,
-    THREAD_SHORTCUT,
-    handle_history_interactive,
+from cognee.modules.integrations.slack.handle_cognee_mention import (
+    NOT_CONNECTED_MESSAGE,
+    NOTHING_TO_SAVE_MESSAGE,
+    forget_and_confirm,
+    notice,
+    remember_and_confirm,
 )
 from cognee.modules.integrations.slack.handle_slack_link import NOT_LINKED_MESSAGE
 from cognee.modules.integrations.slack.persistence import (
+    CHANNEL_NOT_ENABLED_MESSAGE,
+    channel_allowed,
     get_by_team,
     is_active,
     resolve_owner_user_id,
 )
-from cognee.modules.integrations.slack.remember_message import remember_message
 from cognee.modules.integrations.slack.response_url import post_to_response_url
 
 logger = logging.getLogger(__name__)
 
 REMEMBER_THIS_CALLBACK_ID = "remember_this"
-
-
-def _ephemeral(text: str, *, replace_original: bool = False) -> dict[str, Any]:
-    payload: dict[str, Any] = {"response_type": "ephemeral", "text": text}
-    if replace_original:
-        payload["replace_original"] = True
-    return payload
+FORGET_THIS_CALLBACK_ID = "forget_this"
 
 
 async def handle_slack_interactive(raw_body: bytes) -> dict[str, Any]:
@@ -63,17 +62,10 @@ async def handle_slack_interactive(raw_body: bytes) -> dict[str, Any]:
     payload = json.loads(raw_payload)
     payload_type = payload.get("type")
 
-    if (
-        payload_type in {"shortcut", "message_action"}
-        and payload.get("callback_id") in {HISTORY_SHORTCUT, THREAD_SHORTCUT}
-    ) or (
-        payload_type in {"view_submission", "block_suggestion"}
-        and (payload.get("view") or {}).get("callback_id") == HISTORY_VIEW
-    ):
-        return await handle_history_interactive(payload)
-
     if payload_type == "message_action" and payload.get("callback_id") == REMEMBER_THIS_CALLBACK_ID:
         await _handle_remember_this(payload)
+    elif payload_type == "message_action" and payload.get("callback_id") == FORGET_THIS_CALLBACK_ID:
+        await _handle_forget_this(payload)
     elif payload_type == "block_actions":
         await _handle_block_action(payload)
 
@@ -100,7 +92,7 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
     Message actions don't render their direct HTTP response body as a
     message the way slash commands do — confirmation/error text is
     delivered via ``response_url`` instead, the same as the async
-    ``/cognee-ask`` answer.
+    ``@cognee`` answer.
     """
     response_url = payload.get("response_url", "")
     team_id = (payload.get("team") or {}).get("id", "")
@@ -110,11 +102,13 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
     if not is_active(credential):
         await post_to_response_url(
             response_url,
-            _ephemeral(
-                "This Slack workspace is not connected to Cognee. "
-                "Connect it from your Integrations settings."
-            ),
+            notice(NOT_CONNECTED_MESSAGE),
         )
+        return
+
+    channel_id = (payload.get("channel") or {}).get("id", "")
+    if not channel_allowed(credential, channel_id):
+        await post_to_response_url(response_url, notice(CHANNEL_NOT_ENABLED_MESSAGE))
         return
 
     # See persistence.resolve_owner_user_id and handle_cognee_ask.py for the
@@ -122,38 +116,72 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
     # installer" as a stopgap).
     owner_user_id = await resolve_owner_user_id(credential, team_id, invoking_slack_user_id)
     if owner_user_id is None:
-        await post_to_response_url(response_url, _ephemeral(NOT_LINKED_MESSAGE))
+        await post_to_response_url(response_url, notice(NOT_LINKED_MESSAGE))
         return
 
     message = payload.get("message") or {}
     text = (message.get("text") or "").strip()
     if not text:
-        await post_to_response_url(
-            response_url, _ephemeral("Nothing to remember — that message has no text.")
-        )
+        await post_to_response_url(response_url, notice(NOTHING_TO_SAVE_MESSAGE))
         return
 
-    channel_name: str | None = (payload.get("channel") or {}).get("name")
-    author_id: str | None = message.get("user")
-
-    try:
-        await remember_message(
-            owner_user_id, text=text, channel_name=channel_name, author_id=author_id
+    # Asking Slack whether the app is in the channel can take longer than the 3-second
+    # window, so the rest runs detached and answers through response_url. Anchored until
+    # it finishes, and waited for when the server shuts down.
+    register_background_task(
+        asyncio.create_task(
+            remember_and_confirm(
+                partial(post_to_response_url, response_url),
+                credential,
+                owner_user_id=owner_user_id,
+                text=text,
+                team_id=team_id,
+                channel_id=channel_id,
+                message_ts=message.get("ts", ""),
+                channel_name=(payload.get("channel") or {}).get("name"),
+                author_id=message.get("user"),
+            )
         )
-    except EntityNotFoundError:
-        logger.error("Slack credential for team %s points at a deleted user", team_id)
+    )
+
+
+async def _handle_forget_this(payload: dict[str, Any]) -> None:
+    """Forget the message for the member: their own saved copy, and, from a synced channel,
+    the workspace's memory too when they wrote it or own the connection.
+
+    No allowlist check: the allowlist limits where Cognee is used, and taking back
+    one's own copy is never limited.
+    """
+    response_url = payload.get("response_url", "")
+    team_id = (payload.get("team") or {}).get("id", "")
+    invoking_slack_user_id = (payload.get("user") or {}).get("id", "")
+
+    credential = await get_by_team(team_id) if team_id else None
+    if not is_active(credential):
         await post_to_response_url(
             response_url,
-            _ephemeral(
-                "Slack integration is not fully configured. Please disconnect and reconnect."
-            ),
+            notice(NOT_CONNECTED_MESSAGE),
         )
         return
-    except Exception:  # any remember failure must degrade to a chat message, not a crash
-        logger.exception("Failed to remember a Slack message for team %s", team_id)
-        await post_to_response_url(
-            response_url, _ephemeral("Could not save that message. Please try again.")
-        )
+    owner_user_id = await resolve_owner_user_id(credential, team_id, invoking_slack_user_id)
+    if owner_user_id is None:
+        await post_to_response_url(response_url, notice(NOT_LINKED_MESSAGE))
         return
 
-    await post_to_response_url(response_url, _ephemeral("Saved to Cognee memory."))
+    message = payload.get("message") or {}
+    register_background_task(
+        asyncio.create_task(
+            forget_and_confirm(
+                partial(post_to_response_url, response_url),
+                credential,
+                owner_user_id=owner_user_id,
+                team_id=team_id,
+                channel_id=(payload.get("channel") or {}).get("id", ""),
+                message_ts=message.get("ts", ""),
+                # A reply re-renders its thread; a message outside one, its day.
+                root_ts=message.get("thread_ts") or message.get("ts", ""),
+                member=invoking_slack_user_id,
+                author_id=message.get("user", ""),
+            )
+        )
+    )

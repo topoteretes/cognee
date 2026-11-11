@@ -62,9 +62,9 @@ at `updatedAt`; it is not a live countdown while no new progress arrives.
 
 ## Coverage and hosting
 
-Google Drive, Gmail, Google Calendar, Notion and Linear report through the shared
-SDK ingestion helpers. GitHub code ingestion and Slack history imports report
-through the same progress contract from their own execution paths.
+Google Drive, Gmail, Google Calendar, Notion, Linear and Slack report through the
+shared SDK ingestion helpers. GitHub code ingestion reports through the same progress
+contract from its own execution path.
 
 The SDK stores progress in the existing operation ledger. Telemetry failures do
 not fail an otherwise valid sync or replace its original error. Progress contains

@@ -1,8 +1,7 @@
 """POST a followup message to a Slack ``response_url``.
 
-Shared by every Slack handler that acks fast and delivers its real answer
-later — the async ``/cognee-ask`` search and the "Remember this" message
-shortcut both use this. A ``response_url`` is valid for 30 minutes and
+Used by the interactive handlers, which ack fast and answer later: the "Remember
+this" message shortcut and the Share/Discard buttons of an ``@cognee`` answer. A ``response_url`` is valid for 30 minutes and
 accepts up to 5 posts; ``replace_original: true`` (set by the caller's own
 payload, not here) swaps an earlier placeholder for the real answer instead
 of leaving both visible.
@@ -30,11 +29,12 @@ _ALLOWED_RESPONSE_URL_HOST = "hooks.slack.com"
 # /services/..., which anyone can create in a free workspace and which accept the
 # exact {"text": ..., "blocks": [...]} body this module sends. Pinning the host but
 # not the path still lets a forged payload exfiltrate the answer text into an
-# attacker's Slack workspace. Genuine response_urls are only ever these two:
+# attacker's Slack workspace. Genuine response_urls are only ever these three:
 #   slash commands   -> https://hooks.slack.com/commands/T…/…/…
 #   interactivity    -> https://hooks.slack.com/actions/T…/…/…
+#   shortcuts        -> https://hooks.slack.com/app-actions/T…/…/…
 _ALLOWED_RESPONSE_URL_PATH = re.compile(
-    r"^/(?:commands|actions)/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$"
+    r"^/(?:commands|actions|app-actions)/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$"
 )
 
 

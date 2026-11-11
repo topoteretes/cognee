@@ -1,42 +1,15 @@
-"""Handle ``/cognee-ask`` slash command — recall from knowledge graph.
+"""The answer review of ``@cognee <question>``: Share and Discard, and the answer's text.
 
-Nothing about a ``/cognee-ask`` becomes visible to the channel until the
-asker has seen the answer and explicitly chosen to share it — neither the
-question nor the answer are known to be channel-appropriate before that.
-So every step here, including the initial "searching..." ack, is
-``ephemeral`` (visible only to whoever ran the command). Once the search
-finishes, the answer is shown back privately with Share/Discard buttons:
-Share is the *only* thing that ever posts ``in_channel`` (question and
-answer together, since nothing was public before it); Discard drops the
-answer entirely, visible to no one, not even the asker.
-
-Slack requires an ack within 3 seconds; ``HYBRID_COMPLETION`` search calls an
-LLM and routinely takes longer than that. So the fast path here only
-validates and acks immediately with a placeholder — the actual search runs
-in a background task, and its answer is delivered afterward via the
-command's ``response_url`` (see
-:mod:`cognee.modules.integrations.slack.response_url`; ``replace_original:
-true`` swaps the placeholder for the next prompt instead of leaving both
-messages visible).
+Nothing about a question becomes visible to the channel until the asker has seen the
+answer and chosen to share it. ``handle_cognee_mention.ask`` shows the answer privately
+with Share and Discard; Share is the only thing that ever posts ``in_channel`` (question
+and answer together, since nothing was public before it), Discard drops it unseen.
 """
 
-import asyncio
 import logging
 from typing import Any
-from urllib.parse import parse_qs
-from uuid import UUID, uuid4
 
-from cognee.api.v1.search.search import search as cognee_search
-from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-from cognee.modules.integrations.slack.handle_slack_link import NOT_LINKED_MESSAGE
-from cognee.modules.integrations.slack.persistence import (
-    get_by_team,
-    is_active,
-    resolve_owner_user_id,
-)
 from cognee.modules.integrations.slack.response_url import post_to_response_url
-from cognee.modules.search.types import SearchType
-from cognee.modules.users.methods import get_user
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +18,6 @@ logger = logging.getLogger(__name__)
 ASK_SHARE_ACTION_ID = "cognee_ask_share"
 ASK_DISCARD_ACTION_ID = "cognee_ask_discard"
 
-# asyncio.create_task() only holds a weak reference to its result — without
-# keeping the task alive somewhere, it can be garbage-collected mid-flight
-# the instant handle_cognee_ask returns. Each task removes itself on completion.
-_pending_searches: set = set()
 
 # A ready-to-share (question, answer) pair, keyed by a short id (never the
 # text itself — Slack button values cap at 2000 chars, easily blown by a
@@ -106,122 +75,14 @@ def _reply(
     return payload
 
 
-async def handle_cognee_ask(raw_body: bytes) -> dict[str, Any]:
-    """Ack ``/cognee-ask {query}`` within Slack's 3-second window.
-
-    Everything past the workspace/query/authorization validation happens in
-    the background — the real answer is not this function's return value,
-    it arrives as a second message via ``response_url`` (first the answer
-    review prompt, then whatever Share/Discard resolves to).
-    """
-    form = parse_qs(raw_body.decode())
-    team_id = (form.get("team_id") or [""])[0]
-    invoking_slack_user_id = (form.get("user_id") or [""])[0]
-    text = (form.get("text") or [""])[0].strip()
-    response_url = (form.get("response_url") or [""])[0]
-
-    credential = await get_by_team(team_id) if team_id else None
-    if not is_active(credential):
-        return _ephemeral(
-            "This Slack workspace is not connected to Cognee. "
-            "Connect it from your Integrations settings."
-        )
-
-    owner_user_id = await resolve_owner_user_id(credential, team_id, invoking_slack_user_id)
-    if owner_user_id is None:
-        return _ephemeral(NOT_LINKED_MESSAGE)
-
-    if not text:
-        return _ephemeral(
-            "Ask me something and I'll check what you know — "
-            "e.g. `/cognee-ask why did we choose Neon for v2?`"
-        )
-
-    task = asyncio.create_task(_search_and_respond(response_url, team_id, owner_user_id, text))
-    _pending_searches.add(task)
-    task.add_done_callback(_pending_searches.discard)
-
-    # Ephemeral — nothing is visible to the channel until Share is clicked
-    # on the answer that follows, so this ack (and the "<@user> used
-    # /cognee-ask ..." invocation line an in_channel response would trigger)
-    # must not leak the question either.
-    return _ephemeral(f"🔎 Recalling: _{_preview(text)}_")
+def _escaped(text: str) -> str:
+    """``text`` shown as written: Slack's control sequences (``<!channel>``, a disguised
+    ``<url|label>`` link, a mention) become plain characters (G48)."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _preview(text: str) -> str:
     return text if len(text) <= _QUERY_PREVIEW_MAX_CHARS else text[:_QUERY_PREVIEW_MAX_CHARS] + "…"
-
-
-async def _search_and_respond(response_url: str, team_id: str, user_id: UUID, text: str) -> None:
-    """Run the actual search and deliver its answer via ``response_url``.
-
-    Never raises — this runs detached from the request/response cycle, so
-    there is no caller left to catch anything; every failure path here ends
-    in a best-effort message delivery instead.
-    """
-    try:
-        owner = await get_user(user_id)
-    except EntityNotFoundError:
-        logger.error("Slack credential for team %s points at a deleted user", team_id)
-        await post_to_response_url(
-            response_url,
-            _ephemeral(
-                "Slack integration is not fully configured. Please disconnect and reconnect.",
-                replace_original=True,
-            ),
-        )
-        return
-
-    try:
-        results = await cognee_search(
-            query_text=text,
-            # Matches the frontend recall page's default (recallKnowledge.ts):
-            # graph traversal alone can come back empty on a thin/loosely
-            # connected graph, where the vector-search fallback still finds
-            # a relevant chunk.
-            query_type=SearchType.HYBRID_COMPLETION,
-            user=owner,
-            datasets=None,  # search across every dataset the owner can read
-        )
-    except Exception:  # any search failure must degrade to a chat message, not a crash
-        logger.exception("Search failed for Slack team %s", team_id)
-        await post_to_response_url(
-            response_url, _ephemeral("Search failed. Please try again.", replace_original=True)
-        )
-        return
-
-    fallback_text, blocks = _format_answer(results)
-    answer_id = uuid4().hex
-    _pending_answers[answer_id] = (text, fallback_text, blocks)
-
-    await post_to_response_url(
-        response_url,
-        _ephemeral(
-            f"{fallback_text}\n\nShare this in the channel?",
-            replace_original=True,
-            blocks=[
-                *blocks,
-                {
-                    "type": "actions",
-                    "elements": [
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "Share"},
-                            "style": "primary",
-                            "action_id": ASK_SHARE_ACTION_ID,
-                            "value": answer_id,
-                        },
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "Discard"},
-                            "action_id": ASK_DISCARD_ACTION_ID,
-                            "value": answer_id,
-                        },
-                    ],
-                },
-            ],
-        ),
-    )
 
 
 async def handle_cognee_ask_share(response_url: str, answer_id: str) -> dict[str, Any]:
@@ -236,10 +97,10 @@ async def handle_cognee_ask_share(response_url: str, answer_id: str) -> dict[str
     question, fallback_text, blocks = pending
     question_block = {
         "type": "section",
-        "text": {"type": "mrkdwn", "text": f'*Asked:* "{_preview(question)}"'},
+        "text": {"type": "mrkdwn", "text": f'*Asked:* "{_escaped(_preview(question))}"'},
     }
     return _in_channel(
-        f'Asked: "{_preview(question)}"\n\n{fallback_text}',
+        f'Asked: "{_escaped(_preview(question))}"\n\n{fallback_text}',
         replace_original=True,
         blocks=[question_block, {"type": "divider"}, *blocks],
     )
@@ -251,23 +112,93 @@ async def handle_cognee_ask_discard(answer_id: str) -> dict[str, Any]:
     return _ephemeral("Discarded.", replace_original=True)
 
 
-def _extract_fact(result: Any) -> str | None:
-    """Pull the answer text out of one ``cognee.search()`` result.
+# The header of the Evidence block the engine appends to an answer asked with
+# ``include_references`` (``append_chunk_evidence``): its bullets carry data and chunk
+# ids, so the answer is shown without it and its documents as links (``_sources``).
+_EVIDENCE_HEADER = "\n\nEvidence:"
 
-    Despite the ``List[SearchResult]`` type hint, the public ``search()``
-    never returns raw ``SearchResult`` objects — it always runs them through
-    ``_backwards_compatible_search_results`` first, which yields a dict with
-    a ``"search_result"`` key when backend access control is enabled, or the
-    bare completion payload otherwise. Either way that payload can itself be
-    a single string or a list of strings (e.g. ``HYBRID_COMPLETION`` returns
-    ``["<answer>"]``) — the first non-empty string is used. Anything else is
-    skipped rather than raising, since a shape this code doesn't recognize
-    shouldn't crash the whole answer.
+
+def _extract_fact(result: Any) -> str | None:
+    """Pull the answer text out of one ``cognee.search(..., verbose=True)`` result.
+
+    Each result is a dict per dataset searched, with the completion in ``"text_result"``:
+    a string or a list of strings (``HYBRID_COMPLETION`` returns ``["<answer>"]``), the
+    first non-empty one is used, without the engine's Evidence block. Anything else is
+    skipped rather than raising, since a shape this code doesn't recognize shouldn't
+    crash the whole answer.
     """
-    value = result.get("search_result") if isinstance(result, dict) else result
+    value = result.get("text_result") if isinstance(result, dict) else None
     if isinstance(value, list):
         value = next((item for item in value if isinstance(item, str) and item), None)
-    return value if isinstance(value, str) and value else None
+    if not isinstance(value, str):
+        return None
+    return value.split(_EVIDENCE_HEADER, 1)[0].strip() or None
+
+
+# Slack's Block Kit limits: a text object holds at most 3,000 characters and a context
+# block at most 10 elements. Over them Slack refuses the whole message, answer included.
+_SLACK_TEXT_LIMIT = 3000
+_CONTEXT_ELEMENTS = 10
+_SOURCES_LEAD = "Sources: "
+
+
+def _sources(result: Any) -> list[str]:
+    """The documents one answer read, as Slack links, in element texts within Slack's limit.
+
+    Read from the result's structured ``evidence``: a chunk's document is named by its
+    title (``Data.label``) and linked to its ``url`` (a Slack permalink for a synced
+    message), once per document, in the order the search ranked them (G10). A document
+    without a title is left out: its stored file name tells a member nothing. Only an https
+    link becomes one, and the title is escaped like an answer. Every source is shown: the
+    links fill one element after another (G86); only a title that alone would pass Slack's
+    limit is shortened.
+    """
+    evidence = result.get("evidence") if isinstance(result, dict) else None
+    links: list[str] = []
+    seen: set[str] = set()
+    for reference in evidence or []:
+        if not isinstance(reference, dict) or reference.get("kind") != "segment":
+            continue
+        title, url = reference.get("title"), reference.get("url")
+        if not isinstance(title, str) or not title.strip():
+            continue
+        key = str(reference.get("data_id") or title)
+        if key in seen:
+            continue
+        seen.add(key)
+        # Slack's link syntax is ``<url|label>``: a URL carrying a space, ``<``, ``>`` or ``|``
+        # would close it early (a ``<!channel>`` after it, a label of the writer's), so
+        # such a source is shown by its title alone (G79).
+        valid_url = (
+            isinstance(url, str)
+            and url.startswith("https://")
+            and not any(character in url for character in " <>|")
+        )
+        frame = len(f"<{url}|>") if valid_url else 0
+        label = _fitted(title.strip(), _SLACK_TEXT_LIMIT - len(_SOURCES_LEAD) - frame)
+        links.append(f"<{url}|{label}>" if valid_url else label)
+
+    elements: list[str] = []
+    current = _SOURCES_LEAD
+    for link in links:
+        joined = current + link if current == _SOURCES_LEAD else f"{current} · {link}"
+        if len(joined) <= _SLACK_TEXT_LIMIT:
+            current = joined
+        else:
+            elements.append(current)
+            current = link
+    if current != _SOURCES_LEAD:
+        elements.append(current)
+    return elements
+
+
+def _fitted(title: str, room: int) -> str:
+    """``title`` escaped, shortened with an ellipsis when escaped it would pass ``room``."""
+    label = _escaped(title)
+    while len(label) > room and title:
+        title = title[: len(title) - (len(label) - room) - 1].rstrip()
+        label = _escaped(title) + "…"
+    return label
 
 
 # Substrings that mark a fact as "I can't answer this from the given
@@ -287,6 +218,14 @@ _REFUSAL_MARKERS = (
     "doesn't contain",
     "does not contain",
     "contains no information",
+    # A dataset without the answer talks about its context instead (live, 2026-11-10:
+    # "The capital city is not specified in the provided context.").
+    "not specified",
+    "not mentioned",
+    "does not mention",
+    "doesn't mention",
+    "provided context",
+    "given context",
 )
 
 
@@ -296,43 +235,35 @@ def _is_refusal(fact: str) -> bool:
 
 
 def _format_answer(results: list[Any]) -> tuple[str, list[dict[str, Any]]]:
-    """Build a ``/cognee-ask`` answer as ``(fallback_text, blocks)``.
+    """Build an ``@cognee`` answer as ``(fallback_text, blocks)``.
 
     ``fallback_text`` is a plain-text summary for notifications/screen
     readers; ``blocks`` (Block Kit) is what actually renders when the client
-    supports it — a header, one section per fact with dividers between them,
-    and a muted context line with the result count. No interactive elements
-    yet (that needs a real ``/interactive`` handler, which is a separate
-    piece of work); this is presentation only.
+    supports it — a header and one section per fact, each followed by the documents it
+    read (``_sources``), with dividers between them. Presentation only: Share and
+    Discard are added by the caller.
     """
-    facts = [
-        fact
-        for fact in (_extract_fact(result) for result in results)
-        if fact and not _is_refusal(fact)
+    answers = [
+        (_escaped(fact), _sources(result))
+        for result in results
+        if (fact := _extract_fact(result)) and not _is_refusal(fact)
     ][:3]
-    if not facts:
+    if not answers:
         return "No relevant information found.", []
 
     blocks: list[dict[str, Any]] = [
         {"type": "header", "text": {"type": "plain_text", "text": "Answer", "emoji": True}},
     ]
-    for fact in facts:
+    for fact, sources in answers:
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": fact}})
+        for first in range(0, len(sources), _CONTEXT_ELEMENTS):
+            texts = sources[first : first + _CONTEXT_ELEMENTS]
+            blocks.append(
+                {"type": "context", "elements": [{"type": "mrkdwn", "text": t} for t in texts]}
+            )
         blocks.append({"type": "divider"})
     blocks.pop()  # no trailing divider after the last fact
 
-    result_word = "result" if len(facts) == 1 else "results"
-    blocks.append(
-        {
-            "type": "context",
-            "elements": [
-                {
-                    "type": "mrkdwn",
-                    "text": f"Searched across your Cognee memory · {len(facts)} {result_word}",
-                }
-            ],
-        }
-    )
-
+    facts = [fact for fact, _ in answers]
     fallback_text = "*Answer:*\n" + "\n\n".join(f"*{i}.* {fact}" for i, fact in enumerate(facts, 1))
     return fallback_text, blocks

@@ -6,6 +6,8 @@ split, and expires_in -> token_expires_at conversion.
 """
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -53,6 +55,10 @@ def test_splits_secret_from_metadata():
         "bot_user_id": "U999",
         "enterprise_id": "E456",
         "installed_by_slack_user_id": "U111",
+        "selected_channels": [],
+        # A (re)connect cancels a pending uninstall deletion.
+        "uninstalled_at": None,
+        "uninstall_data_deleted_at": None,
     }
     # Secret material never ends up in the clear-text metadata.
     assert "xoxb-secret" not in installation.provider_metadata.values()
@@ -86,10 +92,24 @@ def test_scope_is_passed_through_as_scopes():
     assert installation.scopes == "commands,chat:write"
 
 
-def test_the_bot_scopes_are_read_only():
-    """SDK-832: the app posts through response_url and views.*, which need no write scope."""
+def test_the_only_write_scope_is_the_one_ephemeral_answers_need():
+    """SDK-832: no write scope beyond what a call needs. ``@cognee`` answers with
+    ``chat.postEphemeral`` (``chat:write``); everything else posts through ``response_url``
+    or ``views.*``, which need none."""
     from cognee.modules.integrations.slack import oauth
 
     scopes = oauth._BOT_SCOPES.split(",")
-    assert not [scope for scope in scopes if scope.endswith(":write")]
+    assert [scope for scope in scopes if scope.endswith(":write")] == ["chat:write"]
     assert "commands" in scopes and "channels:read" in scopes
+
+
+@pytest.mark.asyncio
+async def test_forget_related_data_forgets_what_the_user_remembered_from_this_workspace():
+    user = SimpleNamespace(id="user-1")
+    credential = SimpleNamespace(provider_account_id="T123")
+    with patch(
+        "cognee.modules.integrations.slack.adapter.forget_remembered", new=AsyncMock()
+    ) as forget_remembered:
+        await integration.forget_related_data(credential, user)
+
+    forget_remembered.assert_awaited_once_with(user, team_id="T123")

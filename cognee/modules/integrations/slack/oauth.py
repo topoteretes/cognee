@@ -36,15 +36,16 @@ _AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
 _ACCESS_URL = "https://slack.com/api/oauth.v2.access"
 
 # History is fetched only for explicitly selected channels. Metadata scopes
-# also let imports verify both bot and connecting-user membership. Existing
-# installations must re-authorize when this list changes.
-#
-# Read-only on purpose: every message the app sends goes through a
-# ``response_url`` (no scope) or ``views.*`` (a bot token, no scope), so no
-# write scope is requested. ``chat:write`` and ``im:write`` used to be here
-# with nothing calling a method that needs them; they only widened what a
-# leaked bot token could do (SDK-832).
-_BOT_SCOPES = "commands,channels:read,channels:history,groups:read,groups:history"
+# also let a sync verify both bot and connecting-user membership; users:read renders
+# message authors by name; app_mentions:read and im:history receive ``@cognee`` in
+# channels and DMs; chat:write answers it with ``chat.postEphemeral``; commands is what
+# message shortcuts (Remember this, Forget this) need. Existing installations must
+# re-authorize when this list changes. No other write scope: an unused one only widens
+# what a leaked bot token could do (SDK-832).
+_BOT_SCOPES = (
+    "app_mentions:read,chat:write,commands,im:history,channels:read,"
+    "channels:history,groups:read,groups:history,users:read"
+)
 
 # oauth.v2.access is a synchronous call inside the callback request — cap it so
 # a hanging Slack never ties up a worker.
