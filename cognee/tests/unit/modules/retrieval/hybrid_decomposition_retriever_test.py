@@ -308,7 +308,15 @@ async def test_a_session_turn_runs_sequentially_and_keeps_the_whole_union(monkey
     retriever.prepare_session_turn_for_retrieval = AsyncMock(
         return_value=SimpleNamespace(should_answer=True, effective_query=None)
     )
-    retriever.get_completion_from_context = AsyncMock(return_value=["answer"])
+    answered = {}
+
+    # A plain function: the runner inspects this method's signature, which Python 3.10
+    # cannot do for an AsyncMock.
+    async def complete(query=None, retrieved_objects=None, context=None):
+        answered["retrieved_objects"] = retrieved_objects
+        return ["answer"]
+
+    retriever.get_completion_from_context = complete
     retriever.merge_retrieved_objects = MagicMock()
     unified = _lanes({query: hits[:1] for query, hits in THREE_LEGS.items()})
     engine, decompose = _run(unified, decompose=_decomposition(LEG_A, LEG_B))
@@ -326,4 +334,4 @@ async def test_a_session_turn_runs_sequentially_and_keeps_the_whole_union(monkey
     assert _ids(objects["chunks"]) == ["c1", "c2", "c3"]
     assert all(text in context for text in ("Acme ordered 40 units.", "Order: 40 units"))
     assert completion == ["answer"]
-    assert retriever.get_completion_from_context.await_args.kwargs["retrieved_objects"] is objects
+    assert answered["retrieved_objects"] is objects
