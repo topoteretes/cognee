@@ -180,14 +180,13 @@ async def test_the_cognify_run_opens_first_and_the_indexing_run_works_in_between
 
 @pytest.mark.asyncio
 async def test_the_indexing_run_rolls_back_per_item(monkeypatch, datasets, pushed):
-    """One failed item must not take the other items' chunks with it."""
+    """One failed item must not take the other items' chunks with it: the
+    indexing run uses the cognify rollback handler, which rolls back per item."""
     calls = _install_fake_run_pipeline(monkeypatch, ALL_COMPLETE)
 
     await _collect(indexing_tasks="INDEX", **COGNIFY_PARAMS)
 
-    handler = calls[1]["rollback_handler"]
-    assert handler.keywords == {"keep_completed_data": True}
-    assert handler.func is memory_pipelines.cognify_rollback_handler
+    assert calls[1]["rollback_handler"] is memory_pipelines.cognify_rollback_handler
 
 
 @pytest.mark.asyncio
