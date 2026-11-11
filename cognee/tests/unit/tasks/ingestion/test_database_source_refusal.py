@@ -224,7 +224,9 @@ def test_unset_switch_refuses_api_callers_only(servers, monkeypatch):
         _require_database_ingestion_allowed()
     with (
         operation_origin_scope(ORIGIN_API),
-        pytest.raises(CogneeValidationError, match="not enabled for API callers"),
+        pytest.raises(
+            CogneeValidationError, match="Set ALLOW_DATABASE_INGESTION=true in the server"
+        ),
     ):
         create_dlt_source_from_connection_string(dsn)
 
@@ -233,7 +235,7 @@ def test_unset_switch_refuses_api_callers_only(servers, monkeypatch):
         _require_database_ingestion_allowed()
 
 
-@pytest.mark.parametrize("value", ["false", "0", "no", "off", " FALSE "])
+@pytest.mark.parametrize("value", ["false", "0", "no", "off", " FALSE ", "flase", "ture"])
 @pytest.mark.parametrize(
     "dsn",
     [f"postgresql://u:p@{FOREIGN}/shop", "sqlite:////tmp/shop.db", "mysql://u:p@db/shop"],
@@ -242,5 +244,8 @@ def test_unset_switch_refuses_api_callers_only(servers, monkeypatch):
 def test_switch_off_refuses_every_connection_string(servers, monkeypatch, value, dsn):
     monkeypatch.setenv(ALLOW_DATABASE_INGESTION_ENV, value)
 
-    with pytest.raises(CogneeValidationError, match="disabled on this server"):
+    with pytest.raises(CogneeValidationError, match="disabled on this server") as error:
         create_dlt_source_from_connection_string(dsn)
+
+    assert f"ALLOW_DATABASE_INGESTION={value.strip()};" in error.value.message
+    assert "Set ALLOW_DATABASE_INGESTION=true" in error.value.message

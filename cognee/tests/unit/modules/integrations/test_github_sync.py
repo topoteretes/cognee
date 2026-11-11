@@ -51,6 +51,14 @@ def test_clone_url_carries_no_credentials():
     assert sync_module.clone_url("acme/api") == "https://github.com/acme/api.git"
 
 
+@pytest.mark.parametrize(
+    "name", ["acme", "acme/api/extra", "acme/a b", "-acme/api", "acme/api@evil", "", "a/"]
+)
+def test_clone_url_refuses_what_is_not_a_github_name(name):
+    with pytest.raises(ValueError, match="Not a GitHub repository name"):
+        sync_module.clone_url(name)
+
+
 @pytest.fixture
 def mocks(monkeypatch):
     from cognee.modules.integrations.sync_progress import SyncProgressReporter
@@ -247,3 +255,36 @@ async def test_repository_discovery_refuses_a_next_page_off_the_api_host(monkeyp
 def test_pagination_stays_on_the_exact_api_origin(url, same):
     """SDK-832 review: scheme, host and effective port, and never userinfo."""
     assert sync_module._same_origin(url, sync_module.API_BASE_URL) is same
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("setting", [None, ""])
+async def test_api_started_sync_clones_with_the_variable_unset(mocks, monkeypatch, setting):
+    """The URLs are cognee-built on github.com, so the API-request default that refuses
+    caller-chosen clone URLs does not apply: the clone runs as system work."""
+    from cognee.modules.operations.origin import (
+        ORIGIN_API,
+        ORIGIN_BACKGROUND,
+        get_operation_origin,
+        operation_origin_scope,
+    )
+    from cognee.tasks.web_scraper.ssrf_protection import is_http_requests_allowed
+
+    if setting is None:
+        monkeypatch.delenv("ALLOW_HTTP_REQUESTS", raising=False)
+    else:
+        monkeypatch.setenv("ALLOW_HTTP_REQUESTS", setting)
+    seen = {}
+
+    async def remember(*args, **kwargs):
+        seen["origin"] = get_operation_origin()
+        seen["allowed"] = is_http_requests_allowed()
+        return SimpleNamespace(status="completed", error=None)
+
+    mocks.remember.side_effect = remember
+
+    with operation_origin_scope(ORIGIN_API):
+        await sync_module.sync_repositories(_credential(), ["acme/api"])
+        assert get_operation_origin() == ORIGIN_API  # restored after the clone
+
+    assert seen == {"origin": ORIGIN_BACKGROUND, "allowed": True}

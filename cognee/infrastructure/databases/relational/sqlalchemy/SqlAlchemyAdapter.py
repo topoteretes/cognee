@@ -159,12 +159,17 @@ class SQLAlchemyAdapter:
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
-    async def push_to_s3(self) -> None:
-        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_db_file"):
-            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+    def needs_push_to_s3(self) -> bool:
+        """Whether writes live in a local copy of an S3 database until ``push_to_s3``."""
+        return os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_db_file")
 
-            s3_file_storage = S3FileStorage("")
-            s3_file_storage.s3.put(self.temp_db_file, self.db_path, recursive=True)
+    async def push_to_s3(self) -> None:
+        if not self.needs_push_to_s3():
+            return
+        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+
+        s3_file_storage = S3FileStorage("")
+        s3_file_storage.s3.put(self.temp_db_file, self.db_path, recursive=True)
 
     async def pull_from_s3(self) -> None:
         from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage

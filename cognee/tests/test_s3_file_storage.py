@@ -1,15 +1,93 @@
 import os
 import pathlib
+from io import BytesIO
 from uuid import uuid4
 
+from fastapi import UploadFile
+
 import cognee
+from cognee.api.v1.ontologies.ontologies import OntologyService
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
+
+ONTOLOGY_KEY = "s3_storage_test_ontology"
+ONTOLOGY_PATH = (
+    pathlib.Path(__file__).parents[2] / "examples/guides/ontology_input_example/basic_ontology.owl"
+)
+
+
+async def list_user_ontology_objects(data_directory_path: str, user) -> list[str]:
+    """Objects under the user's ontology folder, read from the bucket itself.
+
+    An ``s3://`` path always resolves to ``S3FileStorage``, whatever the code under
+    test does, so this is an S3 listing and not a look at a local folder.
+    """
+    return await get_file_storage(data_directory_path).list_files(str(user.id))
+
+
+async def upload_ontology_and_read_it_back(data_directory_path: str, user) -> list:
+    """Upload an ontology, check it is stored on S3 and return it as cognify reads it."""
+    ontology_content = ONTOLOGY_PATH.read_bytes()
+    ontology_service = OntologyService()
+
+    await ontology_service.upload_ontology(
+        ontology_key=ONTOLOGY_KEY,
+        file=UploadFile(file=BytesIO(ontology_content), filename=ONTOLOGY_PATH.name),
+        user=user,
+    )
+
+    # Read as a local path, the s3:// data root is a folder named "s3:" in the working
+    # directory. Nothing of the upload may land there.
+    local_ontology_folder = pathlib.Path(os.path.abspath(data_directory_path)) / str(user.id)
+    assert not local_ontology_folder.exists(), (
+        f"The ontology upload wrote to a local folder instead of S3: {local_ontology_folder}"
+    )
+
+    stored_objects = await list_user_ontology_objects(data_directory_path, user)
+    assert f"{user.id}/metadata.json" in stored_objects, (
+        f"The ontology index is not an object under the S3 data root: {stored_objects}"
+    )
+    ontology_objects = [path for path in stored_objects if path.endswith(".owl")]
+    assert len(ontology_objects) == 1, (
+        f"The ontology file is not an object under the S3 data root: {stored_objects}"
+    )
+    async with get_file_storage(data_directory_path).open(ontology_objects[0], "rb") as file:
+        assert file.read() == ontology_content, "The ontology object on S3 differs from the upload"
+
+    ontology_files = await ontology_service.get_ontology_files([ONTOLOGY_KEY], user)
+    assert len(ontology_files) == 1, "The uploaded ontology was not read back from S3"
+    assert ontology_files[0].read() == ontology_content, (
+        "The ontology read back from S3 differs from the upload"
+    )
+    ontology_files[0].seek(0)
+    assert ONTOLOGY_KEY in await ontology_service.list_ontologies(user), (
+        "The uploaded ontology is not listed"
+    )
+    assert await ontology_service.export_ontology(ONTOLOGY_KEY, user), (
+        "The ontology stored on S3 could not be exported"
+    )
+
+    return ontology_files
+
+
+async def delete_ontology_and_check_it_is_gone(data_directory_path: str, user) -> None:
+    ontology_service = OntologyService()
+
+    await ontology_service.delete_ontology(ONTOLOGY_KEY, user)
+
+    stored_objects = await list_user_ontology_objects(data_directory_path, user)
+    assert not [path for path in stored_objects if path.endswith(".owl")], (
+        f"The deleted ontology is still an object on S3: {stored_objects}"
+    )
+    assert ONTOLOGY_KEY not in await ontology_service.list_ontologies(user), (
+        "The deleted ontology is still listed"
+    )
 
 
 async def main():
@@ -38,7 +116,21 @@ async def main():
 
     await cognee.add([text], dataset_name)
 
-    await cognee.cognify([dataset_name])
+    # An uploaded ontology must live in the bucket like every other upload, and cognify
+    # must be able to use it from there.
+    user = await get_default_user()
+    ontology_files = await upload_ontology_and_read_it_back(data_directory_path, user)
+
+    await cognee.cognify(
+        [dataset_name],
+        config={
+            "ontology_config": {
+                "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_files)
+            }
+        },
+    )
+
+    await delete_ontology_and_check_it_is_gone(data_directory_path, user)
 
     from cognee.infrastructure.databases.vector import get_vector_engine_async
 
@@ -68,7 +160,6 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
-    user = await get_default_user()
     history = await get_history(user.id)
 
     assert len(history) == 6, "Search history is not correct."

@@ -708,17 +708,22 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to initialize Ladybug database: {e}")
             raise
 
+    def needs_push_to_s3(self) -> bool:
+        """Whether writes live in a local copy of an S3 database until ``push_to_s3``."""
+        return os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file")
+
     async def push_to_s3(self) -> None:
-        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file"):
-            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+        if not self.needs_push_to_s3():
+            return
+        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
-            s3_file_storage = S3FileStorage("")
+        s3_file_storage = S3FileStorage("")
 
-            if self.connection:
-                async with self.LADYBUG_ASYNC_LOCK:
-                    self.connection.execute("CHECKPOINT;")
+        if self.connection:
+            async with self.LADYBUG_ASYNC_LOCK:
+                self.connection.execute("CHECKPOINT;")
 
-            s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
+        s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
 
     async def pull_from_s3(self) -> None:
         from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage

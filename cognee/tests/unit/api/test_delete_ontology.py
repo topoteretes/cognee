@@ -64,13 +64,14 @@ def ontology_service(tmp_path):
 
 
 class TestOntologyServiceDelete:
-    def test_delete_ontology_removes_file_and_metadata(self, ontology_service, tmp_path):
+    @pytest.mark.asyncio
+    async def test_delete_ontology_removes_file_and_metadata(self, ontology_service, tmp_path):
         """delete_ontology removes the .owl file and metadata entry."""
         user = SimpleNamespace(id="user-1")
 
         user_dir = tmp_path / "user-1"
         user_dir.mkdir()
-        owl_file = ontology_service._get_ontology_path(user_dir, "my_ontology")
+        owl_file = tmp_path / ontology_service._get_ontology_path("user-1", "my_ontology")
         owl_file.write_text("<rdf>test</rdf>")
 
         metadata = {
@@ -82,13 +83,14 @@ class TestOntologyServiceDelete:
         }
         (user_dir / "metadata.json").write_text(json.dumps(metadata))
 
-        ontology_service.delete_ontology("my_ontology", user)
+        await ontology_service.delete_ontology("my_ontology", user)
 
         assert not owl_file.exists()
         updated_metadata = json.loads((user_dir / "metadata.json").read_text())
         assert "my_ontology" not in updated_metadata
 
-    def test_delete_ontology_raises_for_unknown_key(self, ontology_service, tmp_path):
+    @pytest.mark.asyncio
+    async def test_delete_ontology_raises_for_unknown_key(self, ontology_service, tmp_path):
         """delete_ontology raises ValueError if ontology_key not in metadata."""
         user = SimpleNamespace(id="user-1")
 
@@ -97,9 +99,10 @@ class TestOntologyServiceDelete:
         (user_dir / "metadata.json").write_text(json.dumps({}))
 
         with pytest.raises(ValueError, match="not found"):
-            ontology_service.delete_ontology("nonexistent", user)
+            await ontology_service.delete_ontology("nonexistent", user)
 
-    def test_delete_ontology_handles_missing_owl_file(self, ontology_service, tmp_path):
+    @pytest.mark.asyncio
+    async def test_delete_ontology_handles_missing_owl_file(self, ontology_service, tmp_path):
         """delete_ontology succeeds even if .owl file is already missing."""
         user = SimpleNamespace(id="user-1")
 
@@ -115,12 +118,13 @@ class TestOntologyServiceDelete:
         }
         (user_dir / "metadata.json").write_text(json.dumps(metadata))
 
-        ontology_service.delete_ontology("orphan_key", user)
+        await ontology_service.delete_ontology("orphan_key", user)
 
         updated_metadata = json.loads((user_dir / "metadata.json").read_text())
         assert "orphan_key" not in updated_metadata
 
-    def test_delete_ontology_preserves_other_entries(self, ontology_service, tmp_path):
+    @pytest.mark.asyncio
+    async def test_delete_ontology_preserves_other_entries(self, ontology_service, tmp_path):
         """Deleting one ontology preserves other ontology entries."""
         user = SimpleNamespace(id="user-1")
 
@@ -132,19 +136,20 @@ class TestOntologyServiceDelete:
             "delete_this": {"filename": "del.owl", "size_bytes": 10, "uploaded_at": "2024-01-01"},
         }
         (user_dir / "metadata.json").write_text(json.dumps(metadata))
-        delete_file = ontology_service._get_ontology_path(user_dir, "delete_this")
-        keep_file = ontology_service._get_ontology_path(user_dir, "keep_this")
+        delete_file = tmp_path / ontology_service._get_ontology_path("user-1", "delete_this")
+        keep_file = tmp_path / ontology_service._get_ontology_path("user-1", "keep_this")
         delete_file.write_text("<rdf/>")
         keep_file.write_text("<rdf/>")
 
-        ontology_service.delete_ontology("delete_this", user)
+        await ontology_service.delete_ontology("delete_this", user)
 
         updated_metadata = json.loads((user_dir / "metadata.json").read_text())
         assert "keep_this" in updated_metadata
         assert "delete_this" not in updated_metadata
         assert keep_file.exists()
 
-    def test_delete_ontology_rejects_path_traversal_key(self, ontology_service, tmp_path):
+    @pytest.mark.asyncio
+    async def test_delete_ontology_rejects_path_traversal_key(self, ontology_service, tmp_path):
         """delete_ontology rejects keys that resolve outside the user directory."""
         user = SimpleNamespace(id="user-1")
         user_dir = tmp_path / "user-1"
@@ -160,7 +165,7 @@ class TestOntologyServiceDelete:
         (user_dir / "metadata.json").write_text(json.dumps(metadata))
 
         with pytest.raises(ValueError, match="Invalid ontology key"):
-            ontology_service.delete_ontology("../escape", user)
+            await ontology_service.delete_ontology("../escape", user)
 
 
 # ---------------------------------------------------------------------------
