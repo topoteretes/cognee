@@ -163,22 +163,28 @@ async def test_dropping_a_dataset_removes_its_pipelines_and_keeps_another_datase
 
 @pytest.mark.asyncio
 async def test_a_pipeline_cognee_did_not_write_is_left_alone(staging, tmp_path, monkeypatch):
-    """dlt's pipelines directory is shared with the host's own pipelines: a state file
-    that is not a dlt state object is not ours, and does not stop the drop."""
+    """dlt's pipelines directory is shared with the host's own pipelines: one of them that
+    loads into a dataset of the same name is kept, and a state file under one of cognee's
+    names that is not a dlt state object does not stop the drop."""
     from cognee.tasks.ingestion.ingest_dlt_source import drop_dlt_dataset
 
     monkeypatch.setenv("DLT_DATA_DIR", str(tmp_path))
     monkeypatch.setenv(DELETE_JOBS, "false")
-    for name, state in {"aaa_truncated": '{"dataset_name": "mi', "aab_list": "[]"}.items():
+    states = {
+        "host_pipeline": b'{"dataset_name": "mine"}',
+        "ingest_dlt_truncated": b'{"dataset_name": "mi',
+        "ingest_dlt_list": b"[]",
+        "ingest_dlt_binary": b"\xff\xfe\x00",
+    }
+    for name, state in states.items():
         (tmp_path / "pipelines" / name).mkdir(parents=True)
-        (tmp_path / "pipelines" / name / "state.json").write_text(state)
+        (tmp_path / "pipelines" / name / "state.json").write_bytes(state)
     await _ingest_into("mine", [{"id": "1", "title": "Plan", "content": "Dropped text."}])
 
     await drop_dlt_dataset("mine")
 
     assert _text_on_disk(tmp_path, "Dropped text.") == []
-    assert (tmp_path / "pipelines" / "aaa_truncated").is_dir()
-    assert (tmp_path / "pipelines" / "aab_list").is_dir()
+    assert sorted(path.name for path in (tmp_path / "pipelines").iterdir()) == sorted(states)
 
 
 @pytest.mark.asyncio

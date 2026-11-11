@@ -1,6 +1,7 @@
 """Fixtures shared by the dlt document-mode ingestion tests."""
 
 import importlib
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +9,20 @@ import pytest
 from cognee.tasks.ingestion.dlt_utils import DOCUMENT_SOURCE_ATTR, PIPELINE_SCOPE_ATTR
 
 ingest = importlib.import_module("cognee.tasks.ingestion.ingest_dlt_source")
+
+
+@pytest.fixture(autouse=True)
+def dlt_settings_restored():
+    """``apply_dlt_runtime_defaults`` writes the environment with ``setdefault``, which
+    monkeypatch does not undo, so a test's defaults would reach every later test."""
+    names = ("RUNTIME__DLTHUB_TELEMETRY", "LOAD__DELETE_COMPLETED_JOBS")
+    before = {name: os.environ.get(name) for name in names}
+    yield
+    for name, value in before.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
 
 
 @pytest.fixture

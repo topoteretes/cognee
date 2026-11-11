@@ -693,13 +693,18 @@ async def drop_dlt_dataset(dataset_name: str) -> None:
     directory of every pipeline that loaded into it (state, schemas and completed load
     packages, which hold the rendered text of every row). A later sync would read the
     staged rows back. Taken under the staging lock, so no dlt run is mid-write.
+
+    Staging is keyed by dataset name alone, not by owner or dataset id: datasets that
+    share a name (two users' ``main_dataset``, or names that differ only in characters
+    ``_to_safe_ident`` replaces) share one staging database and pipeline state, and this
+    drops it for all of them, sync cursors included. A caller must know no other dataset
+    of that name is still syncing.
+
+    Sources with no pipeline scope (database and CSV sources) share the one
+    ``ingest_dlt_source`` directory across datasets. It is removed only when its last
+    load was into this dataset; otherwise what it holds of this dataset stays.
     """
     apply_dlt_runtime_defaults()
-
-    import shutil
-    from pathlib import Path
-
-    from dlt.common.pipeline import get_dlt_pipelines_dir
 
     safe_name = _to_safe_ident(dataset_name)
     db_name = f"dlt_database_{safe_name}"
@@ -713,37 +718,50 @@ async def drop_dlt_dataset(dataset_name: str) -> None:
                 username=relational_config.db_username,
                 password=relational_config.db_password,
             )
+            staging_dir = None
         else:
-            # The database and the two datasets dlt attaches to it, under the name as given
-            # and as dlt normalizes it; never by prefix, which also matched a dataset whose
-            # name starts with this one (``<name>__other``).
-            from dlt.common.normalizers.naming.snake_case import NamingConvention
+            staging_dir = relational_config.db_path
+        await asyncio.to_thread(_delete_dlt_files, safe_name, db_name, staging_dir)
 
-            normalized = NamingConvention().normalize_identifier(safe_name)
-            files = {db_name}
-            for dataset in {safe_name, normalized}:
-                files |= {f"{db_name}__{dataset}", f"{db_name}__{dataset}_staging"}
-            for name in files:
-                Path(relational_config.db_path, name).unlink(missing_ok=True)
 
-        pipelines = Path(get_dlt_pipelines_dir())
-        for pipeline_dir in pipelines.iterdir() if pipelines.is_dir() else []:
-            state_path = pipeline_dir / "state.json"
-            if not state_path.is_file():
-                continue
-            if _pipeline_dataset(state_path) == safe_name:
-                shutil.rmtree(pipeline_dir)
+def _delete_dlt_files(safe_name: str, db_name: str, staging_dir: str | None) -> None:
+    """Remove a dataset's SQLite staging files (``staging_dir``) and pipeline directories."""
+    import shutil
+    from pathlib import Path
+
+    from dlt.common.pipeline import get_dlt_pipelines_dir
+
+    if staging_dir is not None:
+        # The database and the two datasets dlt attaches to it, under the name as given
+        # and as dlt normalizes it; never by prefix, which also matched a dataset whose
+        # name starts with this one (``<name>__other``).
+        from dlt.common.normalizers.naming.snake_case import NamingConvention
+
+        normalized = NamingConvention().normalize_identifier(safe_name)
+        files = {db_name}
+        for dataset in {safe_name, normalized}:
+            files |= {f"{db_name}__{dataset}", f"{db_name}__{dataset}_staging"}
+        for name in files:
+            Path(staging_dir, name).unlink(missing_ok=True)
+
+    # Only the directories pipeline_name_for_source names: dlt's pipelines directory is
+    # shared with the host's own pipelines, which may load into a dataset of this name.
+    pipelines = Path(get_dlt_pipelines_dir())
+    for pipeline_dir in pipelines.glob("ingest_dlt_*"):
+        state_path = pipeline_dir / "state.json"
+        if state_path.is_file() and _pipeline_dataset(state_path) == safe_name:
+            shutil.rmtree(pipeline_dir)
 
 
 def _pipeline_dataset(state_path) -> str | None:
     """The dataset a dlt pipeline loads into, or ``None`` for a state dlt did not write.
 
-    dlt's pipelines directory is shared with the host's own pipelines, and dlt writes its
-    state atomically, so a file that is not a state object belongs to someone else.
+    dlt writes its state atomically, so a file that cannot be read as a state object
+    (truncated, not UTF-8, unreadable) is not a pipeline of ours and is skipped.
     """
     try:
         state = json.loads(state_path.read_text())
-    except json.JSONDecodeError:
+    except (ValueError, OSError):
         return None
     return state.get("dataset_name") if isinstance(state, dict) else None
 

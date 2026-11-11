@@ -171,5 +171,3 @@ def test_dlt_runtime_defaults(monkeypatch, preset, expected):
     apply_dlt_runtime_defaults()
 
     assert {name: os.environ.get(name) for name in expected} == expected
-    for name in expected:  # setdefault writes outside monkeypatch's bookkeeping
-        monkeypatch.delenv(name, raising=False)
