@@ -247,3 +247,29 @@ async def test_index_data_points_does_not_mutate_metadata():
         await index_data_points([data_point])
 
     assert data_point.metadata["index_fields"] == original_index_fields
+
+
+@pytest.mark.asyncio
+async def test_failed_batch_waits_for_sibling_writes():
+    completed = asyncio.Event()
+    started = asyncio.Event()
+
+    async def write(_index, _property, batch):
+        if batch[0].name == "fails":
+            await started.wait()
+            raise ValueError("write failed")
+        started.set()
+        await asyncio.sleep(0.01)
+        completed.set()
+
+    engine = AsyncMock()
+    engine.index_data_points.side_effect = write
+    points = [TestDataPoint(name=name) for name in ("fails", "finishes")]
+    for point in points:
+        point.metadata = {"index_fields": ["name"]}
+    with (
+        patch.dict(index_data_points.__globals__, {"write_batch_size": lambda: 1}),
+        pytest.raises(ValueError, match="write failed"),
+    ):
+        await index_data_points(points, vector_engine=engine, semaphore=asyncio.Semaphore(2))
+    assert completed.is_set(), "no sibling write may outlive the failed storage call"
