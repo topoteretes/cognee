@@ -27,7 +27,8 @@ from collections.abc import Mapping
 
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 
-_MIN_TOKEN_LENGTH = 3
+# Tokens this short are never singularized ("bus", "gas", "its").
+_MIN_SINGULAR_LENGTH = 3
 
 # Short function-word list, without a stopword dependency. They are not content words
 # of a fuzzy match (``multiword_match_is_sound``), and one alone never matches a key
@@ -70,7 +71,7 @@ def tokens_of(name: str) -> list[str]:
 
 def singular(token: str) -> str:
     """A cheap singular form good enough for suffix comparison (never for display)."""
-    if len(token) <= _MIN_TOKEN_LENGTH:
+    if len(token) <= _MIN_SINGULAR_LENGTH:
         return token
     if token.endswith("ies"):
         return token[:-3] + "y"
@@ -125,7 +126,7 @@ def compact_key_index(resolver: BaseOntologyResolver, category: str) -> dict[str
     index: dict[str, str] = {}
     for key in keys:
         compact_key = compact(key)
-        if len(compact_key) >= _MIN_TOKEN_LENGTH:
+        if compact_key:
             index.setdefault(compact_key, key)
     return index
 
@@ -152,9 +153,8 @@ def find_class_named_in(name: str, class_index: Mapping[str, str]) -> str | None
     what the entity is. ``"customer feedback form"`` therefore does not become a
     ``Customer`` (its head is ``form``), while ``"acme customer"`` and ``"credit
     exposure to acme"`` do ground in ``Customer`` / ``CreditExposure``. The longest
-    class wins; a class shorter than one content token of three characters is ignored.
-    The head ends at the first phrase breaker (``of``, ``to``, ``for``, …), so a class
-    whose name contains one (``LineOfCredit``) is never found inside a name.
+    class wins. The head ends at the first phrase breaker (``of``, ``to``, ``for``, …), so
+    a class whose name contains one (``LineOfCredit``) is never found inside a name.
     ``class_index`` is the classes' :func:`compact_key_index`.
     """
     head = head_phrase_tokens(name)

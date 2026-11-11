@@ -28,6 +28,7 @@ from cognee.modules.engine.utils import generate_edge_name
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
     ontology_data_point,
+    ontology_edge_triples,
 )
 from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY, AttachedOntologyNode
 from cognee.modules.ontology.term_matching import compact_key_index, lookup_words, tokens_of
@@ -69,20 +70,10 @@ def _class_subgraph(
         if node.category == ONTOLOGY_CLASS_CATEGORY
     }
     class_by_key.setdefault(generate_edge_name(root.name), root)
-
-    class_edges = []
-    for source_name, relationship_name, target_name in edges:
-        source = class_by_key.get(generate_edge_name(source_name))
-        target = class_by_key.get(generate_edge_name(target_name))
-        if source is not None and target is not None:
-            class_edges.append(
-                (
-                    EntityType.id_for(source.name),
-                    EntityType.id_for(target.name),
-                    generate_edge_name(relationship_name),
-                )
-            )
-    return [ontology_data_point(EntityType, node) for node in class_by_key.values()], class_edges
+    classes = list(class_by_key.values())
+    return [ontology_data_point(EntityType, node) for node in classes], ontology_edge_triples(
+        classes, edges
+    )
 
 
 def align_tables_with_ontology(

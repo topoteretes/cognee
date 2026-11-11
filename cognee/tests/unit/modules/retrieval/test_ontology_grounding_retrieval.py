@@ -433,6 +433,23 @@ async def test_a_pinned_class_is_read_with_its_realizes_edges_only():
     assert acme["edges"][0]["text"] == "acme -- is_a -- customer"
 
 
+@pytest.mark.asyncio
+async def test_an_entity_that_is_not_pinned_keeps_its_incoming_is_a_edges_first():
+    # Members sort last only under a pinned class; without an ontology the order is unchanged.
+    language_id, python_id = str(uuid4()), str(uuid4())
+    fact_ids = [str(uuid4()) for _ in range(10)]
+    nodes = [(language_id, {"name": "programming language"}), (python_id, {"name": "python"})]
+    nodes += [(fact_id, {"name": f"fact {index}"}) for index, fact_id in enumerate(fact_ids)]
+    edges = [(python_id, language_id, "is_a", {})]
+    edges += [(language_id, fact_id, "mentioned_in", {}) for fact_id in fact_ids]
+    hit = ScoredResult(id=UUID(language_id), score=0.2, payload={"name": "programming language"})
+
+    entities, _ = await build_entities(_graph_engine(nodes, edges), [hit], 10)
+
+    (language,) = entities
+    assert language["edges"][0]["text"] == "python -- is_a -- programming language"
+
+
 async def _retrieve_hybrid(query: str):
     """Run ``HybridRetriever._retrieve_one`` with every store mocked out.
 

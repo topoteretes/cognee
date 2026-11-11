@@ -105,6 +105,20 @@ def test_a_restriction_superclass_is_not_a_parent():
     )
 
 
+def test_a_two_letter_name_is_a_key_like_any_other():
+    graph = Graph()
+    graph.add((NS.Country, RDF.type, OWL.Class))
+    graph.add((NS.UK, RDF.type, NS.Country))
+    resolver = RDFLibOntologyResolver(ontology_file=None)
+    resolver.graph = graph
+    resolver.build_lookup()
+
+    (concept,) = ground_query("What is our exposure to the UK?", resolver)
+
+    assert concept.canonical_name == "UK"
+    assert concept.node_id == str(Entity.id_for("UK"))
+
+
 def test_a_longer_run_cannot_swallow_an_unrelated_word():
     # "enterprise customer acme" is no key, so it cannot consume "acme": the class
     # comes from the bigram and Acme still resolves on its own.

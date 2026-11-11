@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, NamedTuple
 from uuid import UUID
 
@@ -135,14 +136,18 @@ async def build_entities(
     class_ids = [entity_id for entity_id in entity_ids if entity_id in pinned_class_ids]
     other_ids = [entity_id for entity_id in entity_ids if entity_id not in pinned_class_ids]
     try:
-        nodes, edges = [], []
+        reads = []
         if other_ids:
-            nodes, edges = await graph_engine.get_neighborhood(other_ids, depth=1)
+            reads.append(graph_engine.get_neighborhood(other_ids, depth=1))
         if class_ids:
-            class_nodes, class_edges = await graph_engine.get_neighborhood(
-                class_ids, depth=1, edge_types=[REALIZES_RELATIONSHIP]
+            reads.append(
+                graph_engine.get_neighborhood(
+                    class_ids, depth=1, edge_types=[REALIZES_RELATIONSHIP]
+                )
             )
-            nodes, edges = [*nodes, *class_nodes], [*edges, *class_edges]
+        neighborhoods = await asyncio.gather(*reads)
+        nodes = [node for read_nodes, _ in neighborhoods for node in read_nodes]
+        edges = [edge for _, read_edges in neighborhoods for edge in read_edges]
     except Exception as error:
         logger.warning(
             "Graph neighborhood retrieval failed; returning entities without edges: %s",
@@ -166,10 +171,10 @@ async def build_entities(
         connections = connections_by_entity_id.get(entity["id"], [])
         _hydrate_entity(entity, connections, scoped=scoped)
         entity["edges"] = _edge_bullets_from_connections(
-            entity["id"],
             connections,
             max_edges_per_entity,
             edge_ranks or {},
+            entity["id"] if entity["id"] in pinned_class_ids else None,
         )
     return entities, _reachable_edge_type_ids(connections_by_entity_id)
 
@@ -348,13 +353,18 @@ def _entity_type(result_payload: dict) -> str | None:
 
 
 def _edge_bullets_from_connections(
-    entity_id: str, connections: list[Any], max_edges: int, edge_ranks: dict[str, int]
+    connections: list[Any],
+    max_edges: int,
+    edge_ranks: dict[str, int],
+    pinned_class_id: str | None = None,
 ) -> list[dict]:
     if max_edges <= 0:
         return []
 
     ranked = _deduplicated_bullets(connections)
-    ranked.sort(key=lambda edge_bullet: _edge_sort_key(edge_bullet.bullet, edge_ranks, entity_id))
+    ranked.sort(
+        key=lambda edge_bullet: _edge_sort_key(edge_bullet.bullet, edge_ranks, pinned_class_id)
+    )
     selected = ranked[:max_edges]
     # Inside the window a superseded fact sinks below the ones that still hold.
     # The sort is stable, so everything else keeps the rank order above.
@@ -394,17 +404,21 @@ def _deduplicated_bullets(connections: Any) -> list["_EdgeBullet"]:
     return bullets
 
 
-def _edge_sort_key(edge: dict, edge_ranks: dict[str, int], entity_id: str) -> tuple[int, int, int]:
-    """The entity's own type edges first, then query-ranked edges, then legacy graph
-    order, then type edges pointing into the entity (a class's members say the least).
+def _edge_sort_key(
+    edge: dict, edge_ranks: dict[str, int], pinned_class_id: str | None = None
+) -> tuple[int, int, int]:
+    """Type edges first, then query-ranked edges, then legacy graph order.
 
-    Within each group an edge from an authoritative source (a ``realizes`` edge
-    stamped ``authoritative`` by schema alignment) sorts before the others, so when
-    several tables realize one concept the system of record survives the edge cap.
+    For a pinned class (``pinned_class_id``) the ``is_a`` edges pointing into it come
+    last: they are its members, which say the least about the class. Within each group
+    an edge from an authoritative source (a ``realizes`` edge stamped ``authoritative``
+    by schema alignment) sorts before the others, so when several tables realize one
+    concept the system of record survives the edge cap.
     """
     authority = 0 if edge.get("authoritative") else 1
     if _is_type_edge(edge):
-        return (0 if edge.get("source_id") == entity_id else 3, 0, authority)
+        is_member = pinned_class_id is not None and edge.get("source_id") != pinned_class_id
+        return (3 if is_member else 0, 0, authority)
     rank = edge_ranks.get(edge.get("edge_type_id"))
     if rank is None:
         return (2, 0, authority)

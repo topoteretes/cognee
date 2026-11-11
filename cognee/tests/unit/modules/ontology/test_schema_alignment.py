@@ -101,17 +101,28 @@ def test_align_tables_emits_realizes_edges_and_the_ontology_subgraph():
         assert attributes["relationship_name"] == name
 
 
-def test_a_table_and_a_document_that_name_one_class_write_the_same_node():
+def test_a_table_and_a_document_that_name_one_class_write_the_same_subgraph():
     resolver = _crm_resolver()
     chunk = MagicMock(importance_weight=0.5, belongs_to_set=[])
     document_graph = KnowledgeGraph(
         nodes=[Node(id="n1", name="Acme", type="Customer", description="")], edges=[]
     )
 
-    from_document, _ = construct_data_points_and_edges_with_ontology(
+    from_document, document_edges = construct_data_points_and_edges_with_ontology(
         [chunk], [document_graph], resolver, ontology_mode="annotate"
     )
-    from_table, _ = align_tables_with_ontology({uuid4(): "customers"}, resolver)
+    from_table, table_edges = align_tables_with_ontology({uuid4(): "customers"}, resolver)
+
+    class_edges = {
+        (str(source), str(target), name)
+        for source, target, name, _ in table_edges
+        if name != REALIZES_RELATIONSHIP
+    }
+    assert {name for _, _, name in class_edges} == {"is_a", "hassubscription"}
+    assert class_edges <= {
+        (identity.source_id, identity.target_id, identity.relationship_name)
+        for identity in document_edges
+    }
 
     fields = ("name", "description", "ontology_valid", "ontology_uri")
     assert {entity_type.name for entity_type in from_table} == {"customer", "party", "subscription"}
