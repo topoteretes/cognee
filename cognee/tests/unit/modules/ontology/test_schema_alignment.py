@@ -8,6 +8,9 @@ import pytest
 from rdflib import OWL, RDF, RDFS, Graph, Namespace
 
 from cognee.modules.engine.models import EntityType
+from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
+    construct_data_points_and_edges_with_ontology,
+)
 from cognee.modules.ontology.exceptions import GetSubgraphError, OntologyInitializationError
 from cognee.modules.ontology.ontology_env_config import OntologyEnvConfig
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
@@ -15,6 +18,7 @@ from cognee.modules.ontology.schema_alignment import (
     REALIZES_RELATIONSHIP,
     align_tables_with_ontology,
 )
+from cognee.shared.data_models import KnowledgeGraph, Node
 
 NS = Namespace("http://example.org/crm#")
 
@@ -97,10 +101,35 @@ def test_align_tables_emits_realizes_edges_and_the_ontology_subgraph():
         assert attributes["relationship_name"] == name
 
 
-def test_align_tables_dedupes_shared_ontology_edges_across_tables():
-    _, edges = align_tables_with_ontology(
-        {uuid4(): "crm.customers", uuid4(): "legacy.customer"}, _crm_resolver()
+def test_a_table_and_a_document_that_name_one_class_write_the_same_node():
+    resolver = _crm_resolver()
+    chunk = MagicMock(importance_weight=0.5, belongs_to_set=[])
+    document_graph = KnowledgeGraph(
+        nodes=[Node(id="n1", name="Acme", type="Customer", description="")], edges=[]
     )
+
+    from_document, _ = construct_data_points_and_edges_with_ontology(
+        [chunk], [document_graph], resolver, ontology_mode="annotate"
+    )
+    from_table, _ = align_tables_with_ontology({uuid4(): "customers"}, resolver)
+
+    fields = ("name", "description", "ontology_valid", "ontology_uri")
+    assert {entity_type.name for entity_type in from_table} == {"customer", "party", "subscription"}
+    for entity_type in from_table:
+        written_by_cognify = from_document[str(entity_type.id)]
+        assert [getattr(written_by_cognify, field) for field in fields] == [
+            getattr(entity_type, field) for field in fields
+        ]
+
+
+def test_align_tables_dedupes_shared_ontology_edges_across_tables():
+    resolver = _crm_resolver()
+    resolver.get_subgraph = MagicMock(wraps=resolver.get_subgraph)
+
+    _, edges = align_tables_with_ontology(
+        {uuid4(): "crm.customers", uuid4(): "legacy.customer"}, resolver
+    )
+    assert resolver.get_subgraph.call_count == 1  # the class is walked once, not once per table
     assert len([edge for edge in edges if edge[2] == "is_a"]) == 1  # once, not once per table
     assert len(_realizes(edges)) == 2
 

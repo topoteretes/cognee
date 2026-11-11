@@ -24,8 +24,11 @@ from typing import Any
 from uuid import UUID
 
 from cognee.modules.engine.models import EntityType
-from cognee.modules.engine.utils import generate_edge_name, generate_node_name
+from cognee.modules.engine.utils import generate_edge_name
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
+    ontology_data_point,
+)
 from cognee.modules.ontology.models import ONTOLOGY_CLASS_CATEGORY, AttachedOntologyNode
 from cognee.modules.ontology.term_matching import compact_key_index, lookup_words, tokens_of
 from cognee.shared.logging_utils import get_logger
@@ -47,17 +50,6 @@ def authority_for(
         if name in lowered:
             return True, lowered[name]
     return False, None
-
-
-def _entity_type_for(node: AttachedOntologyNode) -> EntityType:
-    normalized_name = generate_node_name(node.name)
-    return EntityType(
-        id=EntityType.id_for(node.name),
-        name=normalized_name,
-        description=normalized_name,
-        ontology_valid=True,
-        ontology_uri=str(node.uri) if node.uri is not None else None,
-    )
 
 
 def _class_subgraph(
@@ -90,7 +82,7 @@ def _class_subgraph(
                     generate_edge_name(relationship_name),
                 )
             )
-    return [_entity_type_for(node) for node in class_by_key.values()], class_edges
+    return [ontology_data_point(EntityType, node) for node in class_by_key.values()], class_edges
 
 
 def align_tables_with_ontology(
@@ -113,19 +105,23 @@ def align_tables_with_ontology(
     class_index = compact_key_index(resolver, ONTOLOGY_CLASS_CATEGORY)
     entity_types: dict[UUID, EntityType] = {}
     edge_attributes: dict[tuple[UUID, UUID, str], dict[str, Any]] = {}
+    roots_by_key: dict[str, AttachedOntologyNode] = {}
     realized: list[str] = []
     for table_id, table_name in table_names.items():
         class_key = lookup_words(tokens_of(table_name.rsplit(".", 1)[-1]), class_index)
         if class_key is None:
             continue
-        nodes, edges, root = resolver.get_subgraph(
-            node_name=class_key, node_type=ONTOLOGY_CLASS_CATEGORY
-        )
-        class_types, class_edges = _class_subgraph(nodes, edges, root)
-        for entity_type in class_types:
-            entity_types.setdefault(entity_type.id, entity_type)
-        for edge_key in class_edges:
-            edge_attributes.setdefault(edge_key, {})
+        root = roots_by_key.get(class_key)
+        if root is None:
+            nodes, edges, root = resolver.get_subgraph(
+                node_name=class_key, node_type=ONTOLOGY_CLASS_CATEGORY
+            )
+            roots_by_key[class_key] = root
+            class_types, class_edges = _class_subgraph(nodes, edges, root)
+            for entity_type in class_types:
+                entity_types.setdefault(entity_type.id, entity_type)
+            for edge_key in class_edges:
+                edge_attributes.setdefault(edge_key, {})
         authoritative, owner = authority_for(table_name, authoritative_sources)
         edge_attributes[(table_id, EntityType.id_for(root.name), REALIZES_RELATIONSHIP)] = {
             "authoritative": authoritative,

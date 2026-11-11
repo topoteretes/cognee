@@ -334,6 +334,27 @@ def _mark_existing_ontology_data_point(
     return True
 
 
+def ontology_data_point(
+    data_point_class: type[Entity] | type[EntityType],
+    ontology_node: AttachedOntologyNode,
+    **fields,
+) -> Entity | EntityType:
+    """The graph node of an ontology class or individual, under its deterministic id.
+
+    Cognify and table alignment (``schema_alignment``) both build ontology nodes here, so
+    a class that a document and a table both name is one node.
+    """
+    normalized_name = generate_node_name(ontology_node.name)
+    return data_point_class(
+        id=data_point_class.id_for(ontology_node.name),
+        name=normalized_name,
+        description=normalized_name,
+        ontology_valid=True,
+        ontology_uri=str(ontology_node.uri) if ontology_node.uri is not None else None,
+        **fields,
+    )
+
+
 def _add_ontology_data_points(
     ontology_nodes: list[AttachedOntologyNode],
     source_chunk: DocumentChunk,
@@ -353,28 +374,11 @@ def _add_ontology_data_points(
         ):
             continue
 
-        data_point_id = data_point_class.id_for(ontology_node.name)
-        data_point_key = str(data_point_id)
-        normalized_name = generate_node_name(ontology_node.name)
-        if data_point_class is EntityType:
-            data_points_by_id[data_point_key] = EntityType(
-                id=data_point_id,
-                name=normalized_name,
-                description=normalized_name,
-                ontology_valid=True,
-                ontology_uri=ontology_uri,
-                importance_weight=source_chunk.importance_weight,
-            )
-        else:
-            data_points_by_id[data_point_key] = Entity(
-                id=data_point_id,
-                name=normalized_name,
-                description=normalized_name,
-                ontology_valid=True,
-                ontology_uri=ontology_uri,
-                belongs_to_set=source_chunk.belongs_to_set,
-                importance_weight=source_chunk.importance_weight,
-            )
+        fields = {"importance_weight": source_chunk.importance_weight}
+        if data_point_class is Entity:
+            fields["belongs_to_set"] = source_chunk.belongs_to_set
+        data_point = ontology_data_point(data_point_class, ontology_node, **fields)
+        data_points_by_id[str(data_point.id)] = data_point
 
 
 def _add_ontology_edges(
