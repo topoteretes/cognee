@@ -141,20 +141,22 @@ def _declares_merge(resource) -> bool:
 
 
 def apply_dlt_runtime_defaults() -> None:
-    """Set cognee's defaults for dlt's own settings, as environment variables.
+    """Set cognee's defaults for dlt's own settings in the environment.
 
-    Runs when ``ingest_dlt_source`` is imported, before anything reads dlt's
-    configuration: dlt starts its telemetry on the first read (building a
-    ``sql_database`` source is one) and never re-reads the setting. A value already in the
-    environment is kept; one set only in dlt's ``config.toml`` is not seen
-    (reading it would start the telemetry) and is overridden. A process that
-    used dlt before importing cognee has already started dlt's telemetry, and
-    this does not stop it: import cognee first, or set the variable yourself.
+    Called before cognee builds a dlt source or pipeline: dlt reads its telemetry
+    setting once, when its runtime first starts (``sql_database()`` starts it), and
+    ``dlt.config`` set afterwards does not reach it, so only the environment, set
+    first, does. A value already in the environment is kept; one set only in dlt's
+    ``config.toml`` is not seen (reading it would start the runtime) and is
+    overridden. A process that used dlt before cognee's first dlt call has already
+    started dlt's telemetry: set ``RUNTIME__DLTHUB_TELEMETRY=false`` yourself.
 
     - ``RUNTIME__DLTHUB_TELEMETRY=false`` when ``TELEMETRY_DISABLED`` is set, so
-      cognee's switch also stops the events dlt sends to its own endpoint.
-    - ``LOAD__DELETE_COMPLETED_JOBS=true``: completed load packages hold every
-      row's full text under dlt's pipelines directory, which no forget reaches.
+      cognee's switch also stops the events dlt posts to dltHub on every run.
+    - ``LOAD__DELETE_COMPLETED_JOBS=true``: dlt keeps every completed load package,
+      with the rendered text of every row, under its pipelines directory, outside
+      cognee's data root, so a forgotten or deleted record stays on disk. A failed
+      package is kept either way, for the retry.
     """
     if os.getenv("TELEMETRY_DISABLED"):
         os.environ.setdefault("RUNTIME__DLTHUB_TELEMETRY", "false")

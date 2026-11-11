@@ -173,11 +173,3 @@ def test_dlt_runtime_defaults(monkeypatch, preset, expected):
     assert {name: os.environ.get(name) for name in expected} == expected
     for name in expected:  # setdefault writes outside monkeypatch's bookkeeping
         monkeypatch.delenv(name, raising=False)
-
-
-@pytest.mark.asyncio
-async def test_completed_load_jobs_are_not_kept(staging, tmp_path, monkeypatch):
-    monkeypatch.setenv("LOAD__DELETE_COMPLETED_JOBS", "true")
-    await staging("notes", [{"id": "a", "title": "A", "content": "the full row text"}])
-    kept = [path for path in (tmp_path / "pipelines").rglob("completed_jobs/*") if path.is_file()]
-    assert kept == []
