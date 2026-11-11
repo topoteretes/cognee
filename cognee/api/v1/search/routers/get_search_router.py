@@ -5,10 +5,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from cognee import __version__ as cognee_version
-from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
+from cognee.api.DTO import ErrorResponse, InDTO, OutDTO, RetrieverSpecificConfig
 from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import delete_user_search_history, get_history
 from cognee.modules.search.types import SearchResult, SearchType
@@ -136,25 +136,7 @@ class SearchPayloadDTO(InDTO):
             "feature_unavailable) and, when one argument is at fault, its 'param'."
         ),
     )
-    retriever_specific_config: dict[str, Any] | None = Field(
-        default=None,
-        examples=[None],
-        description=(
-            "Options for the retriever behind search_type, the same dict the SDK's "
-            "search(retriever_specific_config=...) takes, e.g. chunks_top_k, "
-            "entities_top_k, facts_top_k, include_external_metadata and "
-            "external_metadata_keys for HYBRID_COMPLETION. Keys the chosen search type "
-            "does not read are ignored. response_model is a Python type and cannot be "
-            "sent over HTTP."
-        ),
-    )
-
-    @field_validator("retriever_specific_config")
-    @classmethod
-    def _reject_response_model(cls, config: dict[str, Any] | None) -> dict[str, Any] | None:
-        if config and "response_model" in config:
-            raise ValueError("response_model cannot be set over HTTP; it is a Python type.")
-        return config
+    retriever_specific_config: RetrieverSpecificConfig = None
 
 
 def get_search_router() -> APIRouter:
@@ -288,7 +270,7 @@ def get_search_router() -> APIRouter:
         - **max_iter** (Optional[int]): Max agentic iterations, must be >= 1 (AGENTIC_COMPLETION only)
         - **include_references** (bool): Attach source references to completion-type results (default: true)
         - **code_query** (Optional[dict]): Structured operation arguments for CODE search
-        - **retriever_specific_config** (Optional[dict]): Options for the retriever behind search_type, as the SDK's `search(retriever_specific_config=...)` takes them; `response_model` is rejected with 422
+        - **retriever_specific_config** (Optional[dict]): Options for the retriever behind search_type, as the SDK's `search(retriever_specific_config=...)` takes them; known keys are checked for type and upper bound, and an invalid value or `response_model` is rejected with 400
 
         ## Response
         Returns a list of search results containing relevant nodes from the graph.
