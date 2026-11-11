@@ -71,22 +71,35 @@ async def test_getting_of_documents(dataset_id_1):
 
 
 async def test_vector_engine_search_none_limit():
-    query_text = "Tell me about Quantum computers"
+    from uuid import NAMESPACE_URL, uuid4, uuid5
 
     from cognee.infrastructure.databases.vector import get_vector_engine_async
 
     vector_engine = await get_vector_engine_async()
-    collection_name = "Entity_name"
-
-    query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
-
-    result = await vector_engine.search(
-        collection_name=collection_name, query_vector=query_vector, limit=None
-    )
-
-    # Check that we did not accidentally use any default value for limit
-    # in vector search along the way (like 5, 10, or 15)
-    assert len(result) > 15
+    collection_name = f"LimitNone_{uuid4().hex}"
+    query_vector = [1.0] + [0.0] * (vector_engine.embedding_engine.get_vector_size() - 1)
+    point_ids = [uuid5(NAMESPACE_URL, f"lancedb-limit-none:{i}") for i in range(20)]
+    # The LLM may extract fewer than 16 entities. Seed more than the default
+    # limit independently of extraction, then check every identity is returned.
+    try:
+        await vector_engine.upsert_raw_vectors(
+            collection_name,
+            [
+                {
+                    "id": point_id,
+                    "vector": query_vector,
+                    "payload": {"id": str(point_id), "text": f"limit fixture {i}"},
+                }
+                for i, point_id in enumerate(point_ids)
+            ],
+        )
+        result = await vector_engine.search(
+            collection_name=collection_name, query_vector=query_vector, limit=None
+        )
+        assert len(result) == len(point_ids)
+        assert {str(row.id) for row in result} == {str(point_id) for point_id in point_ids}
+    finally:
+        await vector_engine.delete_collection(collection_name)
 
 
 async def test_vector_engine_search_with_nodeset_filtering():
