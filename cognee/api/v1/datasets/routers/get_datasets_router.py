@@ -799,6 +799,7 @@ def get_datasets_router() -> APIRouter:
                 external_metadata=data.external_metadata,
                 data_size=data.data_size,
                 content_hash=data.content_hash,
+                structure=(data.system_metadata or {}).get("structure"),
             )
             for data in dataset_data
         ]

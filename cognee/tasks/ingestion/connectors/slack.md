@@ -39,7 +39,19 @@ before `users:read` was added have to reconnect once (see "Limits").
 
 1. The server must be reachable from Slack over public HTTPS (a domain, or a tunnel such as
    ngrok for testing): Slack calls the events URL, the interactivity URL and both OAuth
-   redirect URLs.
+   redirect URLs. The UI must call the API on that same host, because the OAuth callback
+   checks a cookie set when the UI started the install; on another host it ends in
+   `error_invalid_state`. Locally, start the UI with the API proxy and tunnel the UI, not
+   the API:
+   ```bash
+   cd cognee-frontend && COGNEE_DEV_API_PROXY=http://localhost:8000 npm run dev
+   ngrok http 3000
+   ```
+   (with `cognee-cli -ui`, put `COGNEE_DEV_API_PROXY=http://localhost:8000` in the `.env`
+   instead: the CLI starts the UI with that environment), then open the UI at
+   `https://<ngrok>` (not `localhost:3000`, which the CLI opens by itself) and set
+   `SLACK_FRONTEND_BASE_URL=https://<ngrok>`. The UI forwards `/api/v1` to the API, Slack's
+   signed requests included.
 2. Create the app from `scripts/slack-app-manifest.sdk.yml` (api.slack.com/apps > Create New
    App > From a manifest), after replacing `<ngrok>` with your host and, for a real
    deployment, the app's name and bot name. Slack tries to verify the events URL when the
@@ -175,20 +187,49 @@ and `im:history`, and the events `app_mention` and `message.im`, all in
 
 | Message | What it does |
 |---|---|
-| `@cognee <question>` | answers from the member's memory (the workspace's dataset only within the selected channels Slack says the member is in, `users.conversations`; when Slack cannot say, without it, and the member is told), visible only to them, with the *Sources* it read (each a link to its document, for a synced conversation the message in Slack) and *Share* (posts the question, answer and sources in the channel) and *Discard*; the answer waits for them as session Q&A in Cognee's session cache (session `slack:<team>:<member>`, the cache's own expiry), so Share works after a restart or on another worker; with `CACHING=false`, or when the cache cannot keep it, the answer comes without Share. Kept answers quote the workspace, so the 14-day deletion after an uninstall deletes every member's, and a disconnect that deletes the data deletes those kept under the disconnecting user |
+| `@cognee <question>` | in a channel, answers in the question's thread (or the thread it was asked in) with a message everyone in the channel sees (`chat.postMessage`), so it reads only what all of them can: the workspace's dataset within that channel, when it is synced, and the selected public channels (Slack's `users.conversations` for the app, asked on every question, so a channel made private drops out at once), never a selected private channel other than this one and never the asker's other datasets. In a Slack Connect channel (`conversations.info`'s `is_ext_shared`) it reads that channel alone, since the other organization's members cannot read this workspace's channels; when Slack cannot say, it reads that channel alone too and the asker is told. In a direct message it answers with a message in the direct message, from the member's memory: the workspace's dataset within the selected channels Slack says the member is in (`users.conversations`; when Slack cannot say, without it, and the member is told) and their other datasets whole. Either way the answer is the reply itself (no header), shown below; a miss or a failure is shown to the asker alone |
 | `@cognee remember <text>` | saves a note Slack never saw, e.g. a decision from a call; the note is the item of that message, so `@cognee forget` in its thread, *Forget this* on it, or deleting the message forgets it |
 | `@cognee remember` in a thread | saves the thread's first message, followed like "Remember this": an edit or a deletion in Slack forgets the copy |
 | `@cognee forget` in a thread (a channel or a DM) | forgets the member's own copy or note of the thread's first message; the *Forget this* shortcut does it for any message. Other members' copies stay, and the channel allowlist never blocks it. On a message of a synced channel, its author or the connection's owner also takes it out of the workspace's memory (below) |
-| `@cognee here <question>` | the same, within this channel's synced messages only (the node set `slack:channel:<id>`); in a direct message it explains that it needs a channel |
 | `@cognee link` | the page where the member links their Slack account |
 | `@cognee unlink` | ends the member's own link |
 | `@cognee status` | which Cognee account the member is linked to, whether this channel is synced and whether commands work here, and the last sync |
 | `@cognee help`, or a bare mention | what the app does |
 
-Every answer is ephemeral, but a mention itself is visible to the channel: a private question
-goes in a direct message. A direct message is always allowed; in a channel the command
+An answer is a message; every other reply is ephemeral, shown to the member who asked. A
+question that should stay private goes in a direct message. A direct message is always allowed; in a channel the command
 allowlist applies, except to `forget`, `unlink` and `status`. The "Remember this" and "Forget this" message shortcuts save and forget
 any message. There are no slash commands.
+
+An answer reads like cognee's own Search answer. The LLM's Markdown is rendered as Slack
+mrkdwn by one renderer (headings become a bold line, a leading "Answer" heading goes, bold,
+italics, strikethrough, bullets and https links are converted, code is kept; everything stays
+escaped, so an answer cannot ping a channel or disguise a link); the notification text is the
+same answer as plain text. Below each fact one line numbers the documents it read, `Sources ·
+N   1 #general · ana · Nov 5   2 …`, each a link to the message in Slack: the channel is the
+name in the row's structure (`document_parent`), the author and day are read from the row's
+title, so neither changes what a row is and nothing is re-cognified. A line then says what the
+answer read: `From #channel and N public channels`, `From #channel` in a Slack Connect channel
+or when Slack could not say which channels are public, `From your channels and your memory` in
+a direct message.
+
+**Rating.** Under every answer, 👍 and 👎. Each answer is recorded as session Q&A (session
+`slack:<team>:<member>`) under the person who connected Slack, who owns the workspace dataset,
+with the graph nodes and edges its workspace search read; a channel answer keeps its question
+and answer text, a direct message's keeps neither (only the graph ids), since it may quote the
+member's own datasets. Only the person who asked can rate: the click's Slack user (signed by
+Slack) must own the answer's session, and the button carries the answer's random id alone, so
+anyone else's click changes nothing and they are told so privately. 👍 records 5 and 👎 1 as
+the answer's `feedback_score`; a second click rates again and replaces the first rating. Each
+rating runs improve's `feedback_weights` pipeline at once over that session and the workspace
+dataset, moving the `feedback_weight` of the graph elements the answer used (elements of the
+member's own datasets are not in the workspace graph and stay untouched). **Ratings change
+answers only once `DEFAULT_FEEDBACK_INFLUENCE` is above 0** (default `0.0`, a separate SDK
+setting); until then they are collected and nothing reads them. With `CACHING=false`, or when
+the cache cannot keep the record, the answer is posted without the buttons. The cache's own
+expiry applies. The records quote the workspace, so the 14-day deletion after an uninstall
+deletes every member's, and a disconnect that deletes the data deletes those kept under the
+disconnecting user.
 
 A mention is answered once per delivery. The event is acknowledged at once and answered in the
 background, so Slack sends it again only when the acknowledgement did not reach it in time (a
@@ -241,7 +282,11 @@ people rarely open threads becomes a few documents a day, not one per message:
 - Left out: messages to the Cognee app, any message that starts by mentioning it, a command
   (`@cognee forget`) or a question (`@cognee what did we decide?`): they talk to the app, not
   to the channel, and a `remember` note is stored on its own. A message that only mentions
-  the app later is content.
+  the app later is content. The same holds for any other app (a user `users.info` marks
+  `is_bot`, such as another Cognee app): a message that opens by mentioning it is a command
+  to it, and in a thread opened by such a command, what apps reply is left out too, while
+  what people reply stays. Other apps' messages outside such threads (CI results, alerts)
+  are content.
 - Left out: messages that are not something a person wrote (joins, leaves, topic and purpose
   changes, pins, deleted-message placeholders and every other non-content subtype) and the
   Cognee app's own messages. A thread or a day with nothing left produces no row.
@@ -356,6 +401,20 @@ naming who can. A thread's first message taken out leaves its replies in memory.
 
 ## Limits
 
+- **A guest in a channel sees its answers.** An answer in a channel uses the selected public
+  channels, which every full member of the workspace can read, but a single- or
+  multi-channel guest cannot. Slack does not say whether a channel has a guest without
+  reading every member, so Cognee cannot tell, and a guest in the channel reads answers drawn
+  from public channels they are not in. Ask in a direct message where that matters, or leave
+  such channels out of the command allowlist. A Slack Connect channel is told apart and gets
+  answers from itself alone.
+- **Connect from the host the sign-in returns to.** The OAuth callback is accepted only with
+  the cookie `authorize` set, and a cookie belongs to one host. Connect (and Link Slack)
+  started from a UI that calls the API on another host than `SLACK_REDIRECT_URI` /
+  `SLACK_MEMBER_REDIRECT_URI` ends in `error_invalid_state` after Slack's consent page. The
+  usual case is a tunnel while the UI is open on `localhost:3000`, which `cognee-cli -ui`
+  opens by itself: open the UI on the tunnel's host instead (Setup, step 1). The UI checks
+  this before opening Slack and names the address to use.
 - **A run is bounded and resumable.** `max_requests` (default 1500) is the request budget of
   one run; a call retried after a rate limit or a 5xx counts once. A spent budget stops the run
   cleanly with `failed_budget`, a rate limit that outlasts the retries with `failed_rate_limit`,
@@ -426,13 +485,14 @@ naming who can. A thread's first message taken out leaves its replies in memory.
   channel, `"general"` and `"#general"` find nothing. The name stays out on purpose: node sets
   are part of a row's content hash, so a name in them would re-cognify a whole channel on every
   rename. The ids are in the channel list (`GET /api/v1/integrations/slack/resources`, `id`
-  and `name`); in Slack, `@cognee here` filters by the channel it is sent in.
+  and `name`).
 - **A raw search hit names no source (G10).** A chunk returned by `CHUNKS` or `recall` carries
   the stored file name (`text_<md5>`) and the `data_id`, not the title or the link. A search
   with `include_references=True` names each document it read by the title and link its data
   record keeps in `system_metadata` (`title`, `url`), copied into the chunk payload as
-  `document_title` / `document_url` (SDK-1500), and `@cognee` asks that way: its answer ends
-  with *Sources*, one link per conversation it read, to the message in Slack.
+  `document_title` / `document_url` (SDK-1500), with the row's channel as `document_parent`, and
+  `@cognee` asks that way: each fact ends with a numbered *Sources* line, one link per
+  conversation it read, to the message in Slack.
 - Direct messages and group DMs are not synced.
 - Documents written by the former history importer (`system_metadata.slack_history`) stay in
   the datasets they were imported into and are no longer updated.
@@ -454,7 +514,7 @@ text of each row, is deleted once loaded (a failed one is kept for the retry), a
 keeps the text of every synced row until the channel is retired or the connection is
 disconnected with `delete_data=true`. A deleted conversation disappears from the graph and,
 once its tombstone is loaded, from staging. An answer that quoted a message stays in the
-search history and the session cache after the message is deleted in Slack.
+search history, and as a message in Slack, after the message is deleted in Slack.
 
 ## Testing
 

@@ -110,16 +110,26 @@ def _slack_member_sign_in(mp, base):
     return slack_member_link.SlackMemberIntegration().exchange_code("the-code"), RuntimeError
 
 
-def _slack_post_ephemeral(mp, base):
-    mp.setattr(slack_mention, "_POST_EPHEMERAL_URL", f"{base}/api/chat.postEphemeral")
+def _slack_web_api(mp, base):
+    mp.setattr(slack_mention, "_SLACK_API", f"{base}/api/")
 
     async def token(credential):
         return "tok"
 
     mp.setattr(slack_mention, "access_token_for", token)
-    credential = SimpleNamespace(provider_account_id="T1")
+    return SimpleNamespace(provider_account_id="T1")
+
+
+def _slack_post_ephemeral(mp, base):
+    credential = _slack_web_api(mp, base)
     # Best effort like every reply: the failure is logged, nothing is raised.
     return slack_mention.post_ephemeral(credential, "C1", "U1", {"text": "hi"}), None
+
+
+def _slack_post_message(mp, base):
+    credential = _slack_web_api(mp, base)
+    # An answer: the caller tells the asker, so the failure is raised.
+    return slack_mention.post_message(credential, "C1", {"text": "hi"}), RuntimeError
 
 
 def _google_token(mp, base):
@@ -205,6 +215,7 @@ _CASES = {
     "slack conversations.list": _slack_channels,
     "slack sign in with slack": _slack_member_sign_in,
     "slack chat.postEphemeral": _slack_post_ephemeral,
+    "slack chat.postMessage": _slack_post_message,
     "google token": _google_token,
     "google revoke": _google_revoke,
     "google userinfo": _google_userinfo,

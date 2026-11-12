@@ -150,11 +150,11 @@ class SlackIntegration(OAuthIntegration):
 
     async def forget_related_data(self, credential: IntegrationCredential, user: User) -> None:
         """Also forget what the disconnecting user remembered from this workspace, and the
-        answers kept for Share under them."""
-        from cognee.modules.integrations.slack.handle_cognee_ask import forget_kept_answers
+        answers recorded for rating under them."""
+        from cognee.modules.integrations.slack.handle_cognee_ask import forget_answer_records
 
         await forget_remembered(user, team_id=credential.provider_account_id)
-        await forget_kept_answers(str(credential.provider_account_id), user_id=user.id)
+        await forget_answer_records(str(credential.provider_account_id), user_id=user.id)
 
     async def sync_now(self, credential: IntegrationCredential) -> None:
         await sync_slack(credential)

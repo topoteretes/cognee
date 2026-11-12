@@ -60,7 +60,7 @@ import re
 import time
 from bisect import bisect_left
 from collections.abc import Callable, Iterator
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, NoReturn
 from urllib.parse import urlparse
@@ -97,7 +97,7 @@ MAX_RUN_SECONDS = 600
 # The Cognee app's command words. A message that starts by mentioning the app, a command or
 # a question, is talk to the app and no document carries it (``_Walker._is_command``,
 # Goran, 2026-11-10); the app's mention handler answers these words.
-APP_COMMANDS = frozenset({"help", "link", "unlink", "status", "remember", "forget", "here"})
+APP_COMMANDS = frozenset({"help", "link", "unlink", "status", "remember", "forget"})
 # Stats key of a run that was cut where the previous one was (G56).
 STALLED_KEY = "failed_day_too_large"
 _TIMEOUT = 30.0
@@ -108,6 +108,8 @@ _STATE_VERSION = 1
 _EMPTY = "~"
 
 _TS = re.compile(r"\d+\.\d{6}")
+# A mention as Slack writes it in a message's text, ``<@U123>`` or ``<@U123|name>``.
+_MENTION = re.compile(r"<@([A-Z0-9]+)(?:\|[^>]*)?>")
 _CHANNEL = re.compile(r"[CG][A-Z0-9]+")
 _CODE = re.compile(r"[a-z0-9_]+")
 _SCOPE = re.compile(r"[a-z0-9:._,]+")
@@ -353,6 +355,24 @@ def _title(text: str, author: str, ts: str) -> str:
     return f"{snippet} — {author}, {day}"
 
 
+_TITLE_TAIL = re.compile(
+    r"\A(?P<snippet>.*) — (?P<author>.+), (?P<day>\d{4}-\d{2}-\d{2})\Z", re.DOTALL
+)
+
+
+def split_title(title: str) -> tuple[str, str, date] | None:
+    """The first words, the author and the day of a title ``_title`` wrote; ``None`` for
+    any other title."""
+    match = _TITLE_TAIL.match(title)
+    if match is None:
+        return None
+    try:
+        day = date.fromisoformat(match["day"])
+    except ValueError:
+        return None
+    return match["snippet"], match["author"], day
+
+
 def _attachment_texts(message: dict[str, Any]) -> list[str]:
     """The text of a shared message or a bot's attachment. A link preview (an attachment
     Slack unfurled from a URL in the text) is left out: the URL is already in the text."""
@@ -497,6 +517,8 @@ class _Walker:
         self.base_url = ""
         self.own_ids: set[str] = set()
         self.names: dict[str, str] = {}
+        # The users ``users.info`` says are apps (bot users), kept with the names.
+        self.apps: list[str] = []
         self.channel_name: str | None = None
         self.shared = False
         # The messages without replies this run read, by day, and the days to render.
@@ -581,6 +603,8 @@ class _Walker:
                 if error.code not in _UNKNOWN_USER:
                     raise
                 user = {}
+            if user.get("is_bot") and user_id not in self.apps:
+                self.apps.append(user_id)
             profile = user.get("profile") or {}
             # The full name first: a display name changes more often and is shared
             # more often, so it would split one person and merge two (G8).
@@ -649,10 +673,23 @@ class _Walker:
         return message.get("user") not in self.own_ids and message.get("bot_id") not in self.own_ids
 
     def _is_command(self, message: dict[str, Any]) -> bool:
-        """A message that starts by mentioning the app: a command or a question to the app,
-        not what the channel said (Goran, 2026-11-10)."""
+        """A message that starts by mentioning an app, this one or another: a command or a
+        question to that app, not what the channel said (Goran, 2026-11-10 and 2026-11-12)."""
         words = (message.get("text") or "").split()
-        return bool(words) and words[0] in {f"<@{own}>" for own in self.own_ids}
+        mention = _MENTION.fullmatch(words[0]) if words else None
+        return mention is not None and (
+            mention.group(1) in self.own_ids or self._is_app(mention.group(1))
+        )
+
+    def _is_app(self, user_id: str) -> bool:
+        self._name(user_id)  # asks users.info once, which says whether it is an app
+        return user_id in self.apps
+
+    def _from_app(self, message: dict[str, Any]) -> bool:
+        user = message.get("user")
+        return bool(message.get("bot_id")) or (
+            isinstance(user, str) and bool(user) and self._is_app(user)
+        )
 
     def _author(self, message: dict[str, Any]) -> str:
         user = message.get("user")
@@ -696,8 +733,11 @@ class _Walker:
         Its permalink is the first message's."""
         blocks = []
         first = None
+        # A thread opened by a command to an app is that app's conversation: what apps reply
+        # in it is the app talking, not the channel; what people reply stays (live, 2026-11-12).
+        app_thread = bool(thread) and self._is_command(thread[0])
         for message in thread:
-            if not self._is_content(message):
+            if not self._is_content(message) or (app_thread and self._from_app(message)):
                 continue
             text = self._text(message)
             files = _file_names(message)
@@ -898,6 +938,7 @@ class _Walker:
         # (Tier 1) asks Slack for each author once; a completed walk drops them, so the
         # next one reads them fresh (G50).
         self.names = state.setdefault("names", {})
+        self.apps = state.setdefault("apps", [])
         self.dirty = set(state.get("dirty_days", []))
         position = state.get("position")
         # Where this run's walk starts: the end of a day, so every day it reaches is read
@@ -987,6 +1028,7 @@ class _Walker:
                 yield {"id": f"{self.channel_id}:{ts}", "_deleted": True}
         state.pop("position", None)
         state.pop("names", None)
+        state.pop("apps", None)
         # A mark for a message that is no root of this channel (deleted since) is done; a
         # root above where this walk resumed keeps its mark for the next walk.
         self.changed.intersection_update(roots)

@@ -194,10 +194,12 @@ async def test_an_at_cognee_answer_names_the_slack_conversation_it_read(clean_en
     sources = [block for block in blocks if block["type"] == "context"]
     permalink = f"https://acme.slack.com/archives/{CHANNEL}/p{ROOT_A.replace('.', '')}"
     assert sources, blocks
-    assert (
-        f"<{permalink}|Ana asks where the Postgres migration plan is. — ana,"
-        in (sources[0]["elements"][0]["text"])
-    )
+    # SDK-1502: where, who and when, read from what the row already stores: the channel's
+    # name from its structure (never hashed), the author and day from its title.
+    from datetime import datetime, timezone
+
+    day = "Nov 5" if datetime.now(timezone.utc).year == 2026 else "Nov 5, 2026"
+    assert f"<{permalink}|#general · ana · {day}>" in sources[0]["elements"][0]["text"]
 
 
 # -- Review 2026-11-11 (F4): red until fixed ---------------------------------------------
@@ -213,7 +215,8 @@ async def test_a_member_is_not_answered_from_a_private_channel_they_are_not_in(
     """F4: every selected channel lands in the installer's one workspace dataset, and
     ``@cognee`` searched every dataset the asker can read. Once the installer shared that
     dataset, a member got answers from every selected private channel, a member of it or
-    not. Slack's own rule must hold: a member is answered only from channels they can see."""
+    not. Slack's own rule must hold: a member's direct message is answered only from
+    channels they can see."""
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
@@ -253,14 +256,18 @@ async def test_a_member_is_not_answered_from_a_private_channel_they_are_not_in(
         last_synced_at=None,
         sync_status=None,
     )
-    replies = []
+    replies, answers = [], []
 
     async def post_ephemeral(credential, channel, user, payload, thread_ts=None):
         replies.append(payload)
 
+    async def post_message(credential, channel, payload, thread_ts=None):
+        answers.append(payload)
+
     monkeypatch.setattr(mention, "get_by_team", AsyncMock(return_value=credential))
     monkeypatch.setattr(mention, "resolve_owner_user_id", AsyncMock(return_value=member.id))
     monkeypatch.setattr(mention, "post_ephemeral", post_ephemeral)
+    monkeypatch.setattr(mention, "post_message", post_message)
     # Slack's membership answer (users.conversations) and the connection's dataset name
     # (this module syncs into its own dataset) are the seams.
     monkeypatch.setattr(
@@ -270,14 +277,127 @@ async def test_a_member_is_not_answered_from_a_private_channel_they_are_not_in(
     )
     monkeypatch.setattr(mention, "dataset_name_for_credential", lambda credential: DATASET)
     event = {
+        "type": "message",
+        "channel_type": "im",
+        "user": ASKER,
+        "channel": "D0ASKER",
+        "ts": "1793873200.000100",
+        "text": "when is the salary review?",
+    }
+    await mention.handle_cognee_mention(TEAM, event)
+
+    assert answers, "the direct message is answered from the channel the asker is in"
+    shown = " ".join(str(payload) for payload in [*replies, *answers])
+    assert PRIVATE not in shown
+    assert "salary review moves to May" not in shown
+
+
+# -- Public answers in a channel (SDK-1502) ----------------------------------------------
+
+PUBLIC = "C0DESIGN"
+
+
+@pytest.mark.asyncio
+async def test_a_channel_answer_uses_only_what_everyone_in_the_channel_can_see(
+    clean_environment, mock_ai, monkeypatch
+):
+    """Goran, 2026-11-12: a question in a channel is answered in its thread, for everyone
+    there, so only that channel and the selected public channels may answer it. The asker
+    is in the private channel and owns a dataset of their own, and today's private answer
+    reads both; the public one must not, or the channel reads what only the asker may."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from cognee.modules.integrations.slack import channel_membership as membership
+    from cognee.modules.integrations.slack import handle_cognee_mention as mention
+    from cognee.modules.users.methods import create_user
+    from cognee.modules.users.permissions.methods import give_permission_on_dataset
+
+    fake = _channel()
+    fake.add_channel(PUBLIC, "design")
+    fake.add_channel(PRIVATE, "leads", is_private=True)
+    fake.members[PRIVATE] = ["U1", ASKER]  # the asker is in it; the channel asked in is wider
+    fake.members[CHANNEL] = ["U1", "U2", ASKER]
+    fake.post("1793873000.000100", "U2", "Design: the review of the logo is on Monday.", PUBLIC)
+    fake.post(
+        "1793873100.000100", "U1", "Leads only: the review of salaries moves to May.", PRIVATE
+    )
+    await _sync(fake)
+    for channel, name in ((PUBLIC, "slack_channel_design"), (PRIVATE, "slack_channel_leads")):
+        await cognee.add(
+            slack_source(service=fake, team_id=TEAM, channel_id=channel, resource_name=name),
+            dataset_name=DATASET,
+            primary_key="id",
+            write_disposition="merge",
+            max_rows_per_table=0,
+        )
+    await cognee.cognify(datasets=[DATASET])
+
+    installer = await get_default_user()
+    member = await create_user("asker@example.com", "pw-Test-123")
+    (dataset,) = await get_authorized_existing_datasets(
+        user=installer, permission_type="read", datasets=[DATASET]
+    )
+    await give_permission_on_dataset(member, dataset.id, "read")
+    await cognee.add(
+        "Personal: the review of my own bonus is on Sunday.",
+        dataset_name="asker_notes",
+        user=member,
+    )
+    await cognee.cognify(datasets=["asker_notes"], user=member)
+
+    credential = SimpleNamespace(
+        status="active",
+        provider_account_id=TEAM,
+        user_id=installer.id,
+        provider_metadata={
+            "bot_user_id": "U0BOT",
+            "selected_channels": [CHANNEL, PUBLIC, PRIVATE],
+        },
+        last_synced_at=None,
+        sync_status=None,
+    )
+    private, public = [], []
+
+    async def post_ephemeral(credential, channel, user, payload, thread_ts=None):
+        private.append(payload)
+
+    async def post_message(credential, channel, payload, thread_ts=None):
+        public.append((channel, thread_ts, payload))
+
+    monkeypatch.setattr(mention, "get_by_team", AsyncMock(return_value=credential))
+    monkeypatch.setattr(mention, "resolve_owner_user_id", AsyncMock(return_value=member.id))
+    monkeypatch.setattr(mention, "post_ephemeral", post_ephemeral)
+    monkeypatch.setattr(mention, "post_message", post_message)
+    # Slack's answers (which channels the asker is in, which are public) and the
+    # connection's dataset name (this module syncs into its own dataset) are the seams.
+    monkeypatch.setattr(
+        mention,
+        "member_channels",
+        AsyncMock(return_value={c for c, members in fake.members.items() if ASKER in members}),
+    )
+    monkeypatch.setattr(
+        membership,
+        "public_channels",
+        AsyncMock(return_value={c for c, info in fake.channels.items() if not info["is_private"]}),
+    )
+    monkeypatch.setattr(
+        membership, "shared_with_other_organizations", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(mention, "dataset_name_for_credential", lambda credential: DATASET)
+    event = {
         "type": "app_mention",
         "user": ASKER,
         "channel": CHANNEL,
         "ts": "1793873200.000100",
-        "text": "<@U0BOT> when is the salary review?",
+        "text": "<@U0BOT> when is the review?",
     }
     await mention.handle_cognee_mention(TEAM, event)
 
-    shown = " ".join(str(payload) for payload in replies)
-    assert PRIVATE not in shown
-    assert "salary review moves to May" not in shown
+    shown = " ".join(str(payload) for payload in [*private, *public])
+    assert "salaries moves to May" not in shown and PRIVATE not in shown
+    assert "bonus is on Sunday" not in shown
+    assert len(public) == 1, "one answer, posted to the channel"
+    ((channel, thread_ts, answer),) = public
+    assert (channel, thread_ts) == (CHANNEL, event["ts"])
+    assert "logo is on Monday" in str(answer), "the selected public channel answers"

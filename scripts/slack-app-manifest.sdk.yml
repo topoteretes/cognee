@@ -12,6 +12,11 @@
 #
 # Replace <ngrok> with your tunnel host, e.g. abc123.ngrok-free.app
 #
+# Tunnel the UI, not the API: run the UI with COGNEE_DEV_API_PROXY=http://localhost:8000,
+# `ngrok http 3000`, and open the UI at https://<ngrok>. The install cookie is set on the
+# host the UI calls and checked on the host the callback arrives on; two hosts end in
+# error_invalid_state. See Setup in cognee/tasks/ingestion/connectors/slack.md.
+#
 # ── First save will fail unless the server is already reachable ────────────
 # Slack POSTs a url_verification challenge to request_url the moment you save
 # event_subscriptions. Start the SDK server AND ngrok first, then create the

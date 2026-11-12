@@ -1,7 +1,8 @@
 """``@cognee``: a mention in a channel, or a direct message to the app, is the one way to
 talk to Cognee from Slack (``@cognee <question>``, ``@cognee remember …``,
-``@cognee link``, ``@cognee help``). Every answer is ephemeral: only the member who asked
-sees it. Slack is stood in for by ``post_ephemeral`` and ``FakeSlack``.
+``@cognee link``, ``@cognee help``). An answer is a message (``post_message``): in a
+channel's thread for everyone there, or in the direct message; every other reply is
+ephemeral (``post_ephemeral``). Slack is otherwise stood in for by ``FakeSlack``.
 """
 
 import json
@@ -11,6 +12,7 @@ from uuid import uuid4
 
 import pytest
 
+from cognee.modules.integrations.slack import channel_membership as membership
 from cognee.modules.integrations.slack import handle_cognee_mention as mention
 from cognee.modules.integrations.slack import handle_slack_event as events
 from cognee.modules.integrations.slack.handle_slack_link import NOT_LINKED_MESSAGE
@@ -51,14 +53,18 @@ def _mention(text: str, channel: str = "C1", **extra) -> dict:
 @pytest.fixture
 def slack(monkeypatch):
     """The connected workspace, the member's link, the channels Slack says the member is in,
-    the datasets the member can read (the workspace's and one of their own), and every
-    ephemeral reply."""
+    the channels Slack says are public, whether the channel is shared with another
+    organization, the datasets the member can read (the workspace's and one of their own),
+    every ephemeral reply and every answer posted."""
     state = SimpleNamespace(
         credential=_credential(),
         owner=OWNER_ID,
         replies=[],
         threads=[],
         channels={"C1", "C7"},
+        public={"C1", "C3"},
+        external=False,
+        posted=[],
         workspace=SimpleNamespace(id=uuid4(), name=WORKSPACE_DATASET),
         own=SimpleNamespace(id=uuid4(), name="notes"),
     )
@@ -73,7 +79,20 @@ def slack(monkeypatch):
     monkeypatch.setattr(
         mention, "resolve_owner_user_id", AsyncMock(side_effect=lambda *args: state.owner)
     )
+
+    async def post_message(credential, channel, payload, thread_ts=None):
+        state.posted.append((channel, thread_ts, payload))
+
     monkeypatch.setattr(mention, "post_ephemeral", post_ephemeral)
+    monkeypatch.setattr(mention, "post_message", post_message)
+    monkeypatch.setattr(
+        membership, "public_channels", AsyncMock(side_effect=lambda *a: state.public)
+    )
+    monkeypatch.setattr(
+        membership,
+        "shared_with_other_organizations",
+        AsyncMock(side_effect=lambda *args: state.external),
+    )
     monkeypatch.setattr(
         mention, "member_channels", AsyncMock(side_effect=lambda *args: state.channels)
     )
@@ -87,6 +106,14 @@ def slack(monkeypatch):
 
 def _texts(state) -> list[str]:
     return [payload["text"] for _, _, payload in state.replies]
+
+
+def _direct(text: str) -> dict:
+    """A direct message to the app."""
+    return {"type": "message", "channel_type": "im", "user": MEMBER, "channel": "D1"} | {
+        "text": text,
+        "ts": "2.2",
+    }
 
 
 @pytest.mark.asyncio
@@ -134,26 +161,6 @@ async def test_a_channel_outside_the_allowlist_is_refused_but_a_direct_message_i
 
     ask.assert_awaited_once()
     assert ask.await_args.kwargs["question"] == "why Neon?"
-
-
-@pytest.mark.asyncio
-async def test_a_question_is_answered_privately_with_share_and_discard(slack):
-    results = [{"text_result": ["We chose Neon for branching."], "evidence": []}]
-    with (
-        patch.object(mention, "cognee_search", AsyncMock(return_value=results)) as search,
-        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
-    ):
-        await mention.handle_cognee_mention(TEAM, _mention("why did we choose Neon?"))
-
-    assert search.await_args.kwargs["query_text"] == "why did we choose Neon?"
-    # G10: the answer names the documents it read, so the search returns them.
-    assert search.await_args.kwargs["include_references"] is True
-    assert search.await_args.kwargs["verbose"] is True
-    *_, (channel, user, answer) = slack.replies
-    assert (channel, user) == ("C1", MEMBER)
-    assert "Neon" in answer["text"]
-    actions = [block for block in answer["blocks"] if block["type"] == "actions"]
-    assert [button["text"]["text"] for button in actions[0]["elements"]] == ["Share", "Discard"]
 
 
 @pytest.mark.asyncio
@@ -258,6 +265,7 @@ async def test_the_event_handler_answers_at_once_and_handles_mentions_and_direct
 
 @pytest.mark.asyncio
 async def test_a_failed_search_is_reported_instead_of_raised(slack):
+    slack.credential = _credential(synced=["C1"])
     with (
         patch.object(mention, "cognee_search", AsyncMock(side_effect=RuntimeError("boom"))),
         patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
@@ -445,7 +453,14 @@ async def test_post_ephemeral_sends_the_thread_to_slack(monkeypatch):
 
     await mention.post_ephemeral(_credential(), "C1", MEMBER, {"text": "hi"}, thread_ts="1.1")
 
-    assert sent == {"channel": "C1", "user": MEMBER, "text": "hi", "thread_ts": "1.1"}
+    assert sent == {
+        "channel": "C1",
+        "user": MEMBER,
+        "text": "hi",
+        "unfurl_links": False,
+        "unfurl_media": False,
+        "thread_ts": "1.1",
+    }
 
 
 def test_every_command_in_the_help_is_one_the_sync_leaves_out_of_memory():
@@ -479,28 +494,7 @@ def test_a_reply_is_a_bold_title_over_one_line_and_progress_is_a_grey_line():
     assert texts and not [text for text in texts if emoji.search(text)]
 
 
-@pytest.mark.asyncio
-async def test_a_question_nothing_answers_says_so_without_share_buttons(slack):
-    # The search retrieved nothing (an empty context); its completion still talks (F1).
-    results = [
-        {
-            "text_result": ["The capital city is not specified in the provided context."],
-            "context_result": "",
-            "evidence": [],
-        }
-    ]
-    with (
-        patch.object(mention, "cognee_search", AsyncMock(return_value=results)),
-        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
-    ):
-        await mention.handle_cognee_mention(TEAM, _mention("what is the german capital?"))
-
-    *_, (_, _, answer) = slack.replies
-    assert answer["text"] == mention.NOTHING_FOUND_MESSAGE
-    assert not [block for block in answer["blocks"] if block["type"] == "actions"]
-
-
-# --- unlink, status, here ---
+# --- unlink ---
 
 
 @pytest.mark.asyncio
@@ -536,80 +530,18 @@ async def test_unlink_without_a_link_changes_nothing(slack):
 
 
 @pytest.mark.asyncio
-async def test_status_says_privately_whether_this_channel_is_synced_and_who_you_are(slack):
-    from datetime import datetime, timezone
-
-    slack.credential.provider_metadata["selected_channels"] = ["C1"]
-    slack.credential.last_synced_at = datetime(2026, 11, 9, 8, 30, tzinfo=timezone.utc)
-    slack.credential.sync_status = "ok"
-    with patch.object(
-        mention, "get_user", AsyncMock(return_value=SimpleNamespace(email="ana@example.com"))
-    ):
-        await mention.handle_cognee_mention(TEAM, _mention("status"))
-
-    ((channel, user, payload),) = slack.replies
-    assert (channel, user) == ("C1", MEMBER)
-    text = payload["text"]
-    assert "ana@example.com" in text
-    assert "synced" in text and "2026-11-09 08:30 UTC" in text
-
-
-@pytest.mark.asyncio
-async def test_status_of_a_member_who_never_linked_says_so(slack):
-    slack.owner = None
-    await mention.handle_cognee_mention(TEAM, _mention("status", channel="C2"))
-
-    text = _texts(slack)[-1]
-    assert "not linked" in text and "not synced" in text
-
-
-@pytest.mark.asyncio
-async def test_here_asks_within_this_channel_only(slack):
-    results = [{"text_result": ["Deploys go out on Fridays."], "evidence": []}]
-    with (
-        patch.object(mention, "cognee_search", AsyncMock(return_value=results)) as search,
-        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
-    ):
-        await mention.handle_cognee_mention(TEAM, _mention("here when do we deploy?", channel="C7"))
-
-    assert search.await_args.kwargs["query_text"] == "when do we deploy?"
-    assert search.await_args.kwargs["node_name"] == ["slack:channel:C7"]
-
-
-@pytest.mark.asyncio
-async def test_a_plain_question_searches_all_of_the_members_memory(slack):
-    with (
-        patch.object(mention, "cognee_search", AsyncMock(return_value=[])) as search,
-        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
-    ):
-        await mention.handle_cognee_mention(TEAM, _mention("when do we deploy?"))
-
-    assert search.await_args.kwargs.get("node_name") is None
-
-
-@pytest.mark.asyncio
-async def test_here_in_a_direct_message_explains_that_it_needs_a_channel(slack):
-    direct = {"type": "message", "channel_type": "im", "user": MEMBER, "channel": "D1", "ts": "2.2"}
-    with patch.object(mention, "cognee_search", AsyncMock()) as search:
-        await mention.handle_cognee_mention(TEAM, direct | {"text": "here when do we deploy?"})
-
-    search.assert_not_awaited()
-    assert _texts(slack)[-1] == mention.HERE_NEEDS_A_CHANNEL_MESSAGE
-
-
-@pytest.mark.asyncio
 async def test_the_workspace_dataset_is_searched_only_in_the_selected_channels_the_member_is_in(
     slack,
 ):
     """F4: the workspace dataset holds every selected channel, private ones included; a
-    member is answered from it only within the channels Slack says they belong to, and
-    from their own datasets whole."""
+    direct message is answered from it only within the channels Slack says the member
+    belongs to, and from their own datasets whole."""
     slack.credential = _credential(synced=["C1", "G2", "C3"])
     with (
         patch.object(mention, "cognee_search", AsyncMock(return_value=[])) as search,
         patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
     ):
-        await mention.handle_cognee_mention(TEAM, _mention("when do we deploy?"))
+        await mention.handle_cognee_mention(TEAM, _direct("when do we deploy?"))
 
     calls = [(c.kwargs["dataset_ids"], c.kwargs["node_name"]) for c in search.await_args_list]
     assert calls == [
@@ -634,57 +566,13 @@ async def test_when_slack_cannot_say_where_the_member_is_the_workspace_is_left_o
         patch.object(mention, "cognee_search", AsyncMock(return_value=[])) as search,
         patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
     ):
-        await mention.handle_cognee_mention(TEAM, _mention("when do we deploy?"))
+        await mention.handle_cognee_mention(TEAM, _direct("when do we deploy?"))
 
     assert [c.kwargs["dataset_ids"] for c in search.await_args_list] == [[slack.own.id]]
     assert mention.MEMBERSHIP_UNKNOWN_MESSAGE in _texts(slack)
 
 
-# -- Review 2026-11-11 (F6): red until fixed ---------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_an_answer_can_still_be_shared_after_the_process_that_wrote_it_is_gone(slack):
-    """F6: the answer waiting for Share lived in one process's memory, so Share after a
-    restart, or on another worker, said "This answer is no longer available"."""
-    from cognee.modules.integrations.slack import handle_cognee_ask as ask
-
-    results = [{"text_result": ["We chose Neon for branching."], "evidence": []}]
-    with (
-        patch.object(mention, "cognee_search", AsyncMock(return_value=results)),
-        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
-    ):
-        await mention.handle_cognee_mention(TEAM, _mention("why did we choose Neon?"))
-    *_, (_, _, answer) = slack.replies
-    (actions,) = [block for block in answer["blocks"] if block["type"] == "actions"]
-    share = next(b for b in actions["elements"] if b["action_id"] == ask.ASK_SHARE_ACTION_ID)
-
-    getattr(ask, "_pending_answers", {}).clear()  # what one process held in memory is gone
-    shared = await ask.handle_cognee_ask_share("https://hooks.slack.com/actions/x", share["value"])
-
-    assert shared.get("response_type") == "in_channel"
-    assert "Neon" in json.dumps(shared)
-
-
-# -- Reprobe 2026-11-12 (N1, N3): red until fixed ----------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_an_answer_is_still_shown_when_it_cannot_be_kept_for_share(slack):
-    """N1: the answer was kept for Share outside any try, so a session cache that failed on
-    the write lost the finished answer: the member saw "Searching…" and nothing after it.
-    The answer is shown without Share, as it is with the session cache switched off."""
-    results = [{"text_result": ["We chose Neon for branching."], "context_result": "Neon chunk"}]
-    with (
-        patch.object(mention, "cognee_search", AsyncMock(return_value=results)),
-        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
-        patch.object(mention, "keep_answer", AsyncMock(side_effect=RuntimeError("cache down"))),
-    ):
-        await mention.handle_cognee_mention(TEAM, _mention("why did we choose Neon?"))
-
-    *_, (_, _, answer) = slack.replies
-    assert "branching" in answer["text"]
-    assert not [block for block in answer.get("blocks", []) if block["type"] == "actions"]
+# -- Reprobe 2026-11-12 (N3) --------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -699,7 +587,395 @@ async def test_any_failure_to_learn_the_members_channels_leaves_the_workspace_ou
         patch.object(mention, "cognee_search", AsyncMock(return_value=[])) as search,
         patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
     ):
-        await mention.handle_cognee_mention(TEAM, _mention("when do we deploy?"))
+        await mention.handle_cognee_mention(TEAM, _direct("when do we deploy?"))
 
     assert [c.kwargs["dataset_ids"] for c in search.await_args_list] == [[slack.own.id]]
     assert mention.MEMBERSHIP_UNKNOWN_MESSAGE in _texts(slack)
+
+
+# -- Public answers in a channel (SDK-1502) ----------------------------------------------
+#
+# Goran, 2026-11-12: a question asked in a channel is answered in its thread, for everyone
+# in the channel, so the answer may use only what every member there can already see: that
+# channel and the selected public channels, or that channel alone when it is shared with
+# another organization. A direct message is answered with a message in it, from today's
+# scope.
+
+_FOUND = [{"text_result": ["We chose Neon for branching."], "context_result": "Neon chunk"}]
+
+
+def _scopes(search) -> list[tuple]:
+    """Each search as (datasets, sorted node names): order inside a scope means nothing."""
+    return [
+        (call.kwargs["dataset_ids"], sorted(call.kwargs["node_name"] or []) or None)
+        for call in search.await_args_list
+    ]
+
+
+def _actions(payload: dict) -> list[dict]:
+    return [block for block in payload.get("blocks", []) if block["type"] == "actions"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "where, thread",
+    [({}, "1.1"), ({"thread_ts": "0.9"}, "0.9")],
+    ids=["under the question", "in the thread it was asked in"],
+)
+async def test_a_channel_question_is_answered_publicly_in_its_thread(slack, where, thread):
+    """Everyone in the channel sees the answer, next to the question: in a new thread under
+    it, or in the thread it was asked in."""
+    slack.credential = _credential(synced=["C1"])
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=_FOUND)),
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("why did we choose Neon?", **where))
+
+    assert len(slack.posted) == 1, "one answer, posted to the channel"
+    ((channel, thread_ts, answer),) = slack.posted
+    assert (channel, thread_ts) == ("C1", thread)
+    assert "branching" in answer["text"]
+    assert not [p for _, _, p in slack.replies if "branching" in p["text"]], "not twice"
+
+
+@pytest.mark.asyncio
+async def test_a_channel_answer_uses_this_channel_and_the_selected_public_channels_only(slack):
+    """Asked in the private channel G4: G4 itself (everyone there reads it) and the selected
+    public channels C1 and C3. G2 is private and the asker is in it, but others in G4 may
+    not be; the asker's own datasets are theirs alone. Who the asker is does not change a
+    public answer, so their channel membership is not asked for."""
+    slack.credential = _credential(synced=["C1", "G2", "C3", "G4"])
+    slack.channels = {"C1", "G2", "G4"}
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=[])) as search,
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+        patch.object(mention, "member_channels", AsyncMock(return_value={"G2"})) as membership,
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("when do we deploy?", channel="G4"))
+
+    assert _scopes(search) == [
+        ([slack.workspace.id], ["slack:channel:C1", "slack:channel:C3", "slack:channel:G4"])
+    ]
+    membership.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_channel_answer_leaves_out_a_public_channel_that_is_not_selected(slack):
+    """A public channel that is not synced has nothing in the workspace dataset; asking in
+    one still answers from the selected public channels."""
+    slack.credential = _credential(synced=["C3", "G2"])
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=[])) as search,
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("when do we deploy?", channel="C1"))
+
+    assert _scopes(search) == [([slack.workspace.id], ["slack:channel:C3"])]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asking", ["public_channels", "shared_with_other_organizations"])
+async def test_when_slack_cannot_describe_the_channels_only_this_channel_answers(slack, asking):
+    """An unknown answer fails closed: a channel Slack did not call public, or a channel it
+    did not say is unshared, gets no other channel. The member is told."""
+    from cognee.tasks.ingestion.connectors.slack import SlackUnavailableError
+
+    slack.credential = _credential(synced=["C1", "G2", "C3"])
+    unknown = AsyncMock(side_effect=SlackUnavailableError("conversations.info", "http_503"))
+    with (
+        patch.object(membership, asking, unknown),
+        patch.object(mention, "cognee_search", AsyncMock(return_value=[])) as search,
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("when do we deploy?", channel="C1"))
+
+    assert _scopes(search) == [([slack.workspace.id], ["slack:channel:C1"])]
+    assert mention.PUBLIC_CHANNELS_UNKNOWN_MESSAGE in _texts(slack)
+
+
+@pytest.mark.asyncio
+async def test_a_slack_connect_channel_is_answered_from_itself_alone(slack):
+    """Goran, 2026-11-12: the other organization's members of a shared channel cannot read
+    this workspace's public channels, so the answer there uses that channel only."""
+    slack.credential = _credential(synced=["C1", "C3"])
+    slack.external = True
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=[])) as search,
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("when do we deploy?", channel="C1"))
+
+    assert _scopes(search) == [([slack.workspace.id], ["slack:channel:C1"])]
+    assert mention.PUBLIC_CHANNELS_UNKNOWN_MESSAGE not in _texts(slack)
+
+
+@pytest.mark.asyncio
+async def test_a_channel_question_nothing_answers_is_told_to_the_asker_alone(slack):
+    """A miss is not posted to the channel."""
+    slack.credential = _credential(synced=["C1"])
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=[])),
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("what is the german capital?"))
+
+    assert slack.posted == []
+    assert _texts(slack)[-1] == mention.NOTHING_FOUND_MESSAGE
+
+
+@pytest.mark.asyncio
+async def test_an_answer_slack_does_not_take_is_told_to_the_asker(slack):
+    """A refused or failed ``chat.postMessage`` does not end the question silently."""
+    slack.credential = _credential(synced=["C1"])
+    with (
+        patch.object(mention, "post_message", AsyncMock(side_effect=RuntimeError("ratelimited"))),
+        patch.object(mention, "cognee_search", AsyncMock(return_value=_FOUND)),
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("why did we choose Neon?"))
+
+    assert _texts(slack)[-1] == mention.ANSWER_NOT_POSTED_MESSAGE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("thread", [None, "2.0"], ids=["a new message", "in its thread"])
+async def test_a_direct_message_is_answered_with_a_message_from_the_members_memory(slack, thread):
+    """Goran, 2026-11-12: a direct message is answered with a real message in it, which
+    stays between the member and the app and is still there after a reload. Its scope is
+    today's: the workspace dataset within the selected channels Slack says the member is
+    in, and the member's own datasets whole."""
+    slack.credential = _credential(synced=["C1", "G2", "C3"])
+    where = {"thread_ts": thread} if thread else {}
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=_FOUND)) as search,
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+    ):
+        await mention.handle_cognee_mention(TEAM, _direct("why did we choose Neon?") | where)
+
+    assert _scopes(search) == [([slack.workspace.id], ["slack:channel:C1"]), ([slack.own.id], None)]
+    assert len(slack.posted) == 1, "one answer, posted in the direct message"
+    ((channel, thread_ts, answer),) = slack.posted
+    assert (channel, thread_ts) == ("D1", thread)
+    assert "branching" in answer["text"]
+    assert not [p for _, _, p in slack.replies if "branching" in p["text"]], "not twice"
+
+
+class _SlackApi:
+    """``client_session`` standing in for the Slack Web API: records each call, answers
+    ``answer``."""
+
+    def __init__(self, answer: dict):
+        self.answer, self.calls = answer, []
+
+    def __call__(self, provider, **kwargs):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def post(self, url, json=None, headers=None, allow_redirects=True):
+        self.calls.append((url, json, allow_redirects))
+        return self
+
+    status = 200
+
+    async def json(self):
+        return self.answer
+
+
+@pytest.mark.asyncio
+async def test_post_message_posts_in_the_thread_for_everyone(monkeypatch):
+    api = _SlackApi({"ok": True})
+    monkeypatch.setattr(mention, "client_session", api)
+    monkeypatch.setattr(mention, "access_token_for", AsyncMock(return_value="xoxb"))
+
+    await mention.post_message(_credential(), "C1", {"text": "hi", "blocks": [{}]}, "1.1")
+
+    assert api.calls == [
+        (
+            "https://slack.com/api/chat.postMessage",
+            {
+                "channel": "C1",
+                "text": "hi",
+                "unfurl_links": False,
+                "unfurl_media": False,
+                "blocks": [{}],
+                "thread_ts": "1.1",
+            },
+            False,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_post_message_raises_when_slack_refuses_it(monkeypatch):
+    """The caller tells the asker; an answer Slack refused is never taken as posted."""
+    monkeypatch.setattr(mention, "client_session", _SlackApi({"ok": False, "error": "x"}))
+    monkeypatch.setattr(mention, "access_token_for", AsyncMock(return_value="xoxb"))
+
+    with pytest.raises(RuntimeError, match="chat.postMessage failed: x"):
+        await mention.post_message(_credential(), "C1", {"text": "hi"})
+
+
+@pytest.mark.asyncio
+async def test_a_posted_answer_does_not_unfold_its_sources(monkeypatch):
+    """Live, 2026-11-12 (Luca: "Can we kill the previews?"): every source link unfolded into a
+    preview of the whole message, three cards under a one-line answer. The sources stay
+    links."""
+    api = _SlackApi({"ok": True})
+    monkeypatch.setattr(mention, "client_session", api)
+    monkeypatch.setattr(mention, "access_token_for", AsyncMock(return_value="xoxb"))
+
+    await mention.post_message(_credential(), "C1", {"text": "hi"}, "1.1")
+
+    ((_, body, _),) = api.calls
+    assert body["unfurl_links"] is False and body["unfurl_media"] is False
+
+
+# -- The answer's design and rating (SDK-1502): red until fixed ---------------------------
+
+
+def _context_texts(answer: dict) -> list[str]:
+    return [
+        element["text"]
+        for block in answer["blocks"]
+        if block["type"] == "context"
+        for element in block["elements"]
+    ]
+
+
+async def _answered(slack, event, record="qa-1"):
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=_FOUND)),
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+        patch.object(mention, "record_answer", AsyncMock(return_value=record), create=True),
+    ):
+        await mention.handle_cognee_mention(TEAM, event)
+    ((_, _, answer),) = slack.posted
+    return answer
+
+
+def _rating_buttons(answer: dict) -> list[tuple[str, str, str]]:
+    return [
+        (element["text"]["text"], element["action_id"], element["value"])
+        for block in _actions(answer)
+        for element in block["elements"]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_channel_answer_says_where_it_comes_from_and_can_be_rated(slack):
+    """The scope line names this channel and counts the public channels it also read; 👍
+    and 👎 carry the answer's id and nothing else."""
+    slack.credential = _credential(synced=["C1", "C3", "C5"])
+    slack.public = {"C1", "C3", "C5"}
+
+    answer = await _answered(slack, _mention("why did we choose Neon?"))
+
+    assert "From <#C1> and 2 public channels" in _context_texts(answer)
+    assert _rating_buttons(answer) == [
+        ("👍", "cognee_answer_up", "qa-1"),
+        ("👎", "cognee_answer_down", "qa-1"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_slack_connect_answer_says_it_read_this_channel_alone(slack):
+    slack.credential = _credential(synced=["C1", "C3"])
+    slack.external = True
+
+    answer = await _answered(slack, _mention("why did we choose Neon?"))
+
+    assert "From <#C1>" in _context_texts(answer)
+
+
+@pytest.mark.asyncio
+async def test_a_direct_message_answer_says_it_read_your_channels_and_memory(slack):
+    slack.credential = _credential(synced=["C1"])
+
+    answer = await _answered(slack, _direct("why did we choose Neon?"))
+
+    assert "From your channels and your memory" in _context_texts(answer)
+    assert [action for _, action, _ in _rating_buttons(answer)] == [
+        "cognee_answer_up",
+        "cognee_answer_down",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_answer_that_cannot_be_kept_has_no_rating_buttons(slack):
+    """With the session cache off (``CACHING=false``) nothing can carry a rating, so the
+    answer is posted without buttons rather than with buttons that do nothing."""
+    slack.credential = _credential(synced=["C1"])
+
+    answer = await _answered(slack, _mention("why did we choose Neon?"), record=None)
+
+    assert "branching" in answer["text"]
+    assert not _actions(answer)
+
+
+@pytest.mark.asyncio
+async def test_a_direct_message_answer_is_recorded_without_its_text(slack):
+    """Goran, 2026-11-12: the record is kept under the workspace's owner, and a direct
+    message's answer may quote the member's own datasets, so only the graph elements it used
+    are kept (nothing to embed); a channel answer, public already, keeps its text."""
+    slack.credential = _credential(synced=["C1"])
+    record = AsyncMock(return_value="qa-1")
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=_FOUND)),
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+        patch.object(mention, "record_answer", record),
+    ):
+        await mention.handle_cognee_mention(TEAM, _direct("why did we choose Neon?"))
+        await mention.handle_cognee_mention(TEAM, _mention("why did we choose Neon?"))
+
+    direct, channel = record.await_args_list
+    assert (direct.kwargs["question"], direct.kwargs["answer"]) == ("", "")
+    assert channel.kwargs["question"] == "why did we choose Neon?"
+    assert "branching" in channel.kwargs["answer"]
+
+
+# -- Help layout (Goran, 2026-11-12): red until fixed ------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_help_is_laid_out_in_groups_with_a_private_footer(slack):
+    await mention.handle_cognee_mention(TEAM, _mention("help"))
+
+    ((_, _, reply),) = slack.replies
+    blocks = reply["blocks"]
+    texts = json.dumps(blocks)
+    assert blocks[0]["text"]["text"].startswith("*cognee in Slack*")
+    assert "Ask, remember and forget from any channel cognee is in." in blocks[0]["text"]["text"]
+    assert [block["type"] for block in blocks].count("divider") == 3
+    for group in ("*Ask*", "*Remember*", "*Forget*", "*Account*"):
+        assert group in texts
+    assert any(block.get("fields") for block in blocks), "label and value in two columns"
+    for command in ("`@cognee <question>`", "`@cognee remember <text>`", "`@cognee status`"):
+        assert command in texts
+    assert blocks[-1] == {
+        "type": "context",
+        "elements": [{"type": "mrkdwn", "text": "Only you can see this."}],
+    }
+    # The notification text stays readable on its own.
+    assert reply["text"].startswith("cognee in Slack")
+    assert "@cognee remember <text>" in reply["text"]
+
+
+@pytest.mark.asyncio
+async def test_status_is_answered_with_the_status_rows(slack):
+    """``@cognee status`` posts ``status.status_message`` for this channel, privately."""
+    message = {"text": "cognee status", "blocks": [{"type": "section", "fields": []}]}
+    answer = AsyncMock(return_value=message)
+    with patch.object(mention, "status_message", answer):
+        await mention.handle_cognee_mention(TEAM, _mention("status", channel="C7"))
+
+    ((channel, user, reply),) = slack.replies
+    assert (channel, user) == ("C7", MEMBER)
+    assert reply["blocks"] == message["blocks"]
+    answer.assert_awaited_once()
+    assert answer.await_args.kwargs["channel"] == "C7"

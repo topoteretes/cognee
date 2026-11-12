@@ -1,8 +1,8 @@
 """Unit tests for cognee.modules.integrations.slack.handle_slack_interactive.
 
 Payload parsing (form-encoded `payload=<json>`, not raw JSON), dispatch to
-the "Remember this" message shortcut and the ``/cognee-ask`` answer review
-prompt's Share/Discard buttons, and every reply delivered via response_url
+the "Remember this" and "Forget this" message shortcuts, and every reply delivered via
+response_url
 rather than the direct HTTP response — matching how Slack actually renders
 (or rather, doesn't render) message-action/block-action responses.
 """
@@ -20,10 +20,6 @@ from cognee.infrastructure.background_tasks import wait_for_background_tasks
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.modules.integrations.credentials import STATUS_ACTIVE
 from cognee.modules.integrations.slack import handle_cognee_mention as mention
-from cognee.modules.integrations.slack.handle_cognee_ask import (
-    ASK_DISCARD_ACTION_ID,
-    ASK_SHARE_ACTION_ID,
-)
 from cognee.modules.integrations.slack.handle_cognee_mention import NOT_FOLLOWABLE_MESSAGE
 from cognee.modules.integrations.slack.handle_slack_interactive import handle_slack_interactive
 from cognee.modules.integrations.slack.persistence import CHANNEL_NOT_ENABLED_MESSAGE
@@ -371,66 +367,16 @@ async def test_remember_this_reports_unexpected_failure():
     assert reply["text"] == mention.SAVE_FAILED_MESSAGE
 
 
-# ── /cognee-ask answer review prompt: Share / Discard buttons ──────────────
-
-
-@pytest.mark.asyncio
-async def test_share_button_dispatches_to_handle_cognee_ask_share():
-    with (
-        patch(
-            f"{MODULE}.handle_cognee_ask_share", new=AsyncMock(return_value={"ok": True})
-        ) as share,
-        patch(f"{MODULE}.post_to_response_url", new=AsyncMock()) as post,
-    ):
-        response = await handle_slack_interactive(
-            _body(
-                _block_action_payload(
-                    action_id=ASK_SHARE_ACTION_ID,
-                    value="abc123",
-                    response_url="https://hooks.slack.com/xyz",
-                )
-            )
-        )
-
-    share.assert_awaited_once_with("https://hooks.slack.com/xyz", "abc123")
-    post.assert_awaited_once_with("https://hooks.slack.com/xyz", {"ok": True})
-    assert response == {}
-
-
-@pytest.mark.asyncio
-async def test_discard_button_dispatches_to_handle_cognee_ask_discard():
-    with (
-        patch(
-            f"{MODULE}.handle_cognee_ask_discard", new=AsyncMock(return_value={"ok": True})
-        ) as discard,
-        patch(f"{MODULE}.post_to_response_url", new=AsyncMock()) as post,
-    ):
-        response = await handle_slack_interactive(
-            _body(
-                _block_action_payload(
-                    action_id=ASK_DISCARD_ACTION_ID,
-                    value="abc123",
-                    response_url="https://hooks.slack.com/xyz",
-                )
-            )
-        )
-
-    discard.assert_awaited_once_with("abc123")
-    post.assert_awaited_once_with("https://hooks.slack.com/xyz", {"ok": True})
-    assert response == {}
+# ── Block actions ──────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_unrecognized_block_action_id_is_ignored():
-    with (
-        patch(f"{MODULE}.handle_cognee_ask_share", new=AsyncMock()) as share,
-        patch(f"{MODULE}.post_to_response_url", new=AsyncMock()) as post,
-    ):
+    with patch(f"{MODULE}.post_to_response_url", new=AsyncMock()) as post:
         response = await handle_slack_interactive(
             _body(_block_action_payload(action_id="some_other_button"))
         )
 
-    share.assert_not_awaited()
     post.assert_not_awaited()
     assert response == {}
 
@@ -515,3 +461,73 @@ async def test_forget_this_on_a_synced_reply_takes_it_out_only_for_its_author(au
     else:
         exclude.assert_not_awaited()
         assert post.await_args.args[1]["text"] == mention.NOT_YOURS_TO_EXCLUDE_MESSAGE
+
+
+# -- Rating an answer (SDK-1502): red until fixed -----------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action_id, score", [("cognee_answer_up", 5), ("cognee_answer_down", 1)])
+async def test_a_rating_button_rates_the_answer_for_the_member_who_clicked(action_id, score):
+    """The rater is the signed payload's user, never the button's value; the answer is told
+    apart by its id alone. The member sees the outcome privately."""
+    credential = _credential()
+    rate = AsyncMock(return_value=True)
+    with (
+        patch(f"{MODULE}.get_by_team", AsyncMock(return_value=credential)),
+        patch(f"{MODULE}.rate_answer", rate, create=True),
+        patch(f"{MODULE}.post_to_response_url", AsyncMock()) as post,
+    ):
+        response = await handle_slack_interactive(
+            _body(_block_action_payload(action_id=action_id, value="qa-1"))
+        )
+        await _drain_pending_saves()
+
+    assert response == {}
+    rate.assert_awaited_once_with(credential, INVOKING_USER, "qa-1", score)
+    assert post.await_args.args[1]["response_type"] == "ephemeral"
+
+
+@pytest.mark.asyncio
+async def test_a_rating_by_someone_who_did_not_ask_is_refused_privately():
+    with (
+        patch(f"{MODULE}.get_by_team", AsyncMock(return_value=_credential())),
+        patch(f"{MODULE}.rate_answer", AsyncMock(return_value=False), create=True),
+        patch(f"{MODULE}.post_to_response_url", AsyncMock()) as post,
+    ):
+        await handle_slack_interactive(
+            _body(_block_action_payload(action_id="cognee_answer_down", value="qa-1"))
+        )
+        await _drain_pending_saves()
+
+    reply = post.await_args.args[1]
+    assert reply["response_type"] == "ephemeral"
+    assert "who asked" in reply["text"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rated", [True, False])
+async def test_a_rating_reply_never_replaces_the_answer(rated):
+    """Live, 2026-11-12: the "Thanks for rating" reply went to the response_url of the
+    answer's button without ``replace_original: false``, and Slack replaced the public
+    answer with it, for everyone. The rater's reply is a new private message."""
+    with (
+        patch(f"{MODULE}.get_by_team", AsyncMock(return_value=_credential())),
+        patch(f"{MODULE}.rate_answer", AsyncMock(return_value=rated), create=True),
+        patch(f"{MODULE}.post_to_response_url", AsyncMock()) as post,
+    ):
+        await handle_slack_interactive(
+            _body(_block_action_payload(action_id="cognee_answer_up", value="qa-1"))
+        )
+        await _drain_pending_saves()
+
+    reply = post.await_args.args[1]
+    assert reply["response_type"] == "ephemeral"
+    assert reply["replace_original"] is False
+
+
+def test_a_rating_is_thanked_in_one_line():
+    """Goran, 2026-11-12: just "Thanks for rating"."""
+    from cognee.modules.integrations.slack import handle_slack_interactive as interactive
+
+    assert interactive.RATED_MESSAGE == "Thanks for rating"

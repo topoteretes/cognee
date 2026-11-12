@@ -1,7 +1,7 @@
 """POST a followup message to a Slack ``response_url``.
 
 Used by the interactive handlers, which ack fast and answer later: the "Remember
-this" message shortcut and the Share/Discard buttons of an ``@cognee`` answer. A ``response_url`` is valid for 30 minutes and
+this" and "Forget this" message shortcuts. A ``response_url`` is valid for 30 minutes and
 accepts up to 5 posts; ``replace_original: true`` (set by the caller's own
 payload, not here) swaps an earlier placeholder for the real answer instead
 of leaving both visible.
@@ -29,12 +29,13 @@ _ALLOWED_RESPONSE_URL_HOST = "hooks.slack.com"
 # /services/..., which anyone can create in a free workspace and which accept the
 # exact {"text": ..., "blocks": [...]} body this module sends. Pinning the host but
 # not the path still lets a forged payload exfiltrate the answer text into an
-# attacker's Slack workspace. Genuine response_urls are only ever these three:
+# attacker's Slack workspace. Genuine response_urls are only ever these:
 #   slash commands   -> https://hooks.slack.com/commands/T…/…/…
 #   interactivity    -> https://hooks.slack.com/actions/T…/…/…
-#   shortcuts        -> https://hooks.slack.com/app-actions/T…/…/…
+#   shortcuts        -> https://hooks.slack.com/app/T…/…/… (what Slack sends for a
+#                       message shortcut) or /app-actions/T…/…/… (what its docs show)
 _ALLOWED_RESPONSE_URL_PATH = re.compile(
-    r"^/(?:commands|actions|app-actions)/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$"
+    r"^/(?:commands|actions|app-actions|app)/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$"
 )
 
 
@@ -59,6 +60,17 @@ def _normalize_slack_response_url(response_url: str) -> str | None:
     return f"https://{_ALLOWED_RESPONSE_URL_HOST}{parts.path}"
 
 
+def _shape(response_url: str) -> str:
+    """The URL's form without its ids or token: host, first path segment, segment count."""
+    try:
+        parts = urlsplit(response_url)
+    except ValueError:
+        return "unparseable"
+    segments = [segment for segment in parts.path.split("/") if segment]
+    first = segments[0] if segments and re.fullmatch(r"[a-z-]{1,20}", segments[0]) else "?"
+    return f"host={parts.hostname} first={first} segments={len(segments)}"
+
+
 async def post_to_response_url(response_url: str, payload: dict[str, Any]) -> None:
     """Best-effort delivery — never raises.
 
@@ -73,8 +85,9 @@ async def post_to_response_url(response_url: str, payload: dict[str, Any]) -> No
     safe_response_url = _normalize_slack_response_url(response_url)
     if safe_response_url is None:
         logger.error(
-            "Refusing to deliver to an invalid https://%s response_url",
+            "Refusing to deliver to an invalid https://%s response_url (%s)",
             _ALLOWED_RESPONSE_URL_HOST,
+            _shape(response_url),
         )
         return
     try:

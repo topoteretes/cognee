@@ -5,13 +5,11 @@ with a single ``payload`` field holding a URL-encoded JSON string — unlike
 the Events API, which POSTs raw JSON directly. Parsed here from the
 verified raw bytes (a parsed-body parameter would break signature verification).
 
-Handles the "Remember this" and "Forget this" message shortcuts and the Share/Discard
-buttons of an
-``@cognee`` answer (see handle_cognee_ask.py). Every
-other interactive payload type this app doesn't act on (other block
-actions, modals, future shortcuts) acks empty rather than erroring — same
-reasoning as unhandled slash commands and events: erroring only earns a
-Slack retry, never a better outcome for a payload this app doesn't act on.
+Handles the "Remember this" and "Forget this" message shortcuts and the 👍 / 👎 under
+an ``@cognee`` answer (handle_cognee_ask.py). Every other interactive payload type this
+app doesn't act on (other block actions, modals, future shortcuts) acks empty rather
+than erroring — same reasoning as unhandled slash commands and events: erroring only
+earns a Slack retry, never a better outcome for a payload this app doesn't act on.
 """
 
 import asyncio
@@ -20,15 +18,9 @@ import logging
 from functools import partial
 from typing import Any
 from urllib.parse import parse_qs
-from uuid import UUID
 
 from cognee.infrastructure.background_tasks import register_background_task
-from cognee.modules.integrations.slack.handle_cognee_ask import (
-    ASK_DISCARD_ACTION_ID,
-    ASK_SHARE_ACTION_ID,
-    handle_cognee_ask_discard,
-    handle_cognee_ask_share,
-)
+from cognee.modules.integrations.slack.handle_cognee_ask import RATINGS, rate_answer
 from cognee.modules.integrations.slack.handle_cognee_mention import (
     NOT_CONNECTED_MESSAGE,
     NOTHING_TO_SAVE_MESSAGE,
@@ -67,23 +59,64 @@ async def handle_slack_interactive(raw_body: bytes) -> dict[str, Any]:
     elif payload_type == "message_action" and payload.get("callback_id") == FORGET_THIS_CALLBACK_ID:
         await _handle_forget_this(payload)
     elif payload_type == "block_actions":
-        await _handle_block_action(payload)
+        await _handle_rating(payload)
 
     return {}
 
 
-async def _handle_block_action(payload: dict[str, Any]) -> None:
-    """Dispatch a clicked button by its ``action_id``."""
-    action = (payload.get("actions") or [{}])[0]
-    action_id = action.get("action_id")
-    response_url = payload.get("response_url", "")
+RATED_MESSAGE = "Thanks for rating"
+NOT_YOURS_TO_RATE_MESSAGE = (
+    "Only the person who asked can rate this answer\nYour click changed nothing."
+)
+RATE_FAILED_MESSAGE = "Couldn't save your rating\nTry again in a moment."
 
-    if action_id == ASK_SHARE_ACTION_ID:
-        response = await handle_cognee_ask_share(response_url, action.get("value", ""))
-        await post_to_response_url(response_url, response)
-    elif action_id == ASK_DISCARD_ACTION_ID:
-        response = await handle_cognee_ask_discard(action.get("value", ""))
-        await post_to_response_url(response_url, response)
+
+async def _handle_rating(payload: dict[str, Any]) -> None:
+    """Rate an answer for the member who clicked 👍 or 👎.
+
+    The rater is the payload's user, which the request signature vouches for; the button
+    carries the answer's id alone. Rating writes to the session cache and moves graph
+    weights, which can take longer than Slack's 3-second window, so it runs detached and
+    answers through response_url.
+    """
+    action = (payload.get("actions") or [{}])[0]
+    score = RATINGS.get(action.get("action_id"))
+    if score is None:
+        return
+    response_url = payload.get("response_url", "")
+    team_id = (payload.get("team") or {}).get("id", "")
+    credential = await get_by_team(team_id) if team_id else None
+    if not is_active(credential):
+        await post_to_response_url(response_url, notice(NOT_CONNECTED_MESSAGE))
+        return
+    register_background_task(
+        asyncio.create_task(
+            _rate_and_confirm(
+                partial(post_to_response_url, response_url),
+                credential,
+                member=(payload.get("user") or {}).get("id", ""),
+                qa_id=action.get("value", ""),
+                score=score,
+            )
+        )
+    )
+
+
+async def _rate_and_confirm(
+    reply: Any, credential: Any, *, member: str, qa_id: str, score: int
+) -> None:
+    """Record the rating and tell the member how it went. Never raises: it runs detached."""
+    # The button sits on the public answer: a reply to its response_url replaces that answer
+    # for everyone unless it says not to (live, 2026-11-12).
+    try:
+        rated = await rate_answer(credential, member, qa_id, score)
+    except Exception:  # a failure degrades to a chat message
+        logger.exception("Rating a Slack answer failed")
+        await reply(notice(RATE_FAILED_MESSAGE, replace_original=False))
+        return
+    await reply(
+        notice(RATED_MESSAGE if rated else NOT_YOURS_TO_RATE_MESSAGE, replace_original=False)
+    )
 
 
 async def _handle_remember_this(payload: dict[str, Any]) -> None:

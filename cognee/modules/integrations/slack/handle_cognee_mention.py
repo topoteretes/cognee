@@ -3,25 +3,26 @@
 A mention in a channel the app is in (``app_mention``) or a direct message to the app
 (``message`` with ``channel_type: im``) carries one of:
 
-* ``@cognee <question>``: answered from the member's memory, with Share and Discard;
+* ``@cognee <question>``: answered with a message (``chat.postMessage``). In a channel it
+  goes in the question's thread, for everyone there, so it uses only what all of them can
+  read (``ask``); in a direct message it stays between the member and the app;
 * ``@cognee remember <text>``: saves a note that Slack never saw (a decision from a call);
 * ``@cognee remember`` in a thread: saves the thread's first message, followed like
   "Remember this" (an edit or a deletion in Slack forgets the copy);
 * ``@cognee forget`` in a thread: forgets the member's own copy of the thread's first
   message (the "Forget this" shortcut does the same for any message);
-* ``@cognee here <question>``: the same, within this channel's synced messages only;
 * ``@cognee link``: the page where the member links their Slack account (Sign in with
   Slack, ``member_link.py``); ``@cognee unlink`` ends that link;
 * ``@cognee status``: whether this channel is synced, the last sync, and which Cognee
   account the member is linked to;
 * ``@cognee help`` or a bare mention: what the app does.
 
-Every answer is ephemeral (``chat.postEphemeral``): only the member who asked sees it. The
-mention itself is visible in the channel, so a private question goes in a direct message.
-A direct message is always allowed; in a channel the command allowlist applies, as for
-"Remember this", except for ``forget``, ``unlink`` and ``status``: taking back one's
-own copy or link, and asking what Cognee does here, are never limited. The event handler acknowledges Slack at once and runs this detached
-(``handle_slack_event``), so a slow search never earns a retry.
+Everything else (progress, a miss, a failure, every other command) is ephemeral
+(``chat.postEphemeral``): only the member who asked sees it. A direct message is always
+allowed; in a channel the command allowlist applies, as for "Remember this", except for
+``forget``, ``unlink`` and ``status``: taking back one's own copy or link, and asking what
+Cognee does here, are never limited. The event handler acknowledges Slack at once and runs
+this detached (``handle_slack_event``), so a slow search never earns a retry.
 """
 
 import asyncio
@@ -48,14 +49,13 @@ from cognee.modules.integrations.outbound import client_session, require_outboun
 from cognee.modules.integrations.slack.adapter import access_token_for
 from cognee.modules.integrations.slack.channel_membership import (
     app_follows_channel,
+    channel_scope,
     member_channels,
 )
 from cognee.modules.integrations.slack.handle_cognee_ask import (
-    ASK_DISCARD_ACTION_ID,
-    ASK_SHARE_ACTION_ID,
     _format_answer,
-    ask_session_id,
-    keep_answer,
+    finish_answer,
+    record_answer,
 )
 from cognee.modules.integrations.slack.handle_slack_link import (
     MEMBER_LINK_PROVIDER,
@@ -76,38 +76,103 @@ from cognee.modules.integrations.slack.remember_message import (
     remember_message,
     remember_note,
 )
+from cognee.modules.integrations.slack.status import status_message
 from cognee.modules.integrations.slack.sync import (
     dataset_name_for_credential,
     exclude_message,
     selected_channels,
 )
+from cognee.modules.retrieval.hybrid.context import extract_context_object_ids
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_user
 from cognee.tasks.ingestion.connectors.slack import SlackSourceError
 
 logger = logging.getLogger(__name__)
 
-_POST_EPHEMERAL_URL = "https://slack.com/api/chat.postEphemeral"
+_SLACK_API = "https://slack.com/api/"
 _TIMEOUT = aiohttp.ClientTimeout(total=10)
 _PREVIEW_MAX_CHARS = 200
 _ANY_LEADING_MENTION = re.compile(r"^\s*<@[UW][A-Z0-9]+>")
 
 # Every reply is a short bold title on its first line and one plain explanation below it
 # (``notice``), in cognee's product voice: direct, no emoji (Goran, 2026-11-10).
-HELP_MESSAGE = (
-    "Cognee in Slack\n"
-    "• `@cognee <question>` answers from your Cognee memory.\n"
-    "• `@cognee here <question>` answers from this channel's synced messages only.\n"
-    "• `@cognee remember <text>` saves a note, e.g. a decision from a call.\n"
-    "• `@cognee remember` in a thread saves the thread's first message.\n"
-    "• `@cognee forget` in a thread forgets your saved copy of the thread's first message; "
-    "its author or the person who connected Slack also removes it from the synced memory.\n"
-    "• `@cognee link` links your Slack account to your Cognee account; "
-    "`@cognee unlink` ends that.\n"
-    "• `@cognee status` says whether this channel is synced and who you are linked as.\n"
-    "Only you see these replies. *Remember this* and *Forget this* are in every message's "
-    "⋯ menu."
+# What the app does, as label and value pairs per group (Goran, 2026-11-12). Laid out in
+# Block Kit by ``help_message``; ``HELP_MESSAGE`` is the same in plain text.
+_HELP_LEAD = "Ask, remember and forget from any channel cognee is in."
+_HELP_GROUPS = (
+    (
+        "Ask",
+        (
+            ("`@cognee <question>`", "An answer in the thread, for everyone in the channel."),
+            ("Message cognee directly", "A private answer from all your memory."),
+            ("Rate", "The buttons under an answer you asked for."),
+        ),
+    ),
+    (
+        "Remember",
+        (
+            ("`@cognee remember <text>`", "Saves a note."),
+            ("`@cognee remember` in a thread", "Saves the thread's first message."),
+            ("*Remember this* (⋯ menu)", "Saves any message."),
+        ),
+    ),
+    (
+        "Forget",
+        (
+            ("`@cognee forget` in a thread", "Forgets your saved copy."),
+            (
+                "*Forget this* (⋯ menu)",
+                "Forgets a synced message, for its author or the person who connected Slack.",
+            ),
+        ),
+    ),
 )
+_HELP_ACCOUNT = "`@cognee link` · `@cognee unlink` · `@cognee status`"
+_ONLY_YOU = "Only you can see this."
+HELP_MESSAGE = "\n".join(
+    [
+        "cognee in Slack",
+        _HELP_LEAD,
+        *(
+            f"{group}: " + "; ".join(f"{label}: {value}" for label, value in rows)
+            for group, rows in _HELP_GROUPS
+        ),
+        f"Account: {_HELP_ACCOUNT}",
+        _ONLY_YOU,
+    ]
+).replace("*", "")
+
+
+def help_message() -> dict[str, Any]:
+    """``@cognee help`` in Block Kit: a title, the groups as two columns (label, value)
+    between dividers, the account commands, and who sees it. ``HELP_MESSAGE`` is its
+    notification text."""
+    blocks: list[dict[str, Any]] = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"*cognee in Slack*\n{_HELP_LEAD}"}},
+        {"type": "divider"},
+    ]
+    for group, rows in _HELP_GROUPS:
+        if group == "Remember":
+            blocks.append({"type": "divider"})  # asking, then what cognee keeps
+        blocks += [
+            {"type": "section", "text": {"type": "mrkdwn", "text": f"*{group}*"}},
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": text}
+                    for label, value in rows
+                    for text in (label, value)
+                ],
+            },
+        ]
+    blocks += [
+        {"type": "divider"},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"*Account*\n{_HELP_ACCOUNT}"}},
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": _ONLY_YOU}]},
+    ]
+    return notice(HELP_MESSAGE, blocks=blocks)
+
+
 REMEMBERED_MESSAGE = (
     "Saved to your memory\n"
     "Recallable in about a minute. Reply `@cognee forget` in this thread to remove it."
@@ -145,9 +210,6 @@ UNLINKED_MESSAGE = (
     "`@cognee link` to link again."
 )
 NOT_LINKED_TO_UNLINK_MESSAGE = "Not linked\nYour Slack account is not linked to a Cognee account."
-HERE_NEEDS_A_CHANNEL_MESSAGE = (
-    "Use here in a channel\n`@cognee here` searches one channel's synced messages."
-)
 NOT_CONFIGURED_MESSAGE = (
     "Slack needs reconnecting\n"
     "The connection to Cognee is not complete. Disconnect Slack and connect it again."
@@ -156,24 +218,25 @@ SEARCH_FAILED_MESSAGE = "Search failed\nTry again in a moment."
 NOTHING_FOUND_MESSAGE = (
     "Nothing found\nYour Cognee memory has nothing on that yet. `@cognee remember` saves it."
 )
-SHARE_FAILED_TEXT = (
-    "Sharing is not available for this answer: Cognee could not keep it for sharing. Ask "
-    "again to try once more."
-)
-SHARE_UNAVAILABLE_TEXT = (
-    "Sharing is off here: it needs Cognee's session memory (CACHING), which this server "
-    "has switched off."
-)
+ANSWER_NOT_POSTED_MESSAGE = "Couldn't post the answer\nTry again in a moment."
 MEMBERSHIP_UNKNOWN_MESSAGE = (
     "Synced channels left out\n"
     "Slack did not say which channels you are in, so this answer does not use the "
     "workspace's synced channels. Try again in a moment."
+)
+PUBLIC_CHANNELS_UNKNOWN_MESSAGE = (
+    "Only this channel used\n"
+    "Slack did not say which channels everyone here can read, so this answer uses only "
+    "this channel's synced messages. Try again in a moment."
 )
 NOT_CONNECTED_MESSAGE = (
     "Slack is not connected\nConnect this workspace from Integrations in Cognee."
 )
 
 Reply = Callable[[dict[str, Any]], Awaitable[None]]
+# Posts an answer as a message in the conversation it was asked in; raises when Slack
+# does not take it.
+Publish = Callable[[dict[str, Any]], Awaitable[None]]
 
 # Taking back one's own copy or link, and asking what Cognee does here, work everywhere.
 _NEVER_LIMITED = {"forget", "unlink", "status"}
@@ -232,7 +295,7 @@ async def _handle(team_id: str, event: dict[str, Any]) -> None:
         await reply(notice(link_message()))
         return
     if not text or command == "help":
-        await reply(notice(HELP_MESSAGE))
+        await reply(help_message())
         return
 
     if command == "unlink":
@@ -241,11 +304,10 @@ async def _handle(team_id: str, event: dict[str, Any]) -> None:
 
     owner_user_id = await resolve_owner_user_id(credential, team_id, member)
     if command == "status":
-        await reply(
-            notice(
-                await status_text(credential, owner_user_id, channel=None if direct else channel)
-            )
+        message = await status_message(
+            credential, owner_user_id, channel=None if direct else channel
         )
+        await reply(notice(message["text"], blocks=message["blocks"]))
         return
     if owner_user_id is None:
         await reply(notice(NOT_LINKED_MESSAGE))
@@ -268,7 +330,7 @@ async def _handle(team_id: str, event: dict[str, Any]) -> None:
                 reply, credential, team_id=team_id, owner_user_id=owner_user_id, event=event
             )
         else:
-            await reply(notice(HELP_MESSAGE))
+            await reply(help_message())
         return
 
     if command == "forget":
@@ -289,24 +351,18 @@ async def _handle(team_id: str, event: dict[str, Any]) -> None:
             await reply(notice(FORGET_WHERE_MESSAGE))
         return
 
-    if command == "here":
-        question = rest.strip()
-        if direct:
-            await reply(notice(HERE_NEEDS_A_CHANNEL_MESSAGE))
-        elif not question:
-            await reply(notice(HELP_MESSAGE))
-        else:
-            await ask(
-                reply,
-                credential,
-                member=member,
-                owner_user_id=owner_user_id,
-                question=question,
-                here=channel,
-            )
-        return
-
-    await ask(reply, credential, member=member, owner_user_id=owner_user_id, question=text)
+    # In a channel the answer starts a thread under the question, or joins the thread it
+    # was asked in; in a direct message it is the next message, or joins its thread.
+    thread = event.get("thread_ts") if direct else event.get("thread_ts") or event.get("ts")
+    await ask(
+        reply,
+        partial(post_message, credential, channel, thread_ts=thread),
+        credential,
+        member=member,
+        owner_user_id=owner_user_id,
+        question=text,
+        channel=None if direct else channel,
+    )
 
 
 def _without_the_mention(text: str, credential: IntegrationCredential) -> str:
@@ -317,20 +373,24 @@ def _without_the_mention(text: str, credential: IntegrationCredential) -> str:
 
 async def ask(
     reply: Reply,
+    publish: Publish,
     credential: IntegrationCredential,
     *,
     member: str,
     owner_user_id: UUID,
     question: str,
-    here: str | None = None,
+    channel: str | None,
 ) -> None:
-    """Answer ``question`` from the owner's memory, privately, with Share and Discard.
+    """Answer ``question`` with a message (``publish``); progress, a miss and a failure
+    reach the member alone (``reply``).
 
-    Every selected channel lands in one workspace dataset, which its owner may share, so
-    that dataset is searched only within the selected channels Slack says ``member``
-    belongs to; the owner's other datasets are searched whole. ``here`` (``@cognee here``)
-    narrows both to that one channel. When Slack cannot say which channels the member is
-    in, the workspace dataset is left out and the member is told.
+    Every selected channel lands in one workspace dataset. A question in ``channel`` is
+    answered for everyone there, so it reads only what all of them can: the workspace
+    dataset within that channel and the selected public channels (``channel_scope``),
+    never the asker's other datasets. A direct message (``channel`` is ``None``) is
+    answered from the workspace dataset within the selected channels Slack says ``member``
+    belongs to, and from the owner's other datasets whole; when Slack cannot say, the
+    workspace dataset is left out and the member is told.
     """
     team_id = str(credential.provider_account_id)
     await reply(notice(f"Searching your memory for “{_preview(question)}”", muted=True))
@@ -340,20 +400,13 @@ async def ask(
         logger.error("Slack credential for team %s points at a deleted user", team_id)
         await reply(notice(NOT_CONFIGURED_MESSAGE))
         return
-    try:
-        channels = await member_channels(credential, member)
-    except SlackSourceError as error:
-        logger.warning("Slack did not list a member's channels for team %s: %s", team_id, error)
-        channels = set()
-        await reply(notice(MEMBERSHIP_UNKNOWN_MESSAGE))
-    except Exception:
-        # Anything else on the way to Slack (outbound HTTP switched off, a token that cannot
-        # be read): the membership is just as unknown, so it fails closed the same way.
-        logger.exception("Could not ask Slack for a member's channels for team %s", team_id)
-        channels = set()
-        await reply(notice(MEMBERSHIP_UNKNOWN_MESSAGE))
-    scope = [here] if here else selected_channels(credential)
-    visible = [channel for channel in scope if channel in channels]
+    if channel is None:
+        visible = await _direct_message_scope(reply, credential, member)
+    else:
+        scope = await channel_scope(credential, channel)
+        if not scope.known:
+            await reply(notice(PUBLIC_CHANNELS_UNKNOWN_MESSAGE))
+        visible = scope.channels
 
     workspace_name = dataset_name_for_credential(credential)
     readable = await get_authorized_existing_datasets(None, "read", owner)
@@ -362,9 +415,9 @@ async def ask(
     others = [dataset.id for dataset in readable if dataset.name != workspace_name]
     searches = []
     if workspace and visible:
-        searches.append((workspace, [f"slack:channel:{channel}" for channel in visible]))
-    if others:
-        searches.append((others, [f"slack:channel:{here}"] if here else None))
+        searches.append((workspace, [f"slack:channel:{scope}" for scope in visible]))
+    if others and channel is None:
+        searches.append((others, None))
     try:
         answers = await asyncio.gather(
             *(
@@ -393,60 +446,81 @@ async def ask(
 
     fallback_text, blocks = _format_answer(results)
     if not blocks:
-        # Every dataset answered that it does not know: nothing to share.
+        # Every dataset answered that it does not know: told to the member alone.
         await reply(notice(NOTHING_FOUND_MESSAGE))
         return
-    share_unavailable = SHARE_UNAVAILABLE_TEXT
+    # The graph elements of the workspace search alone: feedback is applied to the
+    # workspace dataset (``apply_answer_feedback``).
+    used = _used_graph_elements(answers[0] if workspace and visible else [])
     try:
-        answer_ref = await keep_answer(
-            owner_user_id, ask_session_id(team_id, member), question, blocks
+        # A direct message's question and answer stay out of the record (Goran,
+        # 2026-11-12): it is kept under the workspace's owner, and the answer may quote the
+        # member's own datasets. Its graph elements are all a rating needs.
+        rating_ref = await record_answer(
+            credential,
+            member,
+            question=question if channel else "",
+            answer=fallback_text if channel else "",
+            used_graph_element_ids=used,
         )
+    except Exception:  # the answer is found: a cache that cannot keep it costs the rating
+        logger.exception("Could not record a Slack answer for rating for team %s", team_id)
+        rating_ref = None
+    footer = _footer(channel, visible)
+    try:
+        await publish(
+            {
+                "text": fallback_text,
+                "blocks": finish_answer(blocks, footer=footer, rating_ref=rating_ref),
+            }
+        )
+    except Exception:  # an undelivered answer degrades to a chat message
+        logger.exception("Slack did not take an @cognee answer for team %s", team_id)
+        await reply(notice(ANSWER_NOT_POSTED_MESSAGE))
+
+
+def _used_graph_elements(results: list[Any]) -> dict[str, list[str]] | None:
+    """The node and edge ids the results of one search read, for feedback weights."""
+    nodes: set[str] = set()
+    edges: set[str] = set()
+    for result in results:
+        used = extract_context_object_ids(result.get("objects_result")) or {}
+        nodes |= set(used.get("node_ids", []))
+        edges |= set(used.get("edge_ids", []))
+    if not nodes and not edges:
+        return None
+    return {"node_ids": sorted(nodes), "edge_ids": sorted(edges)}
+
+
+def _footer(channel: str | None, visible: list[str]) -> str:
+    """What the answer read, in one plain line. ``<#C…>`` renders as the channel's name."""
+    if channel is None:
+        return "From your channels and your memory"
+    others = len([scope for scope in visible if scope != channel])
+    counted = f"{others} public channel{'' if others == 1 else 's'}"
+    if channel not in visible:
+        return f"From {counted}"
+    return f"From <#{channel}>" + (f" and {counted}" if others else "")
+
+
+async def _direct_message_scope(
+    reply: Reply, credential: IntegrationCredential, member: str
+) -> list[str]:
+    """The selected channels Slack says ``member`` is in; none when Slack cannot say."""
+    team_id = credential.provider_account_id
+    try:
+        channels = await member_channels(credential, member)
+    except SlackSourceError as error:
+        logger.warning("Slack did not list a member's channels for team %s: %s", team_id, error)
+        await reply(notice(MEMBERSHIP_UNKNOWN_MESSAGE))
+        return []
     except Exception:
-        # The answer is found: a session cache that cannot keep it costs Share, not the
-        # answer.
-        logger.exception("Could not keep a Slack answer for Share for team %s", team_id)
-        answer_ref, share_unavailable = None, SHARE_FAILED_TEXT
-    if answer_ref is None:
-        # Share reads the answer back from the session cache, which is off or failed.
-        await reply(
-            notice(
-                fallback_text,
-                blocks=[
-                    *blocks,
-                    {
-                        "type": "context",
-                        "elements": [{"type": "mrkdwn", "text": share_unavailable}],
-                    },
-                ],
-            )
-        )
-        return
-    await reply(
-        notice(
-            f"{fallback_text}\n\nShare this in the channel?",
-            blocks=[
-                *blocks,
-                {
-                    "type": "actions",
-                    "elements": [
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "Share"},
-                            "style": "primary",
-                            "action_id": ASK_SHARE_ACTION_ID,
-                            "value": answer_ref,
-                        },
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "Discard"},
-                            "action_id": ASK_DISCARD_ACTION_ID,
-                            "value": answer_ref,
-                        },
-                    ],
-                },
-            ],
-        )
-    )
+        # Anything else on the way to Slack (outbound HTTP switched off, a token that cannot
+        # be read): the membership is just as unknown, so it fails closed the same way.
+        logger.exception("Could not ask Slack for a member's channels for team %s", team_id)
+        await reply(notice(MEMBERSHIP_UNKNOWN_MESSAGE))
+        return []
+    return [selected for selected in selected_channels(credential) if selected in channels]
 
 
 async def remember_text(
@@ -561,36 +635,6 @@ async def unlink(reply: Reply, *, team_id: str, member: str) -> None:
     await reply(notice(UNLINKED_MESSAGE))
 
 
-async def status_text(
-    credential: IntegrationCredential, owner_user_id: UUID | None, *, channel: str | None
-) -> str:
-    """Who the member is to Cognee, and what Cognee does with ``channel``."""
-    lines = ["Cognee status"]
-    if owner_user_id is None:
-        lines.append(
-            "Your Slack account is not linked to a Cognee account yet: send `@cognee link`."
-        )
-    else:
-        try:
-            lines.append(f"You are linked to Cognee as {(await get_user(owner_user_id)).email}.")
-        except EntityNotFoundError:
-            lines.append(NOT_CONFIGURED_MESSAGE)
-    if channel is not None:
-        if channel in selected_channels(credential):
-            lines.append("This channel is synced into the workspace's Cognee memory.")
-        else:
-            lines.append("This channel is not synced into Cognee memory.")
-        if not channel_allowed(credential, channel):
-            lines.append(CHANNEL_NOT_ENABLED_MESSAGE)
-    last = credential.last_synced_at
-    if last is None:
-        lines.append("No sync has run yet.")
-    else:
-        status = f" ({credential.sync_status})" if credential.sync_status else ""
-        lines.append(f"Last sync: {last:%Y-%m-%d %H:%M} UTC{status}.")
-    return "\n".join(lines)
-
-
 async def forget_and_confirm(
     reply: Reply,
     credential: IntegrationCredential,
@@ -654,29 +698,58 @@ async def post_ephemeral(
 ) -> None:
     """Show ``payload`` to ``user`` alone in ``channel``, in the thread ``thread_ts`` when
     given. Logs a failure, never raises."""
-    body = {"channel": channel, "user": user, "text": payload["text"]}
-    if payload.get("blocks"):
-        body["blocks"] = payload["blocks"]
-    if thread_ts:
-        body["thread_ts"] = thread_ts
     try:
-        token = await access_token_for(credential)
-        async with (
-            client_session(PROVIDER, timeout=_TIMEOUT) as session,
-            session.post(
-                _POST_EPHEMERAL_URL,
-                json=body,
-                headers={"Authorization": f"Bearer {token}"},
-                # A Location header must not send the bot token elsewhere (SDK-832).
-                allow_redirects=False,
-            ) as response,
-        ):
-            if response.status != 200:
-                raise RuntimeError(f"Slack chat.postEphemeral failed: HTTP {response.status}")
-            answer = await response.json()
-        if not answer.get("ok"):
-            logger.warning("Slack chat.postEphemeral failed: %s", answer.get("error", "unknown"))
+        await _post(
+            credential, "chat.postEphemeral", _message(channel, payload, thread_ts) | {"user": user}
+        )
     except Exception:  # an undelivered reply must not crash the detached handler
         logger.exception(
             "Slack chat.postEphemeral failed for team %s", credential.provider_account_id
         )
+
+
+async def post_message(
+    credential: IntegrationCredential,
+    channel: str,
+    payload: dict[str, Any],
+    thread_ts: str | None = None,
+) -> None:
+    """Post ``payload`` as a message in ``channel``, in the thread ``thread_ts`` when given,
+    visible to everyone in it. Raises when Slack does not take it."""
+    await _post(credential, "chat.postMessage", _message(channel, payload, thread_ts))
+
+
+def _message(channel: str, payload: dict[str, Any], thread_ts: str | None) -> dict[str, Any]:
+    # The sources are links; unfolded, each became a preview of a whole message under a
+    # one-line answer (live, 2026-11-12).
+    body = {
+        "channel": channel,
+        "text": payload["text"],
+        "unfurl_links": False,
+        "unfurl_media": False,
+    }
+    if payload.get("blocks"):
+        body["blocks"] = payload["blocks"]
+    if thread_ts:
+        body["thread_ts"] = thread_ts
+    return body
+
+
+async def _post(credential: IntegrationCredential, method: str, body: dict[str, Any]) -> None:
+    """Call the Slack Web API ``method`` with the bot token. Raises on any refusal."""
+    token = await access_token_for(credential)
+    async with (
+        client_session(PROVIDER, timeout=_TIMEOUT) as session,
+        session.post(
+            _SLACK_API + method,
+            json=body,
+            headers={"Authorization": f"Bearer {token}"},
+            # A Location header must not send the bot token elsewhere (SDK-832).
+            allow_redirects=False,
+        ) as response,
+    ):
+        if response.status != 200:
+            raise RuntimeError(f"Slack {method} failed: HTTP {response.status}")
+        answer = await response.json()
+    if not answer.get("ok"):
+        raise RuntimeError(f"Slack {method} failed: {answer.get('error', 'unknown')}")

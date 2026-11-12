@@ -51,7 +51,7 @@ def make_credential(*channels, **overrides):
 @pytest.fixture(autouse=True)
 def no_pause(monkeypatch):
     """No connection is paused unless a test says so (the pause lives in the database)."""
-    monkeypatch.setattr(sync_module, "_is_paused", AsyncMock(return_value=False))
+    monkeypatch.setattr(sync_module, "is_paused", AsyncMock(return_value=False))
 
 
 def workspace(*channels: str) -> FakeSlack:
@@ -802,7 +802,7 @@ async def test_a_paused_connection_is_not_started_by_the_tick(monkeypatch):
         started.append(credential.provider_account_id)
 
     monkeypatch.setattr(
-        sync_module, "_is_paused", AsyncMock(side_effect=lambda credential: credential is paused)
+        sync_module, "is_paused", AsyncMock(side_effect=lambda credential: credential is paused)
     )
     with (
         patch.object(
@@ -819,7 +819,7 @@ async def test_a_paused_connection_is_not_started_by_the_tick(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_message_taken_out_of_a_paused_connection_waits_for_the_resume(monkeypatch):
     spawned = []
-    monkeypatch.setattr(sync_module, "_is_paused", AsyncMock(return_value=True))
+    monkeypatch.setattr(sync_module, "is_paused", AsyncMock(return_value=True))
     monkeypatch.setattr(
         "cognee.modules.integrations.background.spawn_background",
         lambda coro, **kwargs: (spawned.append(kwargs), coro.close()),

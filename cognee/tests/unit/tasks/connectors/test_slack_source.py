@@ -1445,3 +1445,53 @@ def test_a_malformed_history_page_after_rows_cuts_and_keeps_the_rows():
 
     assert rows, "the pages before the broken one were read"
     assert stats["failed"] == 1 and stats["failed_unavailable"] == 1
+
+
+# -- Live run 2026-11-12: talk with other apps is not memory ------------------------------
+
+OTHER_APP_USER = "U0OTHERAPP"
+
+
+def _with_another_app() -> FakeSlack:
+    fake = _workspace()
+    fake.add_user(OTHER_APP_USER, real_name="cognee")
+    fake.users[OTHER_APP_USER]["is_bot"] = True
+    return fake
+
+
+def test_a_command_to_another_app_is_left_out_and_a_mention_of_a_person_stays():
+    """Live: a question asked to another app (the production Cognee app, "@cognee status") was
+    synced as what the channel said. A message that opens by mentioning an app is a command
+    to it, as one to this app already is; one that opens with a person stays."""
+    fake = _with_another_app()
+    fake.post(ts(4), "U1", f"<@{OTHER_APP_USER}> status")
+    fake.post(ts(5), "U1", "<@U2> please review the deploy")
+
+    (day,) = [row for row in _walk(fake, {}) if row["id"] == _day_id(ts(3))]
+
+    assert "status" not in day["content"]
+    assert "please review the deploy" in day["content"]
+
+
+def test_an_apps_reply_to_a_command_is_left_out_and_a_persons_reply_stays():
+    """Live: the other app's answer to that question ("I don't know which Cognee account you
+    are yet...") became a source of this app's answers. In a thread opened by a command to an
+    app, what apps reply is that app talking; what people reply is still the channel."""
+    fake = _with_another_app()
+    fake.post(ts(4), "U1", f"<@{OTHER_APP_USER}> who owns Orion?")
+    fake.reply(
+        ts(4),
+        ts(5),
+        None,
+        "I don't know which Cognee account you are yet.",
+        bot_id="B0OTHERAPP",
+        subtype="bot_message",
+    )
+    fake.reply(ts(4), ts(6), "U2", "Ana owns Orion, I checked.")
+
+    rows = {row["id"]: row for row in _walk(fake, {})}
+
+    thread = rows[f"{CHANNEL}:{ts(4)}"]["content"]
+    assert "I don't know which Cognee account" not in thread
+    assert "who owns Orion" not in thread
+    assert "Ana owns Orion, I checked." in thread

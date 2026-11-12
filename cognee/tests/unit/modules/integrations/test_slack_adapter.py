@@ -92,10 +92,10 @@ def test_scope_is_passed_through_as_scopes():
     assert installation.scopes == "commands,chat:write"
 
 
-def test_the_only_write_scope_is_the_one_ephemeral_answers_need():
+def test_the_only_write_scope_is_the_one_answers_need():
     """SDK-832: no write scope beyond what a call needs. ``@cognee`` answers with
-    ``chat.postEphemeral`` (``chat:write``); everything else posts through ``response_url``
-    or ``views.*``, which need none."""
+    ``chat.postMessage`` and replies with ``chat.postEphemeral`` (both ``chat:write``);
+    everything else posts through ``response_url`` or ``views.*``, which need none."""
     from cognee.modules.integrations.slack import oauth
 
     scopes = oauth._BOT_SCOPES.split(",")
@@ -105,7 +105,7 @@ def test_the_only_write_scope_is_the_one_ephemeral_answers_need():
 
 @pytest.mark.asyncio
 async def test_forget_related_data_forgets_what_the_user_remembered_from_this_workspace():
-    """And the answers kept for Share under that user (N2)."""
+    """And the answers recorded for rating under that user."""
     user = SimpleNamespace(id="user-1")
     credential = SimpleNamespace(provider_account_id="T123")
     with (
@@ -113,11 +113,11 @@ async def test_forget_related_data_forgets_what_the_user_remembered_from_this_wo
             "cognee.modules.integrations.slack.adapter.forget_remembered", new=AsyncMock()
         ) as forget_remembered,
         patch(
-            "cognee.modules.integrations.slack.handle_cognee_ask.forget_kept_answers",
+            "cognee.modules.integrations.slack.handle_cognee_ask.forget_answer_records",
             new=AsyncMock(),
-        ) as forget_kept_answers,
+        ) as forget_answer_records,
     ):
         await integration.forget_related_data(credential, user)
 
     forget_remembered.assert_awaited_once_with(user, team_id="T123")
-    forget_kept_answers.assert_awaited_once_with("T123", user_id="user-1")
+    forget_answer_records.assert_awaited_once_with("T123", user_id="user-1")

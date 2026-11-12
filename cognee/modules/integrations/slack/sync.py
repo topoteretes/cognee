@@ -50,6 +50,8 @@ logger = get_logger("slack_integration")
 PROVIDER = "slack"
 SLACK_DATASET_PREFIX = "slack"
 SELECTION_KEY = "selected_channels"
+# Written by every run (``credentials.record_sync_result``).
+LAST_SYNC_COUNTS_KEY = "last_sync_counts"
 SYNC_STATUS_OK = "ok"
 SYNC_STATUS_DEGRADED = "degraded"
 # The bot scope that renders authors by name. Older installs lack it until they reconnect.
@@ -454,22 +456,29 @@ async def _sync_channels(
 # The tick
 # ---------------------------------------------------------------------------
 def is_due(credential: IntegrationCredential, now: datetime) -> bool:
-    """A connection with channels selected, not syncing, and not synced in its interval.
-
-    The interval is six hours, or ten minutes after a run that was cut short and resumes.
-    """
-    metadata = credential.provider_metadata or {}
-    if not metadata.get(SELECTION_KEY):
+    """A connection with channels selected, not syncing, and not synced in its interval
+    (``next_sync_at``)."""
+    if not (credential.provider_metadata or {}).get(SELECTION_KEY):
         return False
     if ingestion.sync_is_running(PROVIDER, credential.provider_account_id):
         return False
+    due = next_sync_at(credential)
+    return due is None or now >= due
+
+
+def next_sync_at(credential: IntegrationCredential) -> datetime | None:
+    """When the tick next syncs the connection; ``None`` when it never has (the next tick).
+
+    Six hours after the last sync, or ten minutes after a run that was cut short and
+    resumes.
+    """
     last = credential.last_synced_at
     if last is None:
-        return True
+        return None
     if last.tzinfo is None:
         # SQLite stores no timezone; the value is written as UTC.
         last = last.replace(tzinfo=timezone.utc)
-    counts = metadata.get("last_sync_counts") or {}
+    counts = (credential.provider_metadata or {}).get(LAST_SYNC_COUNTS_KEY) or {}
     from cognee.tasks.ingestion.connectors.slack import STALLED_KEY
 
     # Each cut channel counts once under its cut key; one that could not move past a day
@@ -477,10 +486,66 @@ def is_due(credential: IntegrationCredential, now: datetime) -> bool:
     cut_short = credential.sync_status == SYNC_STATUS_DEGRADED and sum(
         counts.get(key, 0) for key in RESUMABLE_COUNT_KEYS
     ) > counts.get(STALLED_KEY, 0)
-    return now - last >= (RESUME_INTERVAL if cut_short else SYNC_INTERVAL)
+    return last + (RESUME_INTERVAL if cut_short else SYNC_INTERVAL)
 
 
-async def _is_paused(credential: IntegrationCredential) -> bool:
+# Why a degraded sync could not finish, one plain sentence per failure kind, in the words
+# the Integrations page uses (``degradedReasons`` in SdkIntegrationCard.tsx).
+DEGRADED_REASONS = {
+    "failed_day_too_large": (
+        "A channel has more messages in one day than the provider's rate limit lets a sync "
+        "read, so its history stops there."
+    ),
+    "failed_rate_limit": (
+        "Slack rate limit reached. The sync continues on its own in about ten minutes."
+    ),
+    "failed_budget": "Large history: the sync continues where it stopped in about ten minutes.",
+    "failed_unavailable": "Slack was unavailable; the sync continues on its own.",
+    "failed_auth": "Slack signed Cognee out. Reconnect to keep syncing.",
+    "failed_missing_scope": "Reconnect to grant the permissions Cognee needs.",
+    "failed_reconnect": (
+        "The connection no longer matches the Slack workspace. Reconnect to keep syncing."
+    ),
+    "failed_channel_access": (
+        "The app can no longer read a channel. Add Cognee to it again, or deselect it."
+    ),
+    "failed_channel_unavailable": "A selected channel was deleted, or the app was removed from it.",
+    "failed_thread_unreadable": (
+        "Slack answered a thread in a way Cognee cannot read. Its last stored version is "
+        "kept, and the next sync tries it again."
+    ),
+}
+DEGRADED_FALLBACK = "Some content could not be processed. Refresh to retry."
+
+
+def degraded_reasons(counts: dict[str, int]) -> list[str]:
+    """The sentences for the failure kinds ``counts`` records, in ``DEGRADED_REASONS``
+    order; the general one when none is known."""
+    return [text for key, text in DEGRADED_REASONS.items() if counts.get(key)] or [
+        DEGRADED_FALLBACK
+    ]
+
+
+async def workspace_item_count(credential: IntegrationCredential) -> int:
+    """How many items the connection's workspace dataset holds, in one query."""
+    from sqlalchemy import func
+
+    from cognee.modules.data.models import Data, Dataset
+
+    async with get_relational_engine().get_async_session() as db:
+        return (
+            await db.execute(
+                select(func.count(Data.id))
+                .join(Dataset, Data.dataset_id == Dataset.id)
+                .where(
+                    Dataset.name == dataset_name_for_credential(credential),
+                    Dataset.owner_id == credential.user_id,
+                )
+            )
+        ).scalar_one()
+
+
+async def is_paused(credential: IntegrationCredential) -> bool:
     """Whether a pause holds the connection (SDK-1434), asked quietly: the tick asks every
     minute, and ``ingestion.sync_is_paused`` would log each time (G62)."""
     from cognee.modules.integrations.credentials import owner_principal_id
@@ -516,7 +581,7 @@ async def sync_due_workspaces() -> int:
     due = [
         credential
         for credential in credentials
-        if is_due(credential, now) and not await _is_paused(credential)
+        if is_due(credential, now) and not await is_paused(credential)
     ]
     for credential in due:
         task = asyncio.create_task(
@@ -589,7 +654,7 @@ async def start_sync(credential: IntegrationCredential) -> None:
     connection waits for its resume (G62)."""
     from cognee.modules.integrations.background import spawn_background
 
-    if await _is_paused(credential):
+    if await is_paused(credential):
         logger.info("Slack sync of %s held: the connection is paused", credential.id)
         return
     if ingestion.request_rerun_if_running(PROVIDER, str(credential.provider_account_id)):
@@ -721,7 +786,7 @@ async def _forget_workspace(credential: IntegrationCredential) -> None:
     from cognee.modules.data.methods import get_dataset_data
     from cognee.modules.data.models import Dataset
     from cognee.modules.integrations.credentials import change_provider_metadata
-    from cognee.modules.integrations.slack.handle_cognee_ask import forget_kept_answers
+    from cognee.modules.integrations.slack.handle_cognee_ask import forget_answer_records
     from cognee.modules.integrations.slack.remember_message import forget_workspace_remembered
     from cognee.modules.users.methods import get_user
     from cognee.tasks.ingestion.ingest_dlt_source import drop_dlt_dataset
@@ -757,7 +822,7 @@ async def _forget_workspace(credential: IntegrationCredential) -> None:
     # every message's text (G43).
     await drop_dlt_dataset(dataset_name)
     await forget_workspace_remembered(team_id)
-    await forget_kept_answers(team_id)
+    await forget_answer_records(team_id)
     uninstalled = (credential.provider_metadata or {}).get(UNINSTALLED_AT_KEY)
 
     def stamp_if_still_uninstalled(metadata: dict) -> dict | None:

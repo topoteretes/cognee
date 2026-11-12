@@ -1,97 +1,13 @@
-"""Unit tests for modules.integrations.slack.handle_cognee_ask: the answer review of
-``@cognee <question>`` (Share and Discard) and how an answer's text is built from the
-search results. Asking itself is ``handle_cognee_mention.ask`` (test_handle_cognee_mention).
+"""Unit tests for modules.integrations.slack.handle_cognee_ask: how an ``@cognee`` answer's
+text is built from the search results. Asking itself is ``handle_cognee_mention.ask``
+(test_handle_cognee_mention).
 """
 
-import asyncio
 import json
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
-from urllib.parse import urlencode
-from uuid import uuid4
 
 import pytest
 
-from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-from cognee.modules.integrations.credentials import STATUS_ACTIVE
-from cognee.modules.integrations.slack.handle_cognee_ask import (
-    ASK_DISCARD_ACTION_ID,
-    ASK_SHARE_ACTION_ID,
-    _format_answer,
-    handle_cognee_ask_discard,
-    handle_cognee_ask_share,
-    keep_answer,
-)
-from cognee.modules.search.types import SearchType
-
-MODULE = "cognee.modules.integrations.slack.handle_cognee_ask"
-
-
-def _body(
-    team_id: str = "T123",
-    text: str = "what happened in Q3?",
-    response_url: str = "https://hooks.slack.com/x",
-    user_id: str = "U100",
-) -> bytes:
-    return urlencode(
-        {"team_id": team_id, "text": text, "response_url": response_url, "user_id": user_id}
-    ).encode()
-
-
-def _credential(user_id=None):
-    return SimpleNamespace(
-        tenant_id=uuid4(), user_id=user_id or uuid4(), provider_metadata={}, status=STATUS_ACTIVE
-    )
-
-
-# ── handle_cognee_ask: fast path ────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_share_posts_the_question_and_answer_in_channel():
-    _, blocks = _format_answer([_answer(["fact one"], [_cited("d1", TITLE, PERMALINK)])])
-    ref = await keep_answer(uuid4(), "slack:T1:U1", "what happened in Q3?", blocks)
-
-    response = await handle_cognee_ask_share("https://hooks.slack.com/x", ref)
-
-    assert response["response_type"] == "in_channel"
-    assert response["replace_original"] is True
-    assert "what happened in Q3?" in response["text"]
-    assert "fact one" in response["text"]
-    # The question is its own block, ahead of the answer's own blocks —
-    # nothing about either was visible to the channel before this.
-    assert response["blocks"][0]["text"]["text"] == '*Asked:* "what happened in Q3?"'
-    assert any(b.get("type") == "section" for b in response["blocks"][1:])
-    assert PERMALINK in response["text"]  # the sources are shared with the answer
-    # Taken out of the session cache: a second click shares nothing twice.
-    again = await handle_cognee_ask_share("https://hooks.slack.com/x", ref)
-    assert "no longer available" in again["text"]
-
-
-@pytest.mark.asyncio
-async def test_share_of_unknown_answer_id_is_a_clean_ephemeral_message():
-    # Server restart, double-click, or an expired/already-handled id.
-    response = await handle_cognee_ask_share("https://hooks.slack.com/x", "does-not-exist")
-
-    assert response["response_type"] == "ephemeral"
-    assert "no longer available" in response["text"]
-
-
-@pytest.mark.asyncio
-async def test_discard_drops_the_answer_and_replies_ephemeral():
-    _, blocks = _format_answer([_answer(["fact one"])])
-    ref = await keep_answer(uuid4(), "slack:T1:U1", "what happened in Q3?", blocks)
-
-    response = await handle_cognee_ask_discard(ref)
-
-    assert response == {
-        "response_type": "ephemeral",
-        "text": "Discarded.",
-        "replace_original": True,
-    }
-    shared = await handle_cognee_ask_share("https://hooks.slack.com/x", ref)
-    assert "no longer available" in shared["text"]
-
+from cognee.modules.integrations.slack.handle_cognee_ask import _format_answer
 
 # ── _format_answer ──────────────────────────────────────────────────────────
 #
@@ -122,19 +38,20 @@ def _cited(document_id, title=None, url=None):
 def test_format_answer_fallback_text_joins_up_to_three_results():
     results = [_answer(f"fact {i}") for i in range(5)]
     fallback_text, _ = _format_answer(results)
-    assert fallback_text.startswith("*Answer:*")
-    assert "fact 0" in fallback_text and "fact 2" in fallback_text
-    assert "fact 3" not in fallback_text
+    assert fallback_text == "fact 0\n\nfact 1\n\nfact 2"
 
 
 def test_format_answer_blocks_have_one_section_per_fact_with_dividers_between():
     results = [_answer(f"fact {i}") for i in range(3)]
     _, blocks = _format_answer(results)
 
-    assert blocks[0] == {
-        "type": "header",
-        "text": {"type": "plain_text", "text": "Answer", "emoji": True},
-    }
+    assert [block["type"] for block in blocks] == [
+        "section",
+        "divider",
+        "section",
+        "divider",
+        "section",
+    ]
     sections = [b for b in blocks if b["type"] == "section"]
     assert [s["text"]["text"] for s in sections] == ["fact 0", "fact 1", "fact 2"]
     # Dividers sit between facts, never trailing after the last one.
@@ -143,7 +60,7 @@ def test_format_answer_blocks_have_one_section_per_fact_with_dividers_between():
 
 def test_an_answer_carries_no_footer_counting_its_results():
     """Goran, 2026-11-10: "Searched across your Cognee memory · 1 result" told the member
-    nothing; the answer is the facts and the Share and Discard buttons."""
+    nothing; the answer is the facts."""
     _, blocks = _format_answer([_answer("fact 0"), _answer("fact 1")])
     assert not [block for block in blocks if block["type"] == "context"]
 
@@ -196,21 +113,17 @@ def test_format_answer_all_misses_reads_as_no_relevant_information():
     assert blocks == []
 
 
-@pytest.mark.asyncio
-async def test_a_shared_answer_cannot_ping_the_channel_or_disguise_a_link():
-    """Share posts in the channel: Slack's control sequences in the question or in an
+def test_a_posted_answer_cannot_ping_the_channel_or_disguise_a_link():
+    """The answer is posted for everyone in the channel: Slack's control sequences in an
     answer that quotes memory are escaped, so they show as text (G48)."""
-    _, blocks = _format_answer(
+    fallback_text, blocks = _format_answer(
         [_answer(["See <https://evil.example/?q=x|the runbook> & <!here>."])]
     )
-    ref = await keep_answer(uuid4(), "slack:T1:U1", "<!channel> what is the salary?", blocks)
 
-    shared = await handle_cognee_ask_share("https://hooks.slack.com/actions/T/1/x", ref)
-
-    posted = json.dumps(shared)
-    for control in ("<!channel>", "<!here>", "<https://"):
+    posted = json.dumps([fallback_text, blocks])
+    for control in ("<!here>", "<https://"):
         assert control not in posted
-    assert "&lt;!channel&gt;" in posted and "&amp;" in posted
+    assert "&lt;!here&gt;" in posted and "&amp;" in posted
 
 
 def test_a_dataset_that_does_not_know_does_not_hide_the_one_that_does():
@@ -234,6 +147,13 @@ PERMALINK = "https://acme.slack.com/archives/C1/p1793872900000100"
 TITLE = "Who owns the runbook? — Ana Kovac, 2026-11-05"
 
 
+def _shown_day(shown: str, year: int) -> str:
+    """How a source's day reads: ``Nov 5``, with the year only when it is not this one."""
+    from datetime import datetime, timezone
+
+    return shown if datetime.now(timezone.utc).year == year else f"{shown}, {year}"
+
+
 def test_an_answer_names_the_documents_it_read_as_links():
     """G10: a member sees where an answer came from. The engine's Evidence block, with
     data and chunk ids, is not shown; each document read is one link, once."""
@@ -250,9 +170,9 @@ def test_an_answer_names_the_documents_it_read_as_links():
     assert sections == ["Ben owns it."]
     (sources,) = [block for block in blocks if block["type"] == "context"]
     # One element: a context block takes at most ten, and no document is dropped.
-    second = f"<{PERMALINK.replace('p17', 'p18')}|Deploys — Ben Ross, 2026-11-06>"
+    second = f"<{PERMALINK.replace('p17', 'p18')}|Ben Ross · {_shown_day('Nov 6', 2026)}>"
     assert [element["text"] for element in sources["elements"]] == [
-        f"Sources: <{PERMALINK}|{TITLE}> · {second}"
+        f"Sources · 2   1 <{PERMALINK}|Ana Kovac · {_shown_day('Nov 5', 2026)}>   2 {second}"
     ]
     assert "data_id" not in fallback and "Evidence" not in fallback
 
@@ -263,7 +183,9 @@ def test_a_rag_answer_names_its_documents_too():
     _, blocks = _format_answer([result])
 
     (sources,) = [block for block in blocks if block["type"] == "context"]
-    assert sources["elements"][0]["text"] == f"Sources: <{PERMALINK}|{TITLE}>"
+    assert sources["elements"][0]["text"] == (
+        f"Sources · 1   1 <{PERMALINK}|Ana Kovac · {_shown_day('Nov 5', 2026)}>"
+    )
 
 
 def test_structured_evidence_names_no_source():
@@ -276,8 +198,8 @@ def test_structured_evidence_names_no_source():
 
 
 def test_a_source_cannot_ping_or_disguise_a_link():
-    """A title is the first words of a Slack message: its control characters show as text,
-    and only an https link becomes one."""
+    """A title is stored text: its control characters show as text, and only an https link
+    becomes one. A title that is not the Slack connector's is shown whole."""
     evidence = [
         _cited("d1", "<!here> & <https://evil.example|x>", PERMALINK),
         _cited("d2", "No link", "javascript:alert(1)"),
@@ -287,7 +209,10 @@ def test_a_source_cannot_ping_or_disguise_a_link():
     (sources,) = [block for block in blocks if block["type"] == "context"]
     texts = [element["text"] for element in sources["elements"]]
     assert texts == [
-        f"Sources: <{PERMALINK}|&lt;!here&gt; &amp; &lt;https://evil.example|x&gt;> · No link"
+        (
+            f"Sources · 2   1 <{PERMALINK}|&lt;!here&gt; &amp; &lt;https://evil.example|x&gt;>"
+            "   2 No link"
+        )
     ]
 
 
@@ -304,11 +229,11 @@ def test_a_dataset_that_does_not_know_shows_no_sources():
 )
 def test_a_source_link_that_could_break_out_of_its_brackets_is_shown_as_its_title(url):
     """G79: a dataset writer's own ``url`` with ``>``, ``<`` or ``|`` closed Slack's link and
-    pinged the channel or disguised the link once the answer was shared."""
+    pinged the channel or disguised the link in the posted answer."""
     _, blocks = _format_answer([_answer(["Yes."], [_cited("d1", "Q3 report", url)])])
 
     (sources,) = [block for block in blocks if block["type"] == "context"]
-    assert sources["elements"][0]["text"] == "Sources: Q3 report"
+    assert sources["elements"][0]["text"] == "Sources · 1   1 Q3 report"
 
 
 def test_many_or_long_sources_stay_within_slacks_text_limit_and_none_is_dropped():
@@ -355,3 +280,185 @@ def test_an_answer_that_uses_a_refusal_phrase_is_still_shown():
 
     sections = [block["text"]["text"] for block in blocks if block["type"] == "section"]
     assert sections == [answer]
+
+
+# -- The answer's design (SDK-1502, Goran 2026-11-12): red until fixed --------------------
+#
+# Modelled on cognee's own Search answer: the answer in plain paragraphs, one compact
+# "Sources · N" line, a scope line and the rating buttons. The LLM writes Markdown; Slack
+# reads mrkdwn, so every answer goes through one renderer (``to_mrkdwn``).
+
+
+def _renderer():
+    from cognee.modules.integrations.slack import handle_cognee_ask
+
+    return handle_cognee_ask
+
+
+@pytest.mark.parametrize(
+    "markdown, mrkdwn",
+    [
+        ("## Answer\n\nWe chose Neon.", "We chose Neon."),
+        ("# Answer\nWe chose Neon.", "We chose Neon."),
+        ("### Why Neon\nBranching.", "*Why Neon*\nBranching."),
+        ("It is **fast** and __cheap__.", "It is *fast* and *cheap*."),
+        ("It is *really* fast.", "It is _really_ fast."),
+        ("~~Postgres~~ Neon", "~Postgres~ Neon"),
+        ("- one\n- two\n* three", "• one\n• two\n• three"),
+        ("See [the plan](https://acme.example/plan).", "See <https://acme.example/plan|the plan>."),
+        ("See [the plan](http://acme.example/plan).", "See the plan."),
+        ("See [x](https://a.example/?q=1|<!here>).", "See x."),
+        ("Run `**not bold**` now.", "Run `**not bold**` now."),
+        ("```\n# not a heading\n**kept**\n```", "```\n# not a heading\n**kept**\n```"),
+        ("Tell <!channel> & <@U1>", "Tell &lt;!channel&gt; &amp; &lt;@U1&gt;"),
+        ("[**bold** label](https://a.example/x)", "<https://a.example/x|*bold* label>"),
+    ],
+    ids=[
+        "an Answer heading is dropped",
+        "a level-one Answer heading too",
+        "another heading becomes a bold line",
+        "bold both ways",
+        "italics",
+        "strikethrough",
+        "bullets",
+        "an https link",
+        "a link that is not https keeps its text",
+        "a link that would break out of its brackets keeps its text",
+        "inline code is kept as written",
+        "a code block is kept as written",
+        "Slack control sequences stay escaped (G48)",
+        "a link label keeps its formatting",
+    ],
+)
+def test_markdown_becomes_slack_mrkdwn(markdown, mrkdwn):
+    assert _renderer().to_mrkdwn(markdown) == mrkdwn
+
+
+@pytest.mark.parametrize(
+    "markdown, plain",
+    [
+        ("## Answer\n\nWe chose **Neon** for *branching*.", "We chose Neon for branching."),
+        ("- one\n- two", "• one\n• two"),
+        ("See [the plan](https://acme.example/plan).", "See the plan."),
+        ("Tell <!channel>", "Tell &lt;!channel&gt;"),
+    ],
+    ids=["markers go", "bullets stay readable", "a link keeps its text", "still escaped"],
+)
+def test_the_plain_text_of_an_answer_carries_no_markdown(markdown, plain):
+    """The ``text`` of a message is what a notification or a screen reader shows."""
+    assert _renderer().to_plain(markdown) == plain
+
+
+def test_an_answer_has_no_header_and_its_fallback_is_the_plain_answer():
+    """The answer is the thread reply under the question, so it needs no "Answer" header;
+    live, the posted answer showed our bold "Answer" and then the LLM's "## Answer"."""
+    fallback_text, blocks = _format_answer([_answer(["## Answer\n\nWe chose **Neon**."])])
+
+    assert [block["type"] for block in blocks] == ["section"]
+    assert blocks[0]["text"]["text"] == "We chose *Neon*."
+    assert fallback_text == "We chose Neon."
+
+
+def _cited_slack(document_id, day, channel="#general"):
+    payload = _cited(document_id, f"Who owns the runbook? — ana, {day}", PERMALINK)
+    payload["payload"]["document_parent"] = channel
+    return payload
+
+
+def test_sources_are_one_numbered_line_naming_channel_author_and_day():
+    """Each source reads as where, who and when; the title's first words are not repeated.
+    The year shows only when it is not this one."""
+    from datetime import datetime, timezone
+
+    this_year = datetime.now(timezone.utc).year
+    _, blocks = _format_answer(
+        [
+            _answer(
+                ["fact"],
+                [
+                    _cited_slack("d1", f"{this_year}-11-05"),
+                    _cited_slack("d2", f"{this_year - 1}-03-09", channel="#leads-public"),
+                    _cited("d3", "Quarterly plan.pdf", None),
+                ],
+            )
+        ]
+    )
+
+    (sources,) = [block for block in blocks if block["type"] == "context"]
+    (element,) = sources["elements"]
+    text = element["text"]
+    assert text.startswith("Sources · 3")
+    assert f"1 <{PERMALINK}|#general · ana · Nov 5>" in text
+    assert f"2 <{PERMALINK}|#leads-public · ana · Mar 9, {this_year - 1}>" in text
+    assert "3 Quarterly plan.pdf" in text
+
+
+# -- Rating an answer (SDK-1502): red until fixed -----------------------------------------
+
+
+def _workspace_credential():
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    return SimpleNamespace(provider_account_id="T0RATE", user_id=uuid4(), provider_metadata={})
+
+
+async def _stored_score(credential, member, qa_id):
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+    entries = await get_session_manager().get_session_entries_by_ids(
+        user_id=str(credential.user_id),
+        qa_ids=[qa_id],
+        session_id=_renderer().answer_session_id("T0RATE", member),
+    )
+    return entries[0].feedback_score if entries else "missing"
+
+
+@pytest.mark.asyncio
+async def test_the_asker_rates_an_answer_and_a_second_click_changes_the_rating():
+    """👍 is 5 and 👎 is 1 on the answer's own session Q&A, kept under the workspace's
+    owner with the graph elements it used, so improve's feedback_weights stage can apply it.
+    A second click re-rates; it does not add a vote."""
+    from unittest.mock import AsyncMock, patch
+
+    ask = _renderer()
+    credential = _workspace_credential()
+    qa_id = await ask.record_answer(
+        credential,
+        "U0ASKER",
+        question="why Neon?",
+        answer="We chose Neon.",
+        used_graph_element_ids={"node_ids": ["n1"], "edge_ids": ["e1"]},
+    )
+    assert qa_id is not None, "the session cache is on in the unit tests"
+
+    with patch.object(ask, "apply_answer_feedback", AsyncMock()) as apply:
+        assert await ask.rate_answer(credential, "U0ASKER", qa_id, 5) is True
+        assert await _stored_score(credential, "U0ASKER", qa_id) == 5
+        assert await ask.rate_answer(credential, "U0ASKER", qa_id, 1) is True
+        assert await _stored_score(credential, "U0ASKER", qa_id) == 1
+
+    assert apply.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_someone_else_cannot_rate_an_answer_they_did_not_ask_for():
+    """The button value is the answer's random id alone; the rater is the signed payload's
+    user. Another member's click finds no answer in their own session and changes nothing."""
+    from unittest.mock import AsyncMock, patch
+
+    ask = _renderer()
+    credential = _workspace_credential()
+    qa_id = await ask.record_answer(
+        credential,
+        "U0ASKER",
+        question="why Neon?",
+        answer="We chose Neon.",
+        used_graph_element_ids={"node_ids": ["n1"], "edge_ids": []},
+    )
+
+    with patch.object(ask, "apply_answer_feedback", AsyncMock()) as apply:
+        assert await ask.rate_answer(credential, "U0OTHER", qa_id, 1) is False
+
+    assert await _stored_score(credential, "U0ASKER", qa_id) is None
+    apply.assert_not_awaited()

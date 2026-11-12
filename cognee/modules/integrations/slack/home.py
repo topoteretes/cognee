@@ -54,11 +54,10 @@ def _build_home_view() -> dict[str, Any]:
                     "type": "mrkdwn",
                     "text": (
                         "*2. Ask a question*\n"
-                        "Mention `@cognee <your question>` in a channel Cognee is in "
-                        "(`@cognee here <question>` asks within that channel only), "
-                        "or send it a direct message to keep the question private. "
-                        "Only you see the answer until you choose *Share* — *Discard* "
-                        "drops it, visible to no one."
+                        "Mention `@cognee <your question>` in a channel Cognee is in: "
+                        "the answer goes in the question's thread, for everyone there, "
+                        "from that channel and the synced public channels. Send it a "
+                        "direct message to ask privately, from all of your memory."
                     ),
                 },
             },

@@ -356,21 +356,31 @@ async def test_the_deletion_leaves_a_dataset_the_connector_did_not_make(clean_co
     assert await _items(outsider, await _workspace_dataset_name()) == 1
 
 
-# -- Reprobe 2026-11-12 (N2): red until fixed --------------------------------------------
+# -- Answers recorded for rating (SDK-1502) ----------------------------------------------
 
 
-async def _kept_answer(owner) -> tuple[str, str]:
-    """An ``@cognee`` answer waiting for Share, as the mention handler keeps it."""
-    from cognee.modules.integrations.slack.handle_cognee_ask import ask_session_id, keep_answer
+async def _recorded_answer(owner) -> tuple[str, str]:
+    """An ``@cognee`` channel answer recorded for rating, as the mention handler records it."""
+    from types import SimpleNamespace
 
-    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "Leads only: May."}}]
-    session_id = ask_session_id(TEAM, "U0MEMBER")
-    ref = await keep_answer(owner.id, session_id, "when is the review?", blocks)
-    assert ref is not None, "the session cache is on in this module"
-    return session_id, ref.split("|")[2]
+    from cognee.modules.integrations.slack.handle_cognee_ask import (
+        answer_session_id,
+        record_answer,
+    )
+
+    credential = SimpleNamespace(provider_account_id=TEAM, user_id=owner.id)
+    qa_id = await record_answer(
+        credential,
+        "U0MEMBER",
+        question="when is the review?",
+        answer="Leads only: May.",
+        used_graph_element_ids={"node_ids": ["n1"], "edge_ids": []},
+    )
+    assert qa_id is not None, "the session cache is on in this module"
+    return answer_session_id(TEAM, "U0MEMBER"), qa_id
 
 
-async def _still_kept(owner, session_id: str, qa_id: str) -> bool:
+async def _still_recorded(owner, session_id: str, qa_id: str) -> bool:
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
     entries = await get_session_manager().get_session_entries_by_ids(
@@ -380,28 +390,29 @@ async def _still_kept(owner, session_id: str, qa_id: str) -> bool:
 
 
 @pytest.mark.asyncio
-async def test_the_deletion_also_removes_answers_waiting_for_share(clean_cognee):
-    """N2: an answer kept for Share is workspace text (a private channel's too), stored in
-    the owner's session cache and its vector index. The 14-day deletion left it behind."""
+async def test_the_deletion_also_removes_answers_recorded_for_rating(clean_cognee):
+    """A channel answer's record quotes the workspace (a private channel's too) and lives in
+    the owner's session cache and its vector index, outside every dataset; the 14-day
+    deletion removes it with the rest."""
     owner, _ = await _workspace_with_data()
-    session_id, qa_id = await _kept_answer(owner)
+    session_id, qa_id = await _recorded_answer(owner)
     await handle_slack_event(_event("app_uninstalled"))
 
     await sync_module.forget_uninstalled_workspaces(now=_days_later(15))
 
-    assert not await _still_kept(owner, session_id, qa_id)
+    assert not await _still_recorded(owner, session_id, qa_id)
 
 
 @pytest.mark.asyncio
-async def test_disconnecting_with_the_data_deleted_removes_answers_waiting_for_share(
+async def test_disconnecting_with_the_data_deleted_removes_answers_recorded_for_rating(
     clean_cognee,
 ):
-    """N2: a disconnect that deletes the data deletes what the app stored for the owner
-    outside the dataset (``forget_related_data``); kept answers were left behind."""
+    """A disconnect that deletes the data deletes what the app stored for the owner outside
+    the dataset (``forget_related_data``), the answers recorded for rating included."""
     owner, _ = await _workspace_with_data()
-    session_id, qa_id = await _kept_answer(owner)
+    session_id, qa_id = await _recorded_answer(owner)
     credential = await store.get_credential_by_account("slack", TEAM)
 
     await SlackIntegration().forget_related_data(credential, owner)
 
-    assert not await _still_kept(owner, session_id, qa_id)
+    assert not await _still_recorded(owner, session_id, qa_id)
