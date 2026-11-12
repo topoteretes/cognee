@@ -176,6 +176,15 @@ class LinearRateLimitedError(LinearSourceError):
         self.reset_at_ms = reset_at_ms
 
 
+class _Transient(Exception):
+    """One failed attempt worth another: a network error (``response`` None) or a 5xx answer."""
+
+    def __init__(self, response: Any, reason: str):
+        super().__init__(reason)
+        self.response = response
+        self.reason = reason
+
+
 class LinearEntityNotFoundError(LinearAPIError):
     """Linear answered that the requested entity does not exist or is not visible."""
 
@@ -200,7 +209,8 @@ class LinearClient:
     ``execute`` returns the ``data`` dict. After every successful call
     ``rate_limit`` holds the remaining request and complexity budget Linear
     reported. Tests and hosts can pass any object with the same ``execute``
-    method and ``rate_limit`` attribute instead.
+    method and ``rate_limit`` attribute instead: ``execute`` takes a ``check_active``
+    keyword and must call it before each request attempt, retries and waits included.
     """
 
     def __init__(self, access_token: str, *, sleep: Callable[[float], None] = time.sleep):
@@ -222,26 +232,47 @@ class LinearClient:
         value = token if token.startswith("lin_api_") else f"Bearer {token}"
         return {"Authorization": value, "Content-Type": "application/json"}
 
-    def execute(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+    def execute(
+        self,
+        query: str,
+        variables: dict[str, Any] | None = None,
+        *,
+        check_active: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
         import requests
 
         payload: dict[str, Any] = {"query": query, "variables": variables or {}}
-        for attempt in range(_RETRIES):
-            last = attempt == _RETRIES - 1
+
+        def attempt() -> dict[str, Any]:
             try:
                 response = requests.post(
-                    GRAPHQL_URL, json=payload, headers=self._headers(), timeout=_TIMEOUT
+                    GRAPHQL_URL,
+                    json=payload,
+                    headers=self._headers(),
+                    timeout=_TIMEOUT,
+                    allow_redirects=False,  # a 3xx is an error answer, never a new target
                 )
             except requests.RequestException as exc:
-                if last:
-                    raise LinearAPIError(f"Linear request failed: {type(exc).__name__}") from None
-                self._sleep(2**attempt)
-                continue
-            if response.status_code >= 500 and not last:
-                self._sleep(2**attempt)
-                continue
+                raise _Transient(None, type(exc).__name__) from None
+            if response.status_code >= 500:
+                raise _Transient(response, f"HTTP {response.status_code}")
             return self._parse(response)
-        raise LinearAPIError("Linear request failed")  # pragma: no cover
+
+        try:
+            return dlt_utils.with_retries(
+                attempt,
+                retry_on=(_Transient,),
+                delay=lambda error, number: 2**number,
+                attempts=_RETRIES,
+                check_active=check_active,
+                sleep=self._sleep,
+            )
+        except _Transient as error:
+            # The last attempt failed the same way: a 5xx answer is read like any other
+            # answer (it may still name RATELIMITED), a network error is reported by type.
+            if error.response is None:
+                raise LinearAPIError(f"Linear request failed: {error.reason}") from None
+            return self._parse(error.response)
 
     def _parse(self, response: Any) -> dict[str, Any]:
         status = response.status_code
@@ -438,12 +469,14 @@ class _Walker:
 
     # -- requests ----------------------------------------------------------
     def _call(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        # Before the budget, so a revoked run ends as revoked, not as a resumable cut.
         if self.check_active is not None:
             self.check_active()
         self._check_budget()
         self.requests += 1
         try:
-            return self.client.execute(query, variables)
+            # The client checks before every retry and wait, so none outlives a revoked run.
+            return self.client.execute(query, variables, check_active=self.check_active)
         except LinearRateLimitedError:
             raise _CutShort("rate_limit") from None
         except LinearAuthError:
@@ -724,9 +757,10 @@ def linear_source(
             when a host tracks the table by that prefix. Defaults to one derived
             from the team id.
         check_active: Optional host authorization checkpoint, called before each
-            request.
+            request and before each retry and its wait.
         service: Pre-built client (see :func:`build_linear_service`). Mainly an
-            injection point for tests and hosts.
+            injection point for tests and hosts. Its ``execute`` takes a ``check_active``
+            keyword and must call it before each retry and each wait.
         access_token: Used to build the client when ``service`` is omitted.
         include_archived: Include archived issues (Linear archives closed issues
             automatically). Trashed issues are always skipped.

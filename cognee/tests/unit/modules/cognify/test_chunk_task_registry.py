@@ -92,8 +92,20 @@ async def gliner_list(chunks_per_batch=None):
         )
 
 
+# The config cognify() hands the dlt route when no ontology is configured.
+NO_ONTOLOGY_CONFIG = {
+    "ontology_config": {
+        "ontology_resolver": None,
+        "ontology_mode": "annotate",
+        "authoritative_sources": {},
+    }
+}
+
+
 async def dlt_list(chunks_per_batch=None):
-    return await cognify_module.get_dlt_tasks(chunk_size=512, chunks_per_batch=chunks_per_batch)
+    return await cognify_module.get_dlt_tasks(
+        chunk_size=512, chunks_per_batch=chunks_per_batch, config=NO_ONTOLOGY_CONFIG
+    )
 
 
 # Each list built with chunks_per_batch=7 as it was before the hook existed:
