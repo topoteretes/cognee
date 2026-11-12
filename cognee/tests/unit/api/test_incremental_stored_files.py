@@ -6,12 +6,15 @@ from uuid import uuid4
 
 import pytest
 
+import cognee.modules.data.methods.remove_unreferenced_files as removal
 from cognee.api.v1.update import incremental
+from cognee.modules.data.exceptions import StoredFileNotRemovedError
 
 OLD = SimpleNamespace(raw_data_location="/data/text_old.txt", original_data_location="/data/a.pdf")
 STAGED = SimpleNamespace(
     raw_data_location="/data/text_new.txt", original_data_location="/data/staged_b.pdf"
 )
+_REAL_REMOVE_UNREFERENCED_FILES = incremental._remove_unreferenced_files
 
 
 def _patch_run(monkeypatch, bundle, write):
@@ -22,8 +25,8 @@ def _patch_run(monkeypatch, bundle, write):
         order.append("write")
         return await write(*args, **kwargs)
 
-    async def remove_files(*versions):
-        order.append(("remove files", versions))
+    async def remove_files(*versions, update_applied):
+        order.append(("remove files", versions, update_applied))
 
     async def complete(*args):
         order.append("run completed")
@@ -44,6 +47,14 @@ def _patch_run(monkeypatch, bundle, write):
     return order
 
 
+def _storage_down(monkeypatch):
+    """Every removal fails, as when the storage backend cannot delete."""
+    engine = SimpleNamespace(
+        remove_data_file_if_unreferenced=AsyncMock(side_effect=OSError("storage is down"))
+    )
+    monkeypatch.setattr(removal, "get_relational_engine", lambda: engine)
+
+
 async def _run():
     dataset, user = SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
     return await incremental._run_incremental_update(
@@ -58,7 +69,7 @@ async def test_a_published_update_checks_the_old_and_the_staged_files_last(monke
 
     await _run()
 
-    assert order == ["write", "run completed", ("remove files", (OLD, STAGED))]
+    assert order == ["write", "run completed", ("remove files", (OLD, STAGED), True)]
 
 
 @pytest.mark.asyncio
@@ -69,7 +80,7 @@ async def test_a_failed_write_still_checks_the_files(monkeypatch):
     with pytest.raises(RuntimeError, match="write failed"):
         await _run()
 
-    assert order == ["write", ("remove files", (OLD, STAGED))]
+    assert order == ["write", ("remove files", (OLD, STAGED), False)]
 
 
 @pytest.mark.asyncio
@@ -86,19 +97,19 @@ async def test_an_unchanged_update_with_nothing_to_repair_still_checks_the_files
     result = await _run()
 
     assert result["status"] == "unchanged" and result["pipeline_run_id"] is None
-    assert order == [("remove files", (OLD, STAGED))]
+    assert order == [("remove files", (OLD, STAGED), False)]
 
 
 @pytest.mark.asyncio
 async def test_each_distinct_location_is_offered_for_removal_once(monkeypatch):
     engine = SimpleNamespace(remove_data_file_if_unreferenced=AsyncMock())
-    monkeypatch.setattr(incremental, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(removal, "get_relational_engine", lambda: engine)
     # Raw text is stored once: the row's processed text and its original are one file.
     text_row = SimpleNamespace(
         raw_data_location="/data/text_old.txt", original_data_location="/data/text_old.txt"
     )
 
-    await incremental._remove_unreferenced_files(text_row, STAGED)
+    await incremental._remove_unreferenced_files(text_row, STAGED, update_applied=True)
 
     offered = [call.args[0] for call in engine.remove_data_file_if_unreferenced.await_args_list]
     assert offered == ["/data/text_old.txt", "/data/text_new.txt", "/data/staged_b.pdf"]
@@ -106,36 +117,42 @@ async def test_each_distinct_location_is_offered_for_removal_once(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_file_that_cannot_be_removed_fails_an_update_that_was_published(monkeypatch):
-    """Never reported as a success: the caller gets the storage error, after the run completed."""
+    """Never reported as a success, and the error says the update is in effect."""
     bundle = {"status": "changed", "data_item": OLD, "staged": STAGED}
     order = _patch_run(monkeypatch, bundle, AsyncMock(return_value={}))
+    monkeypatch.setattr(incremental, "_remove_unreferenced_files", _REAL_REMOVE_UNREFERENCED_FILES)
+    _storage_down(monkeypatch)
 
-    async def storage_down(*versions):
-        order.append("remove files")
-        raise OSError("storage is down")
-
-    monkeypatch.setattr(incremental, "_remove_unreferenced_files", storage_down)
-
-    with pytest.raises(OSError, match="storage is down"):
+    with pytest.raises(StoredFileNotRemovedError) as raised:
         await _run()
 
-    assert order == ["write", "run completed", "remove files"]
+    assert order == ["write", "run completed"]
+    error = raised.value
+    assert error.outcome == incremental.UPDATE_APPLIED
+    assert error.location == OLD.raw_data_location
+    assert str(error).startswith(
+        "StoredFileNotRemovedError: The update was applied: the document holds its new content."
+    )
+    assert "delete it from storage by hand" in str(error)
+    assert isinstance(error.__cause__, OSError)
 
 
 @pytest.mark.asyncio
-async def test_a_file_that_cannot_be_removed_after_a_failed_write_keeps_the_write_error_as_cause(
+async def test_a_file_that_cannot_be_removed_after_a_failed_write_says_nothing_was_applied(
     monkeypatch,
 ):
     bundle = {"status": "changed", "data_item": OLD, "staged": STAGED}
     _patch_run(monkeypatch, bundle, AsyncMock(side_effect=RuntimeError("write failed")))
-    monkeypatch.setattr(
-        incremental,
-        "_remove_unreferenced_files",
-        AsyncMock(side_effect=OSError("storage is down")),
-    )
+    monkeypatch.setattr(incremental, "_remove_unreferenced_files", _REAL_REMOVE_UNREFERENCED_FILES)
+    _storage_down(monkeypatch)
 
-    with pytest.raises(OSError, match="storage is down") as raised:
+    with pytest.raises(StoredFileNotRemovedError) as raised:
         await _run()
 
-    assert isinstance(raised.value.__context__, RuntimeError)
-    assert str(raised.value.__context__) == "write failed"
+    error = raised.value
+    assert error.outcome == incremental.UPDATE_NOT_APPLIED
+    assert "The update was not applied" in str(error)
+    # The storage error is the cause, and the write error it interrupted is kept behind it.
+    assert isinstance(error.__cause__, OSError)
+    assert isinstance(error.__cause__.__context__, RuntimeError)
+    assert str(error.__cause__.__context__) == "write failed"

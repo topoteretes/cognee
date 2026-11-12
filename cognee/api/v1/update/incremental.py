@@ -57,7 +57,6 @@ from cognee.context_global_variables import set_database_global_context_variable
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
 from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
-from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
@@ -90,6 +89,7 @@ from cognee.modules.data.methods import (
     publish_updated_data,
 )
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+from cognee.modules.data.methods.remove_unreferenced_files import remove_unreferenced_files
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.engine.utils.temporal_hints import document_temporal_hints
@@ -534,26 +534,29 @@ async def _restore_repositioned_chunks(chunks: list[DocumentChunk], _context) ->
     )
 
 
-async def _remove_unreferenced_files(*versions: Data | StagedContent) -> None:
+UPDATE_APPLIED = "The update was applied: the document holds its new content."
+UPDATE_NOT_APPLIED = "The update was not applied: the document keeps its previous content."
+
+
+async def _remove_unreferenced_files(*versions: Data | StagedContent, update_applied: bool) -> None:
     """Remove the stored files of ``versions`` that no ``Data`` row points at.
 
     A version is a row as it was, or content that was staged: both name a
-    processed text file and an original. ``remove_data_file_if_unreferenced``
-    decides per file, so one a row still uses stays, and so does a file outside
-    the data root (the user's own).
+    processed text file and an original (see ``remove_unreferenced_files``).
 
-    A file that cannot be removed raises, and no caller catches it: a stored
-    file cognee cannot delete is never an acceptable outcome, so the update
-    fails with that error and it gets looked at.
+    A file that cannot be removed raises ``StoredFileNotRemovedError``, and no
+    caller catches it: a stored file cognee cannot delete is never an
+    acceptable outcome. ``update_applied`` is what that error tells the caller
+    first, because by then the update may already be in effect.
     """
-    db_engine = get_relational_engine()
-    locations = [
-        location
-        for version in versions
-        for location in (version.raw_data_location, version.original_data_location)
-    ]
-    for location in dict.fromkeys(locations):
-        await db_engine.remove_data_file_if_unreferenced(location)
+    await remove_unreferenced_files(
+        [
+            location
+            for version in versions
+            for location in (version.raw_data_location, version.original_data_location)
+        ],
+        UPDATE_APPLIED if update_applied else UPDATE_NOT_APPLIED,
+    )
 
 
 async def _stage_new_content(data, preferred_loaders) -> StagedContent:
@@ -830,6 +833,7 @@ async def _run_incremental_update(
     bundle = await _stage_and_plan(
         data_id, data, dataset, user, node_set, preferred_loaders, chunker, policy
     )
+    update_applied = False
     try:
         # A no-op with nothing to repair is the only path that writes nothing, and
         # so the only one that records no run.
@@ -861,6 +865,7 @@ async def _run_incremental_update(
                     chunker=chunker,
                     extractor=extractor,
                 )
+                update_applied = True  # the publish is the last step of the write
                 # An edit can remove the fact a user chose, or restate it under another
                 # relationship; its decision must not outlive it. Read once the new
                 # chunks' facts are written, so a fact the edit kept is still found.
@@ -895,11 +900,13 @@ async def _run_incremental_update(
         # removes the files a row points at.
         #
         # Deliberately not caught. A removal that fails raises from here even
-        # after a publish, so the caller gets an error for an update that was
-        # applied, and after a failed write its error replaces the write's
-        # (which stays attached as the cause). Returning success with a file
-        # still on disk would be the worse report.
-        await _remove_unreferenced_files(bundle["data_item"], bundle["staged"])
+        # after a publish, and the error says which it is: the update was
+        # applied and an old file is left, or it was not and a staged file is
+        # left (after a failed write, that error stays in the chain). Returning
+        # success with a file still on disk would be the worse report.
+        await _remove_unreferenced_files(
+            bundle["data_item"], bundle["staged"], update_applied=update_applied
+        )
 
 
 async def _stage_and_plan(
@@ -1018,10 +1025,10 @@ async def _stage_and_plan(
         # Refused, or failed before there was a plan: no caller ever sees the
         # staged files, so they are dropped here unless a row already uses them.
         # Deliberately not caught: if a staged file cannot be removed, that
-        # error is raised in place of the refusal (kept as its cause), so
-        # update() stops instead of falling back to the full rebuild. Nothing
-        # has changed yet, and the same update can be retried.
-        await _remove_unreferenced_files(staged)
+        # error is raised in place of the refusal (which stays in the chain),
+        # so update() stops instead of falling back to the full rebuild.
+        # Nothing has changed yet, and the same update can be retried.
+        await _remove_unreferenced_files(staged, update_applied=False)
         raise
 
 

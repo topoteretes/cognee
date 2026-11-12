@@ -18,6 +18,7 @@ from sqlalchemy import or_, select
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules import ingestion
+from cognee.modules.data.methods.remove_unreferenced_files import remove_unreferenced_files
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.DataItemStatus import (
@@ -219,7 +220,9 @@ async def run_tasks_data_item_incremental(
                 data_point.raw_data_location,
                 data_point.original_data_location,
             ):
-                await db_engine.remove_data_file_if_unreferenced(saved_copy)
+                await remove_unreferenced_files(
+                    [saved_copy], "The document already exists and was left as it is."
+                )
             yield {
                 "run_info": PipelineRunAlreadyCompleted(
                     pipeline_run_id=pipeline_run_id,

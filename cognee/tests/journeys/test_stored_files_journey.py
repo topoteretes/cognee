@@ -7,11 +7,13 @@ content of a document the user updated or deleted. After every step here the
 data root holds the current version of the document and nothing else: an
 update removes the version it replaced, an update that does not publish
 removes what it staged, and a duplicate add removes its unused copy. A file
-another document still uses is kept.
+another document still uses is kept. A file that cannot be removed fails the
+update, with an error that says what state the document was left in.
 """
 
 from __future__ import annotations
 
+import importlib
 import io
 from pathlib import Path
 
@@ -19,7 +21,13 @@ import pytest
 from starlette.datastructures import UploadFile
 
 import cognee
+from cognee.api.v1.update import incremental
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.exceptions import StoredFileNotRemovedError
 from cognee.tests.journeys import _support, mock_ai
+
+# ``cognee.api.v1.update.update`` is the function when reached through the package.
+update_module = importlib.import_module("cognee.api.v1.update.update")
 
 DATASET = "journey_stored_files"
 OTHER_DATASET = "journey_stored_files_other"
@@ -180,3 +188,68 @@ async def test_a_duplicate_upload_under_another_name_leaves_no_second_file(clean
 
     await cognee.forget(data_id=row.id, dataset_id=dataset_id, user=default_user)
     assert _stored(clean_env) == {}
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_a_file_that_cannot_be_removed_fails_the_update_and_says_what_it_left(
+    clean_env, default_user, monkeypatch
+):
+    async def storage_down(self, location):
+        raise OSError("storage is down")
+
+    engine_class = type(get_relational_engine())
+
+    # --- chunk-level update: the new content is published before the cleanup ---------
+    result = await cognee.remember(_document("v1"), dataset_name=DATASET, self_improvement=False)
+    dataset_id = _support.as_uuid(result.dataset_id)
+    row = await _only_row(dataset_id, default_user)
+    old_file = row.raw_data_location
+
+    with monkeypatch.context() as patched:
+        patched.setattr(engine_class, "remove_data_file_if_unreferenced", storage_down)
+        with pytest.raises(StoredFileNotRemovedError) as raised:
+            await cognee.update(
+                data_id=row.id, data=_document("v2"), dataset_id=dataset_id, user=default_user
+            )
+
+    error = raised.value
+    assert error.outcome == incremental.UPDATE_APPLIED
+    assert error.location == old_file
+    assert "The update was applied" in str(error) and "storage is down" in str(error)
+    # What the error says is true: the document holds v2, and the v1 file is still there.
+    assert CONDUCTORS["v2"].lower() in _support.stored_text(
+        await _only_row(dataset_id, default_user)
+    )
+    assert _versions(clean_env) == {"v1", "v2"}
+
+    # --- full rebuild: the cleanup fails between storing the content and rebuilding ----
+    result = await cognee.remember(
+        _upload("v1"), dataset_name=OTHER_DATASET, self_improvement=False
+    )
+    other_id = _support.as_uuid(result.dataset_id)
+    other_row = await _only_row(other_id, default_user)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(engine_class, "remove_data_file_if_unreferenced", storage_down)
+        with pytest.raises(StoredFileNotRemovedError) as raised:
+            await cognee.update(
+                data_id=other_row.id,
+                data=_upload("v2"),
+                dataset_id=other_id,
+                user=default_user,
+                chunk_level_diff=False,
+            )
+
+    assert raised.value.outcome == update_module.REBUILD_INTERRUPTED
+    assert "its memory has not been rebuilt" in str(raised.value)
+    interrupted = await _support.snapshot_dataset(other_id, default_user)
+    assert interrupted.graph_nodes == 0, "the error says the memory was not rebuilt"
+
+    # Running the update again, as the error says, rebuilds it.
+    again = await cognee.update(
+        data_id=other_row.id, data=_upload("v2"), dataset_id=other_id, user=default_user
+    )
+    assert again["status"] == "full_rebuild"
+    rebuilt = await _support.snapshot_dataset(other_id, default_user)
+    assert rebuilt.graph_nodes > 0

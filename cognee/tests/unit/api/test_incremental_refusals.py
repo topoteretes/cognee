@@ -383,7 +383,7 @@ async def test_a_document_built_by_another_chunker_is_refused_by_name(monkeypatc
     assert raised.value.reason is RefusalReason.UNSUPPORTED_CHUNKER
     assert "other_v1" in str(raised.value)
     # Nothing will publish the staged content, so its files are not kept.
-    remove_files.assert_awaited_once_with(staged)
+    remove_files.assert_awaited_once_with(staged, update_applied=False)
 
 
 @pytest.mark.asyncio
@@ -442,7 +442,7 @@ async def test_changed_content_with_changed_metadata_refuses_before_planning(mon
         )
 
     assert raised.value.reason is RefusalReason.UNSUPPORTED_METADATA
-    remove_files.assert_awaited_once_with(staged)
+    remove_files.assert_awaited_once_with(staged, update_applied=False)
 
 
 @pytest.mark.asyncio
@@ -450,9 +450,11 @@ async def test_a_staged_file_that_cannot_be_removed_stops_the_update_before_the_
     monkeypatch,
 ):
     """The refusal would send update() to the full rebuild. A staged file that cannot
-    be removed is raised in its place, with the refusal as the cause, so nothing runs
-    on top of storage that cannot delete."""
+    be removed is raised in its place, saying the update was not applied, so nothing
+    runs on top of storage that cannot delete. The refusal stays in the chain."""
+    import cognee.modules.data.methods.remove_unreferenced_files as removal
     from cognee.api.v1.update import incremental
+    from cognee.modules.data.exceptions import StoredFileNotRemovedError
 
     old_data = SimpleNamespace(
         id=uuid4(),
@@ -467,6 +469,7 @@ async def test_a_staged_file_that_cannot_be_removed_stops_the_update_before_the_
     )
     staged = SimpleNamespace(
         raw_data_location="/tmp/new.md",
+        original_data_location="/tmp/staged_original.md",
         content_hash="NEW",
         extension="md",
         mime_type="text/markdown",
@@ -486,13 +489,12 @@ async def test_a_staged_file_that_cannot_be_removed_stops_the_update_before_the_
     monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock(return_value={}))
     monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=True))
     monkeypatch.setattr(incremental, "_stage_new_content", AsyncMock(return_value=staged))
-    monkeypatch.setattr(
-        incremental,
-        "_remove_unreferenced_files",
-        AsyncMock(side_effect=OSError("storage is down")),
+    engine = SimpleNamespace(
+        remove_data_file_if_unreferenced=AsyncMock(side_effect=OSError("storage is down"))
     )
+    monkeypatch.setattr(removal, "get_relational_engine", lambda: engine)
 
-    with pytest.raises(OSError, match="storage is down") as raised:
+    with pytest.raises(StoredFileNotRemovedError) as raised:
         await incremental._stage_and_plan(
             uuid4(),
             "new content",
@@ -504,8 +506,13 @@ async def test_a_staged_file_that_cannot_be_removed_stops_the_update_before_the_
             policy=DEFAULT_CHUNK_POLICY,
         )
 
-    assert isinstance(raised.value.__context__, IncrementalUpdateNotPossible)
-    assert raised.value.__context__.reason is RefusalReason.UNSUPPORTED_METADATA
+    error = raised.value
+    assert error.outcome == incremental.UPDATE_NOT_APPLIED
+    assert error.location == "/tmp/new.md"
+    assert isinstance(error.__cause__, OSError)
+    refusal = error.__cause__.__context__
+    assert isinstance(refusal, IncrementalUpdateNotPossible)
+    assert refusal.reason is RefusalReason.UNSUPPORTED_METADATA
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,7 @@ from cognee.modules.data.methods import (
     load_or_create_datasets,
     resolve_data_id,
 )
+from cognee.modules.data.methods.remove_unreferenced_files import remove_unreferenced_files
 from cognee.modules.data.models import Data
 from cognee.modules.engine.models.node_set import (
     NodeSet,
@@ -651,9 +652,9 @@ async def ingest_data(
         )
 
         # After the commit, the updated rows point at their new files; the
-        # replaced ones are removed unless another row still shares them.
-        for replaced_location in dict.fromkeys(replaced_locations):
-            await db_engine.remove_data_file_if_unreferenced(replaced_location)
+        # replaced ones are removed unless another row still shares them. A
+        # file that cannot be removed raises, saying the new content is stored.
+        await remove_unreferenced_files(replaced_locations, "The new content was stored.")
 
         _elapsed = _time.monotonic() - _store_start
         logger.info("cognee-core store_to_dataset finished in %.3f seconds", _elapsed)

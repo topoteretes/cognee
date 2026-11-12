@@ -2,6 +2,7 @@ from fastapi import status
 
 from cognee.exceptions import (
     CogneeConfigurationError,
+    CogneeSystemError,
     CogneeValidationError,
 )
 
@@ -84,3 +85,46 @@ class InvalidTableAttributeError(CogneeValidationError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
         super().__init__(message, name, status_code)
+
+
+class StoredFileNotRemovedError(CogneeSystemError):
+    """Cleaning up a stored file that a document stopped using failed.
+
+    A document that changes content leaves its previous files without a row
+    pointing at them, and so does an update that staged content it did not
+    publish. Those files are removed on the spot, because nothing can find
+    them afterwards. When the removal fails the operation raises this instead
+    of returning: a stored file cognee cannot delete is never reported as a
+    success, and the file has to be removed by hand.
+
+    The message opens with ``outcome``, the state the document is in, since
+    the operation may well have taken effect before the removal failed. The
+    underlying error is the ``__cause__`` and ``location`` names the file. The
+    failure can come from the removal or from the check that the file is
+    unused, so the message asks for that check before deleting by hand.
+    """
+
+    def __init__(
+        self,
+        location: str,
+        outcome: str,
+        reason: str,
+        name: str = "StoredFileNotRemovedError",
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    ):
+        self.location = location
+        self.outcome = outcome
+        self.reason = reason
+        message = (
+            f"{outcome} Cleaning up a stored file the document stopped using failed: "
+            f"{location} ({reason})."
+        )
+        super().__init__(
+            message,
+            name,
+            status_code,
+            remediation=(
+                "Check that file. If no document points at it, nothing will remove it "
+                "later, so delete it from storage by hand."
+            ),
+        )
