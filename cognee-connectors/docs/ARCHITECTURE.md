@@ -106,7 +106,7 @@ Package names use dashes (`cognee-connector-google-drive`), module names undersc
 and the originals stay in cognee: nothing under `cognee/` imports these packages yet. Files
 say "Copied from" for that reason. Until the originals are removed or turn into re-exports
 of these packages, there are two sources of truth, and they have already diverged: fixes to
-OAuth secrets, redirects, signature checks and how Slack text is stored are here only.
+OAuth secrets, redirects and signature checks are here only.
 
 So a change to OAuth state, webhook signatures, token exchange or ingestion of provider text
 in either copy needs the same change in the other, in the same PR or a linked one.

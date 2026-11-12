@@ -1,140 +1,165 @@
-"""Unit tests for cognee_connector_slack.cognee_host.handle_slack_link.
+"""Linking a Slack member: ``/cognee-link`` points at Sign in with Slack, and the
+``slack_member`` provider turns Slack's answer into the member link (G42).
 
-Copied from cognee/tests/unit/modules/integrations/test_handle_slack_link.py (cognee dev, 2026-10-27).
+Copied from cognee.tests.unit.modules.integrations.test_handle_slack_link (cognee dev, 2026-11-12).
 
-Two halves: /cognee-link mints a magic link (no API key involved at all),
-and confirm_link (backing POST /api/v1/slack/link) resolves that link's
-code and performs the actual member-link write.
+The flow through the real routes, including the attacks, is in
+``cognee/tests/integration/tasks/connectors/test_slack_member_link.py``.
 """
 
-import time
-from unittest.mock import AsyncMock, patch
-from urllib.parse import urlencode
-from uuid import uuid4
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
+from cognee_connector_slack.cognee_host import member_link
 from cognee_connector_slack.cognee_host.handle_slack_link import (
     MEMBER_LINK_PROVIDER,
-    confirm_link,
-    handle_cognee_link,
-    make_link_code,
+    link_message,
     member_link_account_id,
-    validate_link_code,
 )
-from cognee_connectors_core.oauth_state import sign_state_payload
+from cognee_connector_slack.cognee_host.member_link import SlackMemberIntegration
 
-MODULE = "cognee_connector_slack.cognee_host.handle_slack_link"
-
-_SETTINGS = {"signing_secret": "test-signing-secret", "frontend_base_url": "http://localhost:3000"}
+_SETTINGS = {
+    "signing_secret": "test-signing-secret",
+    "frontend_base_url": "http://localhost:3000",
+    "client_id": "client-id",
+    "client_secret": "client-secret",
+    "member_redirect_uri": "https://cognee.example/api/v1/integrations/slack_member/callback",
+}
 
 
 def _require(name: str) -> str:
     return _SETTINGS[name]
 
 
-def _body(team_id="T123", user_id="U100"):
-    return urlencode({"team_id": team_id, "user_id": user_id}).encode()
-
-
-# ── handle_cognee_link: mint the magic link ─────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_mints_a_link_pointing_at_the_frontend():
-    with patch(f"{MODULE}.require", side_effect=_require):
-        response = await handle_cognee_link(_body(team_id="T123", user_id="U100"))
-
-    assert response["response_type"] == "ephemeral"
-    assert "http://localhost:3000/link-slack?code=" in response["text"]
-    assert "expires in 10 minutes" in response["text"]
-
-
-@pytest.mark.asyncio
-async def test_minted_link_code_resolves_back_to_the_invoking_member():
-    with patch(f"{MODULE}.require", side_effect=_require):
-        response = await handle_cognee_link(_body(team_id="T123", user_id="U100"))
-        code = response["text"].split("code=")[1].split("\n")[0]
-        resolved = validate_link_code(code)
-
-    assert resolved == ("T123", "U100")
-
-
-# ── make_link_code / validate_link_code ─────────────────────────────────────
-
-
-def test_validate_link_code_rejects_non_ascii_signature_without_raising():
-    with patch(f"{MODULE}.require", side_effect=_require):
-        payload, _, _signature = make_link_code("T1", "U1").rpartition(":")
-        assert validate_link_code(f"{payload}:\u00e9") is None
-
-
-def test_validate_link_code_compares_in_constant_time():
+@pytest.fixture(autouse=True)
+def settings():
     with (
-        patch(f"{MODULE}.require", side_effect=_require),
-        patch(f"{MODULE}.hmac.compare_digest", return_value=False) as compare,
+        patch("cognee_connector_slack.cognee_host.handle_slack_link.require", side_effect=_require),
+        patch.object(member_link, "require", side_effect=_require),
     ):
-        assert validate_link_code(make_link_code("T1", "U1")) is None
-    compare.assert_called_once()
+        yield
 
 
-def test_validate_link_code_rejects_tampered_signature():
-    with patch(f"{MODULE}.require", side_effect=_require):
-        code = make_link_code("T123", "U100")
-        team_id, slack_user_id, expires, _signature = code.split(":")
-        tampered = f"{team_id}:{slack_user_id}:{expires}:deadbeef"
+def test_the_link_message_points_at_the_server_route_that_starts_sign_in_and_carries_no_code():
+    """Without a frontend page, the link opens the server's start route for the member
+    provider, beside the callback Slack already redirects to."""
+    text = link_message()
 
-        assert validate_link_code(tampered) is None
-
-
-def test_validate_link_code_rejects_expired_code():
-    # A genuinely, correctly-signed code whose expiry has already passed —
-    # distinct from tampered-signature rejection above.
-    payload = f"T123:U100:{int(time.time()) - 1}"
-    with patch(f"{MODULE}.require", side_effect=_require):
-        signature = sign_state_payload(payload, signing_secret=_SETTINGS["signing_secret"])
-        expired = f"{payload}:{signature}"
-
-        assert validate_link_code(expired) is None
-
-
-def test_validate_link_code_rejects_malformed_code():
-    with patch(f"{MODULE}.require", side_effect=_require):
-        assert validate_link_code("not-enough-parts") is None
-        assert validate_link_code("") is None
+    assert "https://cognee.example/api/v1/integrations/slack_member/start" in text
+    assert "/link-slack" not in text
+    assert "code=" not in text
 
 
 def test_member_link_account_id_combines_team_and_user():
     assert member_link_account_id("T123", "U100") == "T123:U100"
 
 
-# ── confirm_link: POST /api/v1/slack/link ───────────────────────────────────
+def test_the_member_provider_is_its_own_connection():
+    assert SlackMemberIntegration.provider == MEMBER_LINK_PROVIDER == "slack_member"
 
 
-@pytest.mark.asyncio
-async def test_confirm_link_writes_the_credential_for_a_valid_code():
-    cognee_user_id = uuid4()
-    with (
-        patch(f"{MODULE}.require", side_effect=_require),
-        patch(f"{MODULE}.upsert_credential", new=AsyncMock()) as upsert,
-    ):
-        code = make_link_code("T123", "U100")
-        linked = await confirm_link(code, cognee_user_id)
+def test_sign_in_with_slack_asks_for_the_member_id_only():
+    url = urlparse(SlackMemberIntegration().authorize_url("the-state"))
+    query = parse_qs(url.query)
 
-    assert linked is True
-    upsert.assert_awaited_once_with(
-        provider=MEMBER_LINK_PROVIDER,
-        provider_account_id=member_link_account_id("T123", "U100"),
-        user_id=cognee_user_id,
-        token_payload={},
-        auth_type="api_key",
+    assert (url.netloc, url.path) == ("slack.com", "/openid/connect/authorize")
+    assert query["scope"] == ["openid"], "no email or profile"
+    assert query["response_type"] == ["code"]
+    assert query["state"] == ["the-state"]
+    assert query["client_id"] == ["client-id"]
+    assert query["redirect_uri"] == [_SETTINGS["member_redirect_uri"]]
+    assert query["nonce"][0]
+
+
+def test_the_link_is_the_member_slack_named_and_keeps_no_token():
+    installation = SlackMemberIntegration().parse_installation(
+        {
+            "ok": True,
+            "sub": "U100",
+            "https://slack.com/user_id": "U100",
+            "https://slack.com/team_id": "T123",
+        }
     )
 
+    assert installation.provider_account_id == "T123:U100"
+    assert installation.token_payload == {}
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        {"https://slack.com/user_id": "U100"},
+        {"https://slack.com/team_id": "T123"},
+        {"sub": "U100"},
+    ],
+)
+def test_an_answer_without_the_member_or_the_workspace_links_nothing(identity):
+    with pytest.raises(ValueError):
+        SlackMemberIntegration().parse_installation(identity)
+
+
+class _Response:
+    status = 200
+
+    def __init__(self, payload):
+        self._payload = payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def json(self):
+        return self._payload
+
+
+class _Session:
+    def __init__(self, answers):
+        self.answers = answers
+        self.posts = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def post(self, url, *, data=None, headers=None, allow_redirects=True):
+        # SDK-832: neither call may follow a redirect.
+        assert allow_redirects is False
+        self.posts.append((url, data, headers))
+        return _Response(self.answers[url])
+
 
 @pytest.mark.asyncio
-async def test_confirm_link_rejects_invalid_code_without_writing():
-    with patch(f"{MODULE}.upsert_credential", new=AsyncMock()) as upsert:
-        linked = await confirm_link("garbage", uuid4())
+async def test_the_code_is_exchanged_and_slack_asked_who_signed_in():
+    identity = {"ok": True, "https://slack.com/user_id": "U100", "https://slack.com/team_id": "T"}
+    session = _Session(
+        {
+            member_link._TOKEN_URL: {"ok": True, "access_token": "xoxp-user"},
+            member_link._USER_INFO_URL: identity,
+        }
+    )
+    with patch.object(member_link.aiohttp, "ClientSession", lambda **kwargs: session):
+        answer = await SlackMemberIntegration().exchange_code("the-code")
 
-    assert linked is False
-    upsert.assert_not_awaited()
+    assert answer == identity
+    token_post, user_info_post = session.posts
+    assert token_post[1]["code"] == "the-code"
+    assert token_post[1]["redirect_uri"] == _SETTINGS["member_redirect_uri"]
+    assert user_info_post[2] == {"Authorization": "Bearer xoxp-user"}
+
+
+@pytest.mark.asyncio
+async def test_a_refused_exchange_raises_without_echoing_the_code():
+    session = _Session({member_link._TOKEN_URL: {"ok": False, "error": "invalid_code"}})
+    with (
+        patch.object(member_link.aiohttp, "ClientSession", lambda **kwargs: session),
+        pytest.raises(RuntimeError, match="invalid_code") as caught,
+    ):
+        await SlackMemberIntegration().exchange_code("secret-code")
+
+    assert "secret-code" not in str(caught.value)

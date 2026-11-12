@@ -18,20 +18,21 @@ It is also the reference for a future port. Read `docs/ARCHITECTURE.md` first.
 | `cognee/modules/integrations/<p>/<p>_settings.py` | `.../settings.py` |
 | `cognee/modules/integrations/<p>/client.py` | `.../client.py` |
 | `cognee/modules/integrations/<p>/verify_<p>_signature.py` | `.../webhooks.py` on the core `WebhookVerifier`; the cognee shim stays in `cognee_host/` |
-| `cognee/modules/integrations/<p>/adapter.py`, `sync.py`, `handle_*_event.py`, `agent_session.py`, `resume_sync.py`, `history*.py`, `home.py`, `persistence.py`, `oauth.py`, `channels.py`, `remember_message.py`, `response_url.py`, `handle_cognee_*.py`, `handle_slack_*.py` | `.../cognee_host/<same name>.py` |
+| `cognee/modules/integrations/<p>/adapter.py`, `sync.py`, `handle_*_event.py`, `agent_session.py`, `resume_sync.py`, `home.py`, `persistence.py`, `oauth.py`, `channels.py`, `channel_membership.py`, `member_link.py`, `status.py`, `remember_message.py`, `response_url.py`, `handle_cognee_*.py`, `handle_slack_*.py` | `.../cognee_host/<same name>.py` |
 | `cognee/modules/integrations/<p>/__init__.py` (registration side effect) | `.../cognee_host/__init__.py`: an explicit `register()`; no side effect at import |
 | `cognee/api/v1/slack/routers/*.py` | `connectors/slack/cognee_connector_slack/cognee_host/routers.py` with `routers()` |
 | `cognee/tests/unit/modules/integrations/test_<p>*.py`, `test_handle_<p>_*.py` and the provider's other unit tests | `connectors/<p>/tests/unit/` |
 | `cognee/tests/unit/modules/integrations/conftest.py` | `connectors/<p>/tests/unit/conftest.py` (a copy, when a moved test uses `credential_db`) |
 | `cognee/tests/integration/tasks/connectors/test_<p>_*.py`, `conftest.py`, `fake_linear.py` (Linear) | `connectors/<p>/tests/integration/` |
-| `cognee/tests/integration/modules/integrations/test_slack_history_native.py` | `connectors/slack/tests/integration/` |
 | `.env.template`, the provider's block | the README's Configuration section; names unchanged |
 | `examples/guides/<p>.py`, `examples/python/integrations/*` | `connectors/<p>/examples/` with imports updated |
-| `docs/slack-history.md`, `docs/integration-sync-progress.md` | `connectors/<p>/docs/` |
+| `docs/integration-sync-progress.md` | `connectors/<p>/docs/` |
+| `scripts/slack-app-manifest.sdk.yml` | `connectors/slack/manifest.yml` |
 
-Pure modules that a provider shares with no host (a client, response-shape helpers,
-`history_models.py`, `home.py` block builders, `response_url.py`) go next to `source.py`,
-not under `cognee_host/`, when they import nothing from cognee.
+Pure modules that a provider shares with no host (a client, response-shape helpers) go
+next to `source.py`, not under `cognee_host/`, when they import nothing from cognee. A
+module that opens its HTTP sessions through `cognee.modules.integrations.outbound` (Slack's
+`home.py`, `response_url.py`, `channels.py`) imports cognee and goes under `cognee_host/`.
 
 ## Import rewrites
 

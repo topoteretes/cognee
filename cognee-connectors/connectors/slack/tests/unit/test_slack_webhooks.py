@@ -22,7 +22,7 @@ from cognee_connectors_core.signatures import MAX_BODY_BYTES, HmacVerifier, Sign
 from cognee_connectors_core.testing import sign_body
 
 _SECRET = "8f742231b10e8888abcd99yyyzzz85a5"
-_BODY = b"command=%2Fcognee-ask&team_id=T123"
+_BODY = b"payload=%7B%22type%22%3A%22message_action%22%7D&team_id=T123"
 
 
 @pytest.fixture(autouse=True)
