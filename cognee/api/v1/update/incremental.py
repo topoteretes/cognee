@@ -541,6 +541,10 @@ async def _remove_unreferenced_files(*versions: Data | StagedContent) -> None:
     processed text file and an original. ``remove_data_file_if_unreferenced``
     decides per file, so one a row still uses stays, and so does a file outside
     the data root (the user's own).
+
+    A file that cannot be removed raises, and no caller catches it: a stored
+    file cognee cannot delete is never an acceptable outcome, so the update
+    fails with that error and it gets looked at.
     """
     db_engine = get_relational_engine()
     locations = [
@@ -889,6 +893,12 @@ async def _run_incremental_update(
         # the content staged for an update that did not publish (unchanged,
         # failed). Left on disk, either would outlive forget(), which only
         # removes the files a row points at.
+        #
+        # Deliberately not caught. A removal that fails raises from here even
+        # after a publish, so the caller gets an error for an update that was
+        # applied, and after a failed write its error replaces the write's
+        # (which stays attached as the cause). Returning success with a file
+        # still on disk would be the worse report.
         await _remove_unreferenced_files(bundle["data_item"], bundle["staged"])
 
 
@@ -1007,6 +1017,10 @@ async def _stage_and_plan(
     except BaseException:
         # Refused, or failed before there was a plan: no caller ever sees the
         # staged files, so they are dropped here unless a row already uses them.
+        # Deliberately not caught: if a staged file cannot be removed, that
+        # error is raised in place of the refusal (kept as its cause), so
+        # update() stops instead of falling back to the full rebuild. Nothing
+        # has changed yet, and the same update can be retried.
         await _remove_unreferenced_files(staged)
         raise
 

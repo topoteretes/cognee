@@ -446,6 +446,69 @@ async def test_changed_content_with_changed_metadata_refuses_before_planning(mon
 
 
 @pytest.mark.asyncio
+async def test_a_staged_file_that_cannot_be_removed_stops_the_update_before_the_fallback(
+    monkeypatch,
+):
+    """The refusal would send update() to the full rebuild. A staged file that cannot
+    be removed is raised in its place, with the refusal as the cause, so nothing runs
+    on top of storage that cannot delete."""
+    from cognee.api.v1.update import incremental
+
+    old_data = SimpleNamespace(
+        id=uuid4(),
+        raw_data_location="/tmp/old.txt",
+        content_hash="OLD",
+        external_metadata={},
+        extension="txt",
+        mime_type="text/plain",
+        original_extension="txt",
+        original_mime_type="text/plain",
+        loader_engine="text_loader",
+    )
+    staged = SimpleNamespace(
+        raw_data_location="/tmp/new.md",
+        content_hash="NEW",
+        extension="md",
+        mime_type="text/markdown",
+        original_extension="md",
+        original_mime_type="text/markdown",
+        loader_engine="text_loader",
+    )
+    monkeypatch.setattr(incremental, "get_data", AsyncMock(return_value=old_data))
+    monkeypatch.setattr(
+        incremental, "_read_processed_text", AsyncMock(side_effect=["old content", "new content"])
+    )
+    monkeypatch.setattr(
+        incremental,
+        "_get_stored_chunks",
+        AsyncMock(return_value=[{"id": str(uuid4()), "text": "old content"}]),
+    )
+    monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock(return_value={}))
+    monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=True))
+    monkeypatch.setattr(incremental, "_stage_new_content", AsyncMock(return_value=staged))
+    monkeypatch.setattr(
+        incremental,
+        "_remove_unreferenced_files",
+        AsyncMock(side_effect=OSError("storage is down")),
+    )
+
+    with pytest.raises(OSError, match="storage is down") as raised:
+        await incremental._stage_and_plan(
+            uuid4(),
+            "new content",
+            SimpleNamespace(id=uuid4()),
+            SimpleNamespace(id=uuid4()),
+            None,
+            None,
+            chunker=TextChunker,
+            policy=DEFAULT_CHUNK_POLICY,
+        )
+
+    assert isinstance(raised.value.__context__, IncrementalUpdateNotPossible)
+    assert raised.value.__context__.reason is RefusalReason.UNSUPPORTED_METADATA
+
+
+@pytest.mark.asyncio
 async def test_write_without_delete_permission_is_denied(monkeypatch):
     """This path destroys graph state, so it needs the same permission the
     full fallback needs — and must deny with the same exception type.

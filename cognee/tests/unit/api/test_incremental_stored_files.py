@@ -102,3 +102,40 @@ async def test_each_distinct_location_is_offered_for_removal_once(monkeypatch):
 
     offered = [call.args[0] for call in engine.remove_data_file_if_unreferenced.await_args_list]
     assert offered == ["/data/text_old.txt", "/data/text_new.txt", "/data/staged_b.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_a_file_that_cannot_be_removed_fails_an_update_that_was_published(monkeypatch):
+    """Never reported as a success: the caller gets the storage error, after the run completed."""
+    bundle = {"status": "changed", "data_item": OLD, "staged": STAGED}
+    order = _patch_run(monkeypatch, bundle, AsyncMock(return_value={}))
+
+    async def storage_down(*versions):
+        order.append("remove files")
+        raise OSError("storage is down")
+
+    monkeypatch.setattr(incremental, "_remove_unreferenced_files", storage_down)
+
+    with pytest.raises(OSError, match="storage is down"):
+        await _run()
+
+    assert order == ["write", "run completed", "remove files"]
+
+
+@pytest.mark.asyncio
+async def test_a_file_that_cannot_be_removed_after_a_failed_write_keeps_the_write_error_as_cause(
+    monkeypatch,
+):
+    bundle = {"status": "changed", "data_item": OLD, "staged": STAGED}
+    _patch_run(monkeypatch, bundle, AsyncMock(side_effect=RuntimeError("write failed")))
+    monkeypatch.setattr(
+        incremental,
+        "_remove_unreferenced_files",
+        AsyncMock(side_effect=OSError("storage is down")),
+    )
+
+    with pytest.raises(OSError, match="storage is down") as raised:
+        await _run()
+
+    assert isinstance(raised.value.__context__, RuntimeError)
+    assert str(raised.value.__context__) == "write failed"
