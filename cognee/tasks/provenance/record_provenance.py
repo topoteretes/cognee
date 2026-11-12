@@ -19,7 +19,8 @@ The row follows the item:
 
 - a batch stored for an item whose row is live with the same content hash is
   a no-op, so every batch may record it;
-- a different content hash versions the row (an update);
+- a different content hash versions the row (an update), once the new content
+  is published;
 - deleting the item tombstones it (``cognee/modules/provenance/tombstones.py``),
   once its ``Data`` row is gone, and a later write brings it back; dropping
   only its memory (``forget(memory_only=True)``) leaves the row as it is.
@@ -64,7 +65,10 @@ async def record_data_item_content(ctx: PipelineContext | None, content_hash: st
 
     For a writer that changes an item's content outside ``add_data_points``:
     the incremental update stores its new chunks under the old ``Data`` row
-    and only then publishes the new content.
+    and only then publishes the new content. It records the new hash after
+    that publish, so the ledger never states content the document does not
+    hold; an update that finds the content unchanged records it too, which is
+    what completes an update whose ledger write failed after its publish.
     """
     if provenance_tracking_enabled():
         await _write_data_item(ctx, content_hash)
@@ -95,15 +99,24 @@ async def _write_data_item(ctx: PipelineContext | None, content_hash: str | None
         logger.debug("Ledger recording skipped: batch names no dataset or no data item")
         return
 
+    key = ledger_data_item_key(scope, data_id)
+    source_ref_key = _source_ref_key_from_ctx(ctx)
+    manager = get_provenance_manager()
+    # Every batch stored for an item comes through here, and all but the first
+    # find the row already live on this content. Those stop at a plain read,
+    # instead of queueing behind the lock all ledger writes share.
+    if await manager.data_item_is_recorded(key, content_hash, source_ref_key):
+        return
+
     run_id = str(ctx.pipeline_run_id) if ctx.pipeline_run_id else None
-    batch = get_provenance_manager().batch()
+    batch = manager.batch()
     batch.track_data_item(
-        ledger_data_item_key(scope, data_id),
+        key,
         content_hash=content_hash,
         activity_id=f"cognify:{run_id}" if run_id else "cognify",
         agent_id=_agent_from_ctx(ctx),
         bundle_id=run_id,
-        source_ref_key=_source_ref_key_from_ctx(ctx),
+        source_ref_key=source_ref_key,
     )
     await batch.commit()
 

@@ -810,6 +810,19 @@ async def _run_incremental_update(
 
     # A no-op with nothing to repair is the only path that writes nothing, and
     # so the only one that records no run.
+    if bundle.get("status") == "unchanged":
+        # The document already holds this content. The audit ledger is told so
+        # as well: an earlier update may have published it and then failed to
+        # record it, and this is the retry that completes it. A no-op when the
+        # ledger is off or already says so.
+        unchanged_data = bundle["data_item"]
+        await record_data_item_content(
+            PipelineContext(
+                user=user, data_item=unchanged_data, dataset=dataset, pipeline_name=PIPELINE_NAME
+            ),
+            unchanged_data.content_hash,
+        )
+
     if bundle.get("status") == "unchanged" and not bundle.get("repairs"):
         return {**_unchanged_result(0, bundle["stored_count"]), "pipeline_run_id": None}
 
@@ -1185,11 +1198,13 @@ async def _write_and_publish(
         for chunk_id in plan.reused
         if chunk_id not in redated
     )
-    # The audit ledger versions the data item on its new content hash before
-    # the row flips: a ledger failure leaves the row on the old version, and
-    # the update is retried.
-    await record_data_item_content(context, staged.content_hash)
     await publish_updated_data(data_id, dataset_id, staged, surviving_tokens + new_tokens, node_set)
+    # The audit ledger versions the data item on its new content hash once the
+    # row holds it, never before: a publish that fails must not leave the
+    # ledger recording an update that did not happen. If this write fails the
+    # update raises with the new content in place, and running it again
+    # records it (see the unchanged branch of ``_run_incremental_update``).
+    await record_data_item_content(context, staged.content_hash)
 
     added_chunks = len(to_extract) + len(reused_chunks)
     kept_count = len(stored_chunks) - len(replaced)

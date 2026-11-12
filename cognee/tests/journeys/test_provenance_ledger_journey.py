@@ -13,6 +13,7 @@ default, a delete does not touch the ledger table at all.
 
 from __future__ import annotations
 
+import importlib
 from uuid import UUID
 
 import pytest
@@ -234,8 +235,9 @@ async def test_an_update_the_ledger_cannot_record_fails_and_a_retry_records_it(
             )
     [original] = await manager.revision_history(key)
 
-    # The retry may rebuild the item from scratch. The document never left, so
-    # either way the ledger shows one new version and no tombstone.
+    # The update published the new content and then could not record it, so it
+    # raised. Running it again finds the content unchanged and records it. The
+    # document never left, so the ledger shows one new version and no tombstone.
     await cognee.update(data_id=choir, data=DOC_CHOIR_V2, dataset_id=dataset_id, user=default_user)
     history = await manager.revision_history(key)
     latest = history[-1]
@@ -249,6 +251,36 @@ async def test_an_update_the_ledger_cannot_record_fails_and_a_retry_records_it(
     assert any("solvay" in text for text in chunks) and not any(
         "haldane" in text for text in chunks
     )
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_an_update_whose_publish_fails_is_not_recorded(
+    clean_env, default_user, ledger_on, monkeypatch
+):
+    """The ledger states new content only once the document holds it."""
+    incremental = importlib.import_module("cognee.api.v1.update.incremental")
+    manager = ledger_on
+    result = await cognee.remember([DOC_CHOIR], dataset_name=DATASET)
+    dataset_id = _support.as_uuid(result.dataset_id)
+    choir = await _data_id(dataset_id, default_user, "saltmarsh choir")
+    key = ledger_data_item_key(dataset_id, choir)
+    [original] = await manager.revision_history(key)
+
+    async def publish_fails(*args, **kwargs):
+        raise RuntimeError("publish failed")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(incremental, "publish_updated_data", publish_fails)
+        with pytest.raises(RuntimeError, match="publish failed"):
+            await cognee.update(
+                data_id=choir, data=DOC_CHOIR_V2, dataset_id=dataset_id, user=default_user
+            )
+
+    # The document still holds the old content, and the ledger says nothing else.
+    [row] = await cognee.datasets.list_data(dataset_id, default_user)
+    assert "yusuf haldane" in _support.stored_text(row)
+    assert await manager.revision_history(key) == [original]
 
 
 @pytest.mark.journey
