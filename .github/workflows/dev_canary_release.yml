@@ -25,6 +25,9 @@ jobs:
     uses: ./.github/workflows/basic_tests.yml
     with:
       ci-image: ""
+      # Test the same `dev` commit that the publish jobs build, so a green gate
+      # actually certifies the published source (cognee#6074, scenario 1).
+      ref: dev
     secrets: inherit
 
   # ── Compute canary version ──────────────────────────────────────────
