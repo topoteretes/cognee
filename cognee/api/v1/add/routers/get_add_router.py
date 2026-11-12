@@ -22,6 +22,7 @@ from cognee.tasks.ingestion.data_item import (
     parse_external_metadata,
     parse_labels,
 )
+from cognee.tasks.ingestion.dlt_config import parse_dlt_config
 
 logger = get_logger()
 
@@ -91,6 +92,17 @@ def get_add_router() -> APIRouter:
                 "ones; 'node_set' is reserved) and returned when listing dataset data."
             ),
         ),
+        dlt_config: str | None = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "JSON object of options for table sources (CSV files and database "
+                'connection strings), e.g. {"primary_key": "id", "write_disposition": '
+                '"replace"}. Keys: primary_key, write_disposition, query, '
+                "max_rows_per_table, column_value_columns, temporal_columns. Applies to "
+                "every table source in the request; an unknown key is rejected."
+            ),
+        ),
         datasetName: str | None = Form(
             default=None,
             examples=["default_dataset"],
@@ -145,6 +157,9 @@ def get_add_router() -> APIRouter:
                  e.g. [{"source": "crm"}, null], paired positionally with the data items
                  (one entry per item; null or {} skips that item). Merged into each
                  item's stored external_metadata.
+        - **dlt_config** (Optional[str]): JSON object of options for table sources (CSV
+                 files and database connection strings), e.g. {"primary_key": "id"}.
+                 An unknown key is rejected with 400.
         - **datasetName** (Optional[str]): Name of the dataset to add data to
         - **datasetId** (Optional[UUID]): UUID of an already existing dataset
         - **node_set** Optional[list[str]]: List of node identifiers used to organize and filter
@@ -209,6 +224,7 @@ def get_add_router() -> APIRouter:
         data = pair_labels_with_data(
             data, parse_labels(labels), parse_external_metadata(external_metadata)
         )
+        dlt_options = parse_dlt_config(dlt_config)
 
         if not data:
             return JSONResponse(
@@ -228,6 +244,7 @@ def get_add_router() -> APIRouter:
                 node_set=node_set
                 if node_set != [""]
                 else None,  # Transform default node_set endpoint value to None
+                dlt_config=dlt_options,
             )
 
             if isinstance(add_run, PipelineRunErrored):
