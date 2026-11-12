@@ -204,6 +204,9 @@ GHCR_LISTING = [
     "v0.18.0",
     "v0.18.1",
     "v0.19.0",
+    "v0.20.0",
+    "v0.21.0",
+    "v0.22.0",
     "vdev",
 ]
 
@@ -233,6 +236,13 @@ def test_filter_includes_trailing_dir_below_floor():
     # must be shipped even though 0.17.0 itself is outside the range.
     dirs = resolver.supported_extension_dirs(GHCR_LISTING, "ladybug>=0.17.1,<=0.18.1")
     assert dirs == ["v0.17.0", "v0.18.0", "v0.18.1"]
+
+
+def test_filter_includes_trailing_dir_for_exact_pin():
+    # ladybug 0.22.3 requests v0.22.0; an exact pin with no exact dir ships the
+    # newest dir below it.
+    dirs = resolver.supported_extension_dirs(GHCR_LISTING, "ladybug==0.22.3")
+    assert dirs == ["v0.22.0"]
 
 
 def test_filter_skips_below_floor_when_floor_has_exact_dir():

@@ -41,6 +41,7 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
+from cognee.modules.retrieval.utils.resolved_context import user_resolution_scope
 from cognee.modules.search.types import SearchType
 from cognee.modules.user_preferences import warm_preference_cache
 from cognee.shared.logging_utils import get_logger
@@ -473,6 +474,7 @@ async def run_sequential_session_turn(
     return retrieved_objects, context, completion
 
 
+@user_resolution_scope()
 async def run_session_aware_completion(
     retriever,
     *,

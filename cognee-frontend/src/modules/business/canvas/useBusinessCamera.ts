@@ -63,7 +63,8 @@ export interface BusinessCamera {
   lastInteractionRef: RefObject<number>;
   fitToEntities: (entities: BusinessEntity[], width: number, height: number, animate: boolean) => void;
   goToAltimeterLevel: (
-    targetLevel: number, width: number, height: number, entities: BusinessEntity[], focusSets: Set<string> | null,
+    targetLevel: number, width: number, height: number, entities: BusinessEntity[],
+    focusSets: Set<string> | null, focusTypes: Set<string> | null, entityType: Record<string, string>,
   ) => void;
   // Pan to a world point keeping the current zoom — the minimap's
   // click-to-navigate, which repositions without re-leveling.
@@ -163,7 +164,7 @@ export function useBusinessCamera(
   const goToAltimeterLevel = useCallback(
     (
       targetLevel: number, width: number, height: number, entities: BusinessEntity[],
-      focusSets: Set<string> | null,
+      focusSets: Set<string> | null, focusTypes: Set<string> | null, entityType: Record<string, string>,
     ): void => {
       lastInteractionRef.current = performance.now();
       if (targetLevel === 3) {
@@ -185,7 +186,12 @@ export function useBusinessCamera(
       // as "everything disappeared" after clicking an altimeter level while
       // a lens was active (COG-6233). Fall back to the full set only if the
       // lens somehow matches nothing, so this never zooms to an empty mean.
-      const inFocus = focusSets ? entities.filter((n) => inLens(n, focusSets)) : entities;
+      // A type lens strands the isolated cluster off-viewport the exact same
+      // way — checking focusSets alone still framed the whole graph's
+      // centroid while a type filter was active with no source filter.
+      const inFocus = (focusSets || focusTypes)
+        ? entities.filter((n) => inLens(n, focusSets, focusTypes, entityType))
+        : entities;
       const framed = inFocus.length ? inFocus : entities;
       // Business (level 0) is the schema view, and where the schema
       // crossfade sits now depends on the graph's own fit scale (see

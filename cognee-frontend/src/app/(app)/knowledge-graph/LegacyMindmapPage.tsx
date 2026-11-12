@@ -115,7 +115,7 @@ export default function KnowledgeGraphPage() {
           blobRef.current = url;
           setIframeSrc(url);
         } else {
-          setError("No graph data in this brain yet.");
+          setError("No graph data in this dataset yet.");
         }
       })
       .catch((err) => { if (cancelled) return; setError(err.message || "Failed to load visualization"); })
@@ -133,8 +133,8 @@ export default function KnowledgeGraphPage() {
       <><TrackPageView page="Mindmap" />
       <div style={{ padding: 32, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12 }}>
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgba(237,236,234,0.35)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="2" /><circle cx="12" cy="5" r="1.5" /><circle cx="19" cy="16" r="1.5" /><circle cx="5" cy="16" r="1.5" /><line x1="12" y1="7" x2="12" y2="10" /><line x1="13.7" y1="13.3" x2="17.8" y2="15.2" /><line x1="10.3" y1="13.3" x2="6.2" y2="15.2" /></svg>
-        <span style={{ fontSize: 15, fontWeight: 500, color: "#EDECEA" }}>No brains yet</span>
-        <span style={{ fontSize: 13, color: "rgba(237,236,234,0.35)", textAlign: "center", maxWidth: 360, lineHeight: "20px" }}>Create a brain and upload documents to visualize your knowledge graph.</span>
+        <span style={{ fontSize: 15, fontWeight: 500, color: "#EDECEA" }}>No datasets yet</span>
+        <span style={{ fontSize: 13, color: "rgba(237,236,234,0.35)", textAlign: "center", maxWidth: 360, lineHeight: "20px" }}>Create a dataset and upload documents to visualize your knowledge graph.</span>
         <Link href="/datasets" style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", fontSize: 13, fontWeight: 500, textDecoration: "none", marginTop: 4 }}>Go to Datasets</Link>
       </div></>
     );
@@ -204,10 +204,10 @@ export default function KnowledgeGraphPage() {
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#A1A1AA" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="2" /><circle cx="12" cy="5" r="1.5" /><circle cx="19" cy="16" r="1.5" /><circle cx="5" cy="16" r="1.5" /><line x1="12" y1="7" x2="12" y2="10" /><line x1="13.7" y1="13.3" x2="17.8" y2="15.2" /><line x1="10.3" y1="13.3" x2="6.2" y2="15.2" /></svg>
                 <span style={{ fontSize: 15, fontWeight: 500, color: "#EDECEA" }}>No graph data yet</span>
                 <span style={{ fontSize: 13, color: "rgba(237,236,234,0.35)", textAlign: "center", maxWidth: 400, lineHeight: "20px" }}>
-                  Upload documents to a brain, then configure and re-process from the{" "}
-                  <Link href="/datasets" style={{ color: "#BC9BFF", textDecoration: "underline" }}>Brain</Link> page.
+                  Upload documents to a dataset, then configure and re-process from the{" "}
+                  <Link href="/datasets" style={{ color: "#BC9BFF", textDecoration: "underline" }}>Datasets</Link> page.
                 </span>
-                {error && error !== "No graph data in this brain yet." && (
+                {error && error !== "No graph data in this dataset yet." && (
                   <span style={{ fontSize: 11, color: "#EF4444", textAlign: "center", maxWidth: 400, fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace', wordBreak: "break-all" }}>{error}</span>
                 )}
               </>

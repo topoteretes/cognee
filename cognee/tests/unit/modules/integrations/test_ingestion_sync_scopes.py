@@ -1,15 +1,23 @@
 """The per-scope loop Drive and Linear share."""
 
+import contextlib
 import importlib
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
+from uuid import UUID
 
 import pytest
 
 from cognee.modules.integrations import ingestion
 from cognee.modules.integrations.credentials import CredentialInactiveError
 
-CREDENTIAL = SimpleNamespace(user_id="user-1", provider_account_id="acct-1")
+CREDENTIAL = SimpleNamespace(
+    id=UUID("11111111-1111-1111-1111-111111111111"),
+    user_id=UUID("22222222-2222-2222-2222-222222222222"),
+    provider="linear",
+    workspace_id=None,
+    provider_account_id="acct-1",
+)
 
 
 @pytest.fixture
@@ -105,3 +113,52 @@ async def test_a_rate_limit_error_is_recorded_as_one_whatever_its_text(monkeypat
         await ingestion.run_sync("linear", CREDENTIAL, sync_source)
 
     assert recorded.await_args.kwargs["counts"]["failed_rate_limit"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failing_scope_is_logged_by_its_resource_name_not_its_id(remember, caplog):
+    """A scope can be a channel or folder id; the hashed resource name names it in the log."""
+    remember.side_effect = RuntimeError("boom")
+
+    _, _, built = await _run(["C0SECRETCHAN"])
+
+    assert "C0SECRETCHAN" not in caplog.text
+    assert built[0][1] in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_the_failure_log_call_carries_no_scope(remember, monkeypatch):
+    """Read off the log call itself, so it holds whatever logging configuration the run has."""
+    log = Mock()
+    monkeypatch.setattr(ingestion, "logger", log)
+    remember.side_effect = RuntimeError("boom")
+
+    _, _, built = await _run(["C0SECRETCHAN"])
+
+    (call,) = log.exception.call_args_list
+    assert "C0SECRETCHAN" not in repr(call)
+    assert built[0][1] in call.args
+
+
+@pytest.mark.parametrize(
+    ("counts", "gone_keys", "blocked"),
+    [
+        ({"failed": 0}, (), False),
+        ({"failed": 1, "failed_ingestion": 1}, (), True),
+        # A backfill cut short may not have replaced a legacy table yet.
+        ({"failed": 1, "failed_budget": 1}, (), True),
+        ({"failed": 2, "failed_team_not_found": 2}, ("failed_team_not_found",), False),
+        (
+            {"failed": 2, "failed_team_not_found": 1, "failed_rate_limit": 1},
+            ("failed_team_not_found",),
+            True,
+        ),
+    ],
+)
+def test_only_a_scope_gone_at_the_provider_does_not_block_retirement(counts, gone_keys, blocked):
+    assert ingestion.retirement_blocked(counts, gone_keys=gone_keys) is blocked
+
+
+def test_a_rate_limit_carries_the_wait_the_provider_named():
+    assert ingestion.RateLimitedError("slow down", retry_after=30).retry_after == 30
+    assert ingestion.RateLimitedError("slow down").retry_after is None

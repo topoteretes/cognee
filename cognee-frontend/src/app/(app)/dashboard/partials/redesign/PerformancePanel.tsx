@@ -8,13 +8,20 @@ import { FONT, T } from "./mono";
  *  and is a Cognee Cloud feature. Renders a text-only notice instead of
  *  syncing the real panel. */
 
-export interface TopicScore { name: string; pct: number | null }
+export interface TopicScore { id: string; name: string; pct: number | null }
 
 interface PerformancePanelProps {
   recallPct: number | null;
   topics: TopicScore[];
+  // Unused by the notice, but declared: OverviewPage syncs and passes these, and
+  // a stub whose props lag the real panel fails the synced type-check gate.
+  unavailable: boolean;
+  loading: boolean;
+  datasetTotal: number;
   onUpload?: () => void;
   onViewAnalysis?: () => void;
+  onRetry?: () => void;
+  onViewDataset?: (datasetId: string) => void;
 }
 
 export function PerformancePanel(_props: PerformancePanelProps): React.ReactElement {

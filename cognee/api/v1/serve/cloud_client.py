@@ -1,5 +1,6 @@
 """Remote HTTP client that proxies V2 operations to a Cognee Cloud instance."""
 
+import asyncio
 import io
 import json
 from pathlib import Path
@@ -8,6 +9,7 @@ from uuid import UUID
 
 import aiohttp
 
+from cognee.modules.conflicts.models import ConflictDetail
 from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
@@ -24,6 +26,34 @@ def _text_upload_filename(text: str) -> str:
     (FileContentHashingError 409s).
     """
     return create_text_data(text).get_metadata()["name"]
+
+
+def remote_graph_schema(graph_model: Any) -> dict | None:
+    """The ``graph_model`` a remote remember or cognify sends: the model as the JSON
+    schema the server rebuilds with ``graph_schema_to_graph_model``, typed ``Edge`` and
+    ``FromIdentity`` fields included, or None for the server's default ``KnowledgeGraph``.
+
+    A model the LLM extraction could not fill raises here, before anything is uploaded.
+    """
+    from cognee.shared.data_models import KnowledgeGraph
+    from cognee.shared.graph_model_utils import graph_model_to_graph_schema
+
+    if graph_model is None or graph_model is KnowledgeGraph:
+        return None
+    return graph_model_to_graph_schema(graph_model)
+
+
+def _node_type_name(node_type: Any) -> str | None:
+    """The ``node_type`` wire form: the class name, or None for the NodeSet default.
+
+    Omitting the field is how the server is told "node-set tags", so the default
+    travels as nothing and only a typed graph scope names its class.
+    """
+    from cognee.modules.engine.models.node_set import NodeSet
+
+    if node_type is None or node_type is NodeSet:
+        return None
+    return node_type.__name__
 
 
 def _failed_update_result(body: str) -> dict | None:
@@ -49,6 +79,9 @@ class CloudClient:
     def __init__(self, service_url: str, api_key: str):
         self.service_url = service_url.rstrip("/")
         self.api_key = api_key
+        # Tenant /api/v1/users/me reported at connect time; read by telemetry
+        # while this client is the active connection.
+        self.tenant_id = ""
         self._session: aiohttp.ClientSession | None = None
 
     # Default for ordinary API calls: aiohttp's standard 5-minute total,
@@ -60,6 +93,9 @@ class CloudClient:
     # can legitimately exceed any fixed total; per-read inactivity stays
     # bounded instead. Applied per-request, only to archive uploads.
     UPLOAD_TIMEOUT = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=600)
+    # The tenant lookup only feeds telemetry; a slow instance must not delay
+    # serve(), so it gives up quickly and the connection proceeds without it.
+    TENANT_LOOKUP_TIMEOUT = aiohttp.ClientTimeout(total=5)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -109,14 +145,45 @@ class CloudClient:
             )
             return None
 
+    async def _get_tenant_id(self) -> str:
+        """Tenant id of the connected API key's user, or "" when there is none.
+
+        Every instance answers ``/api/v1/users/me`` with fastapi-users'
+        ``UserRead``. On a Cloud tenant instance its ``tenant_id`` is the
+        control-plane ``tenants.id``; a self-hosted server reports its own
+        local tenant. Both are recorded — analytics tells them apart by host.
+        Any failure, including a timeout after ``TENANT_LOOKUP_TIMEOUT``,
+        returns "": this must never fail or stall a connection.
+        """
+        try:
+            session = await self._get_session()
+            async with session.get(
+                f"{self.service_url}/api/v1/users/me", timeout=self.TENANT_LOOKUP_TIMEOUT
+            ) as resp:
+                if resp.status != 200:
+                    return ""
+                data = await resp.json()
+            tenant_id = data.get("tenant_id") if isinstance(data, dict) else None
+            return str(UUID(str(tenant_id))) if tenant_id else ""
+        except Exception:
+            logger.debug(
+                "Falling back to no tenant after error in CloudClient._get_tenant_id",
+                exc_info=True,
+            )
+            return ""
+
     # ----- V2 Operations -----
 
     async def remember(self, data: Any, dataset_name: str = "main_dataset", **kwargs) -> dict:
         """POST /api/v1/remember — ingest data and build knowledge graph."""
+        # Resolved first: a model the route cannot carry raises before any upload.
+        graph_schema = remote_graph_schema(kwargs.get("graph_model"))
         session = await self._get_session()
 
         form = aiohttp.FormData()
         form.add_field("datasetName", dataset_name)
+        if graph_schema is not None:
+            form.add_field("graph_model", json.dumps(graph_schema))
 
         if kwargs.get("dataset_id"):
             form.add_field("datasetId", str(kwargs["dataset_id"]))
@@ -260,6 +327,11 @@ class CloudClient:
             payload["top_k"] = kwargs["top_k"]
         if kwargs.get("system_prompt"):
             payload["system_prompt"] = kwargs["system_prompt"]
+        node_type_name = await self._node_type_payload(
+            kwargs.get("node_type"), kwargs.get("node_name")
+        )
+        if node_type_name is not None:
+            payload["node_type"] = node_type_name
         if kwargs.get("node_name"):
             payload["node_name"] = kwargs["node_name"]
         if kwargs.get("only_context"):
@@ -309,8 +381,8 @@ class CloudClient:
             payload["build_global_context_index"] = True
         if kwargs.get("build_truth_subspace"):
             payload["build_truth_subspace"] = True
-        if kwargs.get("review_conflicts"):
-            payload["review_conflicts"] = True
+        if kwargs.get("review_conflicts") is not None:
+            payload["review_conflicts"] = kwargs["review_conflicts"]
         if kwargs.get("feedback_alpha") is not None:
             payload["feedback_alpha"] = kwargs["feedback_alpha"]
         # Deprecated custom tasks (SDK-1115): the /improve DTO takes registry task
@@ -451,22 +523,187 @@ class CloudClient:
             # UUIDs as UUID objects, the fallback reason as its enum member.
             return UpdateResult.model_validate(await resp.json()).model_dump()
 
-    async def list_data(self, dataset_id: UUID) -> list:
+    # Feature probes. The connect-time checks (/health, an authenticated GET) say
+    # the server is up and the key works, not which fields its routes know, so a
+    # feature a server predates is detected from its OpenAPI schema. The schema is
+    # fetched once per client; each probe caches its own answer. Class defaults so
+    # instances built without ``__init__`` (tests) start unknown too.
+    _openapi: dict | None = None
+    _content_hash_lookup_supported: bool | None = None
+    _node_type_supported: bool | None = None
+
+    # The schema is a few hundred KiB; its own timeout keeps a slow docs route
+    # from holding a probe under the 600 s request timeout.
+    SCHEMA_PROBE_TIMEOUT = aiohttp.ClientTimeout(total=30)
+
+    _CONTENT_HASH_UNSUPPORTED = (
+        "Remote server does not support content_hash lookup on "
+        "GET /api/v1/datasets/{dataset_id}/data: it predates the content_hash filter and "
+        "sends no contentHash on its rows, so find_data() cannot tell a match from the "
+        "rest of the dataset. Upgrade the server to use find_data() over serve()."
+    )
+
+    _NODE_TYPE_UNSUPPORTED = (
+        "Remote server does not take node_type on POST /api/v1/search and "
+        "POST /api/v1/recall: it predates the field and would read node_name as node-set "
+        "tags, returning results for the wrong scope without an error. Upgrade the server "
+        "to use a typed node_type over serve(); node_name alone (node-set tags) still works."
+    )
+
+    _NODE_TYPE_UNKNOWN = (
+        "Could not read the remote server's schema (GET /openapi.json), so whether it "
+        "takes node_type on POST /api/v1/search and POST /api/v1/recall is unknown. A "
+        "server that predates the field would read node_name as node-set tags and return "
+        "results for the wrong scope without an error, so the typed scope is not sent. "
+        "Make /openapi.json reachable from this client; node_name alone (node-set tags) "
+        "still works."
+    )
+
+    async def _server_openapi(self) -> dict | None:
+        """The server's OpenAPI document, fetched once per client.
+
+        ``None`` means it could not be read (no schema served, not JSON, or the
+        read ran past ``SCHEMA_PROBE_TIMEOUT``) and is not cached, so a later call
+        can still find out.
+        """
+        if self._openapi is not None:
+            return self._openapi
+        try:
+            session = await self._get_session()
+            async with session.get(
+                f"{self.service_url}/openapi.json", timeout=self.SCHEMA_PROBE_TIMEOUT
+            ) as resp:
+                if resp.status >= 400:
+                    return None
+                schema = await resp.json()
+        # A total-timeout is a bare asyncio.TimeoutError (the builtin on 3.11+), not
+        # a ClientError: only a connect-phase timeout is one.
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError):
+            logger.warning("could not read the server schema from /openapi.json")
+            return None
+        if not isinstance(schema, dict):
+            return None
+        self._openapi = schema
+        return schema
+
+    async def supports_content_hash_lookup(self) -> bool | None:
+        """Whether the server's dataset listing takes a ``content_hash`` query param.
+
+        FastAPI drops an unknown query param without an error, so a server
+        older than the content-hash lookup answers ``?content_hash=`` with the
+        whole dataset listing, which ``find_data()`` would then hand back as
+        matches. ``None`` means unknown (no schema served, or no listing route in
+        it) and is not cached; the row-level check in ``list_data`` fails closed
+        either way, so an unknown server is still asked.
+        """
+        if self._content_hash_lookup_supported is not None:
+            return self._content_hash_lookup_supported
+        schema = await self._server_openapi()
+        if schema is None:
+            return None
+        try:
+            parameters = schema["paths"]["/api/v1/datasets/{dataset_id}/data"]["get"].get(
+                "parameters", []
+            )
+        except (KeyError, TypeError, AttributeError):
+            logger.warning(
+                "find_data: could not read the server schema to check content_hash support"
+            )
+            return None
+        self._content_hash_lookup_supported = any(
+            isinstance(parameter, dict)
+            and parameter.get("name") == "content_hash"
+            and parameter.get("in") == "query"
+            for parameter in parameters
+        )
+        if not self._content_hash_lookup_supported:
+            logger.warning(
+                "find_data: the remote server predates the content_hash lookup; "
+                "lookups over serve() are refused until it is upgraded"
+            )
+        return self._content_hash_lookup_supported
+
+    async def supports_node_type(self) -> bool | None:
+        """Whether the server's search and recall request bodies take ``nodeType``.
+
+        Request bodies ignore unknown fields, so a server older than the field
+        accepts the body and reads ``nodeName`` as node-set tags: no error, and
+        results for the wrong scope. ``None`` means unknown (no schema served) and
+        is not cached, so a later call can still find out.
+        """
+        if self._node_type_supported is not None:
+            return self._node_type_supported
+        schema = await self._server_openapi()
+        if schema is None:
+            return None
+        try:
+            schemas = schema["components"]["schemas"]
+            self._node_type_supported = all(
+                "nodeType" in schemas.get(name, {}).get("properties", {})
+                for name in ("SearchPayloadDTO", "RecallPayloadDTO")
+            )
+        except (KeyError, TypeError, AttributeError):
+            logger.warning("could not read the server schema to check node_type support")
+            return None
+        if not self._node_type_supported:
+            logger.warning(
+                "the remote server predates node_type on search and recall; "
+                "typed scopes over serve() are refused until it is upgraded"
+            )
+        return self._node_type_supported
+
+    async def _node_type_payload(self, node_type: Any, node_name: Any) -> str | None:
+        """The ``node_type`` to send: None for the node-set default, else the class name.
+
+        ``node_type`` only changes what ``node_name`` means, so without names the
+        field has no effect and goes to any server unprobed. With names a typed
+        scope is sent only to a server known to read it: an old server would apply
+        the wrong scope, and a response carries nothing that would show it, so a
+        server whose schema cannot be read is refused too. Dropping the type or the
+        names instead would return results the caller did not ask for, with nothing
+        to tell them.
+        """
+        node_type_name = _node_type_name(node_type)
+        if node_type_name is None or not node_name:
+            return node_type_name
+        supported = await self.supports_node_type()
+        if supported is None:
+            raise RuntimeError(self._NODE_TYPE_UNKNOWN)
+        if not supported:
+            raise RuntimeError(self._NODE_TYPE_UNSUPPORTED)
+        return node_type_name
+
+    async def list_data(self, dataset_id: UUID, *, content_hash: str | None = None) -> list:
         """Traverse bounded pages, deduplicating overlaps during concurrent ingest.
 
         This is not a snapshot: inserts/deletes can make rows unreachable during
         offset traversal. Above offset 1,000,000 the server rejects requests;
         /data/count still reports the full dataset size.
+
+        ``content_hash`` narrows the listing to the caller's rows holding that
+        content. A server that knows the filter applies it (``?content_hash=``)
+        and pages the matches; the rows are filtered again here on
+        ``contentHash`` so a server that ignored the param can never turn a
+        lookup into the whole dataset. A server known (from the schema probe)
+        or found (rows without ``contentHash``) to predate the filter is
+        refused with ``RuntimeError`` rather than guessed at: it has nothing
+        the rows could be matched on.
         """
+        if content_hash is not None and await self.supports_content_hash_lookup() is False:
+            raise RuntimeError(self._CONTENT_HASH_UNSUPPORTED)
+
         session = await self._get_session()
         rows = []
         seen_ids = set()
         limit = 1000
         offset = 0
         while True:
+            params: dict = {"limit": limit, "offset": offset}
+            if content_hash is not None:
+                params["content_hash"] = content_hash
             async with session.get(
                 f"{self.service_url}/api/v1/datasets/{dataset_id}/data",
-                params={"limit": limit, "offset": offset},
+                params=params,
             ) as resp:
                 if resp.status >= 400:
                     body = await resp.text()
@@ -485,13 +722,61 @@ class CloudClient:
                     seen_ids.add(row_id)
                     rows.append(row)
             if len(page) < limit:
-                return rows
+                break
+
+        if content_hash is None:
+            return rows
+        return self._rows_holding(rows, content_hash)
+
+    @classmethod
+    def _rows_holding(cls, rows: list, content_hash: str) -> list:
+        """Keep the rows whose ``contentHash`` is ``content_hash``; fail closed.
+
+        A row without the key comes from a server that predates the lookup
+        (its DataDTO had no ``contentHash``), so nothing in the listing can be
+        matched and returning it unfiltered would hand the caller the whole
+        dataset as "matches".
+        """
+        matches = []
+        for row in rows:
+            if not isinstance(row, dict) or "contentHash" not in row:
+                raise RuntimeError(cls._CONTENT_HASH_UNSUPPORTED)
+            if row["contentHash"] == content_hash:
+                matches.append(row)
+        return matches
+
+    async def sparql(
+        self,
+        dataset_id: UUID,
+        query: str,
+        *,
+        base_iri: str | None = None,
+        limit: int = 1000,
+    ) -> dict:
+        """POST /api/v1/datasets/{dataset_id}/sparql — read-only SPARQL over the graph."""
+        session = await self._get_session()
+
+        payload: dict = {"query": query, "limit": limit}
+        if base_iri:
+            payload["baseIri"] = base_iri
+
+        async with session.post(
+            f"{self.service_url}/api/v1/datasets/{dataset_id}/sparql",
+            json=payload,
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote SPARQL query failed ({resp.status}): {body}")
+            return await resp.json()
 
     async def cognify(self, datasets: Any = None, **kwargs) -> dict:
         """POST /api/v1/cognify — build the knowledge graph."""
+        graph_schema = remote_graph_schema(kwargs.get("graph_model"))
         session = await self._get_session()
 
         payload: dict = {}
+        if graph_schema is not None:
+            payload["graph_model"] = graph_schema
         if datasets:
             payload["datasets"] = (
                 [str(d) for d in datasets] if isinstance(datasets, list) else [str(datasets)]
@@ -533,6 +818,11 @@ class CloudClient:
             payload["topK"] = kwargs["top_k"]
         if kwargs.get("system_prompt"):
             payload["systemPrompt"] = kwargs["system_prompt"]
+        node_type_name = await self._node_type_payload(
+            kwargs.get("node_type"), kwargs.get("node_name")
+        )
+        if node_type_name is not None:
+            payload["nodeType"] = node_type_name
         if kwargs.get("node_name"):
             payload["nodeName"] = kwargs["node_name"]
         if kwargs.get("only_context") is not None:
@@ -580,6 +870,8 @@ class CloudClient:
             payload["data_id"] = str(kwargs["data_id"])
         if kwargs.get("memory_only") is not None:
             payload["memory_only"] = bool(kwargs["memory_only"])
+        if kwargs.get("clean_history"):
+            payload["clean_history"] = True
 
         async with session.post(
             f"{self.service_url}/api/v1/forget",
@@ -589,3 +881,49 @@ class CloudClient:
                 body = await resp.text()
                 raise RuntimeError(f"Remote forget failed ({resp.status}): {body}")
             return await resp.json()
+
+    async def list_conflicts(
+        self, dataset_id: UUID, *, status: str | None = None
+    ) -> list[ConflictDetail]:
+        """GET /api/v1/conflicts — a dataset's conflicts with their competing facts."""
+        session = await self._get_session()
+
+        params = {"dataset_id": str(dataset_id)}
+        if status:
+            params["status"] = status
+
+        async with session.get(
+            f"{self.service_url}/api/v1/conflicts",
+            params=params,
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote list_conflicts failed ({resp.status}): {body}")
+            payload = await resp.json()
+        if not isinstance(payload, list):
+            raise RuntimeError("Remote list_conflicts returned an invalid conflict list")
+        return [ConflictDetail.model_validate(item) for item in payload]
+
+    async def resolve_conflict(
+        self,
+        conflict_id: UUID,
+        *,
+        dataset_id: UUID,
+        selected_fact_id: UUID,
+        reason: str | None = None,
+    ) -> ConflictDetail:
+        """POST /api/v1/conflicts/{conflict_id}/resolve — accept one competing fact."""
+        session = await self._get_session()
+
+        payload: dict = {"datasetId": str(dataset_id), "selectedFactId": str(selected_fact_id)}
+        if reason is not None:
+            payload["reason"] = reason
+
+        async with session.post(
+            f"{self.service_url}/api/v1/conflicts/{conflict_id}/resolve",
+            json=payload,
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote resolve_conflict failed ({resp.status}): {body}")
+            return ConflictDetail.model_validate(await resp.json())

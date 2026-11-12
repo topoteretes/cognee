@@ -2,42 +2,37 @@
 
 import { useState, useCallback } from "react";
 import { useTenant } from "@/modules/tenant/TenantProvider";
-import { useCreditsBalance, getTenantRow } from "@/modules/billing/useCreditsBalance";
+import { useCreditsBalance, getTenantRemainingUsd } from "@/modules/billing/useCreditsBalance";
 import { isCreditsBannerDismissed, dismissCreditsBanner } from "@/utils/browserStorage";
 
 export interface CreditsBannerState {
-  creditsSpentPct: number | null;
   creditsRemainingUsd: number | null;
-  /** True when ≥ 90 % of credits are spent. Wins over all other banners. */
-  showCreditPctBanner: boolean;
-  /** True when balance < $1 and credit-pct banner is not showing. */
+  /** True when balance < $5. */
   showLowBalanceBanner: boolean;
-  /** True when neither warning banner is active. */
+  /** True when the low-balance banner is not active. */
   showVoucherBanner: boolean;
   dismiss: () => void;
 }
+
+const LOW_BALANCE_THRESHOLD_USD = 5;
 
 /**
  * Fetches credit usage and tracks banner visibility.
  *
  * Only one banner may show at a time — priority:
- *   1. Credit-percentage banner (≥ 90 %)
- *   2. Low-balance banner (< $1)
- *   3. Voucher banner (promotional)
+ *   1. Low-balance banner (< $5)
+ *   2. Voucher banner (promotional)
  */
 export function useCreditsBanner(): CreditsBannerState {
   const { tenant } = useTenant();
   const { data: overview } = useCreditsBalance(true);
   const [dismissed, setDismissed] = useState<boolean>(isCreditsBannerDismissed);
 
-  const row = getTenantRow(overview, tenant?.tenant_id ?? null);
-  const creditsSpentPct =
-    row?.spentUsd != null && row.maxBudgetUsd ? Math.round((row.spentUsd / row.maxBudgetUsd) * 100) : null;
-  const creditsRemainingUsd = row?.remainingUsd ?? null;
+  const creditsRemainingUsd = getTenantRemainingUsd(overview, tenant?.tenant_id ?? null);
 
-  const showCreditPctBanner = !dismissed && creditsSpentPct !== null && creditsSpentPct >= 90;
-  const showLowBalanceBanner = !showCreditPctBanner && creditsRemainingUsd !== null && creditsRemainingUsd < 1;
-  const showVoucherBanner = !showCreditPctBanner && !showLowBalanceBanner;
+  const isLowBalance = creditsRemainingUsd !== null && creditsRemainingUsd < LOW_BALANCE_THRESHOLD_USD;
+  const showLowBalanceBanner = !dismissed && isLowBalance;
+  const showVoucherBanner = !isLowBalance;
 
   const dismiss = useCallback(() => {
     dismissCreditsBanner();
@@ -45,9 +40,7 @@ export function useCreditsBanner(): CreditsBannerState {
   }, []);
 
   return {
-    creditsSpentPct,
     creditsRemainingUsd,
-    showCreditPctBanner,
     showLowBalanceBanner,
     showVoucherBanner,
     dismiss,

@@ -36,6 +36,11 @@ if TYPE_CHECKING:
 
 logger = get_logger("add_data_points")
 
+# ctx.extras key under which index_chunks_for_search records the ids of the
+# nodes it already embedded (SDK-397), so the final write of the same chunks
+# upserts their graph rows but does not embed their text a second time.
+SEARCH_INDEXED_IDS = "search_indexed_ids"
+
 
 def _group_by_all_keys(owner_map: dict) -> dict:
     """Artifacts that need the same FULL ref key set, grouped into one call.
@@ -74,6 +79,7 @@ async def add_data_points(
     embed_triplets: bool | None = None,
     ctx: Optional["PipelineContext"] = None,
     graph_only: bool = False,
+    index_edges: bool = True,
 ) -> list[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
@@ -88,6 +94,10 @@ async def add_data_points(
         ctx: Pipeline runtime context (user, dataset, data_item).
         graph_only: Persist graph nodes and edges without initializing or writing
             a vector engine. Intended for deterministic extraction pipelines.
+        index_edges: Also embed the relationship names of the written edges
+            (the ``EdgeType_relationship_name`` index). ``index_chunks_for_search``
+            passes False: its edges are structural only and the final write of
+            the same chunks indexes them.
     """
     if embed_triplets is not None:
         warnings.warn(
@@ -334,14 +344,29 @@ async def add_data_points(
     #
     # Concurrency bought a little latency and made the second case reachable
     # on every write, so the writes are sequenced instead.
+    # Nodes index_chunks_for_search embedded earlier in this run (SDK-397) keep
+    # their graph upsert but are not embedded a second time, on either path.
+    already_indexed = ctx.extras.get(SEARCH_INDEXED_IDS) if ctx is not None else None
+    if already_indexed:
+        nodes_to_embed = [node for node in nodes if str(node.id) not in already_indexed]
+    else:
+        nodes_to_embed = nodes
+
     if use_hybrid:
-        await graph_engine.add_nodes_with_vectors(nodes)
+        # Hybrid backends embed inside the graph write, so the already embedded
+        # nodes are written without vectors and only the rest with them.
+        if len(nodes_to_embed) != len(nodes):
+            await graph_engine.add_nodes(
+                [node for node in nodes if str(node.id) in already_indexed]
+            )
+        if nodes_to_embed:
+            await graph_engine.add_nodes_with_vectors(nodes_to_embed)
     elif graph_only:
         await _write_nodes_grouped()
     else:
         await _write_nodes_grouped()
         await index_data_points(
-            [node.model_copy(deep=True) for node in nodes],
+            [node.model_copy(deep=True) for node in nodes_to_embed],
             vector_engine=vector_engine,
         )
 
@@ -351,7 +376,8 @@ async def add_data_points(
         await _write_edges_grouped(edges)
     else:
         await _write_edges_grouped(edges)
-        await index_graph_edges(edges, vector_engine=vector_engine)
+        if index_edges:
+            await index_graph_edges(edges, vector_engine=vector_engine)
 
     if custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
@@ -371,7 +397,8 @@ async def add_data_points(
                 source_ref_key=fold_source_ref_key,
                 pipeline_run_id=fold_run_arg,
             )
-            await index_graph_edges(custom_edges, vector_engine=vector_engine)
+            if index_edges:
+                await index_graph_edges(custom_edges, vector_engine=vector_engine)
 
         edges.extend(custom_edges)
 

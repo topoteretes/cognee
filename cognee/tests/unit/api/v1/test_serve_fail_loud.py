@@ -64,8 +64,12 @@ def _patch_probes(monkeypatch, health: bool, auth_status):
     async def auth_check(self):
         return auth_status
 
+    async def get_tenant_id(self):
+        return ""
+
     monkeypatch.setattr(CloudClient, "_health_check", health_check)
     monkeypatch.setattr(CloudClient, "_auth_check", auth_check)
+    monkeypatch.setattr(CloudClient, "_get_tenant_id", get_tenant_id)
 
 
 @pytest.mark.asyncio
@@ -109,6 +113,7 @@ async def test_serve_direct_accepted_key_connects_and_saves(monkeypatch, tmp_pat
         assert json.loads(creds_file.read_text()) == {
             "service_url": "http://some-instance:8000",
             "api_key": "good-key",
+            "tenant_id": "",
         }
     finally:
         await cognee.disconnect()
@@ -186,7 +191,7 @@ def test_saved_creds_from_an_older_release_still_load(monkeypatch, tmp_path):
     creds = creds_mod.load_credentials()
 
     assert creds == creds_mod.CloudCredentials(
-        service_url="http://saved-instance.invalid", api_key="saved-key"
+        service_url="http://saved-instance.invalid", api_key="saved-key", tenant_id="t1"
     )
 
 

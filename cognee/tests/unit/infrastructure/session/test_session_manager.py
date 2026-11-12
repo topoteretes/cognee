@@ -126,6 +126,7 @@ class TestSessionManager:
         cache.delete_feedback = AsyncMock(return_value=True)
         cache.delete_qa_entry = AsyncMock(return_value=True)
         cache.delete_session = AsyncMock(return_value=True)
+        cache.delete_sessions = AsyncMock(side_effect=lambda sessions: [True] * len(sessions))
         cache.create_session_context_entry = AsyncMock(return_value=True)
         cache.get_session_context_entries = AsyncMock(return_value=[])
         cache.update_session_context_entry = AsyncMock(return_value=True)
@@ -781,23 +782,49 @@ class TestSessionManager:
         """delete_session delegates to cache and removes its scoped vector rows."""
         ok = await sm.delete_session(user_id="u1", session_id="s1")
         assert ok is True
-        mock_cache.delete_session.assert_called_once_with(user_id="u1", session_id="s1")
-        session_vector_mocks["delete_session"].assert_awaited_once_with(
-            user_id="u1",
-            session_id="s1",
-        )
+        mock_cache.delete_sessions.assert_awaited_once_with([("u1", "s1")])
+        session_vector_mocks["delete_session"].assert_awaited_once_with([("u1", "s1")])
 
     @pytest.mark.asyncio
-    async def test_delete_session_skips_vector_cleanup_when_cache_delete_misses(
+    async def test_delete_session_cleans_vectors_even_when_cache_delete_misses(
         self, sm, mock_cache, session_vector_mocks
     ):
-        """delete_session leaves vectors alone when the cache session was not deleted."""
-        mock_cache.delete_session.return_value = False
+        """An expired session has no cache entries left but still has its Q&A
+        vectors, which hold the question and answer text; delete_session strips
+        them whether or not the cache held anything."""
+        mock_cache.delete_sessions.side_effect = None
+        mock_cache.delete_sessions.return_value = [False]
 
         ok = await sm.delete_session(user_id="u1", session_id="s1")
 
         assert ok is False
-        session_vector_mocks["delete_session"].assert_not_awaited()
+        session_vector_mocks["delete_session"].assert_awaited_once_with([("u1", "s1")])
+
+    @pytest.mark.asyncio
+    async def test_delete_sessions_detags_every_session_in_one_call(
+        self, sm, mock_cache, session_vector_mocks
+    ):
+        """One cache call and one tag removal for all of them, one flag per session."""
+        mock_cache.delete_sessions.side_effect = None
+        mock_cache.delete_sessions.return_value = [True, False]
+
+        existed = await sm.delete_sessions([("u1", "s1"), ("u2", "s2")])
+
+        assert existed == [True, False]
+        session_vector_mocks["delete_session"].assert_awaited_once_with(
+            [("u1", "s1"), ("u2", "s2")]
+        )
+        mock_cache.delete_sessions.assert_awaited_once_with([("u1", "s1"), ("u2", "s2")])
+        mock_cache.delete_values.assert_called_once_with(
+            ["graph_knowledge:u1:s1", "graph_knowledge:u2:s2"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_session_ids_reads_the_cache(self, sm, mock_cache):
+        mock_cache.list_session_ids = AsyncMock(return_value=["s1", "s2"])
+
+        assert await sm.list_session_ids(user_id="u1") == ["s1", "s2"]
+        mock_cache.list_session_ids.assert_awaited_once_with("u1")
 
     @pytest.mark.asyncio
     async def test_generate_completion_with_session_no_user_id_calls_generate_completion_only(

@@ -12,6 +12,7 @@ Two targets, selected by the source's import mode:
 """
 
 import dataclasses
+import json
 from collections.abc import AsyncIterable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -26,6 +27,7 @@ from cognee.modules.migration.cogx import (
     COGXFact,
     COGXRawNode,
     COGXRecord,
+    omp_header_of,
 )
 from cognee.modules.migration.snapshot import rehydrate_node
 from cognee.shared.logging_utils import get_logger
@@ -74,6 +76,11 @@ def _record_external_metadata(record: COGXRecord) -> dict[str, Any]:
         metadata["external_updated_at"] = _iso(record.updated_at)
     if record.metadata:
         metadata.update(record.metadata)
+    header = omp_header_of(record)
+    if header:
+        # OMP header (COGX 0.2): the export of the chunks cognified from this
+        # item reads it back, so origin, evidence and confidence travel again.
+        metadata["omp_header"] = header
     return metadata
 
 
@@ -149,8 +156,12 @@ def _fact_edge_properties(fact: COGXFact) -> dict[str, Any]:
         properties["valid_at"] = _iso(fact.valid_at)
     if fact.invalid_at:
         properties["invalid_at"] = _iso(fact.invalid_at)
-    if fact.confidence is not None:
-        properties["confidence"] = fact.confidence
+    header = omp_header_of(fact)
+    if header:
+        properties["omp_header"] = json.dumps(header)
+    if fact.confidence is not None and fact.confidence.score is not None:
+        # Retrieval reads the numeric score from the edge itself.
+        properties["confidence"] = fact.confidence.score
     return properties
 
 
@@ -207,11 +218,13 @@ def _register_entity(
         )
         by_external_id[record.external_id] = existing
         return existing
+    header = omp_header_of(record)
     entity = Entity(
         id=node_id,
         name=record.name,
         description=description,
         is_a=_entity_type_for(record.entity_type) if record.entity_type else None,
+        omp_header=json.dumps(header) if header else None,
     )
     by_node_id[node_id] = entity
     first_external_id[node_id] = record.external_id

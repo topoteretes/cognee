@@ -161,3 +161,23 @@ async def test_app_home_opened_publish_failure_does_not_fail_the_ack():
         response = await handle_slack_event(_body(_home_envelope()))
 
     assert response == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_an_uninstall_is_recorded_as_ended_by_the_provider(credential_db):
+    from uuid import uuid4
+
+    from cognee.modules.integrations import credentials as store
+    from cognee.modules.integrations.slack.persistence import revoke_by_team
+
+    owner = uuid4()
+    await store.upsert_credential(
+        provider="slack",
+        provider_account_id="T1",
+        user_id=owner,
+        token_payload={"access_token": "xoxb"},
+    )
+
+    assert await revoke_by_team("T1") is True
+
+    assert (await store.get_ended_connection(owner, "slack")).revoked_by == "provider"

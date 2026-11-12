@@ -568,7 +568,7 @@ async def recall(
         (answer written by an LLM): HYBRID_COMPLETION (the default when
         routing is off), GRAPH_COMPLETION, GRAPH_COMPLETION_COT,
         GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_COMPLETION_DECOMPOSITION,
-        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TEMPORAL,
+        GRAPH_SUMMARY_COMPLETION, RAG_COMPLETION, TEMPORAL, BROAD,
         AGENTIC_COMPLETION. Retrieval-only types (no LLM):
         CHUNKS, CHUNKS_LEXICAL, SUMMARIES, SKILLS, CODE. Other: CYPHER,
         NATURAL_LANGUAGE, CODING_RULES, GRAPH_REPORT, FEELING_LUCKY.
@@ -757,6 +757,7 @@ async def forget(
     everything: bool = False,
     data_id: str | None = None,
     dataset_id: str | None = None,
+    clean_history: bool = False,
 ) -> list:
     """Delete data from memory.
 
@@ -778,17 +779,30 @@ async def forget(
         `Evidence:` block and the dataset_id from its `dataset:` line.
     dataset_id : str, optional
         UUID of the dataset to delete entirely, or to scope `data_id`.
+    clean_history : bool
+        If true, also delete the user's own search and recall history (in
+        every dataset) before the data is deleted; alone, with no target,
+        delete only the history. Default false: forgetting one item keeps the
+        history; forgetting a dataset or everything purges that data's
+        history regardless.
     """
     with redirect_stdout(sys.stderr):
         try:
-            if not dataset and not everything and not data_id and not dataset_id:
+            if (
+                not dataset
+                and not everything
+                and not data_id
+                and not dataset_id
+                and not clean_history
+            ):
                 return [
                     types.TextContent(
                         type="text",
                         text=(
                             "Error: Specify 'dataset' name or set 'everything' to true. "
                             "To remove a single item, pass 'data_id' with 'dataset' or "
-                            "'dataset_id'."
+                            "'dataset_id'. To delete only your search history, set "
+                            "'clean_history' to true."
                         ),
                     )
                 ]
@@ -816,10 +830,21 @@ async def forget(
                 everything=everything,
                 data_id=parsed_data_id,
                 dataset_id=parsed_dataset_id,
+                clean_history=clean_history,
             )
             status = result.get("status", "unknown") if isinstance(result, dict) else "completed"
             if everything:
                 text = f"All data deleted (status={status})."
+            elif clean_history and not dataset and not parsed_dataset_id:
+                # No target: the guards above let this through only for a history-only call.
+                text = f"Search history deleted (status={status})."
+            elif parsed_data_id and status == "not_found":
+                # The receipt says nothing existed for the id: a wrong id or an
+                # already-deleted item. Never word that as a deletion.
+                text = (
+                    f"Data item '{data_id}' was not found in dataset '{dataset or dataset_id}' "
+                    "(wrong id, or already deleted); nothing was deleted (status=not_found)."
+                )
             elif parsed_data_id:
                 text = f"Data item '{data_id}' deleted (status={status})."
             else:
@@ -849,8 +874,8 @@ async def improve(
     5. distill_sessions        - gated guidance becomes entity-anchored lessons
     6. update_user_preferences - ratings fold into preference weights
     7. build_truth_subspace    - opt-in (build_truth_subspace=True)
-    8. review_conflicts        - opt-in (IMPROVE_REVIEW_CONFLICTS=true)
-    9. global_context_index    - opt-in (build_global_context_index=True)
+    8. review_conflicts        - on unless IMPROVE_REVIEW_CONFLICTS=false; needs an LLM
+    9. global_context_index    - on unless IMPROVE_GLOBAL_CONTEXT_INDEX=false
 
     Stages 1-7 need session_ids and are skipped with `no_session_ids`
     otherwise. The reply lists every stage with its status (completed,

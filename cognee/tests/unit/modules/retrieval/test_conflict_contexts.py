@@ -23,6 +23,7 @@ EXPLANATION = "Bob replaced Alice as Acme's CEO."
 @pytest.fixture
 def graph():
     return SimpleNamespace(
+        get_filtered_graph_data=AsyncMock(return_value=([], [])),
         get_neighborhood=AsyncMock(
             return_value=(
                 [("f1", {"type": "FactConflict", "text": EXPLANATION})],
@@ -36,7 +37,7 @@ def graph():
                     for chunk_id in ("c1", "c2")
                 ],
             )
-        )
+        ),
     )
 
 

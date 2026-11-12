@@ -6,13 +6,21 @@ from typing import Any
 
 import aiohttp
 
+from cognee.modules.integrations.outbound import client_session
 from cognee.modules.integrations.slack.history_models import TIMESTAMP, SlackHistoryError
+from cognee.modules.integrations.sync_progress import (
+    get_current_sync_progress,
+    report_sync_progress,
+)
 
 
 class SlackAPIError(SlackHistoryError):
     def __init__(self, method: str, code: str):
         self.code = code
         super().__init__(f"Slack {method}: {code}. Check app scopes and channel membership.")
+
+
+_API_URL = "https://slack.com/api"
 
 
 class SlackHistoryClient:
@@ -26,7 +34,7 @@ class SlackHistoryClient:
         self.messages = 0
 
     async def __aenter__(self):
-        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
+        self.session = client_session("slack", timeout=aiohttp.ClientTimeout(total=30))
         return self
 
     async def __aexit__(self, *args):
@@ -41,14 +49,16 @@ class SlackHistoryClient:
                 )
             try:
                 async with self.session.get(
-                    f"https://slack.com/api/{method}",
+                    f"{_API_URL}/{method}",
                     headers={"Authorization": f"Bearer {self._token}"},
                     params=params,
                     allow_redirects=False,
                 ) as response:
                     status = response.status
                     retry_after = response.headers.get("Retry-After", "1")
-                    payload = await response.json() if status < 500 and status != 429 else {}
+                    payload = (
+                        await response.json() if 200 <= status < 300 or 400 <= status < 429 else {}
+                    )
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
                 if attempt == 3:
                     raise SlackHistoryError(
@@ -56,7 +66,18 @@ class SlackHistoryClient:
                     ) from None
                 await asyncio.sleep(2**attempt)
                 continue
+            if 300 <= status < 400:
+                # Not followed (the bearer rides along), and not a transient failure
+                # worth retrying: Slack's API never redirects.
+                raise SlackHistoryError(
+                    f"Slack {method} answered HTTP {status}; redirects are refused."
+                )
             if status == 429 or payload.get("error") == "ratelimited" or status >= 500:
+                reason = (
+                    "rate_limited"
+                    if status == 429 or payload.get("error") == "ratelimited"
+                    else "provider_error"
+                )
                 if attempt == 3:
                     raise SlackHistoryError(
                         "Slack is temporarily rate limited or unavailable. Retry later."
@@ -68,7 +89,14 @@ class SlackHistoryClient:
                 # Never retry earlier than Retry-After; excessive waits fail explicitly.
                 if delay > 300:
                     raise SlackHistoryError(f"Slack requested a {delay}s wait. Retry later.")
-                await asyncio.sleep(delay)
+                reporter = get_current_sync_progress()
+                previous = reporter.snapshot() if reporter is not None else None
+                await report_sync_progress(state="waiting", reason=reason)
+                try:
+                    await asyncio.sleep(delay)
+                finally:
+                    if previous is not None:
+                        await report_sync_progress(state=previous.state, reason=previous.reason)
                 continue
             if status != 200 or not payload.get("ok"):
                 code = payload.get("error", "request_failed")

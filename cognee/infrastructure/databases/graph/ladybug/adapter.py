@@ -42,6 +42,7 @@ from cognee.infrastructure.databases.provenance.source_refs import (
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticEvent, LoopAgnosticLock
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.observability import new_span
@@ -182,7 +183,9 @@ SET r.updated_at = TIMESTAMP(edge.updated_at),
 
 
 DEFAULT_KUZU_BUFFER_POOL_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
-DEFAULT_KUZU_MAX_DB_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
+# 128 GiB, the power of 2 nearest 100 GB (Ladybug rejects any other value). It is
+# address-space accounting, not an allocation, so a large cap costs nothing.
+DEFAULT_KUZU_MAX_DB_SIZE = 1 << 37
 
 # Graph provenance (COG-5522 Part 1). These four fields live in declared scalar
 # STRING columns on both Node and EDGE — never inside the JSON `properties` blob
@@ -434,8 +437,8 @@ class LadybugAdapter(GraphDBInterface):
             Maximum size of the Kuzu buffer pool in bytes.
         kuzu_max_db_size:
             Maximum on-disk database size in bytes. Configurable via the
-            ``KUZU_MAX_DB_SIZE`` env var (see ``GraphConfig``); some users
-            need this above the default 4 GB for large graphs.
+            ``KUZU_MAX_DB_SIZE`` env var (see ``GraphConfig``); must be a
+            power of 2. Defaults to 128 GiB.
         subprocess_mode:
             When True, the adapter runs in subprocess-proxy mode: the
             native ladybug.Database/Connection live in a dedicated worker
@@ -485,19 +488,24 @@ class LadybugAdapter(GraphDBInterface):
                 self._ensure_schema()
             else:
                 self._initialize_connection()
-        self.LADYBUG_ASYNC_LOCK = asyncio.Lock()
-        self._source_ref_change_lock = asyncio.Lock()
+        # Loop-agnostic: the adapter is cached across event loops, and an
+        # asyncio.Lock binds to the first loop that awaits it.
+        self.LADYBUG_ASYNC_LOCK = LoopAgnosticLock()
+        self._source_ref_change_lock = LoopAgnosticLock()
         # Serializes the probe -> create -> update sequence in add_nodes /
         # add_edges (see the bulk upsert statements above): those reads decide
         # what the following writes do, so two concurrent callers must not
         # interleave them.
-        self._bulk_write_lock = asyncio.Lock()
-        self._connection_lock = asyncio.Lock()
+        self._bulk_write_lock = LoopAgnosticLock()
+        self._connection_lock = LoopAgnosticLock()
         # Set when ``open_connections == 0``; used by transient teardown
         # paths (e.g. ``delete_graph``) to wait for in-flight queries to
-        # finish before dropping native resources. ``close()`` does NOT use
-        # this — see ``close()``'s docstring for the cross-loop reason.
-        self._all_queries_drained = asyncio.Event()
+        # finish before dropping native resources. Loop-agnostic like the
+        # locks above: the waiting teardown and the query that finally sets
+        # it may run on different loops (an ``asyncio.Event`` is bound to
+        # one loop and its ``set()`` is not thread-safe). ``close()`` does
+        # NOT use this — see ``close()``'s docstring for the reason.
+        self._all_queries_drained = LoopAgnosticEvent()
         self._all_queries_drained.set()
         # Brief sync lock for atomic counter+event mutations. Cannot reuse
         # ``_connection_lock`` here: teardown holds that lock across the
@@ -702,17 +710,22 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to initialize Ladybug database: {e}")
             raise
 
+    def needs_push_to_s3(self) -> bool:
+        """Whether writes live in a local copy of an S3 database until ``push_to_s3``."""
+        return os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file")
+
     async def push_to_s3(self) -> None:
-        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file"):
-            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+        if not self.needs_push_to_s3():
+            return
+        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
-            s3_file_storage = S3FileStorage("")
+        s3_file_storage = S3FileStorage("")
 
-            if self.connection:
-                async with self.LADYBUG_ASYNC_LOCK:
-                    self.connection.execute("CHECKPOINT;")
+        if self.connection:
+            async with self.LADYBUG_ASYNC_LOCK:
+                self.connection.execute("CHECKPOINT;")
 
-            s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
+        s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
 
     async def pull_from_s3(self) -> None:
         from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
@@ -1027,8 +1040,9 @@ class LadybugAdapter(GraphDBInterface):
         Used by transient-teardown paths (currently ``delete_graph`` and
         the shared-lock per-query cleanup) so ``_drop_native_resources``
         doesn't tear out a connection an executor thread is still using.
-        ``close()`` does NOT use this — see its docstring for why
-        (cross-loop ``asyncio.Event.wait()`` would raise).
+        The event is loop-agnostic, so a query finishing on another loop
+        (or thread) wakes this wait. ``close()`` does NOT use this — see
+        its docstring for why.
 
         Reads the counter under ``_counter_lock`` so a stale ``set()``
         from a finishing query can't race a fresh increment from a new
@@ -3085,13 +3099,14 @@ class LadybugAdapter(GraphDBInterface):
         `edge_types` (matching the Neo4j/Postgres backends); `edge_types=None` or
         `[]` disables the filter.
 
-        Performance note: the `edge_types` branch enumerates every path up to
-        `depth` (Kuzu cannot filter a variable-length relationship binding in
-        Cypher — see #3585) and post-filters in Python, so its cost grows
-        combinatorially with node degree × depth on dense graphs. It is intended
-        for shallow, targeted neighborhoods; a future refactor could push per-hop
-        type filtering into Cypher via a fixed-length UNION to return distinct
-        neighbors instead of walks.
+        Performance note: at `depth=1` the edge types are filtered in Cypher, so
+        edges of other types never reach Python. Deeper, the `edge_types` branch
+        enumerates every path up to `depth` (Kuzu cannot filter a variable-length
+        relationship binding in Cypher — see #3585) and post-filters in Python, so
+        its cost grows combinatorially with node degree × depth on dense graphs. It
+        is intended for shallow, targeted neighborhoods; a future refactor could
+        push per-hop type filtering into Cypher via a fixed-length UNION to return
+        distinct neighbors instead of walks.
         """
         import time
 
@@ -3106,9 +3121,22 @@ class LadybugAdapter(GraphDBInterface):
             # Kuzu's `r` from `-[r*1..N]-` is a RECURSIVE_REL, not a LIST, so the
             # engine rejects `ALL(rel IN r WHERE ...)` with a binder error (and an
             # internal assertion when combined with a parameter reference). When
-            # edge_types is set, fetch paths unfiltered and discard neighbors whose
-            # every path crosses a disallowed edge type (#3585).
-            if edge_types:
+            # edge_types is set and depth > 1, fetch paths unfiltered and discard
+            # neighbors whose every path crosses a disallowed edge type (#3585).
+            if edge_types and depth == 1:
+                # One hop binds a single relationship, which Cypher can filter: a
+                # node with many edges of other types (an ontology class and its
+                # members' is_a edges) is not walked in Python.
+                neighbor_query = """
+                MATCH (seed:Node)-[r]-(neighbor:Node)
+                WHERE seed.id IN $node_ids AND r.relationship_name IN $edge_types
+                RETURN DISTINCT neighbor.id
+                """
+                neighbor_rows = await self.query(
+                    neighbor_query, {"node_ids": node_ids, "edge_types": list(edge_types)}
+                )
+                neighbor_ids = [row[0] for row in neighbor_rows if row[0]]
+            elif edge_types:
                 path_query = f"""
                 MATCH (seed:Node)-[r*1..{depth}]-(neighbor:Node)
                 WHERE seed.id IN $node_ids
@@ -3306,7 +3334,9 @@ class LadybugAdapter(GraphDBInterface):
 
         return nodes, edges
 
-    async def get_filtered_graph_data(self, attribute_filters: list[dict[str, list[str | int]]]):
+    async def get_filtered_graph_data(
+        self, attribute_filters: list[dict[str, list[str | int]]], *, include_edges: bool = True
+    ):
         """
         Get filtered nodes and relationships based on attributes.
 
@@ -3364,9 +3394,12 @@ class LadybugAdapter(GraphDBInterface):
         WHERE {where_clause.replace("n.", "n1.")} AND {where_clause.replace("n.", "n2.")}
         RETURN n1.id, n2.id, r.relationship_name, r.properties
         """
-        nodes, edges = await asyncio.gather(
-            self.query(nodes_query, params), self.query(edges_query, params)
-        )
+        if include_edges:
+            nodes, edges = await asyncio.gather(
+                self.query(nodes_query, params), self.query(edges_query, params)
+            )
+        else:
+            nodes, edges = await self.query(nodes_query, params), []
         formatted_nodes = []
         for n in nodes:
             if n[0]:

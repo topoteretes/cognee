@@ -1,41 +1,37 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import ReactMarkdown from "react-markdown";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import UpgradeBanner from "@/ui/elements/UpgradeBanner";
 import recallKnowledge from "@/modules/datasets/recallKnowledge";
-import getSearchHistory, { type SearchHistoryEntry } from "@/modules/searchHistory/getSearchHistory";
-import { listSessions, getSessionDetail, SEARCH_SESSION_PREFIX, type SessionRow } from "@/modules/sessions/getSessions";
+import {
+  absorbRestoredTurns,
+  beginTurn,
+  dropMessage,
+  mergeConversations,
+  patchMessage,
+  sessionToConversation,
+  type ChatMessage,
+  type Conversation,
+} from "@/modules/searchHistory/conversations";
+import { readSearchState, updateSearchState, type SearchState } from "@/modules/searchHistory/conversationStore";
+import { useSearchState } from "@/modules/searchHistory/useSearchState";
+import { normalizeResults, type SearchResultItem } from "@/modules/searchHistory/normalizeResults";
+import { readHistoryCache, writeHistoryCache } from "@/modules/searchHistory/historyCache";
+import { readCodeConversations, writeCodeConversations } from "@/modules/searchHistory/codeConversations";
+import { listSearchSessions, getSessionDetail, SEARCH_SESSION_PREFIX } from "@/modules/sessions/getSessions";
 import { TrackPageView, trackEvent } from "@/modules/analytics";
 import BrainSelector from "@/ui/elements/BrainSelector";
+import getPodUserId from "@/modules/users/getPodUserId";
 import { isInsufficientCreditsError } from "@/utils/insufficientCredits";
-
-interface SearchResultItem {
-  search_result?: string[];
-  dataset_id?: string;
-  dataset_name?: string;
-  question?: string;
-  answer?: string;
-  text?: string;
-  raw?: { value?: string };
-  kind?: string;
-  origin_function?: string;
-  method_return_value?: unknown;
-  session_feedback?: string;
-  _source?: string;
-}
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  dataset?: string;
-  timestamp: string;
-  loading?: boolean;
-  error?: boolean;
-}
+import { answerCodeQuestion } from "@/app/(app)/search/codeSearch";
+import { isRepositoryDataset, searchTypeOption } from "@/app/(app)/search/searchTypes";
+import useSearchType from "@/app/(app)/search/useSearchType";
+import CodeSearchHint from "./partials/CodeSearchHint";
+import HistorySkeleton from "./partials/HistorySkeleton";
+import MarkdownContent from "./partials/MarkdownContent";
+import SearchTypeSelector from "./partials/SearchTypeSelector";
 
 // Conversations ARE backend sessions: the conversation id doubles as the
 // session_id sent with every recall, so the backend records each Q&A and the
@@ -43,122 +39,19 @@ interface ChatMessage {
 // from agent sessions — only sessions starting with it are listed here.
 const SESSION_PREFIX = SEARCH_SESSION_PREFIX;
 
-interface Conversation {
-  id: string;
-  title: string;
-  messages: ChatMessage[];
-  createdAt: string;
-  updatedAt: string;
-}
+// Sidebar history is capped at 20 sessions (see the load effect).
+const MAX_HISTORY_SESSIONS = 20;
+// Placeholder rows shown before the session list lands and the real count is
+// known — enough to read as a list, few enough not to overstate what's coming.
+const PRESUMED_HISTORY_ROWS = 3;
+// However many are still loading, never show more placeholders than this.
+const MAX_SKELETON_ROWS = 6;
 
-// ── Result normalization ──
-
-function normalizeResults(data: SearchResultItem[]): string {
-  const parts: string[] = [];
-  for (const raw of data) {
-    const r = raw as SearchResultItem;
-    // Recall response format: { text, raw: { value }, kind, ... }
-    if (r.text) {
-      parts.push(r.text);
-    } else if (r.raw?.value) {
-      parts.push(typeof r.raw.value === "string" ? r.raw.value : JSON.stringify(r.raw.value));
-    } else if (Array.isArray(r.search_result)) {
-      for (const x of r.search_result) {
-        parts.push(typeof x === "string" ? x : JSON.stringify(x));
-      }
-    } else if (typeof r.search_result === "string") {
-      parts.push(r.search_result);
-    } else if (r.answer) {
-      parts.push(r.answer);
-    } else if (r.session_feedback) {
-      parts.push(r.session_feedback);
-    } else if (r.question) {
-      parts.push(`Q: ${r.question}`);
-    } else if (typeof raw === "string") {
-      parts.push(raw as unknown as string);
-    } else {
-      try { parts.push(JSON.stringify(raw)); } catch { parts.push(String(raw)); }
-    }
-  }
-  return parts.join("\n\n") || "No results found.";
-}
-
-// ── Markdown result renderer ──
-
-function MarkdownContent({ text }: { text: string }) {
-  return (
-    <div style={{ fontSize: 14, color: "#EDECEA", lineHeight: "22px", wordBreak: "break-word", minWidth: 0 }}>
-      <ReactMarkdown
-        components={{
-          p: ({ children }) => (
-            <p style={{ margin: "0 0 10px", fontSize: 14, lineHeight: "22px", color: "#EDECEA" }}>{children}</p>
-          ),
-          h1: ({ children }) => (
-            <h1 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 8px", color: "#EDECEA", lineHeight: "26px" }}>{children}</h1>
-          ),
-          h2: ({ children }) => (
-            <h2 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 8px", color: "#EDECEA", lineHeight: "24px" }}>{children}</h2>
-          ),
-          h3: ({ children }) => (
-            <h3 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 6px", color: "#EDECEA" }}>{children}</h3>
-          ),
-          strong: ({ children }) => (
-            <strong style={{ fontWeight: 700, color: "#EDECEA" }}>{children}</strong>
-          ),
-          em: ({ children }) => (
-            <em style={{ fontStyle: "italic" }}>{children}</em>
-          ),
-          code: ({ className, children }) => {
-            const isBlock = Boolean(className?.startsWith("language-"));
-            if (isBlock) {
-              return (
-                <code style={{
-                  display: "block", background: "rgba(0,0,0,0.4)", color: "#CDD6F4",
-                  padding: "12px 16px", fontSize: 12,
-                  fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace',
-                  overflowX: "auto", lineHeight: "20px", whiteSpace: "pre",
-                }}>
-                  {children}
-                </code>
-              );
-            }
-            return (
-              <code style={{
-                background: "rgba(255,255,255,0.1)", borderRadius: 3, padding: "1px 5px",
-                fontSize: 12, fontFamily: 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace', color: "#CBA6F7",
-              }}>
-                {children}
-              </code>
-            );
-          },
-          pre: ({ children }) => (
-            <pre style={{ margin: "0 0 10px", borderRadius: 8, overflow: "hidden", background: "rgba(0,0,0,0.4)" }}>{children}</pre>
-          ),
-          ul: ({ children }) => (
-            <ul style={{ margin: "0 0 10px", paddingLeft: 20, lineHeight: "22px" }}>{children}</ul>
-          ),
-          ol: ({ children }) => (
-            <ol style={{ margin: "0 0 10px", paddingLeft: 20, lineHeight: "22px" }}>{children}</ol>
-          ),
-          li: ({ children }) => (
-            <li style={{ fontSize: 14, color: "#EDECEA", marginBottom: 4 }}>{children}</li>
-          ),
-          blockquote: ({ children }) => (
-            <blockquote style={{ borderLeft: "3px solid rgba(188,155,255,0.35)", paddingLeft: 12, margin: "0 0 10px", color: "rgba(237,236,234,0.6)" }}>{children}</blockquote>
-          ),
-          hr: () => (
-            <hr style={{ border: "none", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "12px 0" }} />
-          ),
-          a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: "#BC9BFF", textDecoration: "underline" }}>{children}</a>
-          ),
-        }}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
-  );
-}
+// What a pending answer says about itself, per stage the pod streams.
+const STAGE_LABELS: Record<string, string> = {
+  retrieving: "Searching your data…",
+  generating: "Writing…",
+};
 
 // ── Date grouping ──
 
@@ -172,74 +65,6 @@ function dateLabel(dateStr: string): string {
   if (diffDays < 7) return "This week";
   if (diffDays < 30) return "This month";
   return "Older";
-}
-
-// ── Convert legacy GET /v1/search entries → read-only Conversation[] ──
-// These predate session-backed conversations; continuing one forks into a
-// new session instead of appending (legacy entries cannot grow).
-
-const LEGACY_PREFIX = "hist-";
-
-function legacyToConversations(entries: SearchHistoryEntry[]): Conversation[] {
-  return entries.map((e) => {
-    // Some legacy /v1/search rows come back with no query text — and the
-    // same vintage of rows can lack created_at too (both pre-date the
-    // fields being required) — the types say `string` but the backend
-    // doesn't actually guarantee either. A missing timestamp sorts last
-    // and groups under "Older" (dateLabel of an unparseable date).
-    const query = e.query || "";
-    const ts = e.created_at || "";
-    return {
-      id: `${LEGACY_PREFIX}${e.id}`,
-      title: query.slice(0, 60),
-      createdAt: ts,
-      updatedAt: ts,
-      messages: [
-        { id: `hu-${e.id}`, role: "user" as const, content: query, timestamp: ts },
-        { id: `ha-${e.id}`, role: "assistant" as const, content: e.answer || "No results found.", dataset: e.dataset_name, timestamp: ts },
-      ],
-    };
-  });
-}
-
-// ── Convert a backend session (QA entries) → Conversation ──
-
-function qaTimestamp(time: string | null, fallback: string): string {
-  if (!time) return fallback;
-  // QA timestamps arrive as naive UTC — append Z so Date parses them as UTC.
-  const iso = /Z$|[+-]\d{2}:?\d{2}$/.test(time) ? time : `${time}Z`;
-  const ms = new Date(iso).getTime();
-  return Number.isNaN(ms) ? fallback : new Date(ms).toISOString();
-}
-
-function sessionToConversation(s: SessionRow, qasRaw: Record<string, unknown>[]): Conversation | null {
-  const fallbackTs = s.started_at ?? new Date().toISOString();
-  const qas = qasRaw
-    .map((qa) => {
-      const row = qa as { question?: unknown; answer?: unknown; time?: unknown };
-      return {
-        question: String(row.question ?? "").trim(),
-        answer: row.answer ? String(row.answer) : null,
-        time: row.time ? String(row.time) : null,
-      };
-    })
-    .filter((qa) => qa.question)
-    .sort((a, b) => (a.time ?? "").localeCompare(b.time ?? ""));
-  if (qas.length === 0) return null;
-  const messages: ChatMessage[] = qas.flatMap((qa, i) => {
-    const ts = qaTimestamp(qa.time, fallbackTs);
-    return [
-      { id: `${s.session_id}-u${i}`, role: "user" as const, content: qa.question, timestamp: ts },
-      { id: `${s.session_id}-a${i}`, role: "assistant" as const, content: qa.answer || "No results found.", timestamp: ts },
-    ];
-  });
-  return {
-    id: s.session_id,
-    title: qas[0].question.slice(0, 60),
-    createdAt: fallbackTs,
-    updatedAt: s.last_activity_at ?? fallbackTs,
-    messages,
-  };
 }
 
 // ── Icons ──
@@ -258,56 +83,109 @@ function SendIcon({ active }: { active: boolean }) {
 
 export default function SearchPage() {
   const { cogniInstance, isInitializing } = useCogniInstance();
-  const { hasAccess } = useTenant();
+  const { hasAccess, tenantReady } = useTenant();
   const { selectedDataset, datasets } = useFilter();
 
   const [input, setInput] = useState("");
-  const [isSearching, setIsSearching] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // Conversations: local (this visit) + session-backed history + legacy entries
-  const [sessionConvos, setSessionConvos] = useState<Conversation[]>([]);
+  // Conversations started or continued in this tab, the open one, and the
+  // answer in flight all live outside the component (CLO-846): a navigation
+  // unmounts this page, and state kept here closed the chat the user was in —
+  // the next question then opened a new session the pod had no history for.
+  const instanceId = cogniInstance?.instanceId ?? null;
+  const { conversations: sessionConvos, activeId: activeConvoId, inFlightId } = useSearchState(instanceId);
+  const isSearching = inFlightId !== null;
+  const update = useCallback(
+    (change: (state: SearchState) => SearchState) => {
+      if (instanceId) updateSearchState(instanceId, change);
+    },
+    [instanceId],
+  );
+
+  // Session-backed history restored from the pod.
   const [historyConvos, setHistoryConvos] = useState<Conversation[]>([]);
-  const [legacyConvos, setLegacyConvos] = useState<Conversation[]>([]);
-  const [activeConvoId, setActiveConvoId] = useState<string | null>(null);
+  // History rows still on their way, driving the sidebar skeleton. Starts at a
+  // nominal count because the session list has to load before the real number
+  // is known; each conversation that resolves takes one placeholder with it.
+  const [pendingHistory, setPendingHistory] = useState(PRESUMED_HISTORY_ROWS);
+  // History could not be read in full, so an empty sidebar is unproven — say so
+  // rather than asserting "No conversations yet".
+  const [historyFailed, setHistoryFailed] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Merged conversations: local (this visit), persisted sessions (deduped by
-  // id — a continued session lives in sessionConvos), then legacy entries
-  // (deduped by title against session-backed conversations). Sorted newest
-  // first so date grouping stays coherent across sources.
-  const allConversations = (() => {
-    const localIds = new Set(sessionConvos.map((c) => c.id));
-    const sessionBacked = [...sessionConvos, ...historyConvos.filter((h) => !localIds.has(h.id))];
-    const sessionTitles = new Set(sessionBacked.map((c) => c.title));
-    const legacy = legacyConvos.filter((l) => !sessionTitles.has(l.title));
-    return [...sessionBacked, ...legacy].sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
-  })();
+  // Code conversations restored from this browser: the pod records only Text
+  // turns, so these would otherwise vanish on every reload. Tagged with the pod
+  // they were read for, so nothing is written back until that read has landed —
+  // an early write would replace what is stored with an empty list.
+  const [codeHistory, setCodeHistory] = useState<{ instanceId: string | null; conversations: Conversation[] }>({
+    instanceId: null,
+    conversations: [],
+  });
+  useEffect(() => {
+    if (!instanceId) return;
+    setCodeHistory({ instanceId, conversations: readCodeConversations(instanceId) });
+  }, [instanceId]);
+
+  // The history cache already carries the Code conversations of this visit, so
+  // the two restored lists are deduped against each other as well as the store.
+  const allConversations = mergeConversations(
+    sessionConvos,
+    mergeConversations(historyConvos, codeHistory.conversations),
+  );
 
   // Rebuild the sidebar from backend sessions on mount: only this page's own
-  // sessions (SESSION_PREFIX) are shown — agent sessions never match.
+  // sessions are shown — agent sessions never match the search-UI prefix.
+  //
+  // Loading history never selects a conversation. Only the user's own click
+  // (or the conversation they already had open, restored from the store) leaves
+  // the new-chat state — history arrives seconds after first paint, so
+  // auto-selecting yanked the user out of the chat they had already started
+  // typing in and into an unrelated old one (CLO-714).
+  //
+  // Gated on tenantReady, not just isInitializing: on a first login the pod is
+  // provisioned but not yet confirmed reachable, and firing here returned an
+  // empty history that the sidebar reported as "no conversations" — correct
+  // only after a refresh, once the init cache made the pod ready immediately.
+  // tenantReady is in the deps so the load happens when the pod actually is.
   useEffect(() => {
-    if (!cogniInstance || isInitializing) return;
+    if (!cogniInstance || isInitializing || !tenantReady) return;
     let cancelled = false;
-    // Legacy single-Q&A history (pre-session searches) — read-only sidebar
-    // entries until they age out of the backend.
-    getSearchHistory(cogniInstance)
-      .then((entries) => {
-        if (cancelled) return;
-        const convos = legacyToConversations(entries);
-        setLegacyConvos(convos);
-        if (convos.length > 0) setActiveConvoId((prev) => prev || convos[0].id);
-      })
-      .catch((err) => console.error("Failed to fetch legacy search history:", err));
+    // Aborts the page scan on unmount: `cancelled` only stops the state
+    // updates, the requests themselves kept running against the pod.
+    const scan = new AbortController();
+    // Served from this tab's cache, so bouncing between pages doesn't re-scan
+    // the pod. The page writes its own conversations back, so anything the user
+    // did here is already in it.
+    const cached = readHistoryCache(cogniInstance.instanceId);
+    if (cached) {
+      setHistoryConvos(cached);
+      setPendingHistory(0);
+      return;
+    }
     (async () => {
       try {
-        const page = await listSessions(cogniInstance, { range: "30d", limit: 50 });
+        // Fail closed: without an id there is no way to tell this user's
+        // conversations from a teammate's, and showing theirs would also let a
+        // follow-up be written under their session.
+        const userId = await getPodUserId(cogniInstance);
         if (cancelled) return;
-        const own = page.sessions
-          .filter((s) => s.session_id.startsWith(SESSION_PREFIX))
-          .slice(0, 20);
+        if (!userId) {
+          setHistoryFailed(true);
+          setPendingHistory(0);
+          return;
+        }
+        const { sessions: own, complete } = await listSearchSessions(
+          cogniInstance,
+          MAX_HISTORY_SESSIONS,
+          userId,
+          scan.signal,
+        );
+        if (cancelled) return;
+        if (!complete) setHistoryFailed(true);
+        setPendingHistory(own.length);
         if (own.length === 0) return;
         // Render incrementally: each conversation appears as soon as its own
         // detail request resolves — waiting on Promise.all made the sidebar
@@ -315,23 +193,77 @@ export default function SearchPage() {
         own.forEach((s) => {
           getSessionDetail(cogniInstance, s.session_id)
             .then((detail) => {
-              if (cancelled || !detail) return;
-              const convo = sessionToConversation(s, detail.qas ?? []);
+              if (cancelled) return;
+              // A detail that failed or timed out drops that conversation from
+              // the sidebar; without this the shortened list would be cached
+              // and reported as the user's complete history.
+              if (!detail) {
+                setHistoryFailed(true);
+                return;
+              }
+              // detail.label is the pod's title from the untruncated Q&A list;
+              // detail.qas is only the last 20 turns.
+              const convo = sessionToConversation(s, detail.qas ?? [], detail.label);
               if (!convo) return;
               setHistoryConvos((prev) =>
                 [...prev.filter((c) => c.id !== convo.id), convo]
                   .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "")),
               );
-              setActiveConvoId((prev) => prev || convo.id);
+              // A follow-up sent under a remembered id before this arrived
+              // started a local copy holding only that turn; give it its past.
+              // Same state object when there is nothing to fold in: a store
+              // notification re-renders synchronously, which is not free.
+              update((state) => {
+                const conversations = absorbRestoredTurns(state.conversations, convo);
+                return conversations === state.conversations ? state : { ...state, conversations };
+              });
             })
-            .catch((err) => console.error("Failed to fetch session detail:", err));
+            .catch((err) => console.error("Failed to fetch session detail:", err))
+            // Placeholder retired whether or not the session produced a row —
+            // a failed or questionless one must not leave a skeleton spinning.
+            .finally(() => {
+              if (!cancelled) setPendingHistory((n) => Math.max(0, n - 1));
+            });
         });
-      } catch {
-        // Sessions endpoint unavailable — sidebar just starts empty.
+      } catch (err) {
+        // Not an unavailable endpoint — that is swallowed two layers down and
+        // comes back as an incomplete result above. This catches a malformed
+        // 200, e.g. rows with no string session_id blowing up the prefix filter.
+        console.error("Failed to load search history:", err);
+        if (!cancelled) {
+          setHistoryFailed(true);
+          setPendingHistory(0);
+        }
       }
     })();
-    return () => { cancelled = true; };
-  }, [cogniInstance, isInitializing]);
+    return () => {
+      cancelled = true;
+      scan.abort();
+    };
+  }, [cogniInstance, isInitializing, tenantReady, update]);
+
+  // Cache only once nothing is in flight: a half-loaded list would be restored
+  // as a short history, and an in-flight answer as a spinner that never ends.
+  //
+  // Only the local list is filtered on message count. A message-less local
+  // conversation is a "+" click the user never used, and caching it would bring
+  // it back on the next mount as a real history row. Restored conversations
+  // must not be filtered the same way: the pod ages a session's Q&A out after
+  // its cache TTL but keeps the label, so a real conversation legitimately
+  // arrives with no messages, and dropping it here would make it vanish from
+  // the sidebar for the whole TTL (the cache read skips the scan).
+  useEffect(() => {
+    if (!cogniInstance || isSearching || pendingHistory > 0 || historyFailed) return;
+    const used = sessionConvos.filter((c) => c.messages.length > 0);
+    writeHistoryCache(cogniInstance.instanceId, mergeConversations(used, historyConvos));
+  }, [cogniInstance, isSearching, pendingHistory, historyFailed, sessionConvos, historyConvos]);
+
+  // Store this pod's Code conversations whenever no answer is in flight. Merged
+  // with what was restored, so a conversation not opened this visit is kept.
+  useEffect(() => {
+    if (!instanceId || codeHistory.instanceId !== instanceId || isSearching) return;
+    writeCodeConversations(instanceId, mergeConversations(sessionConvos, codeHistory.conversations));
+  }, [instanceId, codeHistory, isSearching, sessionConvos]);
 
   // Ensure a dataset is always selected — default to the first one
   const effectiveDataset = selectedDataset || datasets[0] || null;
@@ -341,107 +273,117 @@ export default function SearchPage() {
   const activeConvo = allConversations.find((c) => c.id === activeConvoId) || null;
   const messages = activeConvo?.messages || [];
 
+  // Unlike newConversation below, keeps what has been typed: switching type
+  // mid-conversation is usually about the question already in the box.
+  const leaveConversation = useCallback(
+    () => update((state) => (state.activeId === null ? state : { ...state, activeId: null })),
+    [update],
+  );
+  const { searchType, changeSearchType } = useSearchType(instanceId, activeConvoId, activeConvo, leaveConversation);
+
+  // A remembered conversation that history, once fully read, does not contain
+  // is gone from the pod; forgetting it returns the page to the new-chat state
+  // instead of highlighting nothing. Kept while an answer is in flight — the
+  // conversation being answered is about to exist.
+  useEffect(() => {
+    if (!activeConvoId || activeConvo || pendingHistory > 0 || historyFailed || isSearching) return;
+    update((state) => (state.activeId === activeConvoId ? { ...state, activeId: null } : state));
+  }, [activeConvoId, activeConvo, pendingHistory, historyFailed, isSearching, update]);
+
   // Auto-scroll on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
+  // Deselects rather than listing an empty "New conversation": the store now
+  // outlives the page, so a placeholder row would follow the user around the
+  // app until it was used. The session is created by the first question.
   function newConversation() {
-    const id = `${SESSION_PREFIX}${Date.now()}`;
-    const convo: Conversation = { id, title: "New conversation", messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    setSessionConvos((prev) => [convo, ...prev]);
-    setActiveConvoId(id);
+    update((state) => (state.activeId === null ? state : { ...state, activeId: null }));
     setInput("");
     setTimeout(() => inputRef.current?.focus(), 100);
   }
 
   function switchConversation(id: string) {
-    setActiveConvoId(id);
+    update((state) => ({ ...state, activeId: id }));
     setInput("");
     setTimeout(() => inputRef.current?.focus(), 100);
   }
 
   const handleSend = async (q: string) => {
     if (!q.trim() || !cogniInstance || isSearching) return;
+    const podId = cogniInstance.instanceId;
     const query = q.trim();
     setInput("");
-    trackEvent({ pageName: "Search", eventName: "search_executed", additionalProperties: { query_length: String(query.length) } });
+    trackEvent({ pageName: "Search", eventName: "search_executed", additionalProperties: { query_length: String(query.length), search_type: searchType } });
 
-    // Create a conversation (= session) if none is active. A conversation
-    // restored from backend history is adopted into local state so the user
-    // can continue it — same session id, so the backend appends to it.
-    // Legacy (pre-session) entries are read-only: continuing one forks into
-    // a fresh session conversation instead.
-    let convoId = activeConvoId;
-    if (!convoId || !activeConvo || activeConvo.id.startsWith(LEGACY_PREFIX)) {
-      convoId = `${SESSION_PREFIX}${Date.now()}`;
-      const convo: Conversation = { id: convoId, title: query.slice(0, 60), messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-      setSessionConvos((prev) => [convo, ...prev]);
-      setActiveConvoId(convoId);
-    } else if (!sessionConvos.some((c) => c.id === convoId)) {
-      const adopted = activeConvo;
-      setSessionConvos((prev) => [adopted, ...prev]);
-    }
-
-    const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: "user", content: query, timestamp: new Date().toISOString() };
-    const loadingMsg: ChatMessage = { id: `a-${Date.now()}`, role: "assistant", content: "", timestamp: new Date().toISOString(), loading: true };
-
-    // Update conversation with user message + loading indicator
-    const finalConvoId = convoId;
-    setSessionConvos((prev) =>
-      prev.map((c) => {
-        if (c.id !== finalConvoId) return c;
-        const isFirstMessage = c.messages.length === 0;
-        return {
-          ...c,
-          title: isFirstMessage ? query.slice(0, 60) : c.title,
-          messages: [...c.messages, userMsg, loadingMsg],
-          updatedAt: new Date().toISOString(),
-        };
-      })
-    );
-    setIsSearching(true);
+    // Continue the open conversation (= session) or start one. A conversation
+    // restored from backend history is adopted into the store so the user can
+    // continue it — same session id, so the backend appends to it. An id
+    // remembered from before a reload is kept even if its history has not
+    // loaded yet: the pod has the turns, and that is what the answer builds on.
+    const now = new Date().toISOString();
+    const convoId = readSearchState(podId).activeId ?? `${SESSION_PREFIX}${Date.now()}`;
+    const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: "user", content: query, timestamp: now };
+    const loadingMsg: ChatMessage = { id: `a-${Date.now()}`, role: "assistant", content: "", timestamp: now, loading: true };
+    updateSearchState(podId, (state) => ({
+      ...state,
+      activeId: convoId,
+      inFlightId: convoId,
+      conversations: beginTurn(state.conversations, activeConvo, convoId, userMsg, loadingMsg, searchType),
+    }));
+    // Every update goes through the store, not component state: the answer
+    // keeps arriving after a navigation, and a remount picks it up mid-stream.
+    const patchAnswer = (patch: (message: ChatMessage) => ChatMessage) =>
+      updateSearchState(podId, (state) => ({
+        ...state,
+        conversations: patchMessage(state.conversations, convoId, loadingMsg.id, patch),
+      }));
 
     try {
+      if (searchType === "code") {
+        // A lookup in the code graph, not a question put to a model: nothing
+        // streams, and the pod has no turn to record, so the conversation is
+        // kept in this browser instead (codeConversations.ts).
+        const content = await answerCodeQuestion(cogniInstance, query, searchDatasetIds);
+        patchAnswer((m) => ({ ...m, content, dataset: effectiveDataset?.name, loading: false, stage: undefined }));
+        return;
+      }
+      // Fails to compile when a third type is added and not handled above,
+      // instead of sending it through recall as though it were Text.
+      const textOnly: "text" = searchType;
+      void textOnly;
       // The conversation's session id is sent with every search so the
       // backend records the Q&A — that's what persists the chat across refreshes.
-      const data = await recallKnowledge(cogniInstance, {
-        query,
-        scope: "graph",
-        sessionId: finalConvoId,
-        datasetIds: searchDatasetIds,
-      });
+      // Streamed tokens are a preview; the resolved payload is the answer.
+      const data = await recallKnowledge(
+        cogniInstance,
+        { query, scope: "graph", sessionId: convoId, datasetIds: searchDatasetIds },
+        {
+          onStage: (stage) => patchAnswer((m) => ({ ...m, stage })),
+          onDelta: (text) => patchAnswer((m) => ({ ...m, content: m.content + text })),
+          onReset: () => patchAnswer((m) => ({ ...m, content: "" })),
+        },
+      );
       const resultData = (Array.isArray(data) ? data : []) as SearchResultItem[];
       const content = normalizeResults(resultData);
       const datasetLabel = resultData[0]?.dataset_name || selectedDataset?.name;
-
-      setSessionConvos((prev) =>
-        prev.map((c) => {
-          if (c.id !== finalConvoId) return c;
-          return { ...c, messages: c.messages.map((m) => m.id === loadingMsg.id ? { ...m, content, dataset: datasetLabel, loading: false } : m) };
-        })
-      );
+      patchAnswer((m) => ({ ...m, content, dataset: datasetLabel, loading: false, stage: undefined }));
     } catch (err) {
       // On insufficient credits, the pod interceptor (services/http/pod.ts)
       // already opened the global modal — drop the placeholder message
       // instead of showing a redundant inline error bubble underneath it.
       if (isInsufficientCreditsError(err)) {
-        setSessionConvos((prev) =>
-          prev.map((c) => {
-            if (c.id !== finalConvoId) return c;
-            return { ...c, messages: c.messages.filter((m) => m.id !== loadingMsg.id) };
-          })
-        );
+        updateSearchState(podId, (state) => ({
+          ...state,
+          conversations: dropMessage(state.conversations, convoId, loadingMsg.id),
+        }));
       } else {
-        setSessionConvos((prev) =>
-          prev.map((c) => {
-            if (c.id !== finalConvoId) return c;
-            return { ...c, messages: c.messages.map((m) => m.id === loadingMsg.id ? { ...m, content: err instanceof Error ? err.message : "Search failed", loading: false, error: true } : m) };
-          })
-        );
+        const content = err instanceof Error ? err.message : "Search failed";
+        patchAnswer((m) => ({ ...m, content, loading: false, stage: undefined, error: true }));
       }
     } finally {
-      setIsSearching(false);
+      updateSearchState(podId, (state) => (state.inFlightId === convoId ? { ...state, inFlightId: null } : state));
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   };
@@ -453,11 +395,7 @@ export default function SearchPage() {
     }
   };
 
-  const suggestions = [
-    "What are the main entities?",
-    "Summarize the uploaded documents",
-    "What relationships exist in the data?",
-  ];
+  const { suggestions, placeholder } = searchTypeOption(searchType);
 
   const isEmpty = messages.length === 0;
 
@@ -482,7 +420,7 @@ export default function SearchPage() {
         </div>
       </div>
 
-      {/* Main panel — same dark-glass container as Sessions / Brain */}
+      {/* Main panel — same dark-glass container as Sessions / Dataset */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden", marginInline: 32, marginBottom: 32, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(20px)" }}>
 
       {/* Sidebar */}
@@ -503,9 +441,11 @@ export default function SearchPage() {
 
           {/* Conversation list */}
           <div style={{ flex: 1, overflowY: "auto", padding: "8px 8px" }}>
-            {allConversations.length === 0 && (
+            {allConversations.length === 0 && pendingHistory === 0 && (
               <div style={{ padding: "24px 12px", textAlign: "center" }}>
-                <span style={{ fontSize: 12, color: "rgba(237,236,234,0.35)" }}>No conversations yet</span>
+                <span style={{ fontSize: 12, color: "rgba(237,236,234,0.35)" }}>
+                  {historyFailed ? "Couldn't load past conversations" : "No conversations yet"}
+                </span>
               </div>
             )}
             {grouped.map((group) => (
@@ -536,6 +476,12 @@ export default function SearchPage() {
                 ))}
               </div>
             ))}
+            {pendingHistory > 0 && (
+              <HistorySkeleton
+                rows={Math.min(pendingHistory, MAX_SKELETON_ROWS)}
+                showGroupLabel={allConversations.length === 0}
+              />
+            )}
           </div>
         </div>
       )}
@@ -588,7 +534,8 @@ export default function SearchPage() {
                   <div
                     // Distinguishes a painted answer from a pending one so e2e
                     // can fail on a stuck spinner instead of timing out on the
-                    // absence of an error.
+                    // absence of an error. A streaming answer is still pending:
+                    // its text is a preview until the payload lands.
                     data-testid={
                       msg.role === "assistant"
                         ? msg.loading
@@ -609,12 +556,21 @@ export default function SearchPage() {
                     {msg.role === "user" && (
                       <span style={{ fontSize: 14, lineHeight: "22px" }}>{msg.content}</span>
                     )}
-                    {msg.role === "assistant" && msg.loading && (
+                    {msg.role === "assistant" && msg.loading && !msg.content && (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0" }}>
                         <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#6510F4", animation: "pulse 1.2s ease-in-out infinite" }} />
                         <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#6510F4", animation: "pulse 1.2s ease-in-out infinite 0.2s" }} />
                         <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#6510F4", animation: "pulse 1.2s ease-in-out infinite 0.4s" }} />
+                        {msg.stage && STAGE_LABELS[msg.stage] && (
+                          <span style={{ fontSize: 12, color: "rgba(237,236,234,0.5)", marginLeft: 4 }}>{STAGE_LABELS[msg.stage]}</span>
+                        )}
                       </div>
+                    )}
+                    {msg.role === "assistant" && msg.loading && msg.content && (
+                      <>
+                        <MarkdownContent text={msg.content} />
+                        <span aria-hidden style={{ display: "inline-block", width: 6, height: 14, borderRadius: 1, background: "#BC9BFF", animation: "pulse 1s ease-in-out infinite", verticalAlign: "text-bottom" }} />
+                      </>
                     )}
                     {msg.role === "assistant" && !msg.loading && (
                       <>
@@ -637,11 +593,18 @@ export default function SearchPage() {
         {/* Input area */}
         <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", padding: "12px 32px 16px" }}>
           <div style={{ maxWidth: 800, marginInline: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
-            {/* Dataset picker — searches are scoped to one brain
-                (searchDatasetIds), so the scope must be visible and
-                changeable right where the question is typed. */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
-              <BrainSelector allowAll={false} align="right" direction="up" />
+            {/* What a search is scoped to: the type picks the retrieval lane,
+                the dataset picks what that lane reads (searchDatasetIds). Both
+                belong where the question is typed — they are changed per
+                question, not configured once. */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              {/* Only where there is a repository to find: elsewhere it points
+                  at a type that has nothing to search. */}
+              {datasets.some((d) => isRepositoryDataset(d.name)) && <CodeSearchHint />}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
+                <SearchTypeSelector value={searchType} onChange={changeSearchType} />
+                <BrainSelector allowAll={false} align="right" direction="up" />
+              </div>
             </div>
 
             {/* Input bar */}
@@ -655,7 +618,7 @@ export default function SearchPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={hasAccess ? "Ask a question about your data..." : "Subscribe to use search..."}
+                placeholder={hasAccess ? placeholder : "Subscribe to use search..."}
                 rows={1}
                 style={{ flex: 1, border: "none", outline: "none", fontSize: 14, color: "#EDECEA", fontFamily: "inherit", background: "transparent", resize: "none", minHeight: 24, maxHeight: 120 }}
                 onInput={(e) => { const t = e.target as HTMLTextAreaElement; t.style.height = "24px"; t.style.height = t.scrollHeight + "px"; }}

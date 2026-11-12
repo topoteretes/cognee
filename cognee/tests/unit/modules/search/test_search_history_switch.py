@@ -19,6 +19,7 @@ from cognee.infrastructure.databases.relational import Base
 from cognee.infrastructure.databases.relational.create_relational_engine import (
     create_relational_engine,
 )
+from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 from cognee.modules.search.models.Query import Query
 from cognee.modules.search.models.Result import Result
 from cognee.modules.search.operations import search_history_enabled
@@ -295,10 +296,16 @@ async def test_delete_data_purges_history_when_it_deletes_the_emptied_dataset(
         patch.object(datasets_mod, "get_authorized_dataset", AsyncMock(return_value=dataset)),
         patch.object(datasets_mod, "dataset_lock", _no_op_context),
         patch.object(datasets_mod, "set_database_global_context_variables", _no_op_context),
-        patch.object(datasets_mod, "get_dataset_data", AsyncMock(return_value=[])),
-        patch.object(datasets_mod, "delete_data_nodes_and_edges", AsyncMock()),
+        # The dataset is empty after the delete (one count query, no listing).
+        patch.object(datasets_mod, "has_dataset_data", AsyncMock(return_value=False)),
+        patch.object(
+            datasets_mod,
+            "delete_data_nodes_and_edges",
+            AsyncMock(return_value=DeletedGraphElements()),
+        ),
+        patch.object(datasets_mod, "retire_forgotten_decisions", AsyncMock(return_value=set())),
         patch.object(datasets_mod, "_invalidate_sessions_for_deleted_data_nonfatal", AsyncMock()),
-        patch("cognee.modules.data.methods.resolve_data_id", AsyncMock(return_value=None)),
+        patch("cognee.modules.data.methods.get_data", AsyncMock(return_value=None)),
         patch("cognee.modules.data.methods.delete_dataset", delete_dataset),
     ):
         await datasets_mod.datasets.delete_data(
@@ -309,6 +316,23 @@ async def test_delete_data_purges_history_when_it_deletes_the_emptied_dataset(
     assert await _row_counts(history_engine) == (0, 0)
 
 
+def _no_sessions(deletable=()):
+    """forget(everything)'s dataset and session resolution, stubbed to find no session."""
+    return [
+        patch(
+            "cognee.modules.data.methods.get_authorized_existing_datasets",
+            AsyncMock(return_value=list(deletable)),
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.list_sessions_for_user", AsyncMock(return_value=[])
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.list_sessions_for_datasets",
+            AsyncMock(return_value=[]),
+        ),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_forget_everything_purges_the_users_own_history_first():
     """The datasets' history goes inside empty_dataset; forget(everything) adds
@@ -316,7 +340,6 @@ async def test_forget_everything_purges_the_users_own_history_first():
     user = SimpleNamespace(id=uuid4())
     calls = []
     fake_datasets = SimpleNamespace(
-        list_datasets=AsyncMock(return_value=[object(), object()]),
         delete_all=AsyncMock(side_effect=lambda **_: calls.append("delete_all")),
     )
     delete_user_history = AsyncMock(side_effect=lambda _: calls.append("user_history") or COUNTS)
@@ -327,16 +350,17 @@ async def test_forget_everything_purges_the_users_own_history_first():
             "cognee.modules.search.operations.delete_user_search_history",
             delete_user_history,
         ),
-        patch(
-            "cognee.infrastructure.databases.cache.get_cache_config",
-            return_value=SimpleNamespace(caching=False, usage_logging=False),
-        ),
+        ExitStack() as stack,
     ):
+        for p in _no_sessions(deletable=[SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())]):
+            stack.enter_context(p)
         result = await forget_mod._forget_everything(user)
 
     assert result == {
         "datasets_removed": 2,
+        "sessions_removed": 0,
         "search_history_removed": True,
+        "history_cleaned": True,
         "status": "success",
     }
     delete_user_history.assert_awaited_once_with(user.id)
@@ -348,7 +372,10 @@ async def test_forget_data_item_reports_history_kept():
     """History is attributed per dataset, so a document forget cannot purge it."""
     user = SimpleNamespace(id=uuid4())
     dataset_id, data_id = uuid4(), uuid4()
-    fake_datasets = SimpleNamespace(delete_data=AsyncMock())
+    # delete_data's receipt (DeleteDataReceiptDTO); forget passes it through and
+    # adds the history flag.
+    receipt = {"status": "success", "dataset_id": str(dataset_id), "data_id": str(data_id)}
+    fake_datasets = SimpleNamespace(delete_data=AsyncMock(return_value=receipt))
 
     with (
         patch.object(datasets_mod, "datasets", fake_datasets),
@@ -372,9 +399,7 @@ async def test_forget_data_item_reports_history_kept():
 @pytest.mark.asyncio
 async def test_history_cleanup_failure_fails_forget_everything_before_the_data_goes():
     user = SimpleNamespace(id=uuid4())
-    fake_datasets = SimpleNamespace(
-        list_datasets=AsyncMock(return_value=[]), delete_all=AsyncMock()
-    )
+    fake_datasets = SimpleNamespace(delete_all=AsyncMock())
 
     with (
         patch.object(datasets_mod, "datasets", fake_datasets),
@@ -382,8 +407,11 @@ async def test_history_cleanup_failure_fails_forget_everything_before_the_data_g
             "cognee.modules.search.operations.delete_user_search_history",
             AsyncMock(side_effect=RuntimeError("history table missing")),
         ),
+        ExitStack() as stack,
         pytest.raises(RuntimeError, match="history table missing"),
     ):
+        for p in _no_sessions():
+            stack.enter_context(p)
         await forget_mod._forget_everything(user)
 
     fake_datasets.delete_all.assert_not_awaited()

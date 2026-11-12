@@ -38,12 +38,13 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`recall_core.py`](guides/recall_core.py) | `recall` semantics and parameters |
 | [`improve_quickstart.py`](guides/improve_quickstart.py) | Graph enrichment before/after `improve()` |
 | [`agent_memory_quickstart.py`](guides/agent_memory_quickstart.py) | Wrap an LLM agent with `@cognee.agent_memory` |
-| [`no_llm_remember_recall.py`](guides/no_llm_remember_recall.py) | `remember → recall` with no LLM key at all: GLiNER graph + `CHUNKS` recall (needs `cognee[gliner]`) |
+| [`no_llm_remember_recall.py`](guides/no_llm_remember_recall.py) | `remember → recall` with no LLM key at all: GLiNER graph + `HYBRID_COMPLETION` recall with `only_context=True` (needs `cognee[gliner]`) |
 
 ### Sessions & self-improvement
 | Script | Demonstrates |
 |---|---|
 | [`review_conflicts.py`](guides/review_conflicts.py) | Review dated source facts, print stored conflicts and fact status marks |
+| [`resolve_conflicts.py`](guides/resolve_conflicts.py) | Settle a conflict review cannot decide with `list_conflicts` / `resolve_conflict`, and compare recall before and after |
 | [`sessions.py`](guides/sessions.py) | Session-scoped memory via `session_id` |
 | [`session_node_sets.py`](guides/session_node_sets.py) | Per-project session memory: pin a `node_set` on a session, bridge it with `improve()`, recall with `node_name` |
 | [`session_distillation.py`](guides/session_distillation.py) | Distilling a session into durable preferences |
@@ -54,6 +55,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 ### Retrieval
 | Script | Demonstrates |
 |---|---|
+| [`hybrid_decomposition.py`](guides/hybrid_decomposition.py) | Context-primed hybrid decomposition for multi-part questions, with a configurable planning prompt |
 | [`truth_subspace_reranking.py`](guides/truth_subspace_reranking.py) | Teaching retrieval a preference — truth-weighted reranking on/off |
 | [`temporal_recall.py`](guides/temporal_recall.py) | Time-bounded queries with `SearchType.TEMPORAL` |
 | [`references_example.py`](guides/references_example.py) | `include_references` — answers with evidence |
@@ -71,12 +73,13 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Authoring tasks and composing a pipeline |
 | [`ontology_quickstart.py`](guides/ontology_quickstart.py) | Grounding extraction in an OWL ontology |
 | [`entity_deduplication.py`](guides/entity_deduplication.py) | Merging duplicate entities (dry-run, then real) |
-| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Deprecated: use `review_conflicts.py` for Entity descriptions |
+| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Deprecated: `review_conflicts.py` reviews facts instead and leaves descriptions as extracted |
 | [`low_level_llm.py`](guides/low_level_llm.py) | Direct LLM-gateway structured output |
 
 ### Ingestion
 | Script | Demonstrates |
 |---|---|
+| [`dlt_column_search.py`](guides/dlt_column_search.py) | Ingest Chinook and scope `GRAPH_COMPLETION` to a `SchemaColumn` named `table:column` |
 | [`web_url_content_ingestion_example.py`](guides/web_url_content_ingestion_example.py) | Ingesting a URL with `preferred_loaders` (needs network) |
 | [`multimedia_audio_image_processing_example.py`](guides/multimedia_audio_image_processing_example.py) | Audio + image ingestion (bundled assets) |
 | [`image_ocr_extraction.py`](guides/image_ocr_extraction.py) | Vision transcription + OCR text for an image |
