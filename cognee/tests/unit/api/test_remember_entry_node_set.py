@@ -377,6 +377,7 @@ async def test_plain_text_refuses_an_invalid_node_set_and_writes_nothing(monkeyp
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("stub_session_dataset")
 async def test_plain_text_tagging_each_turn_differently_is_refused_on_the_second_turn(
     monkeypatch,
 ):

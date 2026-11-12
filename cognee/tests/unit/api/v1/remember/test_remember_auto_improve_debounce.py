@@ -23,8 +23,9 @@ from cognee.modules.improve.config import ImproveConfig
 from cognee.modules.improve.result import ImproveResult
 
 # Datasets in this module are stand-ins that exist in no database; entering their
-# database context (which remember's session writes now do) is stubbed.
-pytestmark = pytest.mark.usefixtures("stub_dataset_context")
+# database context and resolving a session's dataset (which remember's session
+# writes now do) are stubbed.
+pytestmark = pytest.mark.usefixtures("stub_dataset_context", "stub_session_dataset")
 
 remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 debounce_module = importlib.import_module("cognee.api.v1.remember.auto_improve_debounce")

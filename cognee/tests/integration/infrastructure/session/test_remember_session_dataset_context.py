@@ -5,6 +5,7 @@ dataset's database context, so the session's Q&A vectors land in that dataset's
 isolated vector store, and session history reads them from there. The two
 remember write paths (plain text and typed entries) must write to the same
 store, or the turns they record are invisible to session history's vector lane.
+A plain-text write follows the session's binding exactly as a typed entry does.
 
 Real stores throughout: SQLite relational, the sqlite session cache, one LanceDB
 per dataset, mock embeddings (zero vectors, no network).
@@ -14,6 +15,7 @@ import asyncio
 import contextvars
 import pathlib
 from collections.abc import Awaitable, Callable
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -27,9 +29,14 @@ from cognee.context_global_variables import (
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.session.session_embeddings import SESSION_QA_VECTOR_COLLECTION
 from cognee.memory import QAEntry
-from cognee.modules.data.methods import create_authorized_dataset
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.data.methods import create_authorized_dataset, get_datasets_by_name
 from cognee.modules.engine.operations.setup import setup as engine_setup
-from cognee.modules.users.methods import get_default_user
+from cognee.modules.migrations import startup as migrations_startup
+from cognee.modules.migrations.startup import MigrationError
+from cognee.modules.session_lifecycle.metrics import get_session_row
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import create_user, get_default_user
 
 
 @pytest_asyncio.fixture
@@ -139,5 +146,142 @@ async def test_a_second_turn_joins_the_first_in_the_dataset_store(isolated_datas
         )
 
     await _as_fresh_request(two_turns)
+
+    await _assert_only_in_dataset_store(user, dataset, rows=2)
+
+
+async def _dataset_store_rows(user, dataset_id) -> int:
+    async def count():
+        async with set_database_global_context_variables(dataset_id, user.id):
+            return await _session_vector_rows()
+
+    return await _as_fresh_request(count)
+
+
+@pytest.mark.asyncio
+async def test_plain_text_remember_binds_an_unbound_session(isolated_dataset):
+    """The first plain-text write binds the session, like a typed entry's does."""
+    user, dataset = isolated_dataset
+
+    async def remember_turn():
+        await cognee.remember("first turn", session_id="s4", dataset_name=dataset.name)
+
+    await _as_fresh_request(remember_turn)
+
+    row = await get_session_row(session_id="s4", user_id=user.id)
+    assert row is not None and row.dataset_id == dataset.id
+
+
+@pytest.mark.asyncio
+async def test_plain_text_on_a_bound_session_follows_its_binding(isolated_dataset):
+    """Without a dataset name, a plain-text turn goes to the session's dataset, not the default."""
+    user, dataset = isolated_dataset
+
+    async def two_turns():
+        await cognee.remember(
+            QAEntry(question="q", answer="bound turn"), session_id="s5", dataset_name=dataset.name
+        )
+        result = await cognee.remember("later turn", session_id="s5")
+        assert result.dataset_id == str(dataset.id)
+        assert result.dataset_name == dataset.name
+
+    await _as_fresh_request(two_turns)
+
+    await _assert_only_in_dataset_store(user, dataset, rows=2)
+    assert await get_datasets_by_name([DEFAULT_DATASET_NAME], user.id) == []
+
+
+@pytest.mark.asyncio
+async def test_plain_text_naming_another_dataset_on_a_bound_session_is_refused(isolated_dataset):
+    user, dataset = isolated_dataset
+    other = await create_authorized_dataset("other", user)
+
+    async def remember_turn():
+        await cognee.remember("first turn", session_id="s6", dataset_name=dataset.name)
+
+    async def remember_elsewhere():
+        await cognee.remember("misrouted turn", session_id="s6", dataset_name=other.name)
+
+    await _as_fresh_request(remember_turn)
+    with pytest.raises(ValueError, match="is bound to dataset"):
+        await _as_fresh_request(remember_elsewhere)
+
+    await _assert_only_in_dataset_store(user, dataset, rows=1)
+    assert await _dataset_store_rows(user, other.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_plain_text_needs_write_access_to_an_explicit_dataset_id(isolated_dataset):
+    """An explicit dataset_id is authorized before the session write enters its store."""
+    _, dataset = isolated_dataset
+    outsider = await create_user(f"outsider-{uuid4()}@example.com", "outsider-password")
+
+    async def remember_turn():
+        await cognee.remember(
+            "intruding turn", session_id="s7", dataset_id=dataset.id, user=outsider
+        )
+
+    with pytest.raises(PermissionDeniedError):
+        await _as_fresh_request(remember_turn)
+
+
+@pytest.mark.asyncio
+async def test_plain_text_accepts_a_returned_dataset_id_back(isolated_dataset):
+    """RememberResult.dataset_id is a str; passing it back names the bound dataset."""
+    user, dataset = isolated_dataset
+
+    async def two_turns():
+        first = await cognee.remember("first turn", session_id="s8", dataset_name=dataset.name)
+        await cognee.remember("second turn", session_id="s8", dataset_id=first.dataset_id)
+
+    await _as_fresh_request(two_turns)
+
+    await _assert_only_in_dataset_store(user, dataset, rows=2)
+
+
+def _fail_migrations_for(monkeypatch, dataset_id) -> None:
+    """Report ``dataset_id``'s databases as failed by the startup migrations."""
+
+    async def failed_run():
+        return [str(dataset_id)]
+
+    monkeypatch.setattr(migrations_startup, "run_migrations", failed_run)
+
+
+@pytest.mark.asyncio
+async def test_migration_gate_blocks_on_the_bound_dataset(isolated_dataset, monkeypatch):
+    """A failed migration of the session's dataset blocks the write, even when the
+    call names no dataset (which would otherwise mean main_dataset)."""
+    user, dataset = isolated_dataset
+
+    async def bind():
+        await cognee.remember("first turn", session_id="s9", dataset_name=dataset.name)
+
+    async def write_unnamed():
+        await cognee.remember("blocked turn", session_id="s9")
+
+    await _as_fresh_request(bind)
+    _fail_migrations_for(monkeypatch, dataset.id)
+    with pytest.raises(MigrationError):
+        await _as_fresh_request(write_unnamed)
+
+    await _assert_only_in_dataset_store(user, dataset, rows=1)
+
+
+@pytest.mark.asyncio
+async def test_migration_gate_ignores_an_unrelated_dataset(isolated_dataset, monkeypatch):
+    """A failed migration of main_dataset does not block a session bound elsewhere."""
+    user, dataset = isolated_dataset
+    main = await create_authorized_dataset(DEFAULT_DATASET_NAME, user)
+
+    async def bind():
+        await cognee.remember("first turn", session_id="s10", dataset_name=dataset.name)
+
+    async def write_unnamed():
+        await cognee.remember("healthy turn", session_id="s10")
+
+    await _as_fresh_request(bind)
+    _fail_migrations_for(monkeypatch, main.id)
+    await _as_fresh_request(write_unnamed)
 
     await _assert_only_in_dataset_store(user, dataset, rows=2)

@@ -19,8 +19,9 @@ from uuid import uuid4
 import pytest
 
 # Datasets in this module are stand-ins that exist in no database; entering their
-# database context (which remember's session writes now do) is stubbed.
-pytestmark = pytest.mark.usefixtures("stub_dataset_context")
+# database context and resolving a session's dataset (which remember's session
+# writes now do) are stubbed.
+pytestmark = pytest.mark.usefixtures("stub_dataset_context", "stub_session_dataset")
 
 remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 

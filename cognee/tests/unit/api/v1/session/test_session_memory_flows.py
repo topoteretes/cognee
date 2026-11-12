@@ -326,6 +326,7 @@ class TestRememberResult:
         assert result.elapsed_seconds >= 0
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("stub_session_dataset")
     async def test_session_result_has_elapsed(self):
         """Session-stored result also tracks elapsed time."""
         mock_user = MagicMock()
@@ -1231,6 +1232,7 @@ async def test_self_improvement_opt_out_keeps_permanent_ingestion(flag, backgrou
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("stub_session_dataset")
 @pytest.mark.parametrize("flag", [None, False, True])
 async def test_self_improvement_controls_session_bridge_without_skipping_cache(flag):
     user = MagicMock(id="u1")

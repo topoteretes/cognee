@@ -296,10 +296,17 @@ async def _add_to_session(
 ):
     """Add a Q&A entry to the session cache.
 
-    ``dataset_id`` is the dataset the session is bound to. The write runs inside
-    that dataset's database context, so the entry's Q&A vector lands in the
-    dataset's vector store, where a search turn writes and reads it; written
+    ``dataset_id`` is the session's dataset, resolved from its binding by
+    ``_resolve_entry_dataset`` exactly as for a typed entry. Before anything is
+    written the session is bound to it (an unbound session is bound here, so the
+    first plain-text write binds it, like any other write). The write then runs
+    inside that dataset's database context, so the entry's Q&A vector lands in
+    the dataset's vector store, where a search turn writes and reads it; written
     outside the context it would land in the global store and never be found.
+    With backend access control on, entering the context takes a dataset queue
+    slot (``DATASET_QUEUE_MAX_CONCURRENT``) and provisions the dataset's
+    databases on first use, so a session write waits behind busy datasets like a
+    search turn does, and fails when those databases cannot be bound.
 
     Sessions store chat-shaped content (prompts, assistant answers,
     Q&A turns). File-upload data coerces to placeholder strings like
@@ -343,6 +350,11 @@ async def _add_to_session(
             matched_prefix,
         )
         return
+
+    if dataset_id is not None:
+        await _bind_session_dataset(
+            session_id=session_id, user_id=user.id, dataset_id=dataset_id, was_bound=False
+        )
 
     database_context = (
         set_database_global_context_variables(dataset_id, user.id)
@@ -490,6 +502,17 @@ async def _remember_entry(
     )
 
 
+def _dataset_uuid(dataset_id) -> UUID | None:
+    """``dataset_id`` as a UUID: RememberResult.dataset_id is a str; accept it back as
+    the UUID it names, so it compares equal to a session's binding."""
+    if dataset_id is None or isinstance(dataset_id, UUID):
+        return dataset_id
+    try:
+        return UUID(str(dataset_id))
+    except ValueError:
+        raise ValueError(f"dataset_id must be a dataset UUID, got {dataset_id!r}") from None
+
+
 async def _resolve_entry_dataset(
     *, session_id: str, dataset_name: str, dataset_id: UUID | None, user
 ) -> tuple[Any, "Dataset", bool]:
@@ -538,6 +561,29 @@ async def _resolve_entry_dataset(
     return user, dataset, bound_dataset_id is not None
 
 
+async def _bind_session_dataset(
+    *, session_id: str, user_id: UUID, dataset_id: UUID, was_bound: bool
+) -> None:
+    """Bind ``session_id`` to ``dataset_id`` (or keep its binding) before a session write.
+
+    Every write bumps the session's activity; the atomic upsert binds an unbound
+    session and preserves an existing binding. For a session that was unbound,
+    the row is re-read: a concurrent writer may have bound it to another dataset
+    first, and this write's vectors would then land in a store the session never
+    reads.
+    """
+    from cognee.modules.session_lifecycle.metrics import (
+        ensure_and_touch_session,
+        get_session_row,
+    )
+
+    await ensure_and_touch_session(session_id=session_id, user_id=user_id, dataset_id=dataset_id)
+    if not was_bound:
+        row = await get_session_row(session_id=session_id, user_id=user_id)
+        if row is None or row.dataset_id != dataset_id:
+            raise ValueError("Session is already bound to another dataset or cannot be bound")
+
+
 async def _dispatch_session_entry(
     entry: "MemoryEntry",
     *,
@@ -563,12 +609,7 @@ async def _dispatch_session_entry(
     name); the ``"main_dataset"`` default is accepted because it cannot be told
     apart from no name at all.
     """
-    # RememberResult.dataset_id is a str; accept it back as the UUID it names.
-    if dataset_id is not None and not isinstance(dataset_id, UUID):
-        try:
-            dataset_id = UUID(str(dataset_id))
-        except ValueError:
-            raise ValueError(f"dataset_id must be a dataset UUID, got {dataset_id!r}") from None
+    dataset_id = _dataset_uuid(dataset_id)
 
     from cognee.modules.engine.operations.setup import setup
 
@@ -652,19 +693,10 @@ async def _dispatch_session_entry(
         session_id=session_id, dataset_name=dataset_name, dataset_id=dataset_id, user=user
     )
     from cognee.context_global_variables import set_database_global_context_variables
-    from cognee.modules.session_lifecycle.metrics import (
-        ensure_and_touch_session,
-        get_session_row,
-    )
 
-    # Every entry bumps the session's activity; the atomic upsert binds an unbound
-    # session and preserves an existing binding. For a session that was unbound,
-    # re-read it before caching: a concurrent writer may have bound it first.
-    await ensure_and_touch_session(session_id=session_id, user_id=user.id, dataset_id=dataset.id)
-    if not was_bound:
-        row = await get_session_row(session_id=session_id, user_id=user.id)
-        if row is None or row.dataset_id != dataset.id:
-            raise ValueError("Session is already bound to another dataset or cannot be bound")
+    await _bind_session_dataset(
+        session_id=session_id, user_id=user.id, dataset_id=dataset.id, was_bound=was_bound
+    )
 
     # The entry's vectors go to the dataset's vector store, where the search
     # turns of this session write and read them.
@@ -1631,10 +1663,14 @@ async def _remember_inner(
     # Run vector migrations lazily on the first local SDK call.
     # This ensures stale LanceDB schemas are migrated before any
     # writes, even when the API server was never started. Scoped to the
-    # dataset this call targets (dataset_id override, else dataset_name).
+    # dataset this call targets (dataset_id override, else dataset_name). A
+    # plain session write targets the session's bound dataset, known only once
+    # the binding is resolved, so it takes the gate there instead.
     from cognee.modules.migrations.startup import run_migrations_and_block
 
-    await run_migrations_and_block(dataset_id or dataset_name, kwargs.get("user"))
+    session_write = bool(session_id) and not kwargs.get("content_type")
+    if not session_write:
+        await run_migrations_and_block(dataset_id or dataset_name, kwargs.get("user"))
 
     # Normalize "" to None — HTML forms and Swagger UI submit untouched
     # optional fields as empty strings.
@@ -2137,10 +2173,28 @@ async def _remember_inner(
         operation_context.set_user(user)
 
         # Build the result object — starts as "running"
-        if not dataset_id and dataset_name:
+        if session_id and (dataset_id or dataset_name):
+            # A session write targets the session's dataset, by the same rule as a
+            # typed entry: a bound session keeps its dataset (a disagreeing
+            # dataset_id or non-default dataset_name is refused), an unbound one
+            # resolves or creates dataset_name. The session's search turns read
+            # its Q&A vectors from that dataset's store only.
+            user, session_dataset, _ = await _resolve_entry_dataset(
+                session_id=session_id,
+                dataset_name=dataset_name,
+                dataset_id=_dataset_uuid(dataset_id),
+                user=user,
+            )
+            dataset_id, dataset_name = session_dataset.id, session_dataset.name
+        elif not dataset_id and dataset_name:
             # Create dataset if it doesn't exist
             user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
             dataset_id = dataset_id[0].id if dataset_id else None
+
+        if session_write:
+            # The migration gate, deferred from above: block on the dataset the
+            # session write actually targets, before anything is written to it.
+            await run_migrations_and_block(dataset_id, user)
 
         if dataset_id:
             operation_context.set_dataset(dataset_id)
