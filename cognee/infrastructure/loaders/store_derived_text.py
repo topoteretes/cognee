@@ -2,7 +2,7 @@
 
 import io
 
-from cognee.infrastructure.files.stored_file_claims import claim_stored_file, removals_so_far
+from cognee.infrastructure.files.stored_file_claims import store_claimed
 from cognee.infrastructure.files.utils.get_file_metadata import (
     FileMetadata,
     _derive_basename,
@@ -48,12 +48,8 @@ async def store_derived_text(
     ``kwargs`` are forwarded to ``LoaderResult`` for loaders that also own the
     record's identity or route stamp.
     """
-    removals_before_store = removals_so_far()
-    file_path = await storage.store(storage_file_name, content)
     # Claimed until the caller's row points at it (see ``stored_file_claims``).
-    await claim_stored_file(
-        file_path, removals_before_store, lambda: storage.store(storage_file_name, content)
-    )
+    file_path = await store_claimed(lambda: storage.store(storage_file_name, content))
 
     return LoaderResult(
         file_path=file_path,

@@ -178,3 +178,56 @@ async def test_a_file_that_cannot_be_removed_after_a_failed_write_says_nothing_w
     assert isinstance(error.__cause__, OSError)
     assert isinstance(error.__cause__.__context__, RuntimeError)
     assert str(error.__cause__.__context__) == "write failed"
+
+
+def _staging(monkeypatch, *, loader_result, open_error=None):
+    """Staging stores ``/data/staged.txt``, then runs the loader; records what it releases."""
+    released: list = []
+
+    async def remove_files(locations, outcome):
+        released.append((list(locations), outcome))
+
+    monkeypatch.setattr(
+        incremental, "save_data_item_to_storage", AsyncMock(return_value="/data/staged.txt")
+    )
+    monkeypatch.setattr(
+        incremental, "data_item_to_text_file", AsyncMock(return_value=loader_result)
+    )
+    monkeypatch.setattr(incremental, "remove_unreferenced_files", remove_files)
+    if open_error is not None:
+
+        def failing_open(location):
+            raise open_error
+
+        monkeypatch.setattr(incremental, "open_data_file", failing_open)
+    return released
+
+
+@pytest.mark.asyncio
+async def test_staging_no_loader_accepts_releases_the_original_it_stored(monkeypatch):
+    released = _staging(monkeypatch, loader_result=(None, None))
+
+    with pytest.raises(incremental.IncrementalUpdateNotPossible) as refused:
+        await incremental._stage_new_content("new text", None)
+
+    # The refusal still reaches update(), which goes on to the full rebuild under the
+    # real filename: nothing would ever point at the staged original otherwise.
+    assert refused.value.reason == incremental.RefusalReason.UNREADABLE_TEXT
+    assert released == [(["/data/staged.txt"], incremental.UPDATE_NOT_APPLIED)]
+
+
+@pytest.mark.asyncio
+async def test_staging_that_fails_after_the_loader_releases_both_files(monkeypatch):
+    loader = SimpleNamespace(loader_name="text_loader")
+    released = _staging(
+        monkeypatch,
+        loader_result=("/data/text_new.txt", loader),
+        open_error=OSError("cannot read"),
+    )
+
+    with pytest.raises(OSError, match="cannot read"):
+        await incremental._stage_new_content("new text", None)
+
+    assert released == [
+        (["/data/staged.txt", "/data/text_new.txt"], incremental.UPDATE_NOT_APPLIED)
+    ]

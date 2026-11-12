@@ -584,41 +584,51 @@ async def _stage_new_content(data, preferred_loaders) -> StagedContent:
         )
     else:
         original_file_path = await save_data_item_to_storage(data)
-    actual_file_path = get_data_file_path(original_file_path)
+    # Staged files are released by the caller only once staging returns them, so a
+    # failure from here on (no loader accepts the content, a loader or classify
+    # raising) releases what it already stored: nothing else would ever point at
+    # it, and update() may go on to the full rebuild under the real filename.
+    stored = [original_file_path]
+    try:
+        actual_file_path = get_data_file_path(original_file_path)
 
-    storage_file_path, loader_engine = await data_item_to_text_file(
-        actual_file_path, preferred_loaders
-    )
-    if loader_engine is None:
-        raise IncrementalUpdateNotPossible(
-            "no loader accepted the new content", RefusalReason.UNREADABLE_TEXT
+        storage_file_path, loader_engine = await data_item_to_text_file(
+            actual_file_path, preferred_loaders
         )
-    if isinstance(storage_file_path, LoaderResult):
-        # A loader may hand back a LoaderResult (its own identity and route
-        # stamp, as dlt does) instead of a plain path; only the stored text's
-        # path matters here — ingest_data unwraps it the same way.
-        storage_file_path = storage_file_path.file_path
+        if loader_engine is None:
+            raise IncrementalUpdateNotPossible(
+                "no loader accepted the new content", RefusalReason.UNREADABLE_TEXT
+            )
+        if isinstance(storage_file_path, LoaderResult):
+            # A loader may hand back a LoaderResult (its own identity and route
+            # stamp, as dlt does) instead of a plain path; only the stored text's
+            # path matters here — ingest_data unwraps it the same way.
+            storage_file_path = storage_file_path.file_path
+        stored.append(storage_file_path)
 
-    async with open_data_file(original_file_path) as file:
-        original_metadata = classify(file).get_metadata()
-    if upload_metadata is not None:
-        original_metadata["name"] = PureWindowsPath(str(source_data.filename)).stem
-    async with open_data_file(storage_file_path) as file:
-        storage_metadata = classify(file).get_metadata()
+        async with open_data_file(original_file_path) as file:
+            original_metadata = classify(file).get_metadata()
+        if upload_metadata is not None:
+            original_metadata["name"] = PureWindowsPath(str(source_data.filename)).stem
+        async with open_data_file(storage_file_path) as file:
+            storage_metadata = classify(file).get_metadata()
 
-    return StagedContent(
-        name=original_metadata["name"],
-        raw_data_location=storage_file_path,
-        original_data_location=original_metadata["file_path"],
-        extension=storage_metadata["extension"],
-        mime_type=storage_metadata["mime_type"],
-        original_extension=original_metadata["extension"],
-        original_mime_type=original_metadata["mime_type"],
-        loader_engine=loader_engine.loader_name,
-        content_hash=original_metadata["content_hash"],
-        raw_content_hash=storage_metadata["content_hash"],
-        data_size=original_metadata["file_size"],
-    )
+        return StagedContent(
+            name=original_metadata["name"],
+            raw_data_location=storage_file_path,
+            original_data_location=original_metadata["file_path"],
+            extension=storage_metadata["extension"],
+            mime_type=storage_metadata["mime_type"],
+            original_extension=original_metadata["extension"],
+            original_mime_type=original_metadata["mime_type"],
+            loader_engine=loader_engine.loader_name,
+            content_hash=original_metadata["content_hash"],
+            raw_content_hash=storage_metadata["content_hash"],
+            data_size=original_metadata["file_size"],
+        )
+    except BaseException:
+        await remove_unreferenced_files(stored, UPDATE_NOT_APPLIED)
+        raise
 
 
 def _changed_staged_metadata(old_data: Data, staged: StagedContent) -> list[str]:

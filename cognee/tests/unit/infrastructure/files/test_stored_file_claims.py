@@ -16,9 +16,9 @@ import pytest
 
 import cognee.modules.data.methods.remove_unreferenced_files as removal
 from cognee.infrastructure.files.stored_file_claims import (
-    claim_stored_file,
     holding_stored_files,
-    removals_so_far,
+    removing_stored_files,
+    store_claimed,
 )
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 
@@ -108,35 +108,104 @@ async def test_a_nested_scope_keeps_its_claims_until_the_outer_one_ends(data_roo
     await running
 
 
-@pytest.mark.asyncio
-async def test_a_store_a_removal_overtook_is_stored_again(tmp_path):
-    path = tmp_path / "text_abc.txt"
-    writes = 0
+def _counting_store(path):
+    """A store that writes ``path`` and returns its location; counts its writes."""
+    writes = []
 
     async def store():
-        nonlocal writes
-        writes += 1
+        writes.append(path)
         path.write_text("content")
+        return str(path)
 
-    async with holding_stored_files():
-        before = removals_so_far()
-        await store()
-        # Another dataset's removal lands between the write and the claim.
-        path.unlink()
-        async with removal.removing_stored_files():
-            pass
-        await claim_stored_file(str(path), before, store)
-
-    assert path.read_text() == "content"
-    assert writes == 2
+    return store, writes
 
 
 @pytest.mark.asyncio
-async def test_without_a_removal_in_between_the_file_is_not_stored_again(tmp_path):
-    store_again = AsyncMock()
+async def test_a_store_its_location_was_removed_under_is_stored_again(tmp_path):
+    path = tmp_path / "text_abc.txt"
+    write, writes = _counting_store(path)
+
+    async def store_then_lose_it():
+        location = await write()
+        # Another dataset's removal takes the location before the claim.
+        async with removing_stored_files([location]) as taken:
+            assert taken == [location]
+            path.unlink()
+        return location
 
     async with holding_stored_files():
-        before = removals_so_far()
-        await claim_stored_file(str(tmp_path / "text_abc.txt"), before, store_again)
+        await store_claimed(store_then_lose_it)
 
-    store_again.assert_not_awaited()
+    assert path.read_text() == "content"
+    assert len(writes) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_removal_of_another_location_does_not_store_it_again(tmp_path):
+    path = tmp_path / "text_abc.txt"
+    write, writes = _counting_store(path)
+
+    async def store_while_another_file_is_removed():
+        async with removing_stored_files([str(tmp_path / "text_other.txt")]):
+            pass
+        return await write()
+
+    async with holding_stored_files():
+        await store_claimed(store_while_another_file_is_removed)
+
+    assert len(writes) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_claim_on_a_location_being_removed_waits_and_stores_again(tmp_path):
+    path = tmp_path / "text_abc.txt"
+    path.write_text("content")
+    write, writes = _counting_store(path)
+    taken = asyncio.Event()
+    delete = asyncio.Event()
+
+    async def removal_in_another_dataset():
+        async with removing_stored_files([str(path)]):
+            taken.set()
+            await delete.wait()
+            path.unlink()
+
+    removing = asyncio.create_task(removal_in_another_dataset())
+    await taken.wait()
+
+    async def add():
+        async with holding_stored_files():
+            await store_claimed(write)
+
+    adding = asyncio.create_task(add())
+    await asyncio.sleep(0.05)
+    assert not adding.done(), "The claim did not wait for the removal of its location"
+
+    delete.set()
+    await removing
+    await adding
+    # Written once before the claim and once after the removal it waited for.
+    assert path.read_text() == "content"
+    assert len(writes) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_removal_in_progress_does_not_hold_up_a_store_of_another_location(tmp_path):
+    taken = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def slow_removal():
+        async with removing_stored_files([str(tmp_path / "text_other.txt")]):
+            taken.set()
+            await finish.wait()  # its reference check and deletes
+
+    removing = asyncio.create_task(slow_removal())
+    await taken.wait()
+
+    write, writes = _counting_store(tmp_path / "text_abc.txt")
+    async with holding_stored_files():
+        await asyncio.wait_for(store_claimed(write), timeout=1)
+
+    assert len(writes) == 1
+    finish.set()
+    await removing
