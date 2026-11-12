@@ -29,6 +29,17 @@ It is also the reference for a future port. Read `docs/ARCHITECTURE.md` first.
 | `examples/guides/<p>.py`, `examples/python/integrations/*` | `connectors/<p>/examples/` with imports updated |
 | `docs/slack-history.md`, `docs/integration-sync-progress.md` | `connectors/<p>/docs/` |
 
+A provider whose integration module stays in cognee (Dropbox: its adapter, sync runner and
+OAuth routes are not ported) has no `cognee_host/` and no `cognee.integrations` entry point.
+`connector.py` still mirrors the adapter, and the host-free parts of its `sync.py` (the
+selection key and checks, the dataset name formula) go into a module next to `source.py`
+(`selection.py`).
+
+When the in-tree copy of a source stays in cognee, the package carries a parity test
+(`tests/unit/test_<p>_parity.py`) that runs both copies on the same fake provider and compares
+rows, stats, requests and state, skipped when the installed cognee has no in-tree copy. The
+connectors CI installs cognee from the checkout, so it runs there.
+
 Pure modules that a provider shares with no host (a client, response-shape helpers,
 `history_models.py`, `home.py` block builders, `response_url.py`) go next to `source.py`,
 not under `cognee_host/`, when they import nothing from cognee.
@@ -46,6 +57,7 @@ not under `cognee_host/`, when they import nothing from cognee.
 | `from cognee.tasks.ingestion.connectors.<p> import ...` | `from cognee_connector_<p>.source import ...` |
 | `from cognee.modules.integrations.google import ...` | `from cognee_connector_google import ...` |
 | `from cognee.modules.integrations.oauth_flow import ...` | `from cognee_connectors_core.oauth_state import ...` |
+| `from cognee.modules.integrations.outbound import client_session` / `client_session("<p>", timeout=...)` | `aiohttp.ClientSession(timeout=...)`. `client_session` also refuses the call when `ALLOW_HTTP_REQUESTS` disables outbound HTTP; that is a host policy (cognee's integrations router and sync runner also check it themselves), and a test that patched `client_session` patches `aiohttp.ClientSession` on the client module instead |
 | `if getattr(dlt_utils, "DOCUMENT_SYNC_VERSION", 0) < N: raise RuntimeError(...)` (the capability gate at the top of a source factory) | `dlt_conventions.require_document_sync_version(N, provider="<Provider>", feature="<what the host must read>")`, which reads the installed cognee's version; the package's own constant would compare the package with itself. A test that monkeypatched `module.dlt_utils.DOCUMENT_SYNC_VERSION` monkeypatches `cognee_connectors_core.dlt_conventions.host_document_sync_version` instead. |
 | `cognee.modules.integrations.{base,credentials,registry,crypto,models,connect,sync_progress,ingestion}` | unchanged: these are the host seam; allowed only under `cognee_host/` |
 
