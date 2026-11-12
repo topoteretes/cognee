@@ -39,7 +39,6 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.integrations import ingestion
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 from cognee.modules.integrations.slack.slack_settings import slack_settings
@@ -105,11 +104,6 @@ SYNC, RETIRE, UNAVAILABLE, ARCHIVED = "sync", "retire", "unavailable", "archived
 
 # Scheduled syncs in flight; the lifespan cancels and awaits them on shutdown.
 _scheduled: set[asyncio.Task] = set()
-# One Slack sync per process at a time, scheduled or manual: workspaces due together walk
-# one after another. Added when dlt staging was one lock for the process; staging is now
-# locked per dataset, so each workspace already stages apart. FIFO and usable from any
-# event loop.
-_sync_lock = LoopAgnosticLock()
 
 
 class SlackSyncError(RuntimeError):
@@ -348,19 +342,15 @@ async def sync_slack(credential: IntegrationCredential) -> None:
 async def _sync_source(
     credential: IntegrationCredential, counts: dict[str, int]
 ) -> tuple[str, dict[str, int]]:
-    """Wait for the other workspace's Slack sync, then sync with the connection as it is now.
+    """Sync with the connection as it is now.
 
-    ``run_sync`` has marked the sync running, so the tick and "Sync now" do not queue a
-    second one for this workspace while it waits.
+    ``run_sync`` keeps one sync per workspace and runs it once more after a changed
+    selection, with the credential it started with, so the selection is read afresh here.
+    Workspaces stage apart (one dlt dataset each), so syncs of different workspaces run side
+    by side.
     """
-    from cognee.modules.integrations.sync_progress import report_sync_progress
-
-    await report_sync_progress(state="waiting", reason="waiting_for_lock")
-    async with _sync_lock:
-        await report_sync_progress(state="running")
-        # The selection may have changed while this sync waited.
-        credential = await ingestion.require_active_credential(credential)
-        return await _sync_channels(credential, counts)
+    credential = await ingestion.require_active_credential(credential)
+    return await _sync_channels(credential, counts)
 
 
 async def _sync_channels(

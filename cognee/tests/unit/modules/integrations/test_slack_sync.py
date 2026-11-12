@@ -836,38 +836,21 @@ async def no_progress(provider, credential, **_kwargs):
 
 
 @pytest.mark.asyncio
-async def test_one_slack_sync_at_a_time_lets_an_unrelated_ingest_in_between():
-    """Each channel walk holds a FIFO dlt staging lock. Two workspaces due at once must not
-    both queue on one, or an ingest that arrives meanwhile waits behind both whole syncs."""
-    from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
-
-    # One lock both take, as when the workspaces and the ingest share a staging dataset.
-    _staging_lock = LoopAgnosticLock()
-
+async def test_two_workspaces_due_at_once_sync_side_by_side():
+    """Each workspace stages into its own dlt dataset, so nothing makes one wait for the
+    other. A queued one counted as running, and its owner's disconnect got a 409 until the
+    sync ahead finished (second review of #6683)."""
     first, second = make_credential("C1"), make_credential("C2")
     second.provider_account_id = "T0SECOND"
-    order: list[str] = []
+    both_syncing = asyncio.Event()
     syncing: set[str] = set()
-    overlaps: list[set[str]] = []
-    first_walking = asyncio.Event()
-    release_first = asyncio.Event()
 
     async def walk(credential, counts):
-        team = credential.provider_account_id
-        syncing.add(team)
-        if len(syncing) > 1:
-            overlaps.append(set(syncing))
-        async with _staging_lock:  # what remember() takes for each channel
-            order.append(team)
-            if credential is first:
-                first_walking.set()
-                await release_first.wait()
-        syncing.discard(team)
+        syncing.add(credential.provider_account_id)
+        if len(syncing) == 2:
+            both_syncing.set()
+        await both_syncing.wait()
         return sync_module.SYNC_STATUS_OK, counts
-
-    async def unrelated_ingest():
-        async with _staging_lock:
-            order.append("unrelated")
 
     with (
         patch.object(
@@ -876,22 +859,13 @@ async def test_one_slack_sync_at_a_time_lets_an_unrelated_ingest_in_between():
         patch.object(sync_module, "_sync_channels", walk),
         patch.object(ingestion, "require_active_credential", AsyncMock(side_effect=lambda c: c)),
         patch("cognee.modules.integrations.credentials.record_sync_result", AsyncMock()),
-        # No progress storage: without its I/O every step below is a plain loop turn.
         patch("cognee.modules.integrations.sync_progress.track_sync", no_progress),
         patch("cognee.modules.integrations.sync_progress.report_sync_progress", AsyncMock()),
     ):
         assert await sync_module.sync_due_workspaces() == 2
-        await asyncio.wait_for(first_walking.wait(), 2)
-        for _ in range(20):  # let the second workspace's task reach wherever it waits
-            await asyncio.sleep(0)
-        ingest = asyncio.create_task(unrelated_ingest())
-        for _ in range(20):
-            await asyncio.sleep(0)
-        release_first.set()
-        await asyncio.wait_for(asyncio.gather(ingest, *sync_module._scheduled), 2)
+        await asyncio.wait_for(asyncio.gather(*sync_module._scheduled), 2)
 
-    assert overlaps == [], "two Slack syncs ran at once"
-    assert order == [TEAM, "unrelated", "T0SECOND"]
+    assert syncing == {TEAM, "T0SECOND"}
 
 
 @pytest.mark.asyncio

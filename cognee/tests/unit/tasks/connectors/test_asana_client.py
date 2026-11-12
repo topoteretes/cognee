@@ -5,7 +5,7 @@
 Importing the connectors loads no HTTP client library, so ``requests`` is imported when the
 first request is made. The token never reaches an error message, a ``__cause__``, a repr or a log
 line, and a rate limit is never waited out: a 429 is an error at once, whatever ``Retry-After``
-says, because the walk holds the process-wide staging lock.
+says, because the walk holds its dataset's staging lock.
 """
 
 import logging

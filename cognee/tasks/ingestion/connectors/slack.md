@@ -128,9 +128,9 @@ A self-hosted server with the Slack app configured (`SLACK_CLIENT_ID` and friend
 - `POST /api/v1/integrations/slack/sync` starts a sync now. An in-process tick also syncs every
   connection with a selection every six hours, and ten minutes after a run that was cut short by
   the request budget, a rate limit or a Slack outage; `SLACK_HISTORY_SYNC_ENABLED=false` turns it
-  off. Each due workspace starts at once in its own task, but only one Slack sync, scheduled or
-  "Sync now", runs per process at a time; the others wait, in order, reported as
-  `waiting_for_lock`, and read their selection afresh when their turn comes.
+  off. Each due workspace starts at once in its own task, and workspaces sync side by side:
+  each stages into its own dataset. One workspace runs one sync at a time; a selection saved
+  meanwhile runs it once more, reading the selection afresh.
 - Each channel takes a fresh token when its walk starts, so a rotating token (12 hours) stays
   valid through a long multi-channel sync.
 - All channels of a workspace go into one dataset, `slack_account_<hash of the team id>`.
@@ -438,11 +438,12 @@ naming who can. A thread's first message taken out leaves its replies in memory.
   stage meanwhile), and this connector waits out short rate limits, so the budget bounds how long
   one run blocks other ingestion into that dataset. The other connectors (Asana, Apollo, Linear) never sleep and
   have no deadline, so there is no sibling value; 600 seconds is the interval after which the
-  integration resumes a cut run. The bound per process: one Slack sync runs at a time and each of
-  its channels is one run, so an unrelated ingest (another connector, an `add()`) waits for at
-  most the channel run in progress, 600 seconds plus that one in-flight request, however many
-  workspaces are waiting. A waiting workspace waits for the whole sync ahead of it, up to one
-  run per selected channel of that workspace.
+  integration resumes a cut run. An ingest into another dataset (another connector, an `add()`)
+  does not wait on its staging lock; one into the workspace's dataset waits for at most the
+  channel run in progress, 600 seconds plus that one in-flight request. dlt walks run on a pool
+  of their own, as many threads as datasets the process works on at once
+  (`DATASET_QUEUE_MAX_CONCURRENT`), so they never take the threads the event loop needs; past
+  that many walks at once, the next one waits for a thread.
 - **Rate limits.** A `429` (or `ratelimited`) asking for at most 60 seconds
   (`_MAX_RETRY_AFTER_SECONDS`, the minute Tier 1 asks for) is waited out and retried, up to four
   attempts, unless the wait would run past the run's own 600-second deadline. A longer

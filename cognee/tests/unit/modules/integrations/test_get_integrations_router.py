@@ -1016,9 +1016,9 @@ def no_pause(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_staging_drop(monkeypatch):
-    """A real drop takes the process-wide staging lock and deletes files under dlt's
-    pipelines directory; a drop that outlives the test client's loop would keep that lock
-    for every later dlt test. Tests that are about the drop pass their own."""
+    """A real drop takes its dataset's staging lock and the shared pipeline's, and deletes
+    files under dlt's pipelines directory; a drop that outlives the test client's loop would
+    keep those locks for every later dlt test. Tests that are about the drop pass their own."""
     monkeypatch.setattr(_ingest_dlt_module, "drop_dlt_dataset", AsyncMock())
 
 

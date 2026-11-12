@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import hashlib
 import json
 import os
@@ -6,7 +7,9 @@ import re
 import threading
 from collections import Counter
 from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from typing import Any
 
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -58,20 +61,80 @@ def _staging_lock(key: str) -> LoopAgnosticLock:
 
 @asynccontextmanager
 async def _staging(pipeline_name: str, dataset_name: str) -> AsyncIterator[None]:
-    """Exclusive use of one dlt pipeline's working directory and one staging dataset.
+    """Exclusive use of one staging dataset and one dlt pipeline's working directory.
 
-    A pipeline's working directory is not safe for concurrent runs: normalize's package
-    cleanup deletes folders under the other run's feet. A staging dataset is one database
-    every pipeline of that dataset loads into, and that a drop removes. Runs on other
-    pipelines and datasets go on meanwhile, so a connector that waits on its provider
-    (Slack's rate limits) holds up only its own dataset. Taken pipeline first, then dataset,
-    by every caller, so two of them never wait on each other.
+    A staging dataset is one database every pipeline of that dataset loads into, and that
+    a drop removes. A pipeline's working directory is not safe for concurrent runs:
+    normalize's package cleanup deletes folders under the other run's feet. Runs on other
+    datasets and pipelines go on meanwhile, so a connector that waits on its provider
+    (Slack's rate limits) holds up only its own dataset. Taken dataset first, then pipeline,
+    by every caller: waiting for a busy dataset holds no pipeline, so a drop queued behind a
+    run never keeps the pipeline every CSV and database source shares.
     """
     async with (
-        _staging_lock(f"pipeline:{pipeline_name}"),
         _staging_lock(f"dataset:{dataset_name}"),
+        _staging_lock(f"pipeline:{pipeline_name}"),
     ):
         yield
+
+
+# The threads dlt walks run on. A walk holds a thread for its whole length and bridges back
+# to the event loop on every row (``extraction_checkpoint``), where the coroutine may need
+# the loop's default executor (``getaddrinfo`` for a new Postgres connection). On the
+# default executor, walks on enough datasets took every thread that coroutine needs and the
+# process wedged; on threads of their own they never can. A walk works on one dataset, so
+# the pool is as large as the number of datasets this process works on at once
+# (``DATASET_QUEUE_MAX_CONCURRENT``). A walk waiting for a thread holds only its own
+# dataset's and pipeline's staging locks, which nothing else but work on them needs.
+_walk_pool: ThreadPoolExecutor | None = None
+_walk_pool_mutex = threading.Lock()
+
+
+def _walk_executor() -> ThreadPoolExecutor:
+    global _walk_pool
+    with _walk_pool_mutex:
+        if _walk_pool is None:
+            from cognee.infrastructure.databases.dataset_queue.queue import (
+                get_dataset_queue_settings,
+            )
+
+            size = max(1, int(get_dataset_queue_settings().max_concurrent))
+            _walk_pool = ThreadPoolExecutor(max_workers=size, thread_name_prefix="cognee-dlt-walk")
+            logger.info("dlt walks run on a pool of %s threads", size)
+        return _walk_pool
+
+
+def reset_walk_pool() -> None:
+    """Drop the walk pool, so the next walk builds one from the current settings. Walks in
+    flight finish on the old pool."""
+    global _walk_pool
+    with _walk_pool_mutex:
+        pool, _walk_pool = _walk_pool, None
+    if pool is not None:
+        pool.shutdown(wait=False)
+
+
+async def _run_walk(pipeline, dlt_source, run_kwargs: dict) -> Any:
+    """``pipeline.run`` on a walk thread, with the caller's context, as ``to_thread`` gives.
+
+    A thread cannot be stopped, so a cancelled caller waits for a walk that already started
+    before it lets the cancellation through: the staging locks around this call then live as
+    long as the walk does, and no second run starts on its pipeline meanwhile. A walk still
+    waiting for a thread is dropped at once.
+    """
+    context = contextvars.copy_context()
+    walk = _walk_executor().submit(context.run, pipeline.run, dlt_source, **run_kwargs)
+    try:
+        return await asyncio.shield(asyncio.wrap_future(walk))
+    except asyncio.CancelledError:
+        if not walk.cancel():
+            finished = asyncio.wrap_future(walk)
+            while not walk.done():
+                try:
+                    await asyncio.wait({finished})
+                except asyncio.CancelledError:
+                    pass  # cancelled again: the walk still has to end first
+        raise
 
 
 # Strict identifier pattern — only allow alphanumerics, underscores, dots, and hyphens
@@ -175,8 +238,8 @@ async def ingest_dlt_source(
         )
         try:
             # dlt's pipeline.run() is synchronous and potentially long-running;
-            # run it in a thread to avoid blocking the async event loop.
-            load_info = await asyncio.to_thread(pipeline.run, dlt_source, **run_kwargs)
+            # run it on a walk thread to avoid blocking the async event loop.
+            load_info = await _run_walk(pipeline, dlt_source, run_kwargs)
         except Exception as e:
             raise DLTIngestionError(
                 message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
