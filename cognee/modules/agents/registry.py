@@ -301,3 +301,86 @@ async def _delete_persisted_agent_connections(user_id: UUID) -> None:
 def clear_registered_agent_connections() -> None:
     with _registry_lock:
         _registered_agent_connections.clear()
+
+
+async def invalidate_agent_connections_for_dataset(
+    dataset_id: UUID,
+    session_ids: Iterable[str] = (),
+    user_ids: Iterable[UUID] = (),
+) -> int:
+    """Unbind a deleted dataset from registered and persisted agent connections,
+    and mark connections bound to its invalidated sessions (or left with no
+    datasets) as inactive."""
+    ds_id_str = str(dataset_id)
+    session_id_set = {s for s in session_ids if s}
+    affected_users: set[UUID] = {
+         UUID(str(u)) if not isinstance(u, UUID) else u for u in user_ids if u is not None
+    }
+    invalidated = 0
+
+    with _registry_lock:
+        for conn_id, conn in list(_registered_agent_connections.items()):
+            had_ds = any(d.id == ds_id_str for d in conn.datasets)
+            had_session = bool(conn.session_id and conn.session_id in session_id_set)
+            if not had_ds and not had_session:
+                continue
+            remaining_ds = [d for d in conn.datasets if d.id != ds_id_str]
+            new_status = (
+                "inactive"
+                if (had_session or (had_ds and not remaining_ds))
+                else conn.status
+            )
+            _registered_agent_connections[conn_id] = conn.model_copy(
+                update={"datasets": remaining_ds, "status": new_status}
+            )
+            if conn.user_id is not None:
+                affected_users.add(conn.user_id)
+            invalidated += 1
+
+    if affected_users:
+        from cognee.modules.users.methods.get_principal_configuration import (
+            get_principal_all_configuration,
+        )
+        from cognee.modules.users.methods.store_principal_configuration import (
+            store_principal_configuration,
+        )
+
+        for uid in affected_users:
+            try:
+                all_configs = await get_principal_all_configuration(uid)
+                for config in all_configs:
+                    if config.get("name") != AGENT_CONFIG_NAME:
+                        continue
+                    existing_config = config.get("configuration", {})
+                    agents = existing_config.get("agents", {})
+                    changed = False
+                    for cid, cdata in list(agents.items()):
+                        if not isinstance(cdata, dict):
+                            continue
+                        ds_list = cdata.get("datasets") or []
+                        had_ds = any(isinstance(d, dict) and d.get("id") == ds_id_str for d in ds_list)
+                        had_sess = bool(cdata.get("session_id") in session_id_set)
+                        if not had_ds and not had_sess:
+                            continue
+                        rem_ds = [
+                            d for d in ds_list if not (isinstance(d, dict) and d.get("id") == ds_id_str)
+                        ]
+                        cdata["datasets"] = rem_ds
+                        if had_sess or (had_ds and not rem_ds):
+                            cdata["status"] = "inactive"
+                        changed = True
+                    if changed:
+                        await store_principal_configuration(
+                            principal_id=uid,
+                            name=AGENT_CONFIG_NAME,
+                            configuration={**existing_config, "agents": agents},
+                        )
+            except Exception as error:
+                logger.debug(
+                    "Persisted agent connection invalidation skipped for user %s: %s",
+                    uid,
+                    error,
+                    exc_info=True,
+                )
+
+    return invalidated
