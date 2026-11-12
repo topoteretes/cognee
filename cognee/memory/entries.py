@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
+from cognee.shared.event_time import normalize_event_time
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("memory.entries")
@@ -69,6 +70,29 @@ class QAEntry(SessionNodeSetEntry):
     feedback_text: str | None = None
     feedback_score: int | None = None
     used_graph_element_ids: dict | None = None
+    time: str | None = Field(
+        default=None,
+        examples=["2026-11-05T09:30:12+00:00"],
+        description=(
+            "When the turn ended, as an ISO-8601 timestamp with a timezone, from the "
+            "client's clock. Stored as the entry's time; omitted, the store time is used."
+        ),
+    )
+
+    prompt_time: str | None = Field(
+        default=None,
+        examples=["2026-11-05T09:28:40+00:00"],
+        description=(
+            "When the user submitted the prompt, as an ISO-8601 timestamp with a timezone, "
+            "from the client's clock. With time, it bounds the turn the coding distillation "
+            "pairs traces to."
+        ),
+    )
+
+    @field_validator("time", "prompt_time")
+    @classmethod
+    def time_is_an_aware_timestamp(cls, value: str | None) -> str | None:
+        return normalize_event_time(value) if value is not None else None
 
 
 class TraceEntry(SessionNodeSetEntry):
@@ -91,6 +115,19 @@ class TraceEntry(SessionNodeSetEntry):
     memory_context: str = ""
     error_message: str = ""
     generate_feedback_with_llm: bool = False
+    time: str | None = Field(
+        default=None,
+        examples=["2026-11-05T09:29:58+00:00"],
+        description=(
+            "When the tool call finished, as an ISO-8601 timestamp with a timezone, from "
+            "the client's clock. Stored as the step's time; omitted, the store time is used."
+        ),
+    )
+
+    @field_validator("time")
+    @classmethod
+    def time_is_an_aware_timestamp(cls, value: str | None) -> str | None:
+        return normalize_event_time(value) if value is not None else None
 
 
 class FeedbackEntry(BaseModel):

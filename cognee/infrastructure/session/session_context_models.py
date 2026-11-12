@@ -374,6 +374,48 @@ class AgentContextExtraction(BaseModel):
         return normalized
 
 
+class CodingCandidateLesson(BaseModel):
+    """One lesson of a coding extraction with the turn it was learned in (SDK-1335)."""
+
+    turn: int = Field(
+        description=(
+            "The number of the turn the lesson was learned in, as the TRACES and FINAL "
+            "MESSAGE sections number them (1-based)."
+        ),
+    )
+    lesson: AgentCandidateContextUpdateVariant
+
+
+class CodingAgentContextExtraction(BaseModel):
+    """LLM output of the coding extraction: agent lessons, each tied to its turn.
+
+    A separate model so the default extraction's schema (``AgentContextExtraction``)
+    does not change with the mode.
+    """
+
+    lessons: list[CodingCandidateLesson] = Field(
+        default_factory=list,
+        description=(
+            "Reusable agent/tool lessons drawn from the traces, each with the number of "
+            "the turn it comes from."
+        ),
+    )
+
+    @field_validator("lessons", mode="before")
+    @classmethod
+    def normalize_lessons(cls, value):
+        if not isinstance(value, list):
+            return []
+        normalized = []
+        for item in value:
+            if isinstance(item, dict) and isinstance(item.get("lesson"), dict):
+                item = dict(item)
+                (lesson,) = AgentContextExtraction.normalize_lessons([item["lesson"]])
+                item["lesson"] = lesson
+            normalized.append(item)
+        return normalized
+
+
 class SessionContextEntry(BaseModel):
     """A stored active session-context lesson, tagged by profile (qa or agent)."""
 
@@ -386,6 +428,9 @@ class SessionContextEntry(BaseModel):
     created_at: str
     source_feedback_ids: list[str] = Field(default_factory=list)
     source_trace_ids: list[str] = Field(default_factory=list)
+    # The Q&A rows (turns) a coding lesson was learned in; the distillation judges
+    # the lesson against those turns' requests and answers.
+    source_qa_ids: list[str] = Field(default_factory=list)
     helpful_count: int = 0
     harmful_count: int = 0
     priority: int = 0
@@ -461,7 +506,7 @@ class SessionContextEntry(BaseModel):
             raise ValueError("count must be >= 0")
         return v
 
-    @field_validator("source_feedback_ids", "source_trace_ids")
+    @field_validator("source_feedback_ids", "source_trace_ids", "source_qa_ids")
     @classmethod
     def source_id_lists_only_strings(cls, v: list[str]) -> list[str]:
         if not isinstance(v, list):

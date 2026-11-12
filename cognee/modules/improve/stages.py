@@ -298,8 +298,12 @@ class ExtractAgentContextStage(BaseStage):
     Delegates to ``agent_context_extraction.extract_pending_agent_context`` per
     session, sharing the watermark mid-session extraction uses.
     ``min_new_traces=1`` flushes whatever is still unprocessed before
-    distillation. Fail-open per session: one failing session never blocks the
-    others; the stage reports ``errored`` when any session failed.
+    distillation. With ``DISTILLATION_MODE=coding`` it delegates to
+    ``coding_unit_extraction.extract_coding_unit_context`` instead: the whole
+    pending unit of work, once, with tool inputs and the final answer. That
+    path needs no per-turn feedback analysis, so ``AUTO_FEEDBACK`` does not gate
+    it. Fail-open per session: one failing session never blocks the others;
+    the stage reports ``errored`` when any session failed.
     """
 
     name = "extract_agent_context"
@@ -311,7 +315,7 @@ class ExtractAgentContextStage(BaseStage):
         session_manager = get_session_manager()
         if not session_manager.is_available:
             return REASON_SESSION_MANAGER_UNAVAILABLE
-        if not session_manager.is_auto_feedback_enabled():
+        if not inputs.config.coding_distillation and not session_manager.is_auto_feedback_enabled():
             return REASON_AUTO_FEEDBACK_DISABLED
         if not llm_available():
             return REASON_NO_LLM_CONFIGURED
@@ -320,6 +324,9 @@ class ExtractAgentContextStage(BaseStage):
     async def run(self, inputs: ImproveRunInputs) -> StageResult:
         from cognee.infrastructure.session.agent_context_extraction import (
             extract_pending_agent_context,
+        )
+        from cognee.infrastructure.session.coding_unit_extraction import (
+            extract_coding_unit_context,
         )
         from cognee.infrastructure.session.get_session_manager import get_session_manager
 
@@ -330,12 +337,20 @@ class ExtractAgentContextStage(BaseStage):
         last_error: BaseException | None = None
         for session_id in inputs.session_ids:
             try:
-                ids = await extract_pending_agent_context(
-                    session_manager=session_manager,
-                    user_id=user_id,
-                    session_id=session_id,
-                    min_new_traces=1,
-                )
+                if inputs.config.coding_distillation:
+                    ids = await extract_coding_unit_context(
+                        session_manager=session_manager,
+                        user_id=user_id,
+                        session_id=session_id,
+                        dataset=inputs.dataset,
+                    )
+                else:
+                    ids = await extract_pending_agent_context(
+                        session_manager=session_manager,
+                        user_id=user_id,
+                        session_id=session_id,
+                        min_new_traces=1,
+                    )
                 touched += len(ids)
             except Exception as e:
                 failed += 1

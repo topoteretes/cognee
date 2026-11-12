@@ -150,11 +150,15 @@ class SessionManager:
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
         used_session_context_ids: list | None = None,
+        time: str | None = None,
+        prompt_time: str | None = None,
     ) -> str | None:
         """
         Add a QA to the session. Returns qa_id, or None if cache unavailable.
         used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
         used_session_context_ids: Optional list of session-context entry ids served to this answer.
+        time: The turn's end as the client stamped it (ISO-8601, aware); None stamps the store time.
+        prompt_time: The turn's start (the prompt's submission) as the client stamped it, or None.
         """
         session_id = self.resolve_session_id(session_id)
         self._validate_session_params(user_id=user_id, session_id=session_id)
@@ -193,6 +197,8 @@ class SessionManager:
                 feedback_score=feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
                 used_session_context_ids=used_session_context_ids,
+                time=time,
+                prompt_time=prompt_time,
             )
             await index_session_qa(
                 user_id=user_id,
@@ -217,9 +223,13 @@ class SessionManager:
         method_params: dict | None = None,
         method_return_value: Any = None,
         error_message: str = "",
+        time: str | None = None,
     ) -> str | None:
         """
         Append one agent trace step to the session trace payload.
+
+        ``time`` is the step's end as the client stamped it (ISO-8601, aware); None
+        stamps the store time. The coding distillation pairs steps to turns by it.
 
         ``generate_feedback_with_llm`` asks for a one-line LLM summary of the step's
         return value as its ``session_feedback``. That call is made only when automatic
@@ -263,6 +273,7 @@ class SessionManager:
             method_return_value=method_return_value,
             error_message=error_message,
             session_feedback=session_feedback,
+            time=time,
         )
         await record_session_activity(
             user_id, session_id, dataset_id=self.dataset_id, errored=status == "error"
@@ -293,6 +304,13 @@ class SessionManager:
         failure escape — the trace row is already saved by the time this runs.
         """
         if not self.is_auto_feedback_enabled():
+            return
+        # Coding distillation (DISTILLATION_MODE=coding) extracts once per unit of
+        # work from improve(), with tool inputs and the final answer: the per-trace
+        # and per-window passes would only produce the vague lessons it replaces.
+        from cognee.modules.improve.config import coding_distillation_enabled
+
+        if coding_distillation_enabled():
             return
         try:
             from cognee.infrastructure.session.agent_context_extraction import (
