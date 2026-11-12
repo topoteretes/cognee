@@ -60,9 +60,14 @@ jobs:
       - name: Analyze and propose tickets
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        # digest.md is text typed by anonymous docs users: Claude gets no shell
+        # and no web access, and its file tools stay inside the checkout.
         run: |
           claude -p "$(cat scripts/weekly_tickets/prompt.md)" \
-            --dangerously-skip-permissions \
+            --restricted \
+            --tools "Read,Grep,Glob,Write" \
+            --allowedTools "Read,Grep,Glob,Write" \
+            --permission-prompts none \
             --output-format text
       - name: Shape issue section (tables, length cap)
         env:
@@ -96,7 +101,8 @@ jobs:
       - name: Install Claude Code and cognee
         run: |
           npm install -g @anthropic-ai/claude-code
-          pip install cognee cognee-cli
+          # cognee-cli is a command of the cognee package, not a package of its own.
+          pip install cognee
       - name: Install the cognee memory plugin
         # Adjust the marketplace/plugin name if it differs in your setup.
         run: |
@@ -111,6 +117,8 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        # digest.md is text typed by anonymous docs users: Claude gets no shell
+        # and no web access, and its file tools stay inside the checkout.
         run: |
           {
             cat scripts/weekly_tickets/prompt.md
@@ -124,7 +132,10 @@ jobs:
             echo "answer."
           } > /tmp/prompt-cognee.md
           claude -p "$(cat /tmp/prompt-cognee.md)" \
-            --dangerously-skip-permissions \
+            --restricted \
+            --tools "Read,Grep,Glob,Write" \
+            --allowedTools "Read,Grep,Glob,Write" \
+            --permission-prompts none \
             --output-format text
       - name: Shape issue section (tables, length cap)
         env:
