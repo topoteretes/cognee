@@ -208,3 +208,97 @@ async def test_a_revoke_that_names_no_revoker_records_it_as_unknown(credential_d
 
     ended = await store.get_ended_connection(owner, "notion")
     assert ended.provider_account_id == "ws-1" and ended.revoked_by is None
+
+
+@pytest.mark.asyncio
+async def test_a_new_owner_does_not_inherit_the_previous_owners_sync_history(credential_db):
+    previous, new = uuid4(), uuid4()
+    original = await connect(previous, "ws-1", "Acme")
+    await store.record_sync_result(original, status="completed", counts={"processed": 812})
+    await store.revoke_credential_by_account("notion", "ws-1", revoked_by=store.REVOKED_BY_PROVIDER)
+
+    taken_over = await connect(new, "ws-1", "Acme")
+
+    assert taken_over.user_id == new
+    assert taken_over.sync_status is None
+    assert taken_over.last_synced_at is None
+    assert "last_sync_counts" not in (taken_over.provider_metadata or {})
+
+
+@pytest.mark.asyncio
+async def test_the_same_owner_reconnecting_keeps_the_sync_history(credential_db):
+    owner = uuid4()
+    original = await connect(owner, "ws-1", "Acme")
+    await store.record_sync_result(original, status="completed", counts={"processed": 812})
+    await store.revoke_credential_by_account("notion", "ws-1", revoked_by=store.REVOKED_BY_OWNER)
+
+    reconnected = await connect(owner, "ws-1", "Acme")
+
+    assert reconnected.sync_status == "completed"
+    assert reconnected.last_synced_at is not None
+    assert reconnected.provider_metadata["last_sync_counts"]["processed"] == 812
+
+
+@pytest.mark.asyncio
+async def test_overlapping_metadata_writes_are_all_kept(tmp_path, monkeypatch):
+    """Every writer of ``provider_metadata`` read the row, merged in Python and wrote
+    the whole column back, so of writes that overlapped only the last one stayed. A SQLite
+    file gives each session its own connection, as a deployment does."""
+    import base64
+    from types import SimpleNamespace
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    monkeypatch.setenv("INTEGRATION_CREDENTIALS_KEY", base64.b64encode(b"0" * 32).decode())
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'credentials.db'}")
+    async with engine.begin() as conn:
+        await conn.run_sync(IntegrationCredential.__table__.create)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(
+        store, "get_relational_engine", lambda: SimpleNamespace(get_async_session=sessions)
+    )
+    try:
+        await connect(uuid4(), "ws-1", "Acme")
+
+        await asyncio.gather(
+            *(store.update_provider_metadata("notion", "ws-1", {f"key_{n}": n}) for n in range(8)),
+            *(
+                store.change_provider_metadata(
+                    "notion",
+                    "ws-1",
+                    lambda current, n=n: {"marks": [*current.get("marks", []), n]},
+                )
+                for n in range(8)
+            ),
+        )
+
+        stored = (await store.get_credential_by_account("notion", "ws-1")).provider_metadata
+        assert {f"key_{n}" for n in range(8)} <= stored.keys()
+        assert sorted(stored["marks"]) == list(range(8))
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_new_owner_starts_with_none_of_the_previous_owners_metadata(credential_db):
+    """Whatever a provider kept for the previous owner (Linear: the backfill marker, the
+    resume time) describes their syncs, not the new owner's."""
+    previous, new = uuid4(), uuid4()
+    await store.upsert_credential(
+        provider="notion",
+        provider_account_id="ws-1",
+        user_id=previous,
+        token_payload={"access_token": "token-ws-1"},
+        provider_metadata={"dlt_seeded": True, "resume_needed_at": "2026-11-01T00:00:00+00:00"},
+    )
+    await store.revoke_credential_by_account("notion", "ws-1", revoked_by=store.REVOKED_BY_PROVIDER)
+
+    taken_over = await store.upsert_credential(
+        provider="notion",
+        provider_account_id="ws-1",
+        user_id=new,
+        token_payload={"access_token": "token-ws-1"},
+        provider_metadata={"workspace_name": "Acme"},
+    )
+
+    assert taken_over.provider_metadata == {"workspace_name": "Acme"}

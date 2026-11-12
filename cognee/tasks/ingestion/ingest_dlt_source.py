@@ -15,6 +15,7 @@ from cognee.infrastructure.databases.postgres.admin import (
 from cognee.infrastructure.databases.relational.config import get_relational_config
 from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.data.models import Data
+from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.dlt_row_data import DltRowData, DltRows
 from cognee.tasks.ingestion.dlt_utils import (
@@ -44,8 +45,27 @@ logger = get_logger("ingest_dlt_source")
 # Loop-agnostic: module-level, so it outlives any single event loop.
 _staging_lock = LoopAgnosticLock()
 
+# Marks a resource whose rows already pass through the NUL step, so staging it again does not
+# add the step a second time.
+_NUL_STRIPPED_ATTR = "cognee_nul_stripped"
+
 # Strict identifier pattern — only allow alphanumerics, underscores, dots, and hyphens
 _SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
+
+
+def strip_nul_from_rows(dlt_source) -> None:
+    """Remove NUL characters from every row a document source yields, before dlt stages it.
+
+    PostgreSQL rejects NUL in text, so one document with it fails the load of its whole dlt
+    package, and every retry of that pending package. Every document connector emits the same
+    row contract and is staged here, so the rule lives here once, and it is the one the graph
+    and vector adapters use: the character is removed, not replaced.
+    """
+    resources = getattr(dlt_source, "resources", None)
+    for resource in resources.values() if resources is not None else [dlt_source]:
+        if not getattr(resource, _NUL_STRIPPED_ATTR, False):
+            resource.add_map(sanitize_relational_payload)
+            setattr(resource, _NUL_STRIPPED_ATTR, True)
 
 
 VALID_WRITE_DISPOSITIONS = ("merge", "append", "replace")
@@ -133,6 +153,7 @@ async def ingest_dlt_source(
         # stored as json on the row; without the hint dlt normalizes it into a
         # child table or flattened columns.
         run_kwargs["columns"] = DOCUMENT_COLUMN_HINTS
+        strip_nul_from_rows(dlt_source)
 
     # Every staging run shares one dlt pipeline name, and dlt's working
     # directory for a pipeline is NOT safe for concurrent runs: normalize's
@@ -771,7 +792,15 @@ def _to_safe_ident(s: str) -> str:
     s = "".join(_SAFE_IDENT_CHARS.get(ch, "_") for ch in s)
     if not s:
         raise InvalidDLTArgumentError(message="Invalid dataset name given for dlt ingestion.")
-    if s[0].isdigit():
+    # dlt uses this name as its staging dataset, which on Postgres is a schema,
+    # and Postgres reserves the ``pg_`` prefix for system schemas. A merge load
+    # also writes to a ``<name>_staging`` schema, so the bare name ``pg`` is
+    # reserved too. ``information_schema`` exists in every Postgres database and
+    # belongs to the bootstrap superuser: dlt sees the schema and creates the
+    # dataset's tables inside it, which a non-superuser role is denied. Such a
+    # name is prefixed like one that starts with a digit, on every destination,
+    # so a dataset stages under one name whatever the relational provider.
+    if s[0].isdigit() or s == "pg" or s.startswith("pg_") or s == "information_schema":
         s = f"d_{s}"
     return s[:63]
 
