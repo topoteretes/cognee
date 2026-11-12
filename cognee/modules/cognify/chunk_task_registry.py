@@ -1,89 +1,98 @@
-"""Tasks plugins add right after chunking (CLO-397).
+"""Functions plugins run on chunks right after chunking (CLO-397).
 
 A plugin that must see document chunks before anything indexes, extracts or
-stores them (a gate that screens chunk text, a tagger) registers a factory
-here. Every task list that chunks documents runs the tasks the factories
-return right after its chunking task, in registration order: cognify's LLM
-list, its GLiNER demo list and the indexing pipeline's list, which build that
-step with ``build_chunking_tasks`` (``chunking_tasks.py``), and the dlt
-route's list, where each row of a relational source arrives as one
-``DltRow`` chunk (a ``DocumentChunk`` subclass) and no text is cut. With
-nothing registered the lists are unchanged.
+stores them (a gate that screens chunk text, a tagger) registers a function
+here::
 
-Writing the task (runner semantics: ``cognee/modules/pipelines/__init__.py``):
+    async def screen_chunks(chunks, ctx):
+        return [chunk for chunk in chunks if allowed(chunk)]
 
-* It receives a list of chunks and returns the chunks the next task gets.
-  A task's ``batch_size`` batches the *previous* task's output, so yours sets
-  how many chunks the chunker hands it per call, and a coroutine's return
-  value reaches the next task as one batch: set it to the ``chunks_per_batch``
-  the factory receives, or the tasks after it run on smaller batches.
-* ``enriches=True`` when it only changes chunks in place (return ``None`` and
-  the input passes on). To drop chunks, return the ones to keep, and ``Drop``
-  (``cognee.pipelines``) when none are left: extraction refuses an empty list.
-* ``needs_llm=False`` unless it calls the LLM. The default is True, and one
-  such task makes cognify check the LLM connection before it runs, which
-  fails an install with no LLM key (the GLiNER route).
-* A ``ctx`` parameter receives the ``PipelineContext`` (user, dataset,
-  ``pipeline_name``). The registry is process-wide, so every dataset's lists
-  carry the task: a choice per dataset is made in the task, from ``ctx``.
+    register_chunk_task("memory_gate", screen_chunks)
+
+It receives a batch of chunks and the run's ``PipelineContext`` (user, dataset,
+``pipeline_name``) and returns the chunks to keep. Registered functions run in
+registration order, wherever cognee has fresh chunks: in every task list that
+chunks documents (cognify's LLM list, its GLiNER demo list, the indexing
+pipeline's list and the dlt route's list, whose chunks are source rows), as one
+task right after the chunking task, and in ``update()``'s chunk-level path, on
+the chunks an edit produced. With nothing registered the lists are unchanged.
+
+* Return the chunks to keep, also when the function only changes them in
+  place: returning ``None`` raises.
+* The registry is process-wide, so every dataset's chunks pass through: a
+  choice per dataset is made in the function, from ``ctx``.
+* ``needs_llm=True`` when the function calls the LLM, so cognify checks the LLM
+  connection before the run. The default keeps an install with no LLM key (the
+  GLiNER route) LLM-free.
 * cognify runs the indexing pipeline (unless ``EARLY_CHUNK_INDEXING`` is off)
-  and then the cognify pipeline over the same chunks, and both run the task.
-  Give a chunk the same answer in both runs: a chunk the indexing run stored
-  and the cognify run dropped stays searchable, without its entities.
+  and then the cognify pipeline over the same chunks, and both run the
+  functions. Give a chunk the same answer in both runs: a chunk the indexing
+  run stored and the cognify run dropped stays searchable, without its entities.
+* A document that lost a chunk no longer matches its stored text, so the next
+  ``update()`` of it rebuilds the whole document (``chunks_not_tiling``).
 
 Code files and code repositories are not chunked and run none of this, and
 neither does a pipeline that builds chunks without chunking a document (the
-code docs memify pipeline). ``update()``'s chunk-level path runs no task list,
-so ``update()`` rebuilds the document through ``cognify()`` while the
-factories return tasks: return an empty list while the plugin is switched off
-to keep that path.
+code docs memify pipeline).
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from cognee.pipelines.types import Drop
+
 if TYPE_CHECKING:
-    from cognee.modules.pipelines.tasks.task import Task
+    from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+    from cognee.modules.pipelines.models import PipelineContext
 
-# ``def factory(*, chunks_per_batch: int, **kwargs) -> Task | list[Task]``
-ChunkTaskFactory = Callable[..., "Task | list[Task]"]
-
-_chunk_task_factories: dict[str, ChunkTaskFactory] = {}
+ChunkTask = Callable[["list[DocumentChunk]", "PipelineContext"], Awaitable["list[DocumentChunk]"]]
 
 
-def register_chunk_task(name: str, factory: ChunkTaskFactory) -> None:
-    """Run the tasks ``factory`` builds on the chunks, right after chunking.
+@dataclass(frozen=True)
+class RegisteredChunkTask:
+    run: ChunkTask
+    needs_llm: bool
 
-    ``factory`` is called with keyword arguments each time cognee builds a
-    task list that chunks documents (and by ``update()``, to learn whether any
-    task would run), and returns a ``Task`` or a list of them (empty to add
-    nothing). Accept ``**kwargs``: more may follow. Passed today:
 
-    * ``chunks_per_batch``: the batch size of the list's later tasks; give it
-      to your task as ``batch_size``.
+_chunk_tasks: dict[str, RegisteredChunkTask] = {}
 
-    Tasks run in registration order. Registering a name again replaces its
-    factory and keeps its place; ``unregister_chunk_task`` removes it::
 
-        def gate_tasks(*, chunks_per_batch, **kwargs):
-            return Task(screen_chunks, batch_size=chunks_per_batch, needs_llm=False)
+def register_chunk_task(name: str, task: ChunkTask, needs_llm: bool = False) -> None:
+    """Run ``task`` on every batch of fresh chunks, right after chunking.
 
-        register_chunk_task("memory_gate", gate_tasks)
+    Registering a name again replaces its function and keeps its place;
+    ``unregister_chunk_task`` removes it.
     """
-    if not callable(factory):
-        raise TypeError(
-            f"register_chunk_task() takes a callable factory, got {type(factory).__name__}"
-        )
-    _chunk_task_factories[name] = factory
+    if not callable(task):
+        raise TypeError(f"register_chunk_task() takes an async function, got {type(task).__name__}")
+    _chunk_tasks[name] = RegisteredChunkTask(task, needs_llm)
 
 
-def unregister_chunk_task(name: str) -> ChunkTaskFactory | None:
-    """Remove the factory registered under ``name``; return it, or None if there was none."""
-    return _chunk_task_factories.pop(name, None)
+def unregister_chunk_task(name: str) -> ChunkTask | None:
+    """Remove the function registered under ``name``; return it, or None if there was none."""
+    registered = _chunk_tasks.pop(name, None)
+    return registered.run if registered else None
 
 
-def chunk_task_factories() -> list[tuple[str, ChunkTaskFactory]]:
-    """The registered ``(name, factory)`` pairs in registration order, as a snapshot."""
-    return list(_chunk_task_factories.items())
+def registered_chunk_tasks() -> list[RegisteredChunkTask]:
+    """The registered functions in registration order, as a snapshot."""
+    return list(_chunk_tasks.values())
+
+
+async def apply_chunk_tasks(chunks: list, ctx) -> list:
+    """The chunks the registered functions keep, in registration order."""
+    for name, task in list(_chunk_tasks.items()):
+        if not chunks:
+            break
+        chunks = await task.run(chunks, ctx)
+        if chunks is None:
+            raise TypeError(f"Chunk task {name!r} returned None; return the chunks to keep.")
+    return chunks
+
+
+async def run_chunk_tasks(chunks: list, ctx=None):
+    """``apply_chunk_tasks`` as a pipeline task: a batch nothing is left of is dropped."""
+    return await apply_chunk_tasks(chunks, ctx) or Drop

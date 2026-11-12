@@ -16,7 +16,7 @@ import pytest
 
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify import register_chunk_task, unregister_chunk_task
-from cognee.modules.cognify.chunk_task_registry import chunk_task_factories
+from cognee.modules.cognify.chunk_task_registry import _chunk_tasks, apply_chunk_tasks
 from cognee.modules.cognify.chunking_tasks import (
     build_chunking_tasks,
     build_registered_chunk_tasks,
@@ -26,7 +26,6 @@ from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 from cognee.modules.pipelines.tasks.task import Task, pipeline_needs_llm
-from cognee.pipelines import Drop
 from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
 
 cognify_module = importlib.import_module("cognee.api.v1.cognify.cognify")
@@ -39,14 +38,11 @@ migrations_startup_module = importlib.import_module("cognee.modules.migrations.s
 @pytest.fixture(autouse=True)
 def isolated_registry():
     """Each test starts with no chunk tasks and leaves the registry as it found it."""
-    saved = chunk_task_factories()
-    for name, _ in saved:
-        unregister_chunk_task(name)
+    saved = dict(_chunk_tasks)
+    _chunk_tasks.clear()
     yield
-    for name, _ in chunk_task_factories():
-        unregister_chunk_task(name)
-    for name, factory in saved:
-        register_chunk_task(name, factory)
+    _chunk_tasks.clear()
+    _chunk_tasks.update(saved)
 
 
 @pytest.fixture
@@ -59,20 +55,8 @@ def pinned_config(monkeypatch):
     monkeypatch.setattr(gliner_tasks_module, "get_cognify_config", lambda: config)
 
 
-async def gate_chunks(chunks):
+async def gate_chunks(chunks, ctx):
     return chunks
-
-
-async def tag_chunks(chunks):
-    return None
-
-
-def gate_factory(*, chunks_per_batch, **kwargs):
-    return Task(gate_chunks, batch_size=chunks_per_batch, needs_llm=False)
-
-
-def tag_factory(*, chunks_per_batch, **kwargs):
-    return [Task(tag_chunks, batch_size=chunks_per_batch, enriches=True, needs_llm=False)]
 
 
 async def default_list(chunks_per_batch=None):
@@ -209,20 +193,13 @@ def test_nothing_registered_builds_the_classify_and_chunk_pair_unchanged():
 @pytest.mark.parametrize("list_name", sorted(LISTS))
 async def test_an_empty_registry_leaves_every_list_unchanged(list_name, pinned_config):
     build, profile_before = LISTS[list_name]
-    calls = []
-
-    def recording_factory(**kwargs):
-        calls.append(kwargs)
-        return gate_factory(**kwargs)
-
     untouched = await build(7)
-    register_chunk_task("gate", recording_factory)
+    register_chunk_task("gate", gate_chunks)
     unregister_chunk_task("gate")
     after_unregister = await build(7)
 
     assert _profile(untouched) == profile_before
     assert _shape(after_unregister) == _shape(untouched)
-    assert calls == [], "an unregistered factory is never called"
 
 
 @pytest.mark.asyncio
@@ -230,13 +207,13 @@ async def test_an_empty_registry_leaves_every_list_unchanged(list_name, pinned_c
 async def test_the_registered_task_runs_right_after_chunking(list_name, pinned_config):
     build, _ = LISTS[list_name]
     untouched = await build(7)
-    register_chunk_task("gate", gate_factory)
+    register_chunk_task("gate", gate_chunks)
 
     tasks = await build(7)
 
     chunk_position = _names(untouched).index("extract_chunks_from_documents")
     expected = _names(untouched)
-    expected.insert(chunk_position + 1, "gate_chunks")
+    expected.insert(chunk_position + 1, "run_chunk_tasks")
     assert _names(tasks) == expected
     # Batched like the tasks after it, so they receive the batches they did before,
     # and every other task of the list is exactly what it was.
@@ -245,91 +222,13 @@ async def test_the_registered_task_runs_right_after_chunking(list_name, pinned_c
 
 
 @pytest.mark.asyncio
-async def test_the_factory_gets_the_resolved_batch_size(pinned_config):
-    received = []
-
-    def factory(*, chunks_per_batch, **kwargs):
-        received.append(chunks_per_batch)
-        return []
-
-    register_chunk_task("probe", factory)
-    await default_list(5)
-    await indexing_list()
-    await dlt_list(3)
-
-    assert received == [5, resolve_chunks_per_batch(), 3]
-
-
-@pytest.mark.asyncio
-async def test_tasks_run_in_registration_order_and_a_factory_may_return_several(pinned_config):
-    def gate_and_tag(*, chunks_per_batch, **kwargs):
-        return [gate_factory(chunks_per_batch=chunks_per_batch)] + tag_factory(
-            chunks_per_batch=chunks_per_batch
-        )
-
-    register_chunk_task("tag", tag_factory)
-    register_chunk_task("gate_and_tag", gate_and_tag)
-
-    tasks = await indexing_list(7)
-
-    assert _names(tasks) == [
-        "classify_documents",
-        "extract_chunks_from_documents",
-        "tag_chunks",
-        "gate_chunks",
-        "tag_chunks",
-        "index_chunks_for_search",
-    ]
-
-
-def test_registering_a_name_again_replaces_its_factory_in_place():
-    register_chunk_task("first", gate_factory)
-    register_chunk_task("second", tag_factory)
-    register_chunk_task("first", tag_factory)
-
-    assert chunk_task_factories() == [("first", tag_factory), ("second", tag_factory)]
-    assert _names(build_registered_chunk_tasks(7)) == ["tag_chunks", "tag_chunks"]
-
-
-def test_unregister_returns_the_factory_once():
-    register_chunk_task("gate", gate_factory)
-
-    assert unregister_chunk_task("gate") is gate_factory
-    assert unregister_chunk_task("gate") is None
-    assert build_registered_chunk_tasks(7) == []
-
-
-def test_a_factory_returning_no_tasks_adds_nothing():
-    register_chunk_task("off", lambda **kwargs: [])
-
-    assert len(build_chunking_tasks(TextChunker, 512)) == 2
-
-
-@pytest.mark.parametrize(
-    "returned", [None, gate_chunks, [Task(gate_chunks), "not a task"], iter([Task(gate_chunks)])]
-)
-def test_a_factory_must_return_tasks(returned):
-    register_chunk_task("broken", lambda **kwargs: returned)
-
-    with pytest.raises(TypeError, match="'broken'"):
-        build_chunking_tasks(TextChunker, 512)
-
-
-def test_the_factory_must_be_callable():
-    with pytest.raises(TypeError, match="callable"):
-        register_chunk_task("gate", Task(gate_chunks))
-
-
-@pytest.mark.asyncio
 async def test_an_llm_free_task_keeps_the_gliner_route_llm_free(pinned_config):
     """The run probes the LLM only when some task needs it (``pipeline_needs_llm``)."""
-    register_chunk_task("gate", gate_factory)
+    register_chunk_task("gate", gate_chunks)
     assert pipeline_needs_llm(await gliner_list(7)) is False
     assert pipeline_needs_llm(await dlt_list(7)) is False
 
-    register_chunk_task(
-        "gate", lambda *, chunks_per_batch, **kwargs: Task(gate_chunks, batch_size=chunks_per_batch)
-    )
+    register_chunk_task("gate", gate_chunks, needs_llm=True)
     assert pipeline_needs_llm(await gliner_list(7)) is True
     assert pipeline_needs_llm(await dlt_list(7)) is True
 
@@ -348,12 +247,7 @@ async def test_cognify_probes_the_llm_for_a_registered_task_only_when_it_says_so
     monkeypatch.setattr(cognify_module, "get_configured_ontology_resolver", lambda *a, **k: None)
     monkeypatch.setattr(migrations_startup_module, "run_migrations_and_block", AsyncMock())
     monkeypatch.setattr(gliner_tasks_module, "require_gliner2", lambda: None)
-    register_chunk_task(
-        "gate",
-        lambda *, chunks_per_batch, **kwargs: Task(
-            gate_chunks, batch_size=chunks_per_batch, needs_llm=needs_llm
-        ),
-    )
+    register_chunk_task("gate", gate_chunks, needs_llm=needs_llm)
 
     await cognify_module.cognify(extractor="gliner_demo", chunk_size=512)
 
@@ -365,9 +259,9 @@ async def test_the_runner_hands_the_tasks_their_batches_and_the_next_task_their_
     tmp_path, monkeypatch
 ):
     """The documented contract, through the real runner and the real chunker: the
-    first registered task's batch_size sets the chunker's batches, Drop removes a
-    batch, an enriches task that returns None passes its input on, the task after
-    them receives exactly what the gate returned, and ctx is injected."""
+    functions get the chunker's output in batches of chunks_per_batch, a batch
+    nothing is left of is dropped, the next function and the next task receive
+    exactly what the one before returned, and ctx is passed."""
     monkeypatch.setattr(chunk_task_module, "update_document_token_count", AsyncMock())
     calls, gate_batches, kept_batches, sink_batches = [], [], [], []
 
@@ -375,31 +269,21 @@ async def test_the_runner_hands_the_tasks_their_batches_and_the_next_task_their_
         calls.append(("screen", ctx.pipeline_name))
         gate_batches.append([chunk.chunk_index for chunk in chunks])
         if len(gate_batches) == 1:
-            return Drop
+            return []
         kept = [chunk for chunk in chunks if chunk.chunk_index % 2 == 0]
         kept_batches.append(kept)
         return kept
 
     async def mark_chunks(chunks, ctx):
-        # Returns nothing: as an enriches task, its input goes on to the next task.
         calls.append(("mark", ctx.pipeline_name))
+        return chunks
 
     async def next_task(chunks):
         sink_batches.append(chunks)
         return chunks
 
-    register_chunk_task(
-        "screen",
-        lambda *, chunks_per_batch, **kwargs: Task(
-            screen_chunks, batch_size=chunks_per_batch, needs_llm=False
-        ),
-    )
-    register_chunk_task(
-        "mark",
-        lambda *, chunks_per_batch, **kwargs: Task(
-            mark_chunks, batch_size=chunks_per_batch, enriches=True, needs_llm=False
-        ),
-    )
+    register_chunk_task("screen", screen_chunks)
+    register_chunk_task("mark", mark_chunks)
     text = " ".join(f"Sentence {index} is plain. Another sentence {index}." for index in range(30))
     (tmp_path / "doc.txt").write_text(text)
     data = SimpleNamespace(
@@ -438,3 +322,68 @@ async def test_the_runner_hands_the_tasks_their_batches_and_the_next_task_their_
     assert calls == [("screen", pipeline)] + [("screen", pipeline), ("mark", pipeline)] * len(
         sink_batches
     )
+
+
+def test_registering_a_name_again_replaces_its_function_in_place():
+    async def other(chunks, ctx):
+        return chunks
+
+    register_chunk_task("first", gate_chunks)
+    register_chunk_task("second", gate_chunks)
+    register_chunk_task("first", other, needs_llm=True)
+
+    assert [(name, task.run, task.needs_llm) for name, task in _chunk_tasks.items()] == [
+        ("first", other, True),
+        ("second", gate_chunks, False),
+    ]
+
+
+def test_several_functions_are_one_task_batched_like_the_tasks_after_it():
+    register_chunk_task("first", gate_chunks)
+    register_chunk_task("second", gate_chunks)
+
+    (task,) = build_registered_chunk_tasks(7)
+
+    assert _profile([task]) == [("run_chunk_tasks", 7, False)]
+
+
+def test_unregister_returns_the_function_once():
+    register_chunk_task("gate", gate_chunks)
+
+    assert unregister_chunk_task("gate") is gate_chunks
+    assert unregister_chunk_task("gate") is None
+    assert build_registered_chunk_tasks(7) == []
+
+
+def test_the_registered_task_must_be_callable():
+    with pytest.raises(TypeError, match="async function"):
+        register_chunk_task("gate", Task(gate_chunks))
+
+
+@pytest.mark.asyncio
+async def test_a_function_that_returns_none_raises_instead_of_dropping_the_batch():
+    async def forgets_to_return(chunks, ctx):
+        chunks.clear()
+
+    register_chunk_task("broken", forgets_to_return)
+
+    with pytest.raises(TypeError, match="'broken'"):
+        await apply_chunk_tasks([object()], None)
+
+
+@pytest.mark.asyncio
+async def test_functions_after_one_that_keeps_nothing_are_not_called():
+    calls = []
+
+    async def keep_nothing(chunks, ctx):
+        return []
+
+    async def record(chunks, ctx):
+        calls.append(chunks)
+        return chunks
+
+    register_chunk_task("empty", keep_nothing)
+    register_chunk_task("record", record)
+
+    assert await apply_chunk_tasks([object()], None) == []
+    assert calls == []

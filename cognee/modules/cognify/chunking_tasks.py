@@ -9,7 +9,10 @@ drift apart. The step ends with the tasks plugins register to run on the chunks
 (``chunk_task_registry.py``), so both runs also pass them the same chunks.
 """
 
-from cognee.modules.cognify.chunk_task_registry import chunk_task_factories
+from cognee.modules.cognify.chunk_task_registry import (
+    registered_chunk_tasks,
+    run_chunk_tasks,
+)
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
@@ -27,25 +30,21 @@ def resolve_chunks_per_batch(chunks_per_batch: int | None = None) -> int:
 
 
 def build_registered_chunk_tasks(chunks_per_batch: int) -> list[Task]:
-    """The tasks the registered factories return, in registration order.
+    """The task that runs the registered chunk functions; none with nothing registered.
 
-    ``chunks_per_batch`` is the batch size of the tasks after the chunking
-    step; every factory receives it. A factory that returns anything but a
-    ``Task`` or a list of them raises ``TypeError``.
+    Batched like the tasks after the chunking step (``chunks_per_batch``), so
+    they receive the batches they would without it.
     """
-    tasks = []
-    for name, factory in chunk_task_factories():
-        built = factory(chunks_per_batch=chunks_per_batch)
-        factory_tasks = [built] if isinstance(built, Task) else built
-        if not isinstance(factory_tasks, (list, tuple)) or not all(
-            isinstance(task, Task) for task in factory_tasks
-        ):
-            raise TypeError(
-                f"Chunk task factory {name!r} returned {type(built).__name__}; "
-                "expected a Task or a list of Tasks."
-            )
-        tasks.extend(factory_tasks)
-    return tasks
+    registered = registered_chunk_tasks()
+    if not registered:
+        return []
+    return [
+        Task(
+            run_chunk_tasks,
+            batch_size=chunks_per_batch,
+            needs_llm=any(task.needs_llm for task in registered),
+        )
+    ]
 
 
 def build_chunking_tasks(
@@ -64,7 +63,7 @@ def build_chunking_tasks(
     graph extraction, which the indexing run never reaches, and they do not
     change the chunk text, so both runs still cut the same chunk ids.
     ``chunks_per_batch`` (resolved by ``resolve_chunks_per_batch``) is the
-    batch size of the list's later tasks, handed to the registered factories.
+    batch size of the list's later tasks, and of the registered functions' task.
     With nothing registered this is the (classify, chunk) pair.
     """
     return (
