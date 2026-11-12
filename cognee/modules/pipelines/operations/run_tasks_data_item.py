@@ -18,7 +18,6 @@ from sqlalchemy import or_, select
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules import ingestion
-from cognee.modules.data.methods.remove_unreferenced_files import remove_unreferenced_files
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.DataItemStatus import (
@@ -160,7 +159,6 @@ async def run_tasks_data_item_incremental(
     # re-resolves fresh content inside the session that records the status.
     content_hash = None
     data_point = None
-    saved_copy = None  # where this call wrote the item's bytes, if it did
     if not isinstance(data_item, Data):
         # If the DataItem carries a stable data_id (e.g. from DLT), prefer it
         # over the content lookup so lookups stay consistent.
@@ -175,8 +173,6 @@ async def run_tasks_data_item_incremental(
             data_id = data_point.id if data_point is not None else pin
         else:
             stored = await save_data_item_to_storage_detailed(data_item)
-            if stored.metadata is not None:
-                saved_copy = stored.file_path
 
             # For payloads whose bytes passed through this process the hash was
             # computed at save time — re-reading the object just written (over
@@ -212,17 +208,11 @@ async def run_tasks_data_item_incremental(
     if data_point:
         status_for_pipeline = (data_point.pipeline_status or {}).get(pipeline_name) or {}
         if is_data_item_completed(status_for_pipeline.get(str(dataset.id))):
-            # The item is skipped, so no row will take the copy saved above.
-            # Identical content under the same name landed on the row's own
-            # file; under another name it is a second file, removed here, or
-            # it would outlive forget(), which removes what a row points at.
-            if saved_copy is not None and saved_copy not in (
-                data_point.raw_data_location,
-                data_point.original_data_location,
-            ):
-                await remove_unreferenced_files(
-                    [saved_copy], "The document already exists and was left as it is."
-                )
+            # The copy saved above is left where it is, also when it landed
+            # under another name than the row's own file and no row will take
+            # it. Its key is shared by every add of the same bytes under the
+            # same name, and one of those may be between saving it and
+            # committing its row: removing it here broke that add.
             yield {
                 "run_info": PipelineRunAlreadyCompleted(
                     pipeline_run_id=pipeline_run_id,

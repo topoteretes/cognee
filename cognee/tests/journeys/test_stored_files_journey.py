@@ -5,14 +5,15 @@ text a loader derived from it. ``forget()`` removes the files a ``Data`` row
 points at, so a file no row points at would stay on disk for good, with the
 content of a document the user updated or deleted. After every step here the
 data root holds the current version of the document and nothing else: an
-update removes the version it replaced, an update that does not publish
-removes what it staged, and a duplicate add removes its unused copy. A file
-another document still uses is kept. A file that cannot be removed fails the
-update, with an error that says what state the document was left in.
+update removes the version it replaced, and an update that does not publish
+removes what it staged. A file another document still uses is kept, and so is
+one that an add still in flight is about to use. A file that cannot be removed
+fails the update, with an error that says what state the document was left in.
 """
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import io
 from pathlib import Path
@@ -172,22 +173,44 @@ async def test_a_file_another_document_still_uses_is_kept(clean_env, default_use
 
 @pytest.mark.journey
 @pytest.mark.asyncio
-async def test_a_duplicate_upload_under_another_name_leaves_no_second_file(clean_env, default_user):
-    result = await cognee.remember(_upload("v1"), dataset_name=DATASET, self_improvement=False)
-    dataset_id = _support.as_uuid(result.dataset_id)
-    before = _stored(clean_env)
+async def test_a_skipped_duplicate_add_leaves_the_file_an_add_in_flight_is_about_to_use(
+    clean_env, default_user, monkeypatch
+):
+    """Two adds of the same bytes under the same name share one stored file. The one that is
+    skipped as a duplicate must not remove it: the other may be between saving the file and
+    committing its row, and would be left pointing at nothing."""
+    ingest_module = importlib.import_module("cognee.tasks.ingestion.ingest_data")
+    await cognee.remember(_upload("v1", filename="choir.txt"), dataset_name=DATASET)
 
-    # Same bytes, another filename: the document already exists, so the add is
-    # skipped and the copy it saved has no row to belong to.
-    again = await cognee.remember(
-        _upload("v1", filename="choir_copy.txt"), dataset_name=DATASET, self_improvement=False
+    # Hold an add into another dataset after its file is saved and before its row is committed.
+    saved, release = asyncio.Event(), asyncio.Event()
+    load_text = ingest_module.data_item_to_text_file
+
+    async def held(*args, **kwargs):
+        saved.set()
+        await release.wait()
+        return await load_text(*args, **kwargs)
+
+    monkeypatch.setattr(ingest_module, "data_item_to_text_file", held)
+    in_flight = asyncio.create_task(
+        cognee.add(
+            _upload("v1", filename="choir_copy.txt"), dataset_name=OTHER_DATASET, user=default_user
+        )
     )
-    assert again.status == "completed"
-    row = await _only_row(dataset_id, default_user)
-    assert _stored(clean_env) == before
+    await asyncio.wait_for(saved.wait(), timeout=60)
+    monkeypatch.setattr(ingest_module, "data_item_to_text_file", load_text)
 
-    await cognee.forget(data_id=row.id, dataset_id=dataset_id, user=default_user)
-    assert _stored(clean_env) == {}
+    # The same upload into the first dataset is a duplicate there and is skipped.
+    await cognee.add(
+        _upload("v1", filename="choir_copy.txt"), dataset_name=DATASET, user=default_user
+    )
+
+    release.set()
+    await in_flight
+    other_id = await _support.dataset_id_by_name(OTHER_DATASET, default_user)
+    row = await _only_row(other_id, default_user)
+    assert Path(row.original_data_location.removeprefix("file://")).is_file()
+    assert CONDUCTORS["v1"].lower() in _support.stored_text(row)
 
 
 @pytest.mark.journey
