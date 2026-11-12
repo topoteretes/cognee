@@ -1,0 +1,54 @@
+# Temporary: reproduce issue #6685 (journey hangs on Windows after the Ladybug 0.22.3 bump).
+# Delete with the PR; never merge.
+name: TMP Windows Ladybug hang (#6685)
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/tmp_windows_ladybug_hang_6685.yml
+
+jobs:
+  journey:
+    name: ${{ matrix.label }} graph-subprocess=${{ matrix.graph_subprocess }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { ref: ba643e4cc0f09fd76c780d7670c0792c771e8fa5, label: "before-bump ba643e4cc (ladybug 0.19.0)", graph_subprocess: default }
+          - { ref: 18d2b0fa5, label: "bump-merge 18d2b0fa5 (ladybug 0.22.3)", graph_subprocess: default }
+          - { ref: 9aa686697c83e705b81b539a848fc207e74fe5da, label: "reported 9aa686697 (ladybug 0.22.3)", graph_subprocess: default }
+          - { ref: ba643e4cc0f09fd76c780d7670c0792c771e8fa5, label: "before-bump ba643e4cc (ladybug 0.19.0)", graph_subprocess: "false" }
+          - { ref: 9aa686697c83e705b81b539a848fc207e74fe5da, label: "reported 9aa686697 (ladybug 0.22.3)", graph_subprocess: "false" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ matrix.ref }}
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: "3.12.x"
+
+      - name: Show ladybug version
+        shell: bash
+        run: uv run --no-sync python -c "import ladybug; print('ladybug', ladybug.__version__)"
+
+      - name: Run dataset routing journey (reporter's command)
+        shell: bash
+        env:
+          PYTHONUNBUFFERED: 1
+          PYTHONFAULTHANDLER: 1
+          PYTHONUTF8: 1
+          VECTOR_DB_SUBPROCESS_ENABLED: "false"
+          GRAPH_SUBPROCESS_MODE: ${{ matrix.graph_subprocess }}
+        run: |
+          if [ "$GRAPH_SUBPROCESS_MODE" = "false" ]; then export GRAPH_DATABASE_SUBPROCESS_ENABLED=false; fi
+          echo "GRAPH_DATABASE_SUBPROCESS_ENABLED=${GRAPH_DATABASE_SUBPROCESS_ENABLED-<unset>}"
+          uv run --no-sync python -m pytest cognee/tests/journeys/test_dataset_routing_journey.py \
+            -x -q -p no:cacheprovider --basetemp="$RUNNER_TEMP/jt" --timeout=150 --durations=5
