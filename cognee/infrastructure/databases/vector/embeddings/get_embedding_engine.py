@@ -145,6 +145,20 @@ def create_embedding_engine(
             batch_size=embedding_batch_size,
         )
 
+    if embedding_provider == "embedding_worker":
+        from .EmbeddingWorkerEmbeddingEngine import EmbeddingWorkerEmbeddingEngine
+
+        # Where the worker is: COGNEE_EMBEDDING_WORKER_* (embedding_worker/settings.py).
+        # Vectors always travel as base64; EMBEDDING_ENCODING_FORMAT does not apply.
+        return EmbeddingWorkerEmbeddingEngine(
+            model=embedding_model,
+            dimensions=embedding_dimensions,
+            max_completion_tokens=embedding_max_completion_tokens,
+            batch_size=embedding_batch_size,
+            input_type=embedding_input_type,
+            huggingface_tokenizer=huggingface_tokenizer,
+        )
+
     if embedding_provider == "openai_compatible":
         from .OpenAICompatibleEmbeddingEngine import OpenAICompatibleEmbeddingEngine
 
