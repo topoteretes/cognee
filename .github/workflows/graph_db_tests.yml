@@ -167,6 +167,14 @@ jobs:
           source .github/scripts/keyless_ci_env.sh
           uv run pytest cognee/tests/e2e/postgres/test_drop_owned_connections.py -v
 
+      # No model and no key: graph extraction is a stand-in and embeddings are mocked.
+      - name: Run Cognify In Worker Processes Test
+        env:
+          COGNEE_PG_TEST_URL: postgres://cognee:cognee@localhost:5432/cognee_db
+        shell: bash
+        run: |
+          uv run pytest cognee/tests/e2e/postgres/test_cognify_in_worker_processes.py -v
+
       - name: Run Postgres Graph E2E Test
         env:
           ENV: 'dev'
