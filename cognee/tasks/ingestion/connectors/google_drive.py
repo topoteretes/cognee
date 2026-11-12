@@ -470,9 +470,17 @@ def _loader_registered(extension: str) -> bool:
     )
 
 
+# Where the macOS installer puts LibreOffice, off PATH; Docling looks there too.
+_MACOS_LIBREOFFICE = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+
+
 def _libreoffice_available() -> bool:
-    """Whether ``soffice`` or ``libreoffice`` is on PATH, which both Office loaders need."""
-    return shutil.which("soffice") is not None or shutil.which("libreoffice") is not None
+    """Whether LibreOffice is on PATH or installed as a macOS application."""
+    return (
+        shutil.which("soffice") is not None
+        or shutil.which("libreoffice") is not None
+        or os.path.isfile(_MACOS_LIBREOFFICE)
+    )
 
 
 def _registered_loader_extensions() -> list[str]:

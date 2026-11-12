@@ -302,12 +302,22 @@ def test_only_the_binary_formats_need_libreoffice(loader_engine, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("on_path", "expected"),
-    [({"soffice"}, True), ({"libreoffice"}, True), (set(), False)],
+    ("on_path", "macos_app", "expected"),
+    [
+        ({"soffice"}, False, True),
+        ({"libreoffice"}, False, True),
+        (set(), True, True),  # the macOS application is not on PATH
+        (set(), False, False),
+    ],
 )
-def test_libreoffice_is_found_by_either_executable_name(monkeypatch, on_path, expected):
+def test_libreoffice_is_found_on_path_or_as_the_macos_application(
+    monkeypatch, on_path, macos_app, expected
+):
     monkeypatch.setattr(
         gd_source.shutil, "which", lambda name: f"/usr/bin/{name}" if name in on_path else None
+    )
+    monkeypatch.setattr(
+        gd_source.os.path, "isfile", lambda path: macos_app and path == gd_source._MACOS_LIBREOFFICE
     )
     assert gd_source._libreoffice_available() is expected
 

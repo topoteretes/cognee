@@ -24,7 +24,8 @@ uv sync --extra google-drive
 Office files need a document loader, the `docling` extra (`pip install "cognee[docling]"`,
 Docling 2.116 or newer) or `unstructured`. The legacy binary formats `.doc`, `.xls` and `.ppt`
 are first converted to Open XML by LibreOffice, so they also need `soffice` or `libreoffice`
-on PATH (on Debian or Ubuntu: `libreoffice-writer libreoffice-calc libreoffice-impress`).
+on PATH, or the macOS application in `/Applications` (on Debian or Ubuntu:
+`libreoffice-writer libreoffice-calc libreoffice-impress`).
 Python extras do not install system packages. Restart the process after installing a Python
 extra so the loader registry is rebuilt; LibreOffice is looked up on every sync and needs
 no restart.
@@ -151,13 +152,13 @@ per file on every full scan:
 
 | Count | Meaning | Counts as failure |
 |---|---|---|
-| `skipped_unsupported_type` | Drawings, Forms, images, audio, video, archives, legacy `.doc`/`.xls`/`.ppt` | no |
+| `skipped_unsupported_type` | Drawings, Forms, images, audio, video, archives | no |
 | `skipped_empty_content` | the extracted text is empty | no |
 | `skipped_too_large` | over the `max_file_size_mb` you set | no |
 | `failed_rate_limit` | Drive kept answering 429 or a rate-limit 403 after the retries; the run stopped and resumes | yes |
 | `failed_auth` | the token was refused (401) after the run had produced rows; the run stopped and resumes | yes |
 | `failed_unreadable` | a PDF that downloaded but that pypdf cannot read: password protected, corrupt, or a feature pypdf lacks. The same bytes give the same answer, so it is reported and the cursor still moves. Only memory, the disk and a missing `cryptography` package are treated as passing | yes |
-| `failed_loader_unavailable` | an Office or document file and no loader installed (install `cognee[docling]`), or a legacy `.doc`, `.xls` or `.ppt` and no LibreOffice on PATH | yes |
+| `failed_loader_unavailable` | an Office or document file and no loader installed (install `cognee[docling]`), or a legacy `.doc`, `.xls` or `.ppt` and no LibreOffice (on PATH or in `/Applications` on macOS) | yes |
 | `failed_export_too_large` | a Google Doc or Sheet over Google's export limit (about 10 MB) | yes |
 | `failed_content_extraction` | the download failed, or the loader failed (a model download, a bug), for a reason that may pass; the file is tried again and a loader failure never forgets what was ingested | yes |
 
