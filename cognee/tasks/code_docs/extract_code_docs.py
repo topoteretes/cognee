@@ -9,9 +9,9 @@ documented symbol, its text starting with ``file:line``.
 
 Coverage is what the Python reader finds in the source, plus the Enola
 fallback for symbols whose facts carry a ``doc`` prop: the first paragraph of
-the doc comment, cut at 300 bytes, which enola 0.4.30 (the pinned release)
+the doc comment, cut at 300 bytes, which enola 0.5.1 (the pinned release)
 emits for Python, Go and TypeScript/JavaScript symbols; snapshots written by
-older releases carry none. On this repository the fallback supplied the
+releases older than 0.4.30 carry none. On this repository the fallback supplied the
 frontend's TS/JS docstrings and the few Python symbols the source matcher did
 not place. A full docstring for another language needs a reader in
 ``docstrings.READERS``.
