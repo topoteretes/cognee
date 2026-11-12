@@ -75,6 +75,7 @@ from cognee.modules.chunking.chunk_policy import (
 from cognee.modules.chunking.external_metadata import normalize_external_metadata
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.cognify.chunk_task_registry import apply_chunk_tasks
 from cognee.modules.cognify.config import GLINER_DEMO_EXTRACTOR, LLM_EXTRACTOR, get_cognify_config
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.conflicts.methods import retire_decisions_after_edit
@@ -141,14 +142,13 @@ class RefusalReason(str, Enum):
     a permanent misconfiguration (an incompatible chunker, an unsupported
     backend) looked exactly like a first ingestion. The reason is logged as a
     structured field and returned in ``UpdateResult.fallback`` so they
-    are separable. The first four come from ``update()`` before this engine
+    are separable. The first three come from ``update()`` before this engine
     is consulted; the rest are this engine's own refusals.
     """
 
     DISABLED = "disabled"  # the caller passed chunk_level_diff=False
     CUSTOM_EXTRACTION_CONFIG = "custom_extraction_config"  # graph_model / custom_prompt
     PER_CALL_DB_CONFIG = "per_call_db_config"  # vector_db_config / graph_db_config
-    CHUNK_TASKS_REGISTERED = "chunk_tasks_registered"  # register_chunk_task
     UNSUPPORTED_BACKEND = "unsupported_backend"
     UNSUPPORTED_CHUNKER = "unsupported_chunker"
     UNSUPPORTED_METADATA = (
@@ -1156,6 +1156,11 @@ async def _write_and_publish(
         for chunk in batch:
             chunk.belongs_to_set = document.belongs_to_set
             chunk.source_node_set = document.source_node_set
+        # The functions plugins registered to run on fresh chunks, as every
+        # task list runs them right after chunking (register_chunk_task).
+        batch = await apply_chunk_tasks(batch, context)
+        if not batch:
+            continue
         summaries = await extract(batch, context)
         await add_data_points(summaries, ctx=context)
     if reused_chunks:

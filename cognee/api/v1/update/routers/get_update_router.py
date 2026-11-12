@@ -114,9 +114,9 @@ def get_update_router() -> APIRouter:
         - **pipeline_run_id**: the run to inspect; `null` for a no-op.
         - **fallback**: set on every rebuild; its `reason` names why the chunk-level path
           did not run (`disabled`, `unsupported_metadata`, `custom_extraction_config`,
-          `per_call_db_config`, `chunk_tasks_registered`, `unsupported_backend`,
-          `unsupported_chunker`, `no_baseline`, `chunks_not_tiling`, `unreadable_text`)
-          and `detail` says it in a sentence.
+          `per_call_db_config`, `unsupported_backend`, `unsupported_chunker`,
+          `no_baseline`, `chunks_not_tiling`, `unreadable_text`) and `detail` says it in
+          a sentence.
         - **error**: `error_class` and `message` when `status` is `"failed"`.
 
         ## Error Codes
