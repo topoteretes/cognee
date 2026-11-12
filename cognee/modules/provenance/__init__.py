@@ -28,9 +28,9 @@ times the source text. The row gets a new version when the item's content
 hash changes (an update). Deleting the item retracts it: the paths that
 remove its ``Data`` row call ``tombstones.py`` last, once the row is gone,
 which writes an ``invalidate`` tombstone on the data item's row (never a row
-delete). Dropping only the item's memory keeps the document and writes none;
-a cognify rollback retracts the items it gave memory to under its own reason.
-A later re-ingest brings a retracted item back, tombstone kept in its version
+delete). Whatever removes only the item's memory keeps the document and
+writes none: a memory-only forget, and the rollback of a failed run. A later
+re-ingest brings a retracted item back, tombstone kept in its version
 history. A write or a tombstone that fails raises, so the ingestion or the
 delete fails with it instead of leaving a gap nothing reports.
 

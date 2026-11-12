@@ -66,19 +66,6 @@ class _FakeEngine:
 
 
 @pytest.fixture(autouse=True)
-def ledger_tombstones(monkeypatch):
-    """Capture the audit-ledger retraction instead of touching the real ledger."""
-    calls = []
-
-    async def _tombstone(dataset_id, pipeline_run_id, *, user=None, keep_data_ids=None):
-        calls.append((dataset_id, str(pipeline_run_id), set(keep_data_ids or ())))
-        return 0
-
-    monkeypatch.setattr(rollback_module, "tombstone_pipeline_run", _tombstone)
-    return calls
-
-
-@pytest.fixture(autouse=True)
 def kept_evidence_calls(monkeypatch):
     """Record the evidence re-homing the rollback asks for; the fake session
     above does not run the UPDATE itself."""
@@ -101,7 +88,7 @@ def kept_evidence_calls(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cognify_rollback_deletes_graph_before_relational(monkeypatch, ledger_tombstones):
+async def test_cognify_rollback_deletes_graph_before_relational(monkeypatch):
     pipeline_run_id = uuid4()
     dataset_id = uuid4()
     data_id = uuid4()
@@ -167,8 +154,6 @@ async def test_cognify_rollback_deletes_graph_before_relational(monkeypatch, led
     assert call_log == ["graph_delete", "relational_delete", "relational_delete"]
     assert str(dataset_id) not in data_record.pipeline_status["cognify_pipeline"]
     assert session_mutation.committed is True
-    # The audit ledger retracts what the run asserted, after the deletes.
-    assert ledger_tombstones == [(dataset_id, str(pipeline_run_id), set())]
 
 
 @pytest.mark.asyncio
@@ -471,7 +456,7 @@ async def test_ledger_rollback_removes_only_the_unstamped_items_of_the_run(
 
 @pytest.mark.asyncio
 async def test_graph_provenance_rollback_keeps_completed_documents(
-    monkeypatch, kept_evidence_calls, ledger_tombstones
+    monkeypatch, kept_evidence_calls
 ):
     """A document the run marked complete keeps its refs and its completed
     status; the unfinished one is rolled back and its status cleared."""
@@ -538,8 +523,6 @@ async def test_graph_provenance_rollback_keeps_completed_documents(
     )
     assert str(dataset_id) not in unfinished_record.pipeline_status["cognify_pipeline"]
     assert reset_session.committed is True
-    # The kept document's ledger rows are left alone too.
-    assert ledger_tombstones == [(dataset_id, str(pipeline_run_id), {done_id})]
     assert kept_evidence_calls == [(dataset_id, pipeline_run_id, {done_id})]
     assert kept_evidence_calls.sessions == [reset_session]
 

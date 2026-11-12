@@ -4,18 +4,23 @@ With ``PROVENANCE_TRACKING`` on, each data item gets one ledger row and the
 nodes and edges it produced get none. The row gets a new version when the
 item's content changes, and a tombstone when the document is deleted: forgetting
 one document or deleting the dataset. The tombstone is written last, once the
-document row is gone, so a delete that failed never left one; dropping only an
-item's memory keeps the document and writes none. A ledger that cannot be
-written fails the operation, and the retry completes it.
+document row is gone, so a delete that failed never left one. Whatever removes
+only an item's memory keeps the document and writes none: a memory-only forget,
+and the rollback of a failed run. A ledger that cannot be written fails the
+operation, and the retry completes it.
 """
 
 from __future__ import annotations
+
+from uuid import UUID
 
 import pytest
 
 import cognee
 import cognee.modules.data.methods as data_methods
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.provenance import get_provenance_manager, storage
 from cognee.modules.provenance.tombstones import ledger_data_item_key
 from cognee.tests.journeys import _support
@@ -265,3 +270,41 @@ async def test_a_ledger_that_cannot_be_written_fails_the_ingestion(
     dataset_id = _support.as_uuid(result.dataset_id)
     choir = await _data_id(dataset_id, default_user, "saltmarsh choir")
     assert (await _item(manager, dataset_id, choir))["invalidated"] is False
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_a_rolled_back_run_keeps_the_row_live_so_a_later_delete_is_recorded(
+    clean_env, default_user, ledger_on, monkeypatch
+):
+    # With early chunk indexing off, the cognify run is the one that first
+    # stores the item, so it is the run the ledger row names.
+    monkeypatch.setenv("EARLY_CHUNK_INDEXING", "false")
+    get_cognify_config.cache_clear()
+    manager = ledger_on
+    result = await cognee.remember([DOC_CHOIR], dataset_name=DATASET, self_improvement=False)
+    dataset_id = _support.as_uuid(result.dataset_id)
+    choir = await _data_id(dataset_id, default_user, "saltmarsh choir")
+    run_id = (await _item(manager, dataset_id, choir))["bundle_id"]
+    before = await _support.snapshot_dataset(dataset_id, default_user)
+
+    # Roll that run back the way recovery rolls back a run that never finished the item.
+    dataset = await data_methods.get_authorized_dataset(default_user, dataset_id, "write")
+    await data_methods.reset_data_pipeline_status(choir, dataset_id)
+    async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+        await cognify_rollback_handler(
+            pipeline_run_id=UUID(run_id), dataset=dataset, user=default_user
+        )
+
+    # The run's memory is gone and the document is not, so the row stays live.
+    after = await _support.snapshot_dataset(dataset_id, default_user)
+    assert after.graph_nodes < before.graph_nodes
+    assert [row.id for row in await cognee.datasets.list_data(dataset_id, default_user)] == [choir]
+    assert (await _item(manager, dataset_id, choir))["invalidated"] is False
+
+    # Deleting the document is then what the ledger records, with who did it.
+    await cognee.forget(data_id=choir, dataset_id=dataset_id, user=default_user)
+    tombstone = await _item(manager, dataset_id, choir)
+    assert tombstone["invalidated"] is True
+    assert tombstone["invalidation_reason"] == "data_deleted"
+    assert tombstone["invalidated_by"] == str(default_user.id)

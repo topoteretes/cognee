@@ -10,16 +10,17 @@ from, so a tombstone needs only ``(dataset_id, data_id)``.
 A ``data_deleted`` / ``dataset_deleted`` tombstone says the document is gone,
 so it is written last: after the ``Data`` row was removed and, for a single
 item, checked to be gone. A delete that fails earlier leaves the row live.
-Dropping only an item's memory (``forget(memory_only=True)``, a DLT source
-purged for re-emission) keeps the document and writes no tombstone.
+Whatever removes only an item's memory keeps the document and writes no
+tombstone: ``forget(memory_only=True)``, a DLT source purged for re-emission,
+and the rollback of a failed pipeline run. The row stays live for as long as
+the document is stored, so the delete that finally removes it is the one the
+ledger records.
 
-Three scopes:
+Two scopes:
 
 - **data item**: ``forget(data_id=...)`` / ``datasets.delete_data``, and the
   DLT orphan sweep for the rows it removed.
 - **dataset**: every live data item of a deleted dataset.
-- **pipeline run**: the data items whose memory a rolled-back run created
-  (reason ``pipeline_run_rolled_back``; the documents stay).
 
 Only rows that exist and are live are invalidated (the ledger is opt-in, so
 most deletes find nothing). A tombstone that cannot be written raises, so the
@@ -146,51 +147,6 @@ async def tombstone_data_items(
         return 0
     written = await _tombstone_ids(live_ids, agent_id=agent_id_for(user), reason=reason)
     logger.info("Tombstoned %d data item(s) of dataset %s in the ledger", written, dataset_id)
-    return written
-
-
-async def tombstone_pipeline_run(
-    dataset_id: UUID,
-    pipeline_run_id: UUID | str,
-    *,
-    user: Any = None,
-    keep_data_ids: Iterable[UUID | str] | None = None,
-    reason: str = "pipeline_run_rolled_back",
-) -> int:
-    """Tombstone the data items whose memory a rolled-back run created.
-
-    A data item row carries the ``bundle_id`` of the run that first stored
-    output for it (or that brought it back after a tombstone), and re-tracking
-    a live row is a no-op. So the rows under the rolled-back run are exactly
-    the items that had no memory before it. A cognify run rolled back after an
-    indexing run stored the chunks leaves the row with the indexing run, and
-    the item live: its chunks are still in the graph. Items in
-    ``keep_data_ids`` (completed documents a recovery rollback keeps) are left
-    alone.
-    """
-    kept = {str(data_id) for data_id in (keep_data_ids or ())}
-    prefix = ledger_data_item_key(dataset_id, "")
-    # Collected before writing: the scan and the tombstone writes must not
-    # interleave on one ledger.
-    pending = [
-        entry.entity_id
-        async for entry in storage.iter_live_by_bundle(str(pipeline_run_id), prefix)
-        if entry.entity_id[len(prefix) :] not in kept
-    ]
-    if not pending:
-        return 0
-    written = await _tombstone_ids(
-        pending,
-        agent_id=agent_id_for(user),
-        reason=reason,
-        metadata={"rolled_back_pipeline_run_id": str(pipeline_run_id)},
-    )
-    logger.info(
-        "Tombstoned %d data item(s) in the ledger for rolled-back run %s (dataset %s)",
-        written,
-        pipeline_run_id,
-        dataset_id,
-    )
     return written
 
 

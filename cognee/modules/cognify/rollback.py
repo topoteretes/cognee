@@ -18,7 +18,6 @@ from cognee.modules.graph.models import Edge, Node
 from cognee.modules.pipelines.models.DataItemStatus import is_item_stamped
 from cognee.modules.pipelines.utils import iter_ingestion_entries
 from cognee.modules.provenance.edge_evidence.cleanup import keep_completed_items_evidence
-from cognee.modules.provenance.tombstones import tombstone_pipeline_run
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME
 
@@ -244,11 +243,6 @@ async def cognify_rollback_handler(
                 await keep_completed_items_evidence(session, dataset_id, run_uuid, kept_data_ids)
                 await session.commit()
 
-            # Audit ledger: the data items this run gave memory to are retracted.
-            await tombstone_pipeline_run(
-                dataset_id, pipeline_run_id, user=user, keep_data_ids=kept_data_ids
-            )
-
             logger.info(
                 "Graph-provenance %s rollback completed for run %s (dataset=%s, user=%s).",
                 pipeline_name,
@@ -381,11 +375,6 @@ async def cognify_rollback_handler(
         await keep_completed_items_evidence(session, dataset_id, run_uuid, kept_data_ids)
 
         await session.commit()
-
-    # Audit ledger: the data items this run gave memory to are retracted.
-    await tombstone_pipeline_run(
-        dataset_id, pipeline_run_id, user=user, keep_data_ids=kept_data_ids
-    )
 
     logger.info(
         "%s rollback completed for run %s (dataset=%s, user=%s, rows=%d nodes/%d edges).",

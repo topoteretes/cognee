@@ -21,7 +21,6 @@ from cognee.modules.provenance.tombstones import (
     tombstone_data_item,
     tombstone_data_items,
     tombstone_dataset,
-    tombstone_pipeline_run,
 )
 
 # The package __init__ re-exports the functions under their module names.
@@ -186,56 +185,6 @@ class TestTombstoneDataset:
 
         with pytest.raises(RuntimeError, match="ledger down"):
             await tombstone_dataset(dataset_id, user=USER)
-
-
-class TestTombstonePipelineRun:
-    async def test_retracts_the_items_the_run_gave_memory_to(self, manager):
-        dataset_id, first, second, other = uuid4(), uuid4(), uuid4(), uuid4()
-        await _seed_items(manager, dataset_id, [first, second], run_id="rolled-back")
-        await _seed_items(manager, dataset_id, [other], run_id="other-run")
-
-        assert await tombstone_pipeline_run(dataset_id, "rolled-back", user=USER) == 2
-
-        for data_id in (first, second):
-            tombstone = await _item(manager, dataset_id, data_id)
-            assert tombstone["invalidated"] is True
-            assert tombstone["invalidation_reason"] == "pipeline_run_rolled_back"
-            assert tombstone["metadata"]["rolled_back_pipeline_run_id"] == "rolled-back"
-        assert (await _item(manager, dataset_id, other))["invalidated"] is False
-
-    async def test_completed_items_a_recovery_keeps_stay_live(self, manager):
-        dataset_id, kept, unfinished = uuid4(), uuid4(), uuid4()
-        await _seed_items(manager, dataset_id, [kept, unfinished], run_id="run")
-
-        written = await tombstone_pipeline_run(dataset_id, "run", user=USER, keep_data_ids=[kept])
-
-        assert written == 1
-        assert (await _item(manager, dataset_id, kept))["invalidated"] is False
-        assert (await _item(manager, dataset_id, unfinished))["invalidated"] is True
-
-    async def test_item_that_had_memory_before_the_run_stays_live(self, manager):
-        # The indexing run stores the chunks first; a cognify run that fails
-        # afterwards is rolled back by run id and leaves them in the graph.
-        dataset_id, data_id = uuid4(), uuid4()
-        await _seed_items(manager, dataset_id, [data_id], run_id="indexing-run")
-        await _seed_items(manager, dataset_id, [data_id], run_id="cognify-run")
-
-        assert await tombstone_pipeline_run(dataset_id, "cognify-run", user=USER) == 0
-        assert (await _item(manager, dataset_id, data_id))["invalidated"] is False
-
-    async def test_item_the_run_brought_back_is_retracted(self, manager):
-        dataset_id, data_id = uuid4(), uuid4()
-        await _seed_items(manager, dataset_id, [data_id], run_id="first-run")
-        await tombstone_data_item(dataset_id, data_id, user=USER)
-        await _seed_items(manager, dataset_id, [data_id], run_id="second-run")
-
-        assert await tombstone_pipeline_run(dataset_id, "second-run", user=USER) == 1
-        assert (await _item(manager, dataset_id, data_id))["invalidated"] is True
-
-    async def test_unknown_run_is_noop(self, manager):
-        dataset_id = uuid4()
-        await _seed_items(manager, dataset_id, [uuid4()])
-        assert await tombstone_pipeline_run(dataset_id, "no-such-run", user=USER) == 0
 
 
 class TestDatasetScopedReads:
