@@ -23,7 +23,8 @@ Prerequisites:
         BOXD_MACHINE_NAME  - machine name (default: "cognee-api")
         LLM_PROVIDER, LLM_MODEL, LLM_ENDPOINT, EMBEDDING_PROVIDER, EMBEDDING_MODEL,
         EMBEDDING_DIMENSIONS, EMBEDDING_API_KEY, DEFAULT_USER_PASSWORD
-                           - passed to the Cognee server when set
+                           - passed to the Cognee server when set; for the
+                             ones you leave unset, Cognee's own defaults apply
 
 Usage:
     python distributed/deploy/boxd_sandbox.py
@@ -190,7 +191,8 @@ def deploy_cognee():
 
     try:
         _start_cognee(client, machine.id, env_file)
-    except Exception:
+    except BaseException:
+        # BaseException, so Ctrl-C also names the machine that is left running.
         print(
             f"\nDeploy failed. Machine {machine.name} ({machine.id}) is still running, "
             "so you can inspect it. Delete it with:\n"

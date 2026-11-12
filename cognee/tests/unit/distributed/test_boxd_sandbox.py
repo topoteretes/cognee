@@ -288,6 +288,39 @@ def test_deploy_failure_names_the_machine_left_running(monkeypatch, capsys):
     assert "Boxd().machines.delete('m-1')" in err
 
 
+def test_deploy_interrupt_names_the_machine_left_running(monkeypatch, capsys):
+    module, fake = _deploy_with_fakes(monkeypatch, [])
+
+    def interrupted(machine_id, command, *, timeout=None):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(fake, "exec", interrupted)
+
+    with pytest.raises(KeyboardInterrupt):
+        module.deploy_cognee()
+
+    err = capsys.readouterr().err
+    assert "cognee-api (m-1) is still running" in err
+    assert "Boxd().machines.delete('m-1')" in err
+
+
+def test_deploy_names_the_machine_when_bot_protection_fails(monkeypatch, capsys):
+    module, fake = _deploy_with_fakes(monkeypatch, list(HAPPY_EXECS))
+
+    def refused(machine_id, *, mode=None):
+        raise RuntimeError("bot protection boom")
+
+    monkeypatch.setattr(fake, "set_bot_protection", refused)
+
+    with pytest.raises(RuntimeError, match="bot protection boom"):
+        module.deploy_cognee()
+
+    captured = capsys.readouterr()
+    assert "cognee-api (m-1) is still running" in captured.err
+    assert "Boxd().machines.delete('m-1')" in captured.err
+    assert "Cognee is running!" not in captured.out
+
+
 def test_deploy_rejects_bad_env_value_before_creating_a_machine(monkeypatch):
     module, fake = _deploy_with_fakes(monkeypatch, [])
     monkeypatch.setenv("DEFAULT_USER_PASSWORD", "line1\nline2")
