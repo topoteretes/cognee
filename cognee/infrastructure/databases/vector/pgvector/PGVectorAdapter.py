@@ -9,7 +9,6 @@ from uuid import UUID
 import asyncpg
 import numpy as np
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
-from numpy.typing import NDArray
 from pydantic import BaseModel
 from sqlalchemy import (
     JSON,
@@ -622,11 +621,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             if write_gate is not None:
                 write_gate.release()
 
-    async def embed_data(self, data: list[str]) -> list[NDArray[np.float32]]:
-        """Embed once and retain float32 arrays for pgvector's binary codec."""
-        from ..embeddings.array_format import embed_float32
-
-        return await embed_float32(self.embedding_engine, data)
+    async def embed_data(self, data: list[str]) -> list[list[float]]:
+        """Preserve the public vector interface's list output for external consumers."""
+        return await self.embedding_engine.embed_text(data)
 
     async def get_stored_vector_size(self) -> int | None:
         """Width of the vectors already in this store, or None when nothing is stored yet.
@@ -910,9 +907,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 payload_schema=type(data_points[0]),
             )
 
+        from ..embeddings.array_format import embed_float32
+
         with storage_span("embed"):
-            data_vectors = await self.embed_data(
-                [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
+            data_vectors = await embed_float32(
+                self.embedding_engine,
+                [DataPoint.get_embeddable_data(data_point) for data_point in data_points],
             )
         with storage_span("prepare"):
             return self._data_point_rows(data_points, data_vectors)

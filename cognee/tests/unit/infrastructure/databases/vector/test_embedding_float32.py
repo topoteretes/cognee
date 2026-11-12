@@ -92,3 +92,33 @@ async def test_array_request_scope_is_reset_on_failure():
     with pytest.raises(ValueError, match="provider failed"):
         await embed_float32(Broken(), ["x"])
     assert not arrays_requested.get()
+
+
+@pytest.mark.asyncio
+async def test_pgvector_public_embed_data_keeps_lists_while_write_preparation_keeps_arrays():
+    from unittest.mock import AsyncMock
+
+    from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
+    from cognee.infrastructure.engine import DataPoint
+
+    class Point(DataPoint):
+        text: str
+        metadata: dict = {"index_fields": ["text"]}
+
+    engine = Engine()
+    adapter = object.__new__(PGVectorAdapter)
+    adapter.embedding_engine = EmbeddingGateway(engine)
+    adapter.embedding_engine._record_usage = AsyncMock()
+    adapter.has_collection = AsyncMock(return_value=True)
+    lists = await adapter.embed_data(["public"])
+    assert isinstance(lists, list)
+    assert isinstance(lists[0], list)
+    # Hybrid callers stringify this public result into pgvector literals.
+    import json
+
+    assert json.loads(str(lists[0])) == lists[0]
+    rows = await adapter._prepare_data_points("Point_text", [Point(text="private")])
+    assert isinstance(rows[0]["vector"], np.ndarray)
+    assert rows[0]["vector"].dtype == np.float32
+    assert rows[0]["vector"] is engine.native[-1]
+    assert not arrays_requested.get()

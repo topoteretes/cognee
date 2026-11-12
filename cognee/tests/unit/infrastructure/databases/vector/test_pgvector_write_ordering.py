@@ -19,6 +19,7 @@ import threading
 from contextlib import asynccontextmanager
 from uuid import UUID, uuid4
 
+import numpy as np
 import pytest
 
 pytest.importorskip("asyncpg")
@@ -140,7 +141,7 @@ async def test_create_data_points_sends_plain_rows_with_numeric_vectors():
     assert row_id == point.id
     assert json.loads(payload)["text"] == "hello"
     assert json.loads(payload)["belongs_to_set"] == ["A"]
-    assert vector == [0.1, 0.2, 0.3]
+    np.testing.assert_array_equal(vector, np.array([0.1, 0.2, 0.3], dtype=np.float32))
 
 
 @pytest.mark.asyncio
