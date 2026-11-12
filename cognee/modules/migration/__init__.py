@@ -21,6 +21,7 @@ from .cogx import (
 from .archive import ARCHIVE_SUFFIX, find_archive_root, pack_archive, unpack_archive
 from .export import EXPORT_FORMATS, ExportResult, export_dataset
 from .import_source import import_memory_source
+from .inspection import COGXArchiveInspection, COGXInspectionDiagnostic, inspect_cogx_archive
 from .loader import (
     TranslationResult,
     data_item_from_record,
@@ -44,6 +45,7 @@ __all__ = [
     "COGX_VERSION",
     "EXPORT_FORMATS",
     "IMPORT_MODES",
+    "COGXArchiveInspection",
     "COGXArchiveSource",
     "COGXConfidence",
     "COGXContributor",
@@ -52,6 +54,7 @@ __all__ = [
     "COGXEpisode",
     "COGXEvidence",
     "COGXFact",
+    "COGXInspectionDiagnostic",
     "COGXManifest",
     "COGXMemory",
     "COGXMemoryBlock",
@@ -75,6 +78,7 @@ __all__ = [
     "export_dataset",
     "find_archive_root",
     "import_memory_source",
+    "inspect_cogx_archive",
     "pack_archive",
     "read_archive",
     "read_manifest",
