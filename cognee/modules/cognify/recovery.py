@@ -127,11 +127,14 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
                                 dataset=dataset,
                                 pipeline_name=current.pipeline_name,
                             )
+                        # Shards the run handed to workers and never heard back
+                        # from. Before the run is closed: a closed run is not looked
+                        # at again, so if they cannot be recorded it stays open and
+                        # the next pass comes back to all of it.
+                        await record_interrupted(current.pipeline_run_id)
                         await _close_as_abandoned(
                             current, dataset, sessions_by_row.get(current.id, [])
                         )
-                        # Shards the run handed to workers and never heard back from.
-                        await record_interrupted(current.pipeline_run_id)
                     ownership.closed = True
                     logger.info("Recovery closed run %s as abandoned", current.pipeline_run_id)
                     _send_abandoned_run_telemetry(current, await _run_principal(current))

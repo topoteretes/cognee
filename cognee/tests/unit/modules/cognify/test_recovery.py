@@ -246,8 +246,8 @@ async def test_a_closed_runs_unanswered_shards_are_recorded_interrupted(
     monkeypatch, rollback_fails
 ):
     """Shards the run handed to workers and never heard back from would stay
-    pending for good. Only once the run is closed: after a failed rollback it is
-    still open, and the next pass comes back to it."""
+    pending for good. Only after the rollback: when that fails the run is still
+    open, and the next pass comes back to it."""
     run = _run("cognify_pipeline")
     _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)}, rollback_fails=rollback_fails)
 
@@ -493,3 +493,45 @@ async def test_recovering_an_agents_run_attributes_the_agent(monkeypatch):
     assert properties["agent_owner_id"] == str(parent_id)
     assert properties["agent_plugin"] == "codex"
     assert properties["tenant_id"] == str(run.tenant_id)
+
+
+@pytest.mark.asyncio
+async def test_unanswered_shards_are_recorded_before_the_run_is_closed(monkeypatch):
+    run = _run("cognify_pipeline")
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+
+    async def record(pipeline_run_id):
+        calls.append(("shards", pipeline_run_id))
+
+    monkeypatch.setattr(recovery_module, "record_interrupted", record)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert [name for name, _ in calls] == ["rollback", "shards", "error"]
+
+
+@pytest.mark.asyncio
+async def test_a_run_whose_shards_cannot_be_recorded_stays_open(monkeypatch):
+    """A closed run is not looked at again, so closing it first would leave its
+    shards pending for good. Left open, the next pass comes back to all of it."""
+    run = _run("cognify_pipeline")
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+    monkeypatch.setattr(
+        recovery_module,
+        "record_interrupted",
+        AsyncMock(side_effect=RuntimeError("the database is not answering")),
+    )
+    ownerships = []
+
+    @contextmanager
+    def claim(_run):
+        ownerships.append(SimpleNamespace(closed=False))
+        yield ownerships[-1]
+
+    monkeypatch.setattr(recovery_module, "claim_run_ownership", claim)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    # No ERRORED row, and the ownership marker is kept for the next pass.
+    assert [name for name, _ in calls] == ["rollback"]
+    assert [ownership.closed for ownership in ownerships] == [False]
