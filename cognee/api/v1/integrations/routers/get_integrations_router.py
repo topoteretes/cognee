@@ -38,6 +38,7 @@ generic ``{provider}`` routes so ``plugins`` is never captured as a
 provider name.
 """
 
+import asyncio
 import hmac
 import logging
 import secrets
@@ -134,6 +135,13 @@ from cognee.modules.users.models import User
 
 logger = logging.getLogger(__name__)
 
+# How long a disconnect waits for its staging copy to be dropped before it answers and lets
+# the drop finish in the background. The drop takes the lock every dlt run in the process
+# holds, which another connection's backfill can keep for minutes; a drop that fails within
+# the wait is reported to the owner.
+STAGING_DROP_WAIT_SECONDS = 10
+
+
 # Plugin keys with a native AgentConnectionType; anything else registers as
 # a generic "sdk" connection in the agent-connection registry.
 _PLUGIN_CONNECTION_TYPES: dict[str, str] = {
@@ -167,6 +175,11 @@ class ConnectionStatusDTO(OutDTO):
     # Its data stays in ``dataset_id``.
     disconnected_by: str | None = None
     disconnected_at: datetime | None = None
+    # When the data of an ended connection is deleted (Slack: 14 days after an uninstall);
+    # absent when it is kept.
+    data_deleted_after: datetime | None = None
+    # When that deletion ran; set, the data is gone.
+    data_deleted_at: datetime | None = None
 
 
 class DisconnectResultDTO(OutDTO):
@@ -495,6 +508,46 @@ def _pending_install_nonces(request: Request, provider: str) -> list[str]:
         # its own.
         and name[len(prefix) :].isascii()
     ]
+
+
+def _start_authorization(provider: str, user: User) -> tuple[str, str]:
+    """The provider's authorize URL for ``user`` and the nonce its state carries; the
+    caller sets the nonce cookie on its response: the state says which user started it,
+    the cookie that the browser finishing it is the same one (:func:`_set_install_nonce`)."""
+    integration = _integration_or_404(provider)
+    _outbound_http_or_503(provider)
+    try:
+        nonce = secrets.token_urlsafe(32)
+        state = make_state(user.id, nonce, signing_secret=integration.state_signing_secret())
+        return integration.authorize_url(state), nonce
+    except RuntimeError:
+        # A provider's require()-style settings guard raises when its client id/secret/
+        # signing key aren't configured — a deploy-time gap, not a per-request fault.
+        # Surface it as a clear 503 instead of a bare 500.
+        logger.exception("%s authorize requested but is not configured", provider)
+        raise HTTPException(
+            status_code=503,
+            detail=f"{provider} integration is not configured on this server.",
+        )
+
+
+async def _drop_staging_copy(provider: str, dataset_name: str, drop_dlt_dataset) -> None:
+    """Drop the staging copy, waiting at most ``STAGING_DROP_WAIT_SECONDS``.
+
+    A failure within the wait raises, so the owner is told. The drop is background work from
+    the start, so whatever ends the wait (the timeout, a cancelled request) it still finishes,
+    the shutdown drains it, and a failure is logged.
+    """
+    drop = asyncio.ensure_future(drop_dlt_dataset(dataset_name))
+    spawn_background(_finish(drop), description=f"{provider} staging copy drop on disconnect")
+    try:
+        await asyncio.wait_for(asyncio.shield(drop), timeout=STAGING_DROP_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        logger.info("%s staging copy drop continues in the background", provider)
+
+
+async def _finish(task: asyncio.Future) -> None:
+    await task
 
 
 def _set_install_nonce(response: Response, request: Request, provider: str, nonce: str) -> None:
@@ -891,27 +944,26 @@ def get_integrations_router():
         """
         with new_span("cognee.integrations.authorize") as span:
             span.set_attribute("cognee.integrations.provider", provider)
-            integration = _integration_or_404(provider)
-            _outbound_http_or_503(provider)
-            try:
-                nonce = secrets.token_urlsafe(32)
-                state = make_state(
-                    user.id, nonce, signing_secret=integration.state_signing_secret()
-                )
-                authorize_url = integration.authorize_url(state)
-                _set_install_nonce(response, request, provider, nonce)
-                return AuthorizeUrlDTO(authorize_url=authorize_url)
-            except RuntimeError:
-                # A provider's require()-style settings guard raises when its
-                # client id/secret/signing key aren't configured — a
-                # deploy-time gap, not a per-request fault. Surface it as a
-                # clear 503 instead of a bare 500 so the frontend doesn't have
-                # to guess why "Connect" failed.
-                logger.exception("%s authorize requested but is not configured", provider)
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"{provider} integration is not configured on this server.",
-                )
+            authorize_url, nonce = _start_authorization(provider, user)
+            _set_install_nonce(response, request, provider, nonce)
+            return AuthorizeUrlDTO(authorize_url=authorize_url)
+
+    @integrations_router.get("/{provider}/start", include_in_schema=False)
+    async def start(provider: str, request: Request, user: User = Depends(get_authenticated_user)):
+        """``authorize`` for a link opened in the browser: the same nonce cookie, then a
+        redirect to the provider's authorize page instead of the URL as JSON.
+
+        A link a member follows from the provider, where no page of cognee's runs
+        (Slack's ``@cognee link``), starts sign-in here, in the browser where they are
+        logged in to cognee; the callback binds the account to that user as after
+        ``authorize``. Not logged in, it answers 401.
+        """
+        with new_span("cognee.integrations.start") as span:
+            span.set_attribute("cognee.integrations.provider", provider)
+            authorize_url, nonce = _start_authorization(provider, user)
+            redirect = RedirectResponse(url=authorize_url, status_code=302)
+            _set_install_nonce(redirect, request, provider, nonce)
+            return redirect
 
     @integrations_router.get("/{provider}/callback", include_in_schema=False)
     async def callback(
@@ -1095,7 +1147,9 @@ def get_integrations_router():
         ``connected: false`` with ``disconnectedBy`` (``"owner"`` for a disconnect,
         ``"provider"`` for an app uninstalled or a token it no longer accepts, absent when
         unknown), ``disconnectedAt`` and the dataset its data stays in; the data is deleted
-        only from the datasets. A named account the user never had is still a 404.
+        only from the datasets, or by the provider's own schedule, which ``dataDeletedAfter``
+        (when it is due) and ``dataDeletedAt`` (when it ran) report (Slack: 14 days after an
+        uninstall). A named account the user never had is still a 404.
         """
         from cognee.modules.integrations.ingestion import dataset_summary, sync_is_running
 
@@ -1120,6 +1174,8 @@ def get_integrations_router():
                 provider_account_id=ended.provider_account_id,
                 disconnected_by=ended.revoked_by,
                 disconnected_at=as_utc(ended.revoked_at),
+                data_deleted_after=as_utc(integration.data_deleted_after(ended)),
+                data_deleted_at=as_utc(integration.data_deleted_at(ended)),
             )
 
         dataset_id, stored_items = None, None
@@ -1178,8 +1234,17 @@ def get_integrations_router():
         credential = await _credential_or_404(user, integration, account_id)
         if credential is None:
             raise HTTPException(status_code=404, detail=f"{provider} is not connected")
+        from cognee.modules.integrations.ingestion import RateLimitedError
+
         try:
             resources = await integration.list_resources(credential)
+        except RateLimitedError as error:
+            # Never waited out inside the request: the client is told when to try again.
+            raise HTTPException(
+                status_code=429,
+                detail=f"{provider} is limiting requests; try again shortly",
+                headers={"Retry-After": str(error.retry_after)} if error.retry_after else None,
+            )
         except Exception:
             logger.exception("Could not list %s resources for user %s", provider, user.id)
             raise HTTPException(status_code=502, detail=f"Could not list {provider} resources")
@@ -1258,6 +1323,12 @@ def get_integrations_router():
                     status_code=422, detail="Resource ids must not be blank or whitespace only"
                 )
             resource_ids = list(dict.fromkeys(payload.resource_ids))
+            invalid = integration.invalid_resource_ids(resource_ids)
+            if invalid:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Not a {provider} resource id: {', '.join(invalid)}",
+                )
         updated = await update_provider_metadata(
             provider,
             credential.provider_account_id,
@@ -1418,11 +1489,18 @@ def get_integrations_router():
           An id that is not the caller's returns 404 and never falls back to another
           connection; a blank id returns 422.
         - **delete_data** (bool): When true, the integration's dataset is deleted after the
-          connection is revoked. A provider that exposes no deletable dataset returns 400
-          before anything is revoked; a deletion that fails after the disconnect returns
-          502, unless the deletion itself answered with an HTTP error, whose status is kept.
-          Ignored when account_id is omitted and the caller has no connection. Defaults to
-          False.
+          connection is revoked, with the dlt staging copy it was synced through (the staged
+          rows, the sync state and the load packages), together with what the provider's
+          app stored for the caller outside it (Slack: the messages the caller remembered
+          from that workspace). A dataset that was never created (nothing synced yet) is
+          nothing to delete, and the app's data is deleted whatever happens to the dataset. A
+          provider that exposes no deletable dataset returns 400, and a sync of the connection
+          still running returns 409, both before anything is revoked; a deletion that fails after
+          the disconnect returns 502, unless the deletion itself answered with an HTTP error,
+          whose status is kept. A staging copy still waiting for its lock after
+          ``STAGING_DROP_WAIT_SECONDS`` is dropped in the background, and a failure there is
+          logged. Ignored when account_id is omitted and the caller has no connection. Defaults
+          to False.
 
         ## Response
         - **disconnected** (bool): Whether a connection was revoked locally.
@@ -1444,6 +1522,15 @@ def get_integrations_router():
                     raise HTTPException(
                         status_code=400,
                         detail=f"{provider} does not expose a deletable dataset",
+                    )
+                from cognee.modules.integrations.ingestion import sync_is_running
+
+                # A sync stops at its next check once the connection is revoked, but a
+                # scope it already started could store into the dataset deleted below.
+                if sync_is_running(provider, credential.provider_account_id):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"{provider} is syncing; disconnect once the sync has finished",
                     )
 
             # Ended locally first, so the provider's echo of this revoke (Slack's
@@ -1479,10 +1566,24 @@ def get_integrations_router():
                     )
 
             if delete_data:
-                try:
-                    from cognee.api.v1.forget.forget import forget
+                from cognee.api.v1.forget.forget import forget
+                from cognee.modules.data.exceptions import DatasetNotFoundError
+                from cognee.tasks.ingestion.ingest_dlt_source import drop_dlt_dataset
 
-                    await forget(dataset=dataset_name, user=user)
+                try:
+                    try:
+                        try:
+                            await forget(dataset=dataset_name, user=user)
+                        except DatasetNotFoundError:
+                            pass  # nothing was synced yet, so there is no dataset to delete
+                    finally:
+                        # The credential is already revoked, so this is the only chance to
+                        # delete the app's own data: it runs whatever the dataset did.
+                        await integration.forget_related_data(credential, user)
+                    # forget leaves dlt's staging copy, state and load packages, which hold
+                    # every synced row's text: the next connect and sync would build every
+                    # document again.
+                    await _drop_staging_copy(provider, dataset_name, drop_dlt_dataset)
                 except HTTPException:
                     raise
                 except Exception:
