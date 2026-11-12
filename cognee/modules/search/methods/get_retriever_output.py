@@ -1,5 +1,6 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
 from cognee.modules.retrieval.only_context_prompt import build_only_context_prompt
 from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
 from cognee.modules.retrieval.utils.evidence import (
@@ -21,11 +22,12 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
-# A hybrid type that cannot serve a request answers through its graph counterpart.
-_GRAPH_COUNTERPART = {
-    SearchType.HYBRID_COMPLETION: SearchType.GRAPH_COMPLETION,
-    SearchType.HYBRID_COMPLETION_DECOMPOSITION: SearchType.GRAPH_COMPLETION_DECOMPOSITION,
-}
+# The types served by the hybrid lanes. When they cannot serve a request,
+# HYBRID_COMPLETION (the default type) answers through GRAPH_COMPLETION, while
+# HYBRID_COMPLETION_DECOMPOSITION, always chosen explicitly, refuses the request.
+_HYBRID_TYPES = frozenset(
+    {SearchType.HYBRID_COMPLETION, SearchType.HYBRID_COMPLETION_DECOMPOSITION}
+)
 
 
 async def _effective_search_type(
@@ -45,18 +47,24 @@ async def _effective_search_type(
     else:
         resolved = query_type
 
-    if resolved in _GRAPH_COUNTERPART:
+    if resolved in _HYBRID_TYPES:
         reject_hybrid_graph_only_knobs(kwargs)
         reason = await hybrid_deferral_reason(kwargs, graph_is_empty=graph_is_empty)
+        if reason and resolved is SearchType.HYBRID_COMPLETION_DECOMPOSITION:
+            raise QueryValidationError(
+                message=(
+                    f"{resolved.value} cannot serve this search: {reason}. "
+                    f"Use {SearchType.GRAPH_COMPLETION_DECOMPOSITION.value} for this request."
+                )
+            )
         if reason:
-            counterpart = _GRAPH_COUNTERPART[resolved]
             logger.warning(
                 f"{resolved.value} is not available for this search; answering with "
-                f"{counterpart.value} instead."
+                f"{SearchType.GRAPH_COMPLETION.value} instead."
             )
             # Payload.search_type records this. search() strips it; only_context
             # and verbose callers that parse shape must pin query_type.
-            return counterpart
+            return SearchType.GRAPH_COMPLETION
     return resolved
 
 

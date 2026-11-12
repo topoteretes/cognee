@@ -5,6 +5,9 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("QueryDecomposition")
 
 
 class DecompositionMode(str, Enum):
@@ -43,7 +46,11 @@ class DecompositionRunState:
 def normalize_subqueries(
     original_query: str, subqueries: list[str] | None, max_subqueries: int = 5
 ) -> list[str]:
-    """Clean and bound decomposed subqueries to at most ``max_subqueries``."""
+    """Clean and bound decomposed subqueries to at most ``max_subqueries``.
+
+    A plan with no usable subquery is replaced by the original query, with a warning:
+    the search then runs without decomposition.
+    """
 
     normalized_queries: list[str] = []
     for subquery in subqueries or []:
@@ -57,6 +64,9 @@ def normalize_subqueries(
     if normalized_queries:
         return normalized_queries
 
+    logger.warning(
+        "Query decomposition returned no usable subquery; searching with the original query only."
+    )
     fallback_query = original_query.strip()
     return [fallback_query or original_query]
 
@@ -89,9 +99,7 @@ async def decompose_query(
         response_model=QueryDecomposition,
     )
 
-    return normalize_subqueries(
-        query, getattr(decomposition, "subqueries", None), max_subqueries=max_subqueries
-    )
+    return normalize_subqueries(query, decomposition.subqueries, max_subqueries=max_subqueries)
 
 
 def merge_deduplicated_edges(edge_batches: list[list[Edge]]) -> list[Edge]:

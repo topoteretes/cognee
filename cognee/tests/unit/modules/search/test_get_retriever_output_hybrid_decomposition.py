@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
 from cognee.modules.retrieval.utils.query_decomposition import QueryDecomposition
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.types import SearchType
@@ -165,26 +166,47 @@ async def test_graph_only_knobs_are_rejected_like_plain_hybrid(config):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "config", [{"node_type": str}, {"neighborhood_depth": 2}, {"feedback_influence": 0.2}]
+    ("config", "reason"),
+    [
+        ({"node_type": str}, "node_type=str is not NodeSet"),
+        ({"neighborhood_depth": 2}, "neighborhood_depth is set"),
+        ({"feedback_influence": 0.2}, "feedback_influence > 0"),
+    ],
 )
-async def test_graph_only_requests_defer_to_graph_decomposition(config):
-    resolved = await get_retriever_output_module._effective_search_type(
-        SearchType.HYBRID_COMPLETION_DECOMPOSITION, QUESTION, config, False
-    )
+async def test_graph_only_requests_are_refused_with_the_reason(config, reason):
+    """The type is always chosen explicitly, so it is never answered by another algorithm."""
+    with pytest.raises(QueryValidationError) as refusal:
+        await get_retriever_output_module._effective_search_type(
+            SearchType.HYBRID_COMPLETION_DECOMPOSITION, QUESTION, config, False
+        )
 
-    assert resolved is SearchType.GRAPH_COMPLETION_DECOMPOSITION
+    assert reason in refusal.value.message
+    assert "Use GRAPH_COMPLETION_DECOMPOSITION" in refusal.value.message
 
 
 @pytest.mark.asyncio
-async def test_a_dataset_without_chunk_collections_defers_to_graph_decomposition():
+async def test_a_dataset_without_chunk_collections_is_refused():
     vector = SimpleNamespace(has_collection=AsyncMock(return_value=False))
-    with patch(
-        "cognee.modules.search.methods.hybrid_deferral.get_vector_engine_async",
-        new_callable=AsyncMock,
-        return_value=vector,
+    with (
+        patch(
+            "cognee.modules.search.methods.hybrid_deferral.get_vector_engine_async",
+            new_callable=AsyncMock,
+            return_value=vector,
+        ),
+        pytest.raises(QueryValidationError) as refusal,
     ):
-        resolved = await get_retriever_output_module._effective_search_type(
+        await get_retriever_output_module._effective_search_type(
             SearchType.HYBRID_COMPLETION_DECOMPOSITION, QUESTION, {}, False
         )
 
-    assert resolved is SearchType.GRAPH_COMPLETION_DECOMPOSITION
+    assert "collections missing" in refusal.value.message
+    assert "Use GRAPH_COMPLETION_DECOMPOSITION" in refusal.value.message
+
+
+@pytest.mark.asyncio
+async def test_plain_hybrid_still_defers_on_the_same_request():
+    resolved = await get_retriever_output_module._effective_search_type(
+        SearchType.HYBRID_COMPLETION, QUESTION, {"neighborhood_depth": 2}, False
+    )
+
+    assert resolved is SearchType.GRAPH_COMPLETION

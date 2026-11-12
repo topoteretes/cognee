@@ -89,6 +89,19 @@ def test_normalize_subqueries_strips_caps_and_falls_back():
     assert fallback == ["Original query"]
 
 
+def test_an_empty_plan_is_logged_as_a_warning(caplog):
+    with caplog.at_level("WARNING"):
+        assert normalize_subqueries("Original query", ["", "   "]) == ["Original query"]
+        assert normalize_subqueries("Original query", []) == ["Original query"]
+    assert caplog.text.count("returned no usable subquery") == 2
+
+
+def test_a_usable_plan_logs_no_warning(caplog):
+    with caplog.at_level("WARNING"):
+        normalize_subqueries("Original query", ["First query"])
+    assert "returned no usable subquery" not in caplog.text
+
+
 def test_normalize_subqueries_honours_max_subqueries():
     nine = [f"subquery {index}" for index in range(9)]
 

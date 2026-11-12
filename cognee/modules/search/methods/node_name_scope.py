@@ -31,11 +31,13 @@ _EVERY_SCOPE = frozenset(NodeNameScope)
 # The scopes each search type honours. A type missing here ignores ``node_name``
 # and is refused when one is given. HYBRID_COMPLETION lists every scope because
 # a graph scope is served by deferring to GRAPH_COMPLETION
-# (see hybrid_deferral.request_deferral_reason).
+# (see hybrid_deferral.request_deferral_reason). HYBRID_COMPLETION_DECOMPOSITION
+# never defers, so it lists only the node-set scope its lanes apply themselves.
 SUPPORTED_SCOPES: dict[SearchType, frozenset[NodeNameScope]] = {
     SearchType.CHUNKS: _EVERY_SCOPE,
     SearchType.RAG_COMPLETION: _EVERY_SCOPE,
     SearchType.HYBRID_COMPLETION: _EVERY_SCOPE,
+    SearchType.HYBRID_COMPLETION_DECOMPOSITION: frozenset({NodeNameScope.NODE_SET}),
     SearchType.TEMPORAL: frozenset({NodeNameScope.NODE_SET}),
     SearchType.CODING_RULES: frozenset({NodeNameScope.NODE_SET}),
     SearchType.GRAPH_COMPLETION: _EVERY_SCOPE,

@@ -680,6 +680,39 @@ async def test_types_that_ignore_node_name_refuse_it(search_type):
 
 
 @pytest.mark.asyncio
+async def test_hybrid_decomposition_takes_a_node_set_name():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.hybrid_decomposition_retriever import (
+        HybridDecompositionRetriever,
+    )
+
+    retriever = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION_DECOMPOSITION,
+        query_text="q",
+        node_name=["tag"],
+        node_name_filter_operator="AND",
+    )
+    assert isinstance(retriever, HybridDecompositionRetriever)
+    assert retriever.node_name == ["tag"]
+    assert retriever.node_name_filter_operator == "AND"
+
+
+@pytest.mark.asyncio
+async def test_hybrid_decomposition_refuses_a_graph_scope():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    with pytest.raises(
+        QueryValidationError, match="HYBRID_COMPLETION_DECOMPOSITION does not apply"
+    ):
+        await mod.get_search_type_retriever_instance(
+            SearchType.HYBRID_COMPLETION_DECOMPOSITION,
+            query_text="q",
+            node_type=TextDocument,
+            node_name=["doc_a"],
+        )
+
+
+@pytest.mark.asyncio
 async def test_temporal_refuses_a_graph_scope():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
 
