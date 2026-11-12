@@ -485,14 +485,14 @@ def test_the_former_history_routes_are_gone(method, path):
 def test_an_uninstalled_workspace_says_when_its_data_is_deleted():
     """G77: 14 days after the uninstall, unless the workspace is connected again; a token
     revoked without an uninstall deletes nothing."""
-    from datetime import UTC, datetime
+    from datetime import datetime, timezone
 
     from cognee.modules.integrations.slack import sync as sync_module
 
     uninstalled = make_credential([])
     uninstalled.provider_metadata[sync_module.UNINSTALLED_AT_KEY] = "2026-11-07T10:00:00+00:00"
     assert SlackIntegration().data_deleted_after(uninstalled) == datetime(
-        2026, 11, 21, 10, tzinfo=UTC
+        2026, 11, 21, 10, tzinfo=timezone.utc
     )
     assert SlackIntegration().data_deleted_after(make_credential([])) is None
 
