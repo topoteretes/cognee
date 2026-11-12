@@ -349,10 +349,11 @@ async def test_local_paths_are_rejected_when_gate_disabled(tmp_path, monkeypatch
     # A non-existent absolute path is raw text even with the gate off: a real run
     # saves it as text because it is not an existing local file (see #3887).
     assert await estimator._input_to_texts("/no/such/file.txt") == ["/no/such/file.txt"]
-    # A real run treats a relative path to an existing file as raw text when
-    # the gate is off.
+    # A real run refuses a relative path to an existing file too when the gate
+    # is off (save_data_item_to_storage's relative-path branch).
     monkeypatch.chdir(tmp_path)
-    assert await estimator._input_to_texts("notes.txt") == ["notes.txt"]
+    with pytest.raises(ValueError, match="not accepted"):
+        await estimator._input_to_texts("notes.txt")
 
 
 @pytest.mark.asyncio

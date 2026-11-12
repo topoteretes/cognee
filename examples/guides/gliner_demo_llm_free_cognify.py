@@ -79,6 +79,8 @@ async def main():
         print(f"    entity types:   {sorted(schema.entity_types)}")
         print(f"    relation types: {sorted(schema.relation_types)}")
     print(f"\nchunks processed: {stats.chunks}")
+    if stats.model is not None:  # set when a remote GLiNER worker extracted
+        print(f"worker model:     {stats.model}")
     print(f"nodes mapped:     {stats.nodes}")
     print(
         f"relations: {stats.candidate_edges} proposed, "

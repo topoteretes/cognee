@@ -138,31 +138,6 @@ TELEMETRY_DATASET_NAME_PROPERTIES = ["dataset_name", "dataset"]
 
 # Deployments may override the operation context's origin for telemetry.
 TELEMETRY_ORIGIN_ENV = "TELEMETRY_ORIGIN"
-# The only events a "cloud" origin sends: operation outcomes and run milestones.
-# Task, item start/completion and endpoint events stay local (CLO-799).
-CLOUD_TELEMETRY_EVENTS = frozenset(
-    {
-        "Pipeline Run Started",
-        "Pipeline Run Completed",
-        "Pipeline Run Errored",
-        "Incremental Update Run Started",
-        "Incremental Update Run Completed",
-        "cognee.cognify DEFAULT TASKS CREATION ERRORED",
-        "cognee.remember",
-        "cognee.remember.code_graph",
-        "cognee.remember.import",
-        "cognee.recall",
-        "cognee.recall ERRORED",
-        "cognee.improve",
-        "cognee.forget",
-        "cognee.push",
-        "cognee.export",
-        "cognee.search EXECUTION STARTED",
-        "cognee.search EXECUTION COMPLETED",
-        "cognee.search EXECUTION ERRORED",
-        "Pipeline Item Errored",
-    }
-)
 # A model setting that is a filesystem path (a local GGUF, a mounted checkpoint)
 # carries the account name in it. It leaves the process as this closed value.
 TELEMETRY_LOCAL_PATH_LABEL = "local_path"
@@ -538,6 +513,14 @@ def _resolve_identity(user) -> tuple[str, str | None]:
     return resolved_id, resolved_tenant
 
 
+def _telemetry_identity(user, tenant_id) -> tuple[str, str]:
+    """``(user_id, tenant_id)`` as every event records them: an explicit tenant wins."""
+    user_id, resolved_tenant_id = _resolve_identity(user)
+    if tenant_id is not None:
+        resolved_tenant_id = str(tenant_id)
+    return user_id, resolved_tenant_id or "Single User Tenant"
+
+
 def send_telemetry(
     event_name: str,
     user=None,
@@ -599,14 +582,17 @@ def send_telemetry(
     # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
     # segmented by origin.
     origin = telemetry_origin()
-    if origin == "cloud" and event_name not in CLOUD_TELEMETRY_EVENTS:
+    if origin == "cloud":
+        # The cloud profile: only what the contract allows (cognee/shared/telemetry_schema.py).
+        user = user if user is not None else user_id
+        _send_cloud_telemetry(event_name, user, tenant_id, additional_properties)
         return
     additional_properties = _sanitize_nested_properties(
         obj=additional_properties, property_names=TELEMETRY_SANITIZED_PROPERTIES
     )
-    resolved_user_id, resolved_tenant_id = _resolve_identity(user if user is not None else user_id)
-    if tenant_id is not None:
-        resolved_tenant_id = str(tenant_id)
+    resolved_user_id, resolved_tenant_id = _telemetry_identity(
+        user if user is not None else user_id, tenant_id
+    )
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
     api_key_tracking_id = _get_api_key_tracking_id()
@@ -623,7 +609,7 @@ def send_telemetry(
         "event_time": current_time.isoformat(),
         "user_properties": {
             "user_id": resolved_user_id,
-            "tenant_id": resolved_tenant_id or "Single User Tenant",
+            "tenant_id": resolved_tenant_id,
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
@@ -633,7 +619,7 @@ def send_telemetry(
         "properties": {
             "time": current_time.strftime("%m/%d/%Y"),
             "user_id": resolved_user_id,
-            "tenant_id": resolved_tenant_id or "Single User Tenant",
+            "tenant_id": resolved_tenant_id,
             "anonymous_id": anonymous_id,
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
@@ -652,6 +638,58 @@ def send_telemetry(
         # Starting the sender thread fails at interpreter shutdown — telemetry is
         # best-effort; dropping the event is better than crashing the caller.
         logger.debug("Ignoring exception in send_telemetry", exc_info=True)
+
+
+def _send_cloud_telemetry(event_name: str, user, tenant_id, additional_properties: dict) -> None:
+    """Queue the event as the cloud contract allows it; any failure drops it, never raises."""
+    try:
+        payload = _cloud_payload(event_name, user, tenant_id, additional_properties)
+        if payload is not None:
+            _telemetry_sender.enqueue(payload)
+    except Exception:
+        logger.debug("Dropping cloud telemetry event %s", event_name, exc_info=True)
+
+
+def _cloud_payload(event_name: str, user, tenant_id, additional_properties: dict) -> dict | None:
+    """The event's contract-checked properties under trusted fields no property can override."""
+    from cognee.shared.telemetry_schema import apply_cloud_contract, check_trusted_fields
+
+    trusted = check_trusted_fields(event_name, _cloud_trusted_fields(user, tenant_id))
+    if trusted is None:
+        return None
+    # Some events still send their own tenant_id; setting it is the builder's job.
+    event_properties = {k: v for k, v in additional_properties.items() if k not in trusted}
+    properties = apply_cloud_contract(event_name, event_properties)
+    if properties is None:
+        return None
+    return _cloud_envelope(event_name, properties, trusted)
+
+
+def _cloud_trusted_fields(user, tenant_id) -> dict:
+    """Identity and environment of a cloud event, built only here."""
+    from cognee.modules.integrations.agent_identity import agent_telemetry_properties
+    from cognee.shared.telemetry_schema import CLOUD_SCHEMA_VERSION
+
+    user_id, resolved_tenant_id = _telemetry_identity(user, tenant_id)
+    return {
+        "user_id": user_id,
+        "tenant_id": resolved_tenant_id,
+        **agent_telemetry_properties(user),
+        "schema_version": CLOUD_SCHEMA_VERSION,
+        "telemetry_origin": "cloud",
+    }
+
+
+def _cloud_envelope(event_name: str, properties: dict, trusted: dict) -> dict:
+    """The proxy's event shape; trusted fields go last, so no property replaces them."""
+    return {
+        # The proxy requires the key; a cloud event is identified by user_id and tenant_id.
+        "anonymous_id": "",
+        "event_name": event_name,
+        "event_time": datetime.now(timezone.utc).isoformat(),
+        "user_properties": {"user_id": trusted["user_id"], "tenant_id": trusted["tenant_id"]},
+        "properties": {**properties, **trusted},
+    }
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):

@@ -1,5 +1,6 @@
 """Remote HTTP client that proxies V2 operations to a Cognee Cloud instance."""
 
+import asyncio
 import io
 import json
 from pathlib import Path
@@ -25,6 +26,34 @@ def _text_upload_filename(text: str) -> str:
     (FileContentHashingError 409s).
     """
     return create_text_data(text).get_metadata()["name"]
+
+
+def remote_graph_schema(graph_model: Any) -> dict | None:
+    """The ``graph_model`` a remote remember or cognify sends: the model as the JSON
+    schema the server rebuilds with ``graph_schema_to_graph_model``, typed ``Edge`` and
+    ``FromIdentity`` fields included, or None for the server's default ``KnowledgeGraph``.
+
+    A model the LLM extraction could not fill raises here, before anything is uploaded.
+    """
+    from cognee.shared.data_models import KnowledgeGraph
+    from cognee.shared.graph_model_utils import graph_model_to_graph_schema
+
+    if graph_model is None or graph_model is KnowledgeGraph:
+        return None
+    return graph_model_to_graph_schema(graph_model)
+
+
+def _node_type_name(node_type: Any) -> str | None:
+    """The ``node_type`` wire form: the class name, or None for the NodeSet default.
+
+    Omitting the field is how the server is told "node-set tags", so the default
+    travels as nothing and only a typed graph scope names its class.
+    """
+    from cognee.modules.engine.models.node_set import NodeSet
+
+    if node_type is None or node_type is NodeSet:
+        return None
+    return node_type.__name__
 
 
 def _failed_update_result(body: str) -> dict | None:
@@ -147,10 +176,14 @@ class CloudClient:
 
     async def remember(self, data: Any, dataset_name: str = "main_dataset", **kwargs) -> dict:
         """POST /api/v1/remember — ingest data and build knowledge graph."""
+        # Resolved first: a model the route cannot carry raises before any upload.
+        graph_schema = remote_graph_schema(kwargs.get("graph_model"))
         session = await self._get_session()
 
         form = aiohttp.FormData()
         form.add_field("datasetName", dataset_name)
+        if graph_schema is not None:
+            form.add_field("graph_model", json.dumps(graph_schema))
 
         if kwargs.get("dataset_id"):
             form.add_field("datasetId", str(kwargs["dataset_id"]))
@@ -294,6 +327,11 @@ class CloudClient:
             payload["top_k"] = kwargs["top_k"]
         if kwargs.get("system_prompt"):
             payload["system_prompt"] = kwargs["system_prompt"]
+        node_type_name = await self._node_type_payload(
+            kwargs.get("node_type"), kwargs.get("node_name")
+        )
+        if node_type_name is not None:
+            payload["node_type"] = node_type_name
         if kwargs.get("node_name"):
             payload["node_name"] = kwargs["node_name"]
         if kwargs.get("only_context"):
@@ -485,10 +523,18 @@ class CloudClient:
             # UUIDs as UUID objects, the fallback reason as its enum member.
             return UpdateResult.model_validate(await resp.json()).model_dump()
 
-    # Set when the server's listing route has been probed for ``content_hash``;
-    # a class default so instances built without ``__init__`` (tests) start
-    # unknown too.
+    # Feature probes. The connect-time checks (/health, an authenticated GET) say
+    # the server is up and the key works, not which fields its routes know, so a
+    # feature a server predates is detected from its OpenAPI schema. The schema is
+    # fetched once per client; each probe caches its own answer. Class defaults so
+    # instances built without ``__init__`` (tests) start unknown too.
+    _openapi: dict | None = None
     _content_hash_lookup_supported: bool | None = None
+    _node_type_supported: bool | None = None
+
+    # The schema is a few hundred KiB; its own timeout keeps a slow docs route
+    # from holding a probe under the 600 s request timeout.
+    SCHEMA_PROBE_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
     _CONTENT_HASH_UNSUPPORTED = (
         "Remote server does not support content_hash lookup on "
@@ -497,30 +543,69 @@ class CloudClient:
         "rest of the dataset. Upgrade the server to use find_data() over serve()."
     )
 
+    _NODE_TYPE_UNSUPPORTED = (
+        "Remote server does not take node_type on POST /api/v1/search and "
+        "POST /api/v1/recall: it predates the field and would read node_name as node-set "
+        "tags, returning results for the wrong scope without an error. Upgrade the server "
+        "to use a typed node_type over serve(); node_name alone (node-set tags) still works."
+    )
+
+    _NODE_TYPE_UNKNOWN = (
+        "Could not read the remote server's schema (GET /openapi.json), so whether it "
+        "takes node_type on POST /api/v1/search and POST /api/v1/recall is unknown. A "
+        "server that predates the field would read node_name as node-set tags and return "
+        "results for the wrong scope without an error, so the typed scope is not sent. "
+        "Make /openapi.json reachable from this client; node_name alone (node-set tags) "
+        "still works."
+    )
+
+    async def _server_openapi(self) -> dict | None:
+        """The server's OpenAPI document, fetched once per client.
+
+        ``None`` means it could not be read (no schema served, not JSON, or the
+        read ran past ``SCHEMA_PROBE_TIMEOUT``) and is not cached, so a later call
+        can still find out.
+        """
+        if self._openapi is not None:
+            return self._openapi
+        try:
+            session = await self._get_session()
+            async with session.get(
+                f"{self.service_url}/openapi.json", timeout=self.SCHEMA_PROBE_TIMEOUT
+            ) as resp:
+                if resp.status >= 400:
+                    return None
+                schema = await resp.json()
+        # A total-timeout is a bare asyncio.TimeoutError (the builtin on 3.11+), not
+        # a ClientError: only a connect-phase timeout is one.
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError):
+            logger.warning("could not read the server schema from /openapi.json")
+            return None
+        if not isinstance(schema, dict):
+            return None
+        self._openapi = schema
+        return schema
+
     async def supports_content_hash_lookup(self) -> bool | None:
         """Whether the server's dataset listing takes a ``content_hash`` query param.
 
         FastAPI drops an unknown query param without an error, so a server
         older than the content-hash lookup answers ``?content_hash=`` with the
         whole dataset listing, which ``find_data()`` would then hand back as
-        matches. Probed once per client from ``/openapi.json`` (the check the
-        MCP server makes for ``QAEntry.node_set``). ``None`` means unknown (no
-        schema served, or no listing route in it) and is not cached, so a
-        later call can still find out; the row-level check in ``list_data``
-        fails closed either way.
+        matches. ``None`` means unknown (no schema served, or no listing route in
+        it) and is not cached; the row-level check in ``list_data`` fails closed
+        either way, so an unknown server is still asked.
         """
         if self._content_hash_lookup_supported is not None:
             return self._content_hash_lookup_supported
+        schema = await self._server_openapi()
+        if schema is None:
+            return None
         try:
-            session = await self._get_session()
-            async with session.get(f"{self.service_url}/openapi.json") as resp:
-                if resp.status >= 400:
-                    return None
-                schema = await resp.json()
             parameters = schema["paths"]["/api/v1/datasets/{dataset_id}/data"]["get"].get(
                 "parameters", []
             )
-        except (aiohttp.ClientError, ValueError, KeyError, TypeError, AttributeError):
+        except (KeyError, TypeError, AttributeError):
             logger.warning(
                 "find_data: could not read the server schema to check content_hash support"
             )
@@ -537,6 +622,56 @@ class CloudClient:
                 "lookups over serve() are refused until it is upgraded"
             )
         return self._content_hash_lookup_supported
+
+    async def supports_node_type(self) -> bool | None:
+        """Whether the server's search and recall request bodies take ``nodeType``.
+
+        Request bodies ignore unknown fields, so a server older than the field
+        accepts the body and reads ``nodeName`` as node-set tags: no error, and
+        results for the wrong scope. ``None`` means unknown (no schema served) and
+        is not cached, so a later call can still find out.
+        """
+        if self._node_type_supported is not None:
+            return self._node_type_supported
+        schema = await self._server_openapi()
+        if schema is None:
+            return None
+        try:
+            schemas = schema["components"]["schemas"]
+            self._node_type_supported = all(
+                "nodeType" in schemas.get(name, {}).get("properties", {})
+                for name in ("SearchPayloadDTO", "RecallPayloadDTO")
+            )
+        except (KeyError, TypeError, AttributeError):
+            logger.warning("could not read the server schema to check node_type support")
+            return None
+        if not self._node_type_supported:
+            logger.warning(
+                "the remote server predates node_type on search and recall; "
+                "typed scopes over serve() are refused until it is upgraded"
+            )
+        return self._node_type_supported
+
+    async def _node_type_payload(self, node_type: Any, node_name: Any) -> str | None:
+        """The ``node_type`` to send: None for the node-set default, else the class name.
+
+        ``node_type`` only changes what ``node_name`` means, so without names the
+        field has no effect and goes to any server unprobed. With names a typed
+        scope is sent only to a server known to read it: an old server would apply
+        the wrong scope, and a response carries nothing that would show it, so a
+        server whose schema cannot be read is refused too. Dropping the type or the
+        names instead would return results the caller did not ask for, with nothing
+        to tell them.
+        """
+        node_type_name = _node_type_name(node_type)
+        if node_type_name is None or not node_name:
+            return node_type_name
+        supported = await self.supports_node_type()
+        if supported is None:
+            raise RuntimeError(self._NODE_TYPE_UNKNOWN)
+        if not supported:
+            raise RuntimeError(self._NODE_TYPE_UNSUPPORTED)
+        return node_type_name
 
     async def list_data(self, dataset_id: UUID, *, content_hash: str | None = None) -> list:
         """Traverse bounded pages, deduplicating overlaps during concurrent ingest.
@@ -636,9 +771,12 @@ class CloudClient:
 
     async def cognify(self, datasets: Any = None, **kwargs) -> dict:
         """POST /api/v1/cognify — build the knowledge graph."""
+        graph_schema = remote_graph_schema(kwargs.get("graph_model"))
         session = await self._get_session()
 
         payload: dict = {}
+        if graph_schema is not None:
+            payload["graph_model"] = graph_schema
         if datasets:
             payload["datasets"] = (
                 [str(d) for d in datasets] if isinstance(datasets, list) else [str(datasets)]
@@ -680,6 +818,11 @@ class CloudClient:
             payload["topK"] = kwargs["top_k"]
         if kwargs.get("system_prompt"):
             payload["systemPrompt"] = kwargs["system_prompt"]
+        node_type_name = await self._node_type_payload(
+            kwargs.get("node_type"), kwargs.get("node_name")
+        )
+        if node_type_name is not None:
+            payload["nodeType"] = node_type_name
         if kwargs.get("node_name"):
             payload["nodeName"] = kwargs["node_name"]
         if kwargs.get("only_context") is not None:

@@ -91,7 +91,7 @@ async def _sync_source(
         make_source=make_source,
         classify_error=_classify_error,
     )
-    if not counts["failed"]:
+    if not ingestion.retirement_blocked(counts):
         await ingestion.retire_resources(
             "google_drive", credential, _dataset_name(credential), retained
         )

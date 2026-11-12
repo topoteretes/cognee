@@ -16,7 +16,7 @@ from __future__ import annotations
 import pytest
 
 import cognee
-from cognee.modules.data.methods import get_data_ids_by_dataset
+from cognee.modules.data.methods import get_data_ids_by_dataset, get_dataset_data
 from cognee.modules.search.dataset_routing import (
     DATASET_ROUTE_COLLECTION,
     dataset_route_ids,
@@ -58,8 +58,12 @@ async def test_unscoped_recall_is_routed_to_the_dataset_holding_the_answer(
             for row in await engine.retrieve(DATASET_ROUTE_COLLECTION, row_ids)
         }
         assert set(rows) == set(row_ids), f"routing rows missing for {dataset_id}: {rows.keys()}"
-        assert all(payload["dataset_id"] == str(dataset_id) for payload in rows.values())
-        assert rows[row_ids[0]]["is_root"] is True
+        # Each row is the dataset's own index row, copied as stored: the root
+        # names no single document, a bucket carries the document it summarizes.
+        assert rows[row_ids[0]]["document_id"] is None
+        assert [rows[row_id]["document_id"] for row_id in row_ids[1:]] == [
+            str(document_id) for document_id in documents[dataset_id]
+        ]
 
     # A query quoting one of B's documents routes to B alone.
     target = second[0]
@@ -87,13 +91,31 @@ async def test_unscoped_recall_is_routed_to_the_dataset_holding_the_answer(
         return {str(row.id) for row in rows}
 
     # Forgetting one of B's documents removes its bucket row at once (its id can
-    # no longer be derived once the Data row is gone) and B's root row, whose
-    # text named the document; the other buckets stay. The next index build
-    # writes the root again.
+    # no longer be derived once the Data row is gone); the other buckets stay.
+    # B's root row, whose text named the document, is written again from the
+    # documents that remain, so a broad question keeps routing to B before any
+    # improve runs, and the forgotten document's name is nowhere in it.
+    names = {row.id: row.name for row in await get_dataset_data(dataset_b)}
     gone, *kept = documents[dataset_b]
     await cognee.forget(data_id=gone, dataset_id=dataset_b)
-    _root, *kept_buckets = dataset_route_ids(dataset_b, kept)
-    assert await stored(dataset_b, documents[dataset_b]) == set(kept_buckets)
+    root_id, *kept_buckets = dataset_route_ids(dataset_b, kept)
+    assert await stored(dataset_b, documents[dataset_b]) == {root_id, *kept_buckets}
+    [root_row] = await engine.retrieve(DATASET_ROUTE_COLLECTION, [root_id])
+    assert root_row.payload["document_id"] is None
+    assert names[gone] not in root_row.payload["text"]
+    assert all(names[document_id] in root_row.payload["text"] for document_id in kept)
+    # The row mirrors the root the dataset's own index now holds.
+    assert root_row.payload["text"].lower() in await _support.vector_texts(
+        dataset_b, default_user, "GlobalContextSummary_text"
+    )
+    decision = await route_datasets(
+        root_row.payload["text"],
+        [dataset_a, dataset_b],
+        config.top_k,
+        config.distance_cutoff,
+        config.tie_margin,
+    )
+    assert decision.routed == (dataset_b,)
 
     # Dropping A's memory alone (its files stay) removes every row of A.
     await cognee.forget(dataset_id=dataset_a, memory_only=True)

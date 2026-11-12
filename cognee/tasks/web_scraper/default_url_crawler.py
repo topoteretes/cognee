@@ -9,7 +9,10 @@ from urllib.parse import urlparse
 import httpx
 
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
+from cognee.tasks.web_scraper.ssrf_protection import (
+    require_http_requests_allowed,
+    validate_outbound_url,
+)
 from cognee.tasks.web_scraper.types import UrlsToHtmls
 
 logger = get_logger()
@@ -418,6 +421,7 @@ class DefaultUrlCrawler:
             ValueError: If extraction_rules are missing when required or if urls is invalid.
             Exception: If fetching or extraction fails.
         """
+        require_http_requests_allowed()
         if isinstance(urls, str):
             urls = [urls]
         elif not isinstance(urls, list):

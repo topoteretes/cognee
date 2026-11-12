@@ -45,9 +45,14 @@ async def complete_installation(
         existing = await get_credential_by_account(
             integration.provider, installation.provider_account_id
         )
-        if existing is not None and selection_key in (existing.provider_metadata or {}):
-            # Installation defaults apply only before the user chooses a scope.
-            # Omit the key so upsert's metadata merge retains the stored choice.
+        if (
+            existing is not None
+            and existing.user_id == user_id
+            and selection_key in (existing.provider_metadata or {})
+        ):
+            # Installation defaults apply only before the user chooses a scope. Omit the
+            # key so upsert's metadata merge retains the stored choice. Another owner
+            # starts from the installation's metadata alone (upsert_credential).
             metadata.pop(selection_key)
 
     return await upsert_credential(

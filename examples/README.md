@@ -55,6 +55,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 ### Retrieval
 | Script | Demonstrates |
 |---|---|
+| [`hybrid_decomposition.py`](guides/hybrid_decomposition.py) | Context-primed hybrid decomposition for multi-part questions, with a configurable planning prompt |
 | [`truth_subspace_reranking.py`](guides/truth_subspace_reranking.py) | Teaching retrieval a preference — truth-weighted reranking on/off |
 | [`temporal_recall.py`](guides/temporal_recall.py) | Time-bounded queries with `SearchType.TEMPORAL` |
 | [`references_example.py`](guides/references_example.py) | `include_references` — answers with evidence |
@@ -78,6 +79,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 ### Ingestion
 | Script | Demonstrates |
 |---|---|
+| [`dlt_column_search.py`](guides/dlt_column_search.py) | Ingest Chinook and scope `GRAPH_COMPLETION` to a `SchemaColumn` named `table:column` |
 | [`web_url_content_ingestion_example.py`](guides/web_url_content_ingestion_example.py) | Ingesting a URL with `preferred_loaders` (needs network) |
 | [`multimedia_audio_image_processing_example.py`](guides/multimedia_audio_image_processing_example.py) | Audio + image ingestion (bundled assets) |
 | [`image_ocr_extraction.py`](guides/image_ocr_extraction.py) | Vision transcription + OCR text for an image |
