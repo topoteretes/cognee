@@ -32,7 +32,9 @@ delete). Whatever removes only the item's memory keeps the document and
 writes none: a memory-only forget, and the rollback of a failed run. A later
 re-ingest brings a retracted item back, tombstone kept in its version
 history. A write or a tombstone that fails raises, so the ingestion or the
-delete fails with it instead of leaving a gap nothing reports.
+delete fails with it instead of leaving a gap nothing reports. With the flag
+off (``tracking.py``) none of this runs: the ledger is neither written nor
+read, by a delete or by the read surface.
 
 Reading it: ``ProvenanceManager`` (``get_lineage`` / ``revision_history`` /
 ``verify_chain`` / ``check`` / ``get_statistics`` / ``export``, all

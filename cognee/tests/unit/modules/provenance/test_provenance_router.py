@@ -189,10 +189,31 @@ class TestLedgerWalks:
         )
         assert len(current.text.splitlines()) == 3
 
-    async def test_status_reports_the_flag(self, client, monkeypatch):
-        import cognee.tasks.provenance.record_provenance
-
-        record_module = sys.modules["cognee.tasks.provenance.record_provenance"]
-        monkeypatch.setattr(record_module, "provenance_tracking_enabled", lambda: True)
+    async def test_status_reports_the_flag(self, client):
         response = await client.get("/api/v1/provenance/status")
         assert response.json() == {"provenance_tracking": True, "anchoring_configured": False}
+
+    async def test_a_ledger_that_is_off_says_so_instead_of_answering(self, client, ledger_off):
+        ds = client.app.state.ds_allowed
+        key = ledger_node_key(ds, "n1")
+        client.app.state.user.is_superuser = True
+        scoped = {"dataset_id": str(ds)}
+        requests = [
+            ("get", f"/api/v1/provenance/entry/{key}", None),
+            ("get", f"/api/v1/provenance/history/{key}", None),
+            ("get", "/api/v1/provenance/verify", scoped),
+            ("get", "/api/v1/provenance/statistics", scoped),
+            ("get", "/api/v1/provenance/export", scoped),
+            ("get", "/api/v1/provenance/verify", None),
+            ("post", "/api/v1/provenance/anchor", None),
+            ("get", "/api/v1/provenance/anchors/verify", None),
+        ]
+        for method, url, params in requests:
+            response = await getattr(client, method)(url, params=params)
+            assert response.status_code == 409, url
+            assert "PROVENANCE_TRACKING=true" in response.json()["detail"], url
+
+        # The one route that still answers is the one that reports the switch.
+        status = await client.get("/api/v1/provenance/status")
+        assert status.status_code == 200
+        assert status.json()["provenance_tracking"] is False

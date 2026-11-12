@@ -70,6 +70,13 @@ class TestParser:
         with pytest.raises(CliCommandException):
             ProvenanceCommand().execute(_parse())
 
+    def test_a_ledger_that_is_off_ends_the_command_with_the_reason(self, ledger_off, capsys):
+        for action in (("stats",), ("verify",), ("export",), ("anchor",), ("history", "ds:n1")):
+            with pytest.raises(CliCommandException) as raised:
+                ProvenanceCommand().execute(_parse(*action))
+            assert raised.value.error_code == 1
+            assert "PROVENANCE_TRACKING=true" in capsys.readouterr().err
+
     def test_registered_with_the_cli(self):
         from cognee.cli._cognee import _discover_commands
 

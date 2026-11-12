@@ -7,7 +7,8 @@ one document or deleting the dataset. The tombstone is written last, once the
 document row is gone, so a delete that failed never left one. Whatever removes
 only an item's memory keeps the document and writes none: a memory-only forget,
 and the rollback of a failed run. A ledger that cannot be written fails the
-operation, and the retry completes it.
+operation, and the retry completes it. With the ledger off, which is the
+default, a delete does not touch the ledger table at all.
 """
 
 from __future__ import annotations
@@ -15,10 +16,12 @@ from __future__ import annotations
 from uuid import UUID
 
 import pytest
+from sqlalchemy import event
 
 import cognee
 import cognee.modules.data.methods as data_methods
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.provenance import get_provenance_manager, storage
@@ -308,3 +311,37 @@ async def test_a_rolled_back_run_keeps_the_row_live_so_a_later_delete_is_recorde
     assert tombstone["invalidated"] is True
     assert tombstone["invalidation_reason"] == "data_deleted"
     assert tombstone["invalidated_by"] == str(default_user.id)
+
+
+@pytest.mark.journey
+@pytest.mark.asyncio
+async def test_a_ledger_that_is_off_is_not_touched_by_a_delete(
+    clean_env, default_user, ledger_on, monkeypatch
+):
+    manager = ledger_on
+    result = await cognee.remember([DOC_CHOIR, DOC_KITES], dataset_name=DATASET)
+    dataset_id = _support.as_uuid(result.dataset_id)
+    choir = await _data_id(dataset_id, default_user, "saltmarsh choir")
+
+    # Switch the ledger off again, as it is by default.
+    monkeypatch.setenv("PROVENANCE_TRACKING", "false")
+    get_cognify_config.cache_clear()
+
+    ledger_statements: list[str] = []
+
+    def watch(connection, cursor, statement, parameters, context, executemany):
+        if "provenance_entries" in statement:
+            ledger_statements.append(statement)
+
+    engine = get_relational_engine().engine.sync_engine
+    event.listen(engine, "before_cursor_execute", watch)
+    try:
+        await cognee.forget(data_id=choir, dataset_id=dataset_id, user=default_user)
+        await cognee.forget(dataset=DATASET, user=default_user)
+    finally:
+        event.remove(engine, "before_cursor_execute", watch)
+
+    # A feature that is off cannot slow or fail a delete: it is not even read.
+    assert ledger_statements == []
+    # So the row recorded while the ledger was on is not retracted by a delete made while it is off.
+    assert (await _item(manager, dataset_id, choir))["invalidated"] is False

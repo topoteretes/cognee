@@ -36,19 +36,14 @@ so with tracking on the storing task fails and its run is rolled back.
 
 from cognee.infrastructure.databases.provenance import data_item_id, make_source_ref_key
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.modules.provenance import get_provenance_manager
 from cognee.modules.provenance.tombstones import agent_id_for, ledger_data_item_key
+from cognee.modules.provenance.tracking import provenance_tracking_enabled
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("record_provenance")
-
-
-def provenance_tracking_enabled() -> bool:
-    """The ``PROVENANCE_TRACKING`` switch, read fresh (settings are cached)."""
-    return bool(get_cognify_config().provenance_tracking)
 
 
 async def record_provenance_at_storage(
