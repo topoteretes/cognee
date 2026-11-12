@@ -11,6 +11,12 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("remove_unreferenced_files")
 
+# How many removals run at once. Their storage calls run on the process's shared
+# thread pool, and local storage does them on the event loop itself, so the
+# files of a large re-sync started all together make every other request in the
+# worker wait behind them. A width, not a cutoff: every file is still removed.
+_REMOVALS_AT_ONCE = 16
+
 
 async def remove_unreferenced_files(locations: Iterable[str | None], outcome: str) -> None:
     """Remove each stored file in ``locations`` that no ``Data`` row points at.
@@ -18,9 +24,10 @@ async def remove_unreferenced_files(locations: Iterable[str | None], outcome: st
     For the files a document leaves behind when its row moves on, or that were
     staged for a row that never took them. A file a row still uses stays, and
     so does a file outside the data root (the user's own). The references of
-    all the files are read in one query, and the removals run at the same
-    time: each is a few storage round trips, and a re-sync can release two
-    files per changed document while it holds the dataset lock.
+    all the files are read in one query, and the removals run
+    ``_REMOVALS_AT_ONCE`` at a time: each is a few storage round trips, and a
+    re-sync can release two files per changed document while it holds the
+    dataset lock.
 
     Every file is tried. The ones that could not be removed are then raised
     together as one ``StoredFileNotRemovedError``, each with its own error, and
@@ -46,9 +53,17 @@ async def remove_unreferenced_files(locations: Iterable[str | None], outcome: st
         raise StoredFileNotRemovedError(dict.fromkeys(candidates, reason), outcome) from error
 
     unreferenced = [location for location in candidates if location not in referenced]
-    errors = await asyncio.gather(
-        *(_remove_data_file(db_engine, location) for location in unreferenced)
-    )
+    errors: list[Exception | None] = []
+    # One slice after another, not a sliding window: awaiting each slice is what
+    # gives the event loop its turn when the removals themselves never wait
+    # (local storage).
+    for start in range(0, len(unreferenced), _REMOVALS_AT_ONCE):
+        errors += await asyncio.gather(
+            *(
+                _remove_data_file(db_engine, location)
+                for location in unreferenced[start : start + _REMOVALS_AT_ONCE]
+            )
+        )
     not_removed = {
         location: f"{type(error).__name__}: {error}"
         for location, error in zip(unreferenced, errors)

@@ -90,6 +90,56 @@ async def test_removals_run_at_the_same_time(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_large_release_runs_a_few_at_a_time_and_removes_every_file(monkeypatch):
+    engine = _engine(monkeypatch)
+    monkeypatch.setattr(removal, "_REMOVALS_AT_ONCE", 4)
+    in_flight = 0
+    most_in_flight = 0
+
+    async def remove_data_file(location):
+        nonlocal in_flight, most_in_flight
+        in_flight += 1
+        most_in_flight = max(most_in_flight, in_flight)
+        await asyncio.sleep(0)
+        in_flight -= 1
+        engine.removed.append(location)
+
+    engine.remove_data_file = remove_data_file
+    locations = [f"/data/{index}" for index in range(10)]
+
+    await removal.remove_unreferenced_files(locations, OUTCOME)
+
+    # Never more than the width in flight, and the width drops no file.
+    assert most_in_flight == 4
+    assert engine.removed == locations
+
+
+@pytest.mark.asyncio
+async def test_removals_that_never_wait_still_give_other_work_its_turn(monkeypatch):
+    """Local storage removes a file without awaiting anything."""
+    engine = _engine(monkeypatch)
+    monkeypatch.setattr(removal, "_REMOVALS_AT_ONCE", 4)
+    turns = 0
+
+    async def other_request():
+        nonlocal turns
+        while True:
+            turns += 1
+            await asyncio.sleep(0)
+
+    other = asyncio.create_task(other_request())
+    try:
+        await removal.remove_unreferenced_files([f"/data/{index}" for index in range(40)], OUTCOME)
+    finally:
+        other.cancel()
+
+    # Ten slices of four: the other request runs between them, not only once the
+    # last file is gone.
+    assert len(engine.removed) == 40
+    assert turns >= 10
+
+
+@pytest.mark.asyncio
 async def test_a_reference_check_that_fails_reports_every_file(monkeypatch):
     engine = _engine(monkeypatch)
     engine.referenced_data_files = AsyncMock(side_effect=RuntimeError("database is down"))
