@@ -296,6 +296,7 @@ jobs:
   # Guards the slim docling profile (COG-5924): the loader must convert
   # office/web formats on `--extra docling` without torch installed.
   # Needs no LLM secrets - it drives DoclingLoader directly.
+  # Also runs the Google Drive Office format tests, which need the same extra.
   test_docling_slim:
     name: Run Docling Slim Loader Test
     runs-on: ubuntu-22.04
@@ -316,3 +317,8 @@ jobs:
         env:
           ENV: 'dev'
         run: uv run python ./cognee/tests/test_docling_slim_loader.py
+
+      - name: Run Drive Office Format and Backfill Tests
+        env:
+          ENV: 'dev'
+        run: uv run pytest cognee/tests/integration/tasks/connectors/test_google_drive_formats.py -v

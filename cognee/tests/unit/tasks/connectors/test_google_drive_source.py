@@ -11,6 +11,7 @@ tests stay focused on the sync state machine.
 """
 
 import re
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import drive_pdfs
@@ -175,6 +176,20 @@ def _config(**overrides):
 
 
 @pytest.fixture(autouse=True)
+def installed_packages(monkeypatch):
+    # Tests install a package by changing the one element.
+    fingerprint = ["fp1"]
+    monkeypatch.setattr(gd_source, "_installed_packages_fingerprint", lambda: fingerprint[0])
+    return fingerprint
+
+
+@pytest.fixture(autouse=True)
+def no_registered_loaders(monkeypatch):
+    # The installed extras decide what registers; tests that care set their own.
+    monkeypatch.setattr(gd_source, "_registered_loader_extensions", list)
+
+
+@pytest.fixture(autouse=True)
 def fake_content_extraction(monkeypatch):
     calls = []
 
@@ -293,7 +308,7 @@ def test_incremental_sync_only_touches_changed_file(fake_content_extraction):
         "changes": [{"fileId": "fileA", "removed": False}],
         "newStartPageToken": "t1",
     }
-    state = {"page_token": "t0"}
+    state = {"format_version": gd_source.FORMAT_SUPPORT_VERSION, "page_token": "t0"}
 
     rows = list(gd_source._iter_rows(service, _config(), state))
 
@@ -313,7 +328,7 @@ def test_removed_file_yields_hard_delete_tombstone(fake_content_extraction):
         "changes": [{"fileId": "fileB", "removed": True}],
         "newStartPageToken": "t2",
     }
-    state = {"page_token": "t1"}
+    state = {"format_version": gd_source.FORMAT_SUPPORT_VERSION, "page_token": "t1"}
 
     rows = list(gd_source._iter_rows(service, _config(), state))
 
@@ -335,7 +350,7 @@ def test_file_moved_out_of_scope_yields_hard_delete_tombstone(fake_content_extra
         "changes": [{"fileId": "fileA", "removed": False}],
         "newStartPageToken": "t1",
     }
-    state = {"page_token": "t0"}
+    state = {"format_version": gd_source.FORMAT_SUPPORT_VERSION, "page_token": "t0"}
 
     rows = list(gd_source._iter_rows(service, _config(), state))
 
@@ -351,7 +366,7 @@ def test_deleted_file_returning_404_on_get_yields_tombstone(fake_content_extract
         "changes": [{"fileId": "fileA", "removed": False}],
         "newStartPageToken": "t1",
     }
-    state = {"page_token": "t0"}
+    state = {"format_version": gd_source.FORMAT_SUPPORT_VERSION, "page_token": "t0"}
 
     rows = list(gd_source._iter_rows(service, _config(), state))
 
@@ -367,7 +382,7 @@ def test_only_deletions_skips_the_subfolder_scope_walk(fake_content_extraction):
         "changes": [{"fileId": "fileB", "removed": True}],
         "newStartPageToken": "t1",
     }
-    state = {"page_token": "t0"}
+    state = {"format_version": gd_source.FORMAT_SUPPORT_VERSION, "page_token": "t0"}
 
     rows = list(gd_source._iter_rows(service, _config(), state))
 
@@ -386,14 +401,14 @@ def test_drive_api_error_raises_instead_of_deleting_everything(fake_content_extr
             return _Broken()
 
     service = BrokenChangesService(files_by_folder={"root": []}, file_by_id={})
-    state = {"page_token": "t0"}
+    state = {"format_version": gd_source.FORMAT_SUPPORT_VERSION, "page_token": "t0"}
 
     with pytest.raises(RuntimeError):
         list(gd_source._iter_rows(service, _config(), state))
 
     # State must be untouched — a failed run must not look like "everything
     # was deleted" to the caller (dlt then rolls back and retries this token).
-    assert state == {"page_token": "t0"}
+    assert state == {"format_version": gd_source.FORMAT_SUPPORT_VERSION, "page_token": "t0"}
 
 
 def test_shared_drive_backfill_and_incremental_changes_use_the_same_corpus():
@@ -436,7 +451,7 @@ def test_drive_membership_events_without_a_file_id_do_not_break_sync():
         "changes": [{"removed": True}],
         "newStartPageToken": "t1",
     }
-    state = {"page_token": "t0"}
+    state = {"format_version": gd_source.FORMAT_SUPPORT_VERSION, "page_token": "t0"}
     assert list(gd_source._iter_rows(service, _config(), state)) == []
     assert state["page_token"] == "t1"
 
@@ -594,7 +609,11 @@ def test_changed_file_at_a_fetched_version_is_not_downloaded_again(fake_content_
         "changes": [{"fileId": "fileA", "removed": False}],
         "newStartPageToken": "t1",
     }
-    state = {"page_token": "t0", "versions": {"fileA": file_a["modifiedTime"]}}
+    state = {
+        "format_version": gd_source.FORMAT_SUPPORT_VERSION,
+        "page_token": "t0",
+        "versions": {"fileA": file_a["modifiedTime"]},
+    }
     assert list(gd_source._iter_rows(service, _config(), state)) == []
     assert fake_content_extraction == []
     assert state["page_token"] == "t1"
@@ -606,7 +625,11 @@ def test_deleted_file_forgets_its_version(fake_content_extraction):
         "changes": [{"fileId": "fileA", "removed": True}],
         "newStartPageToken": "t1",
     }
-    state = {"page_token": "t0", "versions": {"fileA": "v", "fileB": "v"}}
+    state = {
+        "format_version": gd_source.FORMAT_SUPPORT_VERSION,
+        "page_token": "t0",
+        "versions": {"fileA": "v", "fileB": "v"},
+    }
     list(gd_source._iter_rows(service, _config(), state))
     assert state["versions"] == {"fileB": "v"}
 
@@ -652,7 +675,12 @@ def test_changed_file_grown_over_the_limit_is_forgotten(fake_content_extraction)
         "changes": [{"fileId": "big", "removed": False}],
         "newStartPageToken": "t1",
     }
-    state = {"page_token": "t0", "known_ids": ["big"], "versions": {"big": "old"}}
+    state = {
+        "format_version": gd_source.FORMAT_SUPPORT_VERSION,
+        "page_token": "t0",
+        "known_ids": ["big"],
+        "versions": {"big": "old"},
+    }
     rows = list(gd_source._iter_rows(service, _config(max_file_size_mb=25), state))
     assert rows == [{"id": "big", "_deleted": True}]
     assert "big" not in state["versions"]
@@ -743,12 +771,12 @@ def test_withdrawn_authorization_stops_fetching_within_the_worker_count(monkeypa
 
 
 def test_permanent_failures_do_not_hold_the_cursor_back(monkeypatch):
-    files = [_file_meta("ok"), _file_meta("word"), _file_meta("huge_doc")]
+    files = [_file_meta("ok"), _file_meta("locked"), _file_meta("huge_doc")]
     service = FakeDriveService({"root": files}, {item["id"]: item for item in files})
 
     def extract(_client, file_id, *_args, **_kwargs):
-        if file_id == "word":
-            raise gd_source.LoaderUnavailableError("no loader")
+        if file_id == "locked":
+            raise gd_source.UnreadableFileError("locked PDF")
         if file_id == "huge_doc":
             raise gd_source.ExportTooLargeError(file_id)
         return "x"
@@ -758,7 +786,7 @@ def test_permanent_failures_do_not_hold_the_cursor_back(monkeypatch):
     rows = list(gd_source._iter_rows(service, _config(), state, stats))
     assert [row["id"] for row in rows] == ["ok"]
     assert stats["failed"] == 2
-    assert stats["failed_loader_unavailable"] == 1
+    assert stats["failed_unreadable"] == 1
     assert stats["failed_export_too_large"] == 1
     assert state["page_token"] == "token-0"
     assert sorted(state["versions"]) == ["ok"]
@@ -834,7 +862,12 @@ def test_file_directly_in_my_drive_stays_in_scope_when_drive_reports_the_real_ro
         "newStartPageToken": "t1",
     }
     top["modifiedTime"] = "2026-05-01T00:00:00Z"
-    state = {"page_token": "t0", "known_ids": ["top"], "versions": {"top": "old"}}
+    state = {
+        "format_version": gd_source.FORMAT_SUPPORT_VERSION,
+        "page_token": "t0",
+        "known_ids": ["top"],
+        "versions": {"top": "old"},
+    }
     rows = list(gd_source._iter_rows(service, _config(folder_id="root"), state))
     assert rows == [
         {
@@ -861,7 +894,12 @@ def test_file_trashed_then_restored_in_one_interval_is_kept(fake_content_extract
     service = FakeDriveService({"root": [file_a]}, {"fileA": file_a}, start_token="t0")
     service.changes_by_token["t0"] = _feed(_trashed("fileA", True), _trashed("fileA", False))
     file_a["modifiedTime"] = "2026-06-01T00:00:00Z"
-    state = {"page_token": "t0", "known_ids": ["fileA"], "versions": {"fileA": "old"}}
+    state = {
+        "format_version": gd_source.FORMAT_SUPPORT_VERSION,
+        "page_token": "t0",
+        "known_ids": ["fileA"],
+        "versions": {"fileA": "old"},
+    }
     rows = list(gd_source._iter_rows(service, _config(), state))
     assert [(row["id"], row["_deleted"]) for row in rows] == [("fileA", False)]
     assert state["known_ids"] == ["fileA"]
@@ -871,7 +909,12 @@ def test_file_restored_then_trashed_in_one_interval_is_forgotten(fake_content_ex
     file_a = _file_meta("fileA")
     service = FakeDriveService({"root": [file_a]}, {"fileA": file_a}, start_token="t0")
     service.changes_by_token["t0"] = _feed(_trashed("fileA", False), _trashed("fileA", True))
-    state = {"page_token": "t0", "known_ids": ["fileA"], "versions": {"fileA": "old"}}
+    state = {
+        "format_version": gd_source.FORMAT_SUPPORT_VERSION,
+        "page_token": "t0",
+        "known_ids": ["fileA"],
+        "versions": {"fileA": "old"},
+    }
     rows = list(gd_source._iter_rows(service, _config(), state))
     assert rows == [{"id": "fileA", "_deleted": True}]
     assert state["known_ids"] == []
@@ -1027,9 +1070,22 @@ def test_rate_limit_while_reading_the_changes_feed_keeps_the_token(monkeypatch):
         raise gd_source._CutShort("rate_limit")
 
     monkeypatch.setattr(gd_source, "_list_changed_file_ids", limited)
-    state, stats = {"page_token": "t0", "known_ids": ["a"], "versions": {"a": "v"}}, {}
+    state, stats = (
+        {
+            "format_version": gd_source.FORMAT_SUPPORT_VERSION,
+            "page_token": "t0",
+            "known_ids": ["a"],
+            "versions": {"a": "v"},
+        },
+        {},
+    )
     assert list(gd_source._iter_rows(service, _config(), state, stats)) == []
-    assert state == {"page_token": "t0", "known_ids": ["a"], "versions": {"a": "v"}}
+    assert state == {
+        "format_version": gd_source.FORMAT_SUPPORT_VERSION,
+        "page_token": "t0",
+        "known_ids": ["a"],
+        "versions": {"a": "v"},
+    }
     assert stats["failed_rate_limit"] == 1
 
 
@@ -1047,7 +1103,7 @@ def test_rate_limit_during_changed_file_fetch_keeps_the_token_and_what_was_fetch
         return "x"
 
     monkeypatch.setattr(gd_source, "extract_file_content", extract)
-    state, stats = {"page_token": "t0"}, {}
+    state, stats = {"format_version": gd_source.FORMAT_SUPPORT_VERSION, "page_token": "t0"}, {}
     rows = list(gd_source._iter_rows(service, _config(), state, stats))
     assert [row["id"] for row in rows] == ["f0"]
     assert state["page_token"] == "t0"
@@ -1102,7 +1158,12 @@ def test_lowered_limit_forgets_on_the_changes_feed_too(fake_content_extraction):
 
 def _delta_for(service, file_id):
     service.changes_by_token["t0"] = _feed({"fileId": file_id, "removed": False})
-    return {"page_token": "t0", "known_ids": [file_id], "versions": {file_id: "old"}}
+    return {
+        "format_version": gd_source.FORMAT_SUPPORT_VERSION,
+        "page_token": "t0",
+        "known_ids": [file_id],
+        "versions": {file_id: "old"},
+    }
 
 
 def test_edited_file_that_now_reads_empty_is_forgotten(monkeypatch):
@@ -1284,7 +1345,6 @@ def test_files_list_pagination_lists_every_file_once(fake_content_extraction):
 
 def test_a_loader_failure_on_an_ingested_file_keeps_its_memory_and_the_cursor(monkeypatch):
     import sys
-    from contextlib import contextmanager
 
     doc = _file_meta("doc", mime_type=DOCX_MIME)
     service = FakeDriveService({"root": [doc]}, {"doc": doc})
@@ -1308,6 +1368,7 @@ def test_a_loader_failure_on_an_ingested_file_keeps_its_memory_and_the_cursor(mo
         lambda: _Engine(),
     )
     monkeypatch.setattr(gd_source, "extract_file_content", _REAL_EXTRACT)
+    monkeypatch.setattr(gd_source, "_loader_registered", lambda _extension: True)
     monkeypatch.setattr(gd_source, "_download_file", fake_download)
     state = _delta_for(service, "doc")
     stats = {}
@@ -1340,7 +1401,7 @@ def test_the_size_bound_also_holds_on_the_changes_feed(monkeypatch):
         return "x"
 
     monkeypatch.setattr(gd_source, "extract_file_content", extract)
-    state = {"page_token": "t0"}
+    state = {"format_version": gd_source.FORMAT_SUPPORT_VERSION, "page_token": "t0"}
     rows = list(
         gd_source._iter_rows(
             service,
@@ -1391,118 +1452,320 @@ def test_zero_workers_from_the_environment_is_an_error_not_the_default(monkeypat
     gd_source.google_drive_source(folder_id="root", service=object())
 
 
-# ---------------------------------------------------------------------------
-# Authorization checkpoint and the retries: the host's check runs before every attempt and
-# every wait, so a revoked connection stops a retry instead of sleeping through it.
-# ---------------------------------------------------------------------------
-class _Revoked(Exception):
-    pass
-
-
-class _CountedRequest:
-    """A request answering every execute() with ``error``, counting how often it was asked."""
-
-    def __init__(self, error):
-        self._error = error
-        self.executions = 0
-
-    def execute(self, num_retries=0):
-        self.executions += 1
-        raise self._error
-
-
-def _service_with_start_page_token_request(request):
-    return SimpleNamespace(changes=lambda: SimpleNamespace(getStartPageToken=lambda **_: request))
-
-
-def test_a_revoked_connection_stops_a_retry_before_it_waits(waits):
-    """googleapiclient used to retry inside execute(), so a revoked connection kept sleeping."""
-    request = _CountedRequest(_HttpError(503))
-    service = _service_with_start_page_token_request(request)
-    checks = []
-
-    def check_active():
-        checks.append(1)
-        if len(checks) == 1:  # the first attempt runs unchecked; this is before its backoff wait
-            raise _Revoked
-
-    # pytest.raises(_Revoked) also proves it is not wrapped in the RuntimeError that a failed
-    # start-page-token request becomes.
-    with pytest.raises(_Revoked):
-        gd_source._get_start_page_token(service, check_active=check_active)
-
-    assert request.executions == 1, "exactly the first request was made"
-    assert waits == [], "the revoked run did not wait"
-
-
-def test_a_revoked_connection_is_not_a_failed_fetch_of_the_changed_file(waits):
-    # fetch_changed turns a failed metadata request into a RuntimeError (or a deletion for a
-    # 404); a revoked connection must pass through its blanket handler as it is.
-    request = _CountedRequest(_HttpError(503))
-    client = SimpleNamespace(
-        files=lambda: SimpleNamespace(get=lambda **_: request), close=lambda: None
+@pytest.mark.parametrize(
+    "mime_type",
+    [
+        DOCX_MIME,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        gd_source.GOOGLE_SLIDES_MIME_TYPE,
+    ],
+)
+@pytest.mark.parametrize("has_versions", [False, True])
+def test_format_upgrade_backfills_unchanged_files_once(
+    mime_type, has_versions, fake_content_extraction
+):
+    existing, added = _file_meta("existing"), _file_meta("added", mime_type=mime_type)
+    service = FakeDriveService(
+        {"root": [existing, added]}, {"existing": existing, "added": added}, start_token="t1"
     )
-    service = FakeDriveService({"root": []}, {})
+    # SDK 1.6.5 recorded skipped ids and a cursor, but no per-file versions.
+    state = {"page_token": "t0", "known_ids": ["existing", "added"]}
+    if has_versions:
+        state["versions"] = {"existing": existing["modifiedTime"]}
+    stats = {}
+    rows = list(gd_source._iter_rows(service, _config(), state, stats))
+    expected = ["added"] if has_versions else ["existing", "added"]
+    assert [row["id"] for row in rows] == expected
+    assert fake_content_extraction == expected
+    assert state["format_version"] == gd_source.FORMAT_SUPPORT_VERSION
+    assert state["page_token"] == "t1"
+    assert state["versions"] == {file["id"]: file["modifiedTime"] for file in (existing, added)}
+    assert stats["deleted"] == 0
+
+    service.changes_by_token["t1"] = {"changes": [], "newStartPageToken": "t2"}
+    service.list_calls.clear()
+    fake_content_extraction.clear()
+    assert list(gd_source._iter_rows(service, _config(), state)) == []
+    assert service.list_calls == fake_content_extraction == []
+    assert state["page_token"] == "t2"
+
+
+@pytest.mark.parametrize("reason", ["auth", "rate_limit"])
+def test_format_upgrade_cut_keeps_old_cursor_and_resumes_without_repeating_success(
+    monkeypatch, reason
+):
+    files = [_file_meta("a", mime_type=DOCX_MIME), _file_meta("b", mime_type=DOCX_MIME)]
+    service = FakeDriveService(
+        {"root": files}, {file["id"]: file for file in files}, start_token="t1"
+    )
+    state = {"page_token": "t0", "format_version": 0, "known_ids": ["a", "b", "gone"]}
+    downloaded = []
+
+    def interrupted(_service, file_id, *_args, **_kwargs):
+        if file_id == "b":
+            raise gd_source._CutShort(reason)
+        downloaded.append(file_id)
+        return "body"
+
+    monkeypatch.setattr(gd_source, "extract_file_content", interrupted)
+    rows = list(gd_source._iter_rows(service, _config(), state))
+    assert [row["id"] for row in rows] == ["a"]
+    assert state["format_version"] == 0
+    assert state["page_token"] == "t0"
+    assert "gone" in state["known_ids"]
+    assert state["versions"] == {"a": files[0]["modifiedTime"]}
+
+    monkeypatch.setattr(
+        gd_source,
+        "extract_file_content",
+        lambda service, file_id, *args, **kwargs: downloaded.append(file_id) or "body",
+    )
+    rows = list(gd_source._iter_rows(service, _config(), state))
+    assert [row["id"] for row in rows] == ["b", "gone"]
+    assert rows[-1] == {"id": "gone", "_deleted": True}
+    assert downloaded == ["a", "b"]
+    assert state["format_version"] == gd_source.FORMAT_SUPPORT_VERSION
+    assert state["page_token"] == "t1"
+
+
+def test_installing_a_loader_scans_again_and_picks_up_unedited_files(monkeypatch):
+    existing, office = _file_meta("existing"), _file_meta("office", mime_type=DOCX_MIME)
+    service = FakeDriveService(
+        {"root": [existing, office]}, {"existing": existing, "office": office}, start_token="t2"
+    )
     service.changes_by_token["t0"] = {
-        "changes": [{"fileId": "fileA", "removed": False}],
+        "changes": [{"fileId": "office", "removed": False}],
         "newStartPageToken": "t1",
     }
+    state = {
+        "format_version": gd_source.FORMAT_SUPPORT_VERSION,
+        "loader_extensions": [],
+        "page_token": "t0",
+        "known_ids": ["existing", "office"],
+        "versions": {"existing": existing["modifiedTime"]},
+    }
 
-    def check_active():
-        if request.executions:  # revoked while the first attempt's backoff is pending
-            raise _Revoked
+    def missing(*args, **kwargs):
+        raise gd_source.LoaderUnavailableError("install the docling extra")
 
-    with pytest.raises(_Revoked):
-        list(
-            gd_source._iter_rows(
-                service,
-                _config(max_workers=2),
-                {"page_token": "t0"},
-                service_factory=lambda: client,
-                check_active=check_active,
-            )
-        )
+    monkeypatch.setattr(gd_source, "extract_file_content", missing)
+    stats = {}
+    assert list(gd_source._iter_rows(service, _config(), state, stats)) == []
+    assert stats["failed_loader_unavailable"] == 1
+    assert state["page_token"] == "t1"  # the failure does not hold the cursor
+    assert state["loader_extensions"] == []
+    assert state["versions"] == {"existing": existing["modifiedTime"]}
 
-    assert request.executions == 1
-    assert waits == []
+    # Installing the extra registers a loader for .docx, which the folder was not scanned with.
+    monkeypatch.setattr(gd_source, "_registered_loader_extensions", lambda: [".docx"])
+    downloaded = []
+    monkeypatch.setattr(
+        gd_source,
+        "extract_file_content",
+        lambda service, file_id, *args, **kwargs: downloaded.append(file_id) or "Office body",
+    )
+    rows = list(gd_source._iter_rows(service, _config(), state))
+    assert downloaded == ["office"]
+    assert [row["id"] for row in rows] == ["office"]
+    assert state["loader_extensions"] == [".docx"]
+    assert state["page_token"] == "t2"
 
-
-# googleapiclient's policy with API_RETRIES: N retries are N + 1 attempts, and retry n waits up
-# to 2**n seconds. The detailed status table is in test_google_api_retry.py.
-@pytest.mark.parametrize("status", [429, 500, 503])
-def test_a_transient_status_is_retried_api_retries_times_with_googles_backoff(waits, status):
-    request = _CountedRequest(_HttpError(status))
-
-    # What the failed request becomes is the connector's business (_CutShort for a 429 or 401,
-    # else RuntimeError); only the number of attempts is pinned here.
-    with pytest.raises((RuntimeError, gd_source._CutShort)):
-        gd_source._get_start_page_token(_service_with_start_page_token_request(request))
-
-    # The run is cut short or failed only once the retries are spent (_raise_if_cut).
-    assert request.executions == gd_source.API_RETRIES + 1
-    assert len(waits) == gd_source.API_RETRIES
-    assert all(0 <= wait <= 2 ** (retry + 1) for retry, wait in enumerate(waits))
-
-
-@pytest.mark.parametrize("status", [400, 401, 403, 404])
-def test_a_permanent_status_is_not_retried_and_a_403_without_a_reason_is_permanent(waits, status):
-    request = _CountedRequest(_HttpError(status))
-
-    # What the failed request becomes is the connector's business (_CutShort for a 429 or 401,
-    # else RuntimeError); only the number of attempts is pinned here.
-    with pytest.raises((RuntimeError, gd_source._CutShort)):
-        gd_source._get_start_page_token(_service_with_start_page_token_request(request))
-
-    assert request.executions == 1
-    assert waits == []
+    service.changes_by_token["t2"] = _feed()
+    service.list_calls.clear()
+    downloaded.clear()
+    assert list(gd_source._iter_rows(service, _config(), state)) == []
+    assert service.list_calls == downloaded == []  # incremental again
 
 
-@pytest.fixture(autouse=True)
-def waits(monkeypatch):
-    """The backoff waits ``api_retry`` asked for, in order, without sleeping for real.
+def test_loader_registered_matches_the_extensions_the_loaders_list(monkeypatch):
+    import sys
 
-    A fake that raises a 5xx or 429 is retried by the connector, so every test needs this.
-    """
-    recorded: list[float] = []
-    monkeypatch.setattr("time.sleep", recorded.append)
-    return recorded
+    import cognee.infrastructure.loaders.get_loader_engine
+
+    class _Engine:
+        def get_available_loaders(self):
+            return ["office"]
+
+        def get_loader_info(self, _name):
+            return {"extensions": ["DOCX", "pptx"]}
+
+    monkeypatch.setattr(
+        sys.modules["cognee.infrastructure.loaders.get_loader_engine"],
+        "get_loader_engine",
+        lambda: _Engine(),
+    )
+    assert gd_source._loader_registered(".docx")
+    assert gd_source._loader_registered(".pptx")
+    assert not gd_source._loader_registered(".xlsx")
+
+
+@pytest.mark.parametrize("install_fixes_it", [True, False])
+def test_a_changed_package_set_retries_a_file_that_failed_on_a_dependency(
+    monkeypatch, installed_packages, install_fixes_it
+):
+    ok, office = _file_meta("ok"), _file_meta("office", mime_type=DOCX_MIME)
+    service = FakeDriveService({"root": [ok, office]}, {"ok": ok, "office": office})
+    # The .docx loader is registered, so only a dependency it imports can be missing.
+    monkeypatch.setattr(gd_source, "_registered_loader_extensions", lambda: [".docx"])
+    downloaded = []
+
+    def extract(_client, file_id, *_args, **_kwargs):
+        downloaded.append(file_id)
+        if file_id == "office" and not state.get("installed"):
+            raise gd_source.LoaderUnavailableError("No module named 'docling_core'")
+        return "body"
+
+    monkeypatch.setattr(gd_source, "extract_file_content", extract)
+    state = {}
+    list(gd_source._iter_rows(service, _config(), state))
+    assert state["loader_fingerprint"] == "fp1"
+    assert state["page_token"] == "token-0" and sorted(state["versions"]) == ["ok"]
+
+    # Nothing was installed: the next sync is incremental and reads nothing.
+    service.changes_by_token["token-0"] = _feed()
+    service.list_calls.clear()
+    downloaded.clear()
+    assert list(gd_source._iter_rows(service, _config(), state)) == []
+    assert service.list_calls == downloaded == []
+
+    # A package is installed: one scan, and only the failed file is read again.
+    installed_packages[0] = "fp2"
+    state["installed"] = install_fixes_it
+    service.start_token = "t3"
+    rows = list(gd_source._iter_rows(service, _config(), state))
+    assert downloaded == ["office"]
+    assert [row["id"] for row in rows] == (["office"] if install_fixes_it else [])
+    assert state["page_token"] == "t3"
+    assert state.get("loader_fingerprint") == (None if install_fixes_it else "fp2")
+
+    # Either way the next sync is incremental again: a dependency that is still missing
+    # waits for the next change instead of scanning on every sync.
+    service.changes_by_token["t3"] = _feed()
+    service.list_calls.clear()
+    downloaded.clear()
+    assert list(gd_source._iter_rows(service, _config(), state)) == []
+    assert service.list_calls == downloaded == []
+
+
+def test_a_package_change_costs_a_folder_that_never_failed_nothing(installed_packages):
+    ok = _file_meta("ok")
+    service = FakeDriveService({"root": [ok]}, {"ok": ok})
+    state = {}
+    list(gd_source._iter_rows(service, _config(), state))
+    assert "loader_fingerprint" not in state
+
+    installed_packages[0] = "fp2"
+    service.changes_by_token["token-0"] = _feed()
+    service.list_calls.clear()
+    assert list(gd_source._iter_rows(service, _config(), state)) == []
+    assert service.list_calls == []
+
+
+def test_the_package_fingerprint_follows_names_and_versions_not_their_order(monkeypatch):
+    monkeypatch.undo()  # the autouse fixture replaces the function under test
+
+    def installed(*packages):
+        return [SimpleNamespace(name=name, version=version) for name, version in packages]
+
+    def fingerprint(*packages):
+        monkeypatch.setattr(gd_source.metadata, "distributions", lambda: installed(*packages))
+        return gd_source._installed_packages_fingerprint()
+
+    base = fingerprint(("docling", "2.1"), ("pypdf", "6.0"))
+    assert fingerprint(("pypdf", "6.0"), ("docling", "2.1")) == base
+    assert fingerprint(("docling", "2.2"), ("pypdf", "6.0")) != base
+    assert fingerprint(("docling", "2.1"), ("pypdf", "6.0"), ("docling-core", "1.0")) != base
+
+
+def test_registered_loader_extensions_lists_only_what_a_loader_handles(monkeypatch):
+    monkeypatch.undo()  # the autouse fixture replaces the function under test
+    import sys
+
+    import cognee.infrastructure.loaders.get_loader_engine
+
+    class _Engine:
+        def get_available_loaders(self):
+            return ["docx_only"]
+
+        def get_loader_info(self, _name):
+            return {"extensions": ["docx", "pdf"]}
+
+    monkeypatch.setattr(
+        sys.modules["cognee.infrastructure.loaders.get_loader_engine"],
+        "get_loader_engine",
+        lambda: _Engine(),
+    )
+    assert gd_source._registered_loader_extensions() == [".docx"]
+
+
+def test_a_format_no_loader_handles_does_not_keep_the_folder_in_full_scan_mode(monkeypatch):
+    ok = _file_meta("ok", mime_type=DOCX_MIME)
+    odt = _file_meta("odt", mime_type="application/vnd.oasis.opendocument.text")
+    service = FakeDriveService({"root": [ok, odt]}, {"ok": ok, "odt": odt})
+    # Only a .docx loader is registered, as with the docling extra on a docling without .odt.
+    monkeypatch.setattr(gd_source, "_registered_loader_extensions", lambda: [".docx"])
+
+    def extract(_client, file_id, *_args, **_kwargs):
+        if file_id == "odt":
+            raise gd_source.LoaderUnavailableError("no loader for .odt")
+        return "body"
+
+    monkeypatch.setattr(gd_source, "extract_file_content", extract)
+    state, stats = {}, {}
+    rows = list(gd_source._iter_rows(service, _config(), state, stats))
+    assert [row["id"] for row in rows] == ["ok"]
+    assert stats["failed_loader_unavailable"] == 1
+    assert state["page_token"] == "token-0"
+    assert state["format_version"] == gd_source.FORMAT_SUPPORT_VERSION
+    assert state["loader_extensions"] == [".docx"]
+    assert state["known_ids"] == ["odt", "ok"]
+    assert sorted(state["versions"]) == ["ok"]
+
+    service.changes_by_token["token-0"] = _feed()
+    service.list_calls.clear()
+    assert list(gd_source._iter_rows(service, _config(), state)) == []
+    assert service.list_calls == []  # the second sync takes the incremental path
+
+
+def test_a_missing_loader_beside_other_permanent_failures_still_moves_the_cursor(monkeypatch):
+    files = [_file_meta("ok"), _file_meta("locked"), _file_meta("office", mime_type=DOCX_MIME)]
+    service = FakeDriveService({"root": files}, {item["id"]: item for item in files})
+
+    def extract(_client, file_id, *_args, **_kwargs):
+        if file_id == "locked":
+            raise gd_source.UnreadableFileError("locked PDF")
+        if file_id == "office":
+            raise gd_source.LoaderUnavailableError("install the docling extra")
+        return "body"
+
+    monkeypatch.setattr(gd_source, "extract_file_content", extract)
+    state, stats = {}, {}
+    list(gd_source._iter_rows(service, _config(), state, stats))
+    assert stats["failed_unreadable"] == stats["failed_loader_unavailable"] == 1
+    assert state["page_token"] == "token-0"
+    assert state["format_version"] == gd_source.FORMAT_SUPPORT_VERSION
+    assert sorted(state["versions"]) == ["ok"]
+
+
+def test_a_transient_failure_still_holds_the_cursor_and_the_loader_set(monkeypatch):
+    files = [_file_meta("ok"), _file_meta("flaky", mime_type=DOCX_MIME)]
+    service = FakeDriveService({"root": files}, {item["id"]: item for item in files})
+    monkeypatch.setattr(gd_source, "_registered_loader_extensions", lambda: [".docx"])
+    monkeypatch.setattr(
+        gd_source,
+        "extract_file_content",
+        lambda _c, file_id, *_a, **_kw: None if file_id == "flaky" else "x",
+    )
+    state = {}
+    list(gd_source._iter_rows(service, _config(), state))
+    assert "page_token" not in state
+    assert "format_version" not in state and "loader_extensions" not in state
+
+
+@pytest.mark.parametrize("version", [True, "1", -1, gd_source.FORMAT_SUPPORT_VERSION + 1])
+def test_unknown_format_state_fails_before_reading_or_mutating(version):
+    state = {"page_token": "t0", "format_version": version}
+    with pytest.raises(ValueError, match="format_version"):
+        list(gd_source._iter_rows(object(), _config(), state))
+    assert state == {"page_token": "t0", "format_version": version}
