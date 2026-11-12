@@ -7,8 +7,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cognee-connector-slack"
-version = "0.1.0"
-description = "Slack connector for cognee: the Slack app (slash commands, Remember this, App Home) and channel-history import into cognee memory, plus the provider's connection contract"
+version = "0.2.0"
+description = "Slack connector for cognee: syncs selected Slack channels into cognee memory, incrementally and with forget-on-delete, plus the @cognee Slack app for a cognee server"
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
 license = "Apache-2.0"
@@ -27,20 +27,22 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    # No [dlt] extra: Slack ships no DLT source, its history import is its own flow.
-    "cognee-connectors-core>=0.1,<1",
-    # The provider's own libraries, with the ranges cognee's pyproject uses.
-    "aiohttp>=3.13.5,<4.0.0",
-    "pydantic>=2.13",
+    "cognee-connectors-core[dlt]>=0.2,<1",
+    # The provider's own libraries, with the ranges cognee's pyproject.toml uses:
+    # httpx for the DLT source's Web API client, pydantic-settings for the SLACK_*
+    # settings class. aiohttp is used by cognee_host/ only and comes with cognee.
+    "httpx>=0.28.1",
+    "pydantic-settings>=2.7.0,!=2.12.*,!=2.13.*,!=2.14.0,!=2.14.1,<3",
 ]
 
 [project.optional-dependencies]
-# The cognee_host/ adapter (the Slack app's handlers and routes, the history
-# import) needs cognee; nothing else in the package does. The history import
-# reports progress through cognee.modules.integrations.sync_progress when the
-# installed cognee has it (newer than 1.6.6) and runs without reports otherwise
-# (cognee_host/compat.py; README.md, "Requirements").
-cognee = ["cognee>=1.6.5,<2"]
+# The cognee_host/ adapter (the @cognee app, its routes, the channel sync and Sign in
+# with Slack) needs cognee; nothing else in the package does. It uses the integration
+# APIs of SDK-1497..1502 (``revoked_by`` on credentials, ``refuse_parent``,
+# ``outbound.client_session``, sync policies, the ``slack`` entry of
+# ``integrations.ingestion``), none of which cognee 1.6.7 has. 1.6.8rc1 is the first
+# release that carries them.
+cognee = ["cognee>=1.6.8rc1,<2"]
 
 [project.urls]
 Homepage = "https://github.com/topoteretes/cognee/tree/main/cognee-connectors/connectors/slack"
@@ -51,8 +53,8 @@ Documentation = "https://docs.cognee.ai"
 [project.entry-points."cognee.connectors"]
 slack = "cognee_connector_slack:CONNECTOR"
 
-# No "cognee.sources" entry point: Slack has no DLT source (docs/ARCHITECTURE.md,
-# rule 6 lists one per DLT source).
+[project.entry-points."cognee.sources"]
+slack = "cognee_connector_slack:slack_source"
 
 [project.entry-points."cognee.integrations"]
 slack = "cognee_connector_slack.cognee_host:register"
@@ -72,4 +74,4 @@ exclude-newer-package = { cognee = "0 days", enola-cli = "0 days" }
 packages = ["cognee_connector_slack"]
 
 [tool.hatch.build.targets.sdist]
-include = ["cognee_connector_slack", "tests", "README.md", "LICENSE", "pyproject.toml"]
+include = ["cognee_connector_slack", "tests", "README.md", "LICENSE", "pyproject.toml", "manifest.yml"]

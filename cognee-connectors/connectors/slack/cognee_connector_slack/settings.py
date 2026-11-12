@@ -1,6 +1,6 @@
 """Slack settings, read from ``SLACK_*`` environment variables.
 
-Copied from cognee.modules.integrations.slack.slack_settings (cognee dev, 2026-10-27):
+Copied from cognee.modules.integrations.slack.slack_settings (cognee dev, 2026-11-12):
 ``IntegrationSettings`` became :class:`cognee_connectors_core.settings.ConnectorSettings`
 and :func:`require` delegates to the core helper of the same name, so the environment
 variable names and the error a missing value raises are unchanged.
@@ -33,9 +33,16 @@ class SlackSettings(ConnectorSettings):
     # Env: SLACK_SIGNING_SECRET
     signing_secret: str = ""
 
-    # Per-dataset selections remain opt-in. Disable this worker when an
-    # external scheduler calls sync_due_slack_history instead.
-    # Env: SLACK_HISTORY_SYNC_ENABLED
+    # Where Slack sends a member back after Sign in with Slack (member_link.py):
+    # the generic integrations callback of the ``slack_member`` provider,
+    # https://<host>/api/v1/integrations/slack_member/callback. It must be one of
+    # the app's registered redirect URLs. Env: SLACK_MEMBER_REDIRECT_URI
+    member_redirect_uri: str = ""
+
+    # The in-process tick that syncs every connection's selected channels every
+    # six hours (see sync.py). Disable it when an external scheduler calls
+    # sync_due_workspaces instead. The uninstall cleanup
+    # (forget_uninstalled_workspaces) runs either way. Env: SLACK_HISTORY_SYNC_ENABLED
     history_sync_enabled: bool = True
 
 
