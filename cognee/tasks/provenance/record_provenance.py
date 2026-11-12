@@ -41,7 +41,7 @@ from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.modules.provenance import get_provenance_manager
 from cognee.modules.provenance.tombstones import agent_id_for, ledger_data_item_key
-from cognee.modules.provenance.tracking import provenance_tracking_enabled
+from cognee.modules.provenance.tracking import LEDGER_RUN_ID, provenance_tracking_enabled
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("record_provenance")
@@ -108,7 +108,10 @@ async def _write_data_item(ctx: PipelineContext | None, content_hash: str | None
     if await manager.data_item_is_recorded(key, content_hash, source_ref_key):
         return
 
-    run_id = str(ctx.pipeline_run_id) if ctx.pipeline_run_id else None
+    # The run that owns the write: a run storing on another run's behalf names
+    # that run (``LEDGER_RUN_ID``, cognify's indexing run), else its own.
+    owning_run = (getattr(ctx, "extras", None) or {}).get(LEDGER_RUN_ID) or ctx.pipeline_run_id
+    run_id = str(owning_run) if owning_run else None
     batch = manager.batch()
     batch.track_data_item(
         key,

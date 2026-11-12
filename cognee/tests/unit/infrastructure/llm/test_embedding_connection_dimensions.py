@@ -78,3 +78,32 @@ async def test_determine_embedding_dimensions_uses_detected_dimensions_when_env_
 
     assert fake_embedding_config.embedding_dimensions == 3
     assert fake_engine.dimensions == 3
+
+
+@pytest.mark.asyncio
+async def test_determine_embedding_dimensions_leaves_a_self_sizing_engine_alone(monkeypatch):
+    # embedding_worker without EMBEDDING_DIMENSIONS: the engine learned its size
+    # from the worker. Writing it into the config would make the next
+    # get_embedding_engine() build a second engine that treats it as configured.
+    fake_engine = _FakeEmbeddingEngine(vector=[0.1, 0.2, 0.3], dimensions=3)
+    fake_engine.configured_dimensions = None
+    fake_vector_engine = SimpleNamespace(embedding_engine=fake_engine)
+    fake_embedding_config = SimpleNamespace(embedding_dimensions=None)
+
+    monkeypatch.delenv("EMBEDDING_DIMENSIONS", raising=False)
+
+    import cognee.infrastructure.databases.vector as vector_module
+    import cognee.infrastructure.databases.vector.embeddings.config as embedding_config_module
+
+    async def _get_vector_engine():
+        return fake_vector_engine
+
+    monkeypatch.setattr(vector_module, "get_vector_engine_async", _get_vector_engine)
+    monkeypatch.setattr(
+        embedding_config_module, "get_embedding_config", lambda: fake_embedding_config
+    )
+
+    await llm_utils.determine_embedding_dimensions(3)
+
+    assert fake_embedding_config.embedding_dimensions is None
+    assert fake_engine.dimensions == 3

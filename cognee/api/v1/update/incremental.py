@@ -889,11 +889,17 @@ async def _run_incremental_update(
                     extractor=extractor,
                 )
                 update_applied = True  # the publish is the last step of the write
+                # An edit can remove the fact a user chose, or restate it under another
+                # relationship; its decision must not outlive it. Read once the new
+                # chunks' facts are written, so a fact the edit kept is still found.
+                await retire_decisions_after_edit(dataset, user)
                 # The audit ledger versions the data item on its new content hash
-                # once the row holds it, never before: a publish that fails must
-                # not leave the ledger recording an update that did not happen. If
-                # this write fails the update raises with the new content in place,
-                # and running it again records it (the unchanged branch above).
+                # last, once the row holds it and the edit's decisions are retired:
+                # a publish that fails must not leave the ledger recording an update
+                # that did not happen. If this write fails the update raises with the
+                # edit complete, and running it again records it (the unchanged
+                # branch above), which is all that is left to do: that branch does
+                # not retire decisions, so retiring them must not wait on the ledger.
                 await _record_content_in_ledger(
                     bundle["staged"].content_hash,
                     bundle,
@@ -901,10 +907,6 @@ async def _run_incremental_update(
                     user,
                     pipeline_run.pipeline_run_id,
                 )
-                # An edit can remove the fact a user chose, or restate it under another
-                # relationship; its decision must not outlive it. Read once the new
-                # chunks' facts are written, so a fact the edit kept is still found.
-                await retire_decisions_after_edit(dataset, user)
         except Exception as error:
             await log_pipeline_run_error(
                 pipeline_run.pipeline_run_id,

@@ -14,6 +14,13 @@ recorded for it.
 
 from cognee.modules.cognify.config import get_cognify_config
 
+# ``ctx.extras`` key naming the run a data item's row is recorded under when
+# that is not the run storing the batch. cognify's indexing run stores the
+# chunks first, on behalf of the cognify run callers follow (and roll back);
+# without it the row would name the indexing run, and every later batch of the
+# cognify run is a no-op.
+LEDGER_RUN_ID = "ledger_run_id"
+
 
 class ProvenanceTrackingDisabledError(RuntimeError):
     """Raised when the ledger is read while ``PROVENANCE_TRACKING`` is off."""
