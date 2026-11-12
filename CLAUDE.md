@@ -65,7 +65,7 @@ pre-commit install
 - **docling-full** - Full docling install with torch-based ML models (adds PDF/image conversion through docling)
 - **codegraph** - Compatibility alias; code graph extraction and Enola are included by default
 - **gliner** - GLiNER demo runtime (gliner2 + torch from PyPI — the CUDA build on Linux, for GPU hosts). Optional: without it the first GLiNER cognify installs CPU-only torch plus this extra itself (see "LLM-free Graph Extraction")
-- **gliner-remote-grpc** / **gliner-remote-amqp** - gRPC (grpcio) / RabbitMQ (aio-pika) transports to a remote GLiNER worker; the HTTP transport needs no extra (see "Remote worker" under "LLM-free Graph Extraction")
+- **gliner-remote-grpc** / **gliner-remote-amqp** - gRPC (grpcio) / RabbitMQ (aio-pika) transports to a remote GLiNER worker; the HTTP transport needs no extra (see "Remote worker" under "LLM-free Graph Extraction"); `remote-worker-amqp` is the same RabbitMQ dependency under a neutral name, for the GLiNER client and `EMBEDDING_PROVIDER=embedding_worker` alike (`docs/embedding-worker.md`)
 - **evals** - Evaluation tools
 - **deepeval** - DeepEval testing framework
 - **posthog** - PostHog analytics
@@ -173,7 +173,7 @@ Triplet embeddings were removed (SDK-1115). What callers used to reach them stay
 #### 1. Pipeline-Based Processing
 All data flows through task-based pipelines (`cognee/modules/pipelines/`). Tasks are composable units that can run sequentially or in parallel. Example pipeline tasks: `classify_documents`, `extract_graph_from_data`, `add_data_points`. The runner semantics (a task's `batch_size` batches the *previous* task's output, `enriches`, `ctx` injection, and which of the two `run_pipeline` functions to import) are in the `cognee/modules/pipelines/__init__.py` docstring; the index of all task implementations is `cognee/tasks/README.md`.
 
-Abandoned-run recovery checks at API startup and every 60 seconds. The
+Abandoned-run recovery checks at API startup and every 5 minutes. The
 `COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS` setting (default 3600, nonnegative)
 is an eligibility floor, not proof of inactivity. Each new pipeline run holds
 an OS lock under `SYSTEM_ROOT_DIRECTORY/pipeline_run_locks` from its persisted
@@ -184,6 +184,9 @@ remove their markers; a crashed writer leaves its marker for recovery.
 Legacy rows and markers unavailable on this filesystem are skipped, so workers
 need the same persistent system directory with working OS file locks to recover
 each other's runs. Missing ownership is never inferred from run age alone.
+A run that a later run of the same pipeline has followed on its dataset is
+rolled back like any other, but its closing row is dated just after its own
+last row, so closing it late does not change the dataset's status.
 
 
 #### 2. Interface-Based Database Adapters
@@ -312,6 +315,7 @@ Key files:
 
 Available search types (from `cognee/modules/search/types/SearchType.py`), passed as `query_type` to `recall()` or `search()`:
 - **HYBRID_COMPLETION** (default) - Document passages plus entity neighbourhoods, then LLM completion
+- **HYBRID_COMPLETION_DECOMPOSITION** - Hybrid retrieval for the full question, then LLM decomposition of question plus that context into up to `max_subqueries` sub-queries (default 7, at most 20), each retrieved through the hybrid lanes and merged content-keyed; single query only; planning errors propagate; context is uncapped (up to 8x each lane's top-k by default); never defers to a graph type: a request hybrid cannot serve (custom `node_type`, `neighborhood_depth`, `feedback_influence > 0`, no chunk collection) raises `QueryValidationError` pointing at `GRAPH_COMPLETION_DECOMPOSITION`
 - **GRAPH_COMPLETION** - Graph traversal + LLM completion
 - **GRAPH_SUMMARY_COMPLETION** - Graph traversal plus a second LLM call that summarizes the answer (reads no pre-computed summaries)
 - **GRAPH_COMPLETION_COT** - Chain-of-thought reasoning over graph
@@ -655,6 +659,28 @@ AWS_SECRET_ACCESS_KEY="your_secret_key"
 # Optional for temporary credentials:
 # AWS_SESSION_TOKEN="your_session_token"
 ```
+
+#### Embedding worker over RabbitMQ (requires remote-worker-amqp extra, alias gliner-remote-amqp)
+```bash
+EMBEDDING_PROVIDER="embedding_worker"
+EMBEDDING_MODEL="BAAI/bge-small-en-v1.5"   # informational; picks the chunking tokenizer
+# EMBEDDING_DIMENSIONS=384                 # optional: taken from the worker's info when unset
+COGNEE_EMBEDDING_WORKER_ENDPOINT="amqp://guest:guest@localhost:5672/%2f"
+```
+`EmbeddingWorkerEmbeddingEngine` sends `/v1/embed` requests to an
+[embedding worker](https://github.com/topoteretes/embedding-worker) queue with the
+remote GLiNER client's RabbitMQ RPC (`cognee/infrastructure/remote_worker/`, shared):
+direct reply-to, publisher confirms, readiness = a consumer on the queue (cached 30 s),
+then (once, and again after a released outage) a `type=info` request for the worker's model info (vector size,
+`max_text_tokens` = the chunk token budget without special tokens, `tokenizer` = the
+chunk tokenizer unless `HUGGINGFACE_TOKENIZER` is set, `limits.max_inputs`; an older worker without it falls back to the
+config), `unavailable` retried 8 times, timeouts not resent, fatal errors (exhausted
+outage, credentials, `COGNEE_EMBEDDING_WORKER_EXPECTED_MODEL`, `EMBEDDING_DIMENSIONS`
+mismatch) latched, `input_too_long` recovered in one round trip (only the inputs the worker lists are split, then averaged and L2-normalized), queue-level `ACCESS_REFUSED` fatal, reconnects single-flight. Sends
+`input_type: "document"` unless `EMBEDDING_INPUT_TYPE=query`, which embeds documents
+as queries too. Both SDKs read a bare trailing `/` in the broker URL as the default
+vhost `/`. Settings (`COGNEE_EMBEDDING_WORKER_*`, same names as the Rust SDK) and
+failure behaviour: `docs/embedding-worker.md`.
 
 #### LLM Rate Limiting
 ```bash

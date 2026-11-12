@@ -98,6 +98,21 @@ only the failed and the changed files, not the whole folder again. A host that p
 `service` gets sequential fetching; pass `service_factory` (a callable returning a fresh
 client) to parallelise.
 
+## NUL characters in documents
+
+PostgreSQL rejects NUL (`U+0000`) in text, so one document with it fails the load of its whole
+DLT package. `ingest_dlt_source` removes NUL from every row of every document connector before
+staging, with the rule the graph and vector writes already use (`sanitize_relational_payload`),
+so the text around the character is kept and the file ID is preserved. The document is not
+counted as skipped or failed. A document that held only NUL is staged with empty text.
+
+A document with NUL that was staged before this fix is handled by the store that held it.
+On PostgreSQL it was never stored: its load failed together with its neighbours, and an
+ordinary sync keeps failing until the pending package is aborted (see below). On SQLite it was
+stored with the NUL and keeps that text until it is extracted again (it changes in Drive, or
+the folder is fully re-synced). The cleaned text then has a new content hash, so the document
+is re-ingested like any edited one.
+
 ## Which files are not ingested, and how each is reported
 
 There is no file size limit by default. A download is streamed to a temporary file, so memory
@@ -157,6 +172,36 @@ When syncing multiple folders into one dataset, assign each a stable, distinct
 Previously ingested documents without a table provenance stamp are retained
 conservatively; explicitly clear and re-sync the dataset to rebuild legacy data.
 
+## Recovering a load blocked by NUL before this fix
+
+Upgrading cognee prevents new bad rows but does not rewrite an already extracted DLT
+package. DLT retries pending packages before extracting new input, so an ordinary sync can
+keep failing on the old NUL value.
+
+Aborting a pending package with state restore needs **dlt 1.30 or newer installed**:
+`pipeline.abort_packages()` does not exist in earlier releases, which `pyproject.toml` still
+allows. Stop concurrent syncs of the pipeline first. DLT's error names the pipeline and prints
+the matching command; cognee uses DLT's default pipelines directory, so
+`dlt pipeline <pipeline_name> info` shows the pending packages and
+`dlt pipeline <pipeline_name> abort-packages` aborts them. From Python, attach to the pipeline
+with its original pipeline directory and destination configuration, inspect
+`pipeline.abort_packages(dry_run=True)` (the plan lists the pending packages it will discard)
+and then call `pipeline.abort_packages()`. DLT restores the cursor and file versions to the
+start of the aborted package. Then run the same folder sync with the fixed cognee and the
+original dataset/resource names: `merge` reloads the affected documents while preserving
+previously committed documents.
+
+DLT warns that a pending package is "partially loaded" and that completed load jobs may have
+modified the destination. For this single-table `merge` source that is safe: the restored
+cursor re-fetches the affected documents and `merge` replaces them by file ID. Review the
+dry-run plan before applying it anyway.
+
+This procedure is covered by the PostgreSQL recovery test below. It is an explicit operator
+action, not an automatic response to an ingestion error. A package created by an older DLT
+version may lack a restore snapshot: aborting it alone does not rewind the cursor, and it
+needs a separate recovery assessment. Do not delete package files or clear only the cursor;
+the persisted file versions must agree with the last successful load as well.
+
 ## Setup
 
 1. Enable the Drive API in Google Cloud and create either a **service account** key
@@ -185,3 +230,14 @@ them with the actual loaders, and merges the rows into a real DLT database seede
 older sync checkpoint. It also verifies rollback on an interrupted listing and a no-change
 sync after reopening the pipeline. Google Slides exports are mocked; a live Google API
 smoke test is still required when validating a Cloud deployment.
+
+The PostgreSQL staging tests use a disposable schema in the test database of the sibling
+tests (default `cognee:cognee@localhost:5432/cognee_db`, overridable with `DB_HOST`, `DB_PORT`,
+`DB_USERNAME`, `DB_PASSWORD` and `DB_NAME`) and are skipped when it is unreachable. They cover
+the load that one NUL document breaks, mixed documents, NUL-only content, unchanged syncs, an
+Obsidian note and recovery of a pre-fix package (the recovery test is skipped on dlt older than
+1.30):
+
+```bash
+uv run pytest cognee/tests/e2e/postgres/test_google_drive_staging.py -v
+```
