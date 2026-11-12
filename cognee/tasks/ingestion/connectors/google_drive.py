@@ -44,6 +44,7 @@ import codecs
 import hashlib
 import io
 import os
+import shutil
 import tempfile
 import threading
 from collections import deque
@@ -76,6 +77,9 @@ PLAIN_TEXT_MIME_TYPES = {"application/json", "application/xml"}
 # Office and document files cognee's loader engine converts to text (the same loaders
 # ``add()`` uses), with the extension the loader picks its parser by.
 _LOADER_EXTENSIONS = {
+    "application/msword": ".doc",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.ms-powerpoint": ".ppt",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
@@ -87,6 +91,10 @@ _LOADER_EXTENSIONS = {
     "application/epub+zip": ".epub",
 }
 
+# The binary formats are converted to Open XML by LibreOffice before they are parsed,
+# whichever loader reads them.
+_LEGACY_OFFICE_EXTENSIONS = {".doc", ".xls", ".ppt"}
+
 # Native Google formats we know how to export as text.  Other native types
 # (Drawings, Forms, ...) are counted as unsupported rather than failing the whole sync.
 _EXPORT_MIME_MAP = {
@@ -97,9 +105,10 @@ _EXPORT_MIME_MAP = {
     GOOGLE_SLIDES_MIME_TYPE: "text/plain",
 }
 
-# Increment when supported formats expand. A completed scan records this in the
-# folder's DLT state so unchanged files skipped by an older connector are discovered.
-FORMAT_SUPPORT_VERSION = 1
+# Increment when supported formats expand (2: legacy .doc, .xls, .ppt). A completed scan
+# records this in the folder's DLT state so unchanged files skipped by an older connector
+# are discovered.
+FORMAT_SUPPORT_VERSION = 2
 
 # Retries per request on 429, 5xx, rate-limit 403 answers and dropped connections (api_retry.py,
 # googleapiclient's policy), sleeping a random time of up to 2**n seconds before retry n: about
@@ -388,7 +397,7 @@ def _download_media(service: Any, file_id: str, *, check_active: Callable[[], No
 
 
 class LoaderUnavailableError(Exception):
-    """No cognee loader is installed for this file's format (it needs an optional extra)."""
+    """The format's loader or a system dependency of it (LibreOffice) is not installed."""
 
 
 class UnreadableFileError(Exception):
@@ -399,8 +408,9 @@ class UnreadableFileError(Exception):
 
 
 # Failures a rerun in the same environment cannot cure, so they must not hold the Changes
-# cursor back. A full scan retries a missing loader's files once a loader for the format is
-# registered, so installing it is enough to pick up unchanged files on the next sync.
+# cursor back. A full scan retries the files of a format without a loader, or of a legacy
+# Office format without LibreOffice, once it can be read, so installing it is enough to
+# pick up unchanged files on the next sync.
 _PERMANENT_REASONS = {
     ExportTooLargeError: "failed_export_too_large",
     LoaderUnavailableError: "failed_loader_unavailable",
@@ -462,9 +472,31 @@ def _loader_registered(extension: str) -> bool:
     )
 
 
+# Where the macOS installer puts LibreOffice, off PATH; Docling looks there too.
+_MACOS_LIBREOFFICE = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+
+
+def _libreoffice_available() -> bool:
+    """Whether LibreOffice is on PATH or installed as a macOS application."""
+    return (
+        shutil.which("soffice") is not None
+        or shutil.which("libreoffice") is not None
+        or os.path.isfile(_MACOS_LIBREOFFICE)
+    )
+
+
 def _registered_loader_extensions() -> list[str]:
-    """The extensions of ``_LOADER_EXTENSIONS`` that a registered loader lists right now."""
-    return sorted(ext for ext in set(_LOADER_EXTENSIONS.values()) if _loader_registered(ext))
+    """The extensions of ``_LOADER_EXTENSIONS`` that can be read right now.
+
+    A registered loader lists the extension and, for the binary Office formats, LibreOffice
+    is on PATH, so installing LibreOffice is a change a later sync scans again for.
+    """
+    libreoffice = _libreoffice_available()
+    return sorted(
+        ext
+        for ext in set(_LOADER_EXTENSIONS.values())
+        if _loader_registered(ext) and (libreoffice or ext not in _LEGACY_OFFICE_EXTENSIONS)
+    )
 
 
 def _installed_packages_fingerprint() -> str:
@@ -507,7 +539,8 @@ def extract_file_content(
 
     The causes a rerun cannot cure are raised, so the caller can name them:
     :class:`ExportTooLargeError`, :class:`LoaderUnavailableError` (the format's loader needs an
-    extra) and :class:`UnreadableFileError` (a PDF that pypdf cannot read).
+    extra, or a legacy Office file needs LibreOffice) and :class:`UnreadableFileError` (a PDF
+    that pypdf cannot read).
     """
     try:
         if mime_type in _EXPORT_MIME_MAP:
@@ -526,6 +559,11 @@ def extract_file_content(
             # A missing loader repeats on every full scan, so it must cost no download.
             if not _loader_registered(extension):
                 raise _no_loader_error(extension)
+            if extension in _LEGACY_OFFICE_EXTENSIONS and not _libreoffice_available():
+                raise LoaderUnavailableError(
+                    f"'{extension}' files are converted with LibreOffice; install it and "
+                    "make sure soffice is on PATH."
+                )
             with _download_file(service, file_id, extension, check_active=check_active) as path:
                 return _load_with_loader_engine(path)
 
