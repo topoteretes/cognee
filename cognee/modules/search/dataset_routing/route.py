@@ -36,7 +36,7 @@ class DatasetRoutingDecision:
 
     candidates: tuple[UUID, ...]  # every dataset that was scored or could have been
     routed: tuple[UUID, ...]  # the best datasets within the cutoff, best first
-    unindexed: tuple[UUID, ...]  # datasets with no routing row: always searched
+    unindexed: tuple[UUID, ...]  # datasets with no routing row: searched when routing cannot narrow
     scores: dict[UUID, float] = field(default_factory=dict)  # best cosine distance per dataset
 
     @property
@@ -46,9 +46,18 @@ class DatasetRoutingDecision:
 
     @property
     def dataset_ids(self) -> list[UUID]:
-        if self.fanned_out:
-            return list(self.candidates)
-        return [*self.routed, *self.unindexed]
+        """The datasets searched first: the routed ones, or every candidate.
+
+        A dataset without a routing row is not searched next to a routed one.
+        Searching it on every query is what kept a deployment with a backlog of
+        unindexed datasets from ever narrowing; it is searched in the widening
+        pass instead, when the routed datasets retrieve nothing. With nothing
+        routed (no rows at all, or none within the cutoff) every candidate is
+        searched.
+        """
+        if self.routed:
+            return list(self.routed)
+        return list(self.candidates)
 
     @property
     def narrowed(self) -> bool:
@@ -62,14 +71,16 @@ async def route_datasets(
     distance_cutoff: float,
     tie_margin: float,
 ) -> DatasetRoutingDecision:
-    """Keep the ``top_k`` best datasets within the cutoff, plus every dataset with no routing row.
+    """Keep the ``top_k`` best datasets within the cutoff; report the ones with no routing row.
 
     A tie at the boundary is never split: every dataset within ``tie_margin``
     of the ``top_k``-th one is routed too. When no dataset is within
     ``distance_cutoff`` the decision covers every candidate.
 
     A dataset without a row has never been through the global context index
-    (or lost it), so routing knows nothing about it and never drops it. An
+    (or lost it), so routing knows nothing about it: it is left to the search's
+    widening pass when another dataset is routed, and searched with every other
+    candidate when none is. An
     adapter that cannot score rows by id, or a routing collection built with
     another embedding width, leaves every dataset unindexed. So does a
     deployment with no routing collection at all, before the query is
