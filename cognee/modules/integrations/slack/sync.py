@@ -721,6 +721,7 @@ async def _forget_workspace(credential: IntegrationCredential) -> None:
     from cognee.modules.data.methods import get_dataset_data
     from cognee.modules.data.models import Dataset
     from cognee.modules.integrations.credentials import change_provider_metadata
+    from cognee.modules.integrations.slack.handle_cognee_ask import forget_kept_answers
     from cognee.modules.integrations.slack.remember_message import forget_workspace_remembered
     from cognee.modules.users.methods import get_user
     from cognee.tasks.ingestion.ingest_dlt_source import drop_dlt_dataset
@@ -756,6 +757,7 @@ async def _forget_workspace(credential: IntegrationCredential) -> None:
     # every message's text (G43).
     await drop_dlt_dataset(dataset_name)
     await forget_workspace_remembered(team_id)
+    await forget_kept_answers(team_id)
     uninstalled = (credential.provider_metadata or {}).get(UNINSTALLED_AT_KEY)
 
     def stamp_if_still_uninstalled(metadata: dict) -> dict | None:

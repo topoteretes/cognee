@@ -156,6 +156,10 @@ SEARCH_FAILED_MESSAGE = "Search failed\nTry again in a moment."
 NOTHING_FOUND_MESSAGE = (
     "Nothing found\nYour Cognee memory has nothing on that yet. `@cognee remember` saves it."
 )
+SHARE_FAILED_TEXT = (
+    "Sharing is not available for this answer: Cognee could not keep it for sharing. Ask "
+    "again to try once more."
+)
 SHARE_UNAVAILABLE_TEXT = (
     "Sharing is off here: it needs Cognee's session memory (CACHING), which this server "
     "has switched off."
@@ -342,6 +346,12 @@ async def ask(
         logger.warning("Slack did not list a member's channels for team %s: %s", team_id, error)
         channels = set()
         await reply(notice(MEMBERSHIP_UNKNOWN_MESSAGE))
+    except Exception:
+        # Anything else on the way to Slack (outbound HTTP switched off, a token that cannot
+        # be read): the membership is just as unknown, so it fails closed the same way.
+        logger.exception("Could not ask Slack for a member's channels for team %s", team_id)
+        channels = set()
+        await reply(notice(MEMBERSHIP_UNKNOWN_MESSAGE))
     scope = [here] if here else selected_channels(credential)
     visible = [channel for channel in scope if channel in channels]
 
@@ -386,9 +396,18 @@ async def ask(
         # Every dataset answered that it does not know: nothing to share.
         await reply(notice(NOTHING_FOUND_MESSAGE))
         return
-    answer_ref = await keep_answer(owner_user_id, ask_session_id(team_id, member), question, blocks)
+    share_unavailable = SHARE_UNAVAILABLE_TEXT
+    try:
+        answer_ref = await keep_answer(
+            owner_user_id, ask_session_id(team_id, member), question, blocks
+        )
+    except Exception:
+        # The answer is found: a session cache that cannot keep it costs Share, not the
+        # answer.
+        logger.exception("Could not keep a Slack answer for Share for team %s", team_id)
+        answer_ref, share_unavailable = None, SHARE_FAILED_TEXT
     if answer_ref is None:
-        # Share reads the answer back from the session cache, which is switched off.
+        # Share reads the answer back from the session cache, which is off or failed.
         await reply(
             notice(
                 fallback_text,
@@ -396,7 +415,7 @@ async def ask(
                     *blocks,
                     {
                         "type": "context",
-                        "elements": [{"type": "mrkdwn", "text": SHARE_UNAVAILABLE_TEXT}],
+                        "elements": [{"type": "mrkdwn", "text": share_unavailable}],
                     },
                 ],
             )

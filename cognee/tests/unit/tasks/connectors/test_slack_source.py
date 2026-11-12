@@ -1418,3 +1418,30 @@ def test_the_stall_warning_names_no_channel(caplog):
 
     assert stats["failed_day_too_large"] == 1
     assert CHANNEL not in caplog.text
+
+
+# -- Reprobe 2026-11-12 (N5) ------------------------------------------------------------
+
+
+def test_a_malformed_history_page_after_rows_cuts_and_keeps_the_rows():
+    """N5: the history path's malformed answers (here a message without a valid ts on a
+    later page) follow the same rule as the replies path: after rows the run is cut and
+    its rows stay. No test covered it: reverting it to a raise left every test green."""
+    fake = _six_messages()
+    real = fake._conversations_history
+    calls = []
+
+    def breaks_on_its_third_page(**params):
+        calls.append(params)
+        page = real(**params)
+        if len(calls) == 3:
+            page["messages"] = [{"type": "message", "text": "no ts"}]
+        return page
+
+    fake._conversations_history = breaks_on_its_third_page
+    stats = _stats()
+
+    rows = _walk(fake, {}, stats)
+
+    assert rows, "the pages before the broken one were read"
+    assert stats["failed"] == 1 and stats["failed_unavailable"] == 1

@@ -92,6 +92,34 @@ def ask_session_id(team_id: str, member: str) -> str:
     return f"slack:{team_id}:{member}"
 
 
+async def forget_kept_answers(team_id: str, user_id: UUID | None = None) -> None:
+    """Delete the answers kept for Share from ``team_id``'s workspace: every member's, or
+    only those kept under ``user_id``.
+
+    They quote the workspace's memory (a private channel's too) and live in the session
+    cache and its vector index, outside every dataset, so deleting the datasets leaves
+    them. Nothing is kept while the session cache is off.
+    """
+    from sqlalchemy import select
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.session_lifecycle.delete_session import delete_sessions
+    from cognee.modules.session_lifecycle.models import SessionRecord
+
+    if not get_session_manager().is_available:
+        return
+    prefix = ask_session_id(team_id, "")
+    query = select(SessionRecord.user_id, SessionRecord.session_id).where(
+        SessionRecord.session_id.startswith(prefix, autoescape=True)
+    )
+    if user_id is not None:
+        query = query.where(SessionRecord.user_id == user_id)
+    async with get_relational_engine().get_async_session() as db:
+        sessions = [(owner, session) for owner, session in (await db.execute(query)).all()]
+    if sessions:
+        await delete_sessions(sessions)
+
+
 def _answer_text(blocks: list[dict[str, Any]]) -> str:
     """What the member was shown, answer and sources, as one mrkdwn text."""
     texts = [block["text"]["text"] for block in blocks if block["type"] == "section"]

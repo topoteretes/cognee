@@ -354,3 +354,54 @@ async def test_the_deletion_leaves_a_dataset_the_connector_did_not_make(clean_co
 
     assert await _items(owner, await _workspace_dataset_name()) == 0
     assert await _items(outsider, await _workspace_dataset_name()) == 1
+
+
+# -- Reprobe 2026-11-12 (N2): red until fixed --------------------------------------------
+
+
+async def _kept_answer(owner) -> tuple[str, str]:
+    """An ``@cognee`` answer waiting for Share, as the mention handler keeps it."""
+    from cognee.modules.integrations.slack.handle_cognee_ask import ask_session_id, keep_answer
+
+    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "Leads only: May."}}]
+    session_id = ask_session_id(TEAM, "U0MEMBER")
+    ref = await keep_answer(owner.id, session_id, "when is the review?", blocks)
+    assert ref is not None, "the session cache is on in this module"
+    return session_id, ref.split("|")[2]
+
+
+async def _still_kept(owner, session_id: str, qa_id: str) -> bool:
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+    entries = await get_session_manager().get_session_entries_by_ids(
+        user_id=str(owner.id), qa_ids=[qa_id], session_id=session_id
+    )
+    return bool(entries)
+
+
+@pytest.mark.asyncio
+async def test_the_deletion_also_removes_answers_waiting_for_share(clean_cognee):
+    """N2: an answer kept for Share is workspace text (a private channel's too), stored in
+    the owner's session cache and its vector index. The 14-day deletion left it behind."""
+    owner, _ = await _workspace_with_data()
+    session_id, qa_id = await _kept_answer(owner)
+    await handle_slack_event(_event("app_uninstalled"))
+
+    await sync_module.forget_uninstalled_workspaces(now=_days_later(15))
+
+    assert not await _still_kept(owner, session_id, qa_id)
+
+
+@pytest.mark.asyncio
+async def test_disconnecting_with_the_data_deleted_removes_answers_waiting_for_share(
+    clean_cognee,
+):
+    """N2: a disconnect that deletes the data deletes what the app stored for the owner
+    outside the dataset (``forget_related_data``); kept answers were left behind."""
+    owner, _ = await _workspace_with_data()
+    session_id, qa_id = await _kept_answer(owner)
+    credential = await store.get_credential_by_account("slack", TEAM)
+
+    await SlackIntegration().forget_related_data(credential, owner)
+
+    assert not await _still_kept(owner, session_id, qa_id)

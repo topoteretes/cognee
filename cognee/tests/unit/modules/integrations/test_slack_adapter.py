@@ -105,11 +105,19 @@ def test_the_only_write_scope_is_the_one_ephemeral_answers_need():
 
 @pytest.mark.asyncio
 async def test_forget_related_data_forgets_what_the_user_remembered_from_this_workspace():
+    """And the answers kept for Share under that user (N2)."""
     user = SimpleNamespace(id="user-1")
     credential = SimpleNamespace(provider_account_id="T123")
-    with patch(
-        "cognee.modules.integrations.slack.adapter.forget_remembered", new=AsyncMock()
-    ) as forget_remembered:
+    with (
+        patch(
+            "cognee.modules.integrations.slack.adapter.forget_remembered", new=AsyncMock()
+        ) as forget_remembered,
+        patch(
+            "cognee.modules.integrations.slack.handle_cognee_ask.forget_kept_answers",
+            new=AsyncMock(),
+        ) as forget_kept_answers,
+    ):
         await integration.forget_related_data(credential, user)
 
     forget_remembered.assert_awaited_once_with(user, team_id="T123")
+    forget_kept_answers.assert_awaited_once_with("T123", user_id="user-1")

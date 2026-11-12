@@ -664,3 +664,42 @@ async def test_an_answer_can_still_be_shared_after_the_process_that_wrote_it_is_
 
     assert shared.get("response_type") == "in_channel"
     assert "Neon" in json.dumps(shared)
+
+
+# -- Reprobe 2026-11-12 (N1, N3): red until fixed ----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_answer_is_still_shown_when_it_cannot_be_kept_for_share(slack):
+    """N1: the answer was kept for Share outside any try, so a session cache that failed on
+    the write lost the finished answer: the member saw "Searching…" and nothing after it.
+    The answer is shown without Share, as it is with the session cache switched off."""
+    results = [{"text_result": ["We chose Neon for branching."], "context_result": "Neon chunk"}]
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=results)),
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+        patch.object(mention, "keep_answer", AsyncMock(side_effect=RuntimeError("cache down"))),
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("why did we choose Neon?"))
+
+    *_, (_, _, answer) = slack.replies
+    assert "branching" in answer["text"]
+    assert not [block for block in answer.get("blocks", []) if block["type"] == "actions"]
+
+
+@pytest.mark.asyncio
+async def test_any_failure_to_learn_the_members_channels_leaves_the_workspace_out(slack):
+    """N3: only ``SlackSourceError`` was caught around the membership lookup, so any other
+    failure on the way (outbound HTTP switched off, a token that cannot be read) ended the
+    question silently. It fails closed the same way: the member is told and their own
+    datasets still answer."""
+    slack.credential = _credential(synced=["C1"])
+    with (
+        patch.object(mention, "member_channels", AsyncMock(side_effect=RuntimeError("no token"))),
+        patch.object(mention, "cognee_search", AsyncMock(return_value=[])) as search,
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("when do we deploy?"))
+
+    assert [c.kwargs["dataset_ids"] for c in search.await_args_list] == [[slack.own.id]]
+    assert mention.MEMBERSHIP_UNKNOWN_MESSAGE in _texts(slack)
