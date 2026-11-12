@@ -61,12 +61,13 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         # digest.md is text typed by anonymous docs users: Claude gets no shell
-        # and no web access, and its file tools stay inside the checkout.
+        # and no web access, reads only inside the checkout, and can write only
+        # its two output files, so it cannot change the script the next step runs.
         run: |
           claude -p "$(cat scripts/weekly_tickets/prompt.md)" \
             --restricted \
             --tools "Read,Grep,Glob,Write" \
-            --allowedTools "Read,Grep,Glob,Write" \
+            --allowedTools "Read,Grep,Glob,Edit(proposals-report.md),Edit(proposals-issue.md)" \
             --permission-prompts none \
             --output-format text
       - name: Shape issue section (tables, length cap)
@@ -118,7 +119,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         # digest.md is text typed by anonymous docs users: Claude gets no shell
-        # and no web access, and its file tools stay inside the checkout.
+        # and no web access, reads only inside the checkout, and can write only
+        # its two output files, so it cannot change the script the next step runs.
         run: |
           {
             cat scripts/weekly_tickets/prompt.md
@@ -134,7 +136,7 @@ jobs:
           claude -p "$(cat /tmp/prompt-cognee.md)" \
             --restricted \
             --tools "Read,Grep,Glob,Write" \
-            --allowedTools "Read,Grep,Glob,Write" \
+            --allowedTools "Read,Grep,Glob,Edit(proposals-report.md),Edit(proposals-issue.md)" \
             --permission-prompts none \
             --output-format text
       - name: Shape issue section (tables, length cap)
