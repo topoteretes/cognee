@@ -1,6 +1,11 @@
+import asyncio
+import sys
 from collections.abc import Iterable
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+    SQLAlchemyAdapter,
+)
 from cognee.modules.data.exceptions import StoredFileNotRemovedError
 from cognee.shared.logging_utils import get_logger
 
@@ -13,7 +18,9 @@ async def remove_unreferenced_files(locations: Iterable[str | None], outcome: st
     For the files a document leaves behind when its row moves on, or that were
     staged for a row that never took them. A file a row still uses stays, and
     so does a file outside the data root (the user's own). The references of
-    all the files are read in one query.
+    all the files are read in one query, and the removals run at the same
+    time: each is a few storage round trips, and a re-sync can release two
+    files per changed document while it holds the dataset lock.
 
     Every file is tried. The ones that could not be removed are then raised
     together as one ``StoredFileNotRemovedError``, each with its own error, and
@@ -38,18 +45,35 @@ async def remove_unreferenced_files(locations: Iterable[str | None], outcome: st
         reason = f"{type(error).__name__}: {error}"
         raise StoredFileNotRemovedError(dict.fromkeys(candidates, reason), outcome) from error
 
-    not_removed: dict[str, str] = {}
-    first_error: Exception | None = None
-    for location in candidates:
-        if location in referenced:
-            continue
-        try:
-            await db_engine.remove_data_file(location)
-        except Exception as error:
-            # Kept, not dropped: the loop goes on to the other files, and every
-            # failure is raised together below.
-            logger.exception("Could not remove stored file %s", location)
-            not_removed[location] = f"{type(error).__name__}: {error}"
-            first_error = first_error or error
+    unreferenced = [location for location in candidates if location not in referenced]
+    errors = await asyncio.gather(
+        *(_remove_data_file(db_engine, location) for location in unreferenced)
+    )
+    not_removed = {
+        location: f"{type(error).__name__}: {error}"
+        for location, error in zip(unreferenced, errors)
+        if error is not None
+    }
     if not_removed:
+        first_error = next(error for error in errors if error is not None)
+        # A removal runs in its own task, which does not see the error this call
+        # may be cleaning up after (a failed write, a refusal). Raised in this
+        # frame it would carry that error as its context; link it, so the
+        # traceback still shows why the document is in the state ``outcome`` names.
+        if first_error.__context__ is None:
+            first_error.__context__ = sys.exc_info()[1]
         raise StoredFileNotRemovedError(not_removed, outcome) from first_error
+
+
+async def _remove_data_file(db_engine: SQLAlchemyAdapter, location: str) -> Exception | None:
+    """Remove one stored file and return the error that kept it, if any.
+
+    Returned, not raised: the other removals go on, and every failure is
+    raised together by the caller.
+    """
+    try:
+        await db_engine.remove_data_file(location)
+    except Exception as error:
+        logger.exception("Could not remove stored file %s", location)
+        return error
+    return None

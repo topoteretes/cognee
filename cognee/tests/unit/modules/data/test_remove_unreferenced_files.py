@@ -1,5 +1,6 @@
 """Releasing stored files: every file is tried, and every one that stays is reported."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -65,6 +66,27 @@ async def test_every_file_is_tried_and_every_failure_is_named(monkeypatch):
     assert "/data/c (OSError: cannot delete /data/c)" in message
     assert "/data/b" not in message
     assert isinstance(error.__cause__, OSError)
+
+
+@pytest.mark.asyncio
+async def test_removals_run_at_the_same_time(monkeypatch):
+    engine = _engine(monkeypatch)
+    in_flight = 0
+    most_in_flight = 0
+
+    async def remove_data_file(location):
+        nonlocal in_flight, most_in_flight
+        in_flight += 1
+        most_in_flight = max(most_in_flight, in_flight)
+        await asyncio.sleep(0)  # Where a storage round trip would wait.
+        in_flight -= 1
+
+    engine.remove_data_file = remove_data_file
+
+    await removal.remove_unreferenced_files(["/data/a", "/data/b", "/data/c"], OUTCOME)
+
+    # One after another this would be 1: a file's removal does not wait for the one before it.
+    assert most_in_flight == 3
 
 
 @pytest.mark.asyncio
