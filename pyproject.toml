@@ -109,18 +109,21 @@ dependencies = [
     # machine later moves to a newer line. Those platforms therefore stay
     # exposed to the storage-corruption defects fixed in 0.18.2 and 0.19.1
     # (COG-6185).
-    # Pinned at 0.19.0, not 0.19.1: extension.ladybugdb.com publishes no
-    # v0.19.1 JSON extension (404 on every platform), and 0.19.1 segfaults
-    # cognee's DB worker mid-write in CI. 0.19.0 carries the same storage
-    # fix and its extension build exists.
+    # Pinned at 0.22.3: 0.19.0 charged every CHECKPOINT ~9 MiB of the
+    # max_db_size budget for the life of the open database (LadybugDB#924,
+    # fixed in 0.21.2 by LadybugDB#925), so one long cognify exhausted the cap
+    # and left a half-done checkpoint that made the store unopenable (#6679).
+    # 0.22.3 requests the v0.22.0 JSON extension, which extension.ladybugdb.com
+    # publishes on every platform, and opens stores written by 0.17.1-0.19.0
+    # in place.
     # Each pinned version's on-disk storage code must also exist in
-    # cognee_db_workers.ladybug_migrate.ladybug_version_mapping (0.19.0 -> 43),
+    # cognee_db_workers.ladybug_migrate.ladybug_version_mapping (0.22.3 -> 49),
     # so bumping this pin is a two-file change.
-    # 0.19.x Windows wheels no longer vendor the OpenSSL DLLs their extension
-    # imports; cognee_db_workers._windows_openssl supplies them. Drop that shim
-    # once a pinned release vendors OpenSSL again.
+    # Windows wheels (0.19.0 through 0.22.3) do not vendor the OpenSSL DLLs
+    # their extension imports; cognee_db_workers._windows_openssl supplies
+    # them. Drop that shim once a pinned release vendors OpenSSL again.
     "ladybug>=0.17.0,<0.18 ; sys_platform == 'darwin' and ('Darwin Kernel Version 22.' in platform_version or 'Darwin Kernel Version 23.' in platform_version)",
-    "ladybug==0.19.0 ; sys_platform != 'darwin' or ('Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version)",
+    "ladybug==0.22.3 ; sys_platform != 'darwin' or ('Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version)",
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",
     "gunicorn>=20.1.0,<24",
@@ -278,10 +281,11 @@ ontology = ["owlrl>=7.1.4,<7.2"]
 # without torch or the ML layout models (~280MB installed vs multiple GB).
 # PDF/image conversion through docling needs the ML pipeline: install the
 # `docling-full` extra for that (cognee's default PDF path uses pypdf either way).
+# 2.116 converts legacy .doc/.xls/.ppt through LibreOffice in an isolated profile per conversion.
 docling = [
-    "docling-slim[convert-core,format-pdf,format-office,format-html,format-email,format-markdown,format-latex]>=2.115,<3",
+    "docling-slim[convert-core,format-pdf,format-office,format-html,format-email,format-markdown,format-latex]>=2.116,<3",
 ]
-docling-full = ["docling>=2.115,<3", "transformers>=4.55"]
+docling-full = ["docling>=2.116,<3", "transformers>=4.55"]
 # GLiNER demo: LLM-free graph extraction and summaries (cognee/tasks/graph/gliner_demo).
 # Recommended for GLiNER users (torch from PyPI: the CUDA build on Linux). Without it, the
 # first GLiNER cognify installs this same list itself (gliner_demo/install.py reads it from
