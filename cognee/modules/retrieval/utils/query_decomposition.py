@@ -3,7 +3,11 @@ from enum import Enum
 
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("QueryDecomposition")
 
 
 class DecompositionMode(str, Enum):
@@ -39,8 +43,14 @@ class DecompositionRunState:
     final_context: str | None = None
 
 
-def normalize_subqueries(original_query: str, subqueries: list[str] | None) -> list[str]:
-    """Clean and bound decomposed subqueries."""
+def normalize_subqueries(
+    original_query: str, subqueries: list[str] | None, max_subqueries: int = 5
+) -> list[str]:
+    """Clean and bound decomposed subqueries to at most ``max_subqueries``.
+
+    A plan with no usable subquery is replaced by the original query, with a warning:
+    the search then runs without decomposition.
+    """
 
     normalized_queries: list[str] = []
     for subquery in subqueries or []:
@@ -48,14 +58,48 @@ def normalize_subqueries(original_query: str, subqueries: list[str] | None) -> l
         if not cleaned_query or cleaned_query in normalized_queries:
             continue
         normalized_queries.append(cleaned_query)
-        if len(normalized_queries) >= 5:
+        if len(normalized_queries) >= max_subqueries:
             break
 
     if normalized_queries:
         return normalized_queries
 
+    logger.warning(
+        "Query decomposition returned no usable subquery; searching with the original query only."
+    )
     fallback_query = original_query.strip()
     return [fallback_query or original_query]
+
+
+async def decompose_query(
+    query: str,
+    *,
+    system_prompt: str,
+    context: str = "",
+    max_subqueries: int = 5,
+) -> list[str]:
+    """Plan focused subqueries for ``query``, optionally reading ``context`` first.
+
+    The caller asked for decomposition, so a missing prompt or a failed planning
+    call fails the search; neither is answered without decomposition.
+    """
+    if not system_prompt:
+        raise ValueError("Query decomposition needs a system prompt, and none was found.")
+
+    text_input = query
+    if context:
+        text_input = (
+            f"Question:\n{query}\n\n"
+            "Context retrieved for the question so far:\n"
+            f"<context>\n{context}\n</context>"
+        )
+    decomposition = await LLMGateway.acreate_structured_output(
+        text_input=text_input,
+        system_prompt=system_prompt,
+        response_model=QueryDecomposition,
+    )
+
+    return normalize_subqueries(query, decomposition.subqueries, max_subqueries=max_subqueries)
 
 
 def merge_deduplicated_edges(edge_batches: list[list[Edge]]) -> list[Edge]:
