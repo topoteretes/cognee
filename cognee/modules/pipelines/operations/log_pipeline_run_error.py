@@ -2,9 +2,14 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.operations import get_operation_origin, scrub_error_message
+from cognee.modules.operations import (
+    get_current_session_ids,
+    get_operation_origin,
+    scrub_error_message,
+)
 from cognee.modules.operations.usage_accumulator import get_parent_run_id
 from cognee.modules.pipelines.models import OperationOutcome, PipelineRun, PipelineRunStatus
+from cognee.modules.pipelines.operations.run_sessions import add_run_sessions
 from cognee.modules.users.models import User
 
 
@@ -24,16 +29,20 @@ async def log_pipeline_run_error(
     embedding_tokens: int | None = None,
     origin: str | None = None,
     parent_operation_id: UUID | None = None,
+    session_ids: tuple[str, ...] | None = None,
 ):
     """Append the ERRORED row for a run.
 
-    ``origin`` and ``parent_operation_id`` default to what this call's own context provides.
-    A writer closing a run on behalf of a process that is gone (startup recovery) passes the
-    STARTED row's values instead, so the ERRORED row describes the run that died, not the
-    process closing it.
+    ``origin``, ``parent_operation_id`` and ``session_ids`` default to what this call's own
+    context provides. A writer closing a run on behalf of a process that is gone (startup
+    recovery) passes the STARTED row's values instead, so the ERRORED row describes the run
+    that died, not the process closing it.
     ``user_id`` and ``tenant_id`` preserve that stored identity without requiring
     a live ``User`` model. When ``user`` is supplied, its identity takes precedence.
     """
+    if session_ids is None:
+        session_ids = get_current_session_ids()
+
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,
         pipeline_name=pipeline_name,
@@ -69,7 +78,7 @@ async def log_pipeline_run_error(
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
-        session.add(pipeline_run)
+        add_run_sessions(session, pipeline_run, session_ids)
         await session.commit()
 
     return pipeline_run

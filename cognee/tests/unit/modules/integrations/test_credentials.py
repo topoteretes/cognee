@@ -119,12 +119,9 @@ async def test_takeover_of_revoked_account_is_allowed():
 
 
 @pytest.mark.asyncio
-async def test_takeover_of_revoked_account_inherits_the_previous_metadata():
-    # The surprising half of merging, pinned so it cannot change unnoticed:
-    # the row is reused rather than replaced, so B starts out carrying the
-    # allowlist A left behind. That direction is restrictive (B's workspace
-    # begins narrowed, never widened) and B can see and change it on the
-    # channels page, which is why it is accepted rather than special-cased.
+async def test_takeover_of_revoked_account_starts_from_the_installation_alone():
+    # The row is reused rather than replaced, but nothing on it was B's: B starts from what
+    # the installation provides, as a first install does, not with the allowlist A left.
     existing = make_existing(
         USER_A,
         STATUS_REVOKED,
@@ -134,10 +131,7 @@ async def test_takeover_of_revoked_account_inherits_the_previous_metadata():
 
     await _upsert(USER_B, session, provider_metadata={"bot_user_id": "U2"})
 
-    assert existing.provider_metadata == {
-        "bot_user_id": "U2",
-        "allowed_channel_ids": ["C1", "C2"],
-    }
+    assert existing.provider_metadata == {"bot_user_id": "U2"}
 
 
 @pytest.mark.asyncio

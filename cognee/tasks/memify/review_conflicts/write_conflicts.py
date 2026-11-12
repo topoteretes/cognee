@@ -22,9 +22,11 @@ from cognee.modules.graph.utils.fact_conflicts import (
     CONFLICT_CITES,
     CONFLICT_VALUE,
     STATUS_PRECEDENCE,
+    read_conflict_marks,
 )
 from cognee.tasks.storage import add_data_points
 
+from .accept_review import _collect_conflict_values
 from .facts import get_endpoints
 from .models import AcceptedConflict, ConflictsToFinalize, ConflictsToWrite, ReviewScope
 
@@ -44,6 +46,71 @@ class ConflictChange:
     @property
     def fact_statuses(self) -> dict[str, str]:
         return self.accepted.fact_statuses if self.accepted else {}
+
+
+def _preserve_user_resolutions(to_write: ConflictsToWrite) -> None:
+    """An automatic review may refresh evidence, but cannot overturn a user's choice.
+
+    Mutate the batch so its finalization receives the same protected nodes. Drops of
+    deleted subjects still go through; LLM drops of a live user's decision do not.
+    The choice covers only the facts the user weighed. Evidence reported after it is
+    never marked rejected on the user's behalf: it follows each review exactly as
+    under a conflict the review owns.
+    """
+    accepted = {str(item.conflict.id): item for item in to_write.accepted_conflicts}
+    for conflict_id, stored in to_write.scope.conflicts.items():
+        if stored.get("resolution_source") != "user":
+            continue
+        incoming = accepted.get(conflict_id)
+        dropping = conflict_id in to_write.dropped_conflict_ids
+        if incoming and incoming.conflict.resolution_source == "user":
+            continue  # An explicit API resolution, including a revision of a prior choice.
+        if not incoming and not dropping:
+            continue
+        if stored.get("selected_fact_id") not in to_write.scope.facts:
+            continue  # Its evidence was forgotten; let the current review replace or drop it.
+        if dropping and stored["about_id"] not in to_write.scope.entities:
+            continue  # The subject itself was deleted.
+        selected_fact_id = stored.get("selected_fact_id")
+        decided = {selected_fact_id, *stored.get("rejected_fact_ids", [])}
+        statuses: dict[str, str] = {}
+        for fact_id, fact in to_write.scope.facts.items():
+            held = next(
+                (
+                    mark.get("status")
+                    for mark in read_conflict_marks(fact["properties"])
+                    if str(mark.get("conflict_id")) == conflict_id
+                ),
+                None,
+            )
+            reported = incoming.fact_statuses.get(fact_id) if incoming else None
+            if held is None and reported is None:
+                continue
+            if fact_id == selected_fact_id:
+                statuses[fact_id] = "current"
+            elif fact_id in decided:
+                statuses[fact_id] = "superseded"
+            elif reported or fact_id not in to_write.shown_fact_ids:
+                # A shown fact the review no longer labels has left the conflict.
+                statuses[fact_id] = reported or held
+        rejected = sorted(fid for fid in statuses if fid in decided and fid != selected_fact_id)
+        # Every list describes the facts that exist now. A forgotten fact leaves no
+        # trace: a stale text would keep rewriting fact hits, a stale chunk sends the
+        # conflict back to review on every run, a stale value keeps a deleted node in scope.
+        replacement = _rebuild_stored_conflict(
+            stored,
+            rejected_fact_ids=rejected,
+            rejected_fact_texts=sorted(
+                {to_write.scope.facts[fid]["properties"].get("edge_text", "") for fid in rejected}
+                - {""}
+            ),
+            sources=sorted(_collect_cited_sources(statuses, to_write.scope.facts)),
+            values=sorted(_collect_conflict_values(stored["about_id"], statuses, to_write.scope)),
+        )
+        accepted[conflict_id] = AcceptedConflict(replacement, statuses)
+        if dropping:
+            to_write.dropped_conflict_ids.remove(conflict_id)
+    to_write.accepted_conflicts[:] = list(accepted.values())
 
 
 def _collect_conflict_changes(to_write: ConflictsToWrite) -> list[ConflictChange]:
@@ -108,12 +175,34 @@ def _restate_marks(
     """
     for change in changes:
         status = change.fact_statuses.get(fact_id)
-        restated = status is not None or change.dropped or fact_id in to_write.shown_fact_ids
+        retired_user_choice = (
+            change.stored.get("resolution_source") == "user"
+            and change.stored.get("selected_fact_id") not in to_write.scope.facts
+        )
+        restated = (
+            status is not None
+            or change.dropped
+            or fact_id in to_write.shown_fact_ids
+            or retired_user_choice
+        )
         if not restated:
             continue
         marks = [mark for mark in marks if str(mark["conflict_id"]) != change.conflict_id]
         if status:
-            marks.append({"conflict_id": change.conflict_id, "status": status})
+            mark = {"conflict_id": change.conflict_id, "status": status}
+            conflict = change.accepted.conflict
+            # Only the facts the user weighed carry the decision; evidence reported after
+            # it keeps a plain review mark (see _preserve_user_resolutions).
+            if conflict.resolution_source == "user" and fact_id in (
+                conflict.selected_fact_id,
+                *conflict.rejected_fact_ids,
+            ):
+                mark.update(
+                    resolution_source="user",
+                    dataset_id=conflict.dataset_id,
+                    selected_fact=conflict.selected_fact,
+                )
+            marks.append(mark)
     return marks
 
 
@@ -232,12 +321,10 @@ def _choose_value_statuses(accepted: AcceptedConflict, facts: dict[str, dict]) -
     return statuses
 
 
-def _collect_cited_sources(accepted: AcceptedConflict, facts: dict[str, dict]) -> dict[str, dict]:
-    """One source record per cited chunk, across every labelled fact."""
+def _collect_cited_sources(fact_ids, facts: dict[str, dict]) -> dict[str, dict]:
+    """One source record per chunk the given facts cite now."""
     return {
-        source["chunk_id"]: source
-        for fact_id in accepted.fact_statuses
-        for source in facts[fact_id]["sources"]
+        source["chunk_id"]: source for fact_id in fact_ids for source in facts[fact_id]["sources"]
     }
 
 
@@ -263,7 +350,9 @@ def _build_conflict_edges(accepted: AcceptedConflict, facts: dict[str, dict]) ->
                     "effective_date": source["effective_date"],
                 },
             )
-            for chunk_id, source in sorted(_collect_cited_sources(accepted, facts).items())
+            for chunk_id, source in sorted(
+                _collect_cited_sources(accepted.fact_statuses, facts).items()
+            )
         ),
     ]
 
@@ -296,6 +385,7 @@ def _update_scope_conflicts(changes: list[ConflictChange], scope: ReviewScope) -
 
 
 async def _write_conflict_changes(unified, to_write: ConflictsToWrite, ctx) -> None:
+    _preserve_user_resolutions(to_write)
     changes = _collect_conflict_changes(to_write)
     conflict_ctx = _build_conflict_storage_context(ctx, to_write.scope.dataset_id)
 
@@ -312,7 +402,9 @@ async def _write_conflict_changes(unified, to_write: ConflictsToWrite, ctx) -> N
 async def _finalize_run(graph_engine, to_finalize: ConflictsToFinalize) -> None:
     """Clear or delete every conflict the run touched; no further write depends on them."""
     for accepted in to_finalize.accepted_conflicts:
-        conflict = accepted.conflict.model_copy(update={"write_pending": False})
+        conflict = accepted.conflict.model_copy(
+            update={"write_pending": accepted.conflict.cache_cleanup_pending}
+        )
         await graph_engine.add_nodes([conflict])
     for conflict_id in to_finalize.dropped_conflict_ids:
         await graph_engine.delete_nodes([conflict_id])

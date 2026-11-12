@@ -375,7 +375,7 @@ async def test_improve_permission_matrix(permissions_example_env):
     class memify_patch:
         """Mock the memify engine behind the global-context-index stage and open its gate.
 
-        That stage is opt-in (``build_global_context_index=True``) and skipped
+        That stage is forced on here (``build_global_context_index=True``) and skipped
         without a usable LLM. The permission checks under test happen before
         any stage, but case 3 also asserts that the stage receives the
         authorized dataset, so the LLM gate is opened here.

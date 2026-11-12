@@ -8,7 +8,10 @@ from collections import Counter
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from cognee.infrastructure.databases.postgres.admin import create_pg_database_if_not_exists
+from cognee.infrastructure.databases.postgres.admin import (
+    create_pg_database_if_not_exists,
+    drop_pg_database_if_exists,
+)
 from cognee.infrastructure.databases.relational.config import get_relational_config
 from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 from cognee.modules.data.models import Data
@@ -18,6 +21,7 @@ from cognee.tasks.ingestion.dlt_utils import (
     DOCUMENT_COLUMN_HINTS,
     NODE_SET_COLUMN,
     STRUCTURE_COLUMN,
+    apply_dlt_runtime_defaults,
     document_source_tag,
     pipeline_name_for_source,
 )
@@ -44,11 +48,22 @@ _staging_lock = LoopAgnosticLock()
 _SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
 
+VALID_WRITE_DISPOSITIONS = ("merge", "append", "replace")
+
+
+def require_valid_write_disposition(write_disposition) -> None:
+    if write_disposition not in VALID_WRITE_DISPOSITIONS:
+        raise InvalidDLTArgumentError(
+            message=f"Invalid write_disposition '{write_disposition}'. "
+            f"Must be one of: {VALID_WRITE_DISPOSITIONS}"
+        )
+
+
 async def ingest_dlt_source(
     dlt_source,
     dataset_name: str,
     primary_key: str | None = None,
-    write_disposition: str = "replace",
+    write_disposition: str | None = "replace",
     max_rows_per_table: int | None = None,
 ) -> DltRows:
     """
@@ -64,19 +79,21 @@ async def ingest_dlt_source(
         primary_key: Optional primary key column name. If not provided, auto-detected
                      from schema or defaults to 'id' or first column.
         write_disposition: DLT write disposition. One of:
-            - "merge" (default): Upsert rows by primary key. Existing rows with the same
+            - "replace" (default): Drop and recreate the table on each run.
+            - "merge": Upsert rows by primary key. Existing rows with the same
               PK are updated; new rows are inserted.
             - "append": Always insert new rows without deduplication.
-            - "replace": Drop and recreate the table on each run.
+            - None: each resource runs under the disposition it declares. For
+              sources whose resources declare "merge" (see
+              ``document_write_disposition``).
     Returns:
         List[DltRowData]: Per-row data objects for downstream processing.
     """
 
-    valid_dispositions = ("merge", "append", "replace")
-    if write_disposition not in valid_dispositions:
-        raise InvalidDLTArgumentError(
-            message=f"Invalid write_disposition '{write_disposition}'. Must be one of: {valid_dispositions}"
-        )
+    apply_dlt_runtime_defaults()
+
+    if write_disposition is not None:
+        require_valid_write_disposition(write_disposition)
 
     original_dataset_name = dataset_name
     dataset_name = _to_safe_ident(dataset_name)
@@ -100,13 +117,15 @@ async def ingest_dlt_source(
             "Only 'sqlite' and 'postgres' are supported."
         )
 
-    # Build run kwargs based on disposition
-    run_kwargs = {
-        "write_disposition": write_disposition,
-    }
+    # Build run kwargs based on disposition. A disposition passed to run()
+    # overrides the one every resource declares, so None passes nothing.
+    run_kwargs = {}
+    if write_disposition is not None:
+        run_kwargs["write_disposition"] = write_disposition
     # Only pass primary_key for merge disposition (required for upsert).
     # When the user didn't provide an explicit primary_key, omit it so dlt
-    # can auto-detect PKs from the source schema per table.
+    # can auto-detect PKs from the source schema per table. Resources running
+    # under their own disposition (None) keep their own key too.
     if write_disposition == "merge" and primary_key:
         run_kwargs["primary_key"] = primary_key
     if document_source_tag(dlt_source):
@@ -134,6 +153,7 @@ async def ingest_dlt_source(
             raise DLTIngestionError(
                 message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
             ) from e
+        key_hints = _dlt_key_hints(_source_tables(pipeline, dlt_source))
 
         # An incremental source can emit no rows (or only update its cursor),
         # so its load package need not contain a table job. Its previously
@@ -185,6 +205,7 @@ async def ingest_dlt_source(
         raise DLTIngestionError(
             message=f"Failed to extract schema from DLT database '{dlt_db_name}': {e}"
         ) from e
+    _apply_key_hints(filtered_schema, key_hints)
 
     # Read rows from each table and produce DltRowData objects
     from cognee.tasks.ingestion.config import get_ingestion_config
@@ -263,6 +284,130 @@ async def _extract_dlt_schema(
         )
 
     return schema, filtered_schema
+
+
+def _loaded_schema(pipeline, dlt_source):
+    """The dlt schema holding the tables this run loaded.
+
+    Unscoped sources share one pipeline, and dlt keeps the first schema that
+    pipeline ever saw as its default. A source carries its own schema (a SQL
+    database's is ``sql_database``), so its tables live there, not in the
+    default; a bare resource (a CSV) joins the default schema.
+    """
+    from dlt.extract.source import DltSource
+
+    if isinstance(dlt_source, DltSource):
+        return pipeline.schemas[dlt_source.schema.name]
+    return pipeline.default_schema
+
+
+def _source_tables(pipeline, dlt_source) -> list:
+    """The table hints of the resources this run loaded, named as dlt staged them.
+
+    Read from the resources, never from the pipeline's schema: unscoped sources
+    share one pipeline, and dlt merges each run's tables into its schema without
+    ever removing a reference, so that schema still holds the keys of every source
+    an earlier run staged under the same table name.
+
+    Resource hints carry the source's own spelling; the loaded schema's naming
+    convention gives the names the staging tables and columns were created with.
+    A resource whose table name depends on its items has no static hints, so its
+    tables get no keys; that is said once per resource.
+    """
+    from dlt.common.schema.utils import normalize_table_identifiers
+    from dlt.extract.source import DltSource
+
+    if isinstance(dlt_source, DltSource):
+        resources = list(dlt_source.resources.selected.values())
+    else:
+        resources = [dlt_source]
+    naming = _loaded_schema(pipeline, dlt_source).naming
+
+    tables = []
+    for resource in resources:
+        if resource.has_dynamic_table_name:
+            logger.warning(
+                "Resource %r names its tables per item, so dlt has no key hints for them: "
+                "its rows get no foreign key edges.",
+                resource.name,
+            )
+            continue
+        tables.append(normalize_table_identifiers(resource.compute_table_schema(), naming))
+    return tables
+
+
+def _dlt_key_hints(tables) -> dict[str, dict]:
+    """Each table's primary and foreign keys, as dlt's table hints record them.
+
+    dlt creates its staging tables without key constraints, so reflecting them finds
+    none; the source's keys survive only as hints. ``references`` holds one entry
+    per referenced table, merging every foreign key to it into two aligned column
+    lists, which are paired back into one entry per column, in order. A composite
+    key's columns stay next to each other; ``_resolve_fk_references`` groups them.
+    """
+    return {
+        table["name"]: {
+            "primary_key": [
+                name
+                for name, column in table.get("columns", {}).items()
+                if column.get("primary_key")
+            ],
+            "foreign_keys": [
+                {"column": column, "ref_table": ref["referenced_table"], "ref_column": ref_column}
+                for ref in table.get("references") or []
+                if _aligned_reference(table["name"], ref)
+                for column, ref_column in zip(ref["columns"], ref["referenced_columns"])
+            ],
+        }
+        for table in tables
+    }
+
+
+def _aligned_reference(table_name: str, ref: dict) -> bool:
+    """Whether a reference pairs each of its columns with one referenced column."""
+    if len(ref["columns"]) == len(ref["referenced_columns"]):
+        return True
+    logger.warning(
+        "Foreign key hint %s(%s) -> %s(%s) is skipped: its column lists differ in length.",
+        table_name,
+        ", ".join(ref["columns"]),
+        ref["referenced_table"],
+        ", ".join(ref["referenced_columns"]),
+    )
+    return False
+
+
+def _apply_key_hints(schema: dict, key_hints: dict[str, dict]) -> None:
+    """Set each reflected table's keys from dlt's hints.
+
+    Postgres names tables "<dataset>.<table>", so a foreign key's target gets the
+    same prefix to match the row lookup.
+
+    Every foreign key is kept, so the table describes all its keys, including one
+    to a table this run did not load (a single-table ``query``, or an empty table
+    dlt wrote no job for). Which of them can find a row is decided per row by
+    ``_resolve_fk_references``; a key whose target has no loaded rows creates no
+    edge and is reported there.
+
+    A table without a hint keeps its reflected keys: a missing hint must never fail
+    the add.
+    """
+    for qualified_name, table_info in schema.items():
+        table_name = qualified_name.split(".")[-1]
+        prefix = qualified_name[: -len(table_name)]
+        hints = key_hints.get(table_name)
+        if hints is None:
+            continue
+        if hints["primary_key"]:
+            table_info["primary_key"] = hints["primary_key"]
+        table_info["foreign_keys"] = [
+            {**fk, "ref_table": prefix + fk["ref_table"]} for fk in hints["foreign_keys"]
+        ]
+
+
+def _is_dlt_column(name: str) -> bool:
+    """dlt's bookkeeping columns, ``_dlt_id`` and ``_dlt_load_id``."""
+    return "_dlt_" in name
 
 
 def _is_dlt_internal_table(qualified_name: str) -> bool:
@@ -403,18 +548,21 @@ async def _read_single_table(
     At most ``max_rows`` rows are read.  Pass 0 or a negative value to
     read all rows (no limit).
     """
-    raw_columns = table_info.get("columns", [])
     foreign_keys = table_info.get("foreign_keys", [])
 
     # extract_schema() returns columns as a list of dicts for SQLite
-    # (e.g. [{"name": "col", "type": "TEXT"}, ...]) or a dict for Postgres
+    # (e.g. [{"name": "col", "type": "TEXT"}, ...]) or a dict for Postgres.
+    # dlt's bookkeeping columns are left out, as they are from the row data.
+    raw_columns = table_info.get("columns", [])
     if isinstance(raw_columns, list):
+        raw_columns = [c for c in raw_columns if not _is_dlt_column(c["name"])]
         column_names = [c["name"] for c in raw_columns]
     else:
+        raw_columns = {k: v for k, v in raw_columns.items() if not _is_dlt_column(k)}
         column_names = list(raw_columns.keys())
 
     # Auto-detect primary key with validation
-    pk_col = _resolve_primary_key(primary_key, table_info, column_names, table_name)
+    pk_columns = _resolve_primary_key(primary_key, table_info, column_names, table_name)
 
     # Compute schema hash for evolution detection
     schema_hash = _compute_schema_hash(raw_columns)
@@ -438,37 +586,32 @@ async def _read_single_table(
 
     # Validate PK uniqueness
     if rows:
-        pk_values = [str(row.get(pk_col, "")) for row in rows]
+        pk_values = [_key_value(row, pk_columns) for row in rows]
         pk_counts = Counter(pk_values)
         duplicates = {v: c for v, c in pk_counts.items() if c > 1}
         if duplicates:
             dup_sample = dict(list(duplicates.items())[:5])
             logger.warning(
-                "Table '%s': primary key column '%s' has %d duplicate values "
+                "Table '%s': primary key '%s' has %d duplicate values "
                 "(sample: %s). Rows with duplicate PKs will overwrite each other "
                 "during upsert. Consider specifying a unique primary_key.",
                 table_name,
-                pk_col,
+                ", ".join(pk_columns),
                 len(duplicates),
                 dup_sample,
             )
 
     row_data_list = []
     for row in rows:
-        row_dict = {k: v for k, v in row.items()}
-        pk_value = str(row_dict.get(pk_col, ""))
-
-        row_keys = list(row_dict.keys())
-        for k in row_keys:
-            if "_dlt_" in k:
-                row_dict.pop(k)
+        row_dict = {k: v for k, v in row.items() if not _is_dlt_column(k)}
+        pk_value = _key_value(row_dict, pk_columns)
 
         content_hash = _row_content_hash(row_dict)
 
         row_data_list.append(
             DltRowData(
                 table_name=table_name,
-                primary_key_column=pk_col,
+                primary_key_columns=pk_columns,
                 primary_key_value=pk_value,
                 row_data=row_dict,
                 content_hash=content_hash,
@@ -488,10 +631,13 @@ def _resolve_primary_key(
     table_info: dict,
     column_names: list,
     table_name: str = "",
-) -> str:
-    """Resolve the primary key column for a table with validation and logging."""
+) -> list[str]:
+    """Resolve a table's primary key columns with validation and logging.
+
+    A composite key is every one of its columns; the fallbacks are one column.
+    """
     if provided_pk and provided_pk in column_names:
-        return provided_pk
+        return [provided_pk]
 
     if provided_pk and provided_pk not in column_names:
         logger.warning(
@@ -505,15 +651,12 @@ def _resolve_primary_key(
     # Check schema-level primary_key
     schema_pk = table_info.get("primary_key")
     if schema_pk:
-        if isinstance(schema_pk, list) and len(schema_pk) > 0:
-            return schema_pk[0]
-        if isinstance(schema_pk, str):
-            return schema_pk
+        return list(schema_pk) if isinstance(schema_pk, list) else [schema_pk]
 
     # Fallback to 'id' column
     if "id" in column_names:
         logger.info("Table '%s': no explicit primary key found, using 'id' column.", table_name)
-        return "id"
+        return ["id"]
 
     # Last resort: first column (with warning)
     if column_names:
@@ -524,9 +667,14 @@ def _resolve_primary_key(
             table_name,
             column_names[0],
         )
-        return column_names[0]
+        return [column_names[0]]
 
-    return "id"
+    return ["id"]
+
+
+def _key_value(row, key_columns: list[str]) -> str:
+    """A row's primary key value: its key columns' values, joined with ":"."""
+    return ":".join(str(row[column]) for column in key_columns)
 
 
 # Identity map over the identifier alphabet. Rebuilding the sanitized name from
@@ -536,12 +684,102 @@ def _resolve_primary_key(
 _SAFE_IDENT_CHARS = {c: c for c in "abcdefghijklmnopqrstuvwxyz0123456789_"}
 
 
+async def drop_dlt_dataset(dataset_name: str) -> None:
+    """Delete everything dlt keeps of ``dataset_name``, for a dataset deleted for good.
+
+    ``forget`` removes the documents, graph and vectors, not the staging copy: the staging
+    database (``dlt_database_<dataset>``, on SQLite with its attached ``__<dataset>`` and
+    ``__<dataset>_staging`` files) and, under dlt's pipelines directory, the working
+    directory of every pipeline that loaded into it (state, schemas and completed load
+    packages, which hold the rendered text of every row). A later sync would read the
+    staged rows back. Taken under the staging lock, so no dlt run is mid-write.
+
+    Staging is keyed by dataset name alone, not by owner or dataset id: datasets that
+    share a name (two users' ``main_dataset``, or names that differ only in characters
+    ``_to_safe_ident`` replaces) share one staging database and pipeline state, and this
+    drops it for all of them, sync cursors included. A caller must know no other dataset
+    of that name is still syncing.
+
+    Sources with no pipeline scope (database and CSV sources) share the one
+    ``ingest_dlt_source`` directory across datasets. It is removed only when its last
+    load was into this dataset; otherwise what it holds of this dataset stays.
+    """
+    apply_dlt_runtime_defaults()
+
+    safe_name = _to_safe_ident(dataset_name)
+    db_name = f"dlt_database_{safe_name}"
+    relational_config = get_relational_config()
+    async with _staging_lock:
+        if relational_config.db_provider == "postgres":
+            await drop_pg_database_if_exists(
+                db_name=db_name,
+                host=relational_config.db_host,
+                port=relational_config.db_port,
+                username=relational_config.db_username,
+                password=relational_config.db_password,
+            )
+            staging_dir = None
+        else:
+            staging_dir = relational_config.db_path
+        await asyncio.to_thread(_delete_dlt_files, safe_name, db_name, staging_dir)
+
+
+def _delete_dlt_files(safe_name: str, db_name: str, staging_dir: str | None) -> None:
+    """Remove a dataset's SQLite staging files (``staging_dir``) and pipeline directories."""
+    import shutil
+    from pathlib import Path
+
+    from dlt.common.pipeline import get_dlt_pipelines_dir
+
+    if staging_dir is not None:
+        # The database and the two datasets dlt attaches to it, under the name as given
+        # and as dlt normalizes it; never by prefix, which also matched a dataset whose
+        # name starts with this one (``<name>__other``).
+        from dlt.common.normalizers.naming.snake_case import NamingConvention
+
+        normalized = NamingConvention().normalize_identifier(safe_name)
+        files = {db_name}
+        for dataset in {safe_name, normalized}:
+            files |= {f"{db_name}__{dataset}", f"{db_name}__{dataset}_staging"}
+        for name in files:
+            Path(staging_dir, name).unlink(missing_ok=True)
+
+    # Only the directories pipeline_name_for_source names: dlt's pipelines directory is
+    # shared with the host's own pipelines, which may load into a dataset of this name.
+    pipelines = Path(get_dlt_pipelines_dir())
+    for pipeline_dir in pipelines.glob("ingest_dlt_*"):
+        state_path = pipeline_dir / "state.json"
+        if state_path.is_file() and _pipeline_dataset(state_path) == safe_name:
+            shutil.rmtree(pipeline_dir)
+
+
+def _pipeline_dataset(state_path) -> str | None:
+    """The dataset a dlt pipeline loads into, or ``None`` for a state dlt did not write.
+
+    dlt writes its state atomically, so a file that cannot be read as a state object
+    (truncated, not UTF-8, unreadable) is not a pipeline of ours and is skipped.
+    """
+    try:
+        state = json.loads(state_path.read_text())
+    except (ValueError, OSError):
+        return None
+    return state.get("dataset_name") if isinstance(state, dict) else None
+
+
 def _to_safe_ident(s: str) -> str:
     s = re.sub(r"[^A-Za-z0-9_]+", "_", s).strip("_").lower()
     s = "".join(_SAFE_IDENT_CHARS.get(ch, "_") for ch in s)
     if not s:
         raise InvalidDLTArgumentError(message="Invalid dataset name given for dlt ingestion.")
-    if s[0].isdigit():
+    # dlt uses this name as its staging dataset, which on Postgres is a schema,
+    # and Postgres reserves the ``pg_`` prefix for system schemas. A merge load
+    # also writes to a ``<name>_staging`` schema, so the bare name ``pg`` is
+    # reserved too. ``information_schema`` exists in every Postgres database and
+    # belongs to the bootstrap superuser: dlt sees the schema and creates the
+    # dataset's tables inside it, which a non-superuser role is denied. Such a
+    # name is prefixed like one that starts with a digit, on every destination,
+    # so a dataset stages under one name whatever the relational provider.
+    if s[0].isdigit() or s == "pg" or s.startswith("pg_") or s == "information_schema":
         s = f"d_{s}"
     return s[:63]
 

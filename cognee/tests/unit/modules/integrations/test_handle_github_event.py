@@ -25,10 +25,12 @@ def mocks(monkeypatch):
         revoke=AsyncMock(return_value=True),
         get_credential=AsyncMock(return_value=_ACTIVE_CREDENTIAL),
         sync=AsyncMock(),
+        paused=AsyncMock(return_value=False),
     )
     monkeypatch.setattr(handle_module, "revoke_credential_by_account", mocked.revoke)
     monkeypatch.setattr(handle_module, "get_credential_by_account", mocked.get_credential)
     monkeypatch.setattr(handle_module, "sync_repositories", mocked.sync)
+    monkeypatch.setattr(handle_module, "sync_is_paused", mocked.paused)
     return mocked
 
 
@@ -43,7 +45,7 @@ async def test_installation_deleted_revokes_the_credential(mocks):
         {"x-github-event": "installation"},
     )
 
-    mocks.revoke.assert_awaited_once_with("github", "42")
+    mocks.revoke.assert_awaited_once_with("github", "42", revoked_by="provider")
     mocks.sync.assert_not_awaited()
 
 
@@ -141,3 +143,44 @@ async def test_unparseable_body_never_raises(mocks):
     await handle_github_event(b"not json", {"x-github-event": "push"})
 
     mocks.sync.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event", "payload"),
+    [
+        (
+            "push",
+            {
+                "ref": "refs/heads/main",
+                "repository": {"full_name": "acme/api", "default_branch": "main"},
+            },
+        ),
+        (
+            "installation_repositories",
+            {"action": "added", "repositories_added": [{"full_name": "acme/api"}]},
+        ),
+    ],
+)
+async def test_a_paused_connection_syncs_nothing_from_a_delivery(mocks, event, payload):
+    """Pause means no new data: a webhook for a paused connection is dropped (SDK-1434)."""
+    mocks.paused.return_value = True
+
+    await handle_github_event(
+        _body({**payload, "installation": {"id": 42}}), {"x-github-event": event}
+    )
+
+    mocks.paused.assert_awaited_once_with("github", _ACTIVE_CREDENTIAL, f"{event} delivery")
+    mocks.sync.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_paused_connection_still_revokes_on_uninstall(mocks):
+    mocks.paused.return_value = True
+
+    await handle_github_event(
+        _body({"action": "deleted", "installation": {"id": 42}}),
+        {"x-github-event": "installation"},
+    )
+
+    mocks.revoke.assert_awaited_once_with("github", "42", revoked_by="provider")

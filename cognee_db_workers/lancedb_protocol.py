@@ -40,6 +40,13 @@ OP_TABLE_SCHEMA = 126
 OP_TABLE_COMPACT_FRAGMENTS = 127
 # kwargs: retention_seconds, max_versions
 OP_TABLE_PRUNE_VERSIONS = 128
+# handle_id; evolve the table's ``payload`` struct in place
+# (``lancedb_schema_evolution.evolve_payload_schema``). args: (target_bytes,)
+# where target_bytes is a one-field Arrow schema ``payload: <target struct>``,
+# IPC-serialized like OP_CREATE_TABLE's schema. kwargs: defaults (field name to
+# model default), required (list of field names the model requires a value
+# for), batch_size. Returns the stats dict.
+OP_TABLE_EVOLVE_PAYLOAD = 129
 
 # Builder ops. args: (root_args, chain_steps, terminal_name, terminal_args,
 # terminal_kwargs) where root_args is the tuple passed to the root call

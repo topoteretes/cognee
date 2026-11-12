@@ -1,7 +1,8 @@
 from time import perf_counter
-from typing import Any, BinaryIO, Literal
+from typing import Any, Literal
 from uuid import UUID
 
+from fastapi import UploadFile
 from pydantic import BaseModel
 
 from cognee.api.v1.add import add
@@ -32,7 +33,7 @@ logger = get_logger("update")
 
 async def update(
     data_id: UUID,
-    data: BinaryIO | list[BinaryIO] | str | list[str],
+    data: str | list[str] | UploadFile | list[UploadFile],
     dataset_id: UUID,
     user: User = None,
     node_set: list[str] | None = None,
@@ -69,7 +70,10 @@ async def update(
             * Absolute paths: "/path/to/document.pdf"
             * File URLs: "file:///path/to/document.pdf" or "file://relative/path.txt"
             * S3 paths: "s3://bucket-name/path/to/file.pdf"
-        - **Binary file objects**: File handles/streams (BinaryIO)
+        - **File uploads**: FastAPI ``UploadFile`` objects, which is what
+          ``PATCH /api/v1/update`` hands in for its multipart ``data`` field. Plain open
+          file objects (``open(path, "rb")``, ``BytesIO``) are not accepted: pass the
+          file's path instead.
 
     Supported File Formats:
         - Text files (.txt, .md, .csv)
@@ -89,7 +93,7 @@ async def update(
             - Absolute file path: "/path/to/document.pdf"
             - File URL: "file:///absolute/path/to/document.pdf" or "file://relative/path.txt"
             - S3 path: "s3://my-bucket/documents/file.pdf"
-            - Binary file object: open("file.txt", "rb")
+            - File upload: a FastAPI UploadFile, as PATCH /api/v1/update receives it
         dataset_id: UUID of the dataset holding the document (required).
         user: User object for authentication and permissions. Uses default user if None.
               Default user: "default_user@example.com" (created automatically on first use).
@@ -193,8 +197,13 @@ async def update(
     if not user:
         user = await get_default_user()
 
-    from cognee.modules.data.methods import reset_data_pipeline_status, resolve_data_id
+    from cognee.modules.data.methods import (
+        get_authorized_dataset,
+        reset_data_pipeline_status,
+        resolve_data_id,
+    )
     from cognee.modules.ingestion.exceptions import IngestionError
+    from cognee.modules.users.exceptions import PermissionDeniedError
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.ingestion.resolve_dlt_sources import check_dlt_replacement, is_dlt_input
 
@@ -204,6 +213,11 @@ async def update(
                 f"update() replaces exactly one document; got a list of {len(data)} items."
             )
         data = data[0]
+
+    # Authorize before the id is resolved: a caller without write access must
+    # not learn from 404-versus-further whether a (dataset, data) pair exists.
+    if await get_authorized_dataset(user, dataset_id, "write") is None:
+        raise PermissionDeniedError(message="Not authorized to update this dataset")
 
     # The document KEEPS its data_id through updates. Resolve the incoming id
     # (exact, then pre-fork legacy_id) once, up front: the incremental path

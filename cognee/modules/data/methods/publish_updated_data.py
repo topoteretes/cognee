@@ -171,8 +171,10 @@ async def reset_data_pipeline_status(
         await session.commit()
 
 
-async def is_data_processed(data_id: UUID, dataset_id: UUID) -> bool:
-    """Whether the cognify-completion stamp is already on the row."""
+async def is_data_processed(
+    data_id: UUID, dataset_id: UUID, pipeline_name: str = COGNIFY_PIPELINE_NAME
+) -> bool:
+    """Whether ``pipeline_name``'s completion stamp (cognify's by default) is on the row."""
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         data_point = (
@@ -183,5 +185,5 @@ async def is_data_processed(data_id: UUID, dataset_id: UUID) -> bool:
         # Same deferred import as _completed_status, same cycle reason.
         from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
 
-        status = (data_point.pipeline_status or {}).get(COGNIFY_PIPELINE_NAME) or {}
+        status = (data_point.pipeline_status or {}).get(pipeline_name) or {}
         return is_data_item_completed(status.get(str(dataset_id)))

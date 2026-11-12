@@ -708,17 +708,22 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to initialize Ladybug database: {e}")
             raise
 
+    def needs_push_to_s3(self) -> bool:
+        """Whether writes live in a local copy of an S3 database until ``push_to_s3``."""
+        return os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file")
+
     async def push_to_s3(self) -> None:
-        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file"):
-            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+        if not self.needs_push_to_s3():
+            return
+        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
-            s3_file_storage = S3FileStorage("")
+        s3_file_storage = S3FileStorage("")
 
-            if self.connection:
-                async with self.LADYBUG_ASYNC_LOCK:
-                    self.connection.execute("CHECKPOINT;")
+        if self.connection:
+            async with self.LADYBUG_ASYNC_LOCK:
+                self.connection.execute("CHECKPOINT;")
 
-            s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
+        s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
 
     async def pull_from_s3(self) -> None:
         from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
@@ -3092,13 +3097,14 @@ class LadybugAdapter(GraphDBInterface):
         `edge_types` (matching the Neo4j/Postgres backends); `edge_types=None` or
         `[]` disables the filter.
 
-        Performance note: the `edge_types` branch enumerates every path up to
-        `depth` (Kuzu cannot filter a variable-length relationship binding in
-        Cypher — see #3585) and post-filters in Python, so its cost grows
-        combinatorially with node degree × depth on dense graphs. It is intended
-        for shallow, targeted neighborhoods; a future refactor could push per-hop
-        type filtering into Cypher via a fixed-length UNION to return distinct
-        neighbors instead of walks.
+        Performance note: at `depth=1` the edge types are filtered in Cypher, so
+        edges of other types never reach Python. Deeper, the `edge_types` branch
+        enumerates every path up to `depth` (Kuzu cannot filter a variable-length
+        relationship binding in Cypher — see #3585) and post-filters in Python, so
+        its cost grows combinatorially with node degree × depth on dense graphs. It
+        is intended for shallow, targeted neighborhoods; a future refactor could
+        push per-hop type filtering into Cypher via a fixed-length UNION to return
+        distinct neighbors instead of walks.
         """
         import time
 
@@ -3113,9 +3119,22 @@ class LadybugAdapter(GraphDBInterface):
             # Kuzu's `r` from `-[r*1..N]-` is a RECURSIVE_REL, not a LIST, so the
             # engine rejects `ALL(rel IN r WHERE ...)` with a binder error (and an
             # internal assertion when combined with a parameter reference). When
-            # edge_types is set, fetch paths unfiltered and discard neighbors whose
-            # every path crosses a disallowed edge type (#3585).
-            if edge_types:
+            # edge_types is set and depth > 1, fetch paths unfiltered and discard
+            # neighbors whose every path crosses a disallowed edge type (#3585).
+            if edge_types and depth == 1:
+                # One hop binds a single relationship, which Cypher can filter: a
+                # node with many edges of other types (an ontology class and its
+                # members' is_a edges) is not walked in Python.
+                neighbor_query = """
+                MATCH (seed:Node)-[r]-(neighbor:Node)
+                WHERE seed.id IN $node_ids AND r.relationship_name IN $edge_types
+                RETURN DISTINCT neighbor.id
+                """
+                neighbor_rows = await self.query(
+                    neighbor_query, {"node_ids": node_ids, "edge_types": list(edge_types)}
+                )
+                neighbor_ids = [row[0] for row in neighbor_rows if row[0]]
+            elif edge_types:
                 path_query = f"""
                 MATCH (seed:Node)-[r*1..{depth}]-(neighbor:Node)
                 WHERE seed.id IN $node_ids
@@ -3313,7 +3332,9 @@ class LadybugAdapter(GraphDBInterface):
 
         return nodes, edges
 
-    async def get_filtered_graph_data(self, attribute_filters: list[dict[str, list[str | int]]]):
+    async def get_filtered_graph_data(
+        self, attribute_filters: list[dict[str, list[str | int]]], *, include_edges: bool = True
+    ):
         """
         Get filtered nodes and relationships based on attributes.
 
@@ -3371,9 +3392,12 @@ class LadybugAdapter(GraphDBInterface):
         WHERE {where_clause.replace("n.", "n1.")} AND {where_clause.replace("n.", "n2.")}
         RETURN n1.id, n2.id, r.relationship_name, r.properties
         """
-        nodes, edges = await asyncio.gather(
-            self.query(nodes_query, params), self.query(edges_query, params)
-        )
+        if include_edges:
+            nodes, edges = await asyncio.gather(
+                self.query(nodes_query, params), self.query(edges_query, params)
+            )
+        else:
+            nodes, edges = await self.query(nodes_query, params), []
         formatted_nodes = []
         for n in nodes:
             if n[0]:

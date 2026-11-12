@@ -21,6 +21,7 @@ from cognee.modules.improve.stages import (
     REASON_NO_WRITES_SINCE_LAST_IMPROVE,
     REASON_OPT_IN_DISABLED,
     REASON_PERSONALIZATION_DISABLED,
+    REASON_TURNED_OFF,
     BuildTruthSubspaceStage,
     DistillSessionsStage,
     FeedbackWeightsStage,
@@ -272,9 +273,9 @@ async def test_truth_subspace_maps_a_skipped_build_onto_the_stage(monkeypatch):
 # --- stage 9 ---------------------------------------------------------------
 
 
-def test_global_context_index_skipped_unless_opted_in():
+def test_global_context_index_skipped_when_turned_off():
     stage = GlobalContextIndexStage()
-    assert stage.gate(_inputs()) == REASON_OPT_IN_DISABLED
+    assert stage.gate(_inputs()) == REASON_TURNED_OFF
     assert stage.gate(_inputs(build_global_context_index=True)) is None
 
 
