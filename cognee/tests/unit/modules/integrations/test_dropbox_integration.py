@@ -139,7 +139,7 @@ def sync_mocks():
             retire=AsyncMock(),
             record=AsyncMock(),
             folder=AsyncMock(
-                side_effect=lambda _t, folder_id: {
+                side_effect=lambda _t, folder_id, **_kw: {
                     ".tag": "folder",
                     "path_lower": {"id:n": "/notes", "id:w": "/work", "id:sub": "/notes/sub"}[
                         folder_id
@@ -380,7 +380,9 @@ async def test_the_cached_token_is_fetched_again_once_it_nears_expiry(sync_mocks
 @pytest.mark.asyncio
 async def test_a_nested_selection_is_refused_when_it_is_saved():
     folders = {"id:n": "/notes", "id:sub": "/notes/sub", "id:w": "/work"}
-    lookup = AsyncMock(side_effect=lambda _t, f: {".tag": "folder", "path_lower": folders[f]})
+    lookup = AsyncMock(
+        side_effect=lambda _t, f, **_kw: {".tag": "folder", "path_lower": folders[f]}
+    )
     with (
         patch.object(adapter_module, "access_token_for", AsyncMock(return_value="t")),
         patch.object(sync_module.client, "get_folder", lookup),
@@ -915,3 +917,47 @@ async def test_a_refresh_refused_mid_sync_revokes_the_connection_and_stops_with_
     assert outcome == "DropboxAuthError"
     persisted = await store.get_credential_by_account("dropbox", ACCOUNT)
     assert persisted.status == "revoked"
+
+
+# ---------------------------------------------------------------- round 9 (bugs, red first)
+@pytest.mark.asyncio
+async def test_the_nested_selection_check_uses_one_session_and_one_credential_read(monkeypatch):
+    folders = {f"id:f{i}": f"/folder{i}" for i in range(5)}
+    sessions = []
+
+    class Response:
+        status = 200
+
+        def __init__(self, body):
+            self.body = body
+
+        async def json(self, content_type=None):
+            return self.body
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+    class Session:
+        def __init__(self, **_kwargs):
+            sessions.append(self)
+
+        def post(self, _url, **kwargs):
+            return Response({".tag": "folder", "path_lower": folders[kwargs["json"]["path"]]})
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+    reads = AsyncMock(side_effect=lambda credential: credential)
+    monkeypatch.setattr(client_module, "client_session", lambda _provider, **kw: Session(**kw))
+    monkeypatch.setattr(sync_module.ingestion, "require_active_credential", reads)
+
+    await sync_module.refuse_nested_selection(credential(), "sl.token", sorted(folders))
+
+    assert len(sessions) == 1, f"{len(sessions)} HTTP sessions for 5 folders"
+    assert reads.await_count == 1, f"{reads.await_count} credential reads for 5 folders"

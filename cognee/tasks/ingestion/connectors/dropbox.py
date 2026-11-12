@@ -181,12 +181,40 @@ def _clean_token(token: Any) -> str:
     return value
 
 
-def _error_tags(response: Any) -> tuple[str, ...]:
-    """Dropbox's error tag chain (``{"error": {".tag": "path", "path": {".tag": ...}}}``)."""
+def _read_body(response: Any, endpoint: str) -> bytes:
+    """The whole body of a streamed response.
+
+    ``send(stream=True)`` hands over an unread body, so every path that parses JSON reads it
+    here first. A connection that breaks while the body arrives is transient, like one that
+    breaks before the answer: retried by the same policy, then a typed error with no URL.
+    """
+    import httpx
+
+    body = None
     try:
-        node = response.json().get("error")
-    except (ValueError, AttributeError):
+        body = response.read()
+    except httpx.TransportError:
+        pass
+    # Raised outside the except block, so the httpx error (which names the URL) is not its
+    # context.
+    if body is None:
+        raise _Transient(status=0, endpoint=endpoint)
+    return body
+
+
+def _json_object(body: bytes) -> Any:
+    try:
+        return json.loads(body)
+    except ValueError:
+        return None
+
+
+def _error_tags(body: bytes) -> tuple[str, ...]:
+    """Dropbox's error tag chain (``{"error": {".tag": "path", "path": {".tag": ...}}}``)."""
+    payload = _json_object(body)
+    if not isinstance(payload, dict):
         return ()
+    node = payload.get("error")
     tags: list[str] = []
     while isinstance(node, dict) and isinstance(node.get(".tag"), str) and len(tags) < 4:
         tag = node[".tag"]
@@ -242,10 +270,7 @@ class DropboxClient:
         def attempt():
             headers = {**self._headers(), "Content-Type": "application/json"}
             with self._send(endpoint, _API, headers, json.dumps(body).encode()) as response:
-                try:
-                    result = response.json()
-                except ValueError:
-                    result = None
+                result = _json_object(_read_body(response, endpoint))
             if not isinstance(result, dict):
                 raise DropboxApiError(
                     f"Dropbox {endpoint} answered with a malformed body", endpoint=endpoint
@@ -312,8 +337,7 @@ class DropboxClient:
                 retry_after = response.headers.get("Retry-After")
                 raise _Transient(status=status, endpoint=endpoint, retry_after=retry_after)
             if status == 401:
-                response.read()
-                tags = _error_tags(response)
+                tags = _error_tags(_read_body(response, endpoint))
                 if tags[:1] and tags[0] in _SCOPE_TAGS:
                     raise DropboxScopeError(
                         f"Dropbox {endpoint} refused the app's access (HTTP 401, {tags[0]}); "
@@ -331,8 +355,7 @@ class DropboxClient:
                 )
             tags = ()
             if status == 409:
-                response.read()
-                tags = _error_tags(response)
+                tags = _error_tags(_read_body(response, endpoint))
             raise DropboxApiError(
                 f"Dropbox {endpoint} failed: HTTP {status}",
                 status=status,
@@ -663,8 +686,7 @@ def _modified_day(entry: dict) -> str | None:
     return None
 
 
-def _render(entry: dict, text: str) -> str:
-    day = _modified_day(entry)
+def _render(day: str | None, text: str) -> str:
     return f"Modified: {day}\n\n{text}" if day else text
 
 
@@ -677,9 +699,17 @@ def _export_format(entry: dict) -> str | None:
 
 
 def _file_to_row(
-    session: _Session, entry: dict, ancestors: list[dict], max_bytes: float | None, stats
+    session: _Session,
+    entry: dict,
+    ancestors: list[dict],
+    max_bytes: float | None,
+    stats,
+    day: str | None,
 ) -> Any:
-    """A row, None when the file is skipped, or ``_RETRY`` for a failure worth retrying."""
+    """A row, None when the file is skipped, or ``_RETRY`` for a failure worth retrying.
+
+    ``day`` is the date line: the day the file's content last changed (see ``_iter_rows``).
+    """
     stats["scanned"] += 1
     size = entry.get("size")
     # Checked first, so an exported Paper doc is held to the limit too and never downloaded.
@@ -738,7 +768,7 @@ def _file_to_row(
         # file or renaming a folder above it extracts nothing again. The title is hashed, so
         # renaming the file itself extracts it once more. The date is in the text, at day
         # precision.
-        "content": _render(entry, text),
+        "content": _render(day, text),
         # Dropbox has no web link for a file without creating a shared link, which is a write.
         "url": None,
         STRUCTURE_COLUMN: {"ancestors": ancestors},
@@ -747,9 +777,13 @@ def _file_to_row(
 
 
 def _valid_file(entry: dict) -> bool:
+    """The fields the connector reads. A downloadable file must carry its ``content_hash``;
+    a Paper doc (not downloadable) has none and is re-rendered whenever it is listed."""
+    required = ("id", "name", "path_lower", "path_display")
+    if entry.get("is_downloadable") is True:
+        required += ("content_hash",)
     return isinstance(entry.get("is_downloadable"), bool) and all(
-        isinstance(entry.get(key), str) and entry[key]
-        for key in ("id", "name", "path_lower", "path_display")
+        isinstance(entry.get(key), str) and entry[key] for key in required
     )
 
 
@@ -798,14 +832,51 @@ def _iter_rows(
     folders: dict[str, str] = dict(state.get("folders", {}))
     stored: set[str] = set(state.get("stored", []))
     retry: set[str] = set(state.get("retry", []))
+    # Per stored file: its content_hash, path_display and date line, as last emitted. A file
+    # listed again with the same bytes keeps its date line (the date is the day the content
+    # last changed) and is not emitted at all when its path did not change either.
+    rendered: dict[str, dict] = (
+        dict(state.get("rendered", {})) if state.get("render") == _RENDER_VERSION else {}
+    )
     removed: set[str] = set()
     changed: dict[str, dict] = {}
 
+    # Deleted paths that may be folders, waiting for one pass over the index (see flush).
+    pending_folders: set[str] = set()
+
     def forget(path: str) -> None:
-        for key in [p for p in index if _is_under(p, path)]:
+        """Forget a deleted path. Dropbox's delete names the path only, not whether it was a
+        file or a folder: a file key is popped at once, anything else may be a folder and is
+        swept with the other folder deletes of the same run of deletes, in one pass."""
+        if path == "":
+            for file_id in index.values():
+                removed.add(file_id)
+            index.clear()
+            folders.clear()
+            pending_folders.clear()
+            return
+        if path in index and path not in folders:
+            removed.add(index.pop(path))
+            return
+        pending_folders.add(path)
+
+    def flush() -> None:
+        """Forget everything under the pending folder deletes: one pass over the index, each
+        key checked by its own ancestors, so the cost is the index size, not deletes times it."""
+        if not pending_folders:
+            return
+
+        def deleted(key: str) -> bool:
+            parts = key.split("/")
+            return any(
+                "/".join(parts[:depth]) in pending_folders for depth in range(2, len(parts) + 1)
+            )
+
+        for key in [k for k in index if deleted(k)]:
             removed.add(index.pop(key))
-        for key in [p for p in folders if _is_under(p, path)]:
+        for key in [k for k in folders if deleted(k)]:
             del folders[key]
+        pending_folders.clear()
 
     def apply(entry: dict) -> None:
         path = entry.get("path_lower")
@@ -814,6 +885,9 @@ def _iter_rows(
             logger.warning("Dropbox: skipped a change without a path.")
             return
         tag = entry[".tag"]
+        if tag != "deleted":
+            # A change after deletes: the deletes come first, as Dropbox listed them.
+            flush()
         if tag == "file":
             if not _valid_file(entry):
                 raise DropboxApiError(
@@ -871,6 +945,7 @@ def _iter_rows(
                 forget("")
             for entry in entries:
                 apply(entry)
+            flush()
             if not all(_is_under(entry["path_lower"], root[0]) for entry in changed.values()):
                 # The folder was renamed or moved between files/get_metadata and the listing.
                 # Dropping those files would leave them unsynced, so the run stops before
@@ -919,6 +994,8 @@ def _iter_rows(
     cut = None
     scope = root or ("", "")  # work is empty when the folder is gone
     row: Any = None
+    identical = 0
+    emitted: dict = {}
     for position, (file_id, entry) in enumerate(work):
         try:
             if entry is None:
@@ -928,7 +1005,14 @@ def _iter_rows(
                 ancestors = _ancestors(entry, scope, folder_id, folders)
             else:
                 ancestors = work_ancestors[file_id]
-            row = _file_to_row(session, entry, ancestors, max_bytes, stats)
+            last = rendered.get(file_id) if file_id in stored else None
+            same_bytes = last is not None and last["hash"] == entry.get("content_hash")
+            if same_bytes and last["path"] == entry["path_display"]:
+                identical += 1
+                continue
+            day = last["day"] if same_bytes else _modified_day(entry)
+            emitted = {"hash": entry.get("content_hash"), "path": entry["path_display"], "day": day}
+            row = _file_to_row(session, entry, ancestors, max_bytes, stats, day)
         except (DropboxAuthError, DropboxRateLimitedError) as error:
             if isinstance(error, DropboxAuthError) and not (rows_stored or stats["deleted"]):
                 # Nothing done yet: a bad token, said as such.
@@ -952,6 +1036,7 @@ def _iter_rows(
             next_retry.add(file_id)
         elif row is not None:
             stored.add(file_id)
+            rendered[file_id] = emitted
             rows_stored += 1
             yield cast(dict, row)
         elif file_id in stored:
@@ -972,6 +1057,9 @@ def _iter_rows(
     state["index"] = index
     state["folders"] = folders
     state["stored"] = sorted(stored)
+    state["rendered"] = {
+        file_id: rendered[file_id] for file_id in sorted(stored) if file_id in rendered
+    }
     state["retry"] = sorted(next_retry)
     if root is None:
         for key in ("cursor", "path"):
@@ -979,7 +1067,7 @@ def _iter_rows(
     else:
         state["cursor"] = new_cursor
         state["path"] = root[0]
-    stats["unchanged"] = len(present) - len(changed)
+    stats["unchanged"] = len(present) - len(changed) + identical
     stats["complete"] = int(cut is None)
     logger.info("Dropbox: sync stats %s", stats)
 

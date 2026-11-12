@@ -253,3 +253,110 @@ def test_an_account_refusal_is_never_renewed_or_retried(tag):
         client_for(handler, token=token).rpc("files/get_metadata", {"path": FILE_ID})
 
     assert token.renewals == 0 and len(calls) == 1 and error.value.tags == (tag,)
+
+
+# ---------------------------------------------------------------- unread (streamed) bodies
+def test_rpc_reads_a_streamed_body_as_a_real_transport_delivers_it():
+    """A real transport hands ``send(stream=True)`` an unread body; ``.json()`` on it raises
+    ``httpx.ResponseNotRead``. The fake's ``streamed`` mode answers the same way."""
+    from cognee.tests.unit.tasks.connectors.fake_dropbox import TOKEN as FAKE_TOKEN
+    from cognee.tests.unit.tasks.connectors.fake_dropbox import FakeDropbox
+
+    fake = FakeDropbox(streamed=True)
+    fake.put("/a.md", "alpha")
+    client = fake.client(FAKE_TOKEN)
+
+    account = client.rpc("users/get_current_account", None)
+    listing = client.rpc(
+        "files/list_folder",
+        {"path": "", "recursive": True, "limit": 2000, "include_non_downloadable_files": True},
+    )
+
+    assert account["account_id"].startswith("dbid:")
+    assert [e["name"] for e in listing["entries"] if e[".tag"] == "file"] == ["a.md"]
+
+
+class _DropboxShapedServer:
+    """A real HTTP server on a free local port, answering like Dropbox for three routes."""
+
+    def __init__(self):
+        import http.server
+        import json as json_module
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                return
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                if self.path == "/2/users/get_current_account":
+                    self._send(200, json_module.dumps({"account_id": "dbid:AAA"}).encode())
+                elif self.path == "/2/files/download":
+                    self._send(200, b"file bytes")
+                elif self.path == "/2/files/get_metadata":
+                    body = {"error": {".tag": "path", "path": {".tag": "not_found"}}}
+                    self._send(409, json_module.dumps(body).encode())
+                elif self.path == "/2/files/list_folder":
+                    # Promises more bytes than it sends, then hangs up mid-body.
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", "1000")
+                    self.end_headers()
+                    self.wfile.write(b'{"entries": [')
+                    self.wfile.flush()
+                    self.close_connection = True
+                else:
+                    self._send(404, b"")
+
+            def _send(self, status, body):
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}/2/"
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def dropbox_server(monkeypatch):
+    from cognee.tasks.ingestion.connectors import dropbox as dropbox_module
+
+    server = _DropboxShapedServer()
+    monkeypatch.setattr(dropbox_module, "_API", server.base)
+    monkeypatch.setattr(dropbox_module, "_CONTENT", server.base)
+    yield server
+    server.close()
+
+
+def test_a_real_transport_answers_an_rpc_a_download_and_a_409(dropbox_server):
+    client = DropboxClient(TOKEN, sleep=lambda _s: None)
+    try:
+        assert client.rpc("users/get_current_account", None) == {"account_id": "dbid:AAA"}
+        with client.download("files/download", {"path": FILE_ID}) as stream:
+            assert stream.read() == b"file bytes"
+        with pytest.raises(DropboxApiError) as error:
+            client.rpc("files/get_metadata", {"path": FILE_ID})
+        assert error.value.status == 409 and error.value.tags == ("path", "not_found")
+    finally:
+        client.close()
+
+
+def test_a_body_cut_off_mid_read_is_a_typed_error_without_the_url(dropbox_server):
+    client = DropboxClient(TOKEN, sleep=lambda _s: None)
+    try:
+        with pytest.raises(DropboxApiError) as error:
+            client.rpc("files/list_folder", {"path": ""})
+    finally:
+        client.close()
+    assert error.value.status == 0
+    assert_clean(error.value)
+    assert "127.0.0.1" not in f"{error.value} {error.value!r}"

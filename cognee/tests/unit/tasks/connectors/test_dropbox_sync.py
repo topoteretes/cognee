@@ -335,9 +335,11 @@ def test_a_reset_cursor_relists_and_reconciles_like_a_snapshot(fake):
     fake.delete("/b.md")
     c = fake.put("/c.md", "charlie")
     fake.reset_cursors.add(state["cursor"])
-    upserts, deletes, _ = sync(fake, state)
+    upserts, deletes, stats = sync(fake, state)
 
-    assert deletes == [b] and set(upserts) == {a, c}
+    # The unchanged file is relisted but not emitted again: its bytes and path are the same.
+    assert deletes == [b] and set(upserts) == {c} and stats["unchanged"] == 1
+    assert a in state["index"].values()
 
 
 def test_a_change_without_a_path_is_skipped_not_fatal(fake):
@@ -929,18 +931,45 @@ def test_a_move_and_a_folder_rename_keep_the_content(fake):
     assert after[a]["content"] == before[a]["content"]
 
 
-def test_an_edit_with_a_new_date_changes_the_content_and_a_same_day_resave_does_not(fake):
+def test_the_date_line_moves_only_when_the_bytes_change(fake):
+    """The date is the day the content last changed: a re-save of the same bytes, on any day,
+    emits nothing; new bytes on a later day carry that day."""
     a = fake.put("/a.md", "alpha", modified="2025-03-04T10:00:00Z")
     state: dict = {}
     first, _, _ = sync(fake, state)
 
-    fake.put("/a.md", "alpha", modified="2025-03-04T18:00:00Z")
-    same_day, _, _ = sync(fake, state)
-    fake.put("/a.md", "alpha", modified="2025-03-05T08:00:00Z")
-    next_day, _, _ = sync(fake, state)
+    fake.put("/a.md", "alpha", modified="2025-03-09T18:00:00Z")
+    resaved, _, resaved_stats = sync(fake, state)
+    fake.put("/a.md", "alpha, edited", modified="2025-03-10T08:00:00Z")
+    edited, _, _ = sync(fake, state)
 
-    assert same_day[a]["content"] == first[a]["content"]
-    assert first_line(next_day[a]) == "Modified: 2025-03-05"
+    assert first_line(first[a]) == "Modified: 2025-03-04"
+    assert resaved == {} and resaved_stats["unchanged"] == 1
+    assert first_line(edited[a]) == "Modified: 2025-03-10"
+
+
+def test_a_move_of_a_resaved_file_keeps_its_content_day(fake):
+    notes = fake.mkdir("/Notes")
+    a = fake.put("/Notes/a.md", "alpha", modified="2025-03-04T10:00:00Z")
+    state: dict = {}
+    sync(fake, state, notes)
+
+    fake.put("/Notes/a.md", "alpha", modified="2025-06-01T10:00:00Z")
+    fake.move("/Notes/a.md", "/Notes/Sub/a.md")
+    upserts, _, _ = sync(fake, state, notes)
+
+    assert upserts[a]["content"] == "Modified: 2025-03-04\n\nalpha", "same bytes, same day"
+    assert upserts[a]["cognee_structure"]["ancestors"][0]["name"] == "Sub"
+
+
+def test_a_listed_file_without_a_content_hash_is_a_malformed_listing(fake):
+    fake.put("/a.md", "alpha")
+    del fake.files["/a.md"]["content_hash"]
+    state: dict = {}
+
+    with pytest.raises(DropboxApiError, match="malformed file"):
+        sync(fake, state)
+    assert state == {}
 
 
 def test_a_render_version_change_lists_whole_and_reemits_every_file(fake):
@@ -1017,3 +1046,61 @@ def test_a_listed_file_without_is_downloadable_is_a_malformed_listing(fake):
     with pytest.raises(DropboxApiError, match="malformed file"):
         sync(fake, state)
     assert state == {}
+
+
+# ---------------------------------------------------------------- round 9 (bugs, red first)
+def test_a_delta_of_deletes_compares_paths_in_proportion_to_deletes_plus_index(fake, monkeypatch):
+    """Each deleted path scanned the whole index: N deletes over M files cost N * M checks."""
+    from cognee.tasks.ingestion.connectors import dropbox as dropbox_module
+
+    deletes, files = 200, 20000
+    index = {f"/d/f{i:05}.md": f"id:f{i}" for i in range(files)}
+    fake.log.extend(
+        {
+            ".tag": "deleted",
+            "name": f"f{i:05}.md",
+            "path_lower": f"/d/f{i:05}.md",
+            "path_display": f"/d/f{i:05}.md",
+        }
+        for i in range(deletes)
+    )
+    state = {
+        "v": 1,
+        "render": 1,
+        "account": ACCOUNT,
+        "folder": "",
+        "path": "",
+        "cursor": "|0",
+        "index": index,
+        "folders": {"/d": "id:folder-d"},
+        "stored": sorted(index.values()),
+        "retry": [],
+    }
+    comparisons = 0
+    real_is_under = dropbox_module._is_under
+
+    def counted(path, folder):
+        nonlocal comparisons
+        comparisons += 1
+        return real_is_under(path, folder)
+
+    monkeypatch.setattr(dropbox_module, "_is_under", counted)
+
+    _, removed, stats = sync(fake, state)
+
+    assert len(removed) == deletes and stats["deleted"] == deletes
+    assert comparisons < 10 * (deletes + files), f"{comparisons} path comparisons"
+
+
+def test_a_resave_with_the_same_bytes_on_a_new_day_emits_nothing(fake):
+    """Same bytes, new client_modified: the content did not change, so the document must not
+    be re-extracted."""
+    a = fake.put("/a.md", "alpha", modified="2025-03-04T10:00:00Z")
+    state: dict = {}
+    sync(fake, state)
+
+    fake.put("/a.md", "alpha", modified="2025-03-09T10:00:00Z")
+    upserts, deletes, stats = sync(fake, state)
+
+    assert upserts == {} and deletes == [], f"re-emitted: {upserts.get(a, {}).get('content')!r}"
+    assert stats["unchanged"] == 1

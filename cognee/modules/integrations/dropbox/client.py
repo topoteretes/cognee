@@ -115,17 +115,29 @@ async def get_current_account(access_token: str) -> dict[str, Any]:
     return await _post("account lookup", ACCOUNT_URL, data=b"null", headers=_bearer(access_token))
 
 
-async def get_folder(access_token: str, folder_id: str) -> dict[str, Any] | None:
-    """A folder's metadata, or None when it is gone or not a folder."""
+async def get_folder(
+    access_token: str, folder_id: str, *, session: Any = None
+) -> dict[str, Any] | None:
+    """A folder's metadata, or None when it is gone or not a folder. ``session``: see _post."""
     try:
         meta = await _post(
-            "folder lookup", METADATA_URL, json={"path": folder_id}, headers=_bearer(access_token)
+            "folder lookup",
+            METADATA_URL,
+            session=session,
+            json={"path": folder_id},
+            headers=_bearer(access_token),
         )
     except DropboxIntegrationError as error:
         if error.code == "path":
             return None
         raise
     return meta if meta.get(".tag") == "folder" else None
+
+
+async def get_folders(access_token: str, folder_ids: list[str]) -> list[dict[str, Any] | None]:
+    """``get_folder`` for each id, in order, through one HTTP session."""
+    async with client_session("dropbox", timeout=TIMEOUT) as session:
+        return [await get_folder(access_token, f, session=session) for f in folder_ids]
 
 
 async def list_folders(access_token: str) -> list[dict[str, Any]]:

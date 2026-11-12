@@ -10,6 +10,7 @@ change log, which is what a ``list_folder/continue`` cursor replays: a move is a
 old path plus the same id at the new path, a deleted folder is one entry.
 """
 
+import hashlib
 import json
 import posixpath
 
@@ -31,7 +32,10 @@ def lookup_error(tag: str, outer: str = "path") -> tuple[int, dict]:
 
 
 class FakeDropbox:
-    def __init__(self, page_size: int = 2000):
+    def __init__(self, page_size: int = 2000, *, streamed: bool = True):
+        """``streamed`` answers with unread streaming bodies, as a real transport does, so a
+        client that reads a body it never streamed in fails here as it does in production."""
+        self.streamed = streamed
         self.page_size = page_size
         self.files: dict[str, dict] = {}  # path_lower -> file metadata
         self.folders: dict[str, dict] = {}  # path_lower -> folder metadata
@@ -79,6 +83,9 @@ class FakeDropbox:
             meta["export_info"] = export_info
         self.files[path.lower()] = meta
         self.content[file_id] = data
+        # Dropbox's content_hash is a block hash of the bytes; the fake only needs it to be
+        # the same for the same bytes and different otherwise.
+        meta["content_hash"] = hashlib.sha256(data).hexdigest()
         self.log.append(meta)
         return file_id
 
@@ -126,6 +133,16 @@ class FakeDropbox:
         )
 
     def handle(self, request: httpx.Request) -> httpx.Response:
+        response = self._handle(request)
+        if not self.streamed:
+            return response
+        return httpx.Response(
+            response.status_code,
+            headers=response.headers,
+            stream=httpx.ByteStream(response.content),
+        )
+
+    def _handle(self, request: httpx.Request) -> httpx.Response:
         route = request.url.path.removeprefix("/2/")
         self.calls.append(route)
         self.authorizations.append(request.headers.get("Authorization", ""))

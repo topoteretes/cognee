@@ -87,11 +87,16 @@ cognee keeps every document and extracts nothing again (the text is downloaded o
 carry the new position). Renaming a file itself is different: the title is part of the
 document cognee builds and hashes, so a renamed file is extracted once more.
 
-The date line is the day of the file's last change, taken from the listing entry and never
-from the clock: `client_modified` (when its author last changed it), or `server_modified` for a
-Paper export and for an entry without `client_modified`; with neither there is no line. It is a
-UTC date at day precision, so a second save on the same day leaves the text, and so the
-document, unchanged, while an edit on a later day re-extracts the file once. It lets the graph
+The date line is the day the file's content last changed, taken from the listing entry and
+never from the clock: `client_modified` (when its author last changed it), or
+`server_modified` for a Paper export and for an entry without `client_modified`; with neither
+there is no line. It is a UTC date at day precision. The connector keeps each stored file's
+`content_hash`: a file listed again with the same bytes keeps the date it was emitted with,
+so a re-save of unchanged bytes on any day is not emitted at all (counted `unchanged`), and a
+move or rename of it is emitted with its old date. New bytes on a later day re-extract the
+file once, under the new date. A downloadable file listed without a `content_hash` is a
+malformed listing (the run raises, the state is untouched); a Paper doc has no
+`content_hash` and is re-rendered whenever Dropbox lists it. It lets the graph
 date what a file says (a `Timestamp` when the model extracts one) and makes "what changed in
 March" findable by keyword (`Modified: 2025-03`).
 
@@ -120,7 +125,10 @@ Dropbox reports a delete by path only, so the state keeps `index` (file `path_lo
 A move arrives as a delete of the old path plus the same id at the new path; deletes are held
 until the whole delta is read, so a move is an update, not a delete. State (`dlt` resource
 state, version `v` 1): `render`, `account`, `folder`, `path`, `cursor`, `index`, `folders` (folder path
-to id, for the structure), `stored` (ids that reached cognee) and `retry` (ids whose last fetch failed).
+to id, for the structure), `stored` (ids that reached cognee), `rendered` (per stored file its
+`content_hash`, path and date line, as last emitted) and `retry` (ids whose last fetch failed).
+A delete names a path only: a path that is a file in `index` is forgotten at once, any other
+is swept as a possible folder in one pass over `index` per run of consecutive deletes.
 Nothing is written to it until the listing is complete, and dlt keeps the previous state when a
 run raises.
 

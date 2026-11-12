@@ -8,6 +8,7 @@ import asyncio
 import threading
 from collections.abc import Callable
 from datetime import datetime
+from itertools import pairwise
 
 from cognee.modules.integrations import ingestion
 from cognee.modules.integrations.dropbox import client
@@ -59,10 +60,6 @@ def _classify_error(error: BaseException) -> str:
     return "failed_ingestion"
 
 
-def _under(path: str, folder: str) -> bool:
-    return path.startswith(folder + "/")
-
-
 def check_selection_shape(selected: object) -> list[str]:
     """The selection as sorted folder ids, or ValueError when it is not a list of ``id:...``."""
     from cognee.tasks.ingestion.connectors.dropbox import valid_folder_id
@@ -75,14 +72,16 @@ def check_selection_shape(selected: object) -> list[str]:
 async def refuse_nested_selection(
     credential: IntegrationCredential, access_token: str, folder_ids: list[str]
 ) -> None:
-    """Raise NestedSelectionError when a selected folder sits inside another one."""
-    paths = []
-    for folder_id in folder_ids:
-        await ingestion.require_active_credential(credential)
-        meta = await client.get_folder(access_token, folder_id)
-        if meta is not None:
-            paths.append(str(meta.get("path_lower") or ""))
-    if any(_under(inner, outer) for inner in paths for outer in paths):
+    """Raise NestedSelectionError when a selected folder sits inside another one.
+
+    One credential check and one HTTP session for the whole selection. Paths are compared
+    sorted with a trailing slash: a folder inside another sorts right after it (or after a
+    folder that is itself inside it), so checking each against its neighbour is enough.
+    """
+    await ingestion.require_active_credential(credential)
+    metas = await client.get_folders(access_token, folder_ids)
+    paths = sorted(str(meta.get("path_lower") or "") + "/" for meta in metas if meta is not None)
+    if any(path.startswith(previous) for previous, path in pairwise(paths)):
         raise NestedSelectionError("A selected Dropbox folder is inside another selected folder")
 
 
