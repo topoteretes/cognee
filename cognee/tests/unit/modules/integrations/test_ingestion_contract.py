@@ -60,6 +60,25 @@ def test_apollo_names_are_pinned_and_a_dlt_table_name():
     )
 
 
+def test_slack_names_are_pinned_and_a_dlt_table_name():
+    # Same rule as the Linear pin: the literal is deliberate. One resource is one channel,
+    # so the channel id is the scope, and the Cloud control plane only tracks tables that
+    # start with the provider prefix.
+    name = ingestion.resource_name("slack", CREDENTIAL, "C0123ABCD")
+    assert name == "slack_channel_02eaa4a14233ea3cb69a0f49"
+    assert name == name.lower() and set(name) <= set("abcdefghijklmnopqrstuvwxyz0123456789_")
+    assert len(name) <= 63
+    assert ingestion.source_factory("slack").__module__ == (
+        "cognee.tasks.ingestion.connectors.slack"
+    )
+
+
+def test_slack_service_is_built_from_the_connections_access_token():
+    from cognee.tasks.ingestion.connectors.slack import SlackClient
+
+    assert isinstance(ingestion.build_service("slack", "xoxb-a-bot-token"), SlackClient)
+
+
 def test_apollo_service_is_built_from_the_connections_api_key():
     from cognee.tasks.ingestion.connectors.apollo import ApolloClient
 

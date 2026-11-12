@@ -138,15 +138,6 @@ class OAuthIntegration(ABC):
         """
 
     @abstractmethod
-    def state_signing_secret(self) -> str:
-        """The secret this provider's OAuth CSRF state is signed/verified with.
-
-        Often the same secret used to verify inbound webhooks (as with
-        Slack) — but doesn't have to be; a provider with no inbound webhooks
-        still needs a secret here.
-        """
-
-    @abstractmethod
     def frontend_base_url(self) -> str:
         """Where the browser lands once the OAuth round-trip completes."""
 

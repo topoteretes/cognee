@@ -20,7 +20,12 @@ def _patch_run(monkeypatch, bundle, write):
         order.append(("retire", dataset, user))
         return set()
 
+    async def record_in_ledger(context, content_hash):
+        order.append(("ledger", content_hash))
+
     monkeypatch.setattr(incremental, "_stage_and_plan", AsyncMock(return_value=bundle))
+    monkeypatch.setattr(incremental, "_remove_unreferenced_files", AsyncMock())
+    monkeypatch.setattr(incremental, "record_data_item_content", record_in_ledger)
     monkeypatch.setattr(incremental, "generate_pipeline_id", lambda *args: uuid4())
     monkeypatch.setattr(
         incremental,
@@ -35,6 +40,13 @@ def _patch_run(monkeypatch, bundle, write):
     return order
 
 
+CHANGED = {
+    "status": "changed",
+    "data_item": SimpleNamespace(content_hash="old-hash"),
+    "staged": SimpleNamespace(content_hash="new-hash"),
+}
+
+
 async def _run(dataset, user):
     return await incremental._run_incremental_update(
         uuid4(), "new text", dataset, user, None, None, None, None, None, None, None, "llm"
@@ -44,19 +56,38 @@ async def _run(dataset, user):
 @pytest.mark.asyncio
 async def test_decisions_are_retired_once_the_edit_is_written(monkeypatch):
     dataset, user = SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
-    order = _patch_run(monkeypatch, {"status": "changed"}, AsyncMock(return_value={}))
+    order = _patch_run(monkeypatch, CHANGED, AsyncMock(return_value={}))
 
     await _run(dataset, user)
 
-    assert order == ["write", ("retire", dataset, user)]
+    # The ledger is told the new content hash last, once the write has published
+    # it and the edit's decisions are retired.
+    assert order == ["write", ("retire", dataset, user), ("ledger", "new-hash")]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_ledger_write_leaves_the_decisions_retired(monkeypatch):
+    """The retry finds the content unchanged and only records it in the ledger,
+    so the edit's decisions must already be retired when the ledger write fails."""
+    dataset, user = SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
+    order = _patch_run(monkeypatch, CHANGED, AsyncMock(return_value={}))
+
+    async def failing_ledger(context, content_hash):
+        order.append(("ledger", content_hash))
+        raise RuntimeError("ledger write failed")
+
+    monkeypatch.setattr(incremental, "record_data_item_content", failing_ledger)
+
+    with pytest.raises(RuntimeError, match="ledger write failed"):
+        await _run(dataset, user)
+
+    assert order == ["write", ("retire", dataset, user), ("ledger", "new-hash")]
 
 
 @pytest.mark.asyncio
 async def test_a_failed_write_retires_nothing(monkeypatch):
     dataset, user = SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
-    order = _patch_run(
-        monkeypatch, {"status": "changed"}, AsyncMock(side_effect=RuntimeError("write failed"))
-    )
+    order = _patch_run(monkeypatch, CHANGED, AsyncMock(side_effect=RuntimeError("write failed")))
 
     with pytest.raises(RuntimeError, match="write failed"):
         await _run(dataset, user)

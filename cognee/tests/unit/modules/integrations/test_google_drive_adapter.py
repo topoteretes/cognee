@@ -57,7 +57,6 @@ def _settings(monkeypatch):
         f"{settings}.redirect_uri",
         "http://localhost:8000/api/v1/integrations/google_drive/callback",
     )
-    monkeypatch.setattr(f"{settings}.state_secret", "state-secret")
     monkeypatch.setattr(f"{settings}.frontend_base_url", "http://localhost:3000")
 
 

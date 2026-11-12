@@ -27,9 +27,9 @@ from cognee.modules.integrations.linear import client as linear_client
 from cognee.modules.integrations.notion import client as notion_client
 from cognee.modules.integrations.slack import adapter as slack_adapter
 from cognee.modules.integrations.slack import channels as slack_channels
-from cognee.modules.integrations.slack import handle_history as slack_handle_history
-from cognee.modules.integrations.slack import history_client as slack_history_client
+from cognee.modules.integrations.slack import handle_cognee_mention as slack_mention
 from cognee.modules.integrations.slack import home as slack_home
+from cognee.modules.integrations.slack import member_link as slack_member_link
 from cognee.modules.integrations.slack import oauth as slack_oauth
 
 
@@ -104,23 +104,32 @@ def _slack_channels(mp, base):
     return slack_channels.list_channels("tok"), RuntimeError
 
 
-def _slack_history(mp, base):
-    mp.setattr(slack_history_client, "_API_URL", f"{base}/api")
-
-    async def call():
-        async with slack_history_client.SlackHistoryClient("tok") as client:
-            await client.call("conversations.history", channel="C1")
-
-    return call(), slack_history_client.SlackHistoryError
+def _slack_member_sign_in(mp, base):
+    mp.setattr(slack_member_link, "_TOKEN_URL", f"{base}/api/openid.connect.token")
+    mp.setattr(slack_member_link, "require", lambda key: "x")
+    return slack_member_link.SlackMemberIntegration().exchange_code("the-code"), RuntimeError
 
 
-def _slack_views_open(mp, base):
-    mp.setattr(slack_handle_history, "_VIEWS_OPEN_URL", f"{base}/api/views.open")
-    mp.setattr(slack_handle_history, "decrypt_token_payload", lambda c: {"access_token": "tok"})
-    return (
-        slack_handle_history._open_view(SimpleNamespace(), "trigger", {"type": "modal"}),
-        slack_handle_history.SlackHistoryError,
-    )
+def _slack_web_api(mp, base):
+    mp.setattr(slack_mention, "_SLACK_API", f"{base}/api/")
+
+    async def token(credential):
+        return "tok"
+
+    mp.setattr(slack_mention, "access_token_for", token)
+    return SimpleNamespace(provider_account_id="T1")
+
+
+def _slack_post_ephemeral(mp, base):
+    credential = _slack_web_api(mp, base)
+    # Best effort like every reply: the failure is logged, nothing is raised.
+    return slack_mention.post_ephemeral(credential, "C1", "U1", {"text": "hi"}), None
+
+
+def _slack_post_message(mp, base):
+    credential = _slack_web_api(mp, base)
+    # An answer: the caller tells the asker, so the failure is raised.
+    return slack_mention.post_message(credential, "C1", {"text": "hi"}), RuntimeError
 
 
 def _google_token(mp, base):
@@ -204,8 +213,9 @@ _CASES = {
     "slack revoke": _slack_revoke,
     "slack views.publish": _slack_home,
     "slack conversations.list": _slack_channels,
-    "slack history client": _slack_history,
-    "slack views.open": _slack_views_open,
+    "slack sign in with slack": _slack_member_sign_in,
+    "slack chat.postEphemeral": _slack_post_ephemeral,
+    "slack chat.postMessage": _slack_post_message,
     "google token": _google_token,
     "google revoke": _google_revoke,
     "google userinfo": _google_userinfo,
@@ -249,8 +259,9 @@ async def test_no_integration_call_opens_a_connection_while_outbound_http_is_dis
     call, _raises = _CASES[case](monkeypatch, redirecting_origin.base)
     monkeypatch.setenv("ALLOW_HTTP_REQUESTS", "false")
 
-    if case == "slack revoke":
-        await call  # revoke_remote swallows every failure so disconnect still completes
+    if case in ("slack revoke", "slack chat.postEphemeral"):
+        # Both swallow every failure: a disconnect still completes, a reply is logged.
+        await call
     else:
         with pytest.raises(OutboundHttpDisabledError):
             await call

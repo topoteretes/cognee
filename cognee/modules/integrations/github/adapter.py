@@ -142,9 +142,6 @@ class GithubIntegration(OAuthIntegration):
             auth_type="github_app",
         )
 
-    def state_signing_secret(self) -> str:
-        return require("webhook_secret")
-
     def frontend_base_url(self) -> str:
         return require("frontend_base_url")
 

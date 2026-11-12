@@ -44,10 +44,12 @@ it every readable dataset is, so a question no dataset knows about is not answer
 whichever is nearest; datasets within `DATASET_ROUTING_TIE_MARGIN` (default 0.001) of the
 last routed one are tied and all searched. Every unscoped search logs each dataset's distance
 at info, which is what the cutoff is tuned against (it depends on the embedding model). A
-dataset with no index rows is always searched, a routed search that retrieves nothing (judged
-on the retrieval context, not on the completion, which is written even over an empty
-context; or only datasets without searchable memory) is widened to every readable dataset, and an explicit
-dataset scope is never routed. Needs backend access control (one store per dataset) and one
+dataset with no index rows is not searched next to a routed one; with no dataset routed,
+every readable dataset is searched. A routed search that retrieves nothing (judged on the
+retrieval context, not on the completion, which is written even over an empty context) is
+widened to the datasets routing skipped, and one that hits only datasets without searchable
+memory is repeated over every readable dataset. An explicit dataset scope is never routed,
+and neither is a `CODE` search: a code dataset never has index rows. Needs backend access control (one store per dataset) and one
 embedding model across the deployment: the rows reuse the vectors the index build stored
 (nothing is embedded twice), the query is embedded with the `.env` model, and when
 the routing collection was built with another width (`EMBEDDING_MODEL` changed without a

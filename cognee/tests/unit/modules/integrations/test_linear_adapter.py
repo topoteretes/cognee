@@ -111,10 +111,6 @@ def test_authorize_url_is_the_agent_install_flow():
     assert params["scope"] == ["read,write,app:assignable,app:mentionable"]
 
 
-def test_state_signing_secret_is_the_webhook_secret():
-    assert LinearIntegration().state_signing_secret() == "hook-secret"
-
-
 def test_webhook_verifier_is_registered():
     assert isinstance(LinearIntegration().webhook_verifier(), LinearWebhookVerifier)
 

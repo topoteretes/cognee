@@ -650,9 +650,6 @@ class LinearIntegration(OAuthIntegration):
             auth_type="oauth2",
         )
 
-    def state_signing_secret(self) -> str:
-        return require("webhook_secret")
-
     def frontend_base_url(self) -> str:
         return require("frontend_base_url")
 

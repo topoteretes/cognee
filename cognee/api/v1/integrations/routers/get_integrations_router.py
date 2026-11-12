@@ -74,14 +74,15 @@ from cognee.modules.integrations.credentials import (
     REVOKED_BY_OWNER,
     CredentialInactiveError,
     CrossUserConflictError,
+    change_provider_metadata,
     get_active_credential_for_user,
     get_ended_connection,
     list_active_credentials_for_provider,
     list_active_credentials_for_user,
     owner_principal_id,
     revoke_credential_by_account,
-    update_provider_metadata,
 )
+from cognee.modules.integrations.crypto import oauth_state_signing_key
 from cognee.modules.integrations.linear.resume_sync import linear_resume_lifespan
 from cognee.modules.integrations.oauth_flow import (
     DEFAULT_STATE_TTL_SECONDS,
@@ -139,6 +140,12 @@ from cognee.modules.users.methods.store_principal_configuration import (
 from cognee.modules.users.models import User
 
 logger = logging.getLogger(__name__)
+
+
+def _as_set(selection: list[str] | None) -> frozenset[str] | None:
+    """A selection compared without its order; ``None`` (everything) stays ``None``."""
+    return None if selection is None else frozenset(selection)
+
 
 # How long a disconnect waits for its staging copy to be dropped before it answers and lets
 # the drop finish in the background. The drop takes the lock every dlt run in the process
@@ -523,7 +530,7 @@ def _start_authorization(provider: str, user: User) -> tuple[str, str]:
     _outbound_http_or_503(provider)
     try:
         nonce = secrets.token_urlsafe(32)
-        state = make_state(user.id, nonce, signing_secret=integration.state_signing_secret())
+        state = make_state(user.id, nonce, signing_secret=oauth_state_signing_key())
         return integration.authorize_url(state), nonce
     except RuntimeError:
         # A provider's require()-style settings guard raises when its client id/secret/
@@ -990,9 +997,7 @@ def get_integrations_router():
                 # cookie's own max-age.
                 return _frontend_redirect(integration, "cancelled")
 
-            fields = validate_state(
-                state, signing_secret=integration.state_signing_secret(), field_count=2
-            )
+            fields = validate_state(state, signing_secret=oauth_state_signing_key(), field_count=2)
             if not isinstance(fields, tuple):
                 span.set_attribute("cognee.integrations.outcome", "error_invalid_state")
                 return _frontend_redirect(integration, "error_invalid_state")
@@ -1338,6 +1343,10 @@ def get_integrations_router():
           ids; duplicates are dropped, blank or whitespace-only ids give 422. Null (also the
           value when omitted) means every resource and is a 422 for providers that do not
           allow it.
+
+        A changed selection starts a sync at once, or one more run of the sync already
+        running, so added resources arrive and removed ones leave memory without waiting
+        for the schedule. An unchanged selection starts nothing.
         """
         integration = _integration_or_404(provider)
         selection_key = integration.resource_selection_key
@@ -1367,11 +1376,29 @@ def get_integrations_router():
                     detail=f"Not a {provider} resource id: {', '.join(invalid)}",
                 )
             await _validate_selection_or_http_error(integration, credential, resource_ids)
-        updated = await update_provider_metadata(
-            provider,
-            credential.provider_account_id,
-            {selection_key: resource_ids},
-        )
+        changed = False
+
+        def select(current: dict) -> dict:
+            # Compared with what is stored under the connection's lock, not with the copy
+            # read above: of two saves at once, the second must see the first's selection.
+            nonlocal changed
+            changed = _as_set(current.get(selection_key)) != _as_set(resource_ids)
+            return {selection_key: resource_ids}
+
+        updated = await change_provider_metadata(provider, credential.provider_account_id, select)
+        if changed:
+            from cognee.modules.integrations import ingestion
+
+            # A paused connection keeps the new selection for its first sync after the
+            # resume.
+            paused = await ingestion.sync_is_paused(provider, updated, "selection change")
+            if not paused and not ingestion.request_rerun_if_running(
+                provider, credential.provider_account_id
+            ):
+                spawn_background(
+                    integration.sync_now(updated),
+                    description=f"{provider} sync after a selection change",
+                )
         return IntegrationResourceSelectionResultDTO(
             selected=(updated.provider_metadata or {}).get(selection_key)
         )
