@@ -42,3 +42,18 @@ async def test_max_tool_output_chars_raises_the_limit():
     context = await _context_after_one_tool_call(max_tool_output_chars=len(TOOL_OUTPUT))
 
     assert context.endswith(TOOL_OUTPUT)
+
+
+@pytest.mark.asyncio
+async def test_zero_max_tool_output_chars_reads_the_whole_result():
+    context = await _context_after_one_tool_call(max_tool_output_chars=0)
+
+    assert context.endswith(TOOL_OUTPUT)
+
+
+@pytest.mark.parametrize("limit", [-1, None, 1.5, "8000", True])
+def test_max_tool_output_chars_must_be_a_non_negative_integer(limit):
+    with pytest.raises(ValueError, match="max_tool_output_chars must be a non-negative integer"):
+        AgenticRetriever(
+            user=SimpleNamespace(id=None), dataset_id=uuid4(), max_tool_output_chars=limit
+        )
