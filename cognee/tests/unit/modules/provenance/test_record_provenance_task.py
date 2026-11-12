@@ -87,6 +87,39 @@ class TestRecordProvenanceTask:
         assert entry.bundle_id == str(ctx.pipeline_run_id)
 
     @pytest.mark.asyncio
+    async def test_later_batches_of_the_same_content_never_take_the_write_lock(
+        self, manager, monkeypatch
+    ):
+        """Nearly every batch stored for an item finds its row already recorded. Those stop
+        at a plain read: the serialized write is shared by every writer in the deployment."""
+        ctx = _ctx()
+        await record_provenance(_batch(), ctx=ctx)
+
+        async def no_write(write_fns):
+            raise AssertionError("a recorded data item went through the serialized write")
+
+        monkeypatch.setattr(storage, "append_chained_many", no_write)
+        later = _ctx(dataset_id=ctx.dataset.id, data_id=ctx.data_item.id, pipeline_run_id=uuid4())
+        await record_provenance(_batch(), ctx=later)
+        await record_provenance(_batch(), ctx=later)
+
+    @pytest.mark.asyncio
+    async def test_the_read_that_skips_a_write_agrees_with_the_write_rule(self, manager):
+        ctx = _ctx()
+        key = ledger_data_item_key(ctx.dataset.id, ctx.data_item.id)
+        source_ref = make_source_ref_key(ctx.dataset.id, ctx.data_item.id)
+        assert await manager.data_item_is_recorded(key, "hash-1", source_ref) is False  # no row
+
+        await record_provenance(_batch(), ctx=ctx)
+        assert await manager.data_item_is_recorded(key, "hash-1", source_ref) is True
+        assert await manager.data_item_is_recorded(key, "hash-2", source_ref) is False  # an update
+        assert await manager.data_item_is_recorded(key, "hash-1", "other-ref") is False
+
+        await manager.invalidate(key, "someone", reason="data_deleted")
+        # A tombstoned row is never current: storing for the item again brings it back.
+        assert await manager.data_item_is_recorded(key, "hash-1", source_ref) is False
+
+    @pytest.mark.asyncio
     async def test_changed_content_versions_the_row_with_both_hashes(self, manager):
         ctx = _ctx(content_hash="hash-1")
         await record_provenance(_batch(), ctx=ctx)

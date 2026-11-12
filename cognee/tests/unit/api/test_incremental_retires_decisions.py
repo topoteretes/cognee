@@ -20,8 +20,12 @@ def _patch_run(monkeypatch, bundle, write):
         order.append(("retire", dataset, user))
         return set()
 
+    async def record_in_ledger(context, content_hash):
+        order.append(("ledger", content_hash))
+
     monkeypatch.setattr(incremental, "_stage_and_plan", AsyncMock(return_value=bundle))
     monkeypatch.setattr(incremental, "_remove_unreferenced_files", AsyncMock())
+    monkeypatch.setattr(incremental, "record_data_item_content", record_in_ledger)
     monkeypatch.setattr(incremental, "generate_pipeline_id", lambda *args: uuid4())
     monkeypatch.setattr(
         incremental,
@@ -36,7 +40,11 @@ def _patch_run(monkeypatch, bundle, write):
     return order
 
 
-CHANGED = {"status": "changed", "data_item": SimpleNamespace(), "staged": SimpleNamespace()}
+CHANGED = {
+    "status": "changed",
+    "data_item": SimpleNamespace(content_hash="old-hash"),
+    "staged": SimpleNamespace(content_hash="new-hash"),
+}
 
 
 async def _run(dataset, user):
@@ -52,7 +60,8 @@ async def test_decisions_are_retired_once_the_edit_is_written(monkeypatch):
 
     await _run(dataset, user)
 
-    assert order == ["write", ("retire", dataset, user)]
+    # The ledger is told the new content hash once the write has published it.
+    assert order == ["write", ("ledger", "new-hash"), ("retire", dataset, user)]
 
 
 @pytest.mark.asyncio

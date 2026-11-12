@@ -39,6 +39,11 @@ from .snapshot import diff_snapshots
 logger = get_logger("provenance_manager")
 
 
+def _data_item_metadata(content_hash: str | None) -> dict[str, Any]:
+    """What a data item row records about its content: the hash, as its snapshot."""
+    return {"snapshot": {"fields": {"content_hash": content_hash}, "hash": content_hash or ""}}
+
+
 class ProvenanceManager:
     """Append-only, tamper-evident provenance ledger manager."""
 
@@ -454,6 +459,28 @@ class ProvenanceManager:
         except Exception:
             logger.exception("Failed to track chunk %r", chunk_id)
             return None
+
+    async def data_item_is_recorded(
+        self, data_item_key: str, content_hash: str | None, source_ref_key: str | None
+    ) -> bool:
+        """Whether recording this data item now would change nothing.
+
+        Read without the chain lock, which every ledger writer in the
+        deployment queues behind. Each batch stored for an item records it, so
+        nearly all of those writes find the row live on this content already;
+        asking first keeps them out of the serialized write path. The answer
+        comes from the rule the write itself applies (``_mutation_decision``),
+        so a row that is missing, tombstoned or on other content still goes
+        through the write.
+        """
+        async with storage.get_async_session() as session:
+            existing_row = await storage.retrieve_row(session, data_item_key)
+        if existing_row is None:
+            return False
+        decision = self._mutation_decision(
+            existing_row, _data_item_metadata(content_hash), {"source_ref_key": source_ref_key}
+        )
+        return decision == "noop"
 
     def batch(self) -> "ProvenanceBatch":
         """Collector for many track_* operations committed as ONE chained
@@ -923,9 +950,7 @@ class ProvenanceBatch:
         """
         self._manager._validate_id(data_item_key, "data_item_key")
         self._manager._warn_unknown_kwargs("track_data_item", kwargs)
-        metadata = {
-            "snapshot": {"fields": {"content_hash": content_hash}, "hash": content_hash or ""}
-        }
+        metadata = _data_item_metadata(content_hash)
         self._write_fns.append(
             self._manager._entity_write(
                 data_item_key, "", metadata, {**kwargs, "entity_type": "data_item"}
