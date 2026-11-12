@@ -1021,11 +1021,6 @@ def _file_to_row(
         stats["failed"] = stats.get("failed", 0) + 1
         stats["failed_content_extraction"] = stats.get("failed_content_extraction", 0) + 1
         return None
-    # PostgreSQL rejects NUL in text. Normalize after every extractor, preserving
-    # the position of the invalid character instead of joining its neighbours.
-    content = content.replace("\x00", "\ufffd")
-    if name:
-        name = name.replace("\x00", "\ufffd")
     if not content.strip():
         _count_skip(stats, "empty_content")
         return None

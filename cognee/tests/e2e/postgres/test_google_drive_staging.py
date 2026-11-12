@@ -1,9 +1,12 @@
-"""Drive text normalization and pending-package recovery on real PostgreSQL.
+"""NUL in a Drive document on real PostgreSQL: the load it breaks and what cures it.
 
-Needs DB_HOST/PORT/USERNAME/PASSWORD/NAME pointing at a test database and fails
-without them. Each test owns two unique schemas and a temporary pipeline. The Drive
-client and the connector's listing and cursor lookups are stubbed; decoding, row
-construction and DLT loads are real.
+PostgreSQL rejects NUL in text, so one document with it fails the load of its whole dlt
+package. ``strip_nul_from_rows`` is the step ``ingest_dlt_source`` adds to every document
+source, and these tests run it the way it runs there. Runs against the test database of the
+sibling tests (default: cognee:cognee@localhost:5432/cognee_db, overridable with DB_HOST,
+DB_PORT, DB_USERNAME, DB_PASSWORD and DB_NAME) and skips if it is unreachable. Each test owns
+two unique schemas and a temporary pipeline. The Drive client and the connector's listing and
+cursor lookups are stubbed; decoding, row construction and DLT loads are real.
 """
 
 import os
@@ -16,23 +19,34 @@ import pytest
 from dlt.common.configuration.container import Container
 from dlt.common.pipeline import PipelineContext
 from dlt.pipeline.exceptions import PipelineStepFailed
-from sqlalchemy import URL, create_engine
+from sqlalchemy import URL, create_engine, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.schema import DropSchema
 
 from cognee.tasks.ingestion.connectors import google_drive as drive
+from cognee.tasks.ingestion.connectors import obsidian_source
 from cognee.tasks.ingestion.dlt_utils import DOCUMENT_COLUMN_HINTS
+from cognee.tasks.ingestion.ingest_dlt_source import strip_nul_from_rows
 
 
 @pytest.fixture
 def pipeline(tmp_path, monkeypatch):
     credentials = {
         "drivername": "postgresql",
-        "host": os.environ["DB_HOST"],
-        "port": int(os.environ["DB_PORT"]),
-        "username": os.environ["DB_USERNAME"],
-        "password": os.environ["DB_PASSWORD"],
-        "database": os.environ["DB_NAME"],
+        "host": os.environ.get("DB_HOST", "localhost"),
+        "port": int(os.environ.get("DB_PORT", "5432")),
+        "username": os.environ.get("DB_USERNAME", "cognee"),
+        "password": os.environ.get("DB_PASSWORD", "cognee"),
+        "database": os.environ.get("DB_NAME", "cognee_db"),
     }
+    engine = create_engine(URL.create(**credentials))
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except OperationalError:
+        engine.dispose()
+        pytest.skip("Postgres not reachable")
+    engine.dispose()
     schema = f"drive_{uuid4().hex}"
     monkeypatch.setenv("DLT_DATA_DIR", str(tmp_path / "dlt"))
     Container()[PipelineContext].deactivate()
@@ -107,10 +121,16 @@ def remote(monkeypatch):
     return remote
 
 
-def _run(pipeline, source):
+def _run_unstripped(pipeline, source):
+    # How a sync staged before the step existed, and how any source that skips it would.
     return pipeline.run(
         source, write_disposition="merge", primary_key="id", columns=DOCUMENT_COLUMN_HINTS
     )
+
+
+def _run(pipeline, source):
+    strip_nul_from_rows(source)
+    return _run_unstripped(pipeline, source)
 
 
 def _rows(pipeline):
@@ -123,6 +143,32 @@ def _state(pipeline):
     return pipeline.state["sources"][pipeline.default_schema_name]["resources"]["folder_rows"]
 
 
+def test_one_nul_document_fails_the_load_of_its_neighbours(pipeline, remote):
+    with pytest.raises(PipelineStepFailed, match="NUL"):
+        _run_unstripped(pipeline, remote.source())
+
+    assert len(pipeline.list_normalized_load_packages()) == 1
+    assert _rows(pipeline) == []  # not even the documents without NUL were loaded
+
+
+def test_another_connector_with_a_nul_note_fails_and_loads_with_the_same_step(pipeline, tmp_path):
+    # The rule is not Drive's: an Obsidian note with a stray NUL byte blocked its vault the same way.
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "Note.md").write_bytes(b"alpha\x00beta\n")
+    (vault / "Other.md").write_bytes(b"clean note\n")
+
+    with pytest.raises(PipelineStepFailed, match="NUL"):
+        _run_unstripped(pipeline, obsidian_source(vault_path=vault, resource_name="notes"))
+    pipeline.drop_pending_packages()
+
+    _run(pipeline, obsidian_source(vault_path=vault, resource_name="notes"))
+    with pipeline.sql_client() as sql:
+        table = sql.make_qualified_table_name("notes")
+        rows = sql.execute_sql(f"SELECT id, content FROM {table} ORDER BY id")
+    assert rows == [("obsidian:Note.md", "alphabeta\n"), ("obsidian:Other.md", "clean note\n")]
+
+
 @pytest.mark.parametrize("content", ["pre\x00posle\nć 😀\t", "\x00"])
 def test_mixed_documents_load_and_unchanged_sync_preserves_rows(pipeline, remote, content):
     remote.content["nul"] = content
@@ -132,7 +178,7 @@ def test_mixed_documents_load_and_unchanged_sync_preserves_rows(pipeline, remote
     expected = [
         ("after", "after", "ispravan posle"),
         ("before", "before", "ispravan pre"),
-        ("nul", "Naslov\ufffddokumenta", content.replace("\x00", "\ufffd")),
+        ("nul", "Naslovdokumenta", content.replace("\x00", "")),
     ]
     assert _rows(pipeline) == expected
     assert source.cognee_sync_stats["failed"] == source.cognee_sync_stats["skipped"] == 0
@@ -160,18 +206,9 @@ def test_old_nul_package_requires_abort_and_state_restore_before_resync(pipeline
 
     remote.changed = {"nul", "after"}
     remote.cursor = "t1"
-    old_source = remote.source()
-
-    def old_unsanitized_row(row):
-        # Reproduce a package extracted before the fix, without changing production code.
-        if row["id"] == "nul":
-            row["title"] = remote.files["nul"]["name"]
-            row["content"] = remote.content["nul"]
-        return row
-
-    old_source.add_map(old_unsanitized_row)
+    # A package extracted before the step existed, which the load then refuses.
     with pytest.raises(PipelineStepFailed, match="NUL"):
-        _run(pipeline, old_source)
+        _run_unstripped(pipeline, remote.source())
     pending = pipeline.list_normalized_load_packages()
     assert len(pending) == 1
     assert _rows(pipeline) == committed_rows
@@ -196,7 +233,7 @@ def test_old_nul_package_requires_abort_and_state_restore_before_resync(pipeline
     assert _rows(pipeline) == [
         ("after", "after", "ispravan posle"),
         ("before", "before", "ispravan pre"),
-        ("nul", "Naslov\ufffddokumenta", "pre\ufffdposle\nć 😀\t"),
+        ("nul", "Naslovdokumenta", "preposle\nć 😀\t"),
     ]
     assert _state(pipeline)["page_token"] == "t1"
     assert not pipeline.list_normalized_load_packages()

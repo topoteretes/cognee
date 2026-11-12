@@ -72,16 +72,18 @@ client) to parallelise.
 
 ## NUL characters in documents
 
-NUL characters (`U+0000`) in extracted text and document titles are replaced with the Unicode
-replacement character (`U+FFFD`, `�`) before DLT staging. PostgreSQL rejects NUL in text; one
-such document would otherwise block the load of its neighbours. This applies to the output of
-every extractor (the replacement runs right after `extract_file_content`). The rest of the text
-and the file ID are preserved, and the document is not counted as skipped or failed. A NUL-only
-document is kept as `�`.
+PostgreSQL rejects NUL (`U+0000`) in text, so one document with it fails the load of its whole
+DLT package. `ingest_dlt_source` removes NUL from every row of every document connector before
+staging, with the rule the graph and vector writes already use (`sanitize_relational_payload`),
+so the text around the character is kept and the file ID is preserved. The document is not
+counted as skipped or failed. A document that held only NUL is staged with empty text.
 
-A document staged before this fix keeps its stored text until it is extracted again (it changes
-in Drive, or the folder is fully re-synced). The replaced text then has a new content hash, so
-the document is re-ingested like any edited one.
+A document with NUL that was staged before this fix is handled by the store that held it.
+On PostgreSQL it was never stored: its load failed together with its neighbours, and an
+ordinary sync keeps failing until the pending package is aborted (see below). On SQLite it was
+stored with the NUL and keeps that text until it is extracted again (it changes in Drive, or
+the folder is fully re-synced). The cleaned text then has a new content hash, so the document
+is re-ingested like any edited one.
 
 ## Which files are not ingested, and how each is reported
 
@@ -144,7 +146,7 @@ conservatively; explicitly clear and re-sync the dataset to rebuild legacy data.
 
 ## Recovering a load blocked by NUL before this fix
 
-Updating the connector prevents new bad rows but does not rewrite an already extracted DLT
+Upgrading cognee prevents new bad rows but does not rewrite an already extracted DLT
 package. DLT retries pending packages before extracting new input, so an ordinary sync can
 keep failing on the old NUL value.
 
@@ -157,7 +159,7 @@ the matching command; cognee uses DLT's default pipelines directory, so
 with its original pipeline directory and destination configuration, inspect
 `pipeline.abort_packages(dry_run=True)` (the plan lists the pending packages it will discard)
 and then call `pipeline.abort_packages()`. DLT restores the cursor and file versions to the
-start of the aborted package. Then run the same folder sync with the fixed connector and the
+start of the aborted package. Then run the same folder sync with the fixed cognee and the
 original dataset/resource names: `merge` reloads the affected documents while preserving
 previously committed documents.
 
@@ -189,11 +191,13 @@ uv run --extra google-drive pytest cognee/tests/unit/tasks/connectors/ cognee/te
 The unit tests mock the Drive API (no live credentials). They require a cognee build that
 includes document-mode (see **Requirements**).
 
-The PostgreSQL staging tests use a disposable schema in the test database configured by
-`DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD` and `DB_NAME`. They cover mixed documents,
-NUL-only content, unchanged syncs and recovery of a pre-fix package (the recovery test is
-skipped on dlt older than 1.30). They fail if the database variables are not set:
+The PostgreSQL staging tests use a disposable schema in the test database of the sibling
+tests (default `cognee:cognee@localhost:5432/cognee_db`, overridable with `DB_HOST`, `DB_PORT`,
+`DB_USERNAME`, `DB_PASSWORD` and `DB_NAME`) and are skipped when it is unreachable. They cover
+the load that one NUL document breaks, mixed documents, NUL-only content, unchanged syncs, an
+Obsidian note and recovery of a pre-fix package (the recovery test is skipped on dlt older than
+1.30):
 
 ```bash
-DB_PROVIDER=postgres uv run pytest cognee/tests/e2e/postgres/test_google_drive_staging.py -v
+uv run pytest cognee/tests/e2e/postgres/test_google_drive_staging.py -v
 ```
