@@ -11,7 +11,7 @@ function run(overrides: Partial<PipelineRun> = {}): PipelineRun {
     id: "r1", pipeline_name: "cognify", status: "COMPLETED", dataset_id: null, dataset_name: null,
     owner_id: null, owner_email: null, created_at: null, pipeline_run_id: "pr-1", kind: "pipeline",
     operation_name: null, origin: null, outcome: "succeeded", error_class: null, tokens_in: null, tokens_out: null,
-    started_at: null, ended_at: null, user_id: null, session_id: null, parent_operation_id: null,
+    started_at: null, ended_at: null, user_id: null, session_ids: [], parent_operation_id: null,
     background: null, ...overrides,
   };
 }

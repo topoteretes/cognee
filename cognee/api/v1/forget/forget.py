@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Any
 from uuid import UUID
 
@@ -15,8 +16,21 @@ from cognee.modules.observability import (
 )
 from cognee.modules.operations import record_operation
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME, INDEXING_PIPELINE_NAME
 
 logger = get_logger("forget")
+
+
+class ForgetTarget(str, Enum):
+    """What forget() reports it removed, picked from its arguments (telemetry and tracing)."""
+
+    EVERYTHING = "everything"
+    DATA_ITEM_MEMORY_ONLY = "data_item_memory_only"
+    DATASET_MEMORY_ONLY = "dataset_memory_only"
+    DATA_ITEM = "data_item"
+    DATASET = "dataset"
+    SEARCH_HISTORY = "search_history"
+    UNKNOWN = "unknown"
 
 
 async def forget(
@@ -64,8 +78,10 @@ async def forget(
             entire dataset. When set with ``data_id``, deletes that item
             from this dataset.
         dataset_id: Dataset UUID. Alternative to ``dataset``.
-        everything: If True, delete all datasets and data the user owns.
-            Ignores ``data_id``, ``dataset``, and ``dataset_id``.
+        everything: If True, delete every dataset the user may delete, and every
+            session the user owns or that belongs to one of those datasets.
+            Other users' sessions stay: the session cache is shared and is never
+            pruned here. Ignores ``data_id``, ``dataset``, and ``dataset_id``.
         memory_only: If True (requires ``dataset`` or ``dataset_id``), delete only memory
             (graph nodes/edges and vector embeddings) and reset pipeline status.
             Raw files and data records are preserved so the dataset can
@@ -105,25 +121,25 @@ async def forget(
         raise ValueError("Provide either dataset or dataset_id, not both.")
 
     if everything:
-        target = "everything"
+        target = ForgetTarget.EVERYTHING
     elif memory_only and data_id:
-        target = "data_item_memory_only"
+        target = ForgetTarget.DATA_ITEM_MEMORY_ONLY
     elif memory_only and dataset_ref:
-        target = "dataset_memory_only"
+        target = ForgetTarget.DATASET_MEMORY_ONLY
     elif data_id:
-        target = "data_item"
+        target = ForgetTarget.DATA_ITEM
     elif dataset_ref:
-        target = "dataset"
+        target = ForgetTarget.DATASET
     elif clean_history:
-        target = "search_history"
+        target = ForgetTarget.SEARCH_HISTORY
     else:
-        target = "unknown"
+        target = ForgetTarget.UNKNOWN
 
     send_telemetry(
         "cognee.forget",
         user if user and hasattr(user, "id") else "sdk",
         additional_properties={
-            "target": target,
+            "target": target.value,
             "dataset_name": dataset or "",
             "dataset_id": str(dataset_id) if dataset_id else "",
             "data_id": str(data_id) if data_id else "",
@@ -138,7 +154,7 @@ async def forget(
     with new_span("memory.delete") as span:
         span.set_attribute(MEMORY_SYSTEM, "cognee")
         span.set_attribute(MEMORY_OPERATION, "delete")
-        span.set_attribute(COGNEE_FORGET_TARGET, target)
+        span.set_attribute(COGNEE_FORGET_TARGET, target.value)
         if dataset_ref:
             span.set_attribute(COGNEE_DATASET_NAME, str(dataset_ref))
 
@@ -241,13 +257,22 @@ async def forget(
 
 
 async def _forget_everything(user: Any) -> dict:
-    """Delete all datasets, data, and session cache owned by the user.
+    """Delete every dataset the user may delete, and the sessions that go with it.
 
     Cleanup scope:
     - Relational DB (datasets, data records): yes
     - Graph DB (nodes, edges): yes
     - Vector DB (embeddings): yes
-    - Session cache (Redis/FS): yes (full prune)
+    - Sessions: the same rule as datasets. Every session the user owns, plus
+      every session attributed to a dataset the user may delete, whoever ran
+      it, goes entirely (cache content, Q&A vectors, dashboard and usage
+      rows, via ``delete_sessions``). The user's own sessions are read from
+      the cache as well as from ``session_records``, whose rows are written
+      best-effort; another user's session is found only through its row,
+      since its dataset attribution lives there. Other users' sessions on
+      datasets the user cannot delete, the cache's shared key/value rows
+      (locks) and the usage logs are never touched: the cache is shared by
+      every user and is never pruned here.
     - Search history (queries/results rows): yes — every user's rows on each
       deleted dataset, shared ones included (inside datasets.empty_dataset),
       plus every row this user owns, including rows saved without a dataset
@@ -255,10 +280,34 @@ async def _forget_everything(user: Any) -> dict:
       access control off). Other users' rows without a dataset stay
     """
     from cognee.api.v1.datasets.datasets import datasets
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+    from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.search.operations import delete_user_search_history
+    from cognee.modules.session_lifecycle import (
+        list_sessions_for_datasets,
+        list_sessions_for_user,
+    )
+    from cognee.modules.session_lifecycle.delete_session import delete_sessions
 
-    user_datasets = await datasets.list_datasets(user=user)
-    count = len(user_datasets)
+    # The datasets delete_all removes: the ones the user may delete, not
+    # every one they can read.
+    deletable_datasets = await get_authorized_existing_datasets([], "delete", user)
+    count = len(deletable_datasets)
+
+    # Resolve the sessions before anything is deleted; nothing to list
+    # without session memory (CACHING=false).
+    session_manager = get_session_manager()
+    session_pairs: list[tuple[UUID, str]] = []
+    if session_manager.is_available:
+        session_pairs.extend(await list_sessions_for_user(user.id))
+        session_pairs.extend(
+            (user.id, session_id)
+            for session_id in await session_manager.list_session_ids(user_id=str(user.id))
+        )
+        session_pairs.extend(
+            await list_sessions_for_datasets([dataset.id for dataset in deletable_datasets])
+        )
+        session_pairs = list(dict.fromkeys(session_pairs))
 
     # Before the data, and not caught, as in empty_dataset: if it fails,
     # nothing is deleted yet and the forget can be retried.
@@ -271,24 +320,30 @@ async def _forget_everything(user: Any) -> dict:
             user.id,
         )
 
+    # Also before the data, and not caught: the dataset half of the session
+    # rule finds its sessions only while the datasets exist, so a failure here
+    # must leave them in place for the retry. The deletable datasets' stores
+    # are not detagged: delete_all drops them, Q&A vectors included.
+    sessions_removed = (
+        await delete_sessions(
+            session_pairs,
+            datasets_being_deleted=[dataset.id for dataset in deletable_datasets],
+        )
+        if session_pairs
+        else 0
+    )
+
     await datasets.delete_all(user=user)
 
-    # Clean up session cache (Redis or filesystem)
-    try:
-        from cognee.infrastructure.databases.cache import get_cache_config
-        from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
-
-        cache_config = get_cache_config()
-        if cache_config.caching or cache_config.usage_logging:
-            cache_engine = get_cache_engine()
-            if cache_engine is not None:
-                await cache_engine.prune()
-    except Exception as e:
-        logger.warning("forget: session cache cleanup failed (non-fatal): %s", e, exc_info=True)
-
-    logger.info("forget: deleted all data for user=%s (%d datasets)", user.id, count)
+    logger.info(
+        "forget: deleted all data for user=%s (%d datasets, %d sessions)",
+        user.id,
+        count,
+        sessions_removed,
+    )
     return {
         "datasets_removed": count,
+        "sessions_removed": sessions_removed,
         "search_history_removed": True,
         "history_cleaned": True,
         "status": "success",
@@ -402,6 +457,25 @@ async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
         dataset_lock(dataset_id),
         set_database_global_context_variables(dataset_id, user.id),
     ):
+        # 0. The routing rows mirrored the index this dataset is about to lose.
+        # They live in the default store, which can be unreachable, so they go
+        # before the irreversible step: a failure here leaves the memory in
+        # place and the forget can be retried, instead of deleted memory whose
+        # summary text survives in the routing collection.
+        from cognee.modules.search.dataset_routing import remove_dataset_routes
+
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            data_ids = [
+                record.id
+                for record in (
+                    await session.execute(select(Data).where(Data.dataset_id == dataset_id))
+                )
+                .scalars()
+                .all()
+            ]
+        await remove_dataset_routes(dataset_id, data_ids)
+
         # 1. Delete graph nodes/edges and vector embeddings
         deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
@@ -435,7 +509,6 @@ async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
         await delete_edge_evidence(dataset_id)
 
         # 2. Reset pipeline_status on all data records in this dataset
-        db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
             data_records = (
                 (await session.execute(select(Data).where(Data.dataset_id == dataset_id)))
@@ -505,6 +578,14 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
         dataset_lock(dataset_id),
         set_database_global_context_variables(dataset_id, user.id),
     ):
+        # 0. The routing rows that mirrored the item's bucket and the dataset's
+        # root (its text names the item) go first: they live in the default
+        # store, which can be unreachable, and a failure there must leave the
+        # memory in place for a retry.
+        from cognee.modules.search.dataset_routing import remove_dataset_routes
+
+        await remove_dataset_routes(dataset_id, [data_id])
+
         # 1. Delete graph nodes/edges and vector embeddings for this data item
         deleted_elements = await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
@@ -535,6 +616,20 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
 
         await delete_edge_evidence(dataset_id, data_id)
 
+        # 1d. The index: the item's bucket and the dataset's root, which names
+        # the item, go by their derived ids (the memory delete above does not
+        # reach them). Same stores as that delete, so it belongs with it. The
+        # root is then written again from what remains, so broad queries keep
+        # routing to the dataset; a failure there leaves it to the next improve.
+        # A dataset that had no index gets none.
+        from cognee.tasks.memify.global_context_index import (
+            rebuild_document_index_root,
+            remove_document_index,
+        )
+
+        if await remove_document_index(dataset_id, [data_id]):
+            await rebuild_document_index_root(dataset_id, user)
+
         # 2. Reset pipeline_status for this data record
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
@@ -545,14 +640,14 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
             if data_record and data_record.pipeline_status:
                 dataset_id_str = str(dataset_id)
                 updated = False
-                # Memory-only forget removes cognify artifacts (graph/vector), so only
-                # cognify_pipeline status should be reset. Keep add status intact.
-                if (
-                    "cognify_pipeline" in data_record.pipeline_status
-                    and dataset_id_str in data_record.pipeline_status["cognify_pipeline"]
-                ):
-                    del data_record.pipeline_status["cognify_pipeline"][dataset_id_str]
-                    updated = True
+                # Memory-only forget removes the chunks, graph and vectors the
+                # indexing and cognify pipelines wrote, so both stamps are reset
+                # (a kept indexing stamp would skip the document's early
+                # indexing). Keep add status intact.
+                for pipeline_name in (INDEXING_PIPELINE_NAME, COGNIFY_PIPELINE_NAME):
+                    if dataset_id_str in data_record.pipeline_status.get(pipeline_name, {}):
+                        del data_record.pipeline_status[pipeline_name][dataset_id_str]
+                        updated = True
                 if updated:
                     orm_attributes.flag_modified(data_record, "pipeline_status")
                 await session.commit()

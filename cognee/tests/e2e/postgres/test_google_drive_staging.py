@@ -111,12 +111,14 @@ def remote(monkeypatch):
     remote.source = lambda: drive.google_drive_source(
         folder_id="folder", resource_name="folder_rows", service=service
     )
-    monkeypatch.setattr(drive, "_list_files_in_scope", lambda *args: iter(remote.listed))
-    monkeypatch.setattr(drive, "_get_start_page_token", lambda *args: remote.cursor)
-    monkeypatch.setattr(drive, "_get_scope_folder_ids", lambda *args: {"folder"})
-    monkeypatch.setattr(drive, "_resolve_folder_id", lambda *args: "folder")
+    monkeypatch.setattr(drive, "_list_files_in_scope", lambda *args, **kwargs: iter(remote.listed))
+    monkeypatch.setattr(drive, "_get_start_page_token", lambda *args, **kwargs: remote.cursor)
+    monkeypatch.setattr(drive, "_get_scope_folder_ids", lambda *args, **kwargs: {"folder"})
+    monkeypatch.setattr(drive, "_resolve_folder_id", lambda *args, **kwargs: "folder")
     monkeypatch.setattr(
-        drive, "_list_changed_file_ids", lambda *args: (remote.changed, set(), remote.cursor)
+        drive,
+        "_list_changed_file_ids",
+        lambda *args, **kwargs: (remote.changed, set(), remote.cursor),
     )
     return remote
 

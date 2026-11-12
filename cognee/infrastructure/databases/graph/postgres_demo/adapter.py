@@ -934,10 +934,10 @@ class PostgresDemoAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_filtered_graph_data(
-        self, attribute_filters: list[dict[str, list[str | int]]]
+        self, attribute_filters: list[dict[str, list[str | int]]], *, include_edges: bool = True
     ) -> tuple[list[tuple[str, dict]], list[tuple[str, str, str, dict]]]:
         """Return core-field matches and the edges induced by those nodes."""
-        if not attribute_filters:
+        if not attribute_filters and include_edges:
             return await self.get_graph_data()
 
         filters: list[tuple[str, set[str]]] = []
@@ -947,7 +947,7 @@ class PostgresDemoAdapter(GraphDBInterface):
                     raise ValueError(f"Invalid filter attribute: {attr!r}")
                 filters.append((attr, {str(value) for value in filter_values}))
 
-        if not filters:
+        if not filters and include_edges:
             return await self.get_graph_data()
 
         async with self.sessionmaker() as session:
@@ -963,6 +963,9 @@ class PostgresDemoAdapter(GraphDBInterface):
                         **_decode_properties(row["properties"]),
                     }
                     nodes.append((row["id"], properties))
+
+            if not include_edges:
+                return nodes, []
 
             edges = await self._fetch_edges_within(session, [node_id for node_id, _ in nodes])
             return nodes, edges

@@ -1,5 +1,7 @@
-from typing import Any, BinaryIO
+from typing import Any
 from uuid import UUID
+
+from fastapi import UploadFile
 
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
@@ -38,7 +40,7 @@ logger = get_logger()
 
 
 async def add(
-    data: BinaryIO | list[BinaryIO] | str | list[str] | DataItem | list[DataItem] | Any,
+    data: str | list[str] | UploadFile | list[UploadFile] | DataItem | list[DataItem] | Any,
     dataset_name: str = DEFAULT_DATASET_NAME,
     user: User = None,
     node_set: list[str] | None = None,
@@ -62,8 +64,8 @@ async def add(
     Add data to Cognee for knowledge graph processing.
 
     This is the first step in the Cognee workflow - it ingests raw data and prepares it
-    for processing. The function accepts various data formats including text, files, urls and
-    binary streams, then stores them in a specified dataset for further processing.
+    for processing. The function accepts text, file paths, URLs and file uploads, then
+    stores them in a specified dataset for further processing.
 
     Prerequisites:
         - **LLM_API_KEY**: Must be set in environment variables for content processing
@@ -82,14 +84,27 @@ async def add(
             * Absolute paths: "/path/to/document.pdf"
             * File URLs: "file:///path/to/document.pdf" or "file://relative/path.txt"
             * S3 paths: "s3://bucket-name/path/to/file.pdf"
-        - **Binary file objects**: File handles/streams (BinaryIO)
+        - **File uploads**: FastAPI ``UploadFile`` objects, which is what ``POST /api/v1/add``
+          hands in for its multipart ``data`` field; each is stored under its upload
+          filename. Plain open file objects (``open(path, "rb")``, ``BytesIO``) are not
+          accepted: pass the file's path instead.
         - **Web URLs**: "https://example.com/page" is fetched and ingested as a page
         - **Code repository URLs**: "https://github.com/<owner>/<repo>" (or a gitlab.com
           project, or any URL ending in .git) is shallow-cloned and ingested as ONE
           code-repo item that cognify runs through the enola code graph pipeline
           (cross-file edges), plus the repo's documents; same as adding a local code
-          project directory. Requires ALLOW_HTTP_REQUESTS and git on PATH. Pass
+          project directory. Requires git on PATH, and ALLOW_HTTP_REQUESTS=true on
+          the server for API calls. Pass
           ``branch`` to clone a branch other than the remote's default.
+        - **Database connection strings**: "postgresql://...", "mysql://...",
+          "sqlite:///path/to/file.db" and the other schemes in
+          ``create_dlt_source.DB_CONNECTION_PATTERNS`` are read through dlt, with
+          ``dlt_config["query"]`` as an optional single-table filter. The connection is
+          made from the machine running cognee: the SDK, CLI and MCP server ingest a
+          database by default, the API server refuses it (422
+          ``DatabaseIngestionDisabled``) unless ``ALLOW_DATABASE_INGESTION=true``, and
+          ``false`` refuses it everywhere. Cognee's own databases are refused whatever
+          the setting, and a sqlite:/// path must be an existing file.
         - **Lists**: Multiple files or text strings in a single call
 
     Supported File Formats:
@@ -113,8 +128,8 @@ async def add(
             - Absolute file path: "/path/to/document.pdf"
             - File URL: "file:///absolute/path/to/document.pdf" or "file://relative/path.txt"
             - S3 path: "s3://my-bucket/documents/file.pdf"
-            - List of mixed types: ["text content", "/path/file.pdf", "file://doc.txt", file_handle]
-            - Binary file object: open("file.txt", "rb")
+            - List of mixed types: ["text content", "/path/file.pdf", "file://doc.txt"]
+            - File upload: a FastAPI UploadFile, as POST /api/v1/add receives it
             - url: A web link url (https or http); a GitHub/GitLab repository URL is
               cloned and indexed as a code graph instead of fetched as a page
         dataset_name: Name of the dataset to store data in. Defaults to "main_dataset".
@@ -263,6 +278,12 @@ async def add(
 
         # Before anything is written, and before the name can reach git.
         check_branch_name(branch)
+
+    from cognee.tasks.web_scraper.ssrf_protection import require_http_requests_allowed_for
+
+    # Before any work starts: with run_in_background the fetch runs after this call
+    # has returned, where its refusal would never reach the caller.
+    require_http_requests_allowed_for(data)
 
     if preferred_loaders is not None:
         transformed = {}

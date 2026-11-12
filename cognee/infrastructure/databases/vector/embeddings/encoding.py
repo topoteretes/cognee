@@ -20,9 +20,7 @@ from typing import Literal
 from urllib.parse import urlparse
 
 import httpx
-import litellm
 import numpy as np
-import openai
 
 from cognee.exceptions import CogneeConfigurationError
 from cognee.infrastructure.databases.exceptions import EmbeddingEncodingError, EmbeddingException
@@ -62,6 +60,8 @@ def _routes_through_openai_handler(model: str | None) -> bool:
         # litellm's provider prefixes are case-sensitive: it cannot route "OpenAI/...".
         return model.split("/", 1)[0] == "openai"
     # An unprefixed model resolves by litellm's model registry.
+    import litellm
+
     return litellm.model_cost.get(model, {}).get("litellm_provider") == "openai"
 
 
@@ -72,6 +72,8 @@ def _litellm_openai_endpoint(endpoint: str | None) -> str | None:
     OPENAI_API_BASE), which cognee cannot call before the request is built. A
     mismatch only affects the default: base64 to a proxy that then rejects it, loudly.
     """
+    import litellm
+
     return (
         endpoint or litellm.api_base or os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
     )
@@ -96,6 +98,8 @@ def _routes_to_openai_api(model: str | None, endpoint: str | None) -> bool:
     # even an openai/ model to a LiteLLM proxy, whose backend may refuse base64. Asked
     # only about models that are OpenAI's by name, so it never meets one it does not know.
     # It reports every failure as BadRequestError.
+    import litellm
+
     try:
         return litellm.get_llm_provider(model=model, api_base=endpoint)[1] == "openai"
     except litellm.exceptions.BadRequestError:
@@ -171,11 +175,15 @@ def _server_error_body(error: BaseException) -> object | None:
     linked through the implicit context. The SDK's ``body`` is a last resort: it keeps
     only the reply's "error" member.
     """
+    # litellm and the OpenAI SDK are imported inside the functions of this module, not at
+    # module scope: it is on the ``import cognee`` path and they are half of that import.
+    from openai import APIStatusError
+
     current: BaseException | None = error
     for _ in range(6):
         if current is None:
             return None
-        if isinstance(current, (openai.APIStatusError, httpx.HTTPStatusError)):
+        if isinstance(current, (APIStatusError, httpx.HTTPStatusError)):
             response = getattr(current, "response", None)
             if isinstance(response, httpx.Response):
                 try:

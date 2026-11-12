@@ -13,6 +13,7 @@ one place a provider's response-shape knowledge should live.
 from uuid import UUID
 
 from cognee.modules.integrations.credentials import (
+    REVOKED_BY_PROVIDER,
     STATUS_ACTIVE,
     get_active_credential_for_user,
     get_credential_by_account,
@@ -36,7 +37,7 @@ async def get_for_user(user_id: UUID) -> IntegrationCredential | None:
 
 
 async def revoke_by_team(team_id: str) -> bool:
-    return await revoke_credential_by_account(PROVIDER, team_id)
+    return await revoke_credential_by_account(PROVIDER, team_id, revoked_by=REVOKED_BY_PROVIDER)
 
 
 def is_active(credential: IntegrationCredential | None) -> bool:

@@ -72,15 +72,19 @@ async def test_local_resolves_for_default_user(monkeypatch, missing):
     from importlib import import_module
 
     import cognee.modules.users.methods as users
-    from cognee.api.v1.ontologies.ontologies import OntologyService
+    from cognee.api.v1.ontologies.ontologies import OntologyFile, OntologyService
 
     resolver_module = import_module("cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver")
     user = SimpleNamespace(id="local-user")
     monkeypatch.setattr(users, "get_default_user", AsyncMock(return_value=user))
-    lookup = Mock(return_value=["first OWL", "second OWL"])
+    stored = [
+        OntologyFile(b"first OWL", "one.owl", "application/rdf+xml", rdf_format="xml"),
+        OntologyFile(b"second TTL", "two.ttl", "text/turtle", rdf_format="turtle"),
+    ]
+    lookup = AsyncMock(return_value=stored)
     if missing:
         lookup.side_effect = ValueError("Ontology key 'one' not found")
-    monkeypatch.setattr(OntologyService, "get_ontology_contents", lookup)
+    monkeypatch.setattr(OntologyService, "get_ontology_files", lookup)
     resolver = Mock()
     monkeypatch.setattr(resolver_module, "RDFLibOntologyResolver", resolver)
     client = CogneeClient.__new__(CogneeClient)
@@ -92,8 +96,15 @@ async def test_local_resolves_for_default_user(monkeypatch, missing):
         client.cognee.remember.assert_not_awaited()
     else:
         await client.remember("hello", ontology_key=["one", "two"])
+        # The stored files go to the resolver as-is, so the format, filename and
+        # content type recorded at upload time reach the parser selection.
         streams = resolver.call_args.kwargs["ontology_file"]
-        assert [s.read() for s in streams] == ["first OWL", "second OWL"]
+        assert streams is stored
+        assert [s.read() for s in streams] == [b"first OWL", b"second TTL"]
+        assert [(s.rdf_format, s.filename, s.content_type) for s in streams] == [
+            ("xml", "one.owl", "application/rdf+xml"),
+            ("turtle", "two.ttl", "text/turtle"),
+        ]
         kwargs = client.cognee.remember.call_args.kwargs
         assert kwargs["config"]["ontology_config"]["ontology_resolver"] is resolver.return_value
         # The user is deliberately NOT pinned on the call: remember() resolves it to
@@ -101,7 +112,7 @@ async def test_local_resolves_for_default_user(monkeypatch, missing):
         # would give the same tool call two user-resolution paths. The lookup below is
         # what has to agree with the write, and it does.
         assert "user" not in kwargs
-    lookup.assert_called_once_with(["one", "two"], user)
+    lookup.assert_awaited_once_with(["one", "two"], user)
 
 
 @pytest.mark.asyncio

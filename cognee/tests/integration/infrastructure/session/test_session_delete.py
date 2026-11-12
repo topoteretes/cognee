@@ -28,9 +28,9 @@ from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRe
 delete_module = importlib.import_module("cognee.modules.session_lifecycle.delete_session")
 
 
-@pytest_asyncio.fixture(params=["fs", "sql"])
-async def stores(request):
-    """A real session cache (fs or SQL) and a real SQLite relational DB, wired into the delete."""
+@pytest_asyncio.fixture
+async def stores():
+    """A real SQL session cache and a real SQLite relational DB, wired into the delete."""
     with tempfile.TemporaryDirectory() as tmpdir:
         relational = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{tmpdir}/relational.db")
         async with relational.engine.begin() as connection:
@@ -39,22 +39,9 @@ async def stores(request):
                 tables=[SessionRecord.__table__, SessionModelUsage.__table__],
             )
 
-        if request.param == "fs":
-            with patch(
-                "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
-                return_value={"data_root_directory": tmpdir},
-            ):
-                from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                    FSCacheAdapter,
-                )
+        from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import SqlCacheAdapter
 
-                adapter = FSCacheAdapter()
-        else:
-            from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import (
-                SqlCacheAdapter,
-            )
-
-            adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmpdir}/cache.db")
+        adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmpdir}/cache.db")
 
         manager = SessionManager(cache_engine=adapter)
         vectors = AsyncMock()
@@ -63,7 +50,7 @@ async def stores(request):
             patch.object(delete_module, "get_relational_engine", return_value=relational),
             # No datasets here: the per-dataset vector stores are covered by
             # test_session_delete_dataset_context.py over real stores.
-            patch.object(delete_module, "_session_vector_datasets", new=AsyncMock(return_value=[])),
+            patch.object(delete_module, "_session_vector_datasets", new=AsyncMock(return_value={})),
             patch(
                 "cognee.infrastructure.session.session_manager.delete_session_qa_vectors",
                 new=vectors,
@@ -71,10 +58,7 @@ async def stores(request):
         ):
             yield SimpleNamespace(manager=manager, relational=relational, vectors=vectors)
 
-        if request.param == "fs":
-            adapter.cache.close()
-        else:
-            await adapter.close()
+        await adapter.close()
         await relational.engine.dispose()
 
 
@@ -142,7 +126,7 @@ async def test_delete_session_removes_every_trace_of_the_session(stores):
     assert await cognee.session.delete_session("s1", user=SimpleNamespace(id=owner)) is True
 
     assert await _footprint(stores, owner, "s1") == EMPTY
-    stores.vectors.assert_awaited_once_with(user_id=str(owner), session_id="s1")
+    stores.vectors.assert_awaited_once_with([(str(owner), "s1")])
     # The owner's other session and another user's session of the same id stay.
     assert await _footprint(stores, owner, "s2") == FULL
     assert await _footprint(stores, stranger, "s1") == FULL
@@ -170,7 +154,7 @@ async def test_delete_session_removes_a_dashboard_row_without_cache_content(stor
     assert await cognee.session.delete_session("expired", user=SimpleNamespace(id=owner)) is True
     assert (await _footprint(stores, owner, "expired"))["records"] == 0
     # Expired cache entries leave their Q&A vectors behind; those go too.
-    stores.vectors.assert_awaited_once_with(user_id=str(owner), session_id="expired")
+    stores.vectors.assert_awaited_once_with([(str(owner), "expired")])
 
 
 @pytest.mark.asyncio

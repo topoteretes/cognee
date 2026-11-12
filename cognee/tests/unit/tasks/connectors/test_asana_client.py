@@ -187,26 +187,38 @@ def _traced(monkeypatch, *responses):
 
 
 def test_the_host_is_asked_before_each_attempt_and_before_each_wait(monkeypatch):
-    """The check comes before the sleep, so a revoked run does not wait out the backoff first."""
+    """The check comes before every wait and every attempt (``with_retries``), so a revoked run
+    neither waits out the backoff nor sends after it."""
     client, events = _traced(monkeypatch, *[Resp(503, {})] * 3)
 
     with pytest.raises(AsanaAPIError):
         client.request("GET", "/projects/1", check_active=lambda: events.append("check"))
 
-    assert events == ["check", "send", "check", "sleep 1", "send", "check", "sleep 2", "send"]
+    assert events == [
+        "check",
+        "send",
+        "check",
+        "sleep 1",
+        "check",
+        "send",
+        "check",
+        "sleep 2",
+        "check",
+        "send",
+    ]
 
 
-def test_a_retried_request_asks_the_host_once_per_attempt(monkeypatch):
+def test_a_retried_request_asks_the_host_before_every_attempt_and_wait(monkeypatch):
     client, events = _traced(monkeypatch, Resp(500, {}), Resp(200, {"data": {}}))
 
     client.request("GET", "/projects/1", check_active=lambda: events.append("check"))
 
-    assert events == ["check", "send", "check", "sleep 1", "send"]
+    assert events == ["check", "send", "check", "sleep 1", "check", "send"]
 
 
 @pytest.mark.parametrize(
     ("revoked_at", "sent", "slept"),
-    [(1, 0, []), (2, 1, []), (3, 2, [1])],
+    [(1, 0, []), (2, 1, []), (3, 1, [1]), (4, 2, [1]), (5, 2, [1, 2])],
 )
 def test_a_revoked_host_stops_the_retries_before_the_attempt_and_the_wait(
     monkeypatch, revoked_at, sent, slept
@@ -365,3 +377,14 @@ def test_the_fake_over_http_reaches_the_client_the_way_a_host_sees_it(monkeypatc
 
     assert [item["gid"] for item in body["data"]] == ["1"]
     assert sent == [f"Bearer {TOKEN}"]
+
+
+def test_a_request_never_follows_a_redirect(monkeypatch):
+    """SDK-832: a 3xx from Asana is an error answer, never a new request target."""
+    client, calls, _ = _client(monkeypatch, Resp(200, {"data": []}), Resp(307, {}))
+
+    client.request("GET", "/tasks")
+    assert calls[0][2]["allow_redirects"] is False
+
+    with pytest.raises(AsanaAPIError, match="HTTP 307"):
+        client.request("GET", "/tasks")
