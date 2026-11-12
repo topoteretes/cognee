@@ -88,19 +88,13 @@ async def client(app):
 
 
 class TestPerEntityReads:
-    async def test_entry_lineage_history_for_readable_dataset(self, client):
+    async def test_entry_and_history_for_readable_dataset(self, client):
         ds = client.app.state.ds_allowed
         edge_key = ledger_edge_key(ds, "n1", "n2", "knows")
 
         entry = await client.get(f"/api/v1/provenance/entry/{edge_key}")
         assert entry.status_code == 200
         assert entry.json()["entity_id"] == edge_key
-
-        lineage = await client.get(f"/api/v1/provenance/lineage/{edge_key}")
-        assert lineage.status_code == 200
-        body = lineage.json()
-        assert body["entity_count"] == 3
-        assert body["integrity_verified"] is True
 
         history = await client.get(f"/api/v1/provenance/history/{ledger_node_key(ds, 'n2')}")
         assert history.status_code == 200
@@ -111,15 +105,22 @@ class TestPerEntityReads:
 
     async def test_unreadable_dataset_is_403_even_when_tracked(self, client):
         key = ledger_node_key(client.app.state.ds_denied, "n1")
-        for route in ("entry", "lineage", "history"):
+        for route in ("entry", "history"):
             response = await client.get(f"/api/v1/provenance/{route}/{key}")
             assert response.status_code == 403, route
 
     async def test_untracked_key_in_readable_dataset_is_404(self, client):
         key = ledger_node_key(client.app.state.ds_allowed, "nope")
-        for route in ("entry", "lineage", "history"):
+        for route in ("entry", "history"):
             response = await client.get(f"/api/v1/provenance/{route}/{key}")
             assert response.status_code == 404, route
+
+    async def test_lineage_and_check_are_not_routes(self, client):
+        ds = client.app.state.ds_allowed
+        key = ledger_node_key(ds, "n1")
+        assert (await client.get(f"/api/v1/provenance/lineage/{key}")).status_code == 404
+        check = await client.get("/api/v1/provenance/check", params={"dataset_id": str(ds)})
+        assert check.status_code == 404
 
     async def test_unscoped_keys_are_superuser_only(self, client):
         response = await client.get("/api/v1/provenance/entry/unscoped-entity")
@@ -132,7 +133,7 @@ class TestPerEntityReads:
 class TestLedgerWalks:
     async def test_scoped_walks_need_dataset_read_access(self, client):
         ds_ok, ds_no = client.app.state.ds_allowed, client.app.state.ds_denied
-        for route in ("verify", "check", "statistics"):
+        for route in ("verify", "statistics"):
             ok = await client.get(f"/api/v1/provenance/{route}", params={"dataset_id": str(ds_ok)})
             assert ok.status_code == 200, route
             assert ok.json()["dataset_id"] == str(ds_ok)
@@ -162,7 +163,7 @@ class TestLedgerWalks:
         }
 
     async def test_whole_ledger_walks_are_superuser_only(self, client):
-        for route in ("verify", "check", "statistics", "export"):
+        for route in ("verify", "statistics", "export"):
             response = await client.get(f"/api/v1/provenance/{route}")
             assert response.status_code == 403, route
 

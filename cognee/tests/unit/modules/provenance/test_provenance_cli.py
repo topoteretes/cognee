@@ -62,7 +62,7 @@ class TestParser:
         args = _parse("verify", "--dataset-id", str(uuid4()), "-f", "json")
         assert args.provenance_action == "verify"
         assert args.output_format == "json"
-        assert _parse("lineage", "ds:n1").entity_id == "ds:n1"
+        assert _parse("history", "ds:n1").entity_id == "ds:n1"
         export = _parse("export", "-d", "docs", "--current-only", "-o", "out.jsonl")
         assert (export.dataset, export.current_only, export.output) == ("docs", True, "out.jsonl")
 
@@ -77,7 +77,7 @@ class TestParser:
 
 
 class TestActions:
-    async def test_verify_stats_check_scoped_to_dataset(self, manager, capsys):
+    async def test_verify_and_stats_scoped_to_dataset(self, manager, capsys):
         ds = await _seed(manager)
         command = ProvenanceCommand()
 
@@ -93,8 +93,12 @@ class TestActions:
             1,
         )
 
-        await command._check(_parse("check", "--dataset-id", str(uuid4()), "-f", "json"))
-        assert json.loads(capsys.readouterr().out)["total_entries"] == 0
+    def test_lineage_and_check_are_not_commands(self):
+        # A ledger of data item rows has no lineage beyond its own history,
+        # and its only links are ones verify already covers.
+        for removed in ("lineage", "check"):
+            with pytest.raises(SystemExit):
+                _parse(removed)
 
     async def test_verify_exits_2_on_tampering(self, manager, tamper):
         ds = await _seed(manager)
@@ -106,17 +110,13 @@ class TestActions:
             await ProvenanceCommand()._verify(_parse("verify", "--dataset-id", str(ds)))
         assert raised.value.error_code == 2
 
-    async def test_history_lineage_entry(self, manager, capsys):
+    async def test_history_and_entry(self, manager, capsys):
         ds = await _seed(manager)
         command = ProvenanceCommand()
 
         await command._history(_parse("history", ledger_node_key(ds, "n2"), "-f", "json"))
         history = json.loads(capsys.readouterr().out)
         assert history[-1]["invalidated"] is True
-
-        await command._lineage(_parse("lineage", ledger_edge_key(ds, "n1", "n2", "knows")))
-        out = capsys.readouterr().out
-        assert "Entries:    3" in out and "verified" in out
 
         await command._entry(_parse("entry", ledger_node_key(ds, "n1")))
         assert json.loads(capsys.readouterr().out)["entity_id"] == ledger_node_key(ds, "n1")
@@ -166,11 +166,9 @@ class TestActions:
         denied = (
             (command._stats, _parse("stats", "--dataset-id", str(ds))),
             (command._verify, _parse("verify", "--dataset-id", str(ds))),
-            (command._check, _parse("check", "--dataset-id", str(ds))),
             (command._export, _parse("export", "--dataset-id", str(ds))),
             (command._history, _parse("history", key)),
             (command._entry, _parse("entry", key)),
-            (command._lineage, _parse("lineage", key)),
         )
         for handler, args in denied:
             with pytest.raises(CliCommandException) as raised:
@@ -190,7 +188,6 @@ class TestActions:
             (command._stats, _parse("stats")),
             (command._verify, _parse("verify")),
             (command._verify, _parse("verify", "--anchors")),
-            (command._check, _parse("check")),
             (command._export, _parse("export")),
             (command._anchor, _parse("anchor")),
         ):

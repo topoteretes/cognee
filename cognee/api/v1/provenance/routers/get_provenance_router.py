@@ -5,7 +5,7 @@ delete paths (tombstones), never through HTTP. Access control follows the
 dataset namespace baked into every ledger key
 (``{dataset_id}:data_item:{data_id}``): a per-entity lookup is allowed when the caller can
 read the dataset the key belongs to, and the ledger-wide walks (verify,
-check, statistics, export) require a ``dataset_id`` unless the caller is a
+statistics, export) require a ``dataset_id`` unless the caller is a
 superuser. Keys without a dataset prefix (custom pipelines that bypass the
 writer's namespacing) are superuser-only for the same reason. The rule itself
 lives in ``cognee.modules.provenance.access`` and is shared with the CLI.
@@ -61,20 +61,6 @@ def get_provenance_router() -> APIRouter:
             raise HTTPException(status_code=404, detail="Entity is not in the ledger.")
         return entry
 
-    @router.get("/lineage/{entity_id:path}", summary="Upstream lineage of one entity")
-    @log_usage(function_name="GET /v1/provenance/lineage", log_type="api_endpoint")
-    async def get_lineage(
-        entity_id: str = PathParam(..., description="Ledger key"),
-        user: User = Depends(get_authenticated_user),
-    ) -> dict[str, Any]:
-        """Everything the entity was derived from (parent + used entities, BFS),
-        with per-row checksums re-verified (`integrity_verified`)."""
-        await _authorize(authorize_ledger_key(user, entity_id))
-        lineage = await get_provenance_manager().get_lineage(entity_id)
-        if not lineage:
-            raise HTTPException(status_code=404, detail="Entity is not in the ledger.")
-        return lineage
-
     @router.get("/history/{entity_id:path}", summary="Version history of one entity")
     @log_usage(function_name="GET /v1/provenance/history", log_type="api_endpoint")
     async def get_history(
@@ -100,17 +86,6 @@ def get_provenance_router() -> APIRouter:
         checksum stored at the previous chain position."""
         await _authorize(authorize_ledger_scope(user, dataset_id))
         return await get_provenance_manager().verify_chain(dataset_id=dataset_id)
-
-    @router.get("/check", summary="Referential-integrity check")
-    @log_usage(function_name="GET /v1/provenance/check", log_type="api_endpoint")
-    async def check(
-        dataset_id: UUID | None = Query(default=None),
-        strict: bool = Query(default=False),
-        user: User = Depends(get_authenticated_user),
-    ) -> dict[str, Any]:
-        """Dangling lineage links (parent / used / version / activity references)."""
-        await _authorize(authorize_ledger_scope(user, dataset_id))
-        return await get_provenance_manager().check(strict=strict, dataset_id=dataset_id)
 
     @router.get("/statistics", summary="Ledger statistics")
     @log_usage(function_name="GET /v1/provenance/statistics", log_type="api_endpoint")

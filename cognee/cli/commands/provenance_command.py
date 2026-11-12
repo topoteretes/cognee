@@ -87,23 +87,18 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
         p_anchor = sub.add_parser("anchor", help="Sign and record the current chain head")
         add_format(p_anchor)
 
-        p_check = sub.add_parser("check", help="Referential-integrity check")
-        add_scope(p_check)
-        add_format(p_check)
-
         p_stats = sub.add_parser("stats", help="Ledger statistics")
         add_scope(p_stats)
         add_format(p_stats)
 
         for name, help_text in (
-            ("lineage", "Upstream lineage of one entity"),
-            ("history", "Version history of one entity"),
-            ("entry", "Current ledger row of one entity"),
+            ("history", "Version history of one data item"),
+            ("entry", "Current ledger row of one data item"),
         ):
             p = sub.add_parser(name, help=help_text)
             p.add_argument(
                 "entity_id",
-                help='Ledger key, e.g. "{dataset_id}:{node_id}" or "rel:{dataset_id}:..."',
+                help='Ledger key, "{dataset_id}:data_item:{data_id}"',
             )
             add_format(p)
 
@@ -126,9 +121,7 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
 
         handlers = {
             "verify": self._verify,
-            "check": self._check,
             "stats": self._stats,
-            "lineage": self._lineage,
             "history": self._history,
             "entry": self._entry,
             "export": self._export,
@@ -272,24 +265,6 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
             f"to {anchor_path()}"
         )
 
-    async def _check(self, args: argparse.Namespace) -> None:
-        dataset_id = await self._authorized_scope(args)
-        result = await self._manager().check(dataset_id=dataset_id)
-        if args.output_format == "json":
-            _print_json(result)
-        else:
-            if result["valid"]:
-                fmt.success(
-                    f"References intact: {result['total_entries']} rows, "
-                    f"{result['invalidated_count']} live tombstone(s)."
-                )
-            else:
-                fmt.error(f"{result['errors']} dangling reference(s):")
-                for ref in result["missing_references"][:20]:
-                    fmt.echo(f"  {ref}")
-        if not result["valid"]:
-            raise CliCommandException("Ledger check failed", error_code=2)
-
     async def _stats(self, args: argparse.Namespace) -> None:
         dataset_id = await self._authorized_scope(args)
         stats = await self._manager().get_statistics(dataset_id=dataset_id)
@@ -306,29 +281,6 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
             fmt.echo("By type:")
             for entity_type, count in sorted(stats["entity_types"].items()):
                 fmt.echo(f"  {entity_type:<16} {count}")
-
-    async def _lineage(self, args: argparse.Namespace) -> None:
-        await self._authorize_key(args)
-        lineage = await self._manager().get_lineage(args.entity_id)
-        if not lineage:
-            fmt.error(f"'{args.entity_id}' is not in the ledger.")
-            raise CliCommandException("Entity not tracked", error_code=1)
-        if args.output_format == "json":
-            _print_json(lineage)
-            return
-        fmt.echo(f"Entity:     {lineage['entity_id']}")
-        fmt.echo(f"Entries:    {lineage['entity_count']}")
-        fmt.echo(f"Integrity:  {'verified' if lineage['integrity_verified'] else 'BROKEN'}")
-        fmt.echo(f"First seen: {lineage['first_seen']}")
-        fmt.echo(f"Updated:    {lineage['last_updated']}")
-        if lineage["source_documents"]:
-            fmt.echo("Sources:")
-            for source in lineage["source_documents"]:
-                fmt.echo(f"  {source}")
-        fmt.echo("Chain:")
-        for entry in lineage["lineage_chain"]:
-            marker = " (tombstone)" if entry.get("invalidated") else ""
-            fmt.echo(f"  {entry['entity_type']:<13} {entry['entity_id']}{marker}")
 
     async def _history(self, args: argparse.Namespace) -> None:
         await self._authorize_key(args)
