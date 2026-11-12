@@ -18,6 +18,13 @@ from cognee.infrastructure.databases.relational.create_relational_engine import 
     create_relational_engine,
 )
 from cognee.modules.cognify import recovery as recovery_module
+from cognee.modules.improve.watermarks import (
+    IMPROVE_OPERATION_NAME,
+    REVIEW_WATERMARK_KEY,
+    has_dataset_changed_since_last_improve,
+    watermark_stamp,
+)
+from cognee.modules.pipelines import run_ownership
 from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
 from cognee.modules.pipelines.methods import get_unterminated_pipeline_runs
 from cognee.modules.pipelines.methods.get_pipeline_run import get_latest_pipeline_run
@@ -513,9 +520,12 @@ async def test_a_run_a_later_run_has_followed_is_rolled_back_and_closed_beneath_
 
 
 @pytest.mark.asyncio
-async def test_a_run_with_no_room_beneath_the_later_run_stays_started(monkeypatch):
+@pytest.mark.parametrize("apart", [timedelta(0), timedelta(microseconds=1)])
+async def test_a_run_with_no_room_beneath_the_later_run_stays_started(monkeypatch, apart):
+    """One microsecond apart is no room either: the closing row would carry the
+    later run's own time, and which of the two is then the newest is not defined."""
     run = _run("cognify_pipeline")
-    later = _run("cognify_pipeline", dataset_id=run.dataset_id, created_at=run.created_at)
+    later = _run("cognify_pipeline", dataset_id=run.dataset_id, created_at=run.created_at + apart)
     calls = _wire(
         monkeypatch,
         [run],
@@ -538,12 +548,70 @@ async def test_a_run_with_no_room_beneath_the_later_run_stays_started(monkeypatc
     assert [ownership.closed for ownership in ownerships] == [False]
 
 
+@pytest.mark.asyncio
+async def test_two_microseconds_beneath_the_later_run_is_room_enough(monkeypatch):
+    run = _run("cognify_pipeline")
+    later = _run(
+        "cognify_pipeline",
+        dataset_id=run.dataset_id,
+        created_at=run.created_at + timedelta(microseconds=2),
+    )
+    calls = _wire(
+        monkeypatch,
+        [run],
+        {run.dataset_id: _dataset_for(run)},
+        newest_rows={run.dataset_id: later},
+    )
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert [name for name, _ in calls] == ["rollback", "error"]
+    assert calls[1][1]["created_at"] == run.created_at + timedelta(microseconds=1)
+
+
+@pytest.mark.asyncio
+async def test_a_run_with_no_room_keeps_its_marker_and_is_seen_by_the_next_pass(
+    monkeypatch, tmp_path
+):
+    """The same with the real ownership claim: the marker a dead writer left is
+    still there after the pass, so the next one claims the run again."""
+    monkeypatch.setattr(
+        run_ownership,
+        "get_base_config",
+        lambda: SimpleNamespace(system_root_directory=str(tmp_path)),
+    )
+    with run_ownership.pipeline_run_ownership() as writer:
+        pass  # The writer is gone and its marker is left, as after a crash.
+    run = _run("cognify_pipeline", run_info={"recovery_lock": writer.token})
+    later = _run("cognify_pipeline", dataset_id=run.dataset_id, created_at=run.created_at)
+    calls = _wire(
+        monkeypatch,
+        [run],
+        {run.dataset_id: _dataset_for(run)},
+        newest_rows={run.dataset_id: later},
+    )
+    monkeypatch.setattr(recovery_module, "claim_run_ownership", run_ownership.claim_run_ownership)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert [name for name, _ in calls] == ["rollback"]
+    assert run_ownership._lock_path(writer.token).is_dir()
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    # Claimed and rolled back again, and still not closed.
+    assert [name for name, _ in calls] == ["rollback", "rollback"]
+    assert run_ownership._lock_path(writer.token).is_dir()
+
+
 _ENGINE_USERS = [
     importlib.import_module(name)
     for name in (
         "cognee.modules.pipelines.operations.log_pipeline_run_error",
         "cognee.modules.pipelines.methods.get_pipeline_run_by_dataset",
         "cognee.modules.pipelines.methods.get_pipeline_run",
+        # The improve change check imports the engine from here when it is called.
+        "cognee.infrastructure.databases.relational",
     )
 ]
 
@@ -640,3 +708,125 @@ async def test_closing_the_datasets_newest_run_makes_it_the_datasets_status(runs
     assert await get_pipeline_status([dataset_id], "cognify_pipeline") == {
         str(dataset_id): PipelineRunStatus.DATASET_PROCESSING_ERRORED
     }
+
+
+@pytest.mark.asyncio
+async def test_a_run_with_no_room_beneath_the_later_run_gets_no_closing_row(runs_engine):
+    """On a real table: one microsecond apart, nothing is written and the run is
+    still listed as unterminated."""
+    dataset_id, abandoned, later = uuid4(), uuid4(), uuid4()
+    started, completed = (
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+    )
+    await _store(
+        runs_engine,
+        (abandoned, dataset_id, started, TWO_HOURS_AGO),
+        (later, dataset_id, completed, TWO_HOURS_AGO + timedelta(microseconds=1)),
+    )
+
+    with pytest.raises(RuntimeError, match="cannot be closed beneath"):
+        await recovery_module._close_as_abandoned(
+            await get_latest_pipeline_run(abandoned), SimpleNamespace(id=dataset_id), []
+        )
+
+    assert (await get_latest_pipeline_run(abandoned)).status == started
+    assert [run.pipeline_run_id for run in await get_unterminated_pipeline_runs()] == [abandoned]
+    assert await get_pipeline_status([dataset_id], "cognify_pipeline") == {
+        str(dataset_id): completed
+    }
+
+
+@pytest.mark.asyncio
+async def test_closing_an_abandoned_run_leaves_the_status_of_a_run_that_overlapped_it(
+    runs_engine,
+):
+    """The other run started before the abandoned one and finished after it. Its
+    closing row is still the dataset's newest, so the status stays what it left."""
+    dataset_id, overlapping, abandoned = uuid4(), uuid4(), uuid4()
+    started, completed = (
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+    )
+    await _store(
+        runs_engine,
+        (overlapping, dataset_id, started, TWO_HOURS_AGO - timedelta(hours=1)),
+        (abandoned, dataset_id, started, TWO_HOURS_AGO),
+        (overlapping, dataset_id, completed, ONE_HOUR_AGO),
+    )
+
+    await recovery_module._close_as_abandoned(
+        await get_latest_pipeline_run(abandoned), SimpleNamespace(id=dataset_id), []
+    )
+
+    closed = await get_latest_pipeline_run(abandoned)
+    assert closed.status == PipelineRunStatus.DATASET_PROCESSING_ERRORED
+    assert closed.created_at.replace(tzinfo=timezone.utc) == TWO_HOURS_AGO + timedelta(
+        microseconds=1
+    )
+    assert await get_unterminated_pipeline_runs() == []
+    assert await get_pipeline_status([dataset_id], "cognify_pipeline") == {
+        str(dataset_id): completed
+    }
+
+
+async def _store_improve_stamp(engine, dataset_id, stage_started_at) -> None:
+    """The row a succeeded improve leaves, with one stage's stamp."""
+    async with engine.get_async_session() as session:
+        session.add(
+            PipelineRun(
+                pipeline_run_id=uuid4(),
+                operation_name=IMPROVE_OPERATION_NAME,
+                outcome="succeeded",
+                status=None,
+                dataset_id=dataset_id,
+                run_info=watermark_stamp(REVIEW_WATERMARK_KEY, "done", stage_started_at),
+                created_at=stage_started_at,
+                ended_at=stage_started_at + timedelta(minutes=1),
+            )
+        )
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_improve_does_not_count_the_closing_row_dated_beneath_a_later_run(runs_engine):
+    """The improve change check counts run rows dated after its stamp. The row
+    closing a run that a later run has followed is dated before it, so closing
+    that run does not make improve run its stage again."""
+    dataset_id, abandoned, later = uuid4(), uuid4(), uuid4()
+    started, completed = (
+        PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+    )
+    await _store(
+        runs_engine,
+        (abandoned, dataset_id, started, TWO_HOURS_AGO),
+        (later, dataset_id, started, ONE_HOUR_AGO),
+        (later, dataset_id, completed, ONE_HOUR_AGO + timedelta(minutes=10)),
+    )
+    await _store_improve_stamp(runs_engine, dataset_id, ONE_HOUR_AGO + timedelta(minutes=30))
+    assert not await has_dataset_changed_since_last_improve(dataset_id, REVIEW_WATERMARK_KEY)
+
+    await recovery_module._close_as_abandoned(
+        await get_latest_pipeline_run(abandoned), SimpleNamespace(id=dataset_id), []
+    )
+
+    assert not await has_dataset_changed_since_last_improve(dataset_id, REVIEW_WATERMARK_KEY)
+
+
+@pytest.mark.asyncio
+async def test_improve_counts_the_closing_row_of_the_datasets_newest_run(runs_engine):
+    """That row is dated now, after the stamp, as before."""
+    dataset_id, abandoned = uuid4(), uuid4()
+    await _store(
+        runs_engine,
+        (abandoned, dataset_id, PipelineRunStatus.DATASET_PROCESSING_STARTED, TWO_HOURS_AGO),
+    )
+    await _store_improve_stamp(runs_engine, dataset_id, ONE_HOUR_AGO)
+    assert not await has_dataset_changed_since_last_improve(dataset_id, REVIEW_WATERMARK_KEY)
+
+    await recovery_module._close_as_abandoned(
+        await get_latest_pipeline_run(abandoned), SimpleNamespace(id=dataset_id), []
+    )
+
+    assert await has_dataset_changed_since_last_improve(dataset_id, REVIEW_WATERMARK_KEY)
