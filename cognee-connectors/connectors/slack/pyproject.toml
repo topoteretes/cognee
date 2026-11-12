@@ -40,9 +40,9 @@ dependencies = [
 # with Slack) needs cognee; nothing else in the package does. It uses the integration
 # APIs of SDK-1497..1502 (``revoked_by`` on credentials, ``refuse_parent``,
 # ``outbound.client_session``, sync policies, the ``slack`` entry of
-# ``integrations.ingestion``), none of which cognee 1.6.7 has. 1.6.8rc1 is the first
+# ``integrations.ingestion``), none of which cognee 1.6.7 has. 1.6.8 is the first
 # release that carries them.
-cognee = ["cognee>=1.6.8rc1,<2"]
+cognee = ["cognee>=1.6.8,<2"]
 
 [project.urls]
 Homepage = "https://github.com/topoteretes/cognee/tree/main/cognee-connectors/connectors/slack"
