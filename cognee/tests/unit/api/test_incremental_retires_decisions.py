@@ -59,8 +59,28 @@ async def test_decisions_are_retired_once_the_edit_is_written(monkeypatch):
 
     await _run(dataset, user)
 
-    # The ledger is told the new content hash once the write has published it.
-    assert order == ["write", ("ledger", "new-hash"), ("retire", dataset, user)]
+    # The ledger is told the new content hash last, once the write has published
+    # it and the edit's decisions are retired.
+    assert order == ["write", ("retire", dataset, user), ("ledger", "new-hash")]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_ledger_write_leaves_the_decisions_retired(monkeypatch):
+    """The retry finds the content unchanged and only records it in the ledger,
+    so the edit's decisions must already be retired when the ledger write fails."""
+    dataset, user = SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
+    order = _patch_run(monkeypatch, CHANGED, AsyncMock(return_value={}))
+
+    async def failing_ledger(context, content_hash):
+        order.append(("ledger", content_hash))
+        raise RuntimeError("ledger write failed")
+
+    monkeypatch.setattr(incremental, "record_data_item_content", failing_ledger)
+
+    with pytest.raises(RuntimeError, match="ledger write failed"):
+        await _run(dataset, user)
+
+    assert order == ["write", ("retire", dataset, user), ("ledger", "new-hash")]
 
 
 @pytest.mark.asyncio

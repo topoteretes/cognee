@@ -36,6 +36,19 @@ async def test_a_dataset_scope_needs_read_access_to_that_dataset():
         await authorize_ledger_scope(USER, OTHER)
 
 
+async def test_a_superuser_reads_a_deleted_datasets_rows(monkeypatch):
+    """A deleted dataset has no ACL left; its rows and tombstones stay readable to a superuser."""
+
+    async def _deleted(user, dataset_id, permission_type="read"):
+        raise AssertionError("a superuser's read must not look the dataset up")
+
+    monkeypatch.setattr(access, "get_authorized_dataset", _deleted)
+    deleted = uuid4()
+
+    await authorize_ledger_scope(SUPERUSER, deleted)
+    await authorize_ledger_key(SUPERUSER, ledger_data_item_key(deleted, uuid4()))
+
+
 async def test_the_whole_ledger_is_superuser_only():
     await authorize_ledger_scope(SUPERUSER, None)
     with pytest.raises(PermissionDeniedError, match="superusers only"):

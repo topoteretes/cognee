@@ -17,7 +17,7 @@ import importlib
 from uuid import UUID
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, select
 
 import cognee
 import cognee.modules.data.methods as data_methods
@@ -25,8 +25,10 @@ from cognee.context_global_variables import set_database_global_context_variable
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.cognify.rollback import cognify_rollback_handler
+from cognee.modules.pipelines.models.PipelineRun import PipelineRun
 from cognee.modules.provenance import get_provenance_manager, storage
 from cognee.modules.provenance.tombstones import ledger_data_item_key
+from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME
 from cognee.tests.journeys import _support
 
 DATASET = "journey_ledger"
@@ -312,15 +314,22 @@ async def test_a_ledger_that_cannot_be_written_fails_the_ingestion(
 async def test_a_rolled_back_run_keeps_the_row_live_so_a_later_delete_is_recorded(
     clean_env, default_user, ledger_on, monkeypatch
 ):
-    # With early chunk indexing off, the cognify run is the one that first
-    # stores the item, so it is the run the ledger row names.
-    monkeypatch.setenv("EARLY_CHUNK_INDEXING", "false")
-    get_cognify_config.cache_clear()
+    # Early chunk indexing is on (the default): the indexing run stores the
+    # item's chunks first, and the row still names the cognify run, the one
+    # callers follow and roll back.
     manager = ledger_on
     result = await cognee.remember([DOC_CHOIR], dataset_name=DATASET, self_improvement=False)
     dataset_id = _support.as_uuid(result.dataset_id)
     choir = await _data_id(dataset_id, default_user, "saltmarsh choir")
-    run_id = (await _item(manager, dataset_id, choir))["bundle_id"]
+    row = await _item(manager, dataset_id, choir)
+    run_id = row["bundle_id"]
+    async with get_relational_engine().get_async_session() as session:
+        run_names = (
+            await session.execute(
+                select(PipelineRun.pipeline_name).where(PipelineRun.pipeline_run_id == UUID(run_id))
+            )
+        ).scalars()
+        assert set(run_names) == {COGNIFY_PIPELINE_NAME}
     before = await _support.snapshot_dataset(dataset_id, default_user)
 
     # Roll that run back the way recovery rolls back a run that never finished the item.

@@ -25,6 +25,15 @@ def _require_superuser(user: Any, message: str) -> None:
 
 
 async def _require_dataset_read(user: Any, dataset_id: UUID) -> None:
+    """Read access to the dataset, or a superuser.
+
+    A superuser may already read the whole ledger, so one dataset's rows are
+    theirs to read too, and that holds after the dataset is deleted: its rows
+    and tombstones stay in the ledger, while the dataset and its permissions,
+    which the ACL lookup needs, are gone.
+    """
+    if getattr(user, "is_superuser", False):
+        return
     if await get_authorized_dataset(user, dataset_id, "read") is None:
         raise _denied(f"No read access to dataset {dataset_id}.")
 

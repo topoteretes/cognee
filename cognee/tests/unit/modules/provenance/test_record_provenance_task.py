@@ -15,6 +15,7 @@ from cognee.modules.cognify.config import CognifyConfig, get_cognify_config
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.modules.provenance import storage
 from cognee.modules.provenance.tombstones import ledger_data_item_key
+from cognee.modules.provenance.tracking import LEDGER_RUN_ID
 from cognee.tasks.provenance import record_provenance, record_provenance_at_storage
 from cognee.tasks.provenance.record_provenance import record_data_item_content
 
@@ -70,6 +71,19 @@ class TestRecordProvenanceTask:
         }
         assert (await manager.verify_chain())["valid"] is True
         assert (await manager.check())["valid"] is True
+
+    @pytest.mark.asyncio
+    async def test_a_run_storing_for_another_run_records_that_run(self, manager):
+        # cognify's indexing run stores the chunks first, for the cognify run.
+        owning_run = uuid4()
+        ctx = _ctx()
+        ctx.extras[LEDGER_RUN_ID] = owning_run
+
+        await record_provenance(_batch(), ctx=ctx)
+
+        entry = await _only_entry(manager)
+        assert entry.bundle_id == str(owning_run)
+        assert entry.activity_id == f"cognify:{owning_run}"
 
     @pytest.mark.asyncio
     async def test_later_batches_of_the_same_content_write_nothing(self, manager):
