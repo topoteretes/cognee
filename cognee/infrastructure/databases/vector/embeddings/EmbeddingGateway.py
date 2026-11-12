@@ -36,6 +36,12 @@ class EmbeddingGateway:
     def __init__(self, engine: EmbeddingEngine):
         self._engine = engine
 
+    async def embed_text_float32(self, text: list[str]):
+        """Return float32 arrays and account for usage exactly once."""
+        from .array_format import embed_float32
+
+        return await embed_float32(self, text)
+
     async def embed_text(self, text: list[str]) -> list[Vector]:
         request_size = self._request_size()
         semaphore = _request_semaphore.get()

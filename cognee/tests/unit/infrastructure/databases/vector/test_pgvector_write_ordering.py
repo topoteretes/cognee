@@ -19,6 +19,7 @@ import threading
 from contextlib import asynccontextmanager
 from uuid import UUID, uuid4
 
+import numpy as np
 import pytest
 
 pytest.importorskip("asyncpg")
@@ -50,9 +51,17 @@ class _Connection:
     def __init__(self, log):
         self.log = log
 
-    @asynccontextmanager
-    async def transaction(self):
-        yield
+    def transaction(self):
+        return self
+
+    async def start(self):
+        pass
+
+    async def commit(self):
+        pass
+
+    async def rollback(self):
+        pass
 
     async def executemany(self, statement, params):
         self.log.append((statement, list(params)))
@@ -62,9 +71,11 @@ class _Pool:
     def __init__(self, log):
         self.connection = _Connection(log)
 
-    @asynccontextmanager
     async def acquire(self):
-        yield self.connection
+        return self.connection
+
+    async def release(self, connection):
+        assert connection is self.connection
 
 
 def _adapter(log, schema=""):
@@ -130,7 +141,7 @@ async def test_create_data_points_sends_plain_rows_with_numeric_vectors():
     assert row_id == point.id
     assert json.loads(payload)["text"] == "hello"
     assert json.loads(payload)["belongs_to_set"] == ["A"]
-    assert vector == [0.1, 0.2, 0.3]
+    np.testing.assert_array_equal(vector, np.array([0.1, 0.2, 0.3], dtype=np.float32))
 
 
 @pytest.mark.asyncio
@@ -183,3 +194,40 @@ def test_row_order_is_the_uuid_btree_order():
     # Postgres orders uuid columns bytewise, which is the canonical text order.
     ids = [uuid4() for _ in range(200)]
     assert sorted(ids, key=_row_order) == sorted(ids, key=lambda i: UUID(str(i)).bytes)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_write_rolls_back_and_releases_pool_and_gate():
+    import asyncio
+
+    adapter = _adapter([])
+    calls = []
+
+    class Connection(_Connection):
+        async def executemany(self, statement, params):
+            raise asyncio.CancelledError()
+
+        async def rollback(self):
+            calls.append("rollback")
+
+    class Pool(_Pool):
+        async def release(self, connection):
+            calls.append("release")
+
+    pool = Pool([])
+    pool.connection = Connection([])
+
+    async def get_pool():
+        return pool
+
+    adapter._get_write_pool = get_pool
+    gate = asyncio.Semaphore(1)
+    with pytest.raises(asyncio.CancelledError):
+        await adapter._write_rows(
+            "test",
+            [{"id": uuid4(), "payload": {}, "vector": [1, 2, 3]}],
+            adapter._data_point_upsert_sql,
+            write_gate=gate,
+        )
+    assert calls == ["rollback", "release"]
+    assert not gate.locked()

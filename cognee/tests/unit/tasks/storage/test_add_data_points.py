@@ -320,6 +320,41 @@ def _provenance_ctx():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("graph_fails", [False, True])
+async def test_batch_writer_commits_graph_before_starting_vectors(monkeypatch, graph_fails):
+    from cognee.infrastructure.databases.unified import batch_writer
+
+    point = SimplePoint(text="owned")
+    unified, graph = _graph_provenance_unified(MagicMock())
+    monkeypatch.setattr(adp_module, "get_unified_engine", AsyncMock(return_value=unified))
+    monkeypatch.setattr(adp_module, "get_graph_from_model", AsyncMock(return_value=([point], [])))
+    order = []
+
+    async def write_graph(*args, **kwargs):
+        order.append("graph")
+        if graph_fails:
+            raise RuntimeError("graph transaction failed")
+
+    writer = SimpleNamespace(vector=unified.vector, write_graph=AsyncMock(side_effect=write_graph))
+    monkeypatch.setattr(batch_writer, "get_batch_writer", lambda g, v: writer)
+    nodes = AsyncMock(side_effect=lambda *args, **kwargs: order.append("vectors"))
+    edges = AsyncMock()
+    monkeypatch.setattr(adp_module, "index_data_points", nodes)
+    monkeypatch.setattr(adp_module, "index_graph_edges", edges)
+    if graph_fails:
+        with pytest.raises(RuntimeError, match="graph transaction failed"):
+            await add_data_points([point], ctx=_provenance_ctx())
+        nodes.assert_not_awaited()
+        edges.assert_not_awaited()
+    else:
+        await add_data_points([point], ctx=_provenance_ctx())
+        assert order == ["graph", "vectors"]
+        edges.assert_awaited_once()
+    graph.add_nodes.assert_not_awaited()
+    graph.add_edges.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @patch.object(adp_module, "upsert_edges")
 @patch.object(adp_module, "upsert_nodes")
 @patch.object(adp_module, "index_graph_edges")

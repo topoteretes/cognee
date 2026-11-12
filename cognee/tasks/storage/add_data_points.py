@@ -380,6 +380,14 @@ async def add_data_points(
             pipeline_run_id=fold_run_arg,
         )
 
+    from cognee.infrastructure.databases.unified.batch_writer import get_batch_writer
+
+    batch_writer = (
+        None if graph_only or use_hybrid else get_batch_writer(graph_engine, vector_engine)
+    )
+    if batch_writer is not None:
+        vector_engine = batch_writer.vector
+
     if use_hybrid:
         # Hybrid backends embed inside the graph write, so the already embedded
         # nodes are written without vectors and only the rest with them.
@@ -397,6 +405,27 @@ async def add_data_points(
         await _write_edges_grouped(edges)
         if custom_edges:
             await _write_custom_edges()
+    elif batch_writer is not None and stores_provenance:
+        await batch_writer.write_graph(
+            nodes,
+            edges,
+            custom_edges=custom_edges or [],
+            node_refs=ownership.node_owners if ownership else {},
+            edge_refs=ownership.edge_owners if ownership else {},
+            default_ref=fold_source_ref_key,
+            pipeline_run_id=fold_run_arg,
+        )
+        slots = indexing_semaphore(vector_engine)
+        work = [index_data_points(nodes_to_embed, vector_engine=vector_engine, semaphore=slots)]
+        if index_edges:
+            work.append(
+                index_graph_edges(
+                    edges + custom_edges if custom_edges else edges,
+                    vector_engine=vector_engine,
+                    semaphore=slots,
+                )
+            )
+        await _run_to_completion(*work)
     else:
         await _write_nodes_grouped()
 
