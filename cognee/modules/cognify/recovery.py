@@ -36,7 +36,10 @@ logger = get_logger("cognify.recovery")
 STALE_RUN_MIN_AGE_SECONDS = int(os.getenv("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS", "3600"))
 if STALE_RUN_MIN_AGE_SECONDS < 0:
     raise ValueError("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS must be nonnegative")
-RECOVERY_POLL_SECONDS = 60
+# How often the API looks again for abandoned runs. A run is not eligible before
+# STALE_RUN_MIN_AGE_SECONDS, so a shorter interval closes one barely sooner,
+# and every look reads the newest row of every run.
+RECOVERY_POLL_SECONDS = 300
 
 # The rollback each pipeline supplies for its own failed runs (the same policy
 # run_tasks applies when a run errors inline). A pipeline without an entry has

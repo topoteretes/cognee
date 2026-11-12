@@ -162,7 +162,9 @@ async def clean_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(
         gd_source,
         "extract_file_content",
-        lambda service, file_id, mime_type, name: "Acme is a company based in Springfield.",
+        lambda service, file_id, mime_type, name, **_kwargs: (
+            "Acme is a company based in Springfield."
+        ),
     )
 
     await cognee.prune.prune_data()

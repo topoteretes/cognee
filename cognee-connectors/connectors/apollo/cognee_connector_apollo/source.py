@@ -194,6 +194,15 @@ def _record_path(collection: str, record_id: str) -> str:
     return f"/{collection}/{record_id}"
 
 
+class _Transient(Exception):
+    """One failed attempt worth another: a network error (``response`` None) or a 5xx answer."""
+
+    def __init__(self, response: Any, reason: str):
+        super().__init__(reason)
+        self.response = response
+        self.reason = reason
+
+
 class ApolloClient:
     """Minimal synchronous REST client for Apollo.
 
@@ -201,7 +210,9 @@ class ApolloClient:
     error answer included, ``rate_limit`` holds the requests left in the minute, hourly and
     daily windows under that endpoint's label (``_endpoint``):
     ``{"/contacts/{id}": {"minute": 40, "hourly": 390, "daily": 1900}}``. Tests and hosts can
-    pass any object with the same ``request`` method and ``rate_limit`` attribute instead.
+    pass any object with the same ``request`` method and ``rate_limit`` attribute instead:
+    ``request`` takes a ``check_active`` keyword and must call it before each request attempt,
+    retries and waits included.
     """
 
     def __init__(self, api_key: str, *, sleep: Callable[[float], None] = time.sleep):
@@ -224,6 +235,7 @@ class ApolloClient:
         *,
         body: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        check_active: Callable[[], None] | None = None,
     ) -> Any:
         import requests
 
@@ -232,8 +244,8 @@ class ApolloClient:
             "Content-Type": "application/json",
             "Cache-Control": "no-cache",
         }
-        for attempt in range(_RETRIES):
-            last = attempt == _RETRIES - 1
+
+        def attempt() -> Any:
             try:
                 response = requests.request(
                     method,
@@ -246,18 +258,30 @@ class ApolloClient:
                     allow_redirects=False,
                 )
             except requests.RequestException as exc:
-                if last:
-                    # `from None` keeps the cause out of this error, not out of __context__,
-                    # which dlt's trace file still reads (dlt 1.30.0, pipeline/trace.py): the
-                    # key is kept out of an exception by the check in __init__.
-                    raise ApolloAPIError(f"Apollo request failed: {type(exc).__name__}") from None
-                self._sleep(2**attempt)
-                continue
+                raise _Transient(None, type(exc).__name__) from None
             self._read_rate_limit(response, path)
-            if response.status_code >= 500 and not last:
-                self._sleep(2**attempt)
-                continue
+            if response.status_code >= 500:
+                raise _Transient(response, f"HTTP {response.status_code}")
             return self._parse(response, path)
+
+        try:
+            return dlt_utils.with_retries(
+                attempt,
+                retry_on=(_Transient,),
+                delay=lambda error, number: 2**number,
+                attempts=_RETRIES,
+                check_active=check_active,
+                sleep=self._sleep,
+            )
+        except _Transient as error:
+            # The last attempt failed the same way: a 5xx answer is read like any other
+            # answer, a network error is reported by type.
+            if error.response is None:
+                # `from None` keeps the cause out of this error, not out of __context__,
+                # which dlt's trace file still reads (dlt 1.30.0, pipeline/trace.py): the
+                # key is kept out of an exception by the check in __init__.
+                raise ApolloAPIError(f"Apollo request failed: {error.reason}") from None
+            return self._parse(error.response, path)
 
     def _read_rate_limit(self, response: Any, path: str) -> None:
         """Keep the windows an answer reports under the endpoint it came from.
@@ -561,6 +585,7 @@ class _Walker:
 
     # -- requests ----------------------------------------------------------
     def _call(self, method: str, path: str, **kwargs: Any) -> Any:
+        # Before the budget, so a revoked run ends as revoked, not as a resumable cut.
         if self.check_active is not None:
             self.check_active()
         self._check_budget(path)
@@ -568,7 +593,8 @@ class _Walker:
         # and this count are about what the run asks for, and the client owns its retries.
         self.stats["requests"] += 1
         try:
-            return self.client.request(method, path, **kwargs)
+            # The client checks before every retry and wait, so none outlives a revoked run.
+            return self.client.request(method, path, check_active=self.check_active, **kwargs)
         except ApolloRateLimitedError:
             raise _CutShortError("rate_limit") from None
         except ApolloAuthError:
@@ -992,7 +1018,8 @@ def apollo_source(
             other's records, and a run refuses state written for another Apollo team.
         api_key: Apollo API key. Used to build the client when ``service`` is omitted.
         service: Pre-built client (see :func:`build_apollo_service`). Mainly an
-            injection point for tests and hosts.
+            injection point for tests and hosts. Its ``request`` takes a ``check_active``
+            keyword and must call it before each request attempt, retries and waits included.
         check_active: Optional host authorization checkpoint, called before each
             request.
         include: Which of ``"contacts"``, ``"accounts"`` and ``"sequences"`` to sync.
