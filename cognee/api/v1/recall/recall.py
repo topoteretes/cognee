@@ -15,6 +15,7 @@ from cognee.infrastructure.llm.config import LLMConfig
 from cognee.memory.entries import normalize_scope
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.observability import (
     COGNEE_RECALL_ROUTE_RULE,
     COGNEE_RECALL_SCOPE,
@@ -46,6 +47,7 @@ from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
+from cognee.modules.search.methods.node_name_scope import node_name_scope
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.search.types.SearchType import resolve_deprecated_search_type
@@ -440,6 +442,7 @@ async def recall(
     scope: str | list[str] | None = None,
     system_prompt: str | None = None,
     system_prompt_path: str = "answer_simple_question.txt",
+    node_type: type | None = NodeSet,
     node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
     # only_context / verbose inspect retriever-specific shapes. Pin query_type:
@@ -488,6 +491,15 @@ async def recall(
         top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
             automatically. If False, fall back to HYBRID_COMPLETION.
+        node_type: What the names in ``node_name`` are, as in ``search()``:
+            ``NodeSet`` (the default) means node-set tags; any other graph node
+            type (``SchemaColumn``, ``TextDocument``, ``Entity``, ...) means the
+            named nodes of that type and their one-hop neighbours. The router
+            then picks only a type that applies a graph scope (``TEMPORAL`` and
+            ``CODING_RULES`` apply node sets only); a pinned type that cannot
+            raises ``QueryValidationError``. ``None`` with names raises too.
+        node_name: Names to scope the graph search to, read according to
+            ``node_type``. Session sources are not scoped by it.
         response_model: Pydantic model class for structured completion output.
             Forwarded to the retriever, which validates the LLM answer against
             it; each result then carries the validated payload as a dict in its
@@ -594,6 +606,11 @@ async def recall(
             ),
             name="InvalidCodeQueryError",
         )
+    # Names without a type are refused here, before any lane runs, so a call is
+    # accepted or refused the same way locally and over serve(), whatever its
+    # scope: the graph lane would raise the same error later, a session-only call
+    # would silently drop the names, and the wire cannot tell None from omitted.
+    node_name_scope(node_type, node_name)
     # "on_empty" means: go back to the source database only when cognee lacks
     # context — so tools must observe every other source's results first.
     if tools_trigger == "on_empty" and "tools" in sources:
@@ -645,6 +662,7 @@ async def recall(
                 top_k=top_k,
                 scope=forward_scope,
                 system_prompt=system_prompt,
+                node_type=node_type,
                 node_name=node_name,
                 only_context=only_context,
                 session_id=session_id,
@@ -744,7 +762,11 @@ async def recall(
                 # Cypher off means no Cypher types. Keyed on LLM availability, not on
                 # the extractor that built the graph. An explicit query_type is not
                 # rerouted; with no LLM a completion type runs with only_context=True.
-                constraints = RoutingConstraints.from_config(llm_config)
+                # A node_name filter also limits routing to the types that apply it,
+                # as node_type reads it: node-set tags, or a typed graph scope.
+                constraints = RoutingConstraints.from_config(
+                    llm_config, node_type=node_type, node_name=node_name
+                )
                 fallback_decision = default_route(constraints)
 
                 # routed_rule is set only when the router chose the type, so the
@@ -899,6 +921,7 @@ async def recall(
                         system_prompt_path=system_prompt_path,
                         system_prompt=system_prompt,
                         top_k=top_k,
+                        node_type=node_type,
                         node_name=node_name,
                         node_name_filter_operator=node_name_filter_operator,
                         only_context=search_only_context,

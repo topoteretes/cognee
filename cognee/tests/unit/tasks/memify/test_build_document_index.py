@@ -345,10 +345,12 @@ async def test_a_rebuilt_root_relinks_every_surviving_bucket(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_removing_a_document_deletes_its_bucket_and_the_root_by_id(monkeypatch):
+@pytest.mark.parametrize("had_index", [True, False])
+async def test_removing_a_document_deletes_its_bucket_and_the_root_by_id(monkeypatch, had_index):
     """Explicit ids, so it works on a ledger graph as on a graph-provenance one:
     the bucket id derives from the Data row like the routing row's, and the root
-    names every document."""
+    names every document. It reports whether any of them existed: once they are
+    deleted nothing else tells an emptied index from a dataset never indexed."""
     from cognee.tasks.memify.global_context_index.constants import (
         GLOBAL_CONTEXT_SUMMARY_COLLECTION,
     )
@@ -361,6 +363,10 @@ async def test_removing_a_document_deletes_its_bucket_and_the_root_by_id(monkeyp
     calls = []
 
     class Graph:
+        async def get_nodes(self, node_ids):
+            calls.append(("lookup", list(node_ids)))
+            return [{"id": node_ids[-1], "type": "GlobalContextSummary"}] if had_index else []
+
         async def delete_nodes(self, node_ids):
             calls.append(("graph", list(node_ids)))
 
@@ -373,11 +379,12 @@ async def test_removing_a_document_deletes_its_bucket_and_the_root_by_id(monkeyp
 
     monkeypatch.setattr(persist_module, "get_unified_engine", fake_engine)
 
-    await persist_module.remove_document_index(dataset_id, [data_id])
+    assert await persist_module.remove_document_index(dataset_id, [data_id]) is had_index
 
     bucket = create_document_bucket_id(str(dataset_id), str(data_id))
     root = create_root_summary_id(str(dataset_id))
     assert calls == [
+        ("lookup", [str(bucket), str(root)]),
         ("graph", [str(bucket), str(root)]),
         ("vector", GLOBAL_CONTEXT_SUMMARY_COLLECTION, [bucket, root]),
     ]

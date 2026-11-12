@@ -51,13 +51,17 @@ from .extractor import (
     require_gliner2,
 )
 from .mapping import map_gliner_result
+from .remote import RemoteGlinerAdapter, create_remote_adapter
 from .schema import (
+    LABEL_BANK_PROBE_SCHEMA,
+    MAX_SKETCH_CHARS,
     MAX_SKETCH_WORDS,
     GlinerSchema,
     LabelSpec,
     make_document_sketch,
     resolve_schema,
     schema_from_label_bank,
+    schema_from_probe_result,
 )
 from .summary import build_text_summary
 
@@ -73,6 +77,8 @@ class GlinerRunStats:
     candidate_edges: int = 0
     kept_edges: int = 0
     schemas_by_document: dict[str, GlinerSchema] = field(default_factory=dict)
+    #: The model a remote worker reported serving (None for local extraction).
+    model: str | None = None
 
     @property
     def dropped_edges(self) -> int:
@@ -104,8 +110,13 @@ async def prepare_gliner_schema(
     model_name: str = DEFAULT_MODEL,
     threshold: float = DEFAULT_THRESHOLD,
     chunker=TextChunker,
+    remote: RemoteGlinerAdapter | None = None,
 ) -> list[Document]:
-    """Attach one closed schema to each document before it is chunked."""
+    """Attach one closed schema to each document before it is chunked.
+
+    With ``remote`` the label-bank probe runs on the worker instead of a local
+    model (``model_name`` is then the worker's to choose).
+    """
     extractor = None
     for document in documents:
         if isinstance(document, (ImageDocument, AudioDocument)):
@@ -114,23 +125,44 @@ async def prepare_gliner_schema(
             )
         document_schema = schema
         if document_schema.is_empty:
-            if extractor is None:
-                extractor = await get_extractor(model_name)
-            model_max_words = getattr(getattr(extractor, "config", None), "max_len", None)
-            sketch_max_words = min(MAX_SKETCH_WORDS, model_max_words or MAX_SKETCH_WORDS)
+            sketch_max_chars = MAX_SKETCH_CHARS
+            if remote is not None:
+                # The worker publishes no max_len; the default model's (4096)
+                # is above the sketch cap, so the cap is what applies locally too.
+                sketch_max_words = MAX_SKETCH_WORDS
+                # The probe is one unwindowed input: keep the sketch within the
+                # worker's per-input limit, or the worker rejects the document.
+                readiness = await remote.ensure_ready()
+                max_text_chars = readiness.limits.max_text_chars
+                if max_text_chars is not None:
+                    sketch_max_chars = min(sketch_max_chars, max_text_chars)
+            else:
+                if extractor is None:
+                    extractor = await get_extractor(model_name)
+                model_max_words = getattr(getattr(extractor, "config", None), "max_len", None)
+                sketch_max_words = min(MAX_SKETCH_WORDS, model_max_words or MAX_SKETCH_WORDS)
             sketch = ""
             async for chunk in document.read(
                 max_chunk_size=max_chunk_size,
                 chunker_cls=chunker,
             ):
                 text = f"{sketch}\n{chunk.text}" if sketch else chunk.text
-                sketch = make_document_sketch(text, max_words=sketch_max_words)
-            document_schema = await asyncio.to_thread(
-                schema_from_label_bank,
-                extractor,
-                sketch,
-                threshold=threshold,
-            )
+                sketch = make_document_sketch(
+                    text, max_chars=sketch_max_chars, max_words=sketch_max_words
+                )
+            if remote is not None:
+                # A blank sketch sends nothing and probes as empty, as locally.
+                probe = await remote.extract_once(
+                    sketch, LABEL_BANK_PROBE_SCHEMA, threshold=threshold
+                )
+                document_schema = schema_from_probe_result(probe)
+            else:
+                document_schema = await asyncio.to_thread(
+                    schema_from_label_bank,
+                    extractor,
+                    sketch,
+                    threshold=threshold,
+                )
 
         document._gliner_schema = document_schema
         logger.info(
@@ -152,6 +184,7 @@ async def extract_graph_and_summarize_with_gliner(
     config: Config | None = None,
     chunk_attachment: Literal["direct", "all"] | None = None,
     ctx=None,
+    remote: RemoteGlinerAdapter | None = None,
 ) -> list[TextSummary]:
     """One batched GLiNER extract per task batch: writes the chunk graphs, returns summaries.
 
@@ -159,7 +192,8 @@ async def extract_graph_and_summarize_with_gliner(
     ``extract_content_graph`` and no ``extract_summary`` calls are made; the
     graphs are handed to ``extract_graph_from_data`` through its
     ``calculate_chunk_graphs`` hook so post-extraction ontology matching and
-    chunk attachment behave exactly as on the LLM path.
+    chunk attachment behave exactly as on the LLM path. With ``remote`` the
+    model call runs on a gliner_worker; everything else stays here.
     """
     if not isinstance(data_chunks, list):
         raise InvalidDataChunksError("must be a list of DocumentChunk.")
@@ -175,6 +209,16 @@ async def extract_graph_and_summarize_with_gliner(
     texts = [chunk.text for chunk in data_chunks]
     if schema.is_empty:
         results = [{} for _ in texts]
+    elif remote is not None:
+        results = await remote.extract_batch(
+            texts,
+            schema,
+            threshold=options.threshold,
+            batch_size=options.batch_size,
+            window_words=options.window_words,
+            window_overlap_words=options.window_overlap_words,
+        )
+        stats.model = remote.model
     else:
         extractor = await get_extractor(options.model_name)
         results = await extract_batch_async(
@@ -215,7 +259,7 @@ async def extract_graph_and_summarize_with_gliner(
 
 def build_gliner_extraction_task(
     *,
-    model_name: str = DEFAULT_MODEL,
+    model_name: str | None = None,
     threshold: float = DEFAULT_THRESHOLD,
     gliner_batch_size: int = DEFAULT_BATCH_SIZE,
     window_words: int = DEFAULT_WINDOW_WORDS,
@@ -224,17 +268,21 @@ def build_gliner_extraction_task(
     config: Config | None = None,
     chunk_attachment: Literal["direct", "all"] | None = None,
     stats: GlinerRunStats | None = None,
+    remote: RemoteGlinerAdapter | None = None,
 ) -> Task:
     """Build only the GLiNER extract+summarize ``Task``.
 
     This is the task ``get_gliner_demo_tasks`` places right before the final
-    ``add_data_points`` and the one it uses as its extraction step. Raises
-    :class:`GlinerNotInstalledError` when ``gliner2`` is not installed and
-    ``ValueError`` on bad options.
+    ``add_data_points`` and the one it uses as its extraction step.
+    ``model_name`` defaults to :data:`DEFAULT_MODEL` locally; with ``remote`` a
+    given one must be what the worker serves (else the run fails with
+    :class:`GlinerWorkerModelMismatchError`). Raises
+    :class:`GlinerNotInstalledError` when ``gliner2`` is not installed (and no
+    ``remote`` worker is given) and ``ValueError`` on bad options.
     """
-    require_gliner2()
+    _require_model(remote, model_name)
     options = GlinerOptions(
-        model_name=model_name,
+        model_name=model_name or DEFAULT_MODEL,
         threshold=threshold,
         batch_size=gliner_batch_size,
         window_words=window_words,
@@ -246,8 +294,9 @@ def build_gliner_extraction_task(
         options=options,
         config=config,
         chunk_attachment=chunk_attachment,
+        remote=remote,
         task_config={"batch_size": chunks_per_batch},
-        needs_llm=False,  # local model; a pipeline of needs_llm=False tasks skips the LLM probe
+        needs_llm=False,  # GLiNER model; a pipeline of needs_llm=False tasks skips the LLM probe
     )
 
 
@@ -257,13 +306,15 @@ def build_gliner_schema_task(
     *,
     ontology_file_path: str | None = None,
     ontology_resolver=None,
-    model_name: str = DEFAULT_MODEL,
+    model_name: str | None = None,
     threshold: float = DEFAULT_THRESHOLD,
     max_chunk_size: int,
     chunker=TextChunker,
+    remote: RemoteGlinerAdapter | None = None,
 ) -> Task:
-    """Build the document-level schema preparation task."""
-    require_gliner2()
+    """Build the document-level schema preparation task (``model_name`` as in
+    :func:`build_gliner_extraction_task`)."""
+    _require_model(remote, model_name)
     schema = resolve_schema(
         entity_types,
         relation_types,
@@ -274,11 +325,20 @@ def build_gliner_schema_task(
         prepare_gliner_schema,
         schema=schema,
         max_chunk_size=max_chunk_size,
-        model_name=model_name,
+        model_name=model_name or DEFAULT_MODEL,
         threshold=threshold,
         chunker=chunker,
+        remote=remote,
         needs_llm=False,
     )
+
+
+def _require_model(remote: RemoteGlinerAdapter | None, model_name: str | None) -> None:
+    """Locally: the runtime must be installed. Remotely: an explicit model must be served."""
+    if remote is None:
+        require_gliner2()
+    elif model_name is not None:
+        remote.require_model(model_name)
 
 
 async def get_gliner_demo_tasks(
@@ -286,7 +346,7 @@ async def get_gliner_demo_tasks(
     relation_types: LabelSpec | None = None,
     *,
     ontology_file_path: str | None = None,
-    model_name: str = DEFAULT_MODEL,
+    model_name: str | None = None,
     threshold: float = DEFAULT_THRESHOLD,
     gliner_batch_size: int = DEFAULT_BATCH_SIZE,
     window_words: int = DEFAULT_WINDOW_WORDS,
@@ -313,8 +373,16 @@ async def get_gliner_demo_tasks(
     are LLM-free. With ``early_chunk_indexing`` (default: the
     ``EARLY_CHUNK_INDEXING`` setting) the indexing pipeline stored the chunks
     before this run, as on the LLM route, and this list finds them in the
-    vector store instead of embedding them again. Raises :class:`GlinerNotInstalledError` when ``gliner2`` is
-    not installed.
+    vector store instead of embedding them again.
+
+    With ``COGNEE_GLINER_TRANSPORT`` set to a remote transport, the model calls
+    go to the gliner_worker at ``COGNEE_GLINER_ENDPOINT`` (see
+    :mod:`cognee.tasks.graph.gliner_demo.remote`): its readiness, model and
+    limits are checked here, before any document is read, and ``gliner2`` need
+    not be installed. ``model_name`` then only checks the worker's model (it
+    defaults to :data:`DEFAULT_MODEL` locally and to whatever the worker serves
+    remotely). Otherwise raises :class:`GlinerNotInstalledError` when
+    ``gliner2`` is not installed.
     """
     cognify_config = get_cognify_config()
     chunks_per_batch = resolve_chunks_per_batch(chunks_per_batch)
@@ -330,6 +398,12 @@ async def get_gliner_demo_tasks(
         ontology_config["ontology_resolver"] = ontology_resolver
         config = {**(config or {}), "ontology_config": ontology_config}
 
+    remote = create_remote_adapter()
+    if remote is not None:
+        if model_name is not None:
+            remote.require_model(model_name)
+        await remote.ensure_ready()
+
     max_chunk_size = await resolve_chunk_size(chunk_size)
     schema_task = build_gliner_schema_task(
         entity_types,
@@ -339,6 +413,7 @@ async def get_gliner_demo_tasks(
         threshold=threshold,
         max_chunk_size=max_chunk_size,
         chunker=chunker,
+        remote=remote,
     )
     extraction_task = build_gliner_extraction_task(
         model_name=model_name,
@@ -350,6 +425,7 @@ async def get_gliner_demo_tasks(
         config=config,
         chunk_attachment=chunk_attachment,
         stats=stats,
+        remote=remote,
     )
 
     # The chunking step the indexing pipeline uses too, so both runs cut the

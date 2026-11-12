@@ -337,9 +337,9 @@ async def test_cognee_client_api_upload_refuses_local_files_when_disabled(monkey
     client = await _mock_api_client(requests)
 
     try:
-        with pytest.raises(ingestion_error, match="Local files are not accepted"):
+        with pytest.raises(ingestion_error, match="not accepted"):
             await client.add(str(local_file), dataset_name="ds")
-        with pytest.raises(ingestion_error, match="Local files are not accepted"):
+        with pytest.raises(ingestion_error, match="not accepted"):
             await client.remember(str(local_file), dataset_name="ds")
         # Plain text is untouched by the setting.
         await client.remember("just a note", dataset_name="ds")

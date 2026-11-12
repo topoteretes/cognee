@@ -29,12 +29,23 @@ logger = get_logger()
 
 QUERY = "Who did Ada Lovelace collaborate with?"
 
+# A Mem0 export in the shape of the OSS get_all(): one short memory per item.
+MEM0_MEMORIES = [
+    {"id": "mem-tea", "memory": "Grace Hopper drinks green tea every morning.", "user_id": "grace"},
+    {"id": "mem-navy", "memory": "Grace Hopper served in the US Navy Reserve.", "user_id": "grace"},
+]
 
-def build_zep_export(path: pathlib.Path) -> None:
+
+def build_zep_export(path: pathlib.Path) -> tuple[str, str, str]:
     """A realistic Zep/Graphiti graph export: UUID-keyed entities, edges by
     node uuid, one episode. Two same-named entities and two facts that
-    resolve onto one edge key exercise merging + dedup."""
+    resolve onto one edge key exercise merging + dedup.
+
+    Returns the Zep ids that survive the merge and dedup (the first wins):
+    Ada Lovelace's, Charles Babbage's and the collaboration fact's.
+    """
     ada_one, ada_two, babbage = str(uuid4()), str(uuid4()), str(uuid4())
+    collaboration = str(uuid4())
     export = {
         "episodes": [
             {
@@ -51,7 +62,7 @@ def build_zep_export(path: pathlib.Path) -> None:
         ],
         "edges": [
             {
-                "uuid": str(uuid4()),
+                "uuid": collaboration,
                 "source_node_uuid": ada_one,
                 "target_node_uuid": babbage,
                 "name": "COLLABORATED_WITH",
@@ -67,6 +78,72 @@ def build_zep_export(path: pathlib.Path) -> None:
         ],
     }
     path.write_text(json.dumps(export), encoding="utf-8")
+    return ada_one, babbage, collaboration
+
+
+async def _assert_zep_origins_exported(ada_id: str, babbage_id: str, collaboration_id: str):
+    """A cognee export of the Zep import still names each memory's Zep origin."""
+    from cognee.modules.migration.cogx import COGXOrigin, read_archive
+
+    with tempfile.TemporaryDirectory() as directory:
+        archive = pathlib.Path(directory) / "zep_cogx"
+        await cognee.export("zep_import", format="cogx", destination=archive)
+        records = list(read_archive(archive))
+    origins = {
+        (record.kind, getattr(record, "name", None) or getattr(record, "predicate", None)): (
+            record.origin
+        )
+        for record in records
+        if record.kind in ("entity", "fact")
+    }
+    assert origins[("entity", "Ada Lovelace")] == COGXOrigin(system="zep", id=ada_id)
+    assert origins[("entity", "Charles Babbage")] == COGXOrigin(system="zep", id=babbage_id)
+    assert origins[("fact", "COLLABORATED_WITH")] == COGXOrigin(
+        system="zep", id=collaboration_id
+    ), "The deduplicated fact must keep the origin of the fact that won."
+
+
+async def _wipe_store():
+    """Reset to an empty store, as on a machine that never ran Cognee."""
+    import cognee.modules.migrations.startup as migrations_startup
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    # Migrations run once per process; a fresh machine runs them again.
+    migrations_startup._startup_migrations_done = False
+
+
+def _document_origins(archive: pathlib.Path) -> set[tuple[str, str]]:
+    from cognee.modules.migration.cogx import read_archive
+
+    return {
+        (record.origin.system, record.origin.id)
+        for record in read_archive(archive)
+        if record.kind == "document"
+    }
+
+
+async def _check_mem0_roundtrip():
+    """Mem0 -> cognee (re-derive, the default) -> COGX -> fresh cognee -> COGX:
+    the chunk cognified from each Mem0 memory keeps that memory's Mem0 origin."""
+    from cognee.modules.migration.sources.cogx_archive import COGXArchiveSource
+    from cognee.modules.migration.sources.mem0 import Mem0Source
+
+    expected = {("mem0", memory["id"]) for memory in MEM0_MEMORIES}
+    await _wipe_store()
+    result = await cognee.remember(Mem0Source(MEM0_MEMORIES), dataset_name="mem0_import")
+    assert result.status == "completed", f"Mem0 import did not complete: {result.status!r}"
+
+    with tempfile.TemporaryDirectory() as directory:
+        first = pathlib.Path(directory) / "mem0_cogx"
+        await cognee.export("mem0_import", format="cogx", destination=first)
+        assert _document_origins(first) == expected, "Chunks lost their Mem0 origin."
+
+        await _wipe_store()
+        await cognee.remember(COGXArchiveSource(first), dataset_name="mem0_import")
+        second = pathlib.Path(directory) / "mem0_cogx_again"
+        await cognee.export("mem0_import", format="cogx", destination=second)
+        assert _document_origins(second) == expected, "A cognee copy lost the Mem0 origin."
 
 
 async def main():
@@ -87,7 +164,7 @@ async def main():
 
     with tempfile.TemporaryDirectory() as temporary_directory:
         export_path = pathlib.Path(temporary_directory) / "zep_export.json"
-        build_zep_export(export_path)
+        zep_ids = build_zep_export(export_path)
 
         source = ZepSource(str(export_path), mode="preserve")
         result = await cognee.remember(source, dataset_name="zep_import")
@@ -126,7 +203,10 @@ async def main():
     assert len(results) != 0, "Search on the imported external graph returned nothing."
     logger.info("Search results: %s", results)
 
-    print("External source import e2e passed: Zep export -> import -> search.")
+    await _assert_zep_origins_exported(*zep_ids)
+    await _check_mem0_roundtrip()
+
+    print("External source import e2e passed: Zep and Mem0 -> import -> search/export.")
 
 
 if __name__ == "__main__":

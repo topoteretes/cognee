@@ -44,8 +44,9 @@ from .dlt_utils import (
     STRUCTURE_COLUMN,
     column_selected,
     document_source_tag,
+    document_write_disposition,
 )
-from .ingest_dlt_source import ingest_dlt_source
+from .ingest_dlt_source import ingest_dlt_source, require_valid_write_disposition
 
 logger = get_logger("resolve_dlt_sources")
 
@@ -155,7 +156,10 @@ async def resolve_dlt_sources(
         return data, None
 
     primary_key = kwargs.get("primary_key", None)
+    # "replace" when the caller named none. Document sources then follow what
+    # their resources declare instead (document_write_disposition).
     write_disposition = kwargs.get("write_disposition", "replace")
+    write_disposition_passed = "write_disposition" in kwargs
     query = kwargs.get("query", None)
     max_rows_per_table = kwargs.get("max_rows_per_table")
     column_value_columns = kwargs.get("column_value_columns")
@@ -168,7 +172,7 @@ async def resolve_dlt_sources(
     # CSVs are NOT handled here anymore: they route through the loader engine
     # (dlt_csv_loader, registered above csv_loader) inside the ingest
     # pipeline, which owns localization (s3/file://) and manifest emission.
-    data_list = _normalize_structured_inputs(data_list, query)
+    data_list = await _normalize_structured_inputs(data_list, query)
 
     dlt_items = []
     non_dlt_items = []
@@ -208,15 +212,20 @@ async def resolve_dlt_sources(
     relational_items = [i for i in dlt_items if not document_source_tag(i)]
 
     # --- Document-tagged sources: one text document per row -----------------
-    # Document sources honour the caller's write_disposition so both sync models
-    # work: "replace" for snapshot sources (Slack, each run rewrites staging with
-    # exactly the rows currently visible) and "merge" (+ a hard_delete tombstone
-    # column) for incremental sources that emit their own deletions (Google
-    # Drive's Changes API, Notion's re-walk against the ids it saw last run).
+    # Both sync models work: "replace" for snapshot sources (each run rewrites
+    # staging with exactly the rows currently visible) and "merge" (+ a
+    # hard_delete tombstone column) for incremental sources that emit their own
+    # deletions (Google Drive's Changes API, Notion's re-walk against the ids it
+    # saw last run). The caller's write_disposition wins; without one a source
+    # whose resources declare "merge" keeps it, and any other is replaced: an
+    # incremental run stages only the changed rows, so replacing them would make
+    # orphan cleanup forget every document the run did not touch.
     # Either way the whole set is read back (max_rows_per_table=0) so orphan
     # cleanup can forget rows that dropped out of the current corpus.
-    # write_disposition/primary_key default to "replace"/"id" (see the kwargs
-    # resolution above).
+    # primary_key defaults to "id".
+    # Checked here, before any staging run: ingest_dlt_source takes None as
+    # "the resources' own", which a caller's value must never reach it as.
+    require_valid_write_disposition(write_disposition)
     document_data_items: list[DataItem] = []
     document_fresh_ids: set[UUID] = set()
     document_scopes: set[tuple[str, str]] = set()
@@ -226,7 +235,9 @@ async def resolve_dlt_sources(
             dlt_item,
             dataset_name,
             primary_key=primary_key or "id",
-            write_disposition=write_disposition,
+            write_disposition=write_disposition
+            if write_disposition_passed
+            else document_write_disposition(dlt_item),
             max_rows_per_table=0,
         )
         loaded_tables = getattr(rows, "loaded_tables", {row.table_name for row in rows})
@@ -337,18 +348,26 @@ async def resolve_dlt_sources(
     return result, orphan_cleanup
 
 
-def _normalize_structured_inputs(data_list: list, query: str | None) -> list:
+async def _normalize_structured_inputs(data_list: list, query: str | None) -> list:
     """Wrap auto-detected structured inputs in dlt sources.
 
     Connection strings become dlt sql_database sources; everything else
     passes through unchanged. CSV inputs are deliberately NOT handled here —
     the loader engine's dlt_csv_loader owns them inside the ingest pipeline
     (with localization of s3:// and file:// locations built in).
+
+    Building a sql_database source connects to the database and reflects its
+    schema, a blocking call that can wait out a connect timeout, so it runs in a
+    worker thread (the operation-origin context travels with it).
     """
+    import asyncio
+
     normalized = []
     for item in data_list:
         if isinstance(item, str) and is_connection_string(item):
-            normalized.append(create_dlt_source_from_connection_string(item, query=query))
+            normalized.append(
+                await asyncio.to_thread(create_dlt_source_from_connection_string, item, query=query)
+            )
         else:
             normalized.append(item)
     return normalized
@@ -707,6 +726,8 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     content = _clean(row_data.get("content"))
     text = f"# {title}\n\n{content}".strip() if title else content
 
+    # A search with references carries this title and url in the row's chunk payloads
+    # (document_sources); Data.label is the caller's and Cognee Cloud's display name.
     system_metadata = {
         "source": source_tag,
         "title": title or None,
@@ -1243,7 +1264,7 @@ async def _delete_dlt_orphans(
         if purged:
             try:
                 retired = await retire_forgotten_decisions(dataset, user)
-                await delete_data([orphan for orphan, _ in purged], dataset.id)
+                await delete_data([orphan for orphan, _ in purged], dataset.id, user)
             except Exception:
                 failed.extend(orphan.id for orphan, _ in purged)
                 logger.warning(

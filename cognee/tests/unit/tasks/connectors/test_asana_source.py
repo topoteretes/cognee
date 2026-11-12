@@ -3033,7 +3033,9 @@ def test_a_retried_request_asks_the_host_per_attempt_and_counts_once_against_the
     )
 
     assert stats["requests"] == plain["requests"] and "failed_budget" not in stats
-    assert len(fake.calls) == len(asked) == plain["requests"] + 1
+    assert len(fake.calls) == plain["requests"] + 1
+    # One check per attempt, and one more before the retry's wait.
+    assert len(asked) == len(fake.calls) + 1
 
 
 def test_a_host_that_revokes_during_a_tasks_retry_stops_the_run_and_loses_that_task(monkeypatch):

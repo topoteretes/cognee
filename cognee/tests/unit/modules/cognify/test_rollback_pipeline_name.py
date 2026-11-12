@@ -103,5 +103,5 @@ async def test_the_handler_passes_the_pipeline_name_through_the_graph_provenance
             run_id, SimpleNamespace(id=DATASET_ID), pipeline_name="indexing_pipeline"
         )
 
-    unified.rollback_by_pipeline_run_id.assert_awaited_once_with(str(run_id), keep_data_ids=None)
+    unified.rollback_by_pipeline_run_id.assert_awaited_once_with(str(run_id), keep_data_ids=set())
     assert reset.await_args.args[2:] == (DATASET_ID, "indexing_pipeline")

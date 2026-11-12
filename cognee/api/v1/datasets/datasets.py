@@ -595,7 +595,7 @@ class datasets:
                         user.id,
                     )
 
-                    await delete_data([data], dataset_id)
+                    await delete_data([data], dataset_id, user)
 
                     # Observe the outcome, don't assume it: a row that survived
                     # the delete must never come back as a success receipt.
