@@ -709,3 +709,28 @@ async def test_no_database_is_created_without_access_control_or_outside_pgvector
     )
     await store_module.ensure_default_store()
     assert created == []
+
+
+@pytest.mark.asyncio
+async def test_routing_width_check_awaits_the_engines_vector_size():
+    """A worker-backed engine's size is awaited, never asked with the blocking call."""
+    from cognee.modules.search.dataset_routing.store import routing_width_matches
+
+    class SelfSizingEmbedder:
+        async def resolve_vector_size(self):
+            return 4
+
+        def get_vector_size(self):  # would block the event loop on a remote worker
+            raise AssertionError("get_vector_size() must not be called from async code")
+
+    class Store:
+        embedding_engine = SelfSizingEmbedder()
+
+        def __init__(self, stored):
+            self.stored = stored
+
+        async def get_stored_vector_size(self):
+            return self.stored
+
+    assert await routing_width_matches(Store(4)) is True
+    assert await routing_width_matches(Store(8)) is False
