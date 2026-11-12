@@ -72,6 +72,12 @@ def _asana_service(access_token: str) -> Any:
     return build_asana_service(access_token)
 
 
+def _slack_service(access_token: str) -> Any:
+    from cognee.tasks.ingestion.connectors.slack import build_slack_service
+
+    return build_slack_service(access_token)
+
+
 _PROVIDERS: dict[str, _Provider] = {
     "google_drive": _Provider(
         prefix="google_drive_files",
@@ -121,6 +127,13 @@ _PROVIDERS: dict[str, _Provider] = {
         source_module="cognee.tasks.ingestion.connectors.asana",
         source_name="asana_source",
         service_builder=_asana_service,
+    ),
+    # One resource per channel: the scope is the channel id.
+    "slack": _Provider(
+        prefix="slack_channel",
+        source_module="cognee.tasks.ingestion.connectors.slack",
+        source_name="slack_source",
+        service_builder=_slack_service,
     ),
 }
 
@@ -486,6 +499,8 @@ async def sync_selected_resources(
 # This local API runs one worker. A multi-worker deployment must replace this
 # process-local guard with a durable job queue / distributed lease.
 _running_syncs: set[tuple[str, str]] = set()
+# Accounts whose running sync was asked to run once more (request_rerun_if_running).
+_rerun_requested: set[tuple[str, str]] = set()
 
 
 def sync_is_running(provider: str, account_id: str) -> bool:
@@ -528,7 +543,53 @@ def exclusive_sync(provider: str, account_id: str) -> Iterator[bool]:
 
 
 async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
-    """Serialize each account's DLT cursor and expose actual in-flight state."""
+    """Serialize each account's DLT cursor and expose actual in-flight state.
+
+    A second request while a sync runs is dropped, except one made through
+    :func:`request_rerun_if_running` (a changed selection): the sync then runs once more
+    when it returns, failed or not, so the change is applied without waiting for the
+    schedule. A failure followed by that run is already recorded on the connection; only
+    the last run's error is raised.
+    """
+    key = (provider, str(credential.provider_account_id))
+    with exclusive_sync(provider, credential.provider_account_id) as acquired:
+        if not acquired:
+            return
+        try:
+            while True:
+                _rerun_requested.discard(key)
+                try:
+                    await _run_sync_once(provider, credential, sync_source)
+                except Exception:
+                    if key not in _rerun_requested:
+                        raise
+                    logger.warning(
+                        "%s sync failed; running it again for a changed selection",
+                        provider,
+                        exc_info=True,
+                    )
+                    continue
+                if key not in _rerun_requested:
+                    return
+        finally:
+            _rerun_requested.discard(key)
+
+
+def request_rerun_if_running(provider: str, account_id: str) -> bool:
+    """Ask the account's running sync to run once more when it returns.
+
+    For a change the running sync may have read too early (a saved selection). Returns
+    ``False`` when no sync is running, so the caller starts one itself.
+    """
+    key = (provider, str(account_id))
+    if key not in _running_syncs:
+        return False
+    _rerun_requested.add(key)
+    return True
+
+
+async def _run_sync_once(provider: str, credential: Any, sync_source: Any) -> None:
+    """One sync of the account: progress, the outcome stamped on the connection."""
     from cognee.modules.integrations.credentials import (
         CredentialInactiveError,
         record_sync_result,
@@ -539,47 +600,43 @@ async def run_sync(provider: str, credential: Any, sync_source: Any) -> None:
     counts = {"scanned": 0, "skipped": 0, "failed": 0}
     progress = None
     try:
-        with exclusive_sync(provider, credential.provider_account_id) as acquired:
-            if not acquired:
-                return
-            async with track_sync(provider, credential) as progress:
-                await progress.report(phase="checking", counts=counts)
-                try:
-                    credential = await require_active_credential(credential)
-                    status, counts = await sync_source(credential, counts)
-                except Exception as exc:
-                    counts["failed"] = max(1, counts["failed"])
-                    # Store a safe category, never provider exception text (which may
-                    # include message IDs, URLs, or user content).
-                    message = str(exc).lower()
-                    if isinstance(exc, RateLimitedError) or any(
-                        term in message
-                        for term in ("ratelimitexceeded", "quota exceeded", "http 429")
-                    ):
-                        counts["failed_rate_limit"] = 1
-                    reason = (
-                        "connection_changed"
-                        if isinstance(exc, CredentialInactiveError)
-                        else "rate_limited"
-                        if counts.get("failed_rate_limit")
-                        else "provider_error"
-                    )
-                    await progress.finish("failed", counts=counts, reason=reason)
-                    await record_sync_result(credential, status="degraded", counts=counts)
-                    raise
-                await record_sync_result(credential, status=status, counts=counts)
-                partial = status == "degraded" or bool(counts.get("failed"))
-                await progress.finish(
-                    "partial" if partial else "succeeded",
-                    counts=counts,
-                    reason=(
-                        "rate_limited"
-                        if counts.get("failed_rate_limit")
-                        else "incomplete"
-                        if partial
-                        else None
-                    ),
+        async with track_sync(provider, credential) as progress:
+            await progress.report(phase="checking", counts=counts)
+            try:
+                credential = await require_active_credential(credential)
+                status, counts = await sync_source(credential, counts)
+            except Exception as exc:
+                counts["failed"] = max(1, counts["failed"])
+                # Store a safe category, never provider exception text (which may
+                # include message IDs, URLs, or user content).
+                message = str(exc).lower()
+                if isinstance(exc, RateLimitedError) or any(
+                    term in message for term in ("ratelimitexceeded", "quota exceeded", "http 429")
+                ):
+                    counts["failed_rate_limit"] = 1
+                reason = (
+                    "connection_changed"
+                    if isinstance(exc, CredentialInactiveError)
+                    else "rate_limited"
+                    if counts.get("failed_rate_limit")
+                    else "provider_error"
                 )
+                await progress.finish("failed", counts=counts, reason=reason)
+                await record_sync_result(credential, status="degraded", counts=counts)
+                raise
+            await record_sync_result(credential, status=status, counts=counts)
+            partial = status == "degraded" or bool(counts.get("failed"))
+            await progress.finish(
+                "partial" if partial else "succeeded",
+                counts=counts,
+                reason=(
+                    "rate_limited"
+                    if counts.get("failed_rate_limit")
+                    else "incomplete"
+                    if partial
+                    else None
+                ),
+            )
     except OutboundHttpDisabledError:
         if progress is None:
             # Refused at the entry: track_sync recorded the failed run, and this

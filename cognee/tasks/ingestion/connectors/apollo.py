@@ -51,7 +51,7 @@ Design
   ``failed_budget``, ``failed_auth``). Apollo counts per endpoint, so the quota that stops a
   run is the one of the endpoint it is about to call. It neither raises nor waits out a rate
   limit: ``dlt`` rolls the state of a failed run back, so a workspace too big for one window
-  would never finish, and waiting would hold the process-wide staging lock.
+  would never finish, and waiting would hold its dataset's staging lock.
 * **One team per resource_name.** The first run stores the team id Apollo reports, and a
   run under another team's key is refused, because it would forget the first team's rows.
 * **Key** is a plain Apollo API key. It lives in the client object only; errors carry

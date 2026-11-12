@@ -82,7 +82,7 @@
   "GET /api/v1/skills/",
   "GET /api/v1/skills/{skill_id}",
   "GET /api/v1/slack/channels",
-  "GET /api/v1/slack/history/{team_id}",
+  "GET /api/v1/slack/settings",
   "GET /api/v1/sync/status",
   "GET /api/v1/users/me",
   "GET /api/v1/users/{id}",
@@ -144,8 +144,6 @@
   "POST /api/v1/search",
   "POST /api/v1/settings",
   "POST /api/v1/skills",
-  "POST /api/v1/slack/history/{team_id}/import",
-  "POST /api/v1/slack/link",
   "POST /api/v1/sync",
   "POST /api/v1/users/get-user-id",
   "POST /api/v1/visualize/multi",
@@ -156,5 +154,5 @@
   "PUT /api/v1/integrations/{provider}/resources",
   "PUT /api/v1/integrations/{provider}/sync/policy",
   "PUT /api/v1/slack/channels",
-  "PUT /api/v1/slack/history/{team_id}/sync"
+  "PUT /api/v1/slack/settings"
 ]

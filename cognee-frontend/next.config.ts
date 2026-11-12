@@ -23,6 +23,23 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_IS_CLOUD_ENVIRONMENT:
       process.env.NEXT_PUBLIC_IS_CLOUD_ENVIRONMENT ?? "false",
+    // With the dev API proxy below, the browser calls the page's own origin
+    // (getLocalApiUrl), not a backend host of its own.
+    NEXT_PUBLIC_API_SAME_ORIGIN: process.env.COGNEE_DEV_API_PROXY ? "true" : "false",
+  },
+
+  // Opt-in, for testing OAuth providers that only accept HTTPS redirect URLs (Slack):
+  // with COGNEE_DEV_API_PROXY=http://localhost:8000 this server forwards the backend's
+  // routes, so one tunnel serves the UI, the API and the OAuth callback on one host and
+  // the install-nonce cookie set by `authorize` comes back with the callback. Unset, it
+  // adds nothing. The UI's own routes live under /api/<name>, never /api/v1.
+  async rewrites() {
+    const backend = process.env.COGNEE_DEV_API_PROXY?.replace(/\/+$/, "");
+    if (!backend) return [];
+    return [
+      { source: "/api/v1/:path*", destination: `${backend}/api/v1/:path*` },
+      { source: "/health", destination: `${backend}/health` },
+    ];
   },
 
   images: {

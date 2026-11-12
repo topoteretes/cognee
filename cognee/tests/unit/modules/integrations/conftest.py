@@ -6,6 +6,7 @@ import importlib
 import sqlite3
 from types import SimpleNamespace
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -24,6 +25,15 @@ _SYNC_POLICY_ENGINE_READERS = (
     "cognee.modules.integrations.sync_policy.tick",
     "cognee.modules.users.methods.get_visible_user_ids",
 )
+
+
+@pytest.fixture(autouse=True)
+def credentials_key(monkeypatch):
+    """A server configured with a credentials key, as connecting requires: the key encrypts
+    tokens and every integration's OAuth state is signed with a key derived from it. Tests
+    about a missing key remove it themselves."""
+    monkeypatch.setenv("INTEGRATION_CREDENTIALS_KEY", base64.b64encode(b"0" * 32).decode())
+    monkeypatch.delenv("INTEGRATION_CREDENTIALS_KEYS", raising=False)
 
 
 @pytest_asyncio.fixture
