@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import Field
 
 from cognee import __version__ as cognee_version
-from cognee.api.DTO import InDTO, OutDTO
+from cognee.api.DTO import InDTO, OutDTO, RetrieverSpecificConfig
 from cognee.api.sse import SSE_MEDIA_TYPE, sse_headers, wants_event_stream
 from cognee.api.v1.recall.recall import RecallResponse
 from cognee.api.v1.recall.recall_stream import begin_recall_stream
@@ -181,6 +181,7 @@ class RecallPayloadDTO(InDTO):
             "server-side."
         ),
     )
+    retriever_specific_config: RetrieverSpecificConfig = None
 
 
 def get_recall_router() -> APIRouter:
@@ -281,6 +282,10 @@ def get_recall_router() -> APIRouter:
         - **response_schema** (Optional[dict]): JSON Schema for structured
           completion output; validated results land in each result's
           ``structured`` field. 422 on schemas outside the supported subset.
+        - **retriever_specific_config** (Optional[dict]): Options for the retriever
+          behind search_type, as the SDK's ``recall(retriever_specific_config=...)``
+          takes them; known keys are checked for type and upper bound, and an invalid
+          value or ``response_model`` is rejected with 400 (send response_schema).
         - **contextProfile** (str): Profile to render for the 'session_context' scope: 'qa'
           (conversational) or 'agent' (tool/workflow). Ignored by other scopes. Defaults to 'qa'.
         - **toolConnections** (Optional[List[str]]): Names of authorized external database
@@ -341,6 +346,7 @@ def get_recall_router() -> APIRouter:
                 tool_connections=payload.tool_connections,
                 tools_trigger=payload.tools_trigger,
                 code_query=payload.code_query,
+                retriever_specific_config=payload.retriever_specific_config,
             )
 
         streaming = wants_event_stream(request.headers.get("accept"), payload.stream)
