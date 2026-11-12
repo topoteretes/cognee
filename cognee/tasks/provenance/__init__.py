@@ -1,3 +1,7 @@
-from .record_provenance import record_provenance
+from .record_provenance import (
+    provenance_tracking_enabled,
+    record_provenance,
+    record_provenance_at_storage,
+)
 
-__all__ = ["record_provenance"]
+__all__ = ["provenance_tracking_enabled", "record_provenance", "record_provenance_at_storage"]

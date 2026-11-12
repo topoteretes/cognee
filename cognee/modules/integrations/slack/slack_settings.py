@@ -24,8 +24,16 @@ class SlackSettings(IntegrationSettings):
     # Env: SLACK_SIGNING_SECRET
     signing_secret: str = ""
 
-    # Per-dataset selections remain opt-in. Disable this worker when an
-    # external scheduler calls sync_due_slack_history instead.
+    # Where Slack sends a member back after Sign in with Slack (member_link.py):
+    # the generic integrations callback of the ``slack_member`` provider,
+    # https://<host>/api/v1/integrations/slack_member/callback. It must be one of
+    # the app's registered redirect URLs. Env: SLACK_MEMBER_REDIRECT_URI
+    member_redirect_uri: str = ""
+
+    # The in-process tick that syncs every connection's selected channels every
+    # six hours (see sync.py). Disable it when an external scheduler calls
+    # sync_due_workspaces instead. The uninstall cleanup
+    # (forget_uninstalled_workspaces) runs either way. Env: SLACK_HISTORY_SYNC_ENABLED
     history_sync_enabled: bool = True
 
 

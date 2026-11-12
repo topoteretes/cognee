@@ -127,7 +127,8 @@ async def test_out_of_band_credentials_ride_the_environment(monkeypatch, tmp_pat
     ]
     assert "tok-SECRET" not in " ".join(clone_args)
     # ...and rides GIT_CONFIG_* as a basic-auth header instead.
-    assert clone_env["GIT_CONFIG_KEY_0"] == "http.extraHeader"
+    # Scoped to the repository's origin, so no other host ever receives it.
+    assert clone_env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraHeader"
     assert clone_env["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
 
 
@@ -151,7 +152,7 @@ async def test_out_of_band_credentials_apply_to_pulls_too(monkeypatch, tmp_path)
     # Bare pull against the (clean) stored remote; auth via the environment.
     assert pull_args == ["pull", "--ff-only"]
     assert pull_cwd == clone_dir
-    assert pull_env["GIT_CONFIG_KEY_0"] == "http.extraHeader"
+    assert pull_env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraHeader"
 
 
 @pytest.mark.asyncio

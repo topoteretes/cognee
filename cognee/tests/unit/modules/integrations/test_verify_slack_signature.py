@@ -74,3 +74,34 @@ def test_missing_signature_fails():
     timestamp = str(int(time.time()))
     assert not is_valid_slack_signature(b"payload", timestamp, "")
     assert not is_valid_slack_signature(b"payload", timestamp, None)
+
+
+@pytest.mark.parametrize("reason", ["http_timeout", None])
+def test_the_events_route_passes_slacks_retry_reason_on(reason):
+    """The events route hands ``X-Slack-Retry-Reason`` to the handler, which answers a
+    question Slack sends again after a slow ack only once."""
+    import importlib
+    import json
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    # The package's __init__ re-exports the function under the module's name.
+    router_module = importlib.import_module("cognee.api.v1.slack.routers.get_slack_router")
+
+    app = FastAPI()
+    app.include_router(router_module.get_slack_router(), prefix="/api/v1/slack")
+    body = json.dumps({"type": "event_callback", "team_id": "T1", "event": {}}).encode()
+    timestamp = str(int(time.time()))
+    headers = {"X-Slack-Request-Timestamp": timestamp, "X-Slack-Signature": _sign(body, timestamp)}
+    if reason:
+        headers["X-Slack-Retry-Num"] = "1"
+        headers["X-Slack-Retry-Reason"] = reason
+
+    handled = AsyncMock(return_value={"ok": True})
+    with patch.object(router_module, "handle_slack_event", handled):
+        response = TestClient(app).post("/api/v1/slack/events", content=body, headers=headers)
+
+    assert response.status_code == 200
+    handled.assert_awaited_once_with(body, retry_reason=reason)

@@ -42,8 +42,9 @@ class ImproveConfig(BaseSettings):
     # improve(build_global_context_index=None); an explicit argument wins.
     review_conflicts: bool = True
     # On: the stage is LLM-free and watermark-gated, and dataset routing is
-    # only as complete as this index. Off, routing still runs but every
-    # unindexed dataset is searched.
+    # only as complete as this index. Off, routing still runs, but an
+    # unindexed dataset is searched only when the routed ones retrieve
+    # nothing (or when no dataset is indexed at all).
     global_context_index: bool = True
     effective_date_key: str = "effective_date"
     # Debounce for automatic improves (plan item B6). The defaults mean "no

@@ -155,7 +155,7 @@ async def clean_environment(tmp_path, monkeypatch):
 def _patch_drive(monkeypatch, service, content_by_id):
     monkeypatch.setattr(gd_source, "build_drive_service", lambda **kwargs: service)
 
-    def fake_extract(service, file_id, mime_type, name):
+    def fake_extract(service, file_id, mime_type, name, **_kwargs):
         return content_by_id[file_id]
 
     monkeypatch.setattr(gd_source, "extract_file_content", fake_extract)

@@ -29,7 +29,9 @@ def fake_media_stream(monkeypatch):
     """googleapiclient is an optional extra; the chunked download is replaced by a copy
     of what the fake request returns, so the tests cover the spool, decode and parse."""
     monkeypatch.setattr(
-        gd_source, "_stream_media", lambda request, buffer: buffer.write(request.execute())
+        gd_source,
+        "_stream_media",
+        lambda request, buffer, **_kwargs: buffer.write(request.execute()),
     )
 
 
@@ -38,6 +40,8 @@ class _FakeRequest:
         self._result = result
 
     def execute(self, num_retries=0):
+        if isinstance(self._result, Exception):
+            raise self._result
         return self._result
 
 
@@ -122,6 +126,9 @@ def test_is_supported_mime_type():
         "application/json",
         "application/xml",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+        "application/vnd.ms-excel",
+        "application/vnd.ms-powerpoint",
     ):
         assert is_supported_mime_type(mime)
     for mime in (
@@ -129,7 +136,6 @@ def test_is_supported_mime_type():
         "application/vnd.google-apps.form",
         "image/png",
         "application/zip",
-        "application/msword",
     ):
         assert not is_supported_mime_type(mime)
 
@@ -198,10 +204,17 @@ def test_google_slides_export_as_plain_text():
 
 
 class _FakeLoaderEngine:
-    def __init__(self, loader_available=True, text="from the loader"):
+    def __init__(self, loader_available=True, text="from the loader", registered=True):
         self.loader_available = loader_available
+        self.registered = registered
         self.text = text
         self.seen = {}
+
+    def get_available_loaders(self):
+        return ["fake"] if self.registered else []
+
+    def get_loader_info(self, loader_name):
+        return {"extensions": ["docx", "doc", "xls", "ppt"]}
 
     def get_loader(self, file_path, preferred_loaders):
         return object() if self.loader_available else None
@@ -244,7 +257,85 @@ def test_office_file_goes_through_the_loader_engine_without_persisting(loader_en
 
 
 def test_missing_loader_is_a_named_error_not_a_skip(loader_engine):
-    loader_engine.loader_available = False
+    loader_engine.registered = loader_engine.loader_available = False
+    service = _FakeService(_FakeFiles(media_result=b"x"))
+    with pytest.raises(LoaderUnavailableError, match="docling"):
+        extract_file_content(service, "d", DOCX, "report.docx")
+
+
+@pytest.mark.parametrize(
+    ("mime", "suffix"),
+    [
+        ("application/msword", ".doc"),
+        ("application/vnd.ms-excel", ".xls"),
+        ("application/vnd.ms-powerpoint", ".ppt"),
+    ],
+)
+def test_legacy_office_file_goes_through_the_loader_engine(
+    loader_engine, monkeypatch, mime, suffix
+):
+    monkeypatch.setattr(gd_source, "_libreoffice_available", lambda: True)
+    service = _FakeService(_FakeFiles(media_result=b"OLE-bytes"))
+    assert extract_file_content(service, "d", mime, "old" + suffix) == "from the loader"
+    assert loader_engine.seen["suffix"] == suffix
+
+
+@pytest.mark.parametrize("mime", ["application/msword", "application/vnd.ms-powerpoint"])
+def test_legacy_office_without_libreoffice_is_a_named_error_before_the_download(
+    loader_engine, monkeypatch, mime
+):
+    monkeypatch.setattr(gd_source, "_libreoffice_available", lambda: False)
+    downloads = []
+    monkeypatch.setattr(
+        gd_source, "_download_file", lambda *args: downloads.append(args) or pytest.fail("download")
+    )
+    service = _FakeService(_FakeFiles(media_result=b"x"))
+    with pytest.raises(LoaderUnavailableError, match="LibreOffice"):
+        extract_file_content(service, "d", mime, "old")
+    assert downloads == []
+
+
+def test_only_the_binary_formats_need_libreoffice(loader_engine, monkeypatch):
+    monkeypatch.setattr(gd_source, "_libreoffice_available", lambda: False)
+    service = _FakeService(_FakeFiles(media_result=b"PK-docx-bytes"))
+    assert extract_file_content(service, "d", DOCX, "report.docx") == "from the loader"
+
+
+@pytest.mark.parametrize(
+    ("on_path", "macos_app", "expected"),
+    [
+        ({"soffice"}, False, True),
+        ({"libreoffice"}, False, True),
+        (set(), True, True),  # the macOS application is not on PATH
+        (set(), False, False),
+    ],
+)
+def test_libreoffice_is_found_on_path_or_as_the_macos_application(
+    monkeypatch, on_path, macos_app, expected
+):
+    monkeypatch.setattr(
+        gd_source.shutil, "which", lambda name: f"/usr/bin/{name}" if name in on_path else None
+    )
+    monkeypatch.setattr(
+        gd_source.os.path, "isfile", lambda path: macos_app and path == gd_source._MACOS_LIBREOFFICE
+    )
+    assert gd_source._libreoffice_available() is expected
+
+
+def test_a_missing_loader_is_found_before_the_download(loader_engine, monkeypatch):
+    loader_engine.registered = loader_engine.loader_available = False
+    downloads = []
+    monkeypatch.setattr(
+        gd_source, "_download_file", lambda *args: downloads.append(args) or pytest.fail("download")
+    )
+    service = _FakeService(_FakeFiles(media_result=b"x"))
+    with pytest.raises(LoaderUnavailableError, match="docling"):
+        extract_file_content(service, "d", DOCX, "report.docx")
+    assert downloads == []
+
+
+def test_a_file_the_listed_loader_cannot_claim_is_a_named_error_after_the_download(loader_engine):
+    loader_engine.loader_available = False  # registered for .docx, but not for this content
     service = _FakeService(_FakeFiles(media_result=b"x"))
     with pytest.raises(LoaderUnavailableError, match="docling"):
         extract_file_content(service, "d", DOCX, "report.docx")
@@ -392,7 +483,9 @@ def test_missing_loader_fails_the_file_with_its_reason(loader_engine):
     assert stats["failed_loader_unavailable"] == 1
 
 
-def test_download_is_chunked_with_retries(monkeypatch):
+def test_download_is_chunked_and_leaves_the_retries_to_the_connector(monkeypatch):
+    # next_chunk(num_retries=0) inside api_retry: the host's check runs before a chunk's retry
+    # and its wait, never before a chunk that downloads first time.
     import sys
     import types
 
@@ -414,10 +507,89 @@ def test_download_is_chunked_with_retries(monkeypatch):
     monkeypatch.setitem(sys.modules, "googleapiclient", types.ModuleType("googleapiclient"))
     monkeypatch.setitem(sys.modules, "googleapiclient.http", module)
     buffer = io.BytesIO()
-    _REAL_STREAM_MEDIA(object(), buffer)
+    checks = []
+    _REAL_STREAM_MEDIA(object(), buffer, check_active=lambda: checks.append(1))
     assert buffer.getvalue() == b"chunk1;chunk2;chunk3;"
+    assert checks == [], "a chunk that downloads first time costs no host check"
     assert seen["chunksize"] == gd_source.DOWNLOAD_CHUNK_BYTES
-    assert seen["retries"] == [gd_source.API_RETRIES] * 3
+    assert seen["retries"] == [0] * 3
+
+
+class _Revoked(Exception):
+    pass
+
+
+class _HttpError(Exception):
+    """What googleapiclient raises: the status on ``resp``."""
+
+    def __init__(self, status):
+        super().__init__(f"<HttpError {status}>")
+        self.resp = type("Resp", (), {"status": status})()
+
+
+def _install_downloader(monkeypatch, failures):
+    """A MediaIoBaseDownload whose next_chunk() raises ``failures`` in turn, then finishes."""
+    import sys
+    import types
+
+    attempts = []
+
+    class _Downloader:
+        def __init__(self, buffer, request, chunksize):
+            self.buffer = buffer
+
+        def next_chunk(self, num_retries=0):
+            attempts.append(num_retries)
+            if len(attempts) <= len(failures):
+                raise failures[len(attempts) - 1]
+            self.buffer.write(b"done")
+            return None, True
+
+    module = types.ModuleType("googleapiclient.http")
+    module.MediaIoBaseDownload = _Downloader
+    monkeypatch.setitem(sys.modules, "googleapiclient", types.ModuleType("googleapiclient"))
+    monkeypatch.setitem(sys.modules, "googleapiclient.http", module)
+    return attempts
+
+
+def test_a_revoked_connection_stops_a_chunk_retry_before_it_waits(monkeypatch, waits):
+    """googleapiclient used to retry inside next_chunk(), so a revoked connection kept sleeping."""
+    attempts = _install_downloader(monkeypatch, [_HttpError(503)] * 3)
+    checks = []
+
+    def check_active():
+        checks.append(1)
+        if len(checks) == 1:  # the first attempt runs unchecked; this is before its backoff wait
+            raise _Revoked
+
+    with pytest.raises(_Revoked):
+        _REAL_STREAM_MEDIA(object(), io.BytesIO(), check_active=check_active)
+
+    assert attempts == [0], "exactly one next_chunk() call, with googleapiclient's own retries off"
+    assert waits == []
+
+
+def test_a_chunk_that_failed_with_a_503_is_retried(monkeypatch, waits):
+    attempts = _install_downloader(monkeypatch, [_HttpError(503)] * 2)
+    buffer = io.BytesIO()
+
+    _REAL_STREAM_MEDIA(object(), buffer)
+
+    assert buffer.getvalue() == b"done"
+    assert attempts == [0, 0, 0]
+    assert [wait <= 2 ** (retry + 1) for retry, wait in enumerate(waits)] == [True, True]
+
+
+def test_a_revoked_connection_is_not_a_failed_extraction():
+    # extract_file_content turns any request failure into "skip this file" (None); a revoked
+    # connection must stop the run instead. The check before the 503's retry raises.
+    service = _FakeService(_FakeFiles(export_result=_HttpError(503)))
+
+    def check_active():
+        raise _Revoked
+
+    with pytest.raises(_Revoked):
+        extract_file_content(service, "f", GOOGLE_DOC_MIME_TYPE, "Doc", check_active=check_active)
 
 
 def test_text_is_read_from_a_file_object_that_has_only_read_and_seek(monkeypatch):
@@ -435,7 +607,7 @@ def test_text_is_read_from_a_file_object_that_has_only_read_and_seek(monkeypatch
             return self._buffer.seek(offset, whence)
 
     @contextmanager
-    def download(_service, _file_id):
+    def download(_service, _file_id, **_kwargs):
         yield _OnlyReadAndSeek("héllo \xff wörld".encode("latin-1"))
 
     monkeypatch.setattr(gd_source, "_download_media", download)
@@ -443,3 +615,14 @@ def test_text_is_read_from_a_file_object_that_has_only_read_and_seek(monkeypatch
     assert (
         extract_file_content(service, "t", "text/plain", "n.txt") == "h\ufffdllo \ufffd w\ufffdrld"
     )
+
+
+@pytest.fixture(autouse=True)
+def waits(monkeypatch):
+    """The backoff waits ``api_retry`` asked for, in order, without sleeping for real.
+
+    A fake that raises a 5xx or 429 is retried by the connector, so every test needs this.
+    """
+    recorded: list[float] = []
+    monkeypatch.setattr("time.sleep", recorded.append)
+    return recorded
