@@ -3,7 +3,7 @@ import importlib
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -17,6 +17,10 @@ from cognee.modules.retrieval.code_retriever import CodeGraphUnavailableError, C
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
+
+# Datasets in this module are stand-ins that exist in no database; entering their
+# database context (which remember's session writes now do) is stubbed.
+pytestmark = pytest.mark.usefixtures("stub_dataset_context")
 
 # Import actual modules via importlib to avoid __init__.py name shadowing.
 # Several __init__.py files re-export functions with the same name as their
@@ -322,6 +326,7 @@ class TestRememberResult:
         assert result.elapsed_seconds >= 0
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("stub_session_dataset")
     async def test_session_result_has_elapsed(self):
         """Session-stored result also tracks elapsed time."""
         mock_user = MagicMock()
@@ -1227,6 +1232,7 @@ async def test_self_improvement_opt_out_keeps_permanent_ingestion(flag, backgrou
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("stub_session_dataset")
 @pytest.mark.parametrize("flag", [None, False, True])
 async def test_self_improvement_controls_session_bridge_without_skipping_cache(flag):
     user = MagicMock(id="u1")
@@ -1242,7 +1248,9 @@ async def test_self_improvement_controls_session_bridge_without_skipping_cache(f
         )
         if result._task is not None:
             await result._task
-    store.assert_awaited_once_with("s1", "memory", user, node_set=None)
+    # The session write carries the dataset it is bound to, so its vectors land in
+    # that dataset's store; the id itself is whatever the resolver minted here.
+    store.assert_awaited_once_with("s1", "memory", user, node_set=None, dataset_id=ANY)
     assert improve.await_count == (0 if flag is False else 1)
     assert result.status == "session_stored"
 
