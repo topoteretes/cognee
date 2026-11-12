@@ -4,7 +4,9 @@ from urllib.parse import urlparse
 
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.exceptions import S3FileSystemNotFoundError
+from cognee.tasks.ingestion.save_data_item_to_storage import require_server_path_access
 
 
 def _resolve_existing_local_path(item: str) -> Path | None:
@@ -78,6 +80,9 @@ async def resolve_data_directories(
         if isinstance(item, str):  # Check if the item is a path
             # S3
             if urlparse(item).scheme == "s3":
+                # Listed with cognee's own AWS credentials: the same gate as a
+                # local path, before anything is listed.
+                require_server_path_access()
                 if fs is not None:
                     if include_subdirectories:
                         base_path = item if item.endswith("/") else item + "/"
@@ -113,10 +118,18 @@ async def resolve_data_directories(
                     item, user=user, dataset_id=dataset_id, branch=branch
                 )
                 resolved_data.append(manifest_item)
-                resolved_data.extend(str(path) for path in document_paths)
+                resolved_data.extend(
+                    DataItem(data=str(path), cognee_path=True) for path in document_paths
+                )
                 continue
 
             local_path = _resolve_existing_local_path(item)
+
+            # The gate runs before a directory is listed or a code project is
+            # turned into a repository manifest, so a refused path is never
+            # walked. A string that is not an existing path is text, not a path.
+            if local_path is not None:
+                require_server_path_access()
 
             if local_path and local_path.is_dir():  # If it's a directory
                 if include_subdirectories:
@@ -133,7 +146,9 @@ async def resolve_data_directories(
                             local_path, user=user, dataset_id=dataset_id
                         )
                         resolved_data.append(manifest_item)
-                        resolved_data.extend(str(path) for path in document_paths)
+                        resolved_data.extend(
+                            DataItem(data=str(path), cognee_path=True) for path in document_paths
+                        )
                         continue
 
                     # Recursively add all files in the directory and subdirectories

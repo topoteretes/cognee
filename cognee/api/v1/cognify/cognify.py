@@ -33,6 +33,7 @@ from cognee.modules.observability import (
     record_operation_duration,
 )
 from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_configured_authoritative_sources,
     get_configured_ontology_mode,
     get_configured_ontology_resolver,
 )
@@ -436,12 +437,20 @@ async def cognify(
                 "early_chunk_indexing is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to choose it locally."
             )
+        if ontology_file_path is not None:
+            # POST /cognify takes no ontology path, and the file is on this
+            # machine, not the server's: forwarding would silently drop it.
+            raise ValueError(
+                "ontology_file_path is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to use the ontology locally."
+            )
         return await client.cognify(
             datasets,
             chunk_size=chunk_size,
             chunks_per_batch=chunks_per_batch,
             custom_prompt=custom_prompt,
             run_in_background=run_in_background,
+            graph_model=graph_model,
         )
 
     # After the argument checks and the remote route: a cognify that raises above,
@@ -468,10 +477,12 @@ async def cognify(
             config, ontology_file_path=ontology_file_path
         )
         resolved_ontology_mode = get_configured_ontology_mode(config)
+        resolved_authoritative_sources = get_configured_authoritative_sources(config)
         config = {
             "ontology_config": {
                 "ontology_resolver": resolved_resolver,
                 "ontology_mode": resolved_ontology_mode,
+                "authoritative_sources": resolved_authoritative_sources,
             }
         }
 
@@ -570,7 +581,7 @@ async def cognify(
         tasks_by_route = {
             CognifyRoute.STANDARD: tasks,
             CognifyRoute.DLT_SOURCE: await get_dlt_tasks(
-                chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
+                chunk_size=chunk_size, chunks_per_batch=chunks_per_batch, config=config
             ),
             CognifyRoute.CODE: get_code_file_tasks(),
             CognifyRoute.CODE_REPO: get_code_repo_tasks(),
@@ -738,10 +749,12 @@ async def get_indexing_tasks(
     a dataset answer chunk-based searches before any entity is extracted. No
     task calls the LLM. Its chunking step comes from ``build_chunking_tasks``,
     as the cognify task lists' does, so both runs cut the same chunks and the
-    cognify run finds them in the store instead of embedding them again.
+    cognify run finds them in the store instead of embedding them again. The
+    temporal hints are left out: nothing here reads them, and the cognify run
+    computes its own when it re-chunks.
     """
     return [
-        *build_chunking_tasks(chunker, await resolve_chunk_size(chunk_size)),
+        *build_chunking_tasks(chunker, await resolve_chunk_size(chunk_size), temporal_hints=False),
         # LOAD: chunk and document nodes to the graph, chunk text to the vector
         # store. From here on the dataset is searchable at chunk level.
         Task(
@@ -753,13 +766,17 @@ async def get_indexing_tasks(
 
 
 async def get_dlt_tasks(
-    chunk_size: int | None = None, chunks_per_batch: int | None = None
+    chunk_size: int | None = None,
+    chunks_per_batch: int | None = None,
+    *,
+    config: Config,
 ) -> list[Task]:
     """Deterministic pipeline for DLT-source manifest datasets.
 
     No LLM tasks: each manifest row becomes one DocumentChunk (vector-indexed
     by add_data_points) and the graph structure comes from the relational
-    schema via extract_dlt_source_edges.
+    schema via extract_dlt_source_edges. ``config`` is the one cognify resolved:
+    its ontology resolver and authoritative sources align the tables.
     """
     from cognee.tasks.ingestion.extract_dlt_source_edges import extract_dlt_source_edges
     from cognee.tasks.ingestion.purge_stale_dlt_source_artifacts import (
@@ -794,5 +811,10 @@ async def get_dlt_tasks(
         # LOAD: schema nodes and deterministic FK edges from the manifest.
         # Cross-batch dedup state lives in ctx.extras (per data item = per
         # source), so these Task objects are safe to share across datasets.
-        Task(extract_dlt_source_edges, needs_llm=False),
+        Task(
+            extract_dlt_source_edges,
+            ontology_resolver=config["ontology_config"]["ontology_resolver"],
+            authoritative_sources=config["ontology_config"]["authoritative_sources"],
+            needs_llm=False,
+        ),
     ]

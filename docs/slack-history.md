@@ -9,8 +9,9 @@ run status alongside the existing encrypted Slack connection.
 
 1. Configure the existing Cognee Slack OAuth connection. Add these bot scopes:
    `channels:history`, `groups:history`, and `groups:read`, alongside the existing
-   `commands`, `chat:write`, `im:write`, and `channels:read` scopes. Reinstall or
-   reconnect the app to grant the new scopes. Reading history is opt-in; granting
+   `commands` and `channels:read` scopes (no write scope: the app answers
+   through `response_url`, which needs none). Reinstall or reconnect the app to
+   grant the new scopes. Reading history is opt-in; granting
    scopes does not start an import.
 2. Invite the app to each selected channel. The Slack person who connected the
    workspace must also be a member. Bulk imports are managed by the connection

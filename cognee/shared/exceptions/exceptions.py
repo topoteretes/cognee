@@ -34,3 +34,17 @@ class ExternalSchemaReferenceError(CogneeValidationError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ) -> None:
         super().__init__(message, name, status_code)
+
+
+class UnresolvedSchemaReferenceError(CogneeValidationError):
+    """A graph model schema's ``x-cognee-edge`` or ``x-cognee-from-identity`` key named a
+    class its ``$defs`` do not define."""
+
+    def __init__(
+        self,
+        message: str = "graph_model names an edge endpoint or reference target its $defs "
+        "do not define.",
+        name: str = "UnresolvedSchemaReferenceError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ) -> None:
+        super().__init__(message, name, status_code)

@@ -78,7 +78,7 @@ async def test_orphan_cleanup_retires_decisions_under_the_dataset_lock():
     with _patches(dataset, orphan, AsyncMock(side_effect=retire), delete, invalidate):
         await _cleanup(user)
 
-    delete.assert_awaited_once_with([orphan], dataset.id)
+    delete.assert_awaited_once_with([orphan], dataset.id, user)
     assert [call.args[1:] for call in invalidate.await_args_list] == [
         ({"n1"}, {"e1"}),
         ({"conflict"}, set()),
@@ -105,7 +105,7 @@ async def test_orphan_cleanup_tombstones_the_rows_it_removed_after_they_are_gone
     dataset, user, orphan = _fixture()
     order: list[str] = []
 
-    async def delete(rows, dataset_id):
+    async def delete(rows, dataset_id, deleting_user):
         order.append("rows")
 
     async def tombstone(dataset_id, data_ids, *, user):

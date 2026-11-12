@@ -34,6 +34,7 @@ async def extract_chunks_from_documents(
     documents: list[Document],
     max_chunk_size: int,
     chunker: Chunker = TextChunker,
+    temporal_hints: bool = True,
 ) -> AsyncGenerator:
     """
     Extracts chunks of data from a list of documents based on the specified chunking parameters.
@@ -41,6 +42,9 @@ async def extract_chunks_from_documents(
     Notes:
         - The `read` method of the `Document` class must be implemented to support the chunking operation.
         - The `chunker` parameter determines the chunking logic and should align with the document type.
+        - `temporal_hints` attaches the date hints graph extraction puts in its prompt. The
+          indexing pipeline turns it off: its chunks are only stored and embedded, the hints
+          are never persisted, and the dateparser pass costs more than cutting the chunks.
     """
     if not isinstance(max_chunk_size, int) or max_chunk_size <= 0:
         raise InvalidChunkSizeError(max_chunk_size)
@@ -62,9 +66,10 @@ async def extract_chunks_from_documents(
         ):
             document_token_count += document_chunk.chunk_size
             document_chunk.belongs_to_set = document.belongs_to_set
-            document_chunk._temporal_hints, temporal_base = hint_lines(
-                document_chunk.text, temporal_base
-            )
+            if temporal_hints:
+                document_chunk._temporal_hints, temporal_base = hint_lines(
+                    document_chunk.text, temporal_base
+                )
             yield document_chunk
 
         await update_document_token_count(document.id, document_token_count)
