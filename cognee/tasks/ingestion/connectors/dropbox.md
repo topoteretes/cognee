@@ -87,16 +87,22 @@ cognee keeps every document and extracts nothing again (the text is downloaded o
 carry the new position). Renaming a file itself is different: the title is part of the
 document cognee builds and hashes, so a renamed file is extracted once more.
 
-The date line is the day the file's content last changed, taken from the listing entry and
-never from the clock: `client_modified` (when its author last changed it), or
+The date line is the day the file's extracted text last changed, taken from the listing entry
+and never from the clock: `client_modified` (when its author last changed it), or
 `server_modified` for a Paper export and for an entry without `client_modified`; with neither
 there is no line. It is a UTC date at day precision. The connector keeps each stored file's
-`content_hash`: a file listed again with the same bytes keeps the date it was emitted with,
-so a re-save of unchanged bytes on any day is not emitted at all (counted `unchanged`), and a
-move or rename of it is emitted with its old date. New bytes on a later day re-extract the
-file once, under the new date. A downloadable file listed without a `content_hash` is a
-malformed listing (the run raises, the state is untouched); a Paper doc has no
-`content_hash` and is re-rendered whenever Dropbox lists it. It lets the graph
+`content_hash` and a hash of its extracted text:
+
+- same bytes in the same place: not downloaded, not emitted (counted `unchanged`);
+- new bytes but the same extracted text (a PDF re-saved with annotations or metadata, an
+  encoding change): downloaded to compare, then not emitted (counted `unchanged`), and the
+  stored date is kept;
+- the same text in a new place (a move or rename): emitted with the stored date;
+- new text: emitted under the file's modified day, and extracted once.
+
+A downloadable file listed without a `content_hash` is a malformed listing (the run raises,
+the state is untouched). A Paper doc has no `content_hash`, so it is downloaded whenever
+Dropbox lists it and emitted only when its text changed. It lets the graph
 date what a file says (a `Timestamp` when the model extracts one) and makes "what changed in
 March" findable by keyword (`Modified: 2025-03`).
 
@@ -126,7 +132,8 @@ A move arrives as a delete of the old path plus the same id at the new path; del
 until the whole delta is read, so a move is an update, not a delete. State (`dlt` resource
 state, version `v` 1): `render`, `account`, `folder`, `path`, `cursor`, `index`, `folders` (folder path
 to id, for the structure), `stored` (ids that reached cognee), `rendered` (per stored file its
-`content_hash`, path and date line, as last emitted) and `retry` (ids whose last fetch failed).
+`content_hash`, text hash, path and date line, as last emitted), `gone` (set once the
+selected folder was forgotten because Dropbox no longer finds it) and `retry` (ids whose last fetch failed).
 A delete names a path only: a path that is a file in `index` is forgotten at once, any other
 is swept as a possible folder in one pass over `index` per run of consecutive deletes.
 Nothing is written to it until the listing is complete, and dlt keeps the previous state when a
@@ -154,8 +161,11 @@ Tombstones are sent after a complete listing, or on a direct answer about the re
   `files/get_metadata` on the folder alone, without a listing. Forgetting a folder
   whose access was lost is a deliberate privacy choice, accepted by Goran on 2026-11-11: data
   the account can no longer read leaves memory, and comes back if access returns and the
-  folder is still selected. A folder never listed that is not found raises
-  `DropboxFolderNotFoundError` instead, so a wrong id never empties a table.
+  folder is still selected. The state remembers the folder is `gone`: later passes do
+  nothing and count `failed_folder_gone` (so the connection reads degraded while it stays
+  selected), and if the same folder id resolves again it is listed whole and synced from
+  scratch. A folder never listed that is not found raises `DropboxFolderNotFoundError`
+  instead, so a wrong id never empties a table.
 
 What never deletes: any listing error (the state stays as it was), a rate limit, a 401, and a
 file that keeps failing: it is retried every run and its stored text is kept until Dropbox
@@ -169,8 +179,8 @@ failure leaves the other tables alone and blocks retirement only when it may hav
 nothing of its own: a listing error, an account mismatch or a source that raised. Files that
 keep failing (`failed_retry`, counted per file on every pass) and a folder cut short by a rate
 limit or a 401 after its files were worked on do not block it
-(`ingestion.retirement_blocked` with `failed_retry` as a gone key and the cut folders as cut
-scopes). The sync still reports degraded whenever anything failed.
+(`ingestion.retirement_blocked` with `failed_retry` and `failed_folder_gone` as gone keys and
+the cut folders as cut scopes). A selected folder that is gone does not block either. The sync still reports degraded whenever anything failed.
 
 Gaps:
 
@@ -218,7 +228,9 @@ Gaps:
 `skipped_unparseable`, `skipped_empty_content`, `skipped_not_found`, `skipped_restricted`),
 `failed` and its reasons
 (`failed_auth`, `failed_account`, `failed_listing` (the folder could not be resolved or
-listed: an API error, or a folder never listed that is not found), `failed_rate_limit`,
+listed: an API error, or a folder never listed that is not found), `failed_folder_gone` (a
+folder forgotten on an earlier pass and still gone: counted on every later pass, never taken
+for a typo, never blocking the retirement of deselected folders), `failed_rate_limit`,
 `failed_retry` once per file still waiting for a
 retry), `team_space_unsupported` (0 or 1) and `complete` (1 when the run was not cut).
 

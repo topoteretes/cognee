@@ -86,6 +86,9 @@ class FakeDropbox:
         # Dropbox's content_hash is a block hash of the bytes; the fake only needs it to be
         # the same for the same bytes and different otherwise.
         meta["content_hash"] = hashlib.sha256(data).hexdigest()
+        if not downloadable:
+            # A Paper doc carries no content_hash: it has no bytes of its own to download.
+            del meta["content_hash"]
         self.log.append(meta)
         return file_id
 

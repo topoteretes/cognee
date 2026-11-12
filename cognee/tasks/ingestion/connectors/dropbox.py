@@ -25,6 +25,7 @@ privacy.
 """
 
 import codecs
+import hashlib
 import json
 import math
 import posixpath
@@ -105,6 +106,7 @@ STATS_KEYS = (
     "failed_auth",
     "failed_account",
     "failed_listing",
+    "failed_folder_gone",
     "failed_rate_limit",
     "failed_retry",
     "team_space_unsupported",
@@ -704,11 +706,15 @@ def _file_to_row(
     ancestors: list[dict],
     max_bytes: float | None,
     stats,
-    day: str | None,
+    last: dict | None,
+    note: dict,
 ) -> Any:
     """A row, None when the file is skipped, or ``_RETRY`` for a failure worth retrying.
 
-    ``day`` is the date line: the day the file's content last changed (see ``_iter_rows``).
+    ``last`` is what the file was last emitted with (``rendered`` in ``_iter_rows``), or None.
+    The date line is the day the extracted text last changed: kept from ``last`` when the
+    text is the same, else the file's own modified day. ``note`` receives the text's hash,
+    the day and whether the text is the one already stored.
     """
     stats["scanned"] += 1
     size = entry.get("size")
@@ -761,6 +767,10 @@ def _file_to_row(
     if not text.strip():
         _count_skip(stats, "empty_content")
         return None
+    text_hash = hashlib.sha256(text.encode()).hexdigest()
+    same_text = last is not None and last.get("text") == text_hash
+    day = last["day"] if same_text and last is not None else _modified_day(entry)
+    note.update(text=text_hash, day=day, same_text=same_text)
     return {
         "id": entry["id"],
         "title": entry["name"],
@@ -913,6 +923,14 @@ def _iter_rows(
         root = _resolve_folder(session, folder_id)
         cursor = state.get("cursor")
         if root is None:
+            if cursor is None and state.get("gone"):
+                # Forgotten on an earlier pass and still gone: nothing to do, and no typo. It
+                # is counted on its own key, so a host can tell it from a failure that may
+                # hide data (retirement of deselected folders is not blocked by it).
+                stats["failed"] += 1
+                stats["failed_folder_gone"] += 1
+                logger.warning("Dropbox: the selected folder is still gone; nothing to sync.")
+                return
             if cursor is None:
                 # Never listed: most likely a wrong id, which would otherwise be an empty table.
                 raise DropboxFolderNotFoundError(
@@ -995,7 +1013,8 @@ def _iter_rows(
     scope = root or ("", "")  # work is empty when the folder is gone
     row: Any = None
     identical = 0
-    emitted: dict = {}
+    note: dict = {}
+    last: dict | None = None
     for position, (file_id, entry) in enumerate(work):
         try:
             if entry is None:
@@ -1006,13 +1025,17 @@ def _iter_rows(
             else:
                 ancestors = work_ancestors[file_id]
             last = rendered.get(file_id) if file_id in stored else None
-            same_bytes = last is not None and last["hash"] == entry.get("content_hash")
+            # A Paper doc has no content_hash: it is downloaded and compared by its text.
+            same_bytes = (
+                last is not None
+                and entry.get("content_hash") is not None
+                and last["hash"] == entry["content_hash"]
+            )
             if same_bytes and last["path"] == entry["path_display"]:
                 identical += 1
                 continue
-            day = last["day"] if same_bytes else _modified_day(entry)
-            emitted = {"hash": entry.get("content_hash"), "path": entry["path_display"], "day": day}
-            row = _file_to_row(session, entry, ancestors, max_bytes, stats, day)
+            note = {"hash": entry.get("content_hash"), "path": entry["path_display"]}
+            row = _file_to_row(session, entry, ancestors, max_bytes, stats, last, note)
         except (DropboxAuthError, DropboxRateLimitedError) as error:
             if isinstance(error, DropboxAuthError) and not (rows_stored or stats["deleted"]):
                 # Nothing done yet: a bad token, said as such.
@@ -1035,8 +1058,18 @@ def _iter_rows(
             stats["failed_retry"] += 1
             next_retry.add(file_id)
         elif row is not None:
+            rendered[file_id] = {
+                "hash": note["hash"],
+                "text": note["text"],
+                "path": note["path"],
+                "day": note["day"],
+            }
+            if note["same_text"] and last is not None and last["path"] == note["path"]:
+                # New bytes, same extracted text, same place (a PDF re-saved with annotations
+                # or metadata): the document is what is stored, so nothing is emitted.
+                identical += 1
+                continue
             stored.add(file_id)
-            rendered[file_id] = emitted
             rows_stored += 1
             yield cast(dict, row)
         elif file_id in stored:
@@ -1064,7 +1097,11 @@ def _iter_rows(
     if root is None:
         for key in ("cursor", "path"):
             state.pop(key, None)
+        # Remembered so a later pass knows the folder went away rather than never existed.
+        state["gone"] = True
     else:
+        # Back at Dropbox (the same id resolves again): it was listed whole, from scratch.
+        state.pop("gone", None)
         state["cursor"] = new_cursor
         state["path"] = root[0]
     stats["unchanged"] = len(present) - len(changed) + identical

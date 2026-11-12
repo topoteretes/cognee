@@ -1065,3 +1065,76 @@ async def test_a_folder_cut_by_a_rate_limit_after_rows_lets_deselected_folders_r
 
     assert counts["failed_rate_limit"] == 1 and status == "degraded"
     sync_mocks.retire.assert_awaited_once()
+
+
+# ---------------------------------------------------------------- round 11: a folder that is gone
+@pytest.mark.asyncio
+async def test_a_gone_folder_never_blocks_retiring_the_deselected_ones(sync_mocks):
+    from cognee.tasks.ingestion.connectors.dropbox import (
+        DropboxError,
+        _iter_rows,
+        _Session,
+        dropbox_source,
+    )
+    from cognee.tests.unit.tasks.connectors.fake_dropbox import FakeDropbox
+
+    fake = FakeDropbox()
+    fake.account = ACCOUNT
+    folder_a, folder_b = fake.mkdir("/A"), fake.mkdir("/B")
+    fake.put("/A/a.md", "alpha")
+    fake.put("/B/b.md", "bravo")
+    states: dict[str, dict] = {}
+    walks = {}
+
+    def build(**kwargs):
+        source = dropbox_source(
+            folder_id=kwargs["folder_id"],
+            account_id=kwargs["account_id"],
+            resource_name=kwargs["resource_name"],
+            service=fake.client(sleep=lambda _s: None),
+        )
+        walks[id(source)] = (kwargs["folder_id"], kwargs["resource_name"])
+        return source
+
+    async def remember(source, **_kwargs):
+        folder_id, name = walks[id(source)]
+        state = states.setdefault(name, {})
+        try:
+            list(
+                _iter_rows(
+                    _Session(fake.client(sleep=lambda _s: None), None),
+                    folder_id=folder_id,
+                    account_id=ACCOUNT,
+                    state=state,
+                    stats=source.cognee_sync_stats,
+                    max_bytes=None,
+                )
+            )
+        except DropboxError as error:
+            raise RuntimeError("pipeline step failed") from error
+        return SimpleNamespace(status="completed")
+
+    async def get_folder(_token, folder_id, **_kwargs):
+        meta = next((m for m in fake.folders.values() if m["id"] == folder_id), None)
+        return {".tag": "folder", "path_lower": meta["path_lower"]} if meta else None
+
+    sync_mocks.remember.side_effect = remember
+    sync_mocks.source.side_effect = build
+    sync_mocks.folder.side_effect = get_folder
+
+    async def run(selection):
+        sync_mocks.retire.reset_mock()
+        counts = {"scanned": 0, "skipped": 0, "failed": 0}
+        return await sync_module._sync_source(credential(selected_folder_ids=selection), counts)
+
+    await run([folder_a, folder_b])
+    fake.delete("/A")
+    _, forgetting = await run([folder_a, folder_b])
+    _, later = await run([folder_a, folder_b])
+    status, deselected = await run([folder_a])
+
+    assert forgetting["deleted"] == 1 and forgetting["failed"] == 0
+    assert later.get("failed_listing", 0) == 0, later
+    assert later["failed_folder_gone"] == 1 and deselected["failed_folder_gone"] == 1
+    assert status == "degraded"
+    sync_mocks.retire.assert_awaited_once()

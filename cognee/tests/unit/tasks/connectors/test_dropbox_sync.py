@@ -373,10 +373,29 @@ def test_a_synced_folder_that_is_gone_is_forgotten_like_a_delete(fake):
     upserts, deletes, stats = sync(fake, state, project)
 
     assert upserts == {} and deletes == [a] and stats["deleted"] == 1
-    assert "cursor" not in state and state["index"] == {}
-    # The next run is the never-listed case again: a wrong id, not a silent empty table.
-    with pytest.raises(DropboxFolderNotFoundError):
-        sync(fake, state, project)
+    assert "cursor" not in state and state["index"] == {} and state["gone"] is True
+    # Later runs know it went away: counted on their own key, never taken for a typo.
+    for _ in range(2):
+        upserts, deletes, stats = sync(fake, state, project)
+        assert (upserts, deletes) == ({}, [])
+        assert (stats["failed"], stats["failed_folder_gone"], stats["failed_listing"]) == (1, 1, 0)
+
+
+def test_a_gone_folder_that_comes_back_syncs_again_from_scratch(fake):
+    project = fake.mkdir("/Project")
+    folder_meta = fake.folders["/project"]
+    fake.put("/Project/a.md", "alpha")
+    state: dict = {}
+    sync(fake, state, project)
+    fake.delete("/Project")
+    sync(fake, state, project)
+    sync(fake, state, project)
+
+    fake.folders["/project"] = folder_meta  # the same id resolves again (restored)
+    b = fake.put("/Project/b.md", "bravo")
+    upserts, _, stats = sync(fake, state, project)
+
+    assert b in upserts and stats["failed"] == 0 and "gone" not in state
 
 
 def test_a_folder_that_cannot_be_read_raises_and_forgets_nothing(fake):
@@ -1104,3 +1123,38 @@ def test_a_resave_with_the_same_bytes_on_a_new_day_emits_nothing(fake):
 
     assert upserts == {} and deletes == [], f"re-emitted: {upserts.get(a, {}).get('content')!r}"
     assert stats["unchanged"] == 1
+
+
+# ---------------------------------------------------------------- round 11
+def test_new_bytes_with_the_same_text_keep_the_day_and_emit_nothing(fake):
+    """A re-save that changes the bytes but not the extracted text (here a UTF-8 BOM, for a PDF
+    an annotation or its metadata) must not re-extract the document under a new date."""
+    a = fake.put("/a.md", "alpha", modified="2025-03-04T10:00:00Z")
+    state: dict = {}
+    sync(fake, state)
+
+    fake.put("/a.md", b"\xef\xbb\xbfalpha", modified="2025-03-09T10:00:00Z")
+    upserts, deletes, stats = sync(fake, state)
+
+    assert upserts == {} and deletes == [], f"re-emitted: {upserts.get(a, {}).get('content')!r}"
+    assert stats["unchanged"] == 1
+    fake.put("/a.md", "alpha", modified="2025-03-11T10:00:00Z")
+    fake.move("/a.md", "/b.md")
+    moved, _, _ = sync(fake, state)
+    assert moved[a]["content"] == "Modified: 2025-03-04\n\nalpha", "the text's day is kept"
+
+
+def test_an_edited_paper_doc_without_a_content_hash_is_emitted_again(fake):
+    info = {"export_as": "markdown"}
+    paper = fake.put("/P.paper", "# Plan v1", downloadable=False, export_info=info)
+    state: dict = {}
+    sync(fake, state)
+
+    fake.put("/P.paper", "# Plan v2", downloadable=False, export_info=info)
+    upserts, _, _ = sync(fake, state)
+
+    assert upserts[paper]["content"].endswith("# Plan v2")
+
+    fake.put("/P.paper", "# Plan v2", downloadable=False, export_info=info)
+    unchanged, _, stats = sync(fake, state)
+    assert unchanged == {} and stats["unchanged"] == 1, "same text: nothing emitted"

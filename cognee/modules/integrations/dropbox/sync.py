@@ -210,6 +210,8 @@ async def _sync_source(
     # (failed_retry, counted per file and on every pass) leaves its folder's table as it is,
     # so it must not keep a deselected folder's data in memory for good. Any failure that
     # stored nothing (a listing error, an account mismatch, a raised source) still blocks.
-    if not ingestion.retirement_blocked(counts, gone_keys=("failed_retry",), cut_scopes=cut_scopes):
+    if not ingestion.retirement_blocked(
+        counts, gone_keys=("failed_retry", "failed_folder_gone"), cut_scopes=cut_scopes
+    ):
         await ingestion.retire_resources("dropbox", credential, dataset_name, retained)
     return (SYNC_STATUS_DEGRADED if counts["failed"] else SYNC_STATUS_OK), counts
