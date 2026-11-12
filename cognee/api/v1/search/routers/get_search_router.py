@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import Field
 
 from cognee import __version__ as cognee_version
-from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
+from cognee.api.DTO import ErrorResponse, InDTO, OutDTO, RetrieverSpecificConfig
 from cognee.exceptions import CogneeApiError
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.search.operations import delete_user_search_history, get_history
@@ -149,6 +149,7 @@ class SearchPayloadDTO(InDTO):
             "feature_unavailable) and, when one argument is at fault, its 'param'."
         ),
     )
+    retriever_specific_config: RetrieverSpecificConfig = None
 
 
 def get_search_router() -> APIRouter:
@@ -283,6 +284,7 @@ def get_search_router() -> APIRouter:
         - **max_iter** (Optional[int]): Max agentic iterations, must be >= 1 (AGENTIC_COMPLETION only)
         - **include_references** (bool): Attach source references to completion-type results (default: true)
         - **code_query** (Optional[dict]): Structured operation arguments for CODE search
+        - **retriever_specific_config** (Optional[dict]): Options for the retriever behind search_type, as the SDK's `search(retriever_specific_config=...)` takes them; known keys are checked for type and upper bound, and an invalid value or `response_model` is rejected with 400
 
         ## Response
         Returns a list of search results containing relevant nodes from the graph.
@@ -330,6 +332,7 @@ def get_search_router() -> APIRouter:
                 "max_iter": payload.max_iter,
                 "include_references": payload.include_references,
                 "code_query": len(str(payload.code_query)) if payload.code_query else 0,
+                "retriever_specific_config": len(payload.retriever_specific_config or {}),
                 "cognee_version": cognee_version,
             },
         )
@@ -357,6 +360,7 @@ def get_search_router() -> APIRouter:
                 max_iter=payload.max_iter,
                 include_references=payload.include_references,
                 code_query=payload.code_query,
+                retriever_specific_config=payload.retriever_specific_config,
             )
 
             return jsonable_encoder(results)
