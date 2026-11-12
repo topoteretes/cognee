@@ -6,7 +6,6 @@ from uuid import NAMESPACE_OID, uuid4, uuid5
 
 import pytest
 
-from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.search.dataset_routing import DatasetRoutingConfig, DatasetRoutingDecision
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
@@ -77,7 +76,7 @@ def lane(monkeypatch):
 
 async def _search(lane, **kwargs):
     return await lane.search_mod.authorized_search(
-        query_type=SearchType.CHUNKS,
+        query_type=kwargs.pop("query_type", SearchType.CHUNKS),
         query_text="q",
         user=types.SimpleNamespace(id=uuid4(), tenant_id=None),
         **kwargs,
@@ -345,17 +344,17 @@ async def test_an_empty_row_result_without_a_context_counts_as_nothing_found(lan
 
 
 @pytest.mark.asyncio
-async def test_a_code_seed_the_routed_dataset_cannot_resolve_widens(lane):
-    """The fan-out softens a seed miss per dataset only when it searches several;
-    routed to one, the miss escapes and must widen rather than fail the call."""
+async def test_a_code_search_is_never_routed(lane):
+    """A code dataset never gets routing rows, and CODE over a dataset without a
+    code graph returns an empty result, not nothing: routed to a document
+    dataset, the search would never reach the code dataset."""
     lane.decision = _narrowed(lane)
     a, b = lane.readable
-    lane.responses = [CodeSeedNotFoundError("no such symbol"), [_payload(a, ["fact"])]]
 
-    out = await _search(lane)
+    await _search(lane, query_type=SearchType.CODE)
 
-    assert lane.fan_out_calls == [[b.id], [a.id, b.id]]
-    assert [payload.dataset_id for payload in out] == [a.id]
+    assert lane.route_calls == []
+    assert lane.fan_out_calls == [[a.id, b.id]]
 
 
 @pytest.mark.asyncio
