@@ -516,6 +516,7 @@ jobs:
           cognee/tests/integration/test_pgvector_copy_live.py
           cognee/tests/integration/test_pgvector_upsert_live.py
           cognee/tests/integration/test_pgvector_binary_write_live.py
+          cognee/tests/integration/test_pgvector_pool_lifecycle_live.py
 
   run-dlt-mixed-input-test:
     name: DLT Mixed Input E2E Test
