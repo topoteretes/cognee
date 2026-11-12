@@ -283,4 +283,7 @@ async def test_a_listing_failure_is_counted_once_with_a_reason(remember, failure
 
     assert counts["failed"] == 1
     reasons = {k: v for k, v in counts.items() if k.startswith("failed_") and v}
-    assert reasons == {"failed_listing": 1}
+    # A folder never listed that Dropbox does not find holds no data: it has its own key,
+    # which never blocks retiring deselected folders.
+    expected = "failed_listing" if failure == "api" else "failed_folder_not_found"
+    assert reasons == {expected: 1}

@@ -1452,3 +1452,104 @@ async def test_a_disconnect_cancelled_while_its_drop_waits_still_finishes_the_dr
     await asyncio.gather(*spawned)
     assert dropped == ["fake_acme"]
     assert len(spawned) == 1
+
+
+def test_the_resource_picker_passes_the_parent_through_one_call_path(client, monkeypatch):
+    integration = supported_integrations["fake"]
+    listed = AsyncMock(return_value=[{"id": "child", "name": "Child"}])
+    monkeypatch.setattr(integration, "resource_selection_key", "picked")
+    monkeypatch.setattr(integration, "list_resources", listed)
+    monkeypatch.setattr(
+        _router_module,
+        "_credential_or_404",
+        AsyncMock(return_value=type("Cred", (), {"provider_metadata": {}})()),
+    )
+
+    with_parent = client.get("/api/v1/integrations/fake/resources?parent=id%3Aa")
+    without = client.get("/api/v1/integrations/fake/resources")
+
+    assert with_parent.status_code == 200 and without.status_code == 200
+    assert [c.kwargs for c in listed.await_args_list] == [{"parent": "id:a"}, {"parent": None}]
+
+
+def test_a_parent_for_a_provider_that_lists_everything_is_a_422(client, monkeypatch):
+    """The base list_resources (the fake keeps it) lists nothing and refuses a parent."""
+    integration = supported_integrations["fake"]
+    monkeypatch.setattr(integration, "resource_selection_key", "picked")
+    monkeypatch.setattr(
+        _router_module,
+        "_credential_or_404",
+        AsyncMock(return_value=type("Cred", (), {"provider_metadata": {}})()),
+    )
+
+    without = client.get("/api/v1/integrations/fake/resources")
+    with_parent = client.get("/api/v1/integrations/fake/resources?parent=x")
+
+    assert without.status_code == 404, "unchanged: no selectable resources"
+    assert with_parent.status_code == 422 and "parent" in with_parent.json()["detail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "module, cls",
+    [
+        ("google_drive", "GoogleDriveIntegration"),
+        ("gmail", "GoogleGmailIntegration"),
+        ("google_calendar", "GoogleCalendarIntegration"),
+        ("linear", "LinearIntegration"),
+        ("notion", "NotionIntegration"),
+    ],
+)
+async def test_providers_that_list_everything_refuse_a_parent_before_any_request(module, cls):
+    from importlib import import_module
+
+    from cognee.modules.integrations.base import ResourceParentNotSupportedError
+
+    adapter = getattr(import_module(f"cognee.modules.integrations.{module}.adapter"), cls)()
+    with pytest.raises(ResourceParentNotSupportedError):
+        await adapter.list_resources(object(), parent="x")
+
+
+@pytest.mark.parametrize(
+    ("parent", "status"),
+    [("id:a", 200), ("/Notes", 422), ("ns:123", 422), ("id:a\nb", 422), ("id:gone", 404)],
+)
+def test_the_dropbox_picker_lists_one_level_under_a_valid_parent(
+    client, monkeypatch, parent, status
+):
+    """Through the real router and the real Dropbox adapter; only Dropbox's HTTP is faked."""
+    from cognee.modules.integrations.dropbox import adapter as dropbox_adapter
+    from cognee.modules.integrations.dropbox import client as dropbox_client
+
+    use_integration(dropbox_adapter.DropboxIntegration())
+    bodies = []
+
+    async def dropbox_http(operation, url, **kwargs):
+        bodies.append(kwargs["json"])
+        if kwargs["json"]["path"] == "id:gone":
+            raise dropbox_client.DropboxIntegrationError(operation, "path")
+        return {
+            "entries": [
+                {".tag": "folder", "id": "id:c", "path_lower": "/a/c", "path_display": "/A/c"},
+                {".tag": "file", "id": "id:f", "path_lower": "/a/f.md", "path_display": "/A/f.md"},
+            ],
+            "cursor": "c",
+            "has_more": False,
+        }
+
+    monkeypatch.setattr(dropbox_client, "_post", dropbox_http)
+    monkeypatch.setattr(dropbox_adapter, "access_token_for", AsyncMock(return_value="sl.t"))
+    monkeypatch.setattr(
+        _router_module,
+        "_credential_or_404",
+        AsyncMock(return_value=type("Cred", (), {"provider_metadata": {}})()),
+    )
+
+    response = client.get("/api/v1/integrations/dropbox/resources", params={"parent": parent})
+
+    assert response.status_code == status, response.text
+    if status == 200:
+        assert bodies == [{"path": "id:a", "recursive": False, "limit": 2000}]
+        assert [r["id"] for r in response.json()["resources"]] == ["id:c"]
+    if status == 422:
+        assert bodies == [], "an invalid parent never reaches Dropbox"

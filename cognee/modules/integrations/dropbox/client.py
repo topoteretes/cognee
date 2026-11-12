@@ -43,11 +43,14 @@ def _code(body: Any, status: int) -> str:
     return f"http_{status}"
 
 
-async def _post(operation: str, url: str, *, session: Any = None, **kwargs: Any) -> dict[str, Any]:
+async def _post(
+    operation: str, url: str, *, session: Any = None, void: bool = False, **kwargs: Any
+) -> dict[str, Any]:
     """One POST, its JSON object on a 200, else the typed error. Redirects are refused.
 
     ``session`` is an open ``client_session`` to send through (a paged listing reuses one);
-    without it the call opens and closes its own.
+    without it the call opens and closes its own. ``void``: a route that answers no result
+    (Dropbox sends ``null`` or nothing); its 200 is success, returned as ``{}``.
     """
     try:
         if session is None:
@@ -59,6 +62,8 @@ async def _post(operation: str, url: str, *, session: Any = None, **kwargs: Any)
         raise DropboxIntegrationError(operation, "request_timeout") from None
     except (aiohttp.ClientError, OSError):
         raise DropboxIntegrationError(operation, "network_error") from None
+    if status == 200 and void:
+        return {}
     if status != 200 or not isinstance(body, dict):
         raise DropboxIntegrationError(operation, _code(body, status))
     return body
@@ -108,7 +113,7 @@ async def refresh_access_token(
 
 async def revoke_token(access_token: str) -> None:
     """Revoke the access token, which also revokes its refresh token (Dropbox OAuth guide)."""
-    await _post("token revoke", REVOKE_URL, data=b"null", headers=_bearer(access_token))
+    await _post("token revoke", REVOKE_URL, void=True, data=b"null", headers=_bearer(access_token))
 
 
 async def get_current_account(access_token: str) -> dict[str, Any]:
@@ -140,12 +145,13 @@ async def get_folders(access_token: str, folder_ids: list[str]) -> list[dict[str
         return [await get_folder(access_token, f, session=session) for f in folder_ids]
 
 
-async def list_folders(access_token: str) -> list[dict[str, Any]]:
-    """Every folder the account can see, for the picker, with its id and path.
+async def list_folders(access_token: str, parent: str | None = None) -> list[dict[str, Any]]:
+    """The folders directly inside ``parent`` (a folder id; None: the top of the account), for
+    the picker, with their id and path.
 
-    Cost: every picker open walks the whole account recursively, files included (Dropbox has
-    no folders-only listing), one ``list_folder`` page of up to 2000 entries per request, all
-    through one HTTP session.
+    One level per call, not the whole account: a picker opens a folder to see its children.
+    Cost: the files of that one level are listed too (Dropbox has no folders-only listing),
+    one ``list_folder`` page of up to 2000 entries per request, through one HTTP session.
     """
     headers = _bearer(access_token)
     folders: list[dict[str, Any]] = []
@@ -155,7 +161,7 @@ async def list_folders(access_token: str) -> list[dict[str, Any]]:
             "folder listing",
             LIST_URL,
             session=session,
-            json={"path": "", "recursive": True, "limit": LIST_LIMIT},
+            json={"path": parent or "", "recursive": False, "limit": LIST_LIMIT},
             headers=headers,
         )
         while True:

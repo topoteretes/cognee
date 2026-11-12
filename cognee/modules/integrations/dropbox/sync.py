@@ -20,6 +20,10 @@ SYNC_STATUS_OK = "ok"
 SYNC_STATUS_DEGRADED = "degraded"
 
 
+class SelectedFolderNotFoundError(ValueError):
+    """A selected folder id Dropbox cannot resolve (deleted, or not visible to the account)."""
+
+
 class NestedSelectionError(ValueError):
     """One selected folder is inside another, so its files would be two documents."""
 
@@ -52,8 +56,12 @@ def _classify_error(error: BaseException) -> str:
             return "failed_auth"
         if isinstance(current, DropboxRateLimitedError):
             return "failed_rate_limit"
-        if isinstance(current, (DropboxApiError, DropboxFolderNotFoundError)):
-            # The source raises these only while listing, and counts them the same way.
+        if isinstance(current, DropboxFolderNotFoundError):
+            # A selected folder never listed that Dropbox does not find holds no data here,
+            # so it must not block retiring the deselected ones. The source counts it the same.
+            return "failed_folder_not_found"
+        if isinstance(current, DropboxApiError):
+            # The source raises this only while listing, and counts it the same way.
             return "failed_listing"
         seen.add(id(current))
         current = current.__cause__ or current.__context__
@@ -69,18 +77,38 @@ def check_selection_shape(selected: object) -> list[str]:
     return sorted(set(selected))
 
 
+def _has_path(meta: dict) -> bool:
+    """Whether a folder's metadata carries the path the nesting check compares; one without
+    (unmounted) cannot be placed in the tree."""
+    return isinstance(meta.get("path_lower"), str) and bool(meta["path_lower"])
+
+
 async def refuse_nested_selection(
-    credential: IntegrationCredential, access_token: str, folder_ids: list[str]
+    credential: IntegrationCredential,
+    access_token: str,
+    folder_ids: list[str],
+    *,
+    refuse_missing: bool = False,
 ) -> None:
     """Raise NestedSelectionError when a selected folder sits inside another one.
 
     One credential check and one HTTP session for the whole selection. Paths are compared
     sorted with a trailing slash: a folder inside another sorts right after it (or after a
-    folder that is itself inside it), so checking each against its neighbour is enough.
+    folder that is itself inside it), so checking each against its neighbour is enough. A
+    folder without a path (unmounted) takes no part: its "/" would be a prefix of all.
+
+    ``refuse_missing`` (when a selection is saved) raises SelectedFolderNotFoundError for an
+    id Dropbox cannot resolve. A sync lets it through: the source counts it as gone.
     """
     await ingestion.require_active_credential(credential)
     metas = await client.get_folders(access_token, folder_ids)
-    paths = sorted(str(meta.get("path_lower") or "") + "/" for meta in metas if meta is not None)
+    if refuse_missing and not all(meta is not None and _has_path(meta) for meta in metas):
+        raise SelectedFolderNotFoundError(
+            "A selected Dropbox folder could not be found; pick it again from the list"
+        )
+    paths = sorted(
+        meta["path_lower"] + "/" for meta in metas if meta is not None and _has_path(meta)
+    )
     if any(path.startswith(previous) for previous, path in pairwise(paths)):
         raise NestedSelectionError("A selected Dropbox folder is inside another selected folder")
 
@@ -193,7 +221,9 @@ async def _sync_source(
         # any file was worked on stored nothing and still blocks.
         nonlocal cut_scopes
         stats = getattr(sources[folder_id], "cognee_sync_stats", {})
-        if not stats.get("complete") and (stats.get("scanned") or stats.get("deleted")):
+        if not stats.get("complete") and (
+            stats.get("scanned") or stats.get("deleted") or stats.get("failed_budget")
+        ):
             cut_scopes += 1
 
     retained = await ingestion.sync_scopes(
@@ -211,7 +241,9 @@ async def _sync_source(
     # so it must not keep a deselected folder's data in memory for good. Any failure that
     # stored nothing (a listing error, an account mismatch, a raised source) still blocks.
     if not ingestion.retirement_blocked(
-        counts, gone_keys=("failed_retry", "failed_folder_gone"), cut_scopes=cut_scopes
+        counts,
+        gone_keys=("failed_retry", "failed_folder_gone", "failed_folder_not_found"),
+        cut_scopes=cut_scopes,
     ):
         await ingestion.retire_resources("dropbox", credential, dataset_name, retained)
     return (SYNC_STATUS_DEGRADED if counts["failed"] else SYNC_STATUS_OK), counts

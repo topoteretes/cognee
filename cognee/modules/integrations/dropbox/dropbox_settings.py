@@ -3,6 +3,8 @@ from pydantic_settings import SettingsConfigDict
 
 from cognee.modules.integrations.base import IntegrationSettings
 
+DEFAULT_MAX_FILE_SIZE_MB = 50.0
+
 
 class DropboxSettings(IntegrationSettings):
     """Configuration for the Dropbox integration.
@@ -18,18 +20,23 @@ class DropboxSettings(IntegrationSettings):
     # started it. Env: DROPBOX_STATE_SECRET
     state_secret: str = ""
 
-    # Files larger than this many MB are left out of a sync (``skipped_too_large``). Unset:
-    # no limit, every file is read. Text and PDF files are read whole to extract their text,
-    # so a deployment short on memory sets it. Env: DROPBOX_MAX_FILE_SIZE_MB
-    max_file_size_mb: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    # Files larger than this many MB are left out of a sync and counted in
+    # ``skipped_too_large`` (never truncated). 50 by default, on review of PR #6668 and after
+    # Google Drive's size cap: text and PDF files are read whole to extract their text, so a
+    # file's size is memory during the sync, and every edit of a large file re-extracts it on
+    # the tenant's LLM key. Raise or lower it here; it must be a positive number, and any
+    # other non-blank value stops the server at startup (fail fast). A stored file that is
+    # now over the cap (it grew, or the cap is new or lower) is forgotten, like any skip.
+    # Env: DROPBOX_MAX_FILE_SIZE_MB
+    max_file_size_mb: float = Field(default=DEFAULT_MAX_FILE_SIZE_MB, gt=0, allow_inf_nan=False)
 
     @field_validator("max_file_size_mb", mode="before")
     @classmethod
-    def _blank_means_no_limit(cls, value: object) -> object:
+    def _blank_means_the_default(cls, value: object) -> object:
         # A blank value (the template line uncommented as shipped, a compose ``${VAR:-}``)
-        # is unset, not a parse error that stops the API server at import.
+        # is unset, so the default applies; it is not a parse error that stops the API server.
         if isinstance(value, str) and not value.strip():
-            return None
+            return DEFAULT_MAX_FILE_SIZE_MB
         return value
 
 

@@ -18,7 +18,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from cognee.modules.integrations import credentials as credential_store
-from cognee.modules.integrations.base import OAuthInstallation, OAuthIntegration
+from cognee.modules.integrations.base import OAuthInstallation, OAuthIntegration, refuse_parent
 from cognee.modules.integrations.credentials import (
     decrypt_token_payload,
     require_active_credential,
@@ -112,7 +112,9 @@ class NotionIntegration(OAuthIntegration):
     async def sync_now(self, credential: IntegrationCredential) -> None:
         await sync_notion(credential)
 
-    async def list_resources(self, credential: IntegrationCredential) -> list[dict[str, Any]]:
+    async def list_resources(
+        self, credential: IntegrationCredential, *, parent: str | None = None
+    ) -> list[dict[str, Any]]:
         """The roots a user can pick: shared pages and data sources whose parent is not shared.
 
         A page or data source inside another shared one is read by that one's walk, so
@@ -120,6 +122,7 @@ class NotionIntegration(OAuthIntegration):
         it returns: a page inside a block (a toggle or a column) of a shared page is
         offered here, and the sync drops it when it walks the parent chain.
         """
+        refuse_parent(self.provider, parent)
         hits = await client.search_shared(await access_token_for(credential))
         shared = {client.canonical_id(hit["id"]) for hit in hits}
         return [

@@ -82,6 +82,17 @@ LIST_FOLDER_LIMIT = 2000
 # is left cuts the run with failed_rate_limit, and the next run resumes. A 429 waits its
 # Retry-After; a 5xx or a network error waits 1, 2, then 4 seconds.
 RUN_WAIT_BUDGET_SECONDS = 120
+# The same lock is why a run's wall time is bounded: a first sync of 10k files would hold it
+# for about 50 minutes, blocking every other dlt ingestion in the process. Past this budget the
+# run stops after the file in hand, keeps what it stored, and the next run fetches the rest
+# (failed_budget). It only delays: nothing is dropped.
+RUN_TIME_BUDGET_SECONDS = 15 * 60
+
+
+def _monotonic() -> float:
+    return time.monotonic()
+
+
 RETRIES = 3
 WAIT_STEP_SECONDS = 1
 # A download stays in memory up to this size and spills to a temporary file beyond it.
@@ -107,7 +118,9 @@ STATS_KEYS = (
     "failed_account",
     "failed_listing",
     "failed_folder_gone",
+    "failed_folder_not_found",
     "failed_rate_limit",
+    "failed_budget",
     "failed_retry",
     "team_space_unsupported",
     "complete",
@@ -559,6 +572,9 @@ def _failure_key(error: DropboxError) -> str:
         return "failed_auth"
     if isinstance(error, DropboxAccountMismatchError):
         return "failed_account"
+    if isinstance(error, DropboxFolderNotFoundError):
+        # Never listed and not found: it holds nothing here.
+        return "failed_folder_not_found"
     return "failed_listing"
 
 
@@ -655,12 +671,21 @@ def _decode(stream: Any) -> str:
 
 def _extract_pdf_text(stream: Any) -> str:
     from pypdf import PdfReader
-    from pypdf.errors import PyPdfError
 
     try:
         reader = PdfReader(stream, strict=False)
         text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    except PyPdfError as error:
+    except (MemoryError, OSError):
+        # The process or the disk under the spool, not this file: it may pass, so the run
+        # stops and the stored PDF stays rather than being forgotten as unparseable.
+        raise
+    except Exception as error:
+        # Besides its own errors, pypdf raises NotImplementedError for what it does not
+        # implement (a certificate security handler, /Adobe.PubSec; an unsupported /V, crypt
+        # filter or stream filter) and KeyError, TypeError and others on malformed files. The
+        # same bytes fail the same way every run, so the file is skipped as unparseable, not
+        # retried. A BaseException (cancellation, the host's check) still propagates. The
+        # cause stays attached for debugging; the caller counts it and logs nothing of it.
         raise ValueError("unreadable PDF") from error
     # NUL bytes in a text layer break a Postgres staging load.
     return text.replace("\x00", "")
@@ -1015,7 +1040,13 @@ def _iter_rows(
     identical = 0
     note: dict = {}
     last: dict | None = None
+    started = _monotonic()
     for position, (file_id, entry) in enumerate(work):
+        if position and _monotonic() - started > RUN_TIME_BUDGET_SECONDS:
+            # At least one file was worked on, so every run makes progress.
+            next_retry.update(fid for fid, _ in work[position:])
+            cut = "budget"
+            break
         try:
             if entry is None:
                 entry = _retry_metadata(session, file_id, scope[0])

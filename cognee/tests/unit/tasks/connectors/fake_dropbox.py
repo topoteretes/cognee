@@ -300,8 +300,11 @@ class FakeDropbox:
         return folder == "" or path == folder or path.startswith(folder + "/")
 
 
-def make_pdf(text: str) -> bytes:
-    """A minimal one-page PDF whose text pypdf can extract."""
+def make_pdf(text: str, *, certificate_encrypted: bool = False) -> bytes:
+    """A minimal one-page PDF whose text pypdf can extract.
+
+    ``certificate_encrypted`` adds a public-key security handler (``/Filter /Adobe.PubSec``),
+    which pypdf does not implement: reading it raises ``NotImplementedError``."""
     stream = f"BT /F1 24 Tf 72 700 Td ({text}) Tj ET".encode()
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -313,6 +316,13 @@ def make_pdf(text: str) -> bytes:
         b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     ]
+    encrypt = b""
+    if certificate_encrypted:
+        objects.append(
+            b"<< /Filter /Adobe.PubSec /SubFilter /adbe.pkcs7.s5 /V 4 /Length 128 "
+            b"/Recipients [<00>] >>"
+        )
+        encrypt = b" /Encrypt %d 0 R /ID [<01><01>]" % len(objects)
     out = bytearray(b"%PDF-1.4\n")
     offsets = []
     for number, body in enumerate(objects, 1):
@@ -322,8 +332,9 @@ def make_pdf(text: str) -> bytes:
     out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
     for offset in offsets:
         out += b"%010d 00000 n \n" % offset
-    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+    out += b"trailer\n<< /Size %d /Root 1 0 R%s >>\nstartxref\n%d\n%%%%EOF\n" % (
         len(objects) + 1,
+        encrypt,
         xref,
     )
     return bytes(out)

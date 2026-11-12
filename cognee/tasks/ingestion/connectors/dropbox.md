@@ -44,8 +44,16 @@ assert source.cognee_sync_stats["failed"] == 0 and source.cognee_sync_stats["com
   user, the account and the folder id. The integration module refuses a folder inside another
   selected folder when the selection is saved (422 from
   `PUT /api/v1/integrations/dropbox/resources`) and again at sync time: the file would be two
-  documents. `dropbox_source` sees one folder and cannot check this; any other host (Cloud
-  included) must refuse a nested selection itself.
+  documents. Saving also refuses a folder id Dropbox cannot resolve (deleted, or not visible to
+  the account), a single folder included. `dropbox_source` sees one folder and cannot check
+  this; any other host (Cloud included) must refuse a nested selection itself.
+- The integration module's folder picker lists one level at a time:
+  `GET /api/v1/integrations/dropbox/resources?parent=<folder id>` lists the folders directly
+  inside it, without `parent` the top of the account (`recursive: false`, folders only, one
+  HTTP session). A `parent` that is not a folder id (a path, an `ns:` id, control
+  characters) is a 422 and never reaches Dropbox; one Dropbox does not find, or a file, is a
+  404. `OAuthIntegration.list_resources` takes `parent` on every provider; those that list
+  everything at once refuse it with a 422 and list as before without it.
 - `folder_id` is `id:...` or `""`. A path (`/Notes`) is refused at construction.
 - Give exactly one of `token` and `service`. `token` is a string or a `TokenSource`: called
   before every request attempt for the token to send, and optionally with `invalidate()`,
@@ -62,15 +70,24 @@ assert source.cognee_sync_stats["failed"] == 0 and source.cognee_sync_stats["com
   `DROPBOX_MAX_FILE_SIZE_MB`: Cloud passes its own `max_file_size_mb` if it wants a cap.
 - `check_active` is called before every request attempt and every wait (in one-second steps),
   and around every row. What it raises stops the run unchanged.
-- `max_file_size_mb` (default `None`, no limit) leaves out larger files, counted in
-  `skipped_too_large`. The integration module passes `DROPBOX_MAX_FILE_SIZE_MB` (unset or
-  blank: no limit; 0, a negative number, `inf` or `nan` stop the server at startup).
+- `max_file_size_mb` (default `None`, no limit: the SDK caller chooses) leaves out larger
+  files, counted in `skipped_too_large`; a file is never truncated, and the extracted text is
+  never cut. The integration module passes `DROPBOX_MAX_FILE_SIZE_MB`, default 50 (unset or
+  blank: 50; any positive number raises or lowers it). Any other non-blank value (0, a
+  negative number, `inf`, `nan`, text) stops the API server at startup: a typo fails fast
+  rather than syncing with a cap nobody chose. A stored file that is now over the cap (it
+  grew, or it is listed again after the cap was introduced or lowered) is forgotten, like any
+  stored file that is now skipped. The 50 MB default was asked for in the review of PR #6668,
+  after Google Drive's size cap: text and PDF files are read whole, so a file's size is memory
+  during the sync, and every edit of a large file re-extracts it on the tenant's LLM key.
 
 ## What is read
 
 - `.txt`, `.md`, `.markdown`, `.csv` as text (UTF-8, or UTF-16 with a BOM; NUL bytes mean
   binary and the file is skipped as unparseable).
-- `.pdf` through pypdf.
+- `.pdf` through pypdf. A PDF pypdf cannot read (corrupt, or a certificate-encrypted
+  `/Adobe.PubSec` file, an unsupported crypt or stream filter it does not implement) is
+  skipped as unparseable and not retried until the file changes.
 - Paper docs and other non-downloadable files that offer a `markdown` export, through
   `files/export`.
 - Everything else is skipped and counted in `skipped_unsupported_type`.
@@ -165,7 +182,8 @@ Tombstones are sent after a complete listing, or on a direct answer about the re
   nothing and count `failed_folder_gone` (so the connection reads degraded while it stays
   selected), and if the same folder id resolves again it is listed whole and synced from
   scratch. A folder never listed that is not found raises `DropboxFolderNotFoundError`
-  instead, so a wrong id never empties a table.
+  instead, so a wrong id never empties a table; it is counted `failed_folder_not_found`, which
+  holds no data either and does not block retiring deselected folders.
 
 What never deletes: any listing error (the state stays as it was), a rate limit, a 401, and a
 file that keeps failing: it is retried every run and its stored text is kept until Dropbox
@@ -179,8 +197,10 @@ failure leaves the other tables alone and blocks retirement only when it may hav
 nothing of its own: a listing error, an account mismatch or a source that raised. Files that
 keep failing (`failed_retry`, counted per file on every pass) and a folder cut short by a rate
 limit or a 401 after its files were worked on do not block it
-(`ingestion.retirement_blocked` with `failed_retry` and `failed_folder_gone` as gone keys and
-the cut folders as cut scopes). A selected folder that is gone does not block either. The sync still reports degraded whenever anything failed.
+(`ingestion.retirement_blocked` with `failed_retry`, `failed_folder_gone` and
+`failed_folder_not_found` as gone keys and the cut folders as cut scopes). A selected folder
+that is gone, or was never found, does not block either. A folder counts as cut when its run
+stopped early after its listing (`scanned`, `deleted` or `failed_budget` above 0). The sync still reports degraded whenever anything failed.
 
 Gaps:
 
@@ -206,6 +226,11 @@ Gaps:
   every other dlt ingestion in the process (the community connector's value). A wait that does
   not fit what is left cuts the run: rows already yielded stay, `failed_rate_limit` is set, the
   rest is fetched next run.
+- A run's wall time is bounded too, for the same lock: after 15 minutes of working on files
+  the run stops after the file in hand (`failed_budget`), keeps what it stored and checkpoints
+  its state, and the next run fetches the rest. A 10k-file first sync would otherwise hold the
+  lock for about 50 minutes. It only delays; nothing is dropped. The integration module counts
+  such a folder as cut, so it does not block retiring deselected folders.
 - A 401 before anything was stored raises `DropboxAuthError`. After rows it cuts the run with
   `failed_auth`; the next run resumes. With a renewing `TokenSource`, Dropbox's AuthError tag
   decides first: `expired_access_token`, `invalid_access_token`, an unlisted tag or a 401
@@ -228,9 +253,10 @@ Gaps:
 `skipped_unparseable`, `skipped_empty_content`, `skipped_not_found`, `skipped_restricted`),
 `failed` and its reasons
 (`failed_auth`, `failed_account`, `failed_listing` (the folder could not be resolved or
-listed: an API error, or a folder never listed that is not found), `failed_folder_gone` (a
-folder forgotten on an earlier pass and still gone: counted on every later pass, never taken
-for a typo, never blocking the retirement of deselected folders), `failed_rate_limit`,
+listed: an API error), `failed_folder_gone` (a folder forgotten on an earlier pass and still
+gone: counted on every later pass, never taken for a typo, never blocking the retirement of
+deselected folders), `failed_folder_not_found` (a folder never listed that Dropbox does not
+find: also never blocking that retirement), `failed_rate_limit`, `failed_budget` (the run's time budget),
 `failed_retry` once per file still waiting for a
 retry), `team_space_unsupported` (0 or 1) and `complete` (1 when the run was not cut).
 

@@ -14,7 +14,12 @@ from typing import Any
 from urllib.parse import urlencode
 
 from cognee.modules.integrations import credentials as credential_store
-from cognee.modules.integrations.base import OAuthInstallation, OAuthIntegration
+from cognee.modules.integrations.base import (
+    OAuthInstallation,
+    OAuthIntegration,
+    ResourceParentError,
+    ResourceParentNotFoundError,
+)
 from cognee.modules.integrations.credentials import (
     decrypt_token_payload,
     require_active_credential,
@@ -32,6 +37,7 @@ from cognee.modules.integrations.dropbox.sync import (
 )
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.connectors.dropbox import valid_folder_id
 
 logger = get_logger("dropbox_integration")
 
@@ -48,6 +54,7 @@ class DropboxIntegration(OAuthIntegration):
     resource_selection_key = SELECTION_KEY
     # Nothing syncs until the user picks folders: a whole Dropbox costs LLM tokens.
     resource_selection_allows_all = False
+    # The picker opens one folder at a time: an account can hold too many to list at once.
 
     def authorize_url(self, state: str) -> str:
         params = {
@@ -122,17 +129,32 @@ class DropboxIntegration(OAuthIntegration):
     async def validate_resource_selection(
         self, credential: IntegrationCredential, resource_ids: list[str]
     ) -> None:
-        """No folder inside another: its files would be two documents. The id shape is
-        checked before this, by ``invalid_resource_ids``."""
+        """Every folder id resolves at Dropbox, and no folder sits inside another (its files
+        would be two documents). A single folder is checked too: an id Dropbox cannot resolve
+        would otherwise be stored and count as gone on every sync."""
         folder_ids = check_selection_shape(resource_ids)
-        if len(folder_ids) > 1:
+        if folder_ids:
             await refuse_nested_selection(
-                credential, await access_token_for(credential), folder_ids
+                credential, await access_token_for(credential), folder_ids, refuse_missing=True
             )
 
-    async def list_resources(self, credential: IntegrationCredential) -> list[dict[str, Any]]:
-        """Every folder of the account, by id, with its path for the picker."""
-        folders = await client.list_folders(await access_token_for(credential))
+    async def list_resources(
+        self, credential: IntegrationCredential, *, parent: str | None = None
+    ) -> list[dict[str, Any]]:
+        """The folders one level under ``parent`` (a folder id; None: the top of the account),
+        by id, with their path for the picker. A parent that is not a folder id is a 422
+        (``ResourceParentError``); one Dropbox does not find, or a file, a 404."""
+        if parent is not None and not valid_folder_id(parent):
+            # Checked before the token is used: a path, an ns: id or a control character
+            # never reaches Dropbox.
+            raise ResourceParentError("parent must be a Dropbox folder id like id:...")
+        try:
+            folders = await client.list_folders(await access_token_for(credential), parent=parent)
+        except client.DropboxIntegrationError as error:
+            if parent is None or error.code != "path":
+                raise
+            # list_folder's path error: the parent is gone, not visible, or not a folder.
+            raise ResourceParentNotFoundError("That Dropbox folder could not be found") from None
         return [
             {
                 "id": folder["id"],

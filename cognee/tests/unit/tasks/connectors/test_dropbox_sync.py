@@ -1158,3 +1158,88 @@ def test_an_edited_paper_doc_without_a_content_hash_is_emitted_again(fake):
     fake.put("/P.paper", "# Plan v2", downloadable=False, export_info=info)
     unchanged, _, stats = sync(fake, state)
     assert unchanged == {} and stats["unchanged"] == 1, "same text: nothing emitted"
+
+
+# ---------------------------------------------------------------- round 12 (review)
+def test_a_pdf_pypdf_cannot_open_is_skipped_and_the_run_goes_on(fake):
+    """A certificate-encrypted PDF (/Adobe.PubSec): pypdf raises NotImplementedError, a
+    RuntimeError, which must not fail the folder on every run."""
+    locked = fake.put("/locked.pdf", make_pdf("Secret", certificate_encrypted=True))
+    ok = fake.put("/ok.md", "fine")
+    state: dict = {}
+
+    upserts, _, stats = sync(fake, state)
+
+    assert set(upserts) == {ok} and locked not in upserts
+    assert stats["skipped_unparseable"] == 1 and stats["failed"] == 0 and stats["complete"] == 1
+
+
+def test_a_long_run_is_cut_by_its_time_budget_and_resumes(fake, monkeypatch):
+    """The walk holds the process-wide dlt staging lock: past the run's time budget it stops
+    after the file in hand, keeps what it stored, and the next run fetches the rest."""
+    from cognee.tasks.ingestion.connectors import dropbox as dropbox_module
+
+    ids = [fake.put(f"/f{i}.md", f"file {i}") for i in range(5)]
+    clock = [0.0]
+
+    def now():
+        clock[0] += 400  # every look at the clock is 400 s later
+        return clock[0]
+
+    monkeypatch.setattr(dropbox_module, "_monotonic", now)
+    state: dict = {}
+
+    first, _, stats = sync(fake, state)
+
+    assert 0 < len(first) < 5
+    assert (stats["failed"], stats["failed_budget"], stats["complete"]) == (1, 1, 0)
+    monkeypatch.setattr(dropbox_module, "_monotonic", lambda: 0.0)
+    second, _, stats = sync(fake, state)
+    assert set(first) | set(second) == set(ids) and stats["complete"] == 1
+
+
+# ---------------------------------------------------------------- round 13
+@pytest.mark.parametrize("error", [MemoryError, OSError])
+def test_a_pdf_read_that_runs_out_of_memory_or_disk_stops_the_run_and_keeps_the_pdf(
+    fake, monkeypatch, error
+):
+    """Memory or the disk under the spool can come back: not a property of the file, so the
+    stored PDF is not tombstoned as unparseable; the run stops and its state stays."""
+    import pypdf
+
+    pdf = fake.put("/r.pdf", make_pdf("Quarterly"), modified="2025-03-04T10:00:00Z")
+    state: dict = {}
+    sync(fake, state)
+    before = copy.deepcopy(state)
+
+    fake.put("/r.pdf", make_pdf("Quarterly v2"), modified="2025-03-05T10:00:00Z")
+
+    def broken(*_args, **_kwargs):
+        raise error("out of resources")
+
+    monkeypatch.setattr(pypdf, "PdfReader", broken)
+    with pytest.raises(error):
+        sync(fake, state)
+
+    assert state == before and pdf in state["stored"]
+
+
+def test_the_run_budget_still_stores_the_first_file(fake, monkeypatch):
+    """Even when the budget is spent before the first file, one file is worked on, so a run
+    always makes progress."""
+    from cognee.tasks.ingestion.connectors import dropbox as dropbox_module
+
+    for i in range(3):
+        fake.put(f"/f{i}.md", f"file {i}")
+    monkeypatch.setattr(dropbox_module, "_monotonic", iter(range(0, 10**9, 10**6)).__next__)
+
+    upserts, _, stats = sync(fake, {})
+
+    assert len(upserts) == 1 and stats["failed_budget"] == 1
+
+
+def test_a_never_listed_folder_that_is_missing_has_its_own_key(fake):
+    error, stats = run_with_stats(fake, {}, "id:typo")
+
+    assert isinstance(error, DropboxFolderNotFoundError)
+    assert (stats["failed_folder_not_found"], stats["failed_folder_gone"]) == (1, 0)
