@@ -19,6 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 # and Linear mount no routers of their own (webhooks arrive on the generic
 # /api/v1/integrations/{provider}/events routes), so the registration imports
 # are explicit here.
+import cognee.modules.integrations.dropbox
 import cognee.modules.integrations.github
 import cognee.modules.integrations.gmail
 import cognee.modules.integrations.google_calendar

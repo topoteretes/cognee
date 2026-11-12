@@ -17,7 +17,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlencode
 
-from cognee.modules.integrations.base import OAuthInstallation, OAuthIntegration
+from cognee.modules.integrations import credentials as credential_store
+from cognee.modules.integrations.base import OAuthInstallation, OAuthIntegration, refuse_parent
 from cognee.modules.integrations.credentials import (
     decrypt_token_payload,
     require_active_credential,
@@ -39,9 +40,6 @@ logger = get_logger("notion_integration")
 
 _AUTHORIZE_URL = f"{client.API_BASE}/oauth/authorize"
 
-# Refresh this far before the token actually dies, so a sync that takes a while does
-# not expire halfway through its own walk.
-_REFRESH_MARGIN = timedelta(minutes=5)
 
 # One lock per workspace, so the picker and a background sync that both find the token
 # expiring do not each spend the same refresh token. Notion rotates it, so the second
@@ -111,7 +109,9 @@ class NotionIntegration(OAuthIntegration):
     async def sync_now(self, credential: IntegrationCredential) -> None:
         await sync_notion(credential)
 
-    async def list_resources(self, credential: IntegrationCredential) -> list[dict[str, Any]]:
+    async def list_resources(
+        self, credential: IntegrationCredential, *, parent: str | None = None
+    ) -> list[dict[str, Any]]:
         """The roots a user can pick: shared pages and data sources whose parent is not shared.
 
         A page or data source inside another shared one is read by that one's walk, so
@@ -119,6 +119,7 @@ class NotionIntegration(OAuthIntegration):
         it returns: a page inside a block (a toggle or a column) of a shared page is
         offered here, and the sync drops it when it walks the parent chain.
         """
+        refuse_parent(self.provider, parent)
         hits = await client.search_shared(await access_token_for(credential))
         shared = {client.canonical_id(hit["id"]) for hit in hits}
         return [
@@ -204,18 +205,16 @@ class NotionIntegration(OAuthIntegration):
 
 async def access_token_for(credential: IntegrationCredential) -> str:
     """A bearer token, refreshed first when it is within five minutes of its expiry."""
-    credential = await require_active_credential(credential)
-    if _is_expiring(credential):
-        async with _refresh_locks.setdefault(str(credential.provider_account_id), asyncio.Lock()):
-            # A caller that held the lock first may have rotated the pair already, so
-            # read the row back before spending the refresh token.
-            credential = await require_active_credential(credential)
-            if _is_expiring(credential):
-                await NotionIntegration().refresh(credential)
-                # refresh() writes through its own session, so the instance handed in
-                # still carries the pre-rotation ciphertext. Read the row back.
-                credential = await require_active_credential(credential)
-
+    # A caller that held the lock first may have rotated the pair already, so the helper
+    # reads the row back before spending the refresh token: Notion rotates it on every
+    # refresh, and spending a stale one fails and could revoke a healthy connection.
+    credential = await credential_store.refreshed_credential(
+        credential,
+        NotionIntegration().refresh,
+        locks=_refresh_locks,
+        read=require_active_credential,
+        now=lambda: datetime.now(timezone.utc),
+    )
     token = decrypt_token_payload(credential).get("access_token")
     if not token:
         raise RuntimeError(
@@ -223,17 +222,6 @@ async def access_token_for(credential: IntegrationCredential) -> str:
             "holds no access token"
         )
     return token
-
-
-def _is_expiring(credential: IntegrationCredential) -> bool:
-    expires_at = credential.token_expires_at
-    if expires_at is None:
-        return False
-    # A naive timestamp comes back from SQLite, which stores no timezone; it is
-    # written as UTC, so that is what it is read as.
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    return expires_at - _REFRESH_MARGIN <= datetime.now(timezone.utc)
 
 
 def _expires_at(expires_in: Any) -> datetime | None:

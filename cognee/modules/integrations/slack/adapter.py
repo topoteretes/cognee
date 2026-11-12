@@ -18,7 +18,7 @@ import aiohttp
 from sqlalchemy import update
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.integrations.base import OAuthInstallation, OAuthIntegration
+from cognee.modules.integrations.base import OAuthInstallation, OAuthIntegration, refuse_parent
 from cognee.modules.integrations.credentials import (
     decrypt_token_payload,
     require_active_credential,
@@ -163,7 +163,9 @@ class SlackIntegration(OAuthIntegration):
         """Anything but a channel id (``C…`` or ``G…``): a DM, a name, a lowercase id (G51)."""
         return [resource_id for resource_id in resource_ids if not _CHANNEL.fullmatch(resource_id)]
 
-    async def list_resources(self, credential: IntegrationCredential) -> list[dict[str, Any]]:
+    async def list_resources(
+        self, credential: IntegrationCredential, *, parent: str | None = None
+    ) -> list[dict[str, Any]]:
         """The channels a user can pick for the sync: the ones the app is in, and the
         selected ones Slack has archived since.
 
@@ -176,6 +178,7 @@ class SlackIntegration(OAuthIntegration):
         selected private channel whose members cannot be read right now stays listed for
         the same reason (``visible_channels``).
         """
+        refuse_parent(self.provider, parent)
         token = await access_token_for(credential)
         selected = selected_channels(credential)
         channels = [
