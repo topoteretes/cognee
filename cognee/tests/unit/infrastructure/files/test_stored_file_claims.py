@@ -11,7 +11,6 @@ import importlib
 import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from urllib.parse import unquote, urlparse
 
 import pytest
 
@@ -21,15 +20,12 @@ from cognee.infrastructure.files.stored_file_claims import (
     holding_stored_files,
     removals_so_far,
 )
+from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 
 # The package re-exports a function under the module's name, so import the module itself.
 saving = importlib.import_module("cognee.modules.ingestion.save_data_to_file")
 
 OUTCOME = "The update was applied: the document holds its new content."
-
-
-def _local_path(location: str) -> str:
-    return unquote(urlparse(location).path)
 
 
 @pytest.fixture
@@ -40,7 +36,7 @@ def data_root(tmp_path, monkeypatch):
     )
 
     async def remove_data_file(location):
-        os.remove(_local_path(location))
+        os.remove(get_data_file_path(location))
 
     engine = SimpleNamespace(
         is_managed_data_file=lambda location: True,
@@ -69,13 +65,15 @@ async def test_a_file_another_operation_stored_stays_until_that_operation_is_ove
 
     # An update in this dataset releases the same file: no row points at it yet.
     await removal.remove_unreferenced_files([location], OUTCOME)
-    assert os.path.exists(_local_path(location)), "A file an add was about to commit was removed"
+    assert os.path.exists(get_data_file_path(location)), (
+        "A file an add was about to commit was removed"
+    )
 
     finish.set()
     await adding
     # Once that operation is over the claim is gone, and an unused file is removed.
     await removal.remove_unreferenced_files([location], OUTCOME)
-    assert not os.path.exists(_local_path(location))
+    assert not os.path.exists(get_data_file_path(location))
 
 
 @pytest.mark.asyncio
@@ -84,7 +82,7 @@ async def test_an_operation_removes_the_files_it_stored_and_did_not_use(data_roo
         location = await saving.save_data_to_file("Staged by an update that did not publish.")
         await removal.remove_unreferenced_files([location], OUTCOME)
 
-    assert not os.path.exists(_local_path(location))
+    assert not os.path.exists(get_data_file_path(location))
 
 
 @pytest.mark.asyncio
@@ -104,7 +102,7 @@ async def test_a_nested_scope_keeps_its_claims_until_the_outer_one_ends(data_roo
     running = asyncio.create_task(item_run())
     await claimed.wait()
     await removal.remove_unreferenced_files([location], OUTCOME)
-    assert os.path.exists(_local_path(location))
+    assert os.path.exists(get_data_file_path(location))
 
     finish.set()
     await running
