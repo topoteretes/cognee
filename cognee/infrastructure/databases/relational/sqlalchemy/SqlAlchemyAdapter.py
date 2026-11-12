@@ -469,10 +469,10 @@ class SQLAlchemyAdapter:
         """
         if not file_location or not self.is_managed_data_file(file_location):
             return
-        async with removing_stored_files([file_location]) as removable:
-            if not removable:
+        async with removing_stored_files() as claimed_elsewhere:
+            if claimed_elsewhere(file_location):
                 return
-            if await self.referenced_data_files(removable):
+            if await self.referenced_data_files([file_location]):
                 return
             await self.remove_data_file(file_location)
 

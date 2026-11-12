@@ -10,14 +10,10 @@ about to commit, leaving that row pointing at nothing.
 
 So every operation that stores files for rows it has yet to commit holds them
 in a scope (``holding_stored_files``); each store claims its file in it
-(``store_claimed``), and a removal (``removing_stored_files``) leaves out a
-file another scope claims.
-
-Everything is per location. A removal marks the locations it takes, then runs
-its reference check and deletes with no shared lock held; only a claim on one
-of those locations waits for it. A store a removal overtook (its location
-removed after the store began, before the claim) writes the file again; a
-removal of any other location does not make it.
+(``claim_stored_file``), and removals (``removing_stored_files``) skip a file
+another scope claims. The claim and the removal check run under one lock, and a
+store that a removal overtook (its file removed between the write and the
+claim) stores the file again before claiming it.
 
 Process-local, like the dataset lock: two processes sharing one data root are
 not covered.
@@ -29,20 +25,16 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
-from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticEvent
+from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
 
-# Guards the state below. Held only for dict updates, never across I/O.
-_guard = threading.Lock()
+# Held by a claim and by a removal from its reference check to its last delete.
+_lock = LoopAgnosticLock()
+# Guards the counters, which a scope releases without taking ``_lock``.
+_counts_guard = threading.Lock()
 # Location -> how many open scopes claim it.
 _claims: Counter[str] = Counter()
-# Location -> the event its removal sets once its delete is over.
-_removing: dict[str, LoopAgnosticEvent] = {}
-# Location -> the sequence number of its last removal, kept while a store that
-# began before it is in flight.
-_removed_at: dict[str, int] = {}
-# Sequence number each in-flight store began at -> how many began there.
-_in_flight: Counter[int] = Counter()
-_sequence = 0
+# Bumped by every removal, so a store can tell whether one ran since it wrote.
+_removals = 0
 
 _scope: ContextVar[Counter[str] | None] = ContextVar("stored_file_claims", default=None)
 
@@ -64,85 +56,55 @@ async def holding_stored_files() -> AsyncIterator[None]:
         yield
     finally:
         _scope.reset(token)
-        with _guard:
+        with _counts_guard:
             _claims.subtract(own)
             for location in own:
                 if _claims[location] <= 0:
                     del _claims[location]
 
 
-async def store_claimed(store: Callable[[], Awaitable[str]]) -> str:
-    """Run ``store`` and claim the location it returns in the open scope.
+def removals_so_far() -> int:
+    """The removal count, read before a store and handed to ``claim_stored_file``."""
+    return _removals
 
-    ``store`` writes the file and returns its location; it runs a second time
-    when a removal took that location after the store began. Outside a scope
-    it only stores.
+
+async def claim_stored_file(
+    location: str, removals_before_store: int, store_again: Callable[[], Awaitable]
+) -> None:
+    """Claim ``location`` in the open scope; a no-op outside one.
+
+    ``store_again`` writes the file once more. It runs only when a removal ran
+    since the store (``removals_before_store``), since that removal may have
+    taken the file before this claim could protect it.
     """
     own = _scope.get()
     if own is None:
-        return await store()
-
-    with _guard:
-        began = _sequence
-        _in_flight[began] += 1
-    try:
-        location = await store()
-        with _guard:
+        return
+    async with _lock:
+        if _removals != removals_before_store:
+            await store_again()
+        with _counts_guard:
             _claims[location] += 1
             own[location] += 1
-            removal = _removing.get(location)
-        if removal is not None:
-            # A removal took the location before this claim; its delete may
-            # still be running. Wait for it, then store the file again below.
-            await removal.wait()
-        with _guard:
-            overtaken = _removed_at.get(location, began) > began
-        if overtaken:
-            await store()
-        return location
-    finally:
-        with _guard:
-            _in_flight[began] -= 1
-            if _in_flight[began] <= 0:
-                del _in_flight[began]
-            _forget_old_removals()
 
 
 @asynccontextmanager
-async def removing_stored_files(locations: list[str]) -> AsyncIterator[list[str]]:
-    """Take the ``locations`` no other scope claims; yields them, to check and remove.
+async def removing_stored_files() -> AsyncIterator[Callable[[str], bool]]:
+    """Hold off claims while removing; yields whether a location is claimed elsewhere.
 
-    Run the reference check and the deletes inside the block, on the yielded
-    locations only. A location another removal is already taking is left to
-    it. The current scope's own claims do not count: an operation may remove
-    the files it staged and did not use.
+    Run the reference check and the deletes inside the block, and skip every
+    location the yielded check reports. The current scope's own claims do not
+    count: an operation may remove the files it staged and did not use.
     """
-    global _sequence
-    own = _scope.get() or Counter()
-    taken: dict[str, LoopAgnosticEvent] = {}
-    with _guard:
-        for location in dict.fromkeys(locations):
-            if _claims[location] - own[location] <= 0 and location not in _removing:
-                taken[location] = _removing[location] = LoopAgnosticEvent()
+    global _removals
+    async with _lock:
+        own = _scope.get() or Counter()
 
-    try:
-        yield list(taken)
-    finally:
-        with _guard:
-            _sequence += 1
-            for location in taken:
-                _removed_at[location] = _sequence
-                del _removing[location]
-            _forget_old_removals()
-        for done in taken.values():
-            done.set()
+        def claimed_elsewhere(location: str) -> bool:
+            with _counts_guard:
+                return _claims[location] - own[location] > 0
 
-
-def _forget_old_removals() -> None:
-    """Drop removals no in-flight store began before. Call with ``_guard`` held."""
-    if not _in_flight:
-        _removed_at.clear()
-        return
-    oldest = min(_in_flight)
-    for location in [loc for loc, at in _removed_at.items() if at <= oldest]:
-        del _removed_at[location]
+        try:
+            yield claimed_elsewhere
+        finally:
+            _removals += 1

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import BinaryIO
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
-from cognee.infrastructure.files.stored_file_claims import store_claimed
+from cognee.infrastructure.files.stored_file_claims import claim_stored_file, removals_so_far
 
 # ``_derive_basename`` is the one place that turns a path/URI into the
 # extension-less document name stored on ``Data.name``. Reusing it here keeps
@@ -87,10 +87,14 @@ async def save_data_to_file_detailed(
         storage = get_file_storage(data_root_directory)
         storage_key = _storage_key(file_name, file_metadata.get("content_hash"), is_text)
 
+        removals_before_store = removals_so_far()
+        full_file_path = await storage.store(storage_key, payload, overwrite=True)
         # The key is shared by every add of these bytes, so the file is claimed
         # until the caller's row points at it (see ``stored_file_claims``).
-        full_file_path = await store_claimed(
-            lambda: storage.store(storage_key, payload, overwrite=True)
+        await claim_stored_file(
+            full_file_path,
+            removals_before_store,
+            lambda: storage.store(storage_key, payload, overwrite=True),
         )
 
     # Point the metadata at where the payload actually landed, and carry the

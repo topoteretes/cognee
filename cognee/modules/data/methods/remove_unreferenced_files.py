@@ -47,11 +47,9 @@ async def remove_unreferenced_files(locations: Iterable[str | None], outcome: st
         return
 
     # A file another operation stored and has yet to commit a row for is
-    # claimed, and stays (see ``stored_file_claims``). The check and the deletes
-    # hold only the locations they take, so stores elsewhere do not wait on them.
-    async with removing_stored_files(candidates) as candidates:
-        if not candidates:
-            return
+    # claimed, and stays (see ``stored_file_claims``).
+    async with removing_stored_files() as claimed_elsewhere:
+        candidates = [location for location in candidates if not claimed_elsewhere(location)]
         try:
             referenced = await db_engine.referenced_data_files(candidates)
         except Exception as error:
