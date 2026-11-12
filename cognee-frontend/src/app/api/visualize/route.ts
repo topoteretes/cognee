@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8000";
+import { getServerBackendUrl } from "@/modules/config/serverRuntimeConfig";
 
 export async function GET(request: NextRequest) {
+  const localApiUrl = getServerBackendUrl();
   const datasetId = request.nextUrl.searchParams.get("dataset_id");
   if (!datasetId) {
     return NextResponse.json({ error: "dataset_id required" }, { status: 400 });
@@ -23,7 +24,10 @@ export async function GET(request: NextRequest) {
       const loginResp = await fetch(`${localApiUrl}/api/v1/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "username=default_user@example.com&password=default_password",
+        body: new URLSearchParams({
+          username: process.env.DEFAULT_USER_EMAIL || "default_user@example.com",
+          password: process.env.DEFAULT_USER_PASSWORD || "default_password",
+        }).toString(),
       });
       if (loginResp.ok) {
         const data = await loginResp.json();
