@@ -58,6 +58,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
 from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.files.stored_file_claims import holding_stored_files
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.utils import get_max_chunk_tokens
@@ -793,20 +794,25 @@ async def incremental_update(
                 "the selected graph does not store ownership provenance in-graph",
                 RefusalReason.UNSUPPORTED_BACKEND,
             )
-        return await _run_incremental_update(
-            data_id,
-            data,
-            dataset,
-            user,
-            old_data,
-            node_set,
-            preferred_loaders,
-            graph_model,
-            custom_prompt,
-            chunker,
-            policy,
-            extractor,
-        )
+        # The staged files are stored long before the row points at them (the
+        # publish comes after extraction): claimed until the update is over, so
+        # no removal in another dataset takes them. The update's own cleanup
+        # still removes the ones it did not use.
+        async with holding_stored_files():
+            return await _run_incremental_update(
+                data_id,
+                data,
+                dataset,
+                user,
+                old_data,
+                node_set,
+                preferred_loaders,
+                graph_model,
+                custom_prompt,
+                chunker,
+                policy,
+                extractor,
+            )
 
 
 async def _record_content_in_ledger(

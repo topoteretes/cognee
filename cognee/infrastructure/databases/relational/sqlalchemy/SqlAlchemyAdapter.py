@@ -15,6 +15,7 @@ from sqlalchemy.orm import joinedload
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.files.stored_file_claims import removing_stored_files
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.modules.data.models.Data import Data
 from cognee.shared.logging_utils import get_logger
@@ -463,12 +464,17 @@ class SQLAlchemyAdapter:
         external s3:// URL) and is never touched. Content-addressed keys are
         shared by design — two rows with identical payloads point at one object
         — so the reference count spans both location columns of every dataset.
+        A file another operation stored and has yet to commit a row for stays
+        (``stored_file_claims``).
         """
         if not file_location or not self.is_managed_data_file(file_location):
             return
-        if await self.referenced_data_files([file_location]):
-            return
-        await self.remove_data_file(file_location)
+        async with removing_stored_files() as claimed_elsewhere:
+            if claimed_elsewhere(file_location):
+                return
+            if await self.referenced_data_files([file_location]):
+                return
+            await self.remove_data_file(file_location)
 
     @staticmethod
     def is_managed_data_file(file_location: str) -> bool:

@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.files.stored_file_claims import holding_stored_files
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
@@ -668,11 +669,16 @@ async def ingest_data(
     # same-content race there can produce two rows, which under document
     # semantics are simply two documents. File writes are content-addressed,
     # so re-running is idempotent.
-    try:
-        return await store_data_to_dataset(
-            data, dataset_name, user, node_set, dataset_id, preferred_loaders
-        )
-    except IntegrityError:
-        return await store_data_to_dataset(
-            data, dataset_name, user, node_set, dataset_id, preferred_loaders
-        )
+    #
+    # The files stored here are claimed until their rows commit, so a removal
+    # in another dataset cannot take one in between (joins the item's scope
+    # when a pipeline runs this task).
+    async with holding_stored_files():
+        try:
+            return await store_data_to_dataset(
+                data, dataset_name, user, node_set, dataset_id, preferred_loaders
+            )
+        except IntegrityError:
+            return await store_data_to_dataset(
+                data, dataset_name, user, node_set, dataset_id, preferred_loaders
+            )
