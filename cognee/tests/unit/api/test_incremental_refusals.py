@@ -490,7 +490,9 @@ async def test_a_staged_file_that_cannot_be_removed_stops_the_update_before_the_
     monkeypatch.setattr(incremental, "is_data_processed", AsyncMock(return_value=True))
     monkeypatch.setattr(incremental, "_stage_new_content", AsyncMock(return_value=staged))
     engine = SimpleNamespace(
-        remove_data_file_if_unreferenced=AsyncMock(side_effect=OSError("storage is down"))
+        is_managed_data_file=lambda location: True,
+        referenced_data_files=AsyncMock(return_value=set()),
+        remove_data_file=AsyncMock(side_effect=OSError("storage is down")),
     )
     monkeypatch.setattr(removal, "get_relational_engine", lambda: engine)
 
@@ -508,7 +510,7 @@ async def test_a_staged_file_that_cannot_be_removed_stops_the_update_before_the_
 
     error = raised.value
     assert error.outcome == incremental.UPDATE_NOT_APPLIED
-    assert error.location == "/tmp/new.md"
+    assert error.locations == ["/tmp/new.md", "/tmp/staged_original.md"]
     assert isinstance(error.__cause__, OSError)
     refusal = error.__cause__.__context__
     assert isinstance(refusal, IncrementalUpdateNotPossible)

@@ -221,6 +221,8 @@ async def test_a_file_that_cannot_be_removed_fails_the_update_and_says_what_it_l
     async def storage_down(self, location):
         raise OSError("storage is down")
 
+    removal = "remove_data_file"  # the storage step, after the reference check
+
     engine_class = type(get_relational_engine())
 
     # --- chunk-level update: the new content is published before the cleanup ---------
@@ -230,7 +232,7 @@ async def test_a_file_that_cannot_be_removed_fails_the_update_and_says_what_it_l
     old_file = row.raw_data_location
 
     with monkeypatch.context() as patched:
-        patched.setattr(engine_class, "remove_data_file_if_unreferenced", storage_down)
+        patched.setattr(engine_class, removal, storage_down)
         with pytest.raises(StoredFileNotRemovedError) as raised:
             await cognee.update(
                 data_id=row.id, data=_document("v2"), dataset_id=dataset_id, user=default_user
@@ -238,7 +240,7 @@ async def test_a_file_that_cannot_be_removed_fails_the_update_and_says_what_it_l
 
     error = raised.value
     assert error.outcome == incremental.UPDATE_APPLIED
-    assert error.location == old_file
+    assert error.locations == [old_file]
     assert "The update was applied" in str(error) and "storage is down" in str(error)
     # What the error says is true: the document holds v2, and the v1 file is still there.
     assert CONDUCTORS["v2"].lower() in _support.stored_text(
@@ -254,7 +256,7 @@ async def test_a_file_that_cannot_be_removed_fails_the_update_and_says_what_it_l
     other_row = await _only_row(other_id, default_user)
 
     with monkeypatch.context() as patched:
-        patched.setattr(engine_class, "remove_data_file_if_unreferenced", storage_down)
+        patched.setattr(engine_class, removal, storage_down)
         with pytest.raises(StoredFileNotRemovedError) as raised:
             await cognee.update(
                 data_id=other_row.id,

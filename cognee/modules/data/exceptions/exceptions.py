@@ -88,43 +88,47 @@ class InvalidTableAttributeError(CogneeValidationError):
 
 
 class StoredFileNotRemovedError(CogneeSystemError):
-    """Cleaning up a stored file that a document stopped using failed.
+    """Cleaning up stored files that a document stopped using failed.
 
     A document that changes content leaves its previous files without a row
     pointing at them, and so does an update that staged content it did not
     publish. Those files are removed on the spot, because nothing can find
-    them afterwards. When the removal fails the operation raises this instead
+    them afterwards. When a removal fails the operation raises this instead
     of returning: a stored file cognee cannot delete is never reported as a
     success, and the file has to be removed by hand.
 
     The message opens with ``outcome``, the state the document is in, since
-    the operation may well have taken effect before the removal failed. The
-    underlying error is the ``__cause__`` and ``location`` names the file. The
-    failure can come from the removal or from the check that the file is
-    unused, so the message asks for that check before deleting by hand.
+    the operation may well have taken effect before the removal failed. Every
+    file is tried before this is raised, and ``not_removed`` names each one that
+    could not be removed with its own error (``locations`` lists them); the
+    first of those errors is the ``__cause__``. A failure can come from the
+    removal or from the check that the files are unused, so the message asks
+    for that check before deleting by hand.
     """
 
     def __init__(
         self,
-        location: str,
+        not_removed: dict[str, str],
         outcome: str,
-        reason: str,
         name: str = "StoredFileNotRemovedError",
         status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
     ):
-        self.location = location
+        self.not_removed = dict(not_removed)
+        self.locations = list(self.not_removed)
         self.outcome = outcome
-        self.reason = reason
+        listed = "; ".join(
+            f"{location} ({reason})" for location, reason in self.not_removed.items()
+        )
         message = (
-            f"{outcome} Cleaning up a stored file the document stopped using failed: "
-            f"{location} ({reason})."
+            f"{outcome} Cleaning up stored files the document stopped using failed for "
+            f"{len(self.not_removed)} file(s): {listed}."
         )
         super().__init__(
             message,
             name,
             status_code,
             remediation=(
-                "Check that file. If no document points at it, nothing will remove it "
-                "later, so delete it from storage by hand."
+                "Check those files. Any that no document points at will not be removed "
+                "later, so delete them from storage by hand."
             ),
         )

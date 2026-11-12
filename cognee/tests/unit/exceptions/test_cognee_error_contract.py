@@ -56,10 +56,9 @@ SAMPLE_ARGUMENTS = {
     "requested": ["project-b"],
     # SyncPausedError names the row that holds the connection paused.
     "level": "default",
-    # StoredFileNotRemovedError: the file, the document's state, and the storage error.
-    "location": "s3://sample-bucket/data/text_sample.txt",
+    # StoredFileNotRemovedError: the files that stayed, each with its error, and the document's state.
+    "not_removed": {"s3://sample-bucket/data/text_sample.txt": "OSError: sample reason"},
     "outcome": "The update was applied: the document holds its new content.",
-    "reason": "OSError: sample reason",
     # DatasetNoDataError (search fan-out) wraps a retriever error for one dataset.
     "dataset": SimpleNamespace(
         name="sample_dataset", id="sample-dataset-id", tenant_id="sample-tenant-id"

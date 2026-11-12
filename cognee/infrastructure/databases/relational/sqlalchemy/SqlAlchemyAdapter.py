@@ -24,6 +24,10 @@ from ..ModelBase import Base
 logger = get_logger()
 
 
+# Locations per reference query: two IN lists, kept under SQLite's bound-parameter limit.
+_LOCATION_CHUNK = 400
+
+
 class SQLAlchemyAdapter:
     """
     Adapt a SQLAlchemy connection for asynchronous operations with database management
@@ -460,31 +464,44 @@ class SQLAlchemyAdapter:
         shared by design — two rows with identical payloads point at one object
         — so the reference count spans both location columns of every dataset.
         """
-        if not file_location:
+        if not file_location or not self.is_managed_data_file(file_location):
             return
-
-        storage_config = get_storage_config()
-        data_root = storage_config["data_root_directory"]
-        if data_root not in file_location:
+        if await self.referenced_data_files([file_location]):
             return
+        await self.remove_data_file(file_location)
 
+    @staticmethod
+    def is_managed_data_file(file_location: str) -> bool:
+        """Whether ``file_location`` is under cognee's data root, not a user's own file."""
+        return get_storage_config()["data_root_directory"] in file_location
+
+    async def referenced_data_files(self, file_locations: list[str]) -> set[str]:
+        """The subset of ``file_locations`` some ``Data`` row still points at.
+
+        Either location column, any dataset. One query per ``_LOCATION_CHUNK``
+        locations instead of one per file, so releasing many files costs one
+        scan, not one each.
+        """
+        referenced: set[str] = set()
         async with self.get_async_session() as session:
-            references = (
-                await session.execute(
-                    select(func.count())
-                    .select_from(Data)
-                    .where(
+            for start in range(0, len(file_locations), _LOCATION_CHUNK):
+                chunk = file_locations[start : start + _LOCATION_CHUNK]
+                rows = await session.execute(
+                    select(Data.raw_data_location, Data.original_data_location).where(
                         or_(
-                            Data.raw_data_location == file_location,
-                            Data.original_data_location == file_location,
+                            Data.raw_data_location.in_(chunk),
+                            Data.original_data_location.in_(chunk),
                         )
                     )
                 )
-            ).scalar()
+                wanted = set(chunk)
+                for raw_location, original_location in rows:
+                    referenced.update(wanted & {raw_location, original_location})
+        return referenced
 
-        if references:
-            return
-
+    async def remove_data_file(self, file_location: str) -> None:
+        """Remove one stored file under the data root, with no reference check."""
+        data_root = get_storage_config()["data_root_directory"]
         relative_path = file_location.split(data_root, 1)[1].lstrip("/\\")
         if file_location.startswith("file://"):
             # file:// locations carry percent-encoding (spaces as %20); storage

@@ -361,9 +361,7 @@ async def update(
         # The re-add stored the new content and then could not remove a file
         # the row left. The memory dropped above is not rebuilt yet, so the
         # error states that, not just that the content was stored.
-        raise StoredFileNotRemovedError(
-            error.location, REBUILD_INTERRUPTED, error.reason
-        ) from error
+        raise StoredFileNotRemovedError(error.not_removed, REBUILD_INTERRUPTED) from error
 
     cognify_runs = await cognify(
         datasets=[dataset_id],
