@@ -77,12 +77,14 @@ def format_case(request, monkeypatch):
             downloads.append(fileId)
             return SimpleNamespace(execute=lambda: (fixtures / f"example.{extension}").read_bytes())
 
-    listing = Mock(side_effect=lambda *args: iter(files))
+    listing = Mock(side_effect=lambda *args, **kwargs: iter(files))
     monkeypatch.setattr(drive, "_list_files_in_scope", listing)
-    monkeypatch.setattr(drive, "_get_start_page_token", lambda *args: "t1")
-    monkeypatch.setattr(drive, "_list_changed_file_ids", lambda *args: (set(), set(), "t2"))
+    monkeypatch.setattr(drive, "_get_start_page_token", lambda *args, **kwargs: "t1")
     monkeypatch.setattr(
-        drive, "_stream_media", lambda request, buffer: buffer.write(request.execute())
+        drive, "_list_changed_file_ids", lambda *args, **kwargs: (set(), set(), "t2")
+    )
+    monkeypatch.setattr(
+        drive, "_stream_media", lambda request, buffer, **kwargs: buffer.write(request.execute())
     )
     return SimpleNamespace(
         files=files,
@@ -130,7 +132,7 @@ def test_old_checkpoint_backfills_real_formats_without_duplicate_documents(
     old_state = deepcopy(_state(pipeline))
     if interrupted:
 
-        def broken_listing(*args):
+        def broken_listing(*args, **kwargs):
             yield case.files[0]
             raise RuntimeError("listing interrupted")
 

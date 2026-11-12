@@ -41,6 +41,7 @@ Limitations
 
 import asyncio
 import codecs
+import hashlib
 import io
 import os
 import tempfile
@@ -50,6 +51,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
+from importlib import metadata
 from typing import Any
 
 from cognee.modules.integrations.google.api_retry import is_host_stop, with_google_retries
@@ -465,6 +467,16 @@ def _registered_loader_extensions() -> list[str]:
     return sorted(ext for ext in set(_LOADER_EXTENSIONS.values()) if _loader_registered(ext))
 
 
+def _installed_packages_fingerprint() -> str:
+    """A hash of the name and version of every installed package.
+
+    A loader that is registered can still fail on a dependency it cannot import. Installing
+    the package registers nothing new, so a change here is the only sign that it may now work.
+    """
+    packages = sorted(f"{dist.name}=={dist.version}" for dist in metadata.distributions())
+    return hashlib.sha256("\n".join(packages).encode()).hexdigest()
+
+
 def _load_with_loader_engine(path: str) -> str:
     """Convert a downloaded file to text with the loader ``add()`` would use."""
     from cognee.infrastructure.loaders.get_loader_engine import get_loader_engine
@@ -682,12 +694,24 @@ def _iter_rows(
     # a format no installed extra can load must not keep the folder in full-scan mode.
     loadable = _registered_loader_extensions()
     newly_loadable = not set(loadable) <= set(state.get("loader_extensions", []))
+    # A registered loader that failed on a missing dependency is retried when the installed
+    # packages change. Only a folder that has such files carries the fingerprint, so any
+    # other folder pays nothing for a change.
+    packages_changed = (
+        "loader_fingerprint" in state
+        and state["loader_fingerprint"] != _installed_packages_fingerprint()
+    )
 
     def fetch_row(client, file_meta):
         local: dict[str, int] = {}
         return _file_to_row(client, file_meta, config, local, check_active=check_active), local
 
-    if page_token is None or format_version < FORMAT_SUPPORT_VERSION or newly_loadable:
+    if (
+        page_token is None
+        or format_version < FORMAT_SUPPORT_VERSION
+        or newly_loadable
+        or packages_changed
+    ):
         yielded = 0
         present_ids = set()
         fetched_versions = {}
@@ -751,6 +775,10 @@ def _iter_rows(
             state["page_token"] = start_token
             state["format_version"] = FORMAT_SUPPORT_VERSION
             state["loader_extensions"] = loadable
+            if stats.get("failed_loader_unavailable"):
+                state["loader_fingerprint"] = _installed_packages_fingerprint()
+            else:
+                state.pop("loader_fingerprint", None)
         logger.info("Google Drive: full scan yielded %d file(s).", yielded)
         return
 
@@ -853,6 +881,7 @@ def _iter_rows(
         # These files were skipped with the loaders registered now, so a later install must
         # scan again even if an earlier run had registered more.
         state["loader_extensions"] = loadable
+        state["loader_fingerprint"] = _installed_packages_fingerprint()
     if not _blocks_cursor(stats):
         state["page_token"] = new_page_token
     logger.info(

@@ -69,8 +69,12 @@ that no installed extra can load therefore never keeps the folder in full-scan m
 Unsupported formats and permanently unreadable files do not prevent the upgrade either.
 
 A file whose loader is registered but fails because one of its dependencies cannot be
-imported is reported the same way, but installing the dependency does not register anything
-new, so no scan is requested: edit the file in Drive or clear the source's state to read it.
+imported is reported the same way, and installing the dependency registers nothing new. A
+folder with such files therefore also records a hash of the installed packages (names and
+versions). When a sync finds it changed, the folder is scanned once more: the failed files
+have no stored version, so they are read again, and every other file is skipped by its
+version, which costs one folder listing. A folder with no such files stores no hash, so a
+package change costs it nothing.
 
 ## How sync + forget-on-delete work
 
