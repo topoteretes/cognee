@@ -1,6 +1,6 @@
 """Unit tests for SlackIntegration.revoke_remote / .refresh.
 
-Copied from cognee/tests/unit/modules/integrations/test_slack_adapter_enterprise.py (cognee dev, 2026-10-27).
+Copied from cognee.tests.unit.modules.integrations.test_slack_adapter_enterprise (cognee dev, 2026-11-12).
 
 Network calls are mocked via aioresponses-free patching of aiohttp — these
 tests check the *contract* each hook must honor: revoke_remote never raises
@@ -32,9 +32,8 @@ def _fake_credential(**overrides):
 
 
 class _FakeResponse:
-    status = 200
-
     def __init__(self, payload):
+        self.status = 200  # Slack answers ``ok: false`` with 200 too
         self._payload = payload
 
     async def __aenter__(self):
