@@ -162,6 +162,16 @@ file that keeps failing: it is retried every run and its stored text is kept unt
 reports it changed or gone. The community connector deleted it after three runs; a failure is
 no evidence the file went away.
 
+Deselecting a folder (integration module): after a sync, the tables of folders no longer
+selected are emptied (`ingestion.retire_resources`), which removes their documents. Each
+folder has its own table, named from its id, with no legacy names, so a selected folder's
+failure leaves the other tables alone and blocks retirement only when it may have stored
+nothing of its own: a listing error, an account mismatch or a source that raised. Files that
+keep failing (`failed_retry`, counted per file on every pass) and a folder cut short by a rate
+limit or a 401 after its files were worked on do not block it
+(`ingestion.retirement_blocked` with `failed_retry` as a gone key and the cut folders as cut
+scopes). The sync still reports degraded whenever anything failed.
+
 Gaps:
 
 - `forget(data_id=...)` and `forget(dataset=...)` leave the dlt staging table and the cursor:

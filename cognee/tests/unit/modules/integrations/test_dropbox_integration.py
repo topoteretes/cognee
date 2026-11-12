@@ -961,3 +961,107 @@ async def test_the_nested_selection_check_uses_one_session_and_one_credential_re
 
     assert len(sessions) == 1, f"{len(sessions)} HTTP sessions for 5 folders"
     assert reads.await_count == 1, f"{reads.await_count} credential reads for 5 folders"
+
+
+# ---------------------------------------------------------------- round 10: retire after failures
+async def _sync_folder_a(sync_mocks, monkeypatch, fake, folder_a):
+    """Sync a selection of folder A only, the walk running for real over ``fake``; a folder B
+    deselected earlier is what ``retire_resources`` would remove."""
+    from cognee.tasks.ingestion.connectors.dropbox import (
+        DropboxError,
+        _iter_rows,
+        _Session,
+        dropbox_source,
+    )
+
+    fake.account = ACCOUNT
+    walks = {}
+
+    def build(**kwargs):
+        source = dropbox_source(
+            folder_id=kwargs["folder_id"],
+            account_id=kwargs["account_id"],
+            resource_name=kwargs["resource_name"],
+            service=fake.client(sleep=lambda _s: None),
+        )
+        walks[id(source)] = kwargs["folder_id"]
+        return source
+
+    async def remember(source, **_kwargs):
+        try:
+            list(
+                _iter_rows(
+                    _Session(fake.client(sleep=lambda _s: None), None),
+                    folder_id=walks[id(source)],
+                    account_id=ACCOUNT,
+                    state={},
+                    stats=source.cognee_sync_stats,
+                    max_bytes=None,
+                )
+            )
+        except DropboxError as error:
+            raise RuntimeError("pipeline step failed") from error
+        return SimpleNamespace(status="completed")
+
+    # Through the fixture's own mocks: patching over them here would outlive the fixture.
+    sync_mocks.remember.side_effect = remember
+    sync_mocks.source.side_effect = build
+    sync_mocks.folder.side_effect = None
+    sync_mocks.folder.return_value = {".tag": "folder", "path_lower": "/a"}
+    counts = {"scanned": 0, "skipped": 0, "failed": 0}
+    status, counts = await sync_module._sync_source(
+        credential(selected_folder_ids=[folder_a]), counts
+    )
+    return status, counts
+
+
+@pytest.mark.parametrize("failing_files", [1, 3])
+@pytest.mark.asyncio
+async def test_files_that_keep_failing_do_not_stop_a_deselected_folder_from_retiring(
+    sync_mocks, monkeypatch, failing_files
+):
+    from cognee.tests.unit.tasks.connectors.fake_dropbox import FakeDropbox
+
+    fake = FakeDropbox()
+    folder_a = fake.mkdir("/A")
+    fake.put("/A/ok.md", "fine")
+    for i in range(failing_files):
+        fake.download_errors[fake.put(f"/A/broken{i}.md", "never")] = (503, {})
+
+    status, counts = await _sync_folder_a(sync_mocks, monkeypatch, fake, folder_a)
+
+    assert counts["failed_retry"] == failing_files and status == "degraded", counts
+    sync_mocks.retire.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_folder_that_fails_while_listing_keeps_deselected_folders(sync_mocks, monkeypatch):
+    from cognee.tests.unit.tasks.connectors.fake_dropbox import FakeDropbox
+
+    fake = FakeDropbox()
+    folder_a = fake.mkdir("/A")
+    fake.put("/A/ok.md", "fine")
+    fake.queued["files/list_folder"] = [(403, {})]
+
+    status, counts = await _sync_folder_a(sync_mocks, monkeypatch, fake, folder_a)
+
+    assert counts["failed_listing"] == 1 and status == "degraded"
+    sync_mocks.retire.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_folder_cut_by_a_rate_limit_after_rows_lets_deselected_folders_retire(
+    sync_mocks, monkeypatch
+):
+    from cognee.tests.unit.tasks.connectors.fake_dropbox import FakeDropbox
+
+    fake = FakeDropbox()
+    folder_a = fake.mkdir("/A")
+    fake.put("/A/a.md", "first")
+    fake.put("/A/b.md", "second")
+    fake.queued["files/download"] = [(200, b"first"), (429, {}, {"Retry-After": "3600"})]
+
+    status, counts = await _sync_folder_a(sync_mocks, monkeypatch, fake, folder_a)
+
+    assert counts["failed_rate_limit"] == 1 and status == "degraded"
+    sync_mocks.retire.assert_awaited_once()

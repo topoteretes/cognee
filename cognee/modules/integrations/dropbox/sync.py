@@ -172,8 +172,11 @@ async def _sync_source(
         ).result()
     )
 
+    sources: dict[str, object] = {}
+    cut_scopes = 0
+
     def make_source(folder_id: str, resource_name: str, check_active):
-        return source_factory(
+        sources[folder_id] = source = source_factory(
             folder_id=folder_id,
             account_id=str(credential.provider_account_id),
             resource_name=resource_name,
@@ -181,6 +184,17 @@ async def _sync_source(
             check_active=check_active,
             max_file_size_mb=dropbox_settings.max_file_size_mb,
         )
+        return source
+
+    def scope_stored(folder_id: str) -> None:
+        # A folder its own source cut short (rate limit, a 401 after rows) once its listing
+        # was done and files were worked on: it resumes next pass and holds only its own
+        # table, so the cut does not block retiring the deselected folders. A cut before
+        # any file was worked on stored nothing and still blocks.
+        nonlocal cut_scopes
+        stats = getattr(sources[folder_id], "cognee_sync_stats", {})
+        if not stats.get("complete") and (stats.get("scanned") or stats.get("deleted")):
+            cut_scopes += 1
 
     retained = await ingestion.sync_scopes(
         "dropbox",
@@ -190,7 +204,12 @@ async def _sync_source(
         dataset_name=dataset_name,
         make_source=make_source,
         classify_error=_classify_error,
+        on_scope_stored=scope_stored,
     )
-    if not counts["failed"]:
+    # One table per folder, named from its id, and no legacy names: a file that keeps failing
+    # (failed_retry, counted per file and on every pass) leaves its folder's table as it is,
+    # so it must not keep a deselected folder's data in memory for good. Any failure that
+    # stored nothing (a listing error, an account mismatch, a raised source) still blocks.
+    if not ingestion.retirement_blocked(counts, gone_keys=("failed_retry",), cut_scopes=cut_scopes):
         await ingestion.retire_resources("dropbox", credential, dataset_name, retained)
     return (SYNC_STATUS_DEGRADED if counts["failed"] else SYNC_STATUS_OK), counts
