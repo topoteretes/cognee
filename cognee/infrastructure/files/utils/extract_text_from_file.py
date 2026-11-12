@@ -3,6 +3,8 @@ from typing import BinaryIO
 import filetype
 from pypdf import PdfReader
 
+from cognee.infrastructure.files.utils.is_text_content import decode_text_content
+
 
 def extract_text_from_file(file: BinaryIO, file_type: filetype.Type) -> str | None:
     """
@@ -31,4 +33,4 @@ def extract_text_from_file(file: BinaryIO, file_type: filetype.Type) -> str | No
         return "\n".join([page.extract_text().strip() for page in pages])
 
     if file_type.extension == "txt":
-        return file.read().decode("utf-8")
+        return decode_text_content(file.read())
