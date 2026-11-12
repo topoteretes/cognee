@@ -9,6 +9,8 @@ repos:
       - id: check-yaml
         exclude: ^deployment/helm/templates/
       - id: check-added-large-files
+        # The connectors workspace lockfile resolves cognee's whole tree for its dev group.
+        exclude: ^cognee-connectors/uv\.lock$
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
     rev: v0.16.6

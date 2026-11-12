@@ -66,11 +66,9 @@ def test_other_clean_kwargs_do_not_defer():
     assert request_deferral_reason({"node_type": None}) is None
 
 
-def test_node_type_none_with_node_name_defers():
-    assert (
-        request_deferral_reason({"node_name": ["KEN"], "node_type": None})
-        == "node_type=None is not NodeSet"
-    )
+def test_node_type_none_with_node_name_does_not_defer():
+    """No type can apply the filter, so the factory refuses it instead of deferring."""
+    assert request_deferral_reason({"node_name": ["KEN"], "node_type": None}) is None
 
 
 @pytest.mark.asyncio

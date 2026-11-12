@@ -115,6 +115,28 @@ def test_drop_checks_all_surviving_support_and_replacement_collision(scope):
     assert accept_review_response(output, scope, prompt).dropped_conflict_ids == []
 
 
+@pytest.mark.parametrize(
+    "forgotten, reviewed, retired",
+    [
+        (True, ["n1", "n2", "n3"], True),
+        (False, ["n1", "n2", "n3"], False),
+        (True, ["n2", "n3"], False),
+    ],
+)
+def test_a_user_decision_whose_selected_fact_is_gone_retires_with_its_subjects_review(
+    scope, forgotten, reviewed, retired
+):
+    """A response that leaves the decision out still retires it once its fact is forgotten."""
+    conflict_id = existing_conflict(scope)
+    scope.conflicts[conflict_id].update(
+        resolution_source="user", selected_fact_id="e1", rejected_fact_ids=["e2"]
+    )
+    if forgotten:
+        del scope.facts["e1"]
+    batch = accept(scope, schema.ReviewResponse(reviewed=reviewed))
+    assert batch.dropped_conflict_ids == ([conflict_id] if retired else [])
+
+
 def test_partial_answer_writes_nothing_for_an_unreviewed_subject(scope):
     existing_conflict(scope)
     output = response()

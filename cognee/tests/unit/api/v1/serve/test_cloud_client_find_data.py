@@ -72,7 +72,7 @@ class _FakeServer:
         self.honours_filter = honours_filter
         self.requests = []
 
-    def get(self, url, params=None):
+    def get(self, url, params=None, timeout=None):
         self.requests.append((url, dict(params or {})))
         if url.endswith("/openapi.json"):
             if self.openapi is None:

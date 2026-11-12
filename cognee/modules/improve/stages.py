@@ -27,6 +27,7 @@ REASON_SESSION_MANAGER_UNAVAILABLE = "session_manager_unavailable"
 REASON_AUTO_FEEDBACK_DISABLED = "auto_feedback_disabled"
 REASON_PERSONALIZATION_DISABLED = "personalization_disabled"
 REASON_OPT_IN_DISABLED = "opt_in_disabled"
+REASON_TURNED_OFF = "turned_off"
 REASON_NO_WRITES_SINCE_LAST_IMPROVE = "no_writes_since_last_improve"
 REASON_NO_NEW_SESSION_ENTRIES = "no_new_entries"
 REASON_NO_NEW_TRACE_STEPS = "no_new_trace_steps"
@@ -527,7 +528,7 @@ class ReviewConflictsStage(BaseStage):
 
     def gate(self, inputs: ImproveRunInputs) -> str | None:
         if not inputs.review_conflicts:
-            return REASON_OPT_IN_DISABLED
+            return REASON_TURNED_OFF
         if not llm_available():
             return REASON_NO_LLM_CONFIGURED
         from cognee.modules.provenance.edge_evidence.config import get_provenance_config
@@ -605,7 +606,7 @@ class GlobalContextIndexStage(BaseStage):
 
     def gate(self, inputs: ImproveRunInputs) -> str | None:
         if not inputs.build_global_context_index:
-            return REASON_OPT_IN_DISABLED
+            return REASON_TURNED_OFF
         return None
 
     async def run(self, inputs: ImproveRunInputs) -> StageResult:

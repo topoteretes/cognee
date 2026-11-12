@@ -23,6 +23,7 @@ from cognee.modules.operations.origin import (
 )
 from cognee.modules.operations.scrub_error import ERROR_MESSAGE_MAX_LENGTH, scrub_error_message
 from cognee.modules.pipelines.models.PipelineRun import PipelineRun
+from cognee.modules.pipelines.models.PipelineRunSession import PipelineRunSession
 
 record_operation_mod = importlib.import_module("cognee.modules.operations.record_operation")
 record_operation = record_operation_mod.record_operation
@@ -42,7 +43,10 @@ async def ops_engine(tmp_path, monkeypatch):
     )
 
     async with engine.engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all, tables=[PipelineRun.__table__])
+        await connection.run_sync(
+            Base.metadata.create_all,
+            tables=[PipelineRun.__table__, PipelineRunSession.__table__],
+        )
 
     monkeypatch.setattr(record_operation_mod, "get_relational_engine", lambda: engine)
 
@@ -78,15 +82,19 @@ async def test_origin_defaults_to_sdk_and_scopes_override(ops_engine):
 
 @pytest.mark.asyncio
 async def test_session_id_is_persisted(ops_engine):
-    async with record_operation("recall", session_id="session-abc"):
+    async with record_operation("recall", session_ids=["session-abc"]):
         pass
 
     async with record_operation("search") as context:
-        context.set_session_id("session-xyz")
+        context.set_session_ids(["session-xyz"])
 
     rows = await _fetch_rows(ops_engine)
-    assert rows[0].session_id == "session-abc"
-    assert rows[1].session_id == "session-xyz"
+    sessions = {}
+    async with ops_engine.get_async_session() as session:
+        for link in (await session.execute(select(PipelineRunSession))).scalars():
+            sessions.setdefault(link.pipeline_run_row_id, []).append(link.session_id)
+    assert sessions[rows[0].id] == ["session-abc"]
+    assert sessions[rows[1].id] == ["session-xyz"]
 
 
 @pytest.mark.asyncio

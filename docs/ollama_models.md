@@ -1,6 +1,6 @@
 # Supported Ollama Models for Structured Graph Extraction
 
-Cognee supports using local Large Language Models (LLMs) via Ollama. However, because Cognee relies on structured output generation (using Instructor with JSON schemas) to extract knowledge graphs, the performance and reliability of the extraction pipeline depend heavily on the model's capabilities.
+Cognee supports using local Large Language Models (LLMs) via Ollama. However, because Cognee relies on structured output generation (JSON schemas) to extract knowledge graphs, the performance and reliability of the extraction pipeline depend heavily on the model's capabilities.
 
 This guide lists recommended models, models with known limitations, and troubleshooting tips.
 
@@ -34,7 +34,7 @@ Use these environment variables for local or self-hosted models. Copy them into 
    ```
 3. Set `LLM_ENDPOINT` based on `STRUCTURED_OUTPUT_FRAMEWORK` (default is `litellm_native`):
    - **`litellm_native` (default):** `LLM_ENDPOINT=http://localhost:11434` — LiteLLM appends Ollama's native paths; a `/v1` suffix returns 404.
-   - **`instructor`:** `LLM_ENDPOINT=http://localhost:11434/v1` and `STRUCTURED_OUTPUT_FRAMEWORK=instructor`.
+   - **`instructor`:** `LLM_ENDPOINT=http://localhost:11434/v1` and `STRUCTURED_OUTPUT_FRAMEWORK=instructor` (needs the `instructor` extra: `pip install "cognee[instructor]"`).
 
 A full runnable script is in [`examples/guides/local_ollama_example.py`](../examples/guides/local_ollama_example.py) (that example uses the OpenAI-compatible `/v1` endpoint — pair it with `STRUCTURED_OUTPUT_FRAMEWORK=instructor`, or change the endpoint to the bare host for the default `litellm_native` framework).
 

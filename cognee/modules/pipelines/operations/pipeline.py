@@ -31,7 +31,7 @@ logger = get_logger("cognee.pipeline")
 # parallel. See cognee/infrastructure/locks/dataset_lock.py.
 
 
-async def _drive_marking_held(dataset_id: UUID, source: AsyncIterator[Any]) -> AsyncIterator[Any]:
+async def drive_marking_held(dataset_id: UUID, source: AsyncIterator[Any]) -> AsyncIterator[Any]:
     """Yield from ``source`` while ``dataset_id`` is recorded as locked.
 
     A pipeline body runs its work in child tasks (``run_tasks`` -> ``create_task``),
@@ -207,7 +207,7 @@ async def run_pipeline_per_dataset(
 
         async with (
             await get_dataset_lock(dataset.id),
-            aclosing(_drive_marking_held(dataset.id, body)) as source,
+            aclosing(drive_marking_held(dataset.id, body)) as source,
         ):
             async for run_info in source:
                 yield run_info

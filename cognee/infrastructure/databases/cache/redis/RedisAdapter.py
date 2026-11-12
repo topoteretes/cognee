@@ -18,6 +18,11 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("RedisAdapter")
 
 
+def _escape_glob(text: str) -> str:
+    """Escape Redis MATCH pattern characters so ``text`` matches only itself."""
+    return "".join("\\" + char if char in "*?[]\\" else char for char in text)
+
+
 class RedisAdapter(CacheDBInterface):
     """Redis-backed cache adapter for session QA, trace storage, and coordination."""
 
@@ -167,11 +172,23 @@ class RedisAdapter(CacheDBInterface):
         """Overwrite a single serialized entry in-place within a Redis list."""
         await self.async_redis.lset(session_key, index, json.dumps(entry_dump))
 
-    async def _rewrite_entries(self, session_key: str, entries: list) -> None:
-        """Replace the full Redis list contents for a session key."""
-        await self.async_redis.delete(session_key)
-        for entry in entries:
-            await self.async_redis.rpush(session_key, json.dumps(entry))
+    async def _delete_entries(self, key: str, field: str, value: str) -> bool:
+        """Remove every entry whose ``field`` is ``value``; False when none is stored.
+
+        Each LREM removes one stored element in place, so a reader never sees the list
+        half rewritten. An entry an update rewrote after the read is read again.
+        """
+        removed = False
+        while True:
+            stored = await self.async_redis.lrange(key, 0, -1)
+            matching = [raw for raw in stored if json.loads(raw).get(field) == value]
+            if not matching:
+                break
+            for raw in matching:
+                removed = bool(await self.async_redis.lrem(key, 0, raw)) or removed
+        if removed and stored:
+            await self._apply_session_ttl(key)
+        return removed
 
     async def _apply_session_ttl(self, session_key: str) -> None:
         """Refresh the configured TTL for a session-scoped Redis key."""
@@ -447,16 +464,9 @@ class RedisAdapter(CacheDBInterface):
         Returns True if deleted, False if qa_id not found.
         """
         try:
-            session_key = self._session_key(user_id, session_id)
-            entries = await self._load_entries(session_key)
-            idx = self._find_index_by_qa_id(entries, qa_id)
-            if idx is None:
-                return False
-            entries.pop(idx)
-            await self._rewrite_entries(session_key, entries)
-            if entries:
-                await self._apply_session_ttl(session_key)
-            return True
+            return await self._delete_entries(
+                self._session_key(user_id, session_id), "qa_id", qa_id
+            )
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while deleting Q&A: {e!s}"
             logger.error(error_msg)
@@ -488,6 +498,56 @@ class RedisAdapter(CacheDBInterface):
             error_msg = f"Unexpected error while deleting session from Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
+
+    async def delete_sessions(self, sessions: list[tuple[str, str]]) -> list[bool]:
+        """Delete each session's QA, trace and context keys in one pipelined round trip."""
+        if not sessions:
+            return []
+        try:
+            pipe = self.async_redis.pipeline(transaction=False)
+            for user_id, session_id in sessions:
+                pipe.delete(
+                    self._session_key(user_id, session_id),
+                    self._agent_trace_key(user_id, session_id),
+                    self._session_context_key(user_id, session_id),
+                )
+            return [deleted > 0 for deleted in await pipe.execute()]
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while deleting sessions: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while deleting sessions from Redis: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def list_session_ids(self, user_id: str) -> list[str]:
+        """Every session id with a QA, trace or session-context key for the user."""
+        prefixes = [
+            key_for(user_id, "")
+            for key_for in (self._session_key, self._agent_trace_key, self._session_context_key)
+        ]
+        session_ids: set[str] = set()
+        try:
+            # SCAN walks the whole keyspace whatever MATCH says, so one walk for all three
+            # kinds; count is keys per round trip (default 10), not a cap on the result.
+            match = "*:" + _escape_glob(f"{user_id}:") + "*"
+            async for key in self.async_redis.scan_iter(match=match, count=1000):
+                key = key.decode() if isinstance(key, bytes) else key
+                for prefix in prefixes:
+                    if key.startswith(prefix):
+                        session_ids.add(key[len(prefix) :])
+                        break
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while listing sessions: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while listing sessions from Redis: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        session_ids.discard("")
+        return list(session_ids)
 
     async def get_value(self, key: str) -> str | None:
         """Retrieve a raw string value stored under the given key, or None if absent."""
@@ -530,6 +590,21 @@ class RedisAdapter(CacheDBInterface):
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
             error_msg = f"Unexpected error while deleting value from Redis: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def delete_values(self, keys: list[str]) -> None:
+        """Delete the values stored under the given keys in one call."""
+        if not keys:
+            return
+        try:
+            await self.async_redis.delete(*keys)
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while deleting values: {e!s}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while deleting values from Redis: {e!s}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
@@ -646,15 +721,9 @@ class RedisAdapter(CacheDBInterface):
     ) -> bool:
         """Delete a single session-context entry by its "id" field."""
         try:
-            context_key = self._session_context_key(user_id, session_id)
-            entries = await self._load_entries(context_key)
-            surviving = [entry for entry in entries if entry.get("id") != entry_id]
-            if len(surviving) == len(entries):
-                return False
-            await self._rewrite_entries(context_key, surviving)
-            if surviving:
-                await self._apply_session_ttl(context_key)
-            return True
+            return await self._delete_entries(
+                self._session_context_key(user_id, session_id), "id", entry_id
+            )
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while deleting session context entry: {e!s}"
             logger.error(error_msg)

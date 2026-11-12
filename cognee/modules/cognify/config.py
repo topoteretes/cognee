@@ -16,11 +16,17 @@ class CognifyConfig(BaseSettings):
     classification_model: object = DefaultContentPrediction
     summarization_model: object = SummarizedContent
     # How each chunk's TextSummary is written (env: SUMMARY_METHOD, or
-    # cognify(summary_method=...)). "llm" (default): one LLM call per chunk.
-    # "from_extraction": one "Type: name, name" line per extracted type, then
-    # the chunk's relation texts, one per line, no LLM call.
-    summary_method: Literal["llm", "from_extraction"] = "llm"
+    # cognify(summary_method=...)). "from_extraction" (default): one
+    # "Type: name, name" line per extracted type, then the chunk's relation
+    # texts, one per line, no LLM call. "llm": one LLM call per chunk.
+    summary_method: Literal["llm", "from_extraction"] = "from_extraction"
     chunks_per_batch: int | None = None
+    # Write chunks (and their documents) to the graph and vector stores right
+    # after chunking, before the LLM extraction (env: EARLY_CHUNK_INDEXING).
+    # On (default): chunk-based searches answer while entities are still being
+    # extracted; the final write skips re-embedding those chunks. Off: the
+    # dataset becomes searchable only when the whole pipeline has finished.
+    early_chunk_indexing: bool = True
     # Opt-in audit-grade provenance ledger (env: PROVENANCE_TRACKING). Default
     # OFF so the standard cognify pipeline is unchanged.
     provenance_tracking: bool = False
@@ -49,6 +55,7 @@ class CognifyConfig(BaseSettings):
             "classification_model": self.classification_model,
             "summarization_model": self.summarization_model,
             "chunks_per_batch": self.chunks_per_batch,
+            "early_chunk_indexing": self.early_chunk_indexing,
             "provenance_tracking": self.provenance_tracking,
             "graph_extractor": self.graph_extractor,
             "gliner_auto_install": self.gliner_auto_install,
@@ -66,8 +73,8 @@ def _warn_if_contradiction_detection_is_set() -> None:
     """
     if os.getenv("CONTRADICTION_DETECTION") is not None:
         logger.warning(
-            "CONTRADICTION_DETECTION is ignored; use improve(review_conflicts=True) "
-            "or IMPROVE_REVIEW_CONFLICTS instead."
+            "CONTRADICTION_DETECTION is ignored; improve() reviews conflicts by default "
+            "(IMPROVE_REVIEW_CONFLICTS turns it off)."
         )
 
 
@@ -211,7 +218,9 @@ def _gliner_install_properties(config: CognifyConfig) -> dict:
 async def ensure_extractor_runtime(extractor: str, config: CognifyConfig) -> None:
     """Make the GLiNER runtime importable before a pipeline that uses it starts.
 
-    A no-op for the LLM extractor and when the runtime is present. Otherwise the
+    A no-op for the LLM extractor, when the runtime is present, and when a remote
+    GLiNER worker is configured (``COGNEE_GLINER_TRANSPORT``): then the model runs
+    there and this process needs neither torch nor gliner2. Otherwise the
     blocking install runs in a worker thread and is awaited, so the event loop keeps
     serving other work while this caller waits for it. Raises
     ``KeylessExtractorNotInstalledError`` when ``GLINER_AUTO_INSTALL`` is off and
@@ -226,8 +235,11 @@ async def ensure_extractor_runtime(extractor: str, config: CognifyConfig) -> Non
         gliner_runtime_installed,
         install_gliner_runtime,
     )
+    from cognee.tasks.graph.gliner_demo.remote.settings import remote_gliner_configured
 
     if extractor != GLINER_DEMO_EXTRACTOR or gliner_runtime_installed():
+        return
+    if remote_gliner_configured():
         return
     if not config.gliner_auto_install:
         raise KeylessExtractorNotInstalledError()
