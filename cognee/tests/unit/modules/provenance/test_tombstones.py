@@ -187,6 +187,26 @@ class TestTombstoneDataset:
             await tombstone_dataset(dataset_id, user=USER)
 
 
+class TestLedgerOff:
+    async def test_a_delete_does_not_read_or_write_a_ledger_that_is_off(
+        self, manager, ledger_off, monkeypatch
+    ):
+        dataset_id, data_id = uuid4(), uuid4()
+        await _seed_items(manager, dataset_id, [data_id])
+
+        def no_reads(*args, **kwargs):
+            raise AssertionError("the ledger was read while it is off")
+
+        monkeypatch.setattr(storage, "retrieve_live_ids", no_reads)
+        monkeypatch.setattr(storage, "iter_live_with_prefix", no_reads)
+
+        assert await tombstone_data_item(dataset_id, data_id, user=USER) == 0
+        assert await tombstone_data_items(dataset_id, [data_id], user=USER) == 0
+        assert await tombstone_dataset(dataset_id, user=USER) == 0
+        # Recorded while the ledger was on, deleted while it is off: not retracted.
+        assert (await _item(manager, dataset_id, data_id))["invalidated"] is False
+
+
 class TestDatasetScopedReads:
     """Audit reads narrowed to one dataset's key namespace."""
 

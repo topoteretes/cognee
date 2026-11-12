@@ -45,7 +45,9 @@ class ProvenanceCommand(SupportsCliCommand):
     help_string = "Inspect, verify and export the audit provenance ledger"
     docs_url = DEFAULT_DOCS_URL
     description = """
-Read the audit-grade provenance ledger (PROVENANCE_TRACKING=true).
+Read the audit-grade provenance ledger. The ledger is off by default: set
+PROVENANCE_TRACKING=true to record it. While it is off these commands exit
+with that reason and read nothing.
 
 Every data item cognee stores output for is recorded as a hash-chained,
 append-only row keyed "{dataset_id}:data_item:{data_id}", versioned when its
@@ -118,6 +120,18 @@ re-chained since the last anchor. Exit code 2 means the ledger failed.
         if not action:
             fmt.error("No action specified. Use --help to see available actions.")
             raise CliCommandException("No action specified", error_code=1)
+
+        from cognee.modules.provenance.tracking import (
+            ProvenanceTrackingDisabledError,
+            require_provenance_tracking,
+        )
+
+        # A ledger that is off is not read: "valid, 0 rows" would look verified.
+        try:
+            require_provenance_tracking()
+        except ProvenanceTrackingDisabledError as error:
+            fmt.error(str(error))
+            raise CliCommandException("Audit ledger is off", error_code=1) from error
 
         handlers = {
             "verify": self._verify,

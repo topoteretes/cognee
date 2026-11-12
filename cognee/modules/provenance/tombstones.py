@@ -22,9 +22,11 @@ Two scopes:
   DLT orphan sweep for the rows it removed.
 - **dataset**: every live data item of a deleted dataset.
 
-Only rows that exist and are live are invalidated (the ledger is opt-in, so
-most deletes find nothing). A tombstone that cannot be written raises, so the
-delete fails with it. Deleting the same data item again writes it: a delete
+With the ledger off (``PROVENANCE_TRACKING``, the default) a delete does not
+read or write it at all, so a ledger nobody turned on cannot slow or fail a
+delete; a document deleted while it is off keeps the live row it had. With it
+on, only rows that exist and are live are invalidated. A tombstone that cannot
+be written raises, so the delete fails with it. Deleting the same data item again writes it: a delete
 that finds no ``Data`` row still retracts a live ledger row for the id. A
 deleted dataset cannot be deleted again, so after such a failure its rows
 stay live.
@@ -38,6 +40,7 @@ from cognee.shared.logging_utils import get_logger
 
 from . import storage
 from .manager import get_provenance_manager
+from .tracking import provenance_tracking_enabled
 
 logger = get_logger("provenance.tombstones")
 
@@ -138,8 +141,11 @@ async def tombstone_data_items(
     """Tombstone the ledger rows of deleted data items of one dataset.
 
     One lookup and one chained write for the whole list, for a sweep that
-    removes many rows at once. Returns the number of tombstones written.
+    removes many rows at once. Returns the number of tombstones written; none,
+    and no lookup, while the ledger is off.
     """
+    if not provenance_tracking_enabled():
+        return 0
     live_ids = await storage.retrieve_live_ids(
         [ledger_data_item_key(dataset_id, data_id) for data_id in data_ids]
     )
@@ -156,7 +162,10 @@ async def tombstone_dataset(
     user: Any = None,
     reason: str = "dataset_deleted",
 ) -> int:
-    """Tombstone every live data item of the dataset. Returns the number written."""
+    """Tombstone every live data item of the dataset. Returns the number written;
+    none, and no lookup, while the ledger is off."""
+    if not provenance_tracking_enabled():
+        return 0
     # Collected before writing: the prefix scan must not observe its own
     # in-flight invalidations.
     pending = [

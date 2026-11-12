@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from cognee.infrastructure.databases.relational import Base
+from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.provenance import storage as provenance_storage
 from cognee.modules.provenance.manager import get_provenance_manager
 from cognee.modules.provenance.models import ProvenanceEntryRow
@@ -41,9 +42,20 @@ async def manager(provenance_engine, monkeypatch):
                 await session.commit()
 
     monkeypatch.setattr(provenance_storage, "get_async_session", fake_get_async_session)
+    # The ledger is off by default, and is then neither written nor read.
+    monkeypatch.setenv("PROVENANCE_TRACKING", "true")
+    get_cognify_config.cache_clear()
     get_provenance_manager.cache_clear()
     yield get_provenance_manager()
     get_provenance_manager.cache_clear()
+    get_cognify_config.cache_clear()
+
+
+@pytest.fixture
+def ledger_off(manager, monkeypatch):
+    """The ledger switched off, as it is by default; rows seeded through ``manager`` stay."""
+    monkeypatch.setenv("PROVENANCE_TRACKING", "false")
+    get_cognify_config.cache_clear()
 
 
 @pytest.fixture
