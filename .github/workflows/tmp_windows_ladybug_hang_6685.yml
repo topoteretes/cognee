@@ -20,7 +20,7 @@ jobs:
       matrix:
         include:
           - { ref: ba643e4cc0f09fd76c780d7670c0792c771e8fa5, label: "before-bump ba643e4cc (ladybug 0.19.0)", graph_subprocess: default }
-          - { ref: 18d2b0fa5, label: "bump-merge 18d2b0fa5 (ladybug 0.22.3)", graph_subprocess: default }
+          - { ref: 18d2b0fa536f8932d9295ac623244bea70fdaa04, label: "bump-merge 18d2b0fa5 (ladybug 0.22.3)", graph_subprocess: default }
           - { ref: 9aa686697c83e705b81b539a848fc207e74fe5da, label: "reported 9aa686697 (ladybug 0.22.3)", graph_subprocess: default }
           - { ref: ba643e4cc0f09fd76c780d7670c0792c771e8fa5, label: "before-bump ba643e4cc (ladybug 0.19.0)", graph_subprocess: "false" }
           - { ref: 9aa686697c83e705b81b539a848fc207e74fe5da, label: "reported 9aa686697 (ladybug 0.22.3)", graph_subprocess: "false" }
@@ -37,7 +37,7 @@ jobs:
 
       - name: Show ladybug version
         shell: bash
-        run: uv run --no-sync python -c "import ladybug; print('ladybug', ladybug.__version__)"
+        run: uv run --no-sync python -c "from importlib.metadata import version; print('ladybug', version('ladybug'))"
 
       - name: Run dataset routing journey (reporter's command)
         shell: bash
