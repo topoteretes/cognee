@@ -457,16 +457,30 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         evicted from ``_create_vector_engine``'s cache.
         """
         pool, self._write_pool = self._write_pool, None
-        if pool is not None:
-            if self._write_pool_loop is asyncio.get_running_loop():
-                try:
-                    await asyncio.wait_for(pool.close(), timeout=10)
-                except asyncio.TimeoutError:
-                    pool.terminate()
-            else:
-                pool.terminate()
-        if self._owns_engine:
-            await self.engine.dispose(close=True)
+        pool_loop, self._write_pool_loop = self._write_pool_loop, None
+        try:
+            if pool is not None:
+                if pool_loop is asyncio.get_running_loop():
+                    try:
+                        await asyncio.wait_for(pool.close(), timeout=10)
+                    except asyncio.TimeoutError:
+                        self._terminate_write_pool(pool, pool_loop)
+                else:
+                    self._terminate_write_pool(pool, pool_loop)
+        finally:
+            if self._owns_engine:
+                await self.engine.dispose(close=True)
+
+    @staticmethod
+    def _terminate_write_pool(pool, loop) -> None:
+        try:
+            pool.terminate()
+        except RuntimeError:
+            # asyncpg aborts transports on their owning loop. Once that loop is
+            # closed it cannot schedule transport cleanup; the detached pool must
+            # be reclaimed instead. Do not hide errors on a live loop.
+            if loop is None or not loop.is_closed():
+                raise
 
     def _get_write_lock(self, collection_name: str) -> LoopAgnosticLock:
         with self._write_locks_guard:
@@ -524,8 +538,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             if self._write_pool is not None and self._write_pool_loop is loop:
                 return self._write_pool
             if self._write_pool is not None:
-                self._write_pool.terminate()
-                self._write_pool = None
+                stale, self._write_pool = self._write_pool, None
+                stale_loop, self._write_pool_loop = self._write_pool_loop, None
+                self._terminate_write_pool(stale, stale_loop)
             pool = await asyncpg.create_pool(
                 self._asyncpg_dsn(),
                 min_size=0,

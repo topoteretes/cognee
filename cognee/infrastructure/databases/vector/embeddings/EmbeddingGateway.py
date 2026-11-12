@@ -1,3 +1,7 @@
+import asyncio
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 from cognee.shared.logging_utils import get_logger
 
 from .EmbeddingEngine import EmbeddingEngine, EmbeddingResult, Vector
@@ -5,16 +9,28 @@ from .EmbeddingEngine import EmbeddingEngine, EmbeddingResult, Vector
 logger = get_logger("EmbeddingGateway")
 
 
+_request_semaphore: ContextVar[asyncio.Semaphore | None] = ContextVar(
+    "embedding_request_semaphore", default=None
+)
+
+
+@contextmanager
+def embedding_request_scope(semaphore: asyncio.Semaphore):
+    """Share a storage step's request budget without holding it during database writes."""
+    token = _request_semaphore.set(semaphore)
+    try:
+        yield
+    finally:
+        _request_semaphore.reset(token)
+
+
 class EmbeddingGateway:
     """Gateway to an embedding engine: wraps it, returns its vectors and records
     each call's token usage, the way LLMGateway does for completions.
 
-    A call with more texts than the engine sends per request (``get_batch_size``) is
-    embedded in consecutive requests of that size, so a caller can hand over a whole
-    vector write batch (``VECTOR_WRITE_BATCH_SIZE`` rows) without knowing the
-    provider's input limit. The requests of one call run one after another, not
-    concurrently: the caller's bound on concurrent calls stays the bound on requests
-    in flight, which is what ``EMBEDDING_MAX_CONCURRENT_DATA_POINTS`` promises.
+    Large calls are split into provider-sized requests. Inside a storage step they
+    run concurrently under its shared request semaphore. Outside that scope they
+    remain sequential, preserving the caller's existing concurrency policy.
     """
 
     def __init__(self, engine: EmbeddingEngine):
@@ -28,17 +44,35 @@ class EmbeddingGateway:
 
     async def embed_text(self, text: list[str]) -> list[Vector]:
         request_size = self._request_size()
+        semaphore = _request_semaphore.get()
+
+        async def request(texts):
+            if semaphore is None:
+                return await self._engine.embed_text(texts)
+            async with semaphore:
+                return await self._engine.embed_text(texts)
+
         if request_size is None or len(text) <= request_size:
-            vectors = await self._engine.embed_text(text)
+            vectors = await request(text)
             await self._record_usage(vectors.tokens)
             return vectors
 
-        vectors: list[Vector] = []
-        tokens = 0
-        for start in range(0, len(text), request_size):
-            part = await self._engine.embed_text(text[start : start + request_size])
-            vectors.extend(part)
-            tokens += part.tokens
+        batches = [
+            text[start : start + request_size] for start in range(0, len(text), request_size)
+        ]
+        if semaphore is None:
+            parts = [await request(batch) for batch in batches]
+        else:
+            # Preserve input order, and let every sibling finish before propagating
+            # failure so no provider request outlives the storage call.
+            parts = await asyncio.gather(
+                *(request(batch) for batch in batches), return_exceptions=True
+            )
+            for part in parts:
+                if isinstance(part, BaseException):
+                    raise part
+        vectors = [vector for part in parts for vector in part]
+        tokens = sum(part.tokens for part in parts)
         await self._record_usage(tokens)
         return EmbeddingResult(vectors, tokens=tokens)
 

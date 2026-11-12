@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingResult
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import EmbeddingGateway
 from cognee.infrastructure.engine import DataPoint
 from cognee.tasks.storage.index_data_points import index_data_points
 
@@ -82,7 +84,7 @@ async def test_index_data_points_calls_vector_engine():
 
 
 async def _run_and_measure_peak_concurrency(data_points, batch_size, max_concurrent_data_points):
-    """Run index_data_points and return the peak number of concurrent index calls."""
+    """Measure provider requests through the real gateway and storage planner."""
     in_flight = 0
     peak = 0
 
@@ -92,10 +94,17 @@ async def _run_and_measure_peak_concurrency(data_points, batch_size, max_concurr
         peak = max(peak, in_flight)
         await asyncio.sleep(0)
         in_flight -= 1
+        return EmbeddingResult([[1.0]] * len(args[0]), tokens=len(args[0]))
 
     mock_vector_engine = AsyncMock()
-    mock_vector_engine.embedding_engine.get_batch_size = MagicMock(return_value=batch_size)
-    mock_vector_engine.index_data_points = AsyncMock(side_effect=_index)
+    raw = SimpleNamespace(get_batch_size=lambda: batch_size, embed_text=_index)
+    mock_vector_engine.embedding_engine = EmbeddingGateway(raw)
+    mock_vector_engine.embedding_engine._record_usage = AsyncMock()
+
+    async def index(_type, _field, points):
+        await mock_vector_engine.embedding_engine.embed_text([p.name for p in points])
+
+    mock_vector_engine.index_data_points = AsyncMock(side_effect=index)
 
     with patch.dict(
         index_data_points.__globals__,
@@ -205,10 +214,17 @@ async def test_a_shared_semaphore_bounds_concurrent_calls_together():
         peak = max(peak, in_flight)
         await asyncio.sleep(0)
         in_flight -= 1
+        return EmbeddingResult([[1.0]] * len(args[0]), tokens=len(args[0]))
 
     mock_vector_engine = AsyncMock()
-    mock_vector_engine.embedding_engine.get_batch_size = MagicMock(return_value=1)
-    mock_vector_engine.index_data_points = AsyncMock(side_effect=_index)
+    raw = SimpleNamespace(get_batch_size=lambda: 1, embed_text=_index)
+    mock_vector_engine.embedding_engine = EmbeddingGateway(raw)
+    mock_vector_engine.embedding_engine._record_usage = AsyncMock()
+
+    async def index(_type, _field, points):
+        await mock_vector_engine.embedding_engine.embed_text([p.name for p in points])
+
+    mock_vector_engine.index_data_points = AsyncMock(side_effect=index)
     first = [TestDataPoint(name=f"a{i}") for i in range(6)]
     second = [TestDataPoint(name=f"b{i}") for i in range(6)]
     for data_point in first + second:
@@ -273,3 +289,52 @@ async def test_failed_batch_waits_for_sibling_writes():
     ):
         await index_data_points(points, vector_engine=engine, semaphore=asyncio.Semaphore(2))
     assert completed.is_set(), "no sibling write may outlive the failed storage call"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "count,request_size,cap,expected", [(128, 32, 150, 4), (1024, 256, 1024, 8)]
+)
+async def test_provider_requests_overlap_independently_of_write_batches(
+    count, request_size, cap, expected
+):
+    active = peak = 0
+    reached = asyncio.Event()
+
+    async def embed(texts):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        if active == expected:
+            reached.set()
+        await asyncio.wait_for(reached.wait(), 1)
+        active -= 1
+        return EmbeddingResult([[float(text)] for text in texts], tokens=len(texts))
+
+    gateway = EmbeddingGateway(
+        SimpleNamespace(get_batch_size=lambda: request_size, embed_text=embed)
+    )
+    gateway._record_usage = AsyncMock()
+    writes = []
+
+    async def index(_type, _field, points):
+        vectors = await gateway.embed_text([p.name for p in points])
+        assert vectors == [[float(p.name)] for p in points]
+        writes.append(len(points))
+
+    engine = SimpleNamespace(
+        embedding_engine=gateway, create_vector_index=AsyncMock(), index_data_points=index
+    )
+    points = [TestDataPoint(name=str(i), metadata={"index_fields": ["name"]}) for i in range(count)]
+    with patch.dict(
+        index_data_points.__globals__,
+        {
+            "write_batch_size": lambda: 128,
+            "get_embedding_context_config": lambda: SimpleNamespace(
+                embedding_max_concurrent_data_points=cap
+            ),
+        },
+    ):
+        await index_data_points(points, vector_engine=engine)
+    assert peak == expected
+    assert writes == [128] * (count // 128)

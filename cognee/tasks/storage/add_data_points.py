@@ -429,7 +429,7 @@ async def add_data_points(
     else:
         await _write_nodes_grouped()
 
-        # One bound on concurrent vector writes for both halves, so together they
+        # One bound on concurrent embedding requests for both halves, so together they
         # stay within EMBEDDING_MAX_CONCURRENT_DATA_POINTS. The nodes are handed
         # over as they are: index_data_points copies only what it must.
         slots = indexing_semaphore(vector_engine)

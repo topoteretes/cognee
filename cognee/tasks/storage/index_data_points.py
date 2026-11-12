@@ -4,6 +4,9 @@ from uuid import UUID
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_context_config
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingGateway import (
+    embedding_request_scope,
+)
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import get_logger
 
@@ -14,7 +17,7 @@ def write_batch_size() -> int:
     """Rows per vector write: ``VECTOR_WRITE_BATCH_SIZE``, 128 by default.
 
     Independent of the embedding request size. A write batch larger than one request
-    is embedded in consecutive requests by ``EmbeddingGateway``, so the store receives
+    is embedded in provider-sized requests by ``EmbeddingGateway``, so the store receives
     fewer, larger writes (fewer statements and commits) while every request stays
     within the provider's input limit.
     """
@@ -34,17 +37,16 @@ def _embedding_request_size(vector_engine) -> int | None:
 
 
 def indexing_semaphore(vector_engine) -> asyncio.Semaphore:
-    """The bound on concurrent vector writes, shared by every index call of one storage step.
+    """Bound provider requests across every collection in one storage step.
 
-    ``EMBEDDING_MAX_CONCURRENT_DATA_POINTS`` caps the data points in flight to the
-    embedding engine; divided by the texts one request carries, that is how many writes
-    may run at once (150 / 32 = 4 by default). The requests of one write batch run one
-    after another inside the gateway, so the cap holds whatever the write batch size is.
-    ``add_data_points`` hands one semaphore to its node and edge indexing so the two
-    together stay within the cap.
+    A request cannot exceed the smaller of the provider and write batch sizes.
+    The gateway holds a slot only during a provider call; preparation and database
+    writes have their own backpressure and do not occupy embedding capacity.
     """
     max_concurrent = get_embedding_context_config().embedding_max_concurrent_data_points
-    request_size = _embedding_request_size(vector_engine) or write_batch_size()
+    request_size = min(
+        _embedding_request_size(vector_engine) or write_batch_size(), write_batch_size()
+    )
     return asyncio.Semaphore(max(1, max_concurrent // request_size))
 
 
@@ -75,8 +77,8 @@ async def index_data_points(
     Each ``(type, index field)`` pair is one collection. Duplicate IDs keep their
     last input and merge their tags before embedding. Its points are written in
     batches of ``write_batch_size()`` rows; the engine embeds a batch (in requests of its
-    own size) and upserts it. ``semaphore`` bounds how many batches are in flight at
-    once; by default ``indexing_semaphore(vector_engine)``, which keeps at most
+    own size) and upserts it. ``semaphore`` bounds provider requests in flight; by
+    default ``indexing_semaphore(vector_engine)``, which keeps at most
     ``embedding_max_concurrent_data_points`` (default 150, env
     ``EMBEDDING_MAX_CONCURRENT_DATA_POINTS``) data points at the embedding engine. A
     caller indexing several lists in one step passes one semaphore to all of them.
@@ -86,7 +88,7 @@ async def index_data_points(
                      contain an 'index_fields' list specifying which fields to embed.
         vector_engine: Optional pre-created vector engine. Falls back to
                        ``get_vector_engine_async()`` when not supplied.
-        semaphore: Optional shared bound on concurrent batch writes.
+        semaphore: Optional shared bound on concurrent embedding requests.
 
     Returns:
         The original data_points list.
@@ -129,7 +131,7 @@ async def index_data_points(
     rows_per_write = write_batch_size()
 
     async def _index_batch(type_name, field_name, batch):
-        async with semaphore:
+        with embedding_request_scope(semaphore):
             await vector_engine.index_data_points(type_name, field_name, batch)
 
     tasks = []
