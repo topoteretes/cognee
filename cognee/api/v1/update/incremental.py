@@ -783,6 +783,22 @@ async def incremental_update(
         )
 
 
+async def _record_content_in_ledger(
+    content_hash: str, bundle: dict, dataset, user: User, pipeline_run_id: UUID | None = None
+) -> None:
+    """Tell the audit ledger which content the document holds (a no-op when it is off)."""
+    await record_data_item_content(
+        PipelineContext(
+            user=user,
+            data_item=bundle["data_item"],
+            dataset=dataset,
+            pipeline_run_id=pipeline_run_id,
+            pipeline_name=PIPELINE_NAME,
+        ),
+        content_hash,
+    )
+
+
 async def _run_incremental_update(
     data_id: UUID,
     data,
@@ -815,13 +831,7 @@ async def _run_incremental_update(
         # as well: an earlier update may have published it and then failed to
         # record it, and this is the retry that completes it. A no-op when the
         # ledger is off or already says so.
-        unchanged_data = bundle["data_item"]
-        await record_data_item_content(
-            PipelineContext(
-                user=user, data_item=unchanged_data, dataset=dataset, pipeline_name=PIPELINE_NAME
-            ),
-            unchanged_data.content_hash,
-        )
+        await _record_content_in_ledger(bundle["data_item"].content_hash, bundle, dataset, user)
 
     if bundle.get("status") == "unchanged" and not bundle.get("repairs"):
         return {**_unchanged_result(0, bundle["stored_count"]), "pipeline_run_id": None}
@@ -850,6 +860,18 @@ async def _run_incremental_update(
                 pipeline_run.pipeline_run_id,
                 chunker=chunker,
                 extractor=extractor,
+            )
+            # The audit ledger versions the data item on its new content hash
+            # once the row holds it, never before: a publish that fails must
+            # not leave the ledger recording an update that did not happen. If
+            # this write fails the update raises with the new content in place,
+            # and running it again records it (the unchanged branch above).
+            await _record_content_in_ledger(
+                bundle["staged"].content_hash,
+                bundle,
+                dataset,
+                user,
+                pipeline_run.pipeline_run_id,
             )
             # An edit can remove the fact a user chose, or restate it under another
             # relationship; its decision must not outlive it. Read once the new
@@ -1199,12 +1221,6 @@ async def _write_and_publish(
         if chunk_id not in redated
     )
     await publish_updated_data(data_id, dataset_id, staged, surviving_tokens + new_tokens, node_set)
-    # The audit ledger versions the data item on its new content hash once the
-    # row holds it, never before: a publish that fails must not leave the
-    # ledger recording an update that did not happen. If this write fails the
-    # update raises with the new content in place, and running it again
-    # records it (see the unchanged branch of ``_run_incremental_update``).
-    await record_data_item_content(context, staged.content_hash)
 
     added_chunks = len(to_extract) + len(reused_chunks)
     kept_count = len(stored_chunks) - len(replaced)
