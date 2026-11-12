@@ -176,6 +176,14 @@ def _config(**overrides):
 
 
 @pytest.fixture(autouse=True)
+def installed_packages(monkeypatch):
+    # Tests install a package by changing the one element.
+    fingerprint = ["fp1"]
+    monkeypatch.setattr(gd_source, "_installed_packages_fingerprint", lambda: fingerprint[0])
+    return fingerprint
+
+
+@pytest.fixture(autouse=True)
 def no_registered_loaders(monkeypatch):
     # The installed extras decide what registers; tests that care set their own.
     monkeypatch.setattr(gd_source, "_registered_loader_extensions", list)
@@ -1614,6 +1622,84 @@ def test_loader_registered_matches_the_extensions_the_loaders_list(monkeypatch):
     assert gd_source._loader_registered(".docx")
     assert gd_source._loader_registered(".pptx")
     assert not gd_source._loader_registered(".xlsx")
+
+
+@pytest.mark.parametrize("install_fixes_it", [True, False])
+def test_a_changed_package_set_retries_a_file_that_failed_on_a_dependency(
+    monkeypatch, installed_packages, install_fixes_it
+):
+    ok, office = _file_meta("ok"), _file_meta("office", mime_type=DOCX_MIME)
+    service = FakeDriveService({"root": [ok, office]}, {"ok": ok, "office": office})
+    # The .docx loader is registered, so only a dependency it imports can be missing.
+    monkeypatch.setattr(gd_source, "_registered_loader_extensions", lambda: [".docx"])
+    downloaded = []
+
+    def extract(_client, file_id, *_args, **_kwargs):
+        downloaded.append(file_id)
+        if file_id == "office" and not state.get("installed"):
+            raise gd_source.LoaderUnavailableError("No module named 'docling_core'")
+        return "body"
+
+    monkeypatch.setattr(gd_source, "extract_file_content", extract)
+    state = {}
+    list(gd_source._iter_rows(service, _config(), state))
+    assert state["loader_fingerprint"] == "fp1"
+    assert state["page_token"] == "token-0" and sorted(state["versions"]) == ["ok"]
+
+    # Nothing was installed: the next sync is incremental and reads nothing.
+    service.changes_by_token["token-0"] = _feed()
+    service.list_calls.clear()
+    downloaded.clear()
+    assert list(gd_source._iter_rows(service, _config(), state)) == []
+    assert service.list_calls == downloaded == []
+
+    # A package is installed: one scan, and only the failed file is read again.
+    installed_packages[0] = "fp2"
+    state["installed"] = install_fixes_it
+    service.start_token = "t3"
+    rows = list(gd_source._iter_rows(service, _config(), state))
+    assert downloaded == ["office"]
+    assert [row["id"] for row in rows] == (["office"] if install_fixes_it else [])
+    assert state["page_token"] == "t3"
+    assert state.get("loader_fingerprint") == (None if install_fixes_it else "fp2")
+
+    # Either way the next sync is incremental again: a dependency that is still missing
+    # waits for the next change instead of scanning on every sync.
+    service.changes_by_token["t3"] = _feed()
+    service.list_calls.clear()
+    downloaded.clear()
+    assert list(gd_source._iter_rows(service, _config(), state)) == []
+    assert service.list_calls == downloaded == []
+
+
+def test_a_package_change_costs_a_folder_that_never_failed_nothing(installed_packages):
+    ok = _file_meta("ok")
+    service = FakeDriveService({"root": [ok]}, {"ok": ok})
+    state = {}
+    list(gd_source._iter_rows(service, _config(), state))
+    assert "loader_fingerprint" not in state
+
+    installed_packages[0] = "fp2"
+    service.changes_by_token["token-0"] = _feed()
+    service.list_calls.clear()
+    assert list(gd_source._iter_rows(service, _config(), state)) == []
+    assert service.list_calls == []
+
+
+def test_the_package_fingerprint_follows_names_and_versions_not_their_order(monkeypatch):
+    monkeypatch.undo()  # the autouse fixture replaces the function under test
+
+    def installed(*packages):
+        return [SimpleNamespace(name=name, version=version) for name, version in packages]
+
+    def fingerprint(*packages):
+        monkeypatch.setattr(gd_source.metadata, "distributions", lambda: installed(*packages))
+        return gd_source._installed_packages_fingerprint()
+
+    base = fingerprint(("docling", "2.1"), ("pypdf", "6.0"))
+    assert fingerprint(("pypdf", "6.0"), ("docling", "2.1")) == base
+    assert fingerprint(("docling", "2.2"), ("pypdf", "6.0")) != base
+    assert fingerprint(("docling", "2.1"), ("pypdf", "6.0"), ("docling-core", "1.0")) != base
 
 
 def test_registered_loader_extensions_lists_only_what_a_loader_handles(monkeypatch):

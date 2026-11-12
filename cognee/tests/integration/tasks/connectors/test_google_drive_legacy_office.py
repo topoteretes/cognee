@@ -86,12 +86,14 @@ def legacy_case(request, monkeypatch, legacy_runtime, legacy_dir):
             downloads.append(fileId)
             return SimpleNamespace(execute=lambda: data)
 
-    listing = Mock(side_effect=lambda *args: iter(files))
+    listing = Mock(side_effect=lambda *args, **kwargs: iter(files))
     monkeypatch.setattr(drive, "_list_files_in_scope", listing)
-    monkeypatch.setattr(drive, "_get_start_page_token", lambda *args: "t1")
-    monkeypatch.setattr(drive, "_list_changed_file_ids", lambda *args: (set(), set(), "t2"))
+    monkeypatch.setattr(drive, "_get_start_page_token", lambda *args, **kwargs: "t1")
     monkeypatch.setattr(
-        drive, "_stream_media", lambda request, buffer: buffer.write(request.execute())
+        drive, "_list_changed_file_ids", lambda *args, **kwargs: (set(), set(), "t2")
+    )
+    monkeypatch.setattr(
+        drive, "_stream_media", lambda request, buffer, **kwargs: buffer.write(request.execute())
     )
     return SimpleNamespace(
         path=fixtures / f"legacy.{suffix}",
@@ -171,7 +173,7 @@ def test_listing_failure_rolls_back_the_upgrade(tmp_path, legacy_case, monkeypat
     pipeline = _seed(tmp_path, case, None)
     before = deepcopy(_state(pipeline))
 
-    def broken_listing(*args):
+    def broken_listing(*args, **kwargs):
         yield case.files[1]
         raise RuntimeError("listing interrupted")
 
@@ -221,7 +223,9 @@ def test_corrupt_file_keeps_the_cursor_and_healthy_documents(tmp_path, legacy_ca
     case.files.reverse()
     with monkeypatch.context() as patch:
         patch.setattr(
-            drive, "_stream_media", lambda request, buffer: buffer.write(b"\xd0\xcf\x11\xe0bad")
+            drive,
+            "_stream_media",
+            lambda request, buffer, **kwargs: buffer.write(b"\xd0\xcf\x11\xe0bad"),
         )
         source = case.source()
         pipeline.run(source)
@@ -242,7 +246,9 @@ def test_deleting_a_legacy_document_keeps_the_other_document(tmp_path, legacy_ca
     pipeline = _seed(tmp_path, case, 1)
     pipeline.run(case.source())
     assert [row["id"] for row in _rows(pipeline)] == ["existing", "legacy"]
-    monkeypatch.setattr(drive, "_list_changed_file_ids", lambda *args: (set(), {"legacy"}, "t2"))
+    monkeypatch.setattr(
+        drive, "_list_changed_file_ids", lambda *args, **kwargs: (set(), {"legacy"}, "t2")
+    )
     pipeline.run(case.source())
     assert [row["id"] for row in _rows(pipeline)] == ["existing"]
     assert "legacy" not in _state(pipeline)["versions"]

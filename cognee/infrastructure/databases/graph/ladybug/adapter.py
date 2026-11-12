@@ -183,7 +183,9 @@ SET r.updated_at = TIMESTAMP(edge.updated_at),
 
 
 DEFAULT_KUZU_BUFFER_POOL_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
-DEFAULT_KUZU_MAX_DB_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
+# 128 GiB, the power of 2 nearest 100 GB (Ladybug rejects any other value). It is
+# address-space accounting, not an allocation, so a large cap costs nothing.
+DEFAULT_KUZU_MAX_DB_SIZE = 1 << 37
 
 # Graph provenance (COG-5522 Part 1). These four fields live in declared scalar
 # STRING columns on both Node and EDGE — never inside the JSON `properties` blob
@@ -435,8 +437,8 @@ class LadybugAdapter(GraphDBInterface):
             Maximum size of the Kuzu buffer pool in bytes.
         kuzu_max_db_size:
             Maximum on-disk database size in bytes. Configurable via the
-            ``KUZU_MAX_DB_SIZE`` env var (see ``GraphConfig``); some users
-            need this above the default 4 GB for large graphs.
+            ``KUZU_MAX_DB_SIZE`` env var (see ``GraphConfig``); must be a
+            power of 2. Defaults to 128 GiB.
         subprocess_mode:
             When True, the adapter runs in subprocess-proxy mode: the
             native ladybug.Database/Connection live in a dedicated worker

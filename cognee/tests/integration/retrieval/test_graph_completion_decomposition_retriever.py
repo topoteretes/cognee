@@ -14,8 +14,8 @@ from cognee.low_level import setup as cognee_setup
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     GraphCompletionDecompositionRetriever,
-    QueryDecomposition,
 )
+from cognee.modules.retrieval.utils.query_decomposition import QueryDecomposition
 from cognee.tasks.storage import add_data_points
 
 logger = logging.getLogger(__name__)
