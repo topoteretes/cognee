@@ -83,16 +83,16 @@ async def _handle_rating(payload: dict[str, Any]) -> None:
     score = RATINGS.get(action.get("action_id"))
     if score is None:
         return
-    response_url = payload.get("response_url", "")
+    reply = partial(_reply_beside_answer, payload.get("response_url", ""))
     team_id = (payload.get("team") or {}).get("id", "")
     credential = await get_by_team(team_id) if team_id else None
     if not is_active(credential):
-        await post_to_response_url(response_url, notice(NOT_CONNECTED_MESSAGE))
+        await reply(NOT_CONNECTED_MESSAGE)
         return
     register_background_task(
         asyncio.create_task(
             _rate_and_confirm(
-                partial(post_to_response_url, response_url),
+                reply,
                 credential,
                 member=(payload.get("user") or {}).get("id", ""),
                 qa_id=action.get("value", ""),
@@ -102,21 +102,24 @@ async def _handle_rating(payload: dict[str, Any]) -> None:
     )
 
 
+async def _reply_beside_answer(response_url: str, text: str) -> None:
+    """A private reply to a click on a public answer's button. The button's response_url
+    replaces that answer for everyone unless the reply says not to (live, 2026-11-12), so
+    every reply of the rating handler goes through here."""
+    await post_to_response_url(response_url, notice(text, replace_original=False))
+
+
 async def _rate_and_confirm(
     reply: Any, credential: Any, *, member: str, qa_id: str, score: int
 ) -> None:
     """Record the rating and tell the member how it went. Never raises: it runs detached."""
-    # The button sits on the public answer: a reply to its response_url replaces that answer
-    # for everyone unless it says not to (live, 2026-11-12).
     try:
         rated = await rate_answer(credential, member, qa_id, score)
     except Exception:  # a failure degrades to a chat message
         logger.exception("Rating a Slack answer failed")
-        await reply(notice(RATE_FAILED_MESSAGE, replace_original=False))
+        await reply(RATE_FAILED_MESSAGE)
         return
-    await reply(
-        notice(RATED_MESSAGE if rated else NOT_YOURS_TO_RATE_MESSAGE, replace_original=False)
-    )
+    await reply(RATED_MESSAGE if rated else NOT_YOURS_TO_RATE_MESSAGE)
 
 
 async def _handle_remember_this(payload: dict[str, Any]) -> None:

@@ -1,10 +1,10 @@
 """POST a followup message to a Slack ``response_url``.
 
 Used by the interactive handlers, which ack fast and answer later: the "Remember
-this" and "Forget this" message shortcuts. A ``response_url`` is valid for 30 minutes and
-accepts up to 5 posts; ``replace_original: true`` (set by the caller's own
-payload, not here) swaps an earlier placeholder for the real answer instead
-of leaving both visible.
+this" and "Forget this" message shortcuts and the 👍 / 👎 under an answer. A
+``response_url`` is valid for 30 minutes and accepts up to 5 posts. Whether a post
+replaces the message the click came from is the caller's payload (``replace_original``),
+never decided here; a button's response_url replaces that message unless told not to.
 """
 
 import logging

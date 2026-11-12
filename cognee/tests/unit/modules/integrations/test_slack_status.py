@@ -192,8 +192,7 @@ async def test_a_running_sync_says_so(stores):
 
 
 @pytest.mark.asyncio
-async def test_a_row_that_cannot_be_computed_says_unknown_and_the_rest_still_show(stores):
-    status.workspace_item_count.side_effect = RuntimeError("database down")
+async def test_a_row_slack_cannot_answer_says_unknown_and_the_rest_still_show(stores):
     membership.public_channels.side_effect = RuntimeError("slack down")
 
     rows = _fields(await _status(_credential()))
@@ -201,6 +200,25 @@ async def test_a_row_that_cannot_be_computed_says_unknown_and_the_rest_still_sho
     assert rows["Memory"] == "Unknown"
     assert rows["Answers here"] == "Unknown"
     assert rows["You"] == "Linked as ana@acme.example"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("read", ["workspace_item_count", "is_paused"])
+async def test_a_failing_read_of_cognees_own_data_fails_the_status(stores, read):
+    """Igor (D6): a catch-all around a local read hides a bug as "Unknown"."""
+    getattr(status, read).side_effect = RuntimeError("database down")
+
+    with pytest.raises(RuntimeError, match="database down"):
+        await _status(_credential())
+
+
+@pytest.mark.asyncio
+async def test_a_member_linked_to_a_deleted_user_sees_unknown(stores):
+    from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+
+    status.get_user.side_effect = EntityNotFoundError(message="gone")
+
+    assert _fields(await _status(_credential()))["You"] == "Unknown"
 
 
 @pytest.mark.asyncio

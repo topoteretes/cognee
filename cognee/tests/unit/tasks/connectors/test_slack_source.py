@@ -1473,20 +1473,22 @@ def test_a_command_to_another_app_is_left_out_and_a_mention_of_a_person_stays():
     assert "please review the deploy" in day["content"]
 
 
-def test_an_apps_reply_to_a_command_is_left_out_and_a_persons_reply_stays():
+@pytest.mark.parametrize(
+    "user, extra",
+    [
+        (None, {"bot_id": "B0OTHERAPP", "subtype": "bot_message"}),
+        # An app posting as its bot user carries that user and no bot_id.
+        (OTHER_APP_USER, {}),
+    ],
+    ids=["bot message", "app's bot user"],
+)
+def test_an_apps_reply_to_a_command_is_left_out_and_a_persons_reply_stays(user, extra):
     """Live: the other app's answer to that question ("I don't know which Cognee account you
     are yet...") became a source of this app's answers. In a thread opened by a command to an
     app, what apps reply is that app talking; what people reply is still the channel."""
     fake = _with_another_app()
     fake.post(ts(4), "U1", f"<@{OTHER_APP_USER}> who owns Orion?")
-    fake.reply(
-        ts(4),
-        ts(5),
-        None,
-        "I don't know which Cognee account you are yet.",
-        bot_id="B0OTHERAPP",
-        subtype="bot_message",
-    )
+    fake.reply(ts(4), ts(5), user, "I don't know which Cognee account you are yet.", **extra)
     fake.reply(ts(4), ts(6), "U2", "Ana owns Orion, I checked.")
 
     rows = {row["id"]: row for row in _walk(fake, {})}

@@ -711,6 +711,77 @@ async def test_a_slack_connect_channel_is_answered_from_itself_alone(slack):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("channel", ["G4", None], ids=["channel answer", "direct message"])
+async def test_a_channel_scoped_search_reads_only_what_one_channel_wrote(slack, channel):
+    """A channel scope is a node set filter, and an entity is one node for every channel
+    that names it: the hybrid entity lane prints a relation sentence extracted from a
+    private channel's message when the shared neighbour was last named in a channel in
+    scope (swarm F11, probe on the real retriever). A channel-scoped search therefore
+    reads chunk-level sources only, where every row belongs to one channel."""
+    from cognee.modules.search.types import SearchType
+
+    slack.credential = _credential(synced=["C1", "G2", "G4"])
+    slack.channels = {"C1", "G2", "G4"}
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=[])) as search,
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+        patch.object(mention, "member_channels", AsyncMock(return_value={"C1", "G4"})),
+    ):
+        await mention.handle_cognee_mention(
+            TEAM,
+            _mention("who is buying Acme?", channel=channel)
+            if channel
+            else _direct("who is buying Acme?"),
+        )
+
+    scoped = [call for call in search.await_args_list if call.kwargs["node_name"]]
+    assert scoped, "the workspace dataset is searched"
+    assert {call.kwargs["query_type"] for call in scoped} <= {
+        SearchType.RAG_COMPLETION,
+        SearchType.CHUNKS,
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_search_records_the_chunks_it_read_for_rating(slack):
+    """A channel answer is a chunk search: its scored chunks are the graph elements a
+    rating moves, as the hybrid sections were before."""
+    slack.credential = _credential(synced=["C1"])
+    read = [SimpleNamespace(payload={"id": "chunk-1"}), SimpleNamespace(payload={"id": "chunk-2"})]
+    found = [{"text_result": ["We chose Neon."], "objects_result": read}]
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=found)),
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+        patch.object(mention, "record_answer", AsyncMock(return_value="qa-1")) as record,
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("why did we choose Neon?"))
+
+    assert record.await_args.kwargs["used_graph_element_ids"] == {
+        "node_ids": ["chunk-1", "chunk-2"],
+        "edge_ids": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_channel_with_nothing_to_read_says_so_instead_of_nothing_found(slack):
+    """Asked in a channel that is not synced, with no selected public channel, no search
+    runs: "Nothing found ... remember saves it" would be false, since a channel answer
+    never reads the asker's own memory (swarm F15)."""
+    slack.credential = _credential(synced=["G2"])
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=[])) as search,
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("when do we deploy?", channel="C1"))
+
+    search.assert_not_awaited()
+    assert slack.posted == []
+    told = _texts(slack)[-1]
+    assert told != mention.NOTHING_FOUND_MESSAGE
+    assert "remember" not in told.lower()
+
+
+@pytest.mark.asyncio
 async def test_a_channel_question_nothing_answers_is_told_to_the_asker_alone(slack):
     """A miss is not posted to the channel."""
     slack.credential = _credential(synced=["C1"])
@@ -884,6 +955,19 @@ async def test_a_channel_answer_says_where_it_comes_from_and_can_be_rated(slack)
 
 
 @pytest.mark.asyncio
+async def test_an_answer_in_a_channel_that_is_not_synced_names_only_what_it_read(slack):
+    """Asked in a public channel that is not synced: the answer read the selected public
+    channels alone, so the scope line does not name this channel."""
+    slack.credential = _credential(synced=["C3"])
+    slack.public = {"C1", "C3"}
+
+    answer = await _answered(slack, _mention("why did we choose Neon?"))
+
+    assert "From 1 public channel" in _context_texts(answer)
+    assert "<#C1>" not in " ".join(_context_texts(answer))
+
+
+@pytest.mark.asyncio
 async def test_a_slack_connect_answer_says_it_read_this_channel_alone(slack):
     slack.credential = _credential(synced=["C1", "C3"])
     slack.external = True
@@ -979,3 +1063,43 @@ async def test_status_is_answered_with_the_status_rows(slack):
     assert reply["blocks"] == message["blocks"]
     answer.assert_awaited_once()
     assert answer.await_args.kwargs["channel"] == "C7"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "event, channel",
+    [(_mention("status", channel="C7"), "C7"), (_direct("status"), None)],
+    ids=["channel with commands off", "direct message"],
+)
+async def test_status_works_where_commands_are_off_and_in_a_direct_message(slack, event, channel):
+    """Asking what Cognee does here is never limited by the channel allowlist; a direct
+    message has no channel of its own."""
+    slack.credential = _credential(allowed=["C1"])
+    message = {"text": "cognee status", "blocks": [{"type": "section", "fields": []}]}
+    answer = AsyncMock(return_value=message)
+    with patch.object(mention, "status_message", answer):
+        await mention.handle_cognee_mention(TEAM, event)
+
+    answer.assert_awaited_once()
+    assert answer.await_args.kwargs["channel"] == channel
+    assert CHANNEL_NOT_ENABLED_MESSAGE not in _texts(slack)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "info, shared",
+    [
+        ({"is_ext_shared": True}, True),
+        # Enterprise Grid: shared with other workspaces of the organization, whose members
+        # cannot read this workspace's public channels either.
+        ({"is_org_shared": True}, True),
+        ({"is_ext_shared": False, "is_org_shared": False}, False),
+    ],
+    ids=["slack connect", "org shared", "neither"],
+)
+async def test_a_channel_shared_beyond_this_workspace_counts_as_shared(monkeypatch, info, shared):
+    client = SimpleNamespace(call=lambda method, **params: {"channel": {"id": "C1", **info}})
+    monkeypatch.setattr(membership, "access_token_for", AsyncMock(return_value="tok"))
+    monkeypatch.setattr(membership.ingestion, "build_service", lambda provider, token: client)
+
+    assert await membership.shared_with_other_organizations(_credential(), "C1") is shared

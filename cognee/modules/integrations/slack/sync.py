@@ -822,7 +822,7 @@ async def _forget_workspace(credential: IntegrationCredential) -> None:
     # every message's text (G43).
     await drop_dlt_dataset(dataset_name)
     await forget_workspace_remembered(team_id)
-    await forget_answer_records(team_id)
+    await forget_answer_records(team_id, credential.user_id, every_owner=True)
     uninstalled = (credential.provider_metadata or {}).get(UNINSTALLED_AT_KEY)
 
     def stamp_if_still_uninstalled(metadata: dict) -> dict | None:
@@ -833,7 +833,11 @@ async def _forget_workspace(credential: IntegrationCredential) -> None:
         return {UNINSTALL_DELETED_AT_KEY: datetime.now(timezone.utc).isoformat()}
 
     await change_provider_metadata(PROVIDER, team_id, stamp_if_still_uninstalled)
-    logger.info("Deleted the data of Slack workspace %s, uninstalled 14 days ago", team_id)
+    logger.info(
+        "Deleted the data of Slack workspace %s, uninstalled at least %s days ago",
+        team_id,
+        UNINSTALL_RETENTION.days,
+    )
 
 
 async def _worker() -> None:

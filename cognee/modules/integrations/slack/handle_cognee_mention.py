@@ -83,6 +83,7 @@ from cognee.modules.integrations.slack.sync import (
     selected_channels,
 )
 from cognee.modules.retrieval.hybrid.context import extract_context_object_ids
+from cognee.modules.retrieval.utils.used_graph_elements import extract_from_scored_results
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_user
 from cognee.tasks.ingestion.connectors.slack import SlackSourceError
@@ -418,14 +419,24 @@ async def ask(
         searches.append((workspace, [f"slack:channel:{scope}" for scope in visible]))
     if others and channel is None:
         searches.append((others, None))
+    if not searches:
+        # A channel answer reads only the workspace's channels; none of them is readable
+        # here, so nothing was searched and "Nothing found" would be the wrong advice.
+        await reply(notice(_nothing_to_read_message(credential)))
+        return
     try:
         answers = await asyncio.gather(
             *(
                 cognee_search(
                     query_text=question,
-                    # Graph traversal alone can come back empty on a thin graph, where the
-                    # vector-search half still finds a relevant chunk.
-                    query_type=SearchType.HYBRID_COMPLETION,
+                    # A channel scope is a node set filter, and an entity is one node for
+                    # every channel that names it: the hybrid entity lane would print a
+                    # relation extracted from a channel outside the scope. Chunks belong to
+                    # one channel each. Unscoped, hybrid's vector half still finds a chunk
+                    # where graph traversal alone comes back empty on a thin graph.
+                    query_type=SearchType.RAG_COMPLETION
+                    if node_name
+                    else SearchType.HYBRID_COMPLETION,
                     user=owner,
                     dataset_ids=dataset_ids,
                     node_name=node_name,
@@ -484,12 +495,24 @@ def _used_graph_elements(results: list[Any]) -> dict[str, list[str]] | None:
     nodes: set[str] = set()
     edges: set[str] = set()
     for result in results:
-        used = extract_context_object_ids(result.get("objects_result")) or {}
+        read = result.get("objects_result")
+        # Hybrid returns its sections as a dict; a chunk search returns its scored chunks.
+        if isinstance(read, dict):
+            used = extract_context_object_ids(read) or {}
+        else:
+            used = extract_from_scored_results(read or []) or {}
         nodes |= set(used.get("node_ids", []))
         edges |= set(used.get("edge_ids", []))
     if not nodes and not edges:
         return None
     return {"node_ids": sorted(nodes), "edge_ids": sorted(edges)}
+
+
+def _nothing_to_read_message(credential: IntegrationCredential) -> str:
+    """Asked in a channel that is not synced, where no synced public channel is readable."""
+    installer = (credential.provider_metadata or {}).get("installed_by_slack_user_id")
+    who = f"<@{installer}>" if installer else "the person who connected Slack"
+    return f"Nothing to read here\nThis channel is not synced. Ask {who} to add it."
 
 
 def _footer(channel: str | None, visible: list[str]) -> str:

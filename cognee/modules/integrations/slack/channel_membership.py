@@ -114,9 +114,11 @@ async def public_channels(credential: IntegrationCredential) -> set[str]:
 async def shared_with_other_organizations(
     credential: IntegrationCredential, channel_id: str
 ) -> bool:
-    """Whether ``channel_id`` is a Slack Connect channel, shared with another organization.
+    """Whether ``channel_id`` is shared beyond this workspace: a Slack Connect channel
+    (another organization) or, on Enterprise Grid, a channel shared with other workspaces
+    of the organization.
 
-    Its external members cannot read this workspace's public channels. Raises when Slack
+    Members from elsewhere cannot read this workspace's public channels. Raises when Slack
     gives no clear answer.
     """
     from cognee.tasks.ingestion.connectors.slack import SlackAPIError
@@ -127,7 +129,7 @@ async def shared_with_other_organizations(
     info = answer.get("channel") or {}
     if info.get("id") != channel_id:
         raise SlackAPIError("conversations.info", "invalid_response")
-    return bool(info.get("is_ext_shared"))
+    return bool(info.get("is_ext_shared") or info.get("is_org_shared"))
 
 
 async def _conversations(credential: IntegrationCredential, **params: str) -> set[str]:

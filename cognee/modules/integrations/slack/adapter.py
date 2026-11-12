@@ -154,7 +154,7 @@ class SlackIntegration(OAuthIntegration):
         from cognee.modules.integrations.slack.handle_cognee_ask import forget_answer_records
 
         await forget_remembered(user, team_id=credential.provider_account_id)
-        await forget_answer_records(str(credential.provider_account_id), user_id=user.id)
+        await forget_answer_records(str(credential.provider_account_id), user.id)
 
     async def sync_now(self, credential: IntegrationCredential) -> None:
         await sync_slack(credential)

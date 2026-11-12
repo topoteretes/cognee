@@ -4,8 +4,8 @@ the workspace's sync.
 Every row comes from data the code already keeps: the member's link, the connection's
 metadata (installer, selection, command allowlist, last sync counts), the answer's own scope
 rule (``channel_scope``), the sync schedule (``next_sync_at``) and the workspace dataset. A
-row that cannot be computed says "Unknown" and the failure is logged, so one failed lookup
-never hides the rest. A selected private channel is only ever counted: the member asking may
+row that needs Slack and cannot reach it says "Unknown" and the failure is logged, so Slack
+being down never hides the rest; a failing read of cognee's own data fails the status. A selected private channel is only ever counted: the member asking may
 not be in it.
 """
 
@@ -120,10 +120,10 @@ async def _memory(credential: IntegrationCredential) -> str:
     selected = selected_channels(credential)
     try:
         public = await channel_membership.public_channels(credential)
-        items = await workspace_item_count(credential)
-    except Exception:  # one row says Unknown; the rest of the status still shows
-        logger.exception("Could not read the Slack workspace's memory for the status")
+    except Exception:  # the way to Slack: one row says Unknown, the rest still shows
+        logger.exception("Could not ask Slack which channels are public for the status")
         return UNKNOWN
+    items = await workspace_item_count(credential)
     shown = len([channel for channel in selected if channel in public])
     return (
         f"{_count(len(selected), 'channel')} synced"
@@ -151,12 +151,8 @@ def _last_sync(credential: IntegrationCredential) -> str:
 async def _next_sync(credential: IntegrationCredential) -> str:
     if sync_is_running(PROVIDER, str(credential.provider_account_id)):
         return "Syncing now"
-    try:
-        if await is_paused(credential):
-            return "Paused by the owner"
-    except Exception:  # one row says Unknown; the rest of the status still shows
-        logger.exception("Could not read the Slack connection's sync pause for the status")
-        return UNKNOWN
+    if await is_paused(credential):
+        return "Paused by the owner"
     if not slack_settings.history_sync_enabled:
         return "Off on this server"
     if not selected_channels(credential):

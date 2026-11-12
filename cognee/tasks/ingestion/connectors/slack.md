@@ -187,13 +187,13 @@ and `im:history`, and the events `app_mention` and `message.im`, all in
 
 | Message | What it does |
 |---|---|
-| `@cognee <question>` | in a channel, answers in the question's thread (or the thread it was asked in) with a message everyone in the channel sees (`chat.postMessage`), so it reads only what all of them can: the workspace's dataset within that channel, when it is synced, and the selected public channels (Slack's `users.conversations` for the app, asked on every question, so a channel made private drops out at once), never a selected private channel other than this one and never the asker's other datasets. In a Slack Connect channel (`conversations.info`'s `is_ext_shared`) it reads that channel alone, since the other organization's members cannot read this workspace's channels; when Slack cannot say, it reads that channel alone too and the asker is told. In a direct message it answers with a message in the direct message, from the member's memory: the workspace's dataset within the selected channels Slack says the member is in (`users.conversations`; when Slack cannot say, without it, and the member is told) and their other datasets whole. Either way the answer is the reply itself (no header), shown below; a miss or a failure is shown to the asker alone |
+| `@cognee <question>` | in a channel, answers in the question's thread (or the thread it was asked in) with a message everyone in the channel sees (`chat.postMessage`), so it reads only what all of them can: the workspace's dataset within that channel, when it is synced, and the selected public channels (Slack's `users.conversations` for the app, asked on every question, so a channel made private drops out at once), never a selected private channel other than this one and never the asker's other datasets. It reads those channels' messages alone (a chunk search, `RAG_COMPLETION`): one entity is one node for every channel that names it, so the hybrid entity lane would carry a relation from a channel outside the scope. A channel that is not synced, with no selected public channel, reads nothing and says so. In a channel shared beyond this workspace (`conversations.info`'s `is_ext_shared`, Slack Connect, or `is_org_shared` on Enterprise Grid) it reads that channel alone, since members from elsewhere cannot read this workspace's channels; when Slack cannot say, it reads that channel alone too and the asker is told. In a direct message it answers with a message in the direct message, from the member's memory: the workspace's dataset within the selected channels Slack says the member is in (`users.conversations`; when Slack cannot say, without it, and the member is told) and their other datasets whole. Either way the answer is the reply itself (no header), shown below; a miss or a failure is shown to the asker alone |
 | `@cognee remember <text>` | saves a note Slack never saw, e.g. a decision from a call; the note is the item of that message, so `@cognee forget` in its thread, *Forget this* on it, or deleting the message forgets it |
 | `@cognee remember` in a thread | saves the thread's first message, followed like "Remember this": an edit or a deletion in Slack forgets the copy |
 | `@cognee forget` in a thread (a channel or a DM) | forgets the member's own copy or note of the thread's first message; the *Forget this* shortcut does it for any message. Other members' copies stay, and the channel allowlist never blocks it. On a message of a synced channel, its author or the connection's owner also takes it out of the workspace's memory (below) |
 | `@cognee link` | the page where the member links their Slack account |
 | `@cognee unlink` | ends the member's own link |
-| `@cognee status` | which Cognee account the member is linked to, whether this channel is synced and whether commands work here, and the last sync |
+| `@cognee status` | which Cognee account the member is linked to, who connected Slack, whether this channel is synced and whether commands work here, what an answer here reads, the workspace's memory, and the last and next sync; a row that needs Slack and cannot reach it says Unknown |
 | `@cognee help`, or a bare mention | what the app does |
 
 An answer is a message; every other reply is ephemeral, shown to the member who asked. A
@@ -502,7 +502,9 @@ naming who can. A thread's first message taken out leaves its replies in memory.
 This reads the messages of the selected channels, the names of their authors and of the
 people mentioned, and the names of attached files (never their content). The text goes to the
 configured LLM and embedding providers, and anyone with read access to the target dataset can
-see it through search; `@cognee` answers a member only from the synced channels they are in. A
+see it through search. `@cognee` in a channel answers from what everyone there can read: that
+channel when it is synced and the selected public channels, from their messages alone; in a
+direct message, from the selected channels the member is in and their own datasets. A
 private channel is synced only when both the app and the Slack user who connected
 the workspace are members. Errors and logs carry the API method and Slack's error code, never
 the token, a channel id, a URL or a response body.

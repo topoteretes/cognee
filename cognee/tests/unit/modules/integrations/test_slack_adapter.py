@@ -120,4 +120,4 @@ async def test_forget_related_data_forgets_what_the_user_remembered_from_this_wo
         await integration.forget_related_data(credential, user)
 
     forget_remembered.assert_awaited_once_with(user, team_id="T123")
-    forget_answer_records.assert_awaited_once_with("T123", user_id="user-1")
+    forget_answer_records.assert_awaited_once_with("T123", "user-1")

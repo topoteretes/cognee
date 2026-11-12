@@ -378,8 +378,9 @@ async def rate_answer(credential: Any, member: str, qa_id: str, score: int) -> b
 
     ``member`` is the Slack user of the signed click, never anything the button carries: an
     answer is found only in its asker's own session, so anyone else's click, or a forged
-    id, finds nothing and returns ``False``. A second click rates again; it replaces the
-    first rating and adds no vote.
+    id, finds nothing and returns ``False``. A second click stores its score in place of
+    the first. The feedback stage applies a changed score as a new step from the current
+    weights, without undoing the first; the same score again changes nothing.
     """
     rated = await get_session_manager().add_feedback(
         user_id=str(credential.user_id),
@@ -398,7 +399,8 @@ async def apply_answer_feedback(credential: Any, member: str) -> None:
     The improve stage's own pipeline (``feedback_weights``), run as the workspace's owner
     over the workspace dataset; elements of another dataset (a direct message's answer
     reads the member's own too) are not in it and are left alone. The rating is stored
-    whatever happens here, and the next run applies it, so a failure is logged.
+    whatever happens here, so a failure is logged; nothing applies it until the member
+    rates that session again.
     """
     from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
     from cognee.modules.integrations.slack.sync import dataset_name_for_credential
@@ -411,17 +413,19 @@ async def apply_answer_feedback(credential: Any, member: str) -> None:
             session_ids=[answer_session_id(team_id, member)],
             dataset=dataset_name_for_credential(credential),
         )
-    except Exception:  # the rating is stored; applying it is retried by the next one
+    except Exception:  # the rating is stored; applying it waits for the next rating
         logger.exception("Applying a Slack answer's rating failed for team %s", team_id)
 
 
-async def forget_answer_records(team_id: str, user_id: UUID | None = None) -> None:
-    """Delete the answers recorded for rating from ``team_id``'s workspace: every
-    member's, or only those kept under ``user_id``.
+async def forget_answer_records(team_id: str, owner_id: UUID, *, every_owner: bool = False) -> None:
+    """Delete the answers recorded for rating from ``team_id``'s workspace that are kept
+    under ``owner_id``, or under any owner the workspace had with ``every_owner``.
 
     A channel answer's record quotes the workspace's memory and lives in the session cache
-    and its vector index, outside every dataset, so deleting the datasets leaves it.
-    Nothing is recorded while the session cache is off.
+    and its vector index, outside every dataset, so deleting the datasets leaves it. The
+    owner's records are listed from the cache itself, since their ``session_records`` rows
+    are written best-effort (as ``forget(everything=True)`` does); those rows still find the
+    records kept under an earlier owner. Nothing is recorded while the session cache is off.
     """
     from sqlalchemy import select
 
@@ -429,14 +433,21 @@ async def forget_answer_records(team_id: str, user_id: UUID | None = None) -> No
     from cognee.modules.session_lifecycle.delete_session import delete_sessions
     from cognee.modules.session_lifecycle.models import SessionRecord
 
-    if not get_session_manager().is_available:
+    sessions_cache = get_session_manager()
+    if not sessions_cache.is_available:
         return
+    prefix = answer_session_id(team_id, "")
+    sessions = {
+        (owner_id, session)
+        for session in await sessions_cache.list_session_ids(user_id=str(owner_id))
+        if session.startswith(prefix)
+    }
     query = select(SessionRecord.user_id, SessionRecord.session_id).where(
-        SessionRecord.session_id.startswith(answer_session_id(team_id, ""), autoescape=True)
+        SessionRecord.session_id.startswith(prefix, autoescape=True)
     )
-    if user_id is not None:
-        query = query.where(SessionRecord.user_id == user_id)
+    if not every_owner:
+        query = query.where(SessionRecord.user_id == owner_id)
     async with get_relational_engine().get_async_session() as db:
-        sessions = [(owner, session) for owner, session in (await db.execute(query)).all()]
+        sessions.update((owner, session) for owner, session in (await db.execute(query)).all())
     if sessions:
-        await delete_sessions(sessions)
+        await delete_sessions(sorted(sessions, key=str))

@@ -418,7 +418,7 @@ async def _stored_score(credential, member, qa_id):
 async def test_the_asker_rates_an_answer_and_a_second_click_changes_the_rating():
     """👍 is 5 and 👎 is 1 on the answer's own session Q&A, kept under the workspace's
     owner with the graph elements it used, so improve's feedback_weights stage can apply it.
-    A second click re-rates; it does not add a vote."""
+    A second click stores its score in place of the first."""
     from unittest.mock import AsyncMock, patch
 
     ask = _renderer()
@@ -462,3 +462,81 @@ async def test_someone_else_cannot_rate_an_answer_they_did_not_ask_for():
 
     assert await _stored_score(credential, "U0ASKER", qa_id) is None
     apply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scoped_to_owner", [True, False], ids=["disconnect", "uninstall"])
+async def test_forgetting_a_workspace_deletes_every_answer_record(monkeypatch, scoped_to_owner):
+    """An answer's record quotes the workspace's memory. Its session_records row is written
+    best-effort (a locked database is swallowed), so disconnect and uninstall cannot find the
+    records through those rows alone: the session cache itself is the source of truth, as
+    for forget(everything=True)."""
+    from cognee.infrastructure.databases.relational import create_db_and_tables
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+    from cognee.modules.session_lifecycle import metrics
+
+    await create_db_and_tables()
+    ask = _renderer()
+    credential = _workspace_credential()
+
+    async def locked(*args, **kwargs):
+        raise RuntimeError("database is locked")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(metrics, "ensure_and_touch_session", locked)
+        await ask.record_answer(
+            credential, "U0LOST", question="q", answer="private text", used_graph_element_ids=None
+        )
+    await ask.record_answer(
+        credential, "U0KEPT", question="q", answer="other text", used_graph_element_ids=None
+    )
+
+    await ask.forget_answer_records("T0RATE", credential.user_id, every_owner=not scoped_to_owner)
+
+    sessions = get_session_manager()
+    for member in ("U0LOST", "U0KEPT"):
+        left = await sessions.get_session(
+            user_id=str(credential.user_id), session_id=ask.answer_session_id("T0RATE", member)
+        )
+        assert left == [], member
+
+
+@pytest.mark.asyncio
+async def test_forgetting_a_workspace_keeps_other_owners_and_other_teams_unless_asked():
+    """A disconnect removes what is kept under the disconnecting owner; an uninstall also
+    removes what an earlier owner of the workspace kept. Another team's answers, even one
+    whose id starts with this team's, are never touched."""
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from cognee.infrastructure.databases.relational import create_db_and_tables
+    from cognee.infrastructure.session.get_session_manager import get_session_manager
+
+    await create_db_and_tables()
+    ask = _renderer()
+    owner, earlier = uuid4(), uuid4()
+
+    async def record(team, user_id):
+        credential = SimpleNamespace(provider_account_id=team, user_id=user_id)
+        await ask.record_answer(
+            credential, "U0M", question="q", answer="text", used_graph_element_ids=None
+        )
+
+    await record("T0FORGET", owner)
+    await record("T0FORGET", earlier)
+    await record("T0FORGET0", owner)
+
+    async def left(team, user_id):
+        return len(
+            await get_session_manager().get_session(
+                user_id=str(user_id), session_id=ask.answer_session_id(team, "U0M")
+            )
+        )
+
+    await ask.forget_answer_records("T0FORGET", owner)
+    assert (await left("T0FORGET", owner), await left("T0FORGET", earlier)) == (0, 1)
+    assert await left("T0FORGET0", owner) == 1
+
+    await ask.forget_answer_records("T0FORGET", owner, every_owner=True)
+    assert await left("T0FORGET", earlier) == 0
+    assert await left("T0FORGET0", owner) == 1

@@ -526,6 +526,35 @@ async def test_a_rating_reply_never_replaces_the_answer(rated):
     assert reply["replace_original"] is False
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "credential, rate",
+    [
+        # The workspace was disconnected after the answer was posted; its buttons stay.
+        (None, AsyncMock(return_value=True)),
+        (_credential(), AsyncMock(side_effect=RuntimeError("cache down"))),
+    ],
+    ids=["workspace not connected", "rating failed"],
+)
+async def test_no_reply_to_a_rating_replaces_the_answer(credential, rate):
+    """Every reply the rating handler sends goes to the public answer's response_url, so
+    each one must say ``replace_original: false``, the refusals included: a 👍 clicked
+    after a disconnect must not turn the public answer into "Slack is not connected"."""
+    with (
+        patch(f"{MODULE}.get_by_team", AsyncMock(return_value=credential)),
+        patch(f"{MODULE}.rate_answer", rate, create=True),
+        patch(f"{MODULE}.post_to_response_url", AsyncMock()) as post,
+    ):
+        await handle_slack_interactive(
+            _body(_block_action_payload(action_id="cognee_answer_up", value="qa-1"))
+        )
+        await _drain_pending_saves()
+
+    reply = post.await_args.args[1]
+    assert reply["response_type"] == "ephemeral"
+    assert reply["replace_original"] is False
+
+
 def test_a_rating_is_thanked_in_one_line():
     """Goran, 2026-11-12: just "Thanks for rating"."""
     from cognee.modules.integrations.slack import handle_slack_interactive as interactive
