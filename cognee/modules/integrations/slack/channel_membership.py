@@ -7,7 +7,8 @@ messages and group DMs are never reported (the app does not subscribe to them), 
 nothing is remembered from them either. ``@cognee`` answers a direct message from the
 synced channels Slack says the member belongs to (``member_channels``), and a question in a
 channel from that channel and the public ones (``public_channels``), unless the channel is
-shared with another organization (``shared_with_other_organizations``).
+shared with another organization (``shared_with_other_organizations``) or the member asking
+is a guest (``is_guest``).
 """
 
 import asyncio
@@ -27,21 +28,27 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class ChannelScope:
     """What an answer in a channel reads (``channels``), whether the channel is shared with
-    another organization (``shared``), and whether Slack answered (``known``)."""
+    another organization (``shared``), whether the member asking is a guest (``guest``), and
+    whether Slack answered (``known``)."""
 
     channels: list[str]
     shared: bool
     known: bool
+    guest: bool = False
 
 
-async def channel_scope(credential: IntegrationCredential, channel: str) -> ChannelScope:
-    """What everyone in ``channel`` can read: the channel itself when it is synced, and the
-    selected public channels. The one rule both the answer and ``@cognee status`` use.
+async def channel_scope(
+    credential: IntegrationCredential, channel: str, member: str
+) -> ChannelScope:
+    """What everyone in ``channel`` can read, asked by ``member``: the channel itself when it
+    is synced, and the selected public channels. The one rule both the answer and
+    ``@cognee status`` use.
 
     A Slack Connect channel gets itself alone: its other organization's members cannot read
-    this workspace's public channels. A guest cannot either, and Slack does not say whether
-    a channel has one (the Limits in ``slack.md``). When Slack cannot say, the channel
-    alone too, with ``known`` false. Never raises.
+    this workspace's public channels. A guest asking gets it alone too, since a guest cannot
+    read them either; whether a channel has other guests Slack does not say per channel
+    (the Limits in ``slack.md``). When Slack cannot say, the channel alone too, with
+    ``known`` false. Never raises.
     """
     from cognee.tasks.ingestion.connectors.slack import SlackSourceError
 
@@ -51,6 +58,8 @@ async def channel_scope(credential: IntegrationCredential, channel: str) -> Chan
     try:
         if await shared_with_other_organizations(credential, channel):
             return ChannelScope(own, shared=True, known=True)
+        if await is_guest(credential, member):
+            return ChannelScope(own, shared=False, known=True, guest=True)
         public = await public_channels(credential)
     except SlackSourceError as error:
         logger.warning("Slack did not describe the channels for team %s: %s", team_id, error)
@@ -130,6 +139,21 @@ async def shared_with_other_organizations(
     if info.get("id") != channel_id:
         raise SlackAPIError("conversations.info", "invalid_response")
     return bool(info.get("is_ext_shared") or info.get("is_org_shared"))
+
+
+async def is_guest(credential: IntegrationCredential, member: str) -> bool:
+    """Whether Slack says ``member`` is a multi- or single-channel guest (``users.info``),
+    who cannot read the workspace's public channels. Raises when Slack gives no clear
+    answer."""
+    from cognee.tasks.ingestion.connectors.slack import SlackAPIError
+
+    require_outbound_http(PROVIDER)
+    client = ingestion.build_service(PROVIDER, await access_token_for(credential))
+    answer = await asyncio.to_thread(client.call, "users.info", user=member)
+    user = answer.get("user") or {}
+    if user.get("id") != member:
+        raise SlackAPIError("users.info", "invalid_response")
+    return bool(user.get("is_restricted") or user.get("is_ultra_restricted"))
 
 
 async def _conversations(credential: IntegrationCredential, **params: str) -> set[str]:

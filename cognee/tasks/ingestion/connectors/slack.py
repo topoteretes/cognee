@@ -86,8 +86,8 @@ DEFAULT_MAX_REQUESTS = 1500
 _ATTEMPTS = 4
 # The longest Retry-After a run waits out: Tier 1 history asks for about a minute, and a
 # shorter bound cut every channel after the first on every sync (G46). The walk holds
-# cognee's process-wide dlt staging lock, so a longer wait, or one past the run's own
-# deadline (``max_wait``), stops the run instead, and it resumes later.
+# its dataset's dlt staging lock (other datasets stage meanwhile), so a longer wait, or one
+# past the run's own deadline (``max_wait``), stops the run instead, and it resumes later.
 _MAX_RETRY_AFTER_SECONDS = 60
 # One run's wall-clock budget, checked before each request. The other connectors never
 # sleep and have none; this one waits out short rate limits, so the budget keeps one run

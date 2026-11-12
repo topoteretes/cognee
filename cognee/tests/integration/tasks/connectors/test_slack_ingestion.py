@@ -102,6 +102,69 @@ async def _records() -> dict[str, object]:
     }
 
 
+def _rate_limited_once(fake: FakeSlack, retry_after: int):
+    """Slack over HTTP, served from ``fake``: the first ``conversations.history`` request
+    answers 429 with ``Retry-After``, as Tier 1 history does under load."""
+    import json
+    from urllib.parse import parse_qsl
+
+    import httpx
+
+    limited = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        if method == "conversations.history" and not limited:
+            limited.append(method)
+            return httpx.Response(429, headers={"Retry-After": str(retry_after)})
+        params = dict(parse_qsl(request.content.decode()))
+        params.pop("token", None)
+        return httpx.Response(200, content=json.dumps(fake.call(method, **params)))
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.asyncio
+async def test_a_slack_rate_limit_holds_up_no_other_datasets_staging(clean_environment):
+    """Slack's rate limits are waited out inside ``pipeline.run``. Staging was one lock for
+    the whole process, so a user's CSV upload or another connector waited behind Slack
+    (review of #6683). While Slack waits, another dataset's staging is free."""
+    from cognee.tasks.ingestion import ingest_dlt_source
+    from cognee.tasks.ingestion.connectors.slack import SlackClient
+    from cognee.tasks.ingestion.dlt_utils import UNSCOPED_PIPELINE_NAME
+
+    def free_for_another_dataset() -> bool:
+        return not any(
+            ingest_dlt_source._staging_lock(key).locked()
+            for key in (f"pipeline:{UNSCOPED_PIPELINE_NAME}", "dataset:main_dataset")
+        )
+
+    while_waiting = []
+    client = SlackClient(
+        "xoxb-test",
+        transport=_rate_limited_once(_channel(), retry_after=30),
+        sleep=lambda seconds: while_waiting.append(
+            (
+                ingest_dlt_source._staging_lock(f"dataset:{DATASET}").locked(),
+                free_for_another_dataset(),
+            )
+        ),
+    )
+
+    await cognee.add(
+        slack_source(
+            service=client, team_id=TEAM, channel_id=CHANNEL, resource_name="slack_channel_test"
+        ),
+        dataset_name=DATASET,
+        primary_key="id",
+        write_disposition="merge",
+        max_rows_per_table=0,
+    )
+
+    # The wait happened with this dataset's staging held, and nobody else's.
+    assert while_waiting == [(True, True)]
+
+
 @pytest.mark.asyncio
 async def test_a_sync_tags_each_conversation_with_its_channel(clean_environment):
     await _sync(_channel())
@@ -384,6 +447,7 @@ async def test_a_channel_answer_uses_only_what_everyone_in_the_channel_can_see(
     monkeypatch.setattr(
         membership, "shared_with_other_organizations", AsyncMock(return_value=False)
     )
+    monkeypatch.setattr(membership, "is_guest", AsyncMock(return_value=False))
     monkeypatch.setattr(mention, "dataset_name_for_credential", lambda credential: DATASET)
     event = {
         "type": "app_mention",

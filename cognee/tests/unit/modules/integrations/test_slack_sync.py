@@ -837,9 +837,12 @@ async def no_progress(provider, credential, **_kwargs):
 
 @pytest.mark.asyncio
 async def test_one_slack_sync_at_a_time_lets_an_unrelated_ingest_in_between():
-    """Each channel walk holds the FIFO dlt staging lock. Two workspaces due at once must not
-    both queue on it, or an ingest that arrives meanwhile waits behind both whole syncs."""
-    from cognee.tasks.ingestion.ingest_dlt_source import _staging_lock
+    """Each channel walk holds a FIFO dlt staging lock. Two workspaces due at once must not
+    both queue on one, or an ingest that arrives meanwhile waits behind both whole syncs."""
+    from cognee.infrastructure.locks.loop_agnostic_lock import LoopAgnosticLock
+
+    # One lock both take, as when the workspaces and the ingest share a staging dataset.
+    _staging_lock = LoopAgnosticLock()
 
     first, second = make_credential("C1"), make_credential("C2")
     second.provider_account_id = "T0SECOND"

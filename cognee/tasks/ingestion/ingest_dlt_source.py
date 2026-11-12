@@ -3,7 +3,10 @@ import hashlib
 import json
 import os
 import re
+import threading
 from collections import Counter
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -21,6 +24,7 @@ from cognee.tasks.ingestion.dlt_utils import (
     DOCUMENT_COLUMN_HINTS,
     NODE_SET_COLUMN,
     STRUCTURE_COLUMN,
+    UNSCOPED_PIPELINE_NAME,
     apply_dlt_runtime_defaults,
     document_source_tag,
     pipeline_name_for_source,
@@ -39,10 +43,36 @@ except ImportError:
 
 logger = get_logger("ingest_dlt_source")
 
-# Serializes dlt staging runs: one shared pipeline name means one shared dlt
-# working directory, which concurrent runs corrupt (see the lock's use below).
-# Loop-agnostic: module-level, so it outlives any single event loop.
-_staging_lock = LoopAgnosticLock()
+# dlt staging locks, one per pipeline and one per staging dataset. Loop-agnostic and
+# module-level, so they outlive any single event loop. One entry per pipeline or dataset
+# name this process staged, never evicted: a lock dropped while another run holds or waits
+# for it would let a third run in.
+_staging_locks: dict[str, LoopAgnosticLock] = {}
+_staging_locks_mutex = threading.Lock()
+
+
+def _staging_lock(key: str) -> LoopAgnosticLock:
+    with _staging_locks_mutex:
+        return _staging_locks.setdefault(key, LoopAgnosticLock())
+
+
+@asynccontextmanager
+async def _staging(pipeline_name: str, dataset_name: str) -> AsyncIterator[None]:
+    """Exclusive use of one dlt pipeline's working directory and one staging dataset.
+
+    A pipeline's working directory is not safe for concurrent runs: normalize's package
+    cleanup deletes folders under the other run's feet. A staging dataset is one database
+    every pipeline of that dataset loads into, and that a drop removes. Runs on other
+    pipelines and datasets go on meanwhile, so a connector that waits on its provider
+    (Slack's rate limits) holds up only its own dataset. Taken pipeline first, then dataset,
+    by every caller, so two of them never wait on each other.
+    """
+    async with (
+        _staging_lock(f"pipeline:{pipeline_name}"),
+        _staging_lock(f"dataset:{dataset_name}"),
+    ):
+        yield
+
 
 # Strict identifier pattern — only allow alphanumerics, underscores, dots, and hyphens
 _SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
@@ -134,14 +164,12 @@ async def ingest_dlt_source(
         # child table or flattened columns.
         run_kwargs["columns"] = DOCUMENT_COLUMN_HINTS
 
-    # Every staging run shares one dlt pipeline name, and dlt's working
-    # directory for a pipeline is NOT safe for concurrent runs: normalize's
-    # package cleanup deletes folders under the other run's feet. The add
-    # pipeline processes items concurrently (two CSVs in one add() reach the
-    # dlt_csv_loader in parallel), so staging must serialize here.
-    async with _staging_lock:
+    # The add pipeline processes items concurrently (two CSVs in one add() reach the
+    # dlt_csv_loader in parallel), so staging is exclusive per pipeline and dataset.
+    pipeline_name = pipeline_name_for_source(dlt_source, original_dataset_name)
+    async with _staging(pipeline_name, dataset_name):
         pipeline = dlt.pipeline(
-            pipeline_name=pipeline_name_for_source(dlt_source, original_dataset_name),
+            pipeline_name=pipeline_name,
             destination=destination,
             dataset_name=dataset_name,
         )
@@ -692,7 +720,7 @@ async def drop_dlt_dataset(dataset_name: str) -> None:
     ``__<dataset>_staging`` files) and, under dlt's pipelines directory, the working
     directory of every pipeline that loaded into it (state, schemas and completed load
     packages, which hold the rendered text of every row). A later sync would read the
-    staged rows back. Taken under the staging lock, so no dlt run is mid-write.
+    staged rows back. Taken under the dataset's staging lock, so no dlt run is mid-write.
 
     Staging is keyed by dataset name alone, not by owner or dataset id: datasets that
     share a name (two users' ``main_dataset``, or names that differ only in characters
@@ -709,7 +737,8 @@ async def drop_dlt_dataset(dataset_name: str) -> None:
     safe_name = _to_safe_ident(dataset_name)
     db_name = f"dlt_database_{safe_name}"
     relational_config = get_relational_config()
-    async with _staging_lock:
+    # The unscoped pipeline too: its directory is removed when its last load was here.
+    async with _staging(UNSCOPED_PIPELINE_NAME, safe_name):
         if relational_config.db_provider == "postgres":
             await drop_pg_database_if_exists(
                 db_name=db_name,

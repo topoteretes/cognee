@@ -64,6 +64,7 @@ def slack(monkeypatch):
         channels={"C1", "C7"},
         public={"C1", "C3"},
         external=False,
+        guests=set(),
         posted=[],
         workspace=SimpleNamespace(id=uuid4(), name=WORKSPACE_DATASET),
         own=SimpleNamespace(id=uuid4(), name="notes"),
@@ -95,6 +96,17 @@ def slack(monkeypatch):
     )
     monkeypatch.setattr(
         mention, "member_channels", AsyncMock(side_effect=lambda *args: state.channels)
+    )
+    # users.info: who is a guest. Asked over Slack's client, the seam a guest test also uses.
+    guests_client = SimpleNamespace(
+        call=lambda method, **params: {
+            "ok": True,
+            "user": {"id": params["user"], "is_restricted": params["user"] in state.guests},
+        }
+    )
+    monkeypatch.setattr(membership, "access_token_for", AsyncMock(return_value="tok"))
+    monkeypatch.setattr(
+        membership.ingestion, "build_service", lambda provider, token: guests_client
     )
     monkeypatch.setattr(
         mention,
@@ -675,7 +687,9 @@ async def test_a_channel_answer_leaves_out_a_public_channel_that_is_not_selected
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("asking", ["public_channels", "shared_with_other_organizations"])
+@pytest.mark.parametrize(
+    "asking", ["public_channels", "shared_with_other_organizations", "is_guest"]
+)
 async def test_when_slack_cannot_describe_the_channels_only_this_channel_answers(slack, asking):
     """An unknown answer fails closed: a channel Slack did not call public, or a channel it
     did not say is unshared, gets no other channel. The member is told."""
@@ -779,6 +793,30 @@ async def test_a_channel_with_nothing_to_read_says_so_instead_of_nothing_found(s
     told = _texts(slack)[-1]
     assert told != mention.NOTHING_FOUND_MESSAGE
     assert "remember" not in told.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("guest", ["is_restricted", "is_ultra_restricted"])
+async def test_a_guest_asking_in_a_channel_is_answered_from_that_channel_alone(
+    slack, monkeypatch, guest
+):
+    """A multi- or single-channel guest cannot read this workspace's other public channels,
+    and the answer is posted where they read it (review of #6683). Slack says who is a guest
+    (``users.info``), so a guest's answer reads the channel alone, like a Slack Connect one."""
+    slack.credential = _credential(synced=["C1", "C3"])
+    users = {MEMBER: {"id": MEMBER, guest: True}}
+    client = SimpleNamespace(
+        call=lambda method, **params: {"ok": True, "user": users[params["user"]]}
+    )
+    monkeypatch.setattr(membership, "access_token_for", AsyncMock(return_value="tok"))
+    monkeypatch.setattr(membership.ingestion, "build_service", lambda provider, token: client)
+    with (
+        patch.object(mention, "cognee_search", AsyncMock(return_value=[])) as search,
+        patch.object(mention, "get_user", AsyncMock(return_value=SimpleNamespace(id=OWNER_ID))),
+    ):
+        await mention.handle_cognee_mention(TEAM, _mention("when do we deploy?", channel="C1"))
+
+    assert _scopes(search) == [([slack.workspace.id], ["slack:channel:C1"])]
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ publish) still acks with 200 so Slack never retry-storms or disables the
 endpoint.
 """
 
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -405,3 +406,46 @@ async def test_an_uninstall_is_recorded_as_ended_by_the_provider(credential_db):
     assert await revoke_by_team("T1") is True
 
     assert (await store.get_ended_connection(owner, "slack")).revoked_by == "provider"
+
+
+# --- Review of #6683: Slack delivers at least once -----------------------------------------
+
+
+_QUESTIONS = [
+    {"type": "app_mention", "user": "U1", "channel": "C1", "ts": "1.1", "text": "<@B> hi"},
+    {"type": "message", "channel_type": "im", "user": "U1", "channel": "D1", "ts": "1.1"},
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event", _QUESTIONS, ids=["mention", "direct message"])
+async def test_a_question_slack_sends_again_after_a_slow_ack_is_answered_once(event):
+    """Slack sends an event again when its ack took longer than 3 seconds
+    (``X-Slack-Retry-Reason: http_timeout``): the first delivery arrived and is being answered.
+    Answering the retry too runs a second search and posts a second public answer."""
+    envelope = {"type": "event_callback", "team_id": "T1", "event_id": "Ev01", "event": event}
+    with patch(f"{MODULE}.handle_cognee_mention", new=AsyncMock()) as answer:
+        assert await handle_slack_event(_body(envelope)) == {"ok": True}
+        assert await handle_slack_event(_body(envelope), retry_reason="http_timeout") == {
+            "ok": True
+        }
+        await asyncio.sleep(0)
+
+    assert answer.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["http_error", "connection_failed"])
+async def test_a_question_whose_first_delivery_failed_is_answered_on_the_retry(reason):
+    """A retry after a failed delivery is the only time the question reaches the app."""
+    envelope = {
+        "type": "event_callback",
+        "team_id": "T1",
+        "event_id": "Ev01",
+        "event": _QUESTIONS[0],
+    }
+    with patch(f"{MODULE}.handle_cognee_mention", new=AsyncMock()) as answer:
+        await handle_slack_event(_body(envelope), retry_reason=reason)
+        await asyncio.sleep(0)
+
+    assert answer.await_count == 1

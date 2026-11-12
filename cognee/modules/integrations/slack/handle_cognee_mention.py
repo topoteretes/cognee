@@ -306,7 +306,7 @@ async def _handle(team_id: str, event: dict[str, Any]) -> None:
     owner_user_id = await resolve_owner_user_id(credential, team_id, member)
     if command == "status":
         message = await status_message(
-            credential, owner_user_id, channel=None if direct else channel
+            credential, owner_user_id, channel=None if direct else channel, member=member
         )
         await reply(notice(message["text"], blocks=message["blocks"]))
         return
@@ -404,7 +404,7 @@ async def ask(
     if channel is None:
         visible = await _direct_message_scope(reply, credential, member)
     else:
-        scope = await channel_scope(credential, channel)
+        scope = await channel_scope(credential, channel, member)
         if not scope.known:
             await reply(notice(PUBLIC_CHANNELS_UNKNOWN_MESSAGE))
         visible = scope.channels

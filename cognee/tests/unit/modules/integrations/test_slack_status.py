@@ -43,6 +43,7 @@ def stores(monkeypatch):
     state = SimpleNamespace(
         public={"C1", "C3"},
         external=False,
+        guest=False,
         running=False,
         paused=False,
         items=40,
@@ -63,6 +64,7 @@ def stores(monkeypatch):
         "shared_with_other_organizations",
         AsyncMock(side_effect=lambda *a: state.external),
     )
+    monkeypatch.setattr(membership, "is_guest", AsyncMock(side_effect=lambda *a: state.guest))
     return state
 
 
@@ -77,7 +79,7 @@ def _fields(message: dict) -> dict[str, str]:
 
 
 async def _status(credential, channel="C1", owner=OWNER):
-    return await status.status_message(credential, owner, channel=channel)
+    return await status.status_message(credential, owner, channel=channel, member="U0MEMBER")
 
 
 @pytest.mark.asyncio
@@ -143,6 +145,15 @@ async def test_a_slack_connect_channel_reads_itself_alone(stores):
     rows = _fields(await _status(_credential()))
 
     assert rows["Answers here"] == "Read this channel only (shared with another organization)"
+
+
+@pytest.mark.asyncio
+async def test_a_guest_is_told_answers_here_read_this_channel_alone(stores):
+    stores.guest = True
+
+    assert _fields(await _status(_credential()))["Answers here"] == (
+        "Read this channel only (you are a guest here)"
+    )
 
 
 @pytest.mark.asyncio

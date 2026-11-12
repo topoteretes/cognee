@@ -38,10 +38,14 @@ FOOTER = "Manage channels in cognee → Integrations. Only you can see this."
 
 
 async def status_message(
-    credential: IntegrationCredential, owner_user_id: UUID | None, *, channel: str | None
+    credential: IntegrationCredential,
+    owner_user_id: UUID | None,
+    *,
+    channel: str | None,
+    member: str,
 ) -> dict[str, Any]:
-    """The status of ``channel`` (``None`` in a direct message) for the member linked as
-    ``owner_user_id`` (``None`` when not linked), as ``{"text", "blocks"}``."""
+    """The status of ``channel`` (``None`` in a direct message) for the Slack ``member``
+    linked as ``owner_user_id`` (``None`` when not linked), as ``{"text", "blocks"}``."""
     installer = (credential.provider_metadata or {}).get("installed_by_slack_user_id")
     groups = [
         [
@@ -50,7 +54,7 @@ async def status_message(
         ],
         [
             ("This channel", _this_channel(credential, channel, installer)),
-            ("Answers here", await _answers_here(credential, channel)),
+            ("Answers here", await _answers_here(credential, channel, member)),
         ],
         [
             ("Memory", await _memory(credential)),
@@ -101,14 +105,16 @@ def _this_channel(
     return f"{synced} · {commands}"
 
 
-async def _answers_here(credential: IntegrationCredential, channel: str | None) -> str:
+async def _answers_here(credential: IntegrationCredential, channel: str | None, member: str) -> str:
     if channel is None:
         return "Your channels and your memory"
-    scope = await channel_membership.channel_scope(credential, channel)
+    scope = await channel_membership.channel_scope(credential, channel, member)
     if not scope.known:
         return UNKNOWN
     if scope.shared:
         return "Read this channel only (shared with another organization)"
+    if scope.guest:
+        return "Read this channel only (you are a guest here)"
     others = len([scoped for scoped in scope.channels if scoped != channel])
     counted = f"{others} public channel{'' if others == 1 else 's'}"
     if channel not in scope.channels:

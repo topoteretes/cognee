@@ -53,9 +53,15 @@ def _ends_the_connection(event: dict) -> bool:
     return bool((event.get("tokens") or {}).get("bot"))
 
 
-async def handle_slack_event(raw_body: bytes) -> dict[str, Any]:
+# Slack's ``X-Slack-Retry-Reason`` when it sends an event again because the ack took longer
+# than 3 seconds: the first delivery reached the app and is being handled.
+_SLOW_ACK = "http_timeout"
+
+
+async def handle_slack_event(raw_body: bytes, *, retry_reason: str | None = None) -> dict[str, Any]:
     """Dispatch one signature-verified Events API request body.
 
+    ``retry_reason`` is Slack's ``X-Slack-Retry-Reason`` on a delivery it sends again.
     Returns the JSON-serializable response for the router. Always answers
     within the 3-second window — ``app_home_opened``'s actual work (one
     ``views.publish`` call) comfortably fits that budget, and never turns
@@ -96,9 +102,11 @@ async def handle_slack_event(raw_body: bytes) -> dict[str, Any]:
         and team_id
         and (is_direct_message(event))
     ):
-        # Answered detached: a search outlives Slack's 3-second window, and an event not
-        # acknowledged in time is sent again (``handle_cognee_mention``).
-        register_background_task(asyncio.create_task(handle_cognee_mention(team_id, event)))
+        # Answered detached: a search outlives Slack's 3-second window. A question Slack
+        # sends again after a slow ack is already being answered; one sent again after a
+        # failed delivery is answered now, since the first never reached the app.
+        if retry_reason != _SLOW_ACK:
+            register_background_task(asyncio.create_task(handle_cognee_mention(team_id, event)))
     elif event_type == "message" and team_id:
         await _follow_message_event(team_id, event)
 

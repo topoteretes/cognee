@@ -11,7 +11,7 @@ These are shared, multi-workspace URLs: every payload carries a ``team_id``
 that the modules-layer handlers resolve back to the connecting cognee user.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from cognee.modules.integrations.slack.handle_slack_event import handle_slack_event
 from cognee.modules.integrations.slack.handle_slack_interactive import handle_slack_interactive
@@ -22,8 +22,10 @@ def get_slack_router():
     slack_router = APIRouter()
 
     @slack_router.post("/events", include_in_schema=False)
-    async def slack_events(raw_body: bytes = Depends(verify_slack_request)):
-        return await handle_slack_event(raw_body)
+    async def slack_events(request: Request, raw_body: bytes = Depends(verify_slack_request)):
+        return await handle_slack_event(
+            raw_body, retry_reason=request.headers.get("x-slack-retry-reason")
+        )
 
     @slack_router.post("/interactive", include_in_schema=False)
     async def slack_interactive(raw_body: bytes = Depends(verify_slack_request)):

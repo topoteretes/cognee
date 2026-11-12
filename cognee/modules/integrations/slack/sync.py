@@ -105,11 +105,10 @@ SYNC, RETIRE, UNAVAILABLE, ARCHIVED = "sync", "retire", "unavailable", "archived
 
 # Scheduled syncs in flight; the lifespan cancels and awaits them on shutdown.
 _scheduled: set[asyncio.Task] = set()
-# One Slack sync per process at a time, scheduled or manual. Each channel's walk holds the
-# process-wide dlt staging lock for up to its wall-clock budget, and that lock is FIFO: with
-# workspaces syncing side by side, an unrelated ingest would queue behind one walk per
-# waiting workspace. Waiting here instead, a workspace holds nothing, so an unrelated ingest
-# waits for at most the channel walk in progress. FIFO and usable from any event loop.
+# One Slack sync per process at a time, scheduled or manual: workspaces due together walk
+# one after another. Added when dlt staging was one lock for the process; staging is now
+# locked per dataset, so each workspace already stages apart. FIFO and usable from any
+# event loop.
 _sync_lock = LoopAgnosticLock()
 
 

@@ -63,7 +63,7 @@ Design
   emitted, queues the tasks it did not reach in ``state["pending"]`` and reports the reason in
   ``cognee_sync_stats`` (``failed_rate_limit``, ``failed_budget``, ``failed_unavailable``,
   ``failed_auth``). It never sleeps on a 429: ``dlt`` rolls back the state of a failed run and
-  the walk holds the process-wide staging lock.
+  the walk holds its dataset's staging lock.
 * **The listing is a pass that can span runs.** A project whose listing finished, and the events
   and page offset of one cut inside, are kept in ``state["listing"]`` (ids, timestamps and
   offsets, never text) and the finished projects' rows are emitted at once. A run cut inside the

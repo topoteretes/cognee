@@ -88,8 +88,9 @@ def test_no_secret_id_or_url_reaches_an_error_or_a_log(caplog, status, error):
     assert raised.value.__cause__ is None
     assert TOKEN not in caplog.text and CHANNEL not in caplog.text
     # httpx itself logs the request line; the URL is the constant endpoint, never an id.
+    # Our own lines name the method and Slack's code, never a URL.
     ours = [r.getMessage() for r in caplog.records if not r.name.startswith(("httpx", "httpcore"))]
-    assert not any("slack.com" in message for message in ours)
+    assert not any("://" in message for message in ours)
 
 
 def test_an_error_answer_names_only_the_method_and_slacks_code():

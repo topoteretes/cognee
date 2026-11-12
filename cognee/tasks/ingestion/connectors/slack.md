@@ -187,7 +187,7 @@ and `im:history`, and the events `app_mention` and `message.im`, all in
 
 | Message | What it does |
 |---|---|
-| `@cognee <question>` | in a channel, answers in the question's thread (or the thread it was asked in) with a message everyone in the channel sees (`chat.postMessage`), so it reads only what all of them can: the workspace's dataset within that channel, when it is synced, and the selected public channels (Slack's `users.conversations` for the app, asked on every question, so a channel made private drops out at once), never a selected private channel other than this one and never the asker's other datasets. It reads those channels' messages alone (a chunk search, `RAG_COMPLETION`): one entity is one node for every channel that names it, so the hybrid entity lane would carry a relation from a channel outside the scope. A channel that is not synced, with no selected public channel, reads nothing and says so. In a channel shared beyond this workspace (`conversations.info`'s `is_ext_shared`, Slack Connect, or `is_org_shared` on Enterprise Grid) it reads that channel alone, since members from elsewhere cannot read this workspace's channels; when Slack cannot say, it reads that channel alone too and the asker is told. In a direct message it answers with a message in the direct message, from the member's memory: the workspace's dataset within the selected channels Slack says the member is in (`users.conversations`; when Slack cannot say, without it, and the member is told) and their other datasets whole. Either way the answer is the reply itself (no header), shown below; a miss or a failure is shown to the asker alone |
+| `@cognee <question>` | in a channel, answers in the question's thread (or the thread it was asked in) with a message everyone in the channel sees (`chat.postMessage`), so it reads only what all of them can: the workspace's dataset within that channel, when it is synced, and the selected public channels (Slack's `users.conversations` for the app, asked on every question, so a channel made private drops out at once), never a selected private channel other than this one and never the asker's other datasets. It reads those channels' messages alone (a chunk search, `RAG_COMPLETION`): one entity is one node for every channel that names it, so the hybrid entity lane would carry a relation from a channel outside the scope. A channel that is not synced, with no selected public channel, reads nothing and says so. In a channel shared beyond this workspace (`conversations.info`'s `is_ext_shared`, Slack Connect, or `is_org_shared` on Enterprise Grid) it reads that channel alone, since members from elsewhere cannot read this workspace's channels; a guest asking (`users.info`) gets that channel alone too; when Slack cannot say, it reads that channel alone too and the asker is told. In a direct message it answers with a message in the direct message, from the member's memory: the workspace's dataset within the selected channels Slack says the member is in (`users.conversations`; when Slack cannot say, without it, and the member is told) and their other datasets whole. Either way the answer is the reply itself (no header), shown below; a miss or a failure is shown to the asker alone. A question Slack sends again because the ack was slow (`X-Slack-Retry-Reason: http_timeout`) is already being answered and is not answered twice; one sent again after a failed delivery is answered |
 | `@cognee remember <text>` | saves a note Slack never saw, e.g. a decision from a call; the note is the item of that message, so `@cognee forget` in its thread, *Forget this* on it, or deleting the message forgets it |
 | `@cognee remember` in a thread | saves the thread's first message, followed like "Remember this": an edit or a deletion in Slack forgets the copy |
 | `@cognee forget` in a thread (a channel or a DM) | forgets the member's own copy or note of the thread's first message; the *Forget this* shortcut does it for any message. Other members' copies stay, and the channel allowlist never blocks it. On a message of a synced channel, its author or the connection's owner also takes it out of the workspace's memory (below) |
@@ -403,11 +403,12 @@ naming who can. A thread's first message taken out leaves its replies in memory.
 
 - **A guest in a channel sees its answers.** An answer in a channel uses the selected public
   channels, which every full member of the workspace can read, but a single- or
-  multi-channel guest cannot. Slack does not say whether a channel has a guest without
-  reading every member, so Cognee cannot tell, and a guest in the channel reads answers drawn
-  from public channels they are not in. Ask in a direct message where that matters, or leave
-  such channels out of the command allowlist. A Slack Connect channel is told apart and gets
-  answers from itself alone.
+  multi-channel guest cannot. A guest who asks is told apart (`users.info`'s `is_restricted`
+  / `is_ultra_restricted`) and gets an answer from the channel alone, but Slack does not say
+  whether a channel has other guests without reading every member, so a guest in the channel
+  still reads answers a full member asked for, drawn from public channels the guest is not
+  in. Ask in a direct message where that matters, or leave such channels out of the command
+  allowlist. A Slack Connect channel is told apart and gets answers from itself alone.
 - **Connect from the host the sign-in returns to.** The OAuth callback is accepted only with
   the cookie `authorize` set, and a cookie belongs to one host. Connect (and Link Slack)
   started from a UI that calls the API on another host than `SLACK_REDIRECT_URI` /
@@ -432,9 +433,10 @@ naming who can. A thread's first message taken out leaves its replies in memory.
   (`PUT /api/v1/integrations/slack/sync/policy`) if it inherits the owner's default.
 - **Wall-clock budget.** A run also stops with `failed_budget` once it has run for 600 seconds
   (`MAX_RUN_SECONDS`), checked before each request, so one in-flight request (with its retries)
-  can finish past it (a rate-limit wait never runs past the deadline). The walk holds cognee's
-  process-wide dlt staging lock, and this connector waits out short rate limits, so the budget bounds how long one run blocks every other
-  connector's sync in the process. The other connectors (Asana, Apollo, Linear) never sleep and
+  can finish past it (a rate-limit wait never runs past the deadline). The walk holds the
+  dlt staging lock of the workspace's dataset (other datasets, a CSV upload or another connector,
+  stage meanwhile), and this connector waits out short rate limits, so the budget bounds how long
+  one run blocks other ingestion into that dataset. The other connectors (Asana, Apollo, Linear) never sleep and
   have no deadline, so there is no sibling value; 600 seconds is the interval after which the
   integration resumes a cut run. The bound per process: one Slack sync runs at a time and each of
   its channels is one run, so an unrelated ingest (another connector, an `add()`) waits for at
