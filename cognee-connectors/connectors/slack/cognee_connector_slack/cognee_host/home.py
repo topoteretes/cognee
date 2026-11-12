@@ -1,19 +1,20 @@
 """Publish the Cognee App Home tab.
 
-Copied from cognee.modules.integrations.slack.home (cognee dev, 2026-10-27).
+Copied from cognee.modules.integrations.slack.home (cognee dev, 2026-11-12).
 
 Slack shows a blank Home tab until the app calls ``views.publish`` — this is
 what makes clicking Cognee in the sidebar show anything at all. The view is
 static/informational (same content for every viewer) — it exists to answer
 the "what do I even do with this app, and what does it need from me?"
-question, since a new member has no other way to discover ``/cognee-link``
-before ever needing it (there is nothing prompting them to run it until
-they try ``/cognee-ask`` and get turned away — see handle_cognee_ask.py).
+question, since a new member has no other way to discover ``@cognee link``
+before ever needing it (nothing prompts them until they ask ``@cognee`` and
+get turned away — see handle_cognee_mention.py).
 """
 
 from typing import Any
 
 import aiohttp
+from cognee.modules.integrations.outbound import client_session
 
 _VIEWS_PUBLISH_URL = "https://slack.com/api/views.publish"
 _TIMEOUT = aiohttp.ClientTimeout(total=10)
@@ -39,11 +40,12 @@ def _build_home_view() -> dict[str, Any]:
                     "text": (
                         "*1. Link your Cognee account*\n"
                         "Every workspace member needs their own link before "
-                        '`/cognee-ask` or "Remember this" will use *their* '
+                        '`@cognee` or "Remember this" will use *their* '
                         "memory instead of just the person who installed this app.\n"
-                        "Run `/cognee-link` — it replies privately with a link. Open it "
-                        "in a browser where you're already logged in to Cognee and "
-                        "click *Confirm*. Nothing to copy or paste."
+                        "Send `@cognee link` — it replies privately with a page. Open it "
+                        "where you're logged in to Cognee, click *Link Slack* and sign "
+                        "in with Slack. `@cognee unlink` ends it, `@cognee status` shows "
+                        "who you are linked as and whether a channel is synced."
                     ),
                 },
             },
@@ -53,10 +55,10 @@ def _build_home_view() -> dict[str, Any]:
                     "type": "mrkdwn",
                     "text": (
                         "*2. Ask a question*\n"
-                        "Type `/cognee-ask <your question>` in any connected "
-                        "channel. Nothing is posted publicly until you review "
-                        "the answer and choose *Share* — *Discard* drops it, "
-                        "visible to no one."
+                        "Mention `@cognee <your question>` in a channel Cognee is in: "
+                        "the answer goes in the question's thread, for everyone there, "
+                        "from that channel and the synced public channels. Send it a "
+                        "direct message to ask privately, from all of your memory."
                     ),
                 },
             },
@@ -66,8 +68,12 @@ def _build_home_view() -> dict[str, Any]:
                     "type": "mrkdwn",
                     "text": (
                         "*3. Remember something*\n"
-                        "Hover any message → *More actions* → *Connect to "
-                        "apps* → *Remember this* to save it to your memory."
+                        "`@cognee remember <text>` saves a note. Hover any message → "
+                        "*More actions* → *Connect to apps* → *Remember this* to save "
+                        "it to your memory, and *Forget this* (or `@cognee forget` in "
+                        "its thread) to take your copy or your note back. On a message of "
+                        "a synced channel, its author or the person who connected Slack "
+                        "also takes it out of this workspace's memory."
                     ),
                 },
             },
@@ -95,7 +101,7 @@ async def publish_home_view(access_token: str, slack_user_id: str) -> None:
     problem — ``views.publish`` needs no OAuth scope beyond a bot token.
     """
     async with (
-        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        client_session("slack", timeout=_TIMEOUT) as session,
         session.post(
             _VIEWS_PUBLISH_URL,
             headers={"Authorization": f"Bearer {access_token}"},
@@ -103,6 +109,8 @@ async def publish_home_view(access_token: str, slack_user_id: str) -> None:
             allow_redirects=False,
         ) as response,
     ):
+        if response.status != 200:
+            raise RuntimeError(f"Slack views.publish failed: HTTP {response.status}")
         payload = await response.json()
 
     if not payload.get("ok"):
