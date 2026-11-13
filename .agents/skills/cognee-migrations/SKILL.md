@@ -145,6 +145,9 @@ result = await cognee.remember(OMPSource("their_export"), dataset_name="my_datas
 result.receipt.counts, result.receipt.dangling
 ```
 
+- An OMP export refuses a non-empty `destination` (leftover files would be
+  read back as memories); `overwrite=True` deletes the folder and everything
+  in it first.
 - `OMPSource` reads an export directory (`memories.jsonl` and/or `.md`
   files), a single `.jsonl`/`.json`/`.md` file, or parsed objects. Memories
   cognee exported come back as the record kinds they were; any other memory

@@ -55,15 +55,35 @@ class OMPSource(MemorySource):
     async def records(self) -> AsyncIterator[COGXRecord]:
         # Pass one keeps only the identifiers, so dangling marks are decided
         # against the whole export without holding every memory in memory.
-        identifiers = {memory.identifier for memory in iter_omp_memories(self._source)}
+        identifiers = {
+            memory.identifier
+            for memory in iter_omp_memories(self._source, on_unreadable=lambda *_: None)
+        }
         external_system = self.origin or self.source_system
-        for memory in iter_omp_memories(self._source):
-            # Verify as received: the dangling marks below are the receiver's
-            # additions and would change the hashed form.
+        for memory in iter_omp_memories(self._source, on_unreadable=self._reject):
+            mark_dangling(memory, identifiers)
+            try:
+                record = record_from_memory(memory, external_system=external_system)
+            except (TypeError, ValueError) as error:
+                # A memory that reads but cannot become a record (an extension
+                # value of the wrong shape) is rejected like an unreadable one.
+                self._reject(memory.identifier, error)
+                continue
+            # Only memories that are imported count toward integrity; the
+            # dangling marks above are not part of the checksum.
             if self.verify_checksums and self.receipt is not None and not self._integrity_reported:
                 self.receipt.integrity_check(memory.identifier, memory.verify_checksum())
-            mark_dangling(memory, identifiers)
-            yield record_from_memory(memory, external_system=external_system)
+            yield record
         # Replays (the streaming import reads a source several times) must
         # not count the same verification again.
         self._integrity_reported = True
+
+    def _reject(self, where: str, error: Exception) -> None:
+        """Note a memory that could not be read as rejected, once per import;
+        with no receipt to note it on, the error is raised instead."""
+        if self.receipt is None:
+            raise error
+        if not self._integrity_reported:
+            # The whole message: a validation error names the failing field
+            # only after its first line.
+            self.receipt.record("rejected", where, reason=f"{type(error).__name__}: {error}")

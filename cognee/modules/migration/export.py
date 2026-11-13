@@ -42,7 +42,13 @@ from cognee.modules.migration.cogx import (
     write_social_layer,
 )
 from cognee.modules.migration.formats import write_cypher, write_graphml, write_json
-from cognee.modules.migration.omp import OMPManifest, memory_from_record, write_omp_export
+from cognee.modules.migration.omp import (
+    OMPManifest,
+    mark_dangling,
+    memory_from_record,
+    prepare_omp_destination,
+    write_omp_export,
+)
 from cognee.modules.migration.snapshot import GraphSnapshot, build_snapshot
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.pipeline_names import COGNIFY_PIPELINE_NAME
@@ -164,7 +170,7 @@ COGX_EXPORT_COVERAGE = {
     "accountable": "the stamped user, or the owner of a stamped agent; otherwise not stated",
     "ai_involvement": "entities: full if cognify extracted them; chunks: none; facts: from their recorded evidence; otherwise as imported or not stated",
     "evidence": "facts: the chunks the edge evidence records (inferred if extracted, observed if structural); entities: the chunks containing them; no source spans",
-    "links": "omp exports only: a chunk mentions the entities it contains; a fact links its subject and object",
+    "links": "omp exports only: a chunk mentions the entities it contains; a fact links its subject and object, or only its subject when the object is a date its text states",
     "version": "DataPoint version from node properties, comparator integer",
     "validity": "valid_from/valid_until and invalidated_by read from node and edge properties when present",
     "weight": "node or edge property only; cognee assigns none",
@@ -172,10 +178,15 @@ COGX_EXPORT_COVERAGE = {
     "path": "not stated",
     "origin": "the origin a memory was imported with (a chunk takes its document's); otherwise the cognee node or edge id",
     "content_hash": "sha256 of each record body",
-    "subject": "names of the entities a chunk contains, or a fact's endpoints; entity records name themselves",
+    "subject": "names of the entities and dates a chunk contains, or a fact's endpoints; entity records name themselves",
     "semantic_kind": "node property only; no classification is performed",
     "confidence": "facts: the conflict review verdict (contradicted, corrected, confirmed) with the edge's confidence score; otherwise as imported, or the score alone",
 }
+# What an OMP memory's checksum covers, which differs from a COGX record's.
+OMP_CHECKSUM_COVERAGE = (
+    "sha256 over the memory's identifier, version, created_at, updated_at and media_type, "
+    "one per line, then its body; other fields are not covered"
+)
 
 
 def _contributors(properties: dict, actors: dict[str, "Actor"], authored: bool) -> dict:
@@ -339,27 +350,61 @@ def _actor_for(user, owners: dict) -> Actor:
     return Actor(kind="agent", accountable=owner.email if owner else str(user.parent_user_id))
 
 
+# What a chunk ``contains`` that the exports name: its entities and dates.
+_CHUNK_CONTENT_TYPES = ("Entity", "Timestamp")
+
+
 @dataclass
 class _Topology:
     """What a record's header reads from the rest of the graph."""
 
     names: dict[str, str]  # node id -> name, for fact subjects
-    entities_in_chunk: dict[str, list[str]]  # chunk id -> ids of the entities it contains
-    chunks_of_entity: dict[str, list[str]]  # entity id -> ids of the chunks containing it
+    contents_of_chunk: dict[str, list[str]]  # chunk id -> ids of its entities and dates
+    chunks_containing: dict[str, list[str]]  # entity or date id -> ids of chunks containing it
     chunk_headers: dict[str, dict]  # chunk id -> the header its document was imported with
+    entity_types: dict[str, str]  # entity id -> the name of its type (its ``is_a`` target)
+    memory_nodes: set[str]  # ids of the nodes an OMP export writes as memories
+    date_nodes: set[str]  # ids of the Timestamp nodes: values a fact may end at
 
     @classmethod
     def of(cls, nodes, edges) -> "_Topology":
-        by_id = {str(node_id): properties or {} for node_id, properties in nodes}
-        names = {node_id: str(p["name"]) for node_id, p in by_id.items() if p.get("name")}
-        topology = cls(names=names, entities_in_chunk={}, chunks_of_entity={}, chunk_headers={})
+        by_id: dict[str, dict] = {}
+        names: dict[str, str] = {}
+        memory_nodes: set[str] = set()
+        date_nodes: set[str] = set()
+        for node_id, properties in nodes:
+            node_id, properties = str(node_id), properties or {}
+            by_id[node_id] = properties
+            # A date is named by its text: Timestamp nodes before SDK-827 have no name.
+            name = properties.get("name") or properties.get("timestamp_str")
+            if name:
+                names[node_id] = str(name)
+            field = _MEMORY_NODE_FIELDS.get(properties.get("type"))
+            if field and properties.get(field):
+                memory_nodes.add(node_id)
+            elif properties.get("type") == "Timestamp":
+                date_nodes.add(node_id)
+        topology = cls(
+            names=names,
+            contents_of_chunk={},
+            chunks_containing={},
+            chunk_headers={},
+            entity_types={},
+            memory_nodes=memory_nodes,
+            date_nodes=date_nodes,
+        )
         for source, target, relationship, _properties in edges:
             source, target = str(source), str(target)
-            if by_id.get(source, {}).get("type") != "DocumentChunk":
+            source_type = by_id.get(source, {}).get("type")
+            target_type = by_id.get(target, {}).get("type")
+            is_type = (source_type, target_type) == ("Entity", "EntityType")
+            if relationship == "is_a" and is_type and target in names:
+                topology.entity_types[source] = names[target]
+            if source_type != "DocumentChunk":
                 continue
-            if relationship == "contains" and by_id.get(target, {}).get("type") == "Entity":
-                topology.entities_in_chunk.setdefault(source, []).append(target)
-                topology.chunks_of_entity.setdefault(target, []).append(source)
+            if relationship == "contains" and target_type in _CHUNK_CONTENT_TYPES:
+                topology.contents_of_chunk.setdefault(source, []).append(target)
+                topology.chunks_containing.setdefault(target, []).append(source)
             elif relationship == "is_part_of":
                 topology.chunk_headers[source] = _document_header(by_id.get(target, {}))
         return topology
@@ -376,7 +421,7 @@ def _entity_record(
         "evidence",
         [
             COGXEvidence(relation="derived", ref=chunk_id)
-            for chunk_id in topology.chunks_of_entity.get(node_id, [])
+            for chunk_id in topology.chunks_containing.get(node_id, [])
         ],
     )
     if extracted:
@@ -385,6 +430,7 @@ def _entity_record(
         external_system="cognee",
         external_id=node_id,
         name=properties["name"],
+        entity_type=topology.entity_types.get(node_id),
         description=properties.get("description"),
         created_at=parse_timestamp(properties.get("created_at")),
         updated_at=parse_timestamp(properties.get("updated_at")),
@@ -399,7 +445,7 @@ def _chunk_record(
     header = _element_header(properties, node_id, facts.actors, imported)
     header.setdefault(
         "subject",
-        [topology.names[entity_id] for entity_id in topology.entities_in_chunk.get(node_id, [])],
+        [topology.names.get(node, node) for node in topology.contents_of_chunk.get(node_id, [])],
     )
     header.setdefault("ai_involvement", "none")  # source text; chunking runs no model
     return COGXDocument(
@@ -497,9 +543,16 @@ def _reviewed_confidence(properties: dict) -> COGXConfidence | None:
     )
 
 
+# Header fields that describe a whole imported document, not its chunks.
+_DOCUMENT_ONLY_FIELDS = ("path", "stub", "links")
+
+
 def _document_header(properties: dict) -> dict:
-    """The OMP header a Document's data item was imported with, if any. The
-    node carries the item's external metadata as a JSON string."""
+    """The OMP header a Document's data item was imported with, if any, as its
+    chunks inherit it. The node carries the item's external metadata as a JSON
+    string. Where the file sat, whether it is a stub and how it links to other
+    memories describe the whole document, not a slice of it, so chunks do not
+    inherit them."""
     metadata = properties.get("external_metadata")
     if isinstance(metadata, str):
         try:
@@ -508,7 +561,8 @@ def _document_header(properties: dict) -> dict:
             return {}
     if not isinstance(metadata, dict):
         return {}
-    return parse_omp_header(metadata.get("omp_header"))
+    header = parse_omp_header(metadata.get("omp_header"))
+    return {key: value for key, value in header.items() if key not in _DOCUMENT_ONLY_FIELDS}
 
 
 def _write_cogx(
@@ -557,37 +611,81 @@ def _write_cogx(
             )
 
 
+# The node types exported as memories, and the property each needs to be one.
+_MEMORY_NODE_FIELDS = {"Entity": "name", "DocumentChunk": "text"}
+
+
+def _fact_edges(edges, topology: "_Topology"):
+    """The edges exported as facts: from an exported memory to another one or
+    to a date, and not a chunk's ``contains`` edge, which its ``mentions``
+    links and subject names already carry."""
+    memory_nodes, date_nodes = topology.memory_nodes, topology.date_nodes
+    fact_edges = []
+    for source, target, relationship, properties in edges:
+        source, target = str(source), str(target)
+        if source not in memory_nodes or (target not in memory_nodes and target not in date_nodes):
+            continue
+        contents = topology.contents_of_chunk.get(source, ())
+        if not (relationship == "contains" and target in contents):
+            fact_edges.append((source, target, str(relationship), properties or {}))
+    return fact_edges
+
+
+def _node_memory(node_id, properties, topology, mentions, facts, exported_at):
+    """The OMP memory of one node in :attr:`_Topology.memory_nodes`."""
+    if properties["type"] == "Entity":
+        record = _entity_record(node_id, properties, topology, facts)
+    else:
+        record = _chunk_record(node_id, properties, topology, facts)
+        record.links.extend(
+            COGXLink(target=target, rel="mentions") for target in mentions.get(node_id, [])
+        )
+    return memory_from_record(record, exported_at=exported_at)
+
+
+def _fact_memory(
+    source, target, relationship, properties, topology, facts, exported_at, linked_object
+):
+    """The OMP memory of one fact edge, linking its ``subject``, and its
+    ``object`` when that is a memory too (a date is stated in the text)."""
+    record = _fact_record(source, target, relationship, properties, topology, facts)
+    record.links.append(COGXLink(target=source, rel="subject"))
+    if linked_object:
+        record.links.append(COGXLink(target=target, rel="object"))
+    return memory_from_record(record, exported_at=exported_at)
+
+
 def _omp_memories(nodes, edges, facts: ExportFacts, exported_at: datetime):
     """The dataset as OMP memories: every entity, chunk and fact is one.
 
-    A chunk links the entities it contains (``mentions``); a fact links its
-    ``subject`` and ``object`` entities. Cognee-internal nodes (entity types,
-    summaries, document records) are graph structure, not memories, and are
-    left out — the manifest says so.
+    A chunk links the entities it contains (``mentions``), so those
+    ``contains`` edges are not facts again. A fact is an edge from an exported
+    memory to another one, linked as its ``subject`` and ``object``, or to a
+    date, which only its text states: dates, like entity types, are values,
+    not memories. Cognee-internal nodes (entity types, summaries, document
+    records) are graph structure: they and their other edges are left out —
+    the manifest says so.
     """
     topology = _Topology.of(nodes, edges)
+    memory_nodes = topology.memory_nodes
+    mentions = {
+        chunk: [target for target in contents if target in memory_nodes]
+        for chunk, contents in topology.contents_of_chunk.items()
+    }
+    fact_edges = _fact_edges(edges, topology)
+    # Every identifier of the export, known before the first memory is written,
+    # so references outside it are marked dangling.
+    exported = memory_nodes | {f"{s}:{r}:{t}" for s, t, r, _properties in fact_edges}
     for node_id, properties in nodes:
-        properties = properties or {}
-        node_id = str(node_id)
-        node_type = properties.get("type")
-        if node_type == "Entity" and properties.get("name"):
-            record = _entity_record(node_id, properties, topology, facts)
-        elif node_type == "DocumentChunk" and properties.get("text"):
-            record = _chunk_record(node_id, properties, topology, facts)
-            record.links.extend(
-                COGXLink(target=entity_id, rel="mentions")
-                for entity_id in topology.entities_in_chunk.get(node_id, [])
-            )
-        else:
-            continue
-        yield memory_from_record(record, exported_at=exported_at)
-    for source, target, relationship, properties in edges:
-        source, target = str(source), str(target)
-        record = _fact_record(source, target, str(relationship), properties or {}, topology, facts)
-        record.links.extend(
-            [COGXLink(target=source, rel="subject"), COGXLink(target=target, rel="object")]
+        if str(node_id) in memory_nodes:
+            memory = _node_memory(str(node_id), properties, topology, mentions, facts, exported_at)
+            yield mark_dangling(memory, exported)
+    for source, target, relationship, properties in fact_edges:
+        linked_object = target in memory_nodes
+        memory = _fact_memory(
+            source, target, relationship, properties, topology, facts, exported_at, linked_object
         )
-        yield memory_from_record(record, exported_at=exported_at)
+        yield mark_dangling(memory, exported)
 
 
 def _write_omp(
@@ -603,7 +701,8 @@ def _write_omp(
     migration_revision: str | None = None,
 ) -> dict[str, Any]:
     """Write the dataset as an OMP export (draft v0.6): ``memories.jsonl`` or a
-    folder of markdown memories, plus the 5.3 manifest."""
+    folder of markdown memories, plus the 5.3 manifest. ``destination`` is
+    empty or absent: :func:`export_dataset` prepared it before reading the graph."""
     exported_at = datetime.now(timezone.utc)
     manifest = OMPManifest.model_validate(
         {
@@ -614,9 +713,10 @@ def _write_omp(
                 "dataset": dataset_name,
                 "embedding_model": embedding_model,
                 "migration_revision": migration_revision,
-                "coverage": COGX_EXPORT_COVERAGE,
+                "coverage": {**COGX_EXPORT_COVERAGE, "checksum": OMP_CHECKSUM_COVERAGE},
                 "not_exported": "cognee-internal graph nodes (entity types, summaries, "
-                "document records) are structure, not memories",
+                "document records) are structure, not memories; dates are values, "
+                "stated by the facts about them, and entity types travel on the entity",
             },
         }
     )
@@ -628,6 +728,19 @@ def _write_omp(
     )
 
 
+def _export_destination(format: str, destination: str | Path | None, dataset_name: str) -> Path:
+    """Where an export goes: ``destination``, else the format's default in the
+    working directory (``<dataset>_export.<ext>``, or a folder for cogx/omp)."""
+    if destination is None:
+        suffix = _FORMAT_SUFFIX.get(format)
+        destination = (
+            f"{dataset_name}_export{suffix}"
+            if suffix
+            else f"{dataset_name}{_DIRECTORY_SUFFIX[format]}"
+        )
+    return Path(destination)
+
+
 async def export_dataset(
     dataset: str | UUID = DEFAULT_DATASET_NAME,
     format: str = "pydantic",
@@ -635,8 +748,12 @@ async def export_dataset(
     user=None,
     link_relations: bool = False,
     include_permissions: bool = False,
+    overwrite: bool = False,
 ) -> ExportResult | GraphSnapshot:
     """Export an authorized dataset's graph. Requires read permission.
+
+    ``overwrite`` (omp formats only): an OMP export refuses a non-empty
+    ``destination``; ``True`` deletes it and everything in it first.
 
     ``include_permissions`` (cogx only): additionally write the dataset's
     social layer — owner and ACL grants WITH user credentials — into
@@ -666,6 +783,11 @@ async def export_dataset(
     if not datasets:
         raise DatasetNotFoundError(message=f"Dataset not found or not readable: {dataset}")
     dataset_obj = datasets[0]
+    if format in ("omp", "omp-markdown"):
+        # Refuse a folder in use before reading the whole graph.
+        prepare_omp_destination(
+            _export_destination(format, destination, dataset_obj.name), overwrite
+        )
 
     async with set_database_global_context_variables(dataset_obj.id, dataset_obj.owner_id):
         graph_engine = await get_graph_engine()
@@ -693,14 +815,7 @@ async def export_dataset(
         )
         return snapshot
 
-    if destination is None:
-        suffix = _FORMAT_SUFFIX.get(format)
-        destination = (
-            f"{dataset_obj.name}_export{suffix}"
-            if suffix
-            else f"{dataset_obj.name}{_DIRECTORY_SUFFIX[format]}"
-        )
-    destination = Path(destination)
+    destination = _export_destination(format, destination, dataset_obj.name)
 
     if format in ("cogx", "omp", "omp-markdown"):
         embedding_model = None
