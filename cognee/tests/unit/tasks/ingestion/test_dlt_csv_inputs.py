@@ -30,6 +30,7 @@ from cognee.infrastructure.loaders.create_loader_engine import create_loader_eng
 from cognee.infrastructure.loaders.external.dlt_csv_loader import DltCsvLoader  # noqa: E402
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult  # noqa: E402
 from cognee.modules.ingestion.exceptions import IngestionError  # noqa: E402
+from cognee.tasks.ingestion.create_dlt_source import create_dlt_source_from_csv  # noqa: E402
 from cognee.tasks.ingestion.data_item import DataItem  # noqa: E402
 
 CSV_BYTES = b"id,name\n1,Ada\n2,Alan\n"
@@ -54,6 +55,15 @@ class TestDispatch:
         loader = engine.get_loader(csv_file, {"csv_loader": {}})
         assert loader is not None
         assert loader.loader_name == "csv_loader"
+
+
+class TestSource:
+    def test_reads_the_rows_of_a_local_csv(self, csv_file):
+        # dlt has to find the file. The bucket URL used to be built by hand as
+        # f"file://{dir}", which is "file://C:\..." on Windows and matched nothing.
+        rows = list(create_dlt_source_from_csv(csv_file))
+
+        assert [row["name"] for row in rows] == ["Ada", "Alan"]
 
 
 class TestLoad:
