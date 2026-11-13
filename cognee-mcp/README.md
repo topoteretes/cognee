@@ -528,12 +528,13 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 ### Available Tools
 
-The MCP server exposes four tools (three memory tools pinned in `tools/list`, plus `cognify_status`):
+The MCP server exposes five tools (four tools pinned in `tools/list` in default mode, plus `cognify_status`):
 
 - **remember**: Store data in memory. Pass `data` for text, or `filename` + `content_base64` to ingest an uploaded file (up to 10 MB). With `session_id`: fast session cache (text only). Without `session_id`: permanent graph memory
 - **recall**: Search memory with auto-routing. Searches session cache first when `session_id` is provided, then falls through to the permanent graph
 - **forget**: Delete memory by dataset name or id, a single data item by `data_id` (paired with its `dataset_id`, both shown by `recall` with `include_references=True`), or delete all owned memory with `everything=True`
-- **cognify_status**: Check the progress of background ingestion started by `remember(background=True)`. Unadvertised by default; discoverable via `search_tools` and callable by name
+- **code_search**: Search indexed code repositories (symbol lookup and code graph queries)
+- **cognify_status**: Check the progress of background ingestion started by `remember(background=True)`. Returns the status as JSON text plus the same payload as structured content (`dataset_name`, `pipelines`, `background_errors`). Unadvertised by default; discoverable via `search_tools` and callable by name
 
 ### Recall result summaries
 
@@ -579,7 +580,7 @@ them. Tool errors retain their existing `Error:` response.
 Advertising every tool up front costs agent context and hurts tool-selection accuracy, so by default the server pins a small set in `tools/list` and makes the rest discoverable through FastMCP's built-in `search_tools`. **Unadvertised tools stay callable by name.**
 
 ```bash
-COGNEE_MCP_TOOL_MODE=default   # pinned: remember, recall, forget
+COGNEE_MCP_TOOL_MODE=default   # pinned: remember, recall, forget, code_search
 COGNEE_MCP_TOOL_MODE=minimal   # pinned: remember, recall, forget
 COGNEE_MCP_TOOL_MODE=all       # no search transform; advertise every tool
 ```

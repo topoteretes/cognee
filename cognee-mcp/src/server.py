@@ -3,6 +3,7 @@ import asyncio
 import base64
 import importlib.metadata
 import importlib.util
+import json
 import os
 import sys
 from collections import deque
@@ -16,6 +17,7 @@ from fastmcp import FastMCP
 from fastmcp.server.http import HostOriginGuardMiddleware
 from fastmcp.server.transforms.search import BM25SearchTransform
 from fastmcp.server.transforms.search.base import BaseSearchTransform
+from fastmcp.tools import ToolResult
 from mcp import types
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
@@ -963,7 +965,7 @@ def format_improve_result(result, dataset_name: str) -> str:
 async def cognify_status(
     dataset_name: str | None = None,
     pipelines: list[str] | None = None,
-) -> list:
+) -> ToolResult:
     """
     Get the current status of selected pipelines.
 
@@ -974,17 +976,19 @@ async def cognify_status(
 
     Returns
     -------
-    list
-        A list containing a single TextContent object with the status information as a string.
-        The status includes information about active and completed jobs for the
-        requested pipelines.
+    ToolResult
+        A text block carrying the status as JSON, plus the same payload as
+        structured content for clients that read it programmatically:
+        ``{"dataset_name": ..., "pipelines": ..., "background_errors": [...]}``.
+        ``pipelines`` keeps the dataset-status endpoint's shape
+        (``{dataset_id: status}``, or ``{dataset_id: {pipeline: status}}``
+        when several pipelines are requested).
 
     Notes
     -----
     - By default this checks "cognify_pipeline" (backward compatible)
     - Use `pipelines` to restrict to specific pipeline names
-    - Status information includes job progress, execution time, and completion status
-    - The status is returned in string format for easy reading
+    - Background task errors are listed newest first
     - In API mode the dataset id is resolved over HTTP and status is read
       from the server's `GET /api/v1/datasets/status` endpoint
     """
@@ -999,12 +1003,14 @@ async def cognify_status(
                     (d["id"] for d in datasets if d.get("name") == dataset_name), None
                 )
                 if dataset_id is None:
-                    return [
-                        types.TextContent(
-                            type="text",
-                            text=f"❌ Dataset '{dataset_name}' not found via API",
-                        )
-                    ]
+                    return ToolResult(
+                        content=[
+                            types.TextContent(
+                                type="text",
+                                text=f"Error: Dataset '{dataset_name}' not found via API",
+                            )
+                        ]
+                    )
             else:
                 from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
                 from cognee.modules.users.methods import get_default_user
@@ -1027,22 +1033,26 @@ async def cognify_status(
                     if str(dataset_id) in pipeline_status:
                         status[str(dataset_id)][pipeline_name] = pipeline_status[str(dataset_id)]
 
-            # Append any background task errors
-            status_text = str(status)
             dataset_errors = _task_errors.get(dataset_name, [])
-            if dataset_errors:
-                error_lines = ["\n\nBackground task errors:"]
-                for ts, err in sorted(dataset_errors, reverse=True):
-                    error_lines.append(f"  [{ts}] {err}")
-                status_text += "\n".join(error_lines)
-
-            return [types.TextContent(type="text", text=status_text)]
+            payload = {
+                "dataset_name": dataset_name,
+                "pipelines": status,
+                "background_errors": [
+                    {"time": ts, "error": err} for ts, err in sorted(dataset_errors, reverse=True)
+                ],
+            }
+            # The text block carries the same payload as JSON so text-only
+            # clients get parseable output instead of a Python repr.
+            return ToolResult(
+                content=[types.TextContent(type="text", text=json.dumps(payload, indent=2))],
+                structured_content=payload,
+            )
         except NotImplementedError:
-            error_msg = "❌ Pipeline status is not available in API mode"
+            error_msg = "Error: Pipeline status is not available in API mode"
             logger.error(error_msg)
-            return [types.TextContent(type="text", text=error_msg)]
+            return ToolResult(content=[types.TextContent(type="text", text=error_msg)])
         except Exception as e:
-            error_msg = f"❌ Failed to get cognify status: {e!s}"
+            error_msg = _tool_error_text("Cognify status failed", e)
             # Still report background errors even if pipeline status fails
             dataset_errors = _task_errors.get(dataset_name, [])
             if dataset_errors:
@@ -1051,7 +1061,7 @@ async def cognify_status(
                     error_lines.append(f"  [{ts}] {err}")
                 error_msg += "\n".join(error_lines)
             logger.exception(error_msg)
-            return [types.TextContent(type="text", text=error_msg)]
+            return ToolResult(content=[types.TextContent(type="text", text=error_msg)])
 
 
 def _sanitize_client_name(name: str) -> str:
