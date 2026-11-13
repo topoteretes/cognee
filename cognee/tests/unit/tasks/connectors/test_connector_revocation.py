@@ -22,10 +22,12 @@ from cognee.tasks.ingestion.connectors.asana import asana_source
 from cognee.tasks.ingestion.connectors.linear import linear_source
 from cognee.tasks.ingestion.connectors.onenote import onenote_source
 from cognee.tasks.ingestion.connectors.slack import slack_source
+from cognee.tasks.ingestion.connectors.vercel import vercel_source
 from cognee.tests.unit.tasks.connectors.fake_apollo import FakeApollo
 from cognee.tests.unit.tasks.connectors.fake_asana import FakeAsana
 from cognee.tests.unit.tasks.connectors.fake_onenote import Graph
 from cognee.tests.unit.tasks.connectors.fake_slack import CHANNEL, TEAM, FakeSlack
+from cognee.tests.unit.tasks.connectors.fake_vercel import FakeVercel
 from cognee.tests.unit.tasks.connectors.test_linear_source import TEAM as LINEAR_TEAM
 from cognee.tests.unit.tasks.connectors.test_linear_source import FakeLinear
 
@@ -108,12 +110,31 @@ def _onenote(check_active_for):
     )
 
 
+def _vercel(check_active_for):
+    # Vercel's smallest working budget is 2 (the project and one page; 1 is refused, 0 sends
+    # nothing), so the revocation lands while the second request is answered: the budget cut
+    # is the next step and only the row guard can still see it.
+    fake = FakeVercel()
+    fake.add_project("prj_web", "web")
+    fake.add_deployment("dpl_a", minutes_ago=20)
+    fake.add_deployment("dpl_b", minutes_ago=10, commit=2)
+    return vercel_source(
+        service=fake,
+        resource_name="vercel_revocation_test",
+        project_id="prj_web",
+        team_id="team_acme",
+        check_active=lambda: check_active_for(fake.calls[1:])(),
+        max_requests=2,
+    )
+
+
 BUDGETED_SOURCES = {
     "slack_source": _slack,
     "linear_source": _linear,
     "apollo_source": _apollo,
     "asana_source": _asana,
     "onenote_source": _onenote,
+    "vercel_source": _vercel,
 }
 
 

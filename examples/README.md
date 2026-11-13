@@ -90,6 +90,7 @@ features, cookbooks build an application.** See [Contributing](#-contributing-a-
 | [`google_calendar.py`](guides/google_calendar.py) | Ingest a Google Calendar with the bundled SDK connector, incremental sync through Google's sync token (needs `cognee[google-calendar]`) |
 | [`slack.py`](guides/slack.py) | Ingest a Slack channel with the bundled SDK connector: a thread is one document and the messages without replies of one day are one document, a new message re-renders only its thread or day, and a deleted message is forgotten when the next sync walks the whole channel |
 | [`obsidian.py`](guides/obsidian.py) | Ingest a local Obsidian vault with the bundled SDK connector: an edited note replaces its old version and a deleted note is forgotten on the next sync |
+| [`vercel.py`](guides/vercel.py) | Ingest one Vercel project's deployments with the bundled SDK connector and ask which deploy failed and why; a deployment deleted at Vercel is forgotten on the next sync (needs a Vercel token) |
 | [`presort_downloads.py`](guides/presort_downloads.py) | Presorting a messy folder before ingestion: `remember(dry_run="presort")`, then ingest the report |
 
 ### Visualization
