@@ -74,3 +74,68 @@ class TestDatasetScopedDefaults:
             SessionManager(cache_engine=None).resolve_session_id(None)
             SessionManager(cache_engine=None, dataset_id=uuid4()).resolve_session_id(None)
         engine_mock.assert_not_called()
+
+    def test_read_only_shared_dataset_context_isolates_session_dataset(self):
+        """When searching a read-only shared dataset (#6375), SessionManager must not
+        attribute the session or derive default_session_<shared_dataset_id> from
+        current_dataset_id; it uses session_dataset_id (user's own dataset or None)."""
+        from cognee.context_global_variables import read_only_dataset_context, session_dataset_id
+
+        shared_dataset_id = uuid4()
+        user_private_dataset_id = uuid4()
+
+        ds_token = current_dataset_id.set(shared_dataset_id)
+        ro_token = read_only_dataset_context.set(True)
+        sess_token = session_dataset_id.set(user_private_dataset_id)
+        try:
+            manager_with_private = SessionManager(cache_engine=None)
+            assert manager_with_private.dataset_id == user_private_dataset_id
+            assert (
+                manager_with_private.resolve_session_id(None)
+                == f"default_session_{user_private_dataset_id}"
+            )
+            assert manager_with_private.resolve_session_id("user_a_session") == "user_a_session"
+
+            session_dataset_id.set(None)
+            manager_unscoped = SessionManager(cache_engine=None)
+            assert manager_unscoped.dataset_id is None
+            assert manager_unscoped.resolve_session_id(None) == "default_session"
+        finally:
+            session_dataset_id.reset(sess_token)
+            read_only_dataset_context.reset(ro_token)
+            current_dataset_id.reset(ds_token)
+
+    @pytest.mark.asyncio
+    async def test_read_only_shared_dataset_skips_session_qa_vector_writes(self):
+        """index_session_qa and search_session_qa_ids must not touch the shared
+        dataset's vector store when read_only_dataset_context is active (#6375)."""
+        from cognee.context_global_variables import read_only_dataset_context
+        from cognee.infrastructure.session.session_embeddings import (
+            index_session_qa,
+            search_session_qa_ids,
+        )
+
+        ro_token = read_only_dataset_context.set(True)
+        try:
+            with patch(
+                "cognee.tasks.storage.index_data_points.index_data_points"
+            ) as index_mock, patch(
+                "cognee.infrastructure.databases.vector.get_vector_engine_async"
+            ) as vec_mock:
+                await index_session_qa(
+                    user_id="user-a",
+                    session_id="user_a_session",
+                    qa_id=str(uuid4()),
+                    question="Who is X?",
+                    answer="X is a test entity.",
+                )
+                hits = await search_session_qa_ids(
+                    user_id="user-a",
+                    session_id="user_a_session",
+                    query_text="Who is X?",
+                )
+                assert hits == []
+                index_mock.assert_not_called()
+                vec_mock.assert_not_called()
+        finally:
+            read_only_dataset_context.reset(ro_token)

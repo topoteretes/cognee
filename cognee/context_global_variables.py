@@ -31,6 +31,11 @@ from cognee.modules.users.methods import get_user
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
 current_dataset_id: ContextVar[UUID | None] = ContextVar("current_dataset_id", default=None)
+# Overrides session dataset attribution when searching a read-only shared dataset
+# so session records, default session IDs, and session QA vectors never leak into
+# datasets the caller cannot write to (#6375).
+read_only_dataset_context: ContextVar[bool] = ContextVar("read_only_dataset_context", default=False)
+session_dataset_id: ContextVar[UUID | None] = ContextVar("session_dataset_id", default=None)
 # Note: same mechanism for LLM and embedding configs so that the LiteLLM client
 #       and the embedding engine can use per-context (e.g. per-request) configs.
 llm_config: ContextVar[LLMConfig | None] = ContextVar("llm_config", default=None)
