@@ -40,6 +40,7 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.modules.pipelines.exceptions import AfterRunHookError
+from cognee.modules.pipelines.execution import DataItemExecutor, register_task_resolver_factory
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.modules.pipelines.tasks.task import Task, pipeline_needs_llm
 from cognee.modules.users.models import User
@@ -134,6 +135,190 @@ def raise_if_cognify_errored(result) -> None:
         )
 
 
+PORTABLE_COGNIFY_RESOLVER = "cognify"
+PORTABLE_INDEXING_RESOLVER = "cognify_indexing"
+
+
+class CognifyTaskResolver:
+    """Maps a data item to the task list its kind requires.
+
+    DLT-source manifests run the deterministic DLT list, code files the code
+    graph lists, everything else the standard list. Every route is wired
+    explicitly: an unmapped route raises ``KeyError`` instead of silently
+    running the standard LLM list on data that was routed away from it.
+
+    Both runs of a ``cognify()`` call have one: the cognify run, and the indexing
+    run before it (``get_indexing_tasks``), whose list is empty for every route
+    but the standard one.
+
+    ``portable`` is ``(factory name, JSON arguments)`` when another process can
+    rebuild this resolver (see ``cognee.modules.pipelines.execution``), else
+    ``None``. What that process rebuilds knows the standard route only (see
+    ``build_portable_cognify_task_resolver`` and
+    ``build_portable_indexing_task_resolver``).
+    """
+
+    def __init__(
+        self,
+        tasks_by_route: dict[CognifyRoute, list[Task]],
+        portable_args: dict | None = None,
+        portable_name: str = PORTABLE_COGNIFY_RESOLVER,
+    ):
+        self.tasks_by_route = tasks_by_route
+        self.portable = (portable_name, portable_args) if portable_args is not None else None
+
+    def __call__(self, data_item) -> list[Task]:
+        return self.tasks_by_route[cognify_route_for(data_item)]
+
+    def portable_item(self, data_item) -> bool:
+        """Whether the resolver another process rebuilds has this item's route."""
+        return cognify_route_for(data_item) is CognifyRoute.STANDARD
+
+
+async def build_standard_cognify_tasks(
+    *,
+    user: User | None,
+    graph_model: BaseModel,
+    chunker,
+    chunk_size: int | None,
+    config: Config,
+    custom_prompt: str | None,
+    chunks_per_batch: int | None,
+    chunk_attachment: Literal["direct", "all"] | None,
+    summary_method: str,
+    early_chunk_indexing: bool | None,
+    extractor: str,
+    **kwargs,
+) -> list[Task]:
+    """The cognify pipeline's task list for the standard route.
+
+    The one place this list is built, so ``cognify()`` and a process that runs
+    some of its data items build the same one. ``extractor`` and
+    ``summary_method`` are already resolved; ``config`` carries the resolved
+    ontology resolver.
+    """
+    if extractor == GLINER_DEMO_EXTRACTOR:
+        if graph_model is not KnowledgeGraph:
+            raise ValueError(
+                "extractor='gliner_demo' builds the generic KnowledgeGraph; "
+                "a custom graph_model is only supported by the 'llm' extractor."
+            )
+        if custom_prompt:
+            logger.warning("custom_prompt is ignored when extractor='gliner_demo'.")
+        if kwargs:
+            raise ValueError(
+                f"Unsupported arguments for extractor='gliner_demo': {', '.join(sorted(kwargs))}"
+            )
+
+        from cognee.tasks.graph.gliner_demo.tasks import get_gliner_demo_tasks
+
+        return await get_gliner_demo_tasks(
+            chunker=chunker,
+            chunk_size=chunk_size,
+            chunks_per_batch=chunks_per_batch,
+            config=config,
+            chunk_attachment=chunk_attachment,
+            track_provenance=get_cognify_config().provenance_tracking,
+            early_chunk_indexing=early_chunk_indexing,
+        )
+
+    return await get_default_tasks(
+        user=user,
+        graph_model=graph_model,
+        chunker=chunker,
+        chunk_size=chunk_size,
+        config=config,
+        custom_prompt=custom_prompt,
+        chunks_per_batch=chunks_per_batch,
+        chunk_attachment=chunk_attachment,
+        summary_method=summary_method,
+        early_chunk_indexing=early_chunk_indexing,
+        **kwargs,
+    )
+
+
+def resolved_ontology_config(
+    config: Config | None, ontology_file_path: str | None = None
+) -> Config:
+    """The ontology configuration the task lists are built with: the caller's,
+    else the one the environment configures."""
+    return {
+        "ontology_config": {
+            "ontology_resolver": get_configured_ontology_resolver(
+                config, ontology_file_path=ontology_file_path
+            ),
+            "ontology_mode": get_configured_ontology_mode(config),
+            "authoritative_sources": get_configured_authoritative_sources(config),
+        }
+    }
+
+
+async def build_portable_cognify_task_resolver(
+    *,
+    user: User,
+    chunk_size: int,
+    chunks_per_batch: int,
+    custom_prompt: str | None,
+    summary_method: str,
+    early_chunk_indexing: bool,
+    extractor: str,
+) -> CognifyTaskResolver:
+    """Rebuild, in another process, the resolver a portable ``cognify()`` call built.
+
+    The arguments are that call's ``portable_args``, already resolved by it.
+    Everything they do not carry is the default a portable call had
+    (``KnowledgeGraph``, ``TextChunker``, the ontology the environment configures).
+
+    Only the standard route is rebuilt, so only standard items may be sent to
+    another process (``cognify_route_for``); any other item raises ``KeyError``
+    there. The other routes stay with the process that owns the run: a code
+    repository is a directory on its disk, and the DLT and code lists read
+    defaults this call's arguments do not carry.
+    """
+    await ensure_extractor_runtime(extractor, get_cognify_config())
+    return CognifyTaskResolver(
+        {
+            CognifyRoute.STANDARD: await build_standard_cognify_tasks(
+                user=user,
+                graph_model=KnowledgeGraph,
+                chunker=TextChunker,
+                chunk_size=chunk_size,
+                config=resolved_ontology_config(None),
+                custom_prompt=custom_prompt,
+                chunks_per_batch=chunks_per_batch,
+                chunk_attachment=None,
+                summary_method=summary_method,
+                early_chunk_indexing=early_chunk_indexing,
+                extractor=extractor,
+            )
+        }
+    )
+
+
+async def build_portable_indexing_task_resolver(
+    *, user: User, chunk_size: int, chunks_per_batch: int
+) -> CognifyTaskResolver:
+    """Rebuild, in another process, the indexing run's resolver of a portable
+    ``cognify()`` call.
+
+    The arguments are the chunking that call resolved, so this process cuts and
+    stores the chunks the cognify run will look for. Like the cognify run's
+    rebuilt resolver it knows the standard route only: the indexing run has no
+    work for any other.
+    """
+    return CognifyTaskResolver(
+        {
+            CognifyRoute.STANDARD: await get_indexing_tasks(
+                chunker=TextChunker, chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
+            )
+        }
+    )
+
+
+register_task_resolver_factory(PORTABLE_COGNIFY_RESOLVER, build_portable_cognify_task_resolver)
+register_task_resolver_factory(PORTABLE_INDEXING_RESOLVER, build_portable_indexing_task_resolver)
+
+
 async def cognify(
     datasets: str | list[str] | list[UUID] | None = None,
     user: User = None,
@@ -158,6 +343,7 @@ async def cognify(
     ontology_file_path: str | None = None,
     summary_method: Literal["llm", "from_extraction"] | None = None,
     early_chunk_indexing: bool | None = None,
+    data_item_executor: DataItemExecutor | None = None,
     **kwargs,
 ):
     """
@@ -285,6 +471,13 @@ async def cognify(
                  chunks become searchable only when extraction finishes. The explicit
                  argument wins over the EARLY_CHUNK_INDEXING setting (on by default).
                  Raises while connected to a remote instance.
+        data_item_executor: An executor that may run this call's data items in other
+                 processes (see ``cognee.modules.pipelines.execution``), for this
+                 call only. It comes before an executor registered for the process
+                 (``set_data_item_executor``); without either, every item runs in
+                 this process. Each process applies ``data_per_batch`` to the items
+                 it runs, so more of the call's items run at a time than in one
+                 process. Raises while connected to a remote instance.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -444,6 +637,13 @@ async def cognify(
                 "ontology_file_path is not supported while connected to a remote Cognee "
                 "instance. Call cognee.disconnect() to use the ontology locally."
             )
+        if data_item_executor is not None:
+            # An executor is an object of this process: POST /cognify cannot
+            # carry it, and where the remote runs its items is the remote's.
+            raise ValueError(
+                "data_item_executor is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to run the pipeline locally."
+            )
         return await client.cognify(
             datasets,
             chunk_size=chunk_size,
@@ -473,18 +673,10 @@ async def cognify(
 
         await run_migrations_and_block(datasets, user)
 
-        resolved_resolver = get_configured_ontology_resolver(
-            config, ontology_file_path=ontology_file_path
-        )
-        resolved_ontology_mode = get_configured_ontology_mode(config)
-        resolved_authoritative_sources = get_configured_authoritative_sources(config)
-        config = {
-            "ontology_config": {
-                "ontology_resolver": resolved_resolver,
-                "ontology_mode": resolved_ontology_mode,
-                "authoritative_sources": resolved_authoritative_sources,
-            }
-        }
+        # Whether the caller passed its own ontology configuration decides if
+        # another process can rebuild this call's tasks (see portable_args below).
+        caller_config = config
+        config = resolved_ontology_config(config, ontology_file_path)
 
         if dry_run:
             from cognee.modules.cognify.estimator import estimate_cognify_dry_run
@@ -499,33 +691,9 @@ async def cognify(
                 summary_method=resolved_summary_method,
             )
 
-        if resolved_extractor == GLINER_DEMO_EXTRACTOR:
-            if graph_model is not KnowledgeGraph:
-                raise ValueError(
-                    "extractor='gliner_demo' builds the generic KnowledgeGraph; "
-                    "a custom graph_model is only supported by the 'llm' extractor."
-                )
-            if custom_prompt:
-                logger.warning("custom_prompt is ignored when extractor='gliner_demo'.")
-            if kwargs:
-                raise ValueError(
-                    "Unsupported arguments for extractor='gliner_demo': "
-                    f"{', '.join(sorted(kwargs))}"
-                )
-
-            from cognee.tasks.graph.gliner_demo.tasks import get_gliner_demo_tasks
-
-            tasks = await get_gliner_demo_tasks(
-                chunker=chunker,
-                chunk_size=chunk_size,
-                chunks_per_batch=chunks_per_batch,
-                config=config,
-                chunk_attachment=chunk_attachment,
-                track_provenance=cognify_config.provenance_tracking,
-                early_chunk_indexing=early_chunk_indexing,
-            )
-        else:
-            tasks = await get_default_tasks(
+        # One task list per route, each wired explicitly (see CognifyTaskResolver).
+        tasks_by_route = {
+            CognifyRoute.STANDARD: await build_standard_cognify_tasks(
                 user=user,
                 graph_model=graph_model,
                 chunker=chunker,
@@ -536,8 +704,15 @@ async def cognify(
                 chunk_attachment=chunk_attachment,
                 summary_method=resolved_summary_method,
                 early_chunk_indexing=early_chunk_indexing,
+                extractor=resolved_extractor,
                 **kwargs,
-            )
+            ),
+            CognifyRoute.DLT_SOURCE: await get_dlt_tasks(
+                chunk_size=chunk_size, chunks_per_batch=chunks_per_batch, config=config
+            ),
+            CognifyRoute.CODE: get_code_file_tasks(),
+            CognifyRoute.CODE_REPO: get_code_repo_tasks(),
+        }
 
         # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
         pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
@@ -552,43 +727,58 @@ async def cognify(
             if early_chunk_indexing is not None
             else cognify_config.early_chunk_indexing
         )
-        resolve_indexing_tasks = None
-        if use_indexing:
-            indexing_tasks_by_route = {
-                CognifyRoute.STANDARD: await get_indexing_tasks(
-                    chunker=chunker, chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
-                ),
-                CognifyRoute.DLT_SOURCE: [],
-                CognifyRoute.CODE: [],
-                CognifyRoute.CODE_REPO: [],
+
+        # Another process can rebuild a task list only from JSON, and shares
+        # this one's environment but none of its memory or local files. So a
+        # run is not portable, and its items always run in this process, when
+        # the call passes a custom chunker (a class) or per-call vector or
+        # graph database configuration (context variables of this process).
+        # That is all the indexing run depends on; the cognify run has more
+        # below.
+        portable_chunking = None
+        if chunker is TextChunker and vector_db_config is None and graph_db_config is None:
+            # Resolved here, not sent as given: a setting changed in this
+            # process only (cognee.config) must not make another process cut
+            # different chunks than this one would.
+            portable_chunking = {
+                "chunk_size": await resolve_chunk_size(chunk_size),
+                "chunks_per_batch": resolve_chunks_per_batch(chunks_per_batch),
             }
 
-            def resolve_indexing_tasks(data_item):
-                return indexing_tasks_by_route[cognify_route_for(data_item)]
+        resolve_indexing_tasks = None
+        if use_indexing:
+            resolve_indexing_tasks = CognifyTaskResolver(
+                {
+                    CognifyRoute.STANDARD: await get_indexing_tasks(
+                        chunker=chunker, chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
+                    ),
+                    CognifyRoute.DLT_SOURCE: [],
+                    CognifyRoute.CODE: [],
+                    CognifyRoute.CODE_REPO: [],
+                },
+                portable_chunking,
+                PORTABLE_INDEXING_RESOLVER,
+            )
 
-        # Per-item routing: each data item resolves to the task list its kind
-        # requires — DLT-source manifests run the deterministic DLT list, code
-        # files run the enola code graph list, everything else runs the
-        # standard list. The lists are built once up front and
-        # the resolver is a sync closure over them (the distributed runner
-        # materializes per-item task columns, so it needs concrete lists, not
-        # an async factory). One run_pipeline call, one cognify_pipeline run
-        # per dataset, mixed datasets included. Every route is wired
-        # EXPLICITLY, the standard route included — no implicit default. An
-        # unmapped route (a CognifyRoute member added without a task list
-        # here) raises KeyError instead of silently running the standard LLM
-        # list on data that was routed away from it.
-        tasks_by_route = {
-            CognifyRoute.STANDARD: tasks,
-            CognifyRoute.DLT_SOURCE: await get_dlt_tasks(
-                chunk_size=chunk_size, chunks_per_batch=chunks_per_batch, config=config
-            ),
-            CognifyRoute.CODE: get_code_file_tasks(),
-            CognifyRoute.CODE_REPO: get_code_repo_tasks(),
-        }
-
-        def resolve_cognify_tasks(data_item):
-            return tasks_by_route[cognify_route_for(data_item)]
+        # The cognify run is not portable either when the call passes a custom
+        # graph model (a class), its own ontology config (an object), an
+        # ontology file (a path on this machine) or extra extraction kwargs.
+        portable_args = None
+        if (
+            portable_chunking is not None
+            and graph_model is KnowledgeGraph
+            and caller_config is None
+            and ontology_file_path is None
+            and not kwargs
+        ):
+            portable_args = {
+                **portable_chunking,
+                "custom_prompt": custom_prompt,
+                "summary_method": resolved_summary_method,
+                "early_chunk_indexing": use_indexing,
+                "extractor": resolved_extractor,
+            }
+        resolve_cognify_tasks = CognifyTaskResolver(tasks_by_route, portable_args)
 
         # run_pipeline derives needs_llm itself for a task list, but this call
         # passes a resolver — so pass the union over every wired route: the
@@ -619,6 +809,7 @@ async def cognify(
                 llm_config=llm_config,
                 embedding_config=embedding_config,
                 data_cache=data_cache,
+                data_item_executor=data_item_executor,
                 extras={"graph_extractor": resolved_extractor},
                 # Reconcile the structure document sources describe, also when an
                 # item failed: one bad page must not freeze the tree of the rest.

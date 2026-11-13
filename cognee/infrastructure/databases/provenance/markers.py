@@ -49,7 +49,8 @@ async def mark_graph_provenance_if_empty(graph_engine) -> bool:
     """Mark an empty graph to store provenance in-graph; return whether it does.
 
     - Already marked -> True (idempotent, no re-mark).
-    - Non-empty (existing/old graph) -> False; it stays on the ledger path.
+    - Non-empty -> what its marker says now: False for an existing/old graph,
+      which stays on the ledger path.
     - Empty graph -> attempt to mark via ``set_graph_metadata``. On
       ``UnsupportedProvenanceCapability`` (pre-Part-1 backend) -> False. Only a
       successful mark returns True.
@@ -58,7 +59,13 @@ async def mark_graph_provenance_if_empty(graph_engine) -> bool:
         return True
 
     if not await graph_engine.is_empty():
-        return False
+        # Several writers can start on one empty graph at once (concurrent data
+        # items, several processes). Another one may have marked it and stored
+        # its first nodes since the marker was read above, so it is read again:
+        # taking that graph for an old one would write this caller's nodes and
+        # edges without their source refs into a graph that is deleted from by
+        # them.
+        return await stores_provenance_in_graph(graph_engine)
 
     try:
         await graph_engine.set_graph_metadata(

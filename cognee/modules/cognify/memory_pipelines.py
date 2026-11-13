@@ -26,7 +26,9 @@ nothing in the pipeline package knows about the chain.
 The indexing run rolls back per item: an item that failed loses its chunks,
 the items that completed keep theirs, and the cognify run stores the failed
 item's chunks itself in its final write. That holds while the indexing run
-records failed items and carries on (``RAISE_INCREMENTAL_LOADING_ERRORS=false``).
+records failed items and carries on (``RAISE_INCREMENTAL_LOADING_ERRORS=false``,
+or its items ran in other processes through a data item executor, where a
+failed item arrives recorded).
 A failure it raises (its setup, the vector store, or by default any failed
 item, the policy the cognify run applies to its own items) fails the cognify
 run at once with that cause: extraction would hit it again after re-reading
@@ -82,6 +84,7 @@ _SHARED_RUN_PARAMS = (
     "embedding_config",
     "data_cache",
     "skip_connection_test",
+    "data_item_executor",
 )
 
 # The stage name the cognify run's subscribers see while the indexing run works.

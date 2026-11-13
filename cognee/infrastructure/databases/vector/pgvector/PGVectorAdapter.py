@@ -22,7 +22,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import DBAPIError, ProgrammingError, SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
 from tenacity import (
@@ -527,9 +527,15 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if table is not None:
             self._metadata.remove(table)
 
+    # Two processes creating one collection at once (workers of one run, see
+    # cognee.modules.pipelines.execution) both pass has_collection, and
+    # VECTOR_DB_LOCK is per process. Postgres then fails the loser's CREATE TABLE
+    # on its catalog (pg_type_typname_nsp_index), which SQLAlchemy raises as
+    # IntegrityError, not as the asyncpg classes; without it here the loser's data
+    # item failed. On the retry has_collection finds the winner's table.
     @retry(
         retry=retry_if_exception_type(
-            (DuplicateTableError, UniqueViolationError, ProgrammingError)
+            (DuplicateTableError, UniqueViolationError, ProgrammingError, IntegrityError)
         ),
         stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=2, min=1, max=6),

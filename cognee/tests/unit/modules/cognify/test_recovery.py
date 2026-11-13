@@ -7,7 +7,7 @@ import inspect
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -130,6 +130,7 @@ def _wire(monkeypatch, runs, datasets, *, rollback_fails=False, users=None, newe
     monkeypatch.setattr(recovery_module, "get_run_session_ids", _no_sessions)
     monkeypatch.setattr(recovery_module, "get_user", _get_user)
     monkeypatch.setattr(recovery_module, "STALE_RUN_MIN_AGE_SECONDS", 3600)
+    monkeypatch.setattr(recovery_module, "record_interrupted", AsyncMock())
 
     @contextmanager
     def claim(run):
@@ -265,6 +266,26 @@ async def test_failed_rollback_leaves_run_started(monkeypatch):
     await recovery_module.recover_stale_pipeline_runs_on_startup()
 
     assert calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rollback_fails", [False, True])
+async def test_a_closed_runs_unanswered_shards_are_recorded_interrupted(
+    monkeypatch, rollback_fails
+):
+    """Shards the run handed to workers and never heard back from would stay
+    pending for good. Only after the rollback: when that fails the run is still
+    open, and the next pass comes back to it."""
+    run = _run("cognify_pipeline")
+    _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)}, rollback_fails=rollback_fails)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    recorded = recovery_module.record_interrupted
+    if rollback_fails:
+        recorded.assert_not_awaited()
+    else:
+        recorded.assert_awaited_once_with(run.pipeline_run_id)
 
 
 @pytest.mark.asyncio
@@ -830,3 +851,45 @@ async def test_improve_counts_the_closing_row_of_the_datasets_newest_run(runs_en
     )
 
     assert await has_dataset_changed_since_last_improve(dataset_id, REVIEW_WATERMARK_KEY)
+
+
+@pytest.mark.asyncio
+async def test_unanswered_shards_are_recorded_before_the_run_is_closed(monkeypatch):
+    run = _run("cognify_pipeline")
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+
+    async def record(pipeline_run_id):
+        calls.append(("shards", pipeline_run_id))
+
+    monkeypatch.setattr(recovery_module, "record_interrupted", record)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    assert [name for name, _ in calls] == ["rollback", "shards", "error"]
+
+
+@pytest.mark.asyncio
+async def test_a_run_whose_shards_cannot_be_recorded_stays_open(monkeypatch):
+    """A closed run is not looked at again, so closing it first would leave its
+    shards pending for good. Left open, the next pass comes back to all of it."""
+    run = _run("cognify_pipeline")
+    calls = _wire(monkeypatch, [run], {run.dataset_id: _dataset_for(run)})
+    monkeypatch.setattr(
+        recovery_module,
+        "record_interrupted",
+        AsyncMock(side_effect=RuntimeError("the database is not answering")),
+    )
+    ownerships = []
+
+    @contextmanager
+    def claim(_run):
+        ownerships.append(SimpleNamespace(closed=False))
+        yield ownerships[-1]
+
+    monkeypatch.setattr(recovery_module, "claim_run_ownership", claim)
+
+    await recovery_module.recover_stale_pipeline_runs_on_startup()
+
+    # No ERRORED row, and the ownership marker is kept for the next pass.
+    assert [name for name, _ in calls] == ["rollback"]
+    assert [ownership.closed for ownership in ownerships] == [False]

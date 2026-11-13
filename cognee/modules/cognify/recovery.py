@@ -20,6 +20,7 @@ from cognee.infrastructure.locks import get_dataset_lock
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.data.models import Dataset
 from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
+from cognee.modules.pipelines.execution.shard_store import record_interrupted
 from cognee.modules.pipelines.methods import (
     get_pipeline_run_by_dataset,
     get_unterminated_pipeline_runs,
@@ -139,6 +140,11 @@ async def recover_stale_pipeline_runs_on_startup() -> None:
                                 dataset=dataset,
                                 pipeline_name=current.pipeline_name,
                             )
+                        # Shards the run handed to workers and never heard back
+                        # from. Before the run is closed: a closed run is not looked
+                        # at again, so if they cannot be recorded it stays open and
+                        # the next pass comes back to all of it.
+                        await record_interrupted(current.pipeline_run_id)
                         await _close_as_abandoned(
                             current, dataset, sessions_by_row.get(current.id, [])
                         )
