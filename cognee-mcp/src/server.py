@@ -21,6 +21,7 @@ from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
+from cognee.modules.operations import remote_caller_scope
 from cognee.modules.storage.utils import JSONEncoder
 
 try:
@@ -264,6 +265,26 @@ def _get_cors_origins() -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()]
 
 
+class RemoteCallerMiddleware:
+    """Run everything the HTTP app does as a remote caller's.
+
+    Over sse / streamable http every caller is treated as remote, whatever the
+    bind address, so the server-side path and database gates refuse what
+    they refuse an API request. Every ASGI scope is wrapped, lifespan
+    included: streamable http runs tool calls in tasks its session manager
+    starts from the lifespan, sse in the connection's request. The flag is set
+    from inside the app, so it does not depend on how the server or event
+    loop propagates context. The operation origin stays "mcp".
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        with remote_caller_scope():
+            await self.app(scope, receive, send)
+
+
 def _build_http_app(transport: str, host: str, path: str | None = None):
     """Build the ASGI app for an HTTP-family transport, guard and CORS included.
 
@@ -320,6 +341,7 @@ def _build_http_app(transport: str, host: str, path: str | None = None):
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RemoteCallerMiddleware)
     return app
 
 

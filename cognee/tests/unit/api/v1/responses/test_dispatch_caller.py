@@ -64,6 +64,19 @@ async def test_cognify_runs_as_the_given_user(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cognify_adds_the_model_text_as_literal_text(monkeypatch):
+    """The model's text is never resolved as a path or URL."""
+    add = AsyncMock()
+    monkeypatch.setattr(dispatch_module, "add", add)
+    monkeypatch.setattr(dispatch_module, "cognify", AsyncMock())
+
+    await dispatch_function(_tool_call("cognify", text="CI/CD"), _caller())
+
+    item = add.await_args.kwargs["data"]
+    assert (item.data, item.literal_text) == ("CI/CD", True)
+
+
+@pytest.mark.asyncio
 async def test_prune_is_not_dispatchable():
     result = await dispatch_function(_tool_call("prune"), _caller())
 

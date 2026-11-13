@@ -33,6 +33,7 @@ from cognee.infrastructure.files.utils.local_path_safety import resolve_local_pa
 from cognee.modules.data.models.Data import Data
 from cognee.modules.users.models import User
 from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.save_data_item_to_storage import local_file_paths_accepted
 
 
 def _local_file(item: Any) -> Path | None:
@@ -47,7 +48,12 @@ def _local_file(item: Any) -> Path | None:
 
 
 def _local_files(item: Any) -> list[Path]:
-    """``item`` as local files: itself, or every file under it when it is a directory."""
+    """``item`` as local files: itself, or every file under it when it is a directory.
+
+    Empty with the gate closed: the disk is never asked about a caller's item.
+    """
+    if not local_file_paths_accepted():
+        return []
     if isinstance(item, (str, Path)):
         try:
             path = resolve_local_path(item, must_exist=True)
@@ -66,7 +72,8 @@ async def _origins(data: Any) -> tuple[dict[str, str], dict[tuple[str, str], str
     by_name: dict[tuple[str, str], str] = {}
     for item in items:
         if isinstance(item, DataItem):
-            if item.data_id is not None:
+            # Pinned items name their document; literal text is never a file.
+            if item.data_id is not None or item.literal_text:
                 continue
             item = item.data
         for path in _local_files(item):

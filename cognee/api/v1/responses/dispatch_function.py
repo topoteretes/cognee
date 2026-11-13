@@ -9,6 +9,7 @@ from cognee.api.v1.responses.models import ToolCall
 from cognee.api.v1.search import search
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.models import User
+from cognee.tasks.ingestion.data_item import DataItem
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,8 @@ async def handle_cognify(arguments: dict[str, Any], user) -> str:
     custom_prompt = arguments.get("custom_prompt")
 
     if text:
-        await add(data=text, user=user)
+        # The model's text, never a path or URL to resolve (DataItem.literal_text).
+        await add(data=DataItem(data=text, literal_text=True), user=user)
 
     await cognify(
         user=user,
