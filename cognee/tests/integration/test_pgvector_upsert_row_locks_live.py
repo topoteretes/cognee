@@ -6,9 +6,11 @@ same entity extracted from many documents by pipelines running at once) then que
 behind each other's row locks although nearly every upsert changed nothing.
 ``create_data_points`` therefore classifies the rows first with a lock-free ``SELECT``,
 inserts the missing ones with ``ON CONFLICT DO NOTHING`` and upserts only the rows that
-would change. These tests pin that the table ends up exactly as the single upsert left
-it, that an unchanged row is neither rewritten nor waited for, that a changed row still
-is, and the races between the classify and the writes.
+would change. Before that, a short read of its own finds the rows an upsert would write
+at all, and only those are embedded. These tests pin that the table ends up exactly as
+the single upsert left it, that an unchanged row is neither embedded, rewritten nor
+waited for, that a changed row still is, and the races between the classifies and the
+writes.
 
 No LLM or embedding calls: the embedding engine is a stub whose vectors differ on every
 call, so a kept vector is told apart from a replaced one. Skipped unless
@@ -57,6 +59,12 @@ class _Embeddings:
 
     def __init__(self):
         self.embedded: dict[str, list[list[float]]] = {}
+        # Every request's texts, in order.
+        self.requests: list[list[str]] = []
+        # Set by a test to hold the next request until it is set; ``reached`` is set
+        # once a request waits there.
+        self.gate: asyncio.Event | None = None
+        self.reached = asyncio.Event()
 
     def get_vector_size(self) -> int:
         return DIMENSIONS
@@ -65,7 +73,15 @@ class _Embeddings:
         return 1000
 
     async def embed_text(self, texts: list[str]) -> list[list[float]]:
+        self.requests.append(list(texts))
+        if self.gate is not None:
+            self.reached.set()
+            await self.gate.wait()
         return [self._embed(value) for value in texts]
+
+    def sent_since(self, request_count: int) -> list[str]:
+        """The texts of every request after the first ``request_count``."""
+        return [value for request in self.requests[request_count:] for value in request]
 
     def _embed(self, value: str) -> list[float]:
         calls = self.embedded.setdefault(value, [])
@@ -177,7 +193,11 @@ async def test_identical_reupsert_writes_no_new_row_version(adapter, collection,
 
     await asyncio.sleep(0.01)  # the re-upsert's timestamps differ
     again = [p.model_copy(update={"updated_at": p.updated_at + 5}) for p in points]
+    requests_before = len(embeddings.requests)
     await adapter.create_data_points(collection, again)
+
+    # Found unchanged before embedding: nothing is sent to the embedding engine.
+    assert embeddings.sent_since(requests_before) == []
 
     after = await _rows(adapter, collection)
     assert {i: r["version"] for i, r in after.items()} == {
@@ -243,12 +263,15 @@ async def test_changed_text_replaces_the_vector_other_changes_keep_it(
     _assert_vector(rows[renoted]["vector"], embeddings.embedded["kept"][0])
 
 
-async def test_duplicate_ids_in_one_call_are_written_once_with_tags_unioned(adapter, collection):
+async def test_duplicate_ids_in_one_call_are_written_once_with_tags_unioned(
+    adapter, collection, embeddings
+):
     existing, new = uuid4(), uuid4()
     await adapter.create_data_points(
         collection, [_Point(id=existing, text="e", belongs_to_set=["S"])]
     )
 
+    requests_before = len(embeddings.requests)
     await adapter.create_data_points(
         collection,
         [
@@ -259,6 +282,8 @@ async def test_duplicate_ids_in_one_call_are_written_once_with_tags_unioned(adap
         ],
     )
 
+    # Each id is embedded once (the existing row's tags change, so it is written).
+    assert sorted(embeddings.sent_since(requests_before)) == ["e", "n"]
     rows = await _rows(adapter, collection)
     assert sorted(rows[new]["payload"]["belongs_to_set"]) == ["A", "B"]
     assert sorted(rows[existing]["payload"]["belongs_to_set"]) == ["A", "B", "S"]
@@ -287,7 +312,15 @@ async def test_mixed_call_across_statement_batches(
         + [_Point(id=p.id, text=p.text, note="n") for p in renoted]
     )
     random.Random(0).shuffle(call)
+    requests_before = len(embeddings.requests)
     await adapter.create_data_points(collection, call)
+
+    # Exactly the new and the changed rows are embedded; a changed row whose text is the
+    # same is embedded too (and keeps its stored vector), an unchanged row is not.
+    expected_texts = [p.text for p in new + retagged + renoted] + [
+        f"new text {i}" for i in range(len(retexted))
+    ]
+    assert sorted(embeddings.sent_since(requests_before)) == sorted(expected_texts)
 
     rows = await _rows(adapter, collection)
     assert len(rows) == len(before) + len(new)
@@ -485,3 +518,29 @@ async def test_concurrent_calls_inserting_the_same_new_ids(embeddings, collectio
 
     assert len(rows) == 5 * 200
     assert all(sorted(r["payload"]["belongs_to_set"]) == ["A", "B"] for r in rows.values())
+
+
+async def test_unchanged_row_deleted_before_the_write_is_not_written(
+    adapter, collection, embeddings
+):
+    """A row found stored unchanged is left out before the embedding. Deleted while the
+    call embeds the other rows, it is not written by this call: the call took effect when
+    it found the row unchanged, before the delete. The next upsert of it inserts it."""
+    kept = _Point(text="kept", belongs_to_set=["A"])
+    await adapter.create_data_points(collection, [kept])
+    same = kept.model_copy(update={"updated_at": kept.updated_at + 5})
+    new = _Point(text="new")
+
+    embeddings.gate = asyncio.Event()
+    write = asyncio.create_task(adapter.create_data_points(collection, [same, new]))
+    await asyncio.wait_for(embeddings.reached.wait(), NO_WAIT_SECONDS)
+    assert embeddings.requests[-1] == ["new"]
+    await _delete(adapter, collection, kept.id)
+    embeddings.gate.set()
+    await asyncio.wait_for(write, NO_WAIT_SECONDS)
+    embeddings.gate = None
+
+    assert set(await _rows(adapter, collection)) == {new.id}
+
+    await adapter.create_data_points(collection, [same])
+    assert (await _rows(adapter, collection))[kept.id]["payload"]["belongs_to_set"] == ["A"]

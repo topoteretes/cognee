@@ -70,13 +70,16 @@ class _Session:
     change, any other id as missing; every missing row is inserted.
     """
 
-    def __init__(self, log, changed):
+    def __init__(self, log, changed, unchanged=frozenset()):
         self.log = log
         self.changed = changed
+        self.unchanged = unchanged
 
     async def execute(self, statement, params=None):
         if isinstance(statement, TextClause):
-            return _Result([(i, i not in self.changed) for i in params["ids"]])
+            return _Result(
+                [(i, i not in self.changed) for i in params["ids"] if i not in self.unchanged]
+            )
         compiled = statement.compile(dialect=postgresql.dialect())
         ids = [
             value
@@ -179,3 +182,63 @@ def test_row_order_is_the_uuid_btree_order():
     # Postgres orders uuid columns bytewise, which is the canonical text order.
     ids = [uuid4() for _ in range(200)]
     assert sorted(ids, key=_row_order) == sorted(ids, key=lambda i: UUID(str(i)).bytes)
+
+
+@pytest.mark.asyncio
+async def test_only_rows_to_write_are_embedded_after_a_read_of_their_own():
+    """The rows an upsert would write are found in a session that is closed before the
+    embedding request; a row stored unchanged is not embedded, a duplicate id once."""
+    events = []
+    ids = _ids_in_reverse_order(3)
+    unchanged = ids[0]
+
+    class Session(_Session):
+        async def execute(self, statement, params=None):
+            if isinstance(statement, TextClause):
+                events.append("classify")
+            return await super().execute(statement, params)
+
+    adapter = _adapter([])
+
+    @asynccontextmanager
+    async def get_async_session():
+        events.append("session")
+        yield Session([], frozenset(), frozenset({unchanged}))
+        events.append("closed")
+
+    async def embed(texts):
+        events.append(("embed", sorted(texts)))
+        return [[0.1, 0.2, 0.3] for _ in texts]
+
+    adapter.get_async_session = get_async_session
+    adapter.embed_data = embed
+    points = [_Point(id=point_id, text=str(point_id)) for point_id in ids]
+    duplicate = _Point(id=ids[1], text="last text wins")
+
+    await adapter.create_data_points("Point_text", [*points, duplicate])
+
+    assert events[:4] == [
+        "session",
+        "classify",
+        "closed",
+        ("embed", sorted(["last text wins", str(ids[2])])),
+    ]
+    assert events[4:6] == ["session", "classify"]
+
+
+@pytest.mark.asyncio
+async def test_nothing_to_write_embeds_nothing():
+    adapter = _adapter([])
+    point = _Point(text="stored")
+
+    @asynccontextmanager
+    async def get_async_session():
+        yield _Session([], frozenset(), frozenset({point.id}))
+
+    async def embed(texts):
+        raise AssertionError("a row stored unchanged must not be embedded")
+
+    adapter.get_async_session = get_async_session
+    adapter.embed_data = embed
+
+    await adapter.create_data_points("Point_text", [point])
