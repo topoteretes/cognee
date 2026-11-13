@@ -85,6 +85,7 @@ handles, the dataset queue, and the delete flows rely on::
 
 import asyncio
 import concurrent.futures
+import contextlib
 import hashlib
 import inspect
 import logging
@@ -444,6 +445,31 @@ class _LeasedValueProxy:
 
                 return await_with_lease()
 
+            # Async generators and ``@asynccontextmanager`` factories (e.g.
+            # ``get_session()``) outlive the call that returned them; hold the
+            # lease until they finish, so an evicted adapter is not closed
+            # under ``async for`` / ``async with``. Other objects that merely
+            # support ``async with`` (e.g. an ``AsyncSession``) pass through.
+            if inspect.isasyncgen(result):
+
+                async def iterate_with_lease(_self=self):
+                    async with contextlib.aclosing(result):
+                        async for item in result:
+                            yield item
+
+                return iterate_with_lease()
+
+            if inspect.isasyncgenfunction(getattr(attr, "__wrapped__", None)) and isinstance(
+                result, contextlib.AbstractAsyncContextManager
+            ):
+
+                @contextlib.asynccontextmanager
+                async def enter_with_lease(_self=self):
+                    async with result as value:
+                        yield value
+
+                return enter_with_lease()
+
             return result
 
         return call_with_lease
@@ -453,6 +479,28 @@ class _LeasedValueProxy:
         # object.__setattr__ in __init__, so every write reaching here targets
         # the wrapped value and must forward to it.
         setattr(self._entry.value, name, value)
+
+
+def weak_pin(value):
+    """Reference for a long-lived holder that re-resolves through the cache
+    (the graph engine handle).
+
+    A leased proxy closes its value via ``weakref.finalize`` once its last
+    reference drops, so it is pinned weakly: while it is the live entry the
+    cache keeps it alive, and once evicted an idle holder -- or one only
+    reachable from a garbage reference cycle -- cannot defer the close (and
+    keep an exclusive file lock held) until the cyclic GC happens to run.
+    In-flight calls still hold the proxy through ``call_with_lease``. Any other
+    value is pinned strongly, as before.
+    """
+    if type(value) is _LeasedValueProxy:
+        return weakref.ref(value)
+    return value
+
+
+def resolve_pin(pin):
+    """Inverse of :func:`weak_pin`: ``None`` once a weakly pinned proxy is gone."""
+    return pin() if type(pin) is weakref.ref else pin
 
 
 class ClosingLRUCache:
