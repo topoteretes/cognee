@@ -141,7 +141,7 @@ async def run_tasks_data_item_incremental(
         pipeline_name: Name of the pipeline
         pipeline_id: Unique identifier for the pipeline
         pipeline_run_id: Unique identifier for this pipeline run
-        context: Optional context dictionary
+        ctx: Optional context dictionary
         user: User performing the operation
 
     Yields:
@@ -409,7 +409,7 @@ async def run_tasks_data_item_regular(
         tasks: List of tasks to execute on the data item
         pipeline_id: Unique identifier for the pipeline
         pipeline_run_id: Unique identifier for this pipeline run
-        context: Optional context dictionary
+        ctx: Optional context dictionary
         user: User performing the operation
 
     Yields:
@@ -485,7 +485,7 @@ async def run_tasks_data_item(
         pipeline_name: Name of the pipeline
         pipeline_id: Unique identifier for the pipeline
         pipeline_run_id: Unique identifier for this pipeline run
-        context: Optional context dictionary
+        ctx: Optional context dictionary
         user: User performing the operation
         incremental_loading: Whether to use incremental processing
         data_cache: Whether to use incremental processing (data caching)

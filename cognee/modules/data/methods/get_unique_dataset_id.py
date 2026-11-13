@@ -26,7 +26,6 @@ async def get_unique_dataset_id(dataset_name: str | UUID, user: User) -> UUID:
     Args:
         dataset_name: string representing the dataset name
         user: User object adding the dataset
-        tenant_id: UUID of the tenant for which dataset is being added
 
     Returns:
         UUID: Unique identifier for the dataset
@@ -53,7 +52,6 @@ async def get_unique_dataset_id(dataset_name: str | UUID, user: User) -> UUID:
         Args:
             dataset_name: string representing the dataset name
             user: Current User object adding the dataset
-            tenant_id: UUID of the tenant for which dataset is being added
 
         Returns:
             UUID: Unique identifier for the dataset

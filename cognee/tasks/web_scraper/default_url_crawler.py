@@ -402,10 +402,8 @@ class DefaultUrlCrawler:
 
         Args:
             urls: A single URL, list of URLs, or dict mapping URLs to extraction rules.
-            extraction_rules: Default extraction rules for string or list URLs.
             use_playwright: If True, use Playwright for JavaScript rendering.
             playwright_js_wait: Seconds to wait for JavaScript to load.
-            join_all_matches: If True, extract all matching elements for each rule.
 
         Returns:
             Dict[str, str]: A dictionary mapping URLs to their extracted content.
