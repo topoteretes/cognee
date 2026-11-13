@@ -31,8 +31,6 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
 )
 from cognee.modules.users.methods import get_authenticated_user, get_authenticated_websocket_user
 from cognee.modules.users.models import User
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
@@ -231,18 +229,15 @@ def get_cognify_router() -> APIRouter:
                     }
                 }
 
-            graph_model_schema = payload.graph_model
             custom_prompt = payload.custom_prompt
-
-            if not graph_model_schema:
-                graph_model = KnowledgeGraph
-            else:
-                graph_model = graph_schema_to_graph_model(graph_model_schema)
 
             cognify_run = await cognee_cognify(
                 datasets,
                 user,
-                graph_model=graph_model,
+                # The schema as sent; cognify() builds the class. This route has always
+                # read an empty object as "omitted": the argument is then left out, like
+                # on the remember route, and cognify() uses its own default.
+                **({"graph_model": payload.graph_model} if payload.graph_model else {}),
                 config=config_to_use,
                 run_in_background=payload.run_in_background,
                 custom_prompt=custom_prompt,

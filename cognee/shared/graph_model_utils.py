@@ -30,8 +30,14 @@ from pydantic import BaseModel
 from pydantic._internal._core_utils import CoreSchemaOrField, is_core_schema
 from pydantic.json_schema import GenerateJsonSchema, models_json_schema
 
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.engine import DataPoint, Edge, FromIdentity
-from cognee.shared.exceptions import ExternalSchemaReferenceError, UnresolvedSchemaReferenceError
+from cognee.shared.data_models import KnowledgeGraph
+from cognee.shared.exceptions import (
+    ExternalSchemaReferenceError,
+    InvalidGraphSchemaError,
+    UnresolvedSchemaReferenceError,
+)
 from cognee.shared.llm_graph_model import (
     _datapoint_types_in,
     _edge_field_types,
@@ -71,7 +77,42 @@ def _reject_external_refs(node) -> None:
             _reject_external_refs(value)
 
 
-def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
+def resolve_graph_model(graph_model: type[BaseModel] | dict[str, Any] | None) -> type[BaseModel]:
+    """The model class a cognify run extracts into, from either form a caller may pass.
+
+    ``None`` is the default ``KnowledgeGraph``; a class is returned as it is; a dict is a
+    JSON schema (what ``POST /cognify`` and ``POST /remember`` take, and what
+    ``graph_model_to_graph_schema`` produces) and is built into a class here. This is the
+    one place a schema becomes a class on the way into a run, so every schema passes the
+    ``$ref`` guards of ``graph_schema_to_graph_model``. Any schema the converter cannot
+    build raises a ``CogneeValidationError`` (HTTP 400), so a caller can tell a bad
+    schema from every other failure.
+    """
+    if graph_model is None:
+        return KnowledgeGraph
+    if isinstance(graph_model, type):
+        return graph_model
+    if not isinstance(graph_model, dict):
+        raise InvalidGraphSchemaError(
+            "graph_model must be a model class or a JSON schema object, "
+            f"got {type(graph_model).__name__}."
+        )
+    if not isinstance(graph_model.get("title"), str):
+        raise InvalidGraphSchemaError(
+            "graph_model schema needs a top-level 'title' naming its root class."
+        )
+    try:
+        return graph_schema_to_graph_model(graph_model)
+    except CogneeValidationError:
+        raise
+    except Exception as error:
+        # The generator's own errors are untyped; they all mean the schema is unusable.
+        raise InvalidGraphSchemaError(
+            f"graph_model could not be built from the schema: {error}"
+        ) from error
+
+
+def graph_schema_to_graph_model(pydantic_json_schema: dict) -> type[BaseModel]:
     _reject_external_refs(pydantic_json_schema)
     # If a custom graph model is provided, convert it from dict to a Pydantic model class
     config = GenerateConfig(
