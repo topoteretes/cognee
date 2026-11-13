@@ -91,7 +91,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     /app/.venv/bin/python -m cognee.tasks.graph.gliner_demo.install
 
-FROM python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254
+FROM python:3.15-slim-bookworm@sha256:96599df822d0e1c6bb700014a05c7f3c8cabc6e0f7ff3c4f9f69cee033b4b5d9
 
 # git: the code-graph route shallow-clones GitHub/GitLab repository URLs at
 # runtime (cognee/tasks/code_graph/resolve_repo.py); without it every remote
