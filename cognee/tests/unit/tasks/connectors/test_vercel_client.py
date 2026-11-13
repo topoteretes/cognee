@@ -264,16 +264,27 @@ def test_a_netrc_entry_for_the_host_never_replaces_the_bearer_token(monkeypatch,
     [
         '{"uid": "é"}'.encode("latin-1"),  # not UTF-8: requests would guess another charset
         b"\xff\xfe{}",
-        b"[" * 100_000 + b"]" * 100_000,  # deeper than the JSON parser recurses
         b"null",
         b"",
     ],
-    # Named ids: pytest puts the test id in PYTEST_CURRENT_TEST, and the 200 000 byte body as
-    # an id is longer than Windows allows in an environment variable.
-    ids=["latin-1", "utf-16-bom", "too-deep", "null", "empty"],
+    ids=["latin-1", "utf-16-bom", "null", "empty"],
 )
 def test_a_200_that_is_not_utf8_json_is_a_response_error(monkeypatch, body):
     client, _, _ = _client(monkeypatch, Resp(200, body))
+
+    with pytest.raises(VercelResponseError, match="without a JSON body"):
+        _get(client)
+
+
+def test_a_200_too_deep_for_the_json_parser_is_a_response_error(monkeypatch):
+    """How deep a body has to be before json gives up depends on the Python version and the
+    stack size (3.14 on Linux parses what 3.13 refuses), so the parser's refusal is faked."""
+
+    def too_deep(_text):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr("cognee.tasks.ingestion.connectors.vercel.json.loads", too_deep)
+    client, _, _ = _client(monkeypatch, Resp(200, b"[[]]"))
 
     with pytest.raises(VercelResponseError, match="without a JSON body"):
         _get(client)
