@@ -392,8 +392,10 @@ async def _fetch_session_context(
 ) -> list[ResponseSessionContextEntry]:
     """Render active session-context lessons for one profile as a one-item list.
 
-    Read-only by default. ``record_context_usage`` opts into stamping returned guidance;
-    published structured summaries are included without raw transcript fallback.
+    Read-only by default. ``record_context_usage`` opts into stamping returned guidance,
+    and only in the caller's own session: a read grant on someone else's session never
+    writes to it. Published structured summaries are included without raw transcript
+    fallback.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
     from cognee.infrastructure.session.session_context_builder import build_active_context_block
@@ -415,7 +417,7 @@ async def _fetch_session_context(
         session_id=session_id,
         query=query_text,
         context_profile=context_profile,
-        stamp_served=record_context_usage,
+        stamp_served=record_context_usage and cache_user_id == caller_user_id,
     )
     from cognee.modules.session_distillation.summary import latest_session_summary
 

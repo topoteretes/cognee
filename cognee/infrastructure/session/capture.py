@@ -1,6 +1,7 @@
 """Authenticated typed capture with a transactional, stable server receipt."""
 
 import asyncio
+from typing import cast
 from uuid import UUID
 
 from cognee.infrastructure.databases.cache import get_cache_engine
@@ -80,9 +81,16 @@ async def remember_capture(
         return existing["receipt"]
 
     await setup()
+    target: list[UUID] | list[str]
+    if existing is not None:
+        target = [UUID(existing["dataset_id"])]
+    elif dataset_id is not None:
+        target = [dataset_id]
+    else:
+        target = [dataset_name]
     try:
         datasets = await get_authorized_existing_datasets(
-            [UUID(existing["dataset_id"]) if existing is not None else dataset_id or dataset_name],
+            target,
             "write",
             user,
             strict=True,
@@ -90,6 +98,7 @@ async def remember_capture(
         if not datasets:
             raise DatasetNotFoundError("Capture requires an existing writable dataset")
         dataset = datasets[0]
+        bound_dataset_id = cast(UUID, dataset.id)
     except (DatasetNotFoundError, PermissionDeniedError):
         # A receipt attests to past admission, not current access or existence.
         # Never resume a vector write after deletion or permission revocation.
@@ -112,7 +121,7 @@ async def remember_capture(
             )
         return adapter._build_agent_trace_entry_dump(
             trace_id=entry_id,
-            session_feedback=feedback,
+            session_feedback=feedback or "",
             **{
                 k: v
                 for k, v in normalized.items()
@@ -131,13 +140,15 @@ async def remember_capture(
             strict=True,
         )
 
-    async with set_database_global_context_variables(dataset.id, user.id, permission_type="write"):
+    async with set_database_global_context_variables(
+        bound_dataset_id, user.id, permission_type="write"
+    ):
         if existing is not None:
             async with track_session_usage(session_id, user.id):
                 return await resume_capture(adapter, existing, index)
         try:
             await ensure_and_touch_session(
-                session_id=session_id, user_id=user.id, dataset_id=dataset.id
+                session_id=session_id, user_id=user.id, dataset_id=bound_dataset_id
             )
             # This stricter contract protects the cache's (user, session) namespace.
             from sqlalchemy import select
@@ -158,7 +169,7 @@ async def remember_capture(
             raise RuntimeError(
                 "Capture session binding temporarily unavailable; retry the event"
             ) from error
-        if bound != dataset.id:
+        if bound != bound_dataset_id:
             raise CaptureRequestError(
                 "capture_session_dataset_mismatch",
                 "Use a different session_id for a different dataset",
@@ -198,7 +209,7 @@ async def remember_capture(
                 adapter,
                 tenant_id=getattr(user, "tenant_id", None),
                 user_id=user_id,
-                dataset_id=dataset.id,
+                dataset_id=bound_dataset_id,
                 dataset_name=dataset.name,
                 session_id=session_id,
                 client_event_id=client_event_id,

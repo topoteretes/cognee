@@ -745,6 +745,8 @@ def get_remember_router() -> APIRouter:
         elapsed_seconds. Authenticated retries return their own original receipt even after
         dataset/session deletion; receipts attest to past acceptance, not current existence.
         Reusing an event ID with different content returns HTTP 409 / capture_payload_conflict.
+        A node_set different from the one pinned on the session returns HTTP 409 /
+        session_node_set_conflict; start a new session for a different node_set.
         HTTP 400 codes include capture_session_dataset_mismatch, capture_invalid_entry and
         capture_skill_improvement_unsupported. A temporarily unavailable binding/cache returns 503.
         Admission requires write permission (403); unknown dataset names return 404 without creation.
