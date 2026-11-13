@@ -20,6 +20,10 @@ DOCUMENT_SOURCE_ATTR = "cognee_document_source"
 # alternating destination datasets. Unrelated DLT sources keep their contract.
 PIPELINE_SCOPE_ATTR = "cognee_pipeline_scope"
 
+# Set by ``empty_resource`` to the name of the table it forgets: the load that follows also
+# removes the table's merge staging copy and its pipeline's older state rows.
+FORGET_TABLE_ATTR = "cognee_forget_table"
+
 # The database a connection-string source reads (a SQLite file's name, a server
 # database's name), so its table nodes can say which database they belong to.
 SOURCE_LABEL_ATTR = "cognee_source_label"
@@ -31,11 +35,15 @@ UNSCOPED_PIPELINE_NAME = "ingest_dlt_source"
 
 
 def pipeline_name_for_source(source, dataset_name: str) -> str:
-    from hashlib import sha256
-
     scope = getattr(source, PIPELINE_SCOPE_ATTR, None)
     if not isinstance(scope, str) or not scope:
         return UNSCOPED_PIPELINE_NAME
+    return pipeline_name_for_scope(scope, dataset_name)
+
+
+def pipeline_name_for_scope(scope: str, dataset_name: str) -> str:
+    from hashlib import sha256
+
     digest = sha256(json.dumps([dataset_name, scope]).encode()).hexdigest()[:32]
     return f"ingest_dlt_{digest}"
 
