@@ -2,9 +2,10 @@
 
 ``GET /datasets/graph-summary`` and brains-summary read only ``num_nodes`` and
 ``num_edges``. They used to get them from ``get_graph_metrics``, which on every
-backend also computes connected components (a GDS projection on Neo4j, 1-3 hop
-path expansion on Ladybug, a recursive CTE on Turso). ``get_graph_counts``
-returns the two counts alone; in-tree adapters implement it with count queries.
+backend also computes connected components (a GDS projection on Neo4j, a full
+node/edge scan with union-find on Ladybug, a recursive CTE on Turso).
+``get_graph_counts`` returns the two counts alone; in-tree adapters implement
+it with count queries.
 
 The interface default derives the counts from ``get_graph_metrics`` so a
 community adapter that predates the method keeps working, which is why it has a
